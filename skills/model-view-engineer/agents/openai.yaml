@@ -1,0 +1,4 @@
+interface:
+  display_name: "Model-View Engineer"
+  short_description: "Implement approved Qt model or view phases"
+  default_prompt: "Use $model-view-engineer to implement only the approved Qt model or view phase and return a small, verified diff."

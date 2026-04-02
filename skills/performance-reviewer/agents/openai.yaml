@@ -1,0 +1,4 @@
+interface:
+  display_name: "Performance Reviewer"
+  short_description: "Run an independent perf gate"
+  default_prompt: "Use $performance-reviewer to review the performance evidence for this phase and return an independent perf gate decision."

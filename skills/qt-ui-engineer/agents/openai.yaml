@@ -1,0 +1,4 @@
+interface:
+  display_name: "Qt UI Engineer"
+  short_description: "Implement approved Qt desktop UI phases"
+  default_prompt: "Use $qt-ui-engineer to implement only the approved Qt Widgets UI phase and return a small, verified diff."

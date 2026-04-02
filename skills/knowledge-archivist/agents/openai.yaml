@@ -1,0 +1,4 @@
+interface:
+  display_name: "Knowledge Archivist"
+  short_description: "Maintain docs, plans, and repo hygiene"
+  default_prompt: "Use $knowledge-archivist to update the approved repository knowledge artifacts and return one repository stewardship package."

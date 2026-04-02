@@ -1,0 +1,4 @@
+interface:
+  display_name: "Architect"
+  short_description: "Design from accepted research"
+  default_prompt: "Use $architect to turn the accepted research into a design package without writing implementation code."

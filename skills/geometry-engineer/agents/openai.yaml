@@ -1,0 +1,4 @@
+interface:
+  display_name: "Geometry Engineer"
+  short_description: "Implement geometry and spatial computation"
+  default_prompt: "Use $geometry-engineer to implement the approved geometry or spatial-computation phase and return a focused, verified diff."

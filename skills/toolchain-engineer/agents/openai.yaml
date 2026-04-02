@@ -1,0 +1,4 @@
+interface:
+  display_name: "Toolchain Engineer"
+  short_description: "Implement builds, toolchains, and packaging"
+  default_prompt: "Use $toolchain-engineer to implement the approved build or toolchain phase and return one focused, verified package."

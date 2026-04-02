@@ -1,0 +1,4 @@
+interface:
+  display_name: "Graphics Engineer"
+  short_description: "Implement 2D and 3D rendering work"
+  default_prompt: "Use $graphics-engineer to implement the approved 2D or 3D graphics phase and return a focused, verified diff."

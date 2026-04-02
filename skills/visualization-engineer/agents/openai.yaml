@@ -1,0 +1,4 @@
+interface:
+  display_name: "Visualization Engineer"
+  short_description: "Implement scientific and data visualization"
+  default_prompt: "Use $visualization-engineer to implement the approved visualization phase and return a focused, verified diff."

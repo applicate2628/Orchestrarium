@@ -1,0 +1,4 @@
+interface:
+  display_name: "Planner"
+  short_description: "Decompose delivery into gated phases"
+  default_prompt: "Use $planner to break the approved design into small phases with files, tests, acceptance criteria, and gates."

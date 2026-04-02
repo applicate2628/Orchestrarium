@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manager"
+  short_description: "Coordinate subagent work with gates"
+  default_prompt: "Use $manager to turn this task into a canonical brief, assign role owners for critical risks, and route the work through gated artifacts before implementation."
