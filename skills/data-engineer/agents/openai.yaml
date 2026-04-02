@@ -1,0 +1,4 @@
+interface:
+  display_name: "Data Engineer"
+  short_description: "Implement approved data phases"
+  default_prompt: "Use $data-engineer to implement only the approved data phase and return a small, verified diff."

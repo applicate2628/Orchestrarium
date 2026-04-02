@@ -1,0 +1,4 @@
+interface:
+  display_name: "Performance Engineer"
+  short_description: "Set perf budgets and evidence"
+  default_prompt: "Use $performance-engineer to investigate the scoped performance risk and return one evidence-backed performance package."

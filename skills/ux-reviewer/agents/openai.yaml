@@ -1,0 +1,4 @@
+interface:
+  display_name: "UX Reviewer"
+  short_description: "Run an independent UX gate"
+  default_prompt: "Use $ux-reviewer to review the UX quality of this phase and return one UX review report."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Architecture Reviewer"
+  short_description: "Review maintainability and design fit"
+  default_prompt: "Use $architecture-reviewer to review maintainability, architecture fit, and team standards for this phase."

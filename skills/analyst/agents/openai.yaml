@@ -1,0 +1,4 @@
+interface:
+  display_name: "Analyst"
+  short_description: "Read-only codebase research"
+  default_prompt: "Use $analyst to inspect this repository slice and return a factual brief with file references only."

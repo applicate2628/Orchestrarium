@@ -1,0 +1,4 @@
+interface:
+  display_name: "Reliability Engineer"
+  short_description: "Set operability constraints"
+  default_prompt: "Use $reliability-engineer to define reliability constraints and return one reliability design package."

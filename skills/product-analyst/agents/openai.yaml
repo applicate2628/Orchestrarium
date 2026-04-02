@@ -1,0 +1,4 @@
+interface:
+  display_name: "Product Analyst"
+  short_description: "Research product facts"
+  default_prompt: "Use $product-analyst to gather product context and return one factual product brief before design."
