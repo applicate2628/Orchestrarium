@@ -30,6 +30,7 @@ The canonical brief should capture:
 - scope and out-of-scope boundaries
 - accepted constraints and assumptions
 - expected change boundary and approved extension seams, if known
+- downstream artifacts that depend on accepted upstream artifacts, enough to re-review them when an upstream artifact changes materially
 - acceptance criteria
 - surfaces that should remain untouched or receive explicit smoke coverage
 - critical risks and their owners
@@ -205,6 +206,7 @@ Do not advance work on optimism or partial acceptance.
 ## Governance rule
 
 - Keep accepted artifacts near the code when the repo is the source of truth.
+- When an accepted upstream artifact is materially revised, mark dependent downstream artifacts for re-review before progression resumes.
 - At minimum, preserve the canonical brief, accepted design decisions, phase plan, and review outcomes.
 - Require external human or CI gates whenever team policy demands them.
 
