@@ -160,7 +160,7 @@ Current team shape: `31 roles`, `6 categories`.
 | Research | `analyst`, `product-analyst` |
 | Design / Constraints | `architect`, `ux-designer`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, `reliability-engineer` |
 | Plan | `planner` |
-| Implement | `backend-engineer`, `frontend-engineer`, `data-engineer`, `platform-engineer`, `toolchain-engineer`, `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`, `knowledge-archivist` |
+| Implement | `backend-engineer`, `frontend-engineer` (web/React UI), `data-engineer`, `platform-engineer`, `toolchain-engineer`, `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer` (Qt desktop UI), `model-view-engineer`, `knowledge-archivist` |
 | QA + Review | `qa-engineer`, `ui-test-engineer`, `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, `accessibility-reviewer` |
 
 Notes:

@@ -158,6 +158,7 @@ AI gates do not replace external engineering policy.
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays within the same role for a bounded correction.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
+- Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - `RETURN(role)` is used by an independent reviewer when the upstream artifact has a structural gap requiring that role's expertise — not a bounded fix. The lead routes the finding to the named upstream role. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely.
 - Keep handoff latency low and avoid pausing between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 
@@ -230,11 +231,11 @@ Decision-making roles should clearly separate confirmed facts, assumptions, and 
 | `planner` | Delivery planner | Small independent phases and acceptance criteria | Phase plan | Each phase is implementable on its own |
 | `knowledge-archivist` | Repository steward | Docs, reports, references, archive consistency | Repository stewardship package | Canonical docs stay coherent |
 | `backend-engineer` | Backend engineer | Approved backend phase | Patch and tests | Change matches plan and contracts |
-| `frontend-engineer` | Frontend engineer | Approved frontend phase | Patch and tests | UI contracts and states stay valid |
+| `frontend-engineer` | Frontend engineer | Approved web/React UI phase | Patch and tests | UI contracts and states stay valid |
 | `data-engineer` | Data engineer | Approved data phase | Patch and tests | Data flow and migrations stay valid |
 | `toolchain-engineer` | Build and packaging engineer | Build graph, compiler, linker, packaging, reproducibility | Toolchain implementation package | Build behavior remains reproducible |
 | `platform-engineer` | Platform engineer | CI/CD, deployment, runtime platform, infrastructure wiring | Platform implementation package | Platform behavior stays aligned with plan |
-| `qt-ui-engineer` | Qt UI engineer | Widgets, dialogs, desktop interaction behavior | Qt UI implementation package | Interaction behavior remains aligned |
+| `qt-ui-engineer` | Qt UI engineer | Approved Qt desktop UI phase | Qt UI implementation package | Interaction behavior remains aligned |
 | `model-view-engineer` | Qt model/view engineer | Models, proxies, delegates, selection, tree/table behavior | Model/view implementation package | Index and view semantics remain correct |
 | `graphics-engineer` | Graphics engineer | Rendering paths, shaders, materials, frame lifecycle | Graphics implementation package | Rendering behavior remains aligned |
 | `visualization-engineer` | Visualization engineer | Scientific and data visualization | Visualization implementation package | Visual encodings and interactions stay valid |
@@ -519,7 +520,7 @@ lead -> knowledge-archivist -> lead
 ### UX-sensitive user-facing task with dedicated UX ownership
 
 ```text
-product-manager -> lead -> product-analyst -> analyst -> architect -> ux-designer -> planner -> frontend-engineer / qt-ui-engineer -> qa-engineer -> ux-reviewer -> lead
+product-manager -> lead -> product-analyst -> analyst -> architect -> ux-designer -> planner -> frontend-engineer (web/React) / qt-ui-engineer (Qt desktop) -> qa-engineer -> ux-reviewer -> lead
 ```
 
 ### Build-system or packaging task
