@@ -31,7 +31,7 @@ description: Perform an independent accessibility gate for approved phases. Use 
 
 - Judge against accessibility outcomes and assistive-tech compatibility, not personal preference.
 - Distinguish blocking issues from non-blocking improvements.
-- Escalate implementation work back through the manager to the appropriate builder role.
+- Escalate implementation work back through the lead to the appropriate builder role.
 
 ## Non-goals
 

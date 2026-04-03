@@ -23,9 +23,10 @@ description: Produce a factual pre-design product brief from available evidence.
 
 ## Gate
 
-- The brief is evidence-backed, clearly scoped, and ready for the manager, architect, or planner to consume.
+- The brief is evidence-backed, clearly scoped, and ready for the lead, architect, or planner to consume.
 - Product assumptions and unresolved product questions are explicit.
 - No solution design or delivery ownership is embedded in the brief.
+- End with one explicit gate decision: `PASS`, `REVISE`, or `BLOCKED`.
 
 ## Working rules
 

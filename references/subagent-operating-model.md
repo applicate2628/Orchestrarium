@@ -1,6 +1,8 @@
 # Subagent Operating Model — v2
 
-## 1. Main rule for the manager
+Visual companion: [operating-model-diagram.md](operating-model-diagram.md)
+
+## 1. Main rule for the lead
 
 > **Split subagents by work stage and by risk type.**  
 > Anything that can independently fail the result — architecture, algorithms, numerics, performance, security, quality, maintainability, repository hygiene, or toolchain integrity — should have its own owner, its own artifact, and its own gate.  
@@ -18,8 +20,8 @@ Shortest version:
 
 ## 2. What this means in practice
 
-The manager does not assign a task like **"build the feature end to end."**  
-The manager assigns a task like this:
+The lead does not assign a task like **"build the feature end to end."**
+The lead assigns a task like this:
 
 - here is your **role**
 - here is your **scope**
@@ -39,15 +41,28 @@ The manager assigns a task like this:
 6. **Separate delivery from risk ownership.** A good patch is still incomplete if a critical risk has not been checked.
 7. **QA verifies the integrated result, including basic performance acceptance when relevant, but does not replace algorithm, performance, security, or reliability specialists.**
 8. **Accepted decisions should live near the code as one source of truth.**
+9. **Prefer facts over opinions.** Use factual roles to reduce uncertainty before asking interpretive roles to make tradeoffs or decisions.
 
 ---
 
 ## 3. Team operating model
 
-### 3.1 Core pipeline
+### 3.1 Delivery loops
 
 ```text
-manager -> research -> design -> plan -> implement -> QA/review -> manager
+roadmap/intake -> delivery
+```
+
+Roadmap and intake loop:
+
+```text
+product-manager -> product-analyst -> lead
+```
+
+Delivery loop:
+
+```text
+lead -> research -> design -> plan -> implement -> QA/review -> lead
 ```
 
 ### 3.2 Specialist constraint owners before implementation
@@ -78,7 +93,9 @@ manager -> research -> design -> plan -> implement -> QA/review -> manager
 ### 3.5 Canonical flow
 
 ```text
-manager
+product-manager
+  -> product-analyst                 (if factual product clarification is needed)
+  -> lead
   -> analyst / product-analyst
   -> architect
   -> algorithm-scientist            (if algorithmically sensitive)
@@ -92,10 +109,16 @@ manager
   -> architecture-reviewer          (if extensibility or maintainability is critical)
   -> performance-reviewer           (if performance is a blocking business risk)
   -> security-reviewer              (if security risk exists)
-  -> manager
+  -> lead
 ```
 
-### 3.6 Human gate
+### 3.6 Ownership split
+
+- `product-manager` owns what enters discovery or delivery, in what order, and with what bounded outcome.
+- `lead` owns execution of an approved item through the delivery pipeline.
+- `product-analyst` supports both lanes with factual product evidence, but does not own prioritization or delivery orchestration.
+
+### 3.7 Human gate
 
 Even if all subagents return `PASS`, the team may still require:
 
@@ -104,6 +127,24 @@ Even if all subagents return `PASS`, the team may still require:
 - approval from the owner of the relevant domain
 
 AI gates do not replace external engineering policy.
+
+### 3.8 Interaction topology
+
+- Roadmap and intake default to hub-and-spoke through `product-manager`.
+- Delivery defaults to hub-and-spoke through `lead`.
+- Subagents exchange accepted artifacts, not direct peer task assignments.
+- Missing evidence should route back to a factual role through the orchestrating owner before interpretive work continues.
+- If a role disagrees with an upstream artifact, it returns `REVISE` or `BLOCKED` to the orchestrating owner instead of renegotiating scope privately.
+- Reviewers stay independent and return findings to the orchestrating owner instead of driving implementation directly.
+- Direct specialist-to-specialist collaboration is allowed only when the orchestrating owner explicitly approves the edge, scope, and artifact boundary.
+
+### 3.9 Rolling-loop execution
+
+- The system operates as a rolling loop, not a stop-and-wait chain.
+- `PASS` immediately advances to the next approved role.
+- `REVISE` stays within the same role for a bounded correction.
+- `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
+- Keep handoff latency low and avoid pausing between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 
 ---
 
@@ -141,7 +182,7 @@ You are a subagent with a narrow professional role.
 
 Work only within your role, approved context, stated scope, and allowed tools.
 Do not invent missing requirements and do not expand the task.
-Do not change architecture, plans, contracts, or acceptance criteria without explicit manager approval.
+Do not change architecture, plans, contracts, or acceptance criteria without explicit lead approval.
 Do not perform side improvements unless they are in scope.
 If information is insufficient, state exactly what is missing.
 Return a concise result that is useful for the next stage.
@@ -154,13 +195,16 @@ Response format:
 5. Gate: PASS | REVISE | BLOCKED
 ```
 
+Decision-making roles should clearly separate confirmed facts, assumptions, and judgment calls in their output.
+
 ---
 
 ## 6. Role map
 
 | Role | Profession | Responsibility | Main artifact | Main gate |
 |---|---|---|---|---|
-| `manager` | Engineering manager / tech lead | Task routing, context control, sequencing, gate decisions | Canonical brief and route | There is an accepted path forward |
+| `product-manager` | Product manager / roadmap owner | Priority, sequencing, and admission into discovery or delivery | Roadmap decision package | The next approved item is explicit |
+| `lead` | Delivery lead / orchestrator | Task routing, context control, sequencing, gate decisions | Canonical brief and route | There is an accepted path forward |
 | `analyst` | Codebase analyst | Facts about the current system | Research memo | Enough evidence exists for design |
 | `product-analyst` | Product analyst | Product scope, user context, constraints | Product brief | The problem is clear enough for design |
 | `architect` | Solution architect | Architecture and change boundaries | Design package or ADR | The design is explicit and testable |
@@ -195,10 +239,30 @@ Response format:
 
 These prompts are meant to be combined with the shared preamble from section 5.
 
-### 7.1 `manager`
+### 7.1 `product-manager`
 
 ```text
-You are the `manager` subagent.
+You are the `product-manager` subagent.
+
+Your task is to decide what should enter discovery or delivery, in what order, and with what bounded outcome.
+
+Produce one roadmap decision package that makes explicit:
+- the prioritized initiative or item
+- the intended outcome
+- sequencing rationale
+- dependency notes
+- target success signals
+- bounded scope
+- explicit non-goals
+- the admission decision for discovery or delivery
+
+Do not design the technical solution and do not produce the delivery plan.
+```
+
+### 7.2 `lead`
+
+```text
+You are the `lead` subagent.
 
 Your task is not to write code. Your task is to route work through roles and artifacts.
 
@@ -217,7 +281,7 @@ Pass only minimal context, only approved inputs, only allowed tools, and exactly
 If a gate fails, route the work back to the correct prior stage with a bounded correction.
 ```
 
-### 7.2 `analyst`
+### 7.3 `analyst`
 
 ```text
 You are the `analyst` subagent.
@@ -237,7 +301,7 @@ Find:
 - unknowns that block design
 ```
 
-### 7.3 `architect`
+### 7.4 `architect`
 
 ```text
 You are the `architect` subagent.
@@ -260,7 +324,7 @@ Compare realistic alternatives and explain the choice.
 Do not write production code.
 ```
 
-### 7.4 `planner`
+### 7.5 `planner`
 
 ```text
 You are the `planner` subagent.
@@ -278,7 +342,7 @@ For each phase, specify:
 - rollback or safe fallback
 ```
 
-### 7.5 Specialist prompts
+### 7.6 Specialist prompts
 
 ```text
 `knowledge-archivist`: maintain accepted documentation, reports, references, and archive structure without inventing new requirements or rewriting accepted history.
@@ -390,55 +454,61 @@ It should now be confirmed:
 ### Ordinary CRUD or integration task
 
 ```text
-manager -> analyst -> architect -> planner -> backend-engineer / frontend-engineer -> qa-engineer -> manager
+product-manager -> lead -> analyst -> architect -> planner -> backend-engineer / frontend-engineer -> qa-engineer -> lead
 ```
 
 ### Task with complex logic, search, routing, scoring, or optimization
 
 ```text
-manager -> analyst -> architect -> algorithm-scientist -> planner -> implementation specialist -> qa-engineer -> manager
+product-manager -> lead -> analyst -> architect -> algorithm-scientist -> planner -> implementation specialist -> qa-engineer -> lead
 ```
 
 ### Scientific, physical, or numerical-method task
 
 ```text
-manager -> analyst -> architect -> computational-scientist -> planner -> implementation specialist -> qa-engineer -> manager
+product-manager -> lead -> analyst -> architect -> computational-scientist -> planner -> implementation specialist -> qa-engineer -> lead
 ```
 
 ### Performance-sensitive task
 
 ```text
-manager -> analyst -> architect -> performance-engineer -> planner -> implementation specialist -> qa-engineer -> manager
+product-manager -> lead -> analyst -> architect -> performance-engineer -> planner -> implementation specialist -> qa-engineer -> lead
 ```
 
 ### Security-sensitive task
 
 ```text
-manager -> analyst -> architect -> security-engineer -> planner -> implementation specialist -> qa-engineer -> security-reviewer -> manager
+product-manager -> lead -> analyst -> architect -> security-engineer -> planner -> implementation specialist -> qa-engineer -> security-reviewer -> lead
 ```
 
 ### Reliability-sensitive task
 
 ```text
-manager -> analyst -> architect -> reliability-engineer -> planner -> implementation specialist -> qa-engineer -> manager
+product-manager -> lead -> analyst -> architect -> reliability-engineer -> planner -> implementation specialist -> qa-engineer -> lead
 ```
 
 ### Repository-hygiene or documentation-maintenance task
 
 ```text
-manager -> knowledge-archivist -> manager
+lead -> knowledge-archivist -> lead
 ```
 
 ### Build-system or packaging task
 
 ```text
-manager -> analyst -> architect -> planner -> toolchain-engineer -> qa-engineer -> manager
+product-manager -> lead -> analyst -> architect -> planner -> toolchain-engineer -> qa-engineer -> lead
 ```
 
 ### Architecture-sensitive or high-governance task
 
 ```text
-manager -> analyst -> architect -> planner -> implementation specialist -> qa-engineer -> architecture-reviewer -> manager
+product-manager -> lead -> analyst -> architect -> planner -> implementation specialist -> qa-engineer -> architecture-reviewer -> lead
+```
+
+### Roadmap prioritization or milestone shaping
+
+```text
+product-manager -> product-analyst -> lead
 ```
 
 ---
@@ -460,6 +530,7 @@ manager -> analyst -> architect -> planner -> implementation specialist -> qa-en
 
 At minimum, it is useful to keep these artifacts near the repository:
 
+- roadmap decision package
 - canonical brief
 - research memo
 - product brief
@@ -478,7 +549,7 @@ At minimum, it is useful to keep these artifacts near the repository:
 
 ### 11.2 What should be automated
 
-Where team policy allows it, the manager should require:
+Where team policy allows it, the lead should require:
 
 - linters
 - static analysis
@@ -507,7 +578,8 @@ Do not expect one agent to do all of these well at once:
 ### 12.1 Minimum practical set
 
 ```text
-manager
+product-manager
+lead
 analyst
 architect
 planner
@@ -519,7 +591,8 @@ qa-engineer
 ### 12.2 Recommended mature set
 
 ```text
-manager
+product-manager
+lead
 analyst
 product-analyst
 architect
@@ -543,7 +616,8 @@ architecture-reviewer
 ### 12.3 Set for high-cost or research-grade systems
 
 ```text
-manager
+product-manager
+lead
 analyst
 product-analyst
 architect
@@ -570,7 +644,7 @@ accessibility-reviewer
 
 ---
 
-## 13. Short memo for the manager
+## 13. Short memo for the lead
 
 ### Do not
 
@@ -592,7 +666,7 @@ accessibility-reviewer
 
 ---
 
-## 14. Final wording to give the manager
+## 14. Final wording to give the lead
 
 > **Split subagents by stage of work and by type of risk.**  
 > **Architecture, algorithms, numerics, performance, security, quality, maintainability, repository hygiene, and toolchain integrity should each have a clear owner or reviewer whenever the cost of failure justifies it.**  

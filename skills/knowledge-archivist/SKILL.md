@@ -37,7 +37,7 @@ description: Maintain repository knowledge hygiene without taking product delive
 
 ## Non-goals
 
-- Do not act as `$manager`, `$planner`, or `$architect`.
+- Do not act as `$lead`, `$planner`, or `$architect`.
 - Do not invent new requirements, acceptance criteria, or policy decisions.
 - Do not absorb build, CI, packaging, or runtime platform work that belongs to `$toolchain-engineer` or `$platform-engineer`.
 - Do not rewrite accepted history to make the repository look cleaner.

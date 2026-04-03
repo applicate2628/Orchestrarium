@@ -31,7 +31,7 @@ description: Perform an independent UX gate for approved user-facing changes. Us
 
 - Judge against user outcomes, accessibility expectations, and interaction clarity.
 - Distinguish blocking issues from optional polish.
-- If the work needs redesign rather than review, send it back through the manager for the right role.
+- If the work needs redesign rather than review, send it back through the lead for the right role.
 
 ## Non-goals
 

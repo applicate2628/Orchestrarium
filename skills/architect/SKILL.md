@@ -28,6 +28,7 @@ description: Produce a design package from accepted research without writing imp
 - The design is traceable to accepted research facts and constraints.
 - Alternatives, interfaces, extension seams, dependency direction, expected blast radius, failure modes, observability, and test strategy are explicit.
 - No implementation code is included.
+- End with one explicit gate decision: `PASS`, `REVISE`, or `BLOCKED`.
 
 ## Working rules
 
