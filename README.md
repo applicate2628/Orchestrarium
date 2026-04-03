@@ -24,7 +24,7 @@ The default coordinator is `$lead`. It owns orchestration, routing, artifact acc
 This repository contains installable Codex skills for:
 
 - roadmap, coordination, and discovery: `product-manager`, `lead`, `consultant`, `analyst`, `product-analyst`
-- design and planning: `architect`, `planner`
+- design and planning: `architect`, `ux-designer`, `planner`
 - repository operations: `knowledge-archivist`, `toolchain-engineer`
 - specialist design lanes: `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, `reliability-engineer`
 - implementation roles: `backend-engineer`, `frontend-engineer`, `data-engineer`, `toolchain-engineer`, `platform-engineer`
@@ -40,8 +40,9 @@ The repository is built around a few stable rules:
 - keep architecture, numerics, performance, security, and maintainability as explicit risk-owner lanes
 - prefer additive change through approved seams over cross-cutting edits
 - protect blast radius and require smoke coverage for nearby but nominally unrelated surfaces
-- treat `$consultant` as optional advisory staff only, never as a required pipeline stage
+- treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
+Repository-wide operating-model source of truth lives in [references/subagent-operating-model.md](references/subagent-operating-model.md).
 Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md).
 The visual companion to the workflow lives in [references/operating-model-diagram.md](references/operating-model-diagram.md).
 
@@ -52,18 +53,17 @@ The current pack covers several sub-teams:
 - Product and intake: roadmap ownership, milestone shaping, product clarification
 - Core delivery: research, architecture, planning, backend, frontend, data, platform
 - Repository operations: repository hygiene, documentation, plans, reports, build systems, and packaging
-- Quality and risk: QA, UI test, security, performance, reliability, architecture review
+- Quality and risk: QA, UI test, security, performance, reliability, UX design, architecture review
 - Qt UI: widget-focused desktop UI work, model-view work, UI regression testing, accessibility review
 - R&D: algorithms, numerics, simulation, geometry, graphics, and scientific visualization
 
 ## Repository layout
 
 - `AGENTS.md`: repo-level delegation rules and skill index
-- `references/`: repository-wide reference documents and shared operating-model material
+- `references/`: repository-wide reference documents and the canonical operating-model material
 - `skills/<role>/SKILL.md`: instructions for one role
 - `skills/<role>/agents/openai.yaml`: display metadata and default prompt for the role
-- `skills/lead/references/`: routing rules, handoff contracts, and operating-model notes
-- `dev/`: optional local working area for drafts and experiments when needed
+- `skills/lead/references/`: condensed lead-facing routing rules, handoff contracts, and operating-model notes
 
 ## Installation
 

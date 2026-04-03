@@ -8,6 +8,8 @@ Use this reference when the lead needs routing, gate, or governance guidance bey
   `product-manager -> product-analyst -> lead`
 - Delivery loop for an approved item:
   `lead -> research -> design -> plan -> implement -> QA/review -> lead`
+- Re-intake loop for an in-flight item whose admitted scope, priority, or milestone intent has changed:
+  `lead -> product-manager -> lead`
 
 The roadmap loop decides what should enter discovery or delivery. The delivery loop decides how an approved item is executed safely.
 
@@ -25,7 +27,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - `product-analyst` and `analyst` establish the factual base; `product-manager`, `architect`, and specialist design lanes interpret that base and make bounded decisions.
 - Every decision artifact should separate confirmed facts, explicit assumptions, judgment calls, and unresolved questions.
 - Do not substitute brainstorming for discovery when the missing input can be gathered as evidence.
-- Use `$consultant` only as optional outside judgment after the best available factual slice has already been assembled.
+- Use `$consultant` only as optional independent judgment after the best available factual slice has already been assembled.
 
 ## Canonical routing patterns
 
@@ -33,12 +35,16 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
   `product-manager -> lead`
 - Roadmap item that needs factual product clarification before admission:
   `product-manager -> product-analyst -> lead`
-- Advisory-only external consultation:
+- Advisory-only independent consultation:
   `lead -> consultant`
+- In-flight item whose admitted scope, priority, or milestone intent has drifted:
+  `lead -> product-manager -> lead`
 - Basic CRUD or integration work:
   `lead -> analyst -> architect -> planner -> implementation -> qa-engineer -> lead`
 - Product-sensitive work with unclear scope or user impact:
   `lead -> product-analyst -> analyst -> architect -> planner -> implementation -> qa-engineer -> lead`
+- UX-sensitive user-facing work with meaningful interaction design:
+  `lead -> product-analyst -> analyst -> architect -> ux-designer -> planner -> frontend-engineer / qt-ui-engineer -> qa-engineer -> ux-reviewer -> lead`
 - Algorithmically sensitive work:
   `lead -> analyst -> architect -> algorithm-scientist -> planner -> implementation -> qa-engineer -> lead`
 - Scientific-modeling or numerical-method work:
@@ -73,7 +79,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
   `lead -> analyst -> architect -> planner -> implementation -> qa-engineer -> architecture-reviewer -> lead`
 - Extensibility-sensitive or low-blast-radius work:
   `lead -> analyst -> architect -> planner -> implementation -> qa-engineer -> architecture-reviewer -> lead`
-- UX-sensitive user-facing work:
+- UX-sensitive user-facing work without a separate UX design lane:
   `lead -> analyst -> architect -> planner -> frontend-engineer -> qa-engineer -> ux-reviewer -> lead`
 - Accessibility-sensitive user-facing work:
   `lead -> analyst -> architect -> planner -> qt-ui-engineer -> ui-test-engineer -> accessibility-reviewer -> lead`
@@ -87,6 +93,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 
 - After `analyst`: relevant system areas, contracts, constraints, and unknowns are explicit.
 - After `architect`: chosen design, rejected alternatives, boundaries, approved extension seams, dependency direction, stable contracts, expected blast radius, failure modes, and test strategy are explicit.
+- After `ux-designer`: scoped user flows, interaction states, content hierarchy, usability constraints, and UX acceptance guidance are explicit.
 - After `algorithm-scientist`: correctness, complexity, invariants, and algorithmic failure modes are explicit.
 - After `computational-scientist`: the scientific model, assumptions, units, discretization or solver strategy, validation criteria, and numerical failure modes are explicit.
 - After `security-engineer`: threat model, trust boundaries, required controls, and must-fix constraints are explicit.
@@ -96,6 +103,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - After `planner`: phases, dependencies, file scope, allowed change surface, must-not-break surfaces, checks, and rollback notes are explicit.
 - After `planner`: shared or core module changes, if any, are isolated into explicit enabling phases instead of being hidden inside local feature work.
 - After implementation: the phase stayed within scope, includes required tests, and reports changed files and risks.
+- Before QA for a multi-phase or multi-specialist change: one explicit integration owner, one integrated artifact, and cross-phase compatibility checks are explicit.
 - After `toolchain-engineer`: build graph behavior, packaging, reproducibility expectations, and local or CI parity are validated or explicitly blocked.
 - After `qa-engineer`: acceptance criteria, regressions, edge cases, and basic performance acceptance are verified or explicitly blocked.
 - After `ui-test-engineer`: Qt UI interaction states, focus behavior, visual regressions, and high-DPI or theme-sensitive regressions are verified or explicitly blocked.
@@ -116,27 +124,89 @@ Do:
 - block progression until the current artifact is accepted
 - keep one source of truth for the brief, accepted decisions, constraints, and status
 - route roadmap questions to `product-manager` instead of burying them inside the lead lane
+- route an in-flight item back to `product-manager` when admitted scope, priority, or milestone intent changes materially
 - route unknowns to factual roles before escalating into opinion-heavy discussion
+- assign one explicit integration owner before QA when multiple implementation phases or specialists must land together
 
 Do not:
 
 - assign one subagent to do the whole feature
 - let delivery start before the roadmap or intake decision is explicit when prioritization is still open
+- let delivery silently redefine an admitted item when the work really needs re-intake
 - mix research, design, planning, implementation, and acceptance without a strong reason
 - skip gates for speed
 - let taste or unsupported opinion replace evidence when the workflow can still gather facts
 - expect QA to replace specialist design lanes
 - allow scope drift or broad write access by default
+- hand QA a partially integrated multi-phase change without an explicitly named integration owner
+
+## Review strategy selection
+
+The lead chooses the review strategy for each risk domain when invoking an independent reviewer. Two strategies are available. Use the decision table below.
+
+### Strategy A — Claim-Verify
+
+The upstream specialist (builder) includes an explicit **claims section** in their artifact: a numbered list of falsifiable guarantees this artifact makes.
+
+The reviewer receives:
+- the implementation artifact
+- the claims list only — **not** the full design package or reasoning chain of the builder
+
+The reviewer's job:
+1. Verify each claim against the artifact or implementation.
+2. Find risk surfaces or threat classes not covered by any claim.
+
+Use Claim-Verify when:
+- The risk is well-understood and the builder can enumerate what they are guaranteeing
+- The goal is catching execution errors (implementation does not satisfy stated design)
+- Speed matters — claim-verify is faster than adversarial review
+- Example domains: security controls on a known threat model, performance against defined budgets, architecture against accepted design
+
+### Strategy B — Adversarial Review
+
+The reviewer receives the implementation artifact only. They do **not** receive the builder's design package or reasoning.
+
+The reviewer's explicit mandate: assume an adversary or failure mode not anticipated by the builder. Find the three highest-probability ways this artifact fails, breaks, or is exploited. For each, show the exact mechanism.
+
+Use Adversarial Review when:
+- The risk surface is novel, poorly understood, or the builder may have systematic blind spots
+- The goal is finding design-level gaps the builder never modeled
+- Cost of missing an unknown risk is high
+- Example domains: security on new trust boundaries or external integrations, architecture on new shared abstractions, numerical stability on novel algorithms
+
+### Decision table
+
+| Signal | Claim-Verify | Adversarial |
+|---|---|---|
+| Risk surface is known and bounded | preferred | optional |
+| Risk surface is novel or externally exposed | optional | preferred |
+| Builder has strong domain expertise | preferred | optional |
+| Builder is working in unfamiliar territory | optional | preferred |
+| Speed is a constraint | preferred | — |
+| Consequence of a missed unknown is critical | optional | preferred |
+
+### How to instruct the reviewer
+
+**Claim-Verify:** Pass the claims list from the builder's artifact explicitly. Tell the reviewer: "Verify each claim. Also identify any risk surfaces not covered by any claim."
+
+**Adversarial:** Pass the implementation artifact only. Tell the reviewer: "Do not read the upstream design package. Assume an adversary with full knowledge of the implementation. Find the three highest-probability failure or attack vectors and show the exact mechanism for each."
+
+### Combining both
+
+For critical changes, run both in sequence: Claim-Verify first (fast, catches execution errors), then Adversarial (slower, catches design-level blind spots). The Adversarial reviewer still does not receive the Claim-Verify report — independence must be preserved.
+
+---
 
 ## Builder and blocker separation
 
 - `product-manager` owns roadmap priority, sequencing, and admission decisions.
 - `product-analyst` and `analyst` gather facts.
 - `architect`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, and `reliability-engineer` define constraints and recommendations.
+- `ux-designer` defines scoped user-facing interaction design before planning and implementation when UX ownership is needed.
 - `knowledge-archivist`, `backend-engineer`, `frontend-engineer`, `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`, `data-engineer`, `toolchain-engineer`, and `platform-engineer` implement approved phases.
 - `qa-engineer` and `ui-test-engineer` verify correctness and regressions in their scope.
 - `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, and `accessibility-reviewer` act as independent blockers when their risk domain matters.
-- `consultant` is advisory-only and not part of the blocker chain.
+- `consultant` is advisory-only and not part of the blocker chain; if an external provider is unavailable, the lead may fulfill this role through an independent internal subagent instead.
 
 Do not let a role that defines a critical constraint act as the only approval gate for that same risk.
 
@@ -144,12 +214,26 @@ Do not let a role that defines a critical constraint act as the only approval ga
 
 - Default topology is hub-and-spoke through `$lead` for delivery work.
 - Default topology is hub-and-spoke through `$product-manager` for roadmap and intake work.
+- If delivery discovers that the admitted item itself has changed materially, `$lead` routes it back to `$product-manager` for re-intake instead of renegotiating scope privately inside the delivery lane.
 - Subagents hand off artifacts, not direct task assignments, to one another.
 - Factual clarification should move upstream through the orchestrating owner before interpretive roles continue.
 - A downstream role may consume an accepted upstream artifact, but it should not silently rewrite that artifact.
 - If a role finds a conflict with an upstream artifact, it returns `REVISE` or `BLOCKED` to the orchestrating owner instead of negotiating scope privately.
 - Independent reviewers return findings to the orchestrating owner; they do not directly re-task implementation roles.
 - Direct role-to-role collaboration is allowed only when the orchestrating owner explicitly approves the pair, scope, and expected artifact boundary.
+
+## Governance sources
+
+- [references/subagent-operating-model.md](../../../references/subagent-operating-model.md) is the repository-wide operating-model source of truth.
+- This file is the condensed lead-facing operating guide and should stay aligned with, not diverge from, the repository-wide model.
+- [AGENTS.md](../../../AGENTS.md) is the repo entrypoint and role index.
+
+## Re-intake and integration ownership
+
+- Re-intake is not the same as `REVISE`. Use re-intake when the admitted item itself has changed; use `REVISE` when the current role can still correct its artifact without changing the admitted item.
+- If scope drift, priority changes, or milestone reshaping materially redefine the work, `$lead` stops delivery progression and routes the item back to `$product-manager`.
+- If a change spans multiple implementation phases or specialists, `$lead` assigns one explicit integration owner before QA.
+- The integration owner assembles one coherent integrated artifact, checks cross-phase compatibility, and hands one verification-ready result to QA or the relevant reviewers.
 
 ## Parallelism guidance
 
@@ -170,6 +254,7 @@ Do not let a role that defines a critical constraint act as the only approval ga
 - product brief, if used
 - research memo
 - design doc or ADR
+- UX design package, if used
 - algorithm note, if used
 - computational model package, if used
 - security design package, if used

@@ -13,7 +13,7 @@ description: Implement an approved frontend phase without redefining product or 
 
 ## Input contract
 
-- Require accepted research, design, applicable specialist constraints, and plan artifacts for the current phase.
+- Require accepted research, design, applicable specialist constraints, accepted UX design guidance when present, and plan artifacts for the current phase.
 - Take only the screens, components, contracts, and constraints needed for that phase.
 - Treat architecture or product changes as out of scope unless the plan explicitly includes them.
 

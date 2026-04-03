@@ -13,7 +13,7 @@ description: Implement an approved Qt desktop UI phase for Widgets-based screens
 
 ## Input contract
 
-- Require accepted research, design, relevant specialist constraints, and the phase plan.
+- Require accepted research, design, relevant specialist constraints, accepted UX design guidance when present, and the phase plan.
 - Take only the windows, dialogs, widgets, state flows, and behavior needed for that phase.
 - Treat product, data, or architecture changes as out of scope unless the plan explicitly includes them.
 

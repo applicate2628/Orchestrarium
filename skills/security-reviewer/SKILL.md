@@ -13,7 +13,8 @@ description: Perform the security gate for an approved phase and return concrete
 
 ## Input contract
 
-- Require the accepted phase plan, the implementation artifact being reviewed, and any relevant security design package.
+- Require the implementation artifact and the **claims list** from the upstream `security-engineer` artifact. Do not require the full security design package — if a specific fact is missing, request it explicitly rather than pulling in the full package.
+- The claims list defines what to verify. Also look for attack surfaces or threat classes not covered by any claim.
 - Take only the code paths, configs, dependencies, and data flows relevant to the security surface.
 - Escalate missing threat context instead of assuming safety.
 

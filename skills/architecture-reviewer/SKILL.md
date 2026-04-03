@@ -13,7 +13,8 @@ description: Review an approved implementation phase for maintainability, readab
 
 ## Input contract
 
-- Require the accepted design and plan artifacts for the phase plus the implementation artifact being reviewed.
+- Require the implementation artifact and the **claims list** from the upstream `architect` artifact. Do not require the full design package — if a specific structural fact is needed, request it explicitly.
+- The claims list defines what to verify. Also look for design deviations not covered by any claim.
 - Take only the files, contracts, and standards relevant to the scoped phase.
 - Escalate ambiguous standards or design gaps instead of normalizing drift.
 - Require the approved change surface and must-not-break surfaces for the phase.
