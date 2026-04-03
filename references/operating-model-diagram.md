@@ -1,39 +1,46 @@
 # Operating Model Diagram
 
 This file provides a visual companion to [subagent-operating-model.md](subagent-operating-model.md).
+Strategy comparison companion: [workflow-strategy-comparison.md](workflow-strategy-comparison.md).
 
 ## 1. End-to-end operating flow
 
 ```mermaid
-flowchart LR
-    PM["product-manager<br/>Roadmap decision package"]
-    PA["product-analyst<br/>Product brief"]
-    M["lead<br/>Canonical brief"]
-    A["analyst<br/>Research memo"]
-    AR["architect<br/>Design package"]
-    S["Specialist design / constraints<br/>UX / algorithm / computational / security / performance / reliability"]
-    P["planner<br/>Phase plan"]
-    I["Implementation specialist<br/>Implementation package"]
-    QA["QA / UI test<br/>Verification package"]
-    R["Independent reviewers<br/>architecture / performance / security / UX / accessibility"]
-    H["Human / CI gate"]
+flowchart TB
+    subgraph Intake["0. Roadmap / Intake"]
+        PM["product-manager<br/>Roadmap decision"]
+        PA["product-analyst<br/>Product brief (optional)"]
+        PM -. "needs factual product clarification" .-> PA
+    end
 
-    PM -->|"admit item to discovery or delivery"| M
-    PM -. "needs factual product clarification" .-> PA
-    PA --> M
-    M -. "scope / priority / milestone drift -> re-intake" .-> PM
+    subgraph Delivery["1-7. Approved delivery work"]
+        direction TB
+        subgraph Row1[" "]
+            direction LR
+            M["lead<br/>Canonical brief"]
+            A["Research<br/>analyst / product-analyst"]
+            D["Design / Constraints<br/>architect / UX / algorithm / computational / security / performance / reliability"]
+            P["Plan<br/>planner"]
+            M --> A --> D --> P
+        end
 
-    M --> A
+        subgraph Row2[" "]
+            direction RL
+            I["Implement<br/>implementation specialist"]
+            INT["Integrate<br/>integration owner"]
+            QA["Verify<br/>QA / UI test"]
+            R["Review<br/>independent reviewers"]
+            H["Human / CI gate"]
+            I --> INT --> QA --> R --> H
+        end
+    end
+
+    PM -->|"admit approved item"| M
+    PA -->|"product facts"| M
+    M -. "scope / priority / milestone drift" .-> PM
     M -. "product context still unclear" .-> PA
-    A --> AR
-    PA --> AR
-    AR --> S
-    S --> P
+
     P --> I
-    I --> INT["Integration owner<br/>Integrated artifact"]
-    INT --> QA
-    QA --> R
-    R --> H
     H --> M
 ```
 
@@ -41,75 +48,76 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    subgraph Roadmap["Roadmap / Intake"]
-        PM["product-manager"]
-        PA["product-analyst"]
+    R["Roadmap / Intake hub<br/>product-manager + product-analyst"]
+    M["lead<br/>orchestrating owner"]
+
+    subgraph Delivery["Delivery lanes"]
+        direction TB
+        subgraph Prep["Prepare"]
+            direction LR
+            F["Research / factual lanes<br/>analyst / product-analyst / specialist evidence"]
+            D["Design / constraint lanes<br/>architect / UX / algorithm / computational / security / performance / reliability"]
+            P["Plan lane<br/>planner"]
+        end
+        subgraph Execute["Execute and assure"]
+            direction LR
+            B["Build lanes<br/>implementation specialists + integration owner"]
+            V["Verification lanes<br/>QA / UI test / independent reviewers"]
+            C["Consultant lane<br/>advisory-only"]
+        end
     end
 
-    subgraph Delivery["Approved delivery work"]
-        M["lead"]
-        A["analyst"]
-        AR["architect"]
-        P["planner"]
-        IMPL["implementation specialists"]
-        INT["integration owner"]
-        QA["qa-engineer / ui-test-engineer"]
-        REV["independent reviewers"]
-    end
+    R -->|"admit item"| M
+    M -. "re-intake" .-> R
 
-    PM <--> PA
-    PM --> M
-    M -. "re-intake" .-> PM
-
-    M --> A
-    M --> AR
-    M --> P
-    M --> IMPL
-    M --> INT
-    M --> QA
-    M --> REV
-
-    A --> M
-    AR --> M
-    P --> M
-    IMPL --> M
-    INT --> M
-    QA --> M
-    REV --> M
+    M <--> F
+    M <--> D
+    M <--> P
+    M <--> B
+    M <--> V
+    M -. "optional second opinion" .-> C
+    C -. "advisory memo" .-> M
 ```
 
 ## 3. Artifact progression
 
 ```mermaid
-flowchart LR
-    R0["Roadmap decision package"]
-    R1["Canonical brief"]
-    R2["Product brief / Research memo"]
-    R3["Design package"]
-    R4["Specialist constraint packages"]
-    R5["Phase plan"]
-    R6["Implementation packages"]
-    R7["Integrated artifact"]
-    R8["Verification package"]
-    R9["Review reports"]
-    R10["Human / CI approval"]
+flowchart TB
+    subgraph RowTop[" "]
+        direction LR
+        subgraph Upstream["Upstream"]
+            direction TB
+            R0["Roadmap decision package"]
+            R1["Canonical brief"]
+            R2["Product brief / research memo"]
+        end
 
-    R0 --> R1
-    R1 --> R2
-    R2 --> R3
-    R3 --> R4
-    R4 --> R5
-    R5 --> R6
-    R6 --> R7
-    R7 --> R8
-    R8 --> R9
-    R9 --> R10
+        subgraph Preparation["Preparation"]
+            direction TB
+            R3["Design package"]
+            R4["Specialist constraint packages"]
+            R5["Phase plan"]
+        end
+    end
+
+    subgraph BuildGate["Build and gate"]
+        direction LR
+        R6["Implementation packages"]
+        R7["Integrated artifact"]
+        R8["Verification package"]
+        R9["Review reports"]
+        R10["Human / CI approval"]
+    end
+
+    R0 --> R1 --> R2
+    R2 --> R3 --> R4 --> R5
+    R5 --> R6 --> R7 --> R8 --> R9 --> R10
 ```
 
 ## 4. Delegation behavior
 
 ```mermaid
-flowchart LR
+flowchart TB
     U["Unknown or ambiguity"]
     F["Narrow factual role<br/>product-analyst / analyst / specialist evidence lane"]
     AF["Accepted artifact"]
@@ -125,7 +133,41 @@ flowchart LR
     I -. "external blocker" .-> B
 ```
 
-## Reading notes
+## 5. Workflow selection matrix
+
+| Situation | Default strategy | Primary roles | Expected accepted artifact | Escalate when |
+|---|---|---|---|---|
+| What should enter discovery or delivery next? | `Roadmap / Intake loop` | `$product-manager`, `$product-analyst` as needed | Roadmap decision package, then optional product brief | Product facts are unclear or milestone intent is unstable |
+| Approved item needs normal execution | `Delivery loop` | `$lead -> analyst -> architect -> planner -> implementation -> QA/review` | Canonical brief, research memo, design package, phase plan, implementation and verification artifacts | A critical risk lane or reviewer becomes mandatory |
+| The next decision is blocked by missing facts | `Fact-first routing` | `$analyst`, `$product-analyst`, or a narrow specialist evidence lane | Accepted factual artifact | Interpretive roles are being asked to guess instead of consume evidence |
+| A domain risk can independently fail the result | `Risk-owner routing` | `$security-engineer`, `$performance-engineer`, `$reliability-engineer`, `$algorithm-scientist`, `$computational-scientist`, `$ux-designer`, or another explicit owner | One specialist design or constraint package | The risk is being left implicit inside general implementation |
+| The admitted item has changed materially mid-delivery | `Re-intake loop` | `$lead -> $product-manager -> $lead` | Updated roadmap decision package or re-admission decision | Scope, priority, or milestone intent no longer matches the admitted item |
+| Multiple implementation phases or specialists must land together | `Integration ownership` | `$lead` plus one explicit integration owner | One integrated artifact ready for QA | QA would otherwise receive a partial multi-phase result |
+| A known bounded risk needs independent checking | `Claim-Verify review` | Upstream builder plus the relevant independent reviewer | Implementation artifact plus claims list, then review report | The reviewer needs to verify stated guarantees and coverage gaps |
+| A novel or externally exposed risk needs blind-spot hunting | `Adversarial review` | Relevant independent reviewer | Review report against the implementation artifact only | Missing an unknown risk is more dangerous than missing an execution bug |
+| A change needs independence between builder and gate | `Builder / blocker separation` | Builder role plus reviewer/blocker role | Builder artifact, then independent review artifact | The builder would otherwise approve the same risk they introduced |
+| Ambiguity or tradeoffs need a non-blocking second opinion | `Consultant advisory` | `$lead -> $consultant` | Advisory memo | Facts are already assembled, but route choice is still ambiguous |
+| Read-heavy scopes are independent | `Parallel read lanes` | Multiple research, triage, or test-analysis roles | Multiple independent factual artifacts | Merge cost would exceed the time saved |
+| Write-heavy scopes are independent and contracts are fixed | `Parallel write lanes` | Multiple implementation roles with disjoint ownership | Multiple implementation artifacts with fixed boundaries | Write scopes overlap or contracts are still moving |
+
+## 6. Role map by category
+
+Current team shape: `31 roles`, `6 categories`.
+
+| Category | Roles |
+|---|---|
+| Coordination | `lead`, `product-manager`, `consultant` (advisory-only) |
+| Research | `analyst`, `product-analyst` |
+| Design / Constraints | `architect`, `ux-designer`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, `reliability-engineer` |
+| Plan | `planner` |
+| Implement | `backend-engineer`, `frontend-engineer`, `data-engineer`, `platform-engineer`, `toolchain-engineer`, `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`, `knowledge-archivist` |
+| QA + Review | `qa-engineer`, `ui-test-engineer`, `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, `accessibility-reviewer` |
+
+Notes:
+- `knowledge-archivist` is a cross-cutting hygiene lane and is usually invoked outside the main feature phase even though it sits closest to implementation support.
+- `consultant` is advisory-only and does not become a required delivery gate.
+
+## 7. Reading notes
 
 - `product-manager` owns what enters discovery or delivery.
 - `lead` owns execution of approved work.
