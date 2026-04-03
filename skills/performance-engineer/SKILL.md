@@ -20,6 +20,7 @@ description: Define performance budgets, measurement strategy, bottleneck models
 ## Return exactly one artifact
 
 - Return one performance package containing the performance budget, benchmark or load-test plan, profiling report or expected bottleneck model, optimization constraints or recommendations, residual risks, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- Include a numbered **claims section**: falsifiable guarantees this artifact makes. Example: "1. Render loop stays under 8 ms at 1080p on the reference GPU. 2. Memory footprint does not exceed 512 MB under peak load." This list is the primary input to `performance-reviewer` — state each claim as a measurable assertion.
 
 ## Gate
 

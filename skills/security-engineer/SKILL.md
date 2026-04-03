@@ -20,6 +20,7 @@ description: Define secure design constraints and threat-aware implementation re
 ## Return exactly one artifact
 
 - Return one security design package containing the threat model, trust boundaries, required controls, implementation constraints, must-fix items, abuse cases, verification expectations, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- Include a numbered **claims section**: falsifiable guarantees this artifact makes. Example: "1. Auth is checked at boundary Y before any write operation. 2. Secret Z is never serialized or logged." This list is the primary input to `security-reviewer` — do not summarize or omit claims to keep the section short.
 
 ## Gate
 

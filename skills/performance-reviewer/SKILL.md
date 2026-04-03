@@ -13,7 +13,8 @@ description: Perform an independent performance gate for an approved phase and r
 
 ## Input contract
 
-- Require the accepted phase plan, the relevant implementation artifact, and any performance package or benchmark evidence already produced.
+- Require the implementation artifact and the **claims list** from the upstream `performance-engineer` artifact. Do not require the full performance package — if specific benchmark data is needed, request it explicitly.
+- The claims list defines what to verify. Also look for performance risks not covered by any claim.
 - Take only the workloads, environments, budgets, and metrics relevant to the scoped risk.
 - Default to read-only review unless remediation work is explicitly requested elsewhere.
 

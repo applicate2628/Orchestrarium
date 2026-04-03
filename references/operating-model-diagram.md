@@ -11,7 +11,7 @@ flowchart LR
     M["lead<br/>Canonical brief"]
     A["analyst<br/>Research memo"]
     AR["architect<br/>Design package"]
-    S["Specialist constraints<br/>algorithm / computational / security / performance / reliability"]
+    S["Specialist design / constraints<br/>UX / algorithm / computational / security / performance / reliability"]
     P["planner<br/>Phase plan"]
     I["Implementation specialist<br/>Implementation package"]
     QA["QA / UI test<br/>Verification package"]
@@ -21,6 +21,7 @@ flowchart LR
     PM -->|"admit item to discovery or delivery"| M
     PM -. "needs factual product clarification" .-> PA
     PA --> M
+    M -. "scope / priority / milestone drift -> re-intake" .-> PM
 
     M --> A
     M -. "product context still unclear" .-> PA
@@ -29,7 +30,8 @@ flowchart LR
     AR --> S
     S --> P
     P --> I
-    I --> QA
+    I --> INT["Integration owner<br/>Integrated artifact"]
+    INT --> QA
     QA --> R
     R --> H
     H --> M
@@ -50,17 +52,20 @@ flowchart TB
         AR["architect"]
         P["planner"]
         IMPL["implementation specialists"]
+        INT["integration owner"]
         QA["qa-engineer / ui-test-engineer"]
         REV["independent reviewers"]
     end
 
     PM <--> PA
     PM --> M
+    M -. "re-intake" .-> PM
 
     M --> A
     M --> AR
     M --> P
     M --> IMPL
+    M --> INT
     M --> QA
     M --> REV
 
@@ -68,6 +73,7 @@ flowchart TB
     AR --> M
     P --> M
     IMPL --> M
+    INT --> M
     QA --> M
     REV --> M
 ```
@@ -82,10 +88,11 @@ flowchart LR
     R3["Design package"]
     R4["Specialist constraint packages"]
     R5["Phase plan"]
-    R6["Implementation package"]
-    R7["Verification package"]
-    R8["Review reports"]
-    R9["Human / CI approval"]
+    R6["Implementation packages"]
+    R7["Integrated artifact"]
+    R8["Verification package"]
+    R9["Review reports"]
+    R10["Human / CI approval"]
 
     R0 --> R1
     R1 --> R2
@@ -96,6 +103,7 @@ flowchart LR
     R6 --> R7
     R7 --> R8
     R8 --> R9
+    R9 --> R10
 ```
 
 ## 4. Delegation behavior
@@ -121,9 +129,13 @@ flowchart LR
 
 - `product-manager` owns what enters discovery or delivery.
 - `lead` owns execution of approved work.
+- `ux-designer` owns scoped interaction design before implementation when the UI surface needs dedicated UX ownership.
+- If an in-flight item no longer fits its admitted scope, priority, or milestone intent, `lead` routes it back to `product-manager` for re-intake.
 - `analyst` and `product-analyst` should reduce uncertainty before interpretive roles make tradeoff decisions.
 - Delegation should reduce noise: pass accepted artifacts, not raw transcript dumps, whenever an accepted artifact already exists.
 - Interpretive roles should consume accepted evidence instead of filling factual gaps with judgment.
 - Subagents exchange accepted artifacts, not direct peer task assignments.
+- `$consultant` stays advisory-only whether it is fulfilled by an external provider or by an internal independent subagent fallback.
+- Multi-phase or multi-specialist implementation requires one explicit integration owner before QA.
 - Reviewers stay independent and report to the orchestrating owner.
 - `REVISE` returns work to the same stage owner; `BLOCKED` stops progression until a new decision or artifact exists.

@@ -22,6 +22,7 @@ description: Produce a design package from accepted research without writing imp
 ## Return exactly one artifact
 
 - Return one design package containing the chosen approach, one to three realistic alternatives with tradeoffs, boundaries of change, approved extension seams, dependency direction, stable internal and external contracts, components and interactions, data model changes, failure modes, observability expectations, security-by-design requirements, and test strategy.
+- Include a numbered **claims section**: falsifiable guarantees this design makes. Example: "1. Module A is not modified — all changes attach at seam S. 2. Interface I remains stable. 3. No new shared dependencies are introduced." This list is the primary input to `architecture-reviewer`.
 
 ## Gate
 
@@ -38,6 +39,7 @@ description: Produce a design package from accepted research without writing imp
 - Name the modules or contracts that should remain untouched if the design is followed correctly.
 - Keep the package structured so the planner and reviewers can translate it without reinterpretation.
 - Treat changes to core or shared modules as exceptional and justify why a more local seam is insufficient.
+- If user-facing flow, interaction behavior, or content hierarchy needs dedicated ownership beyond architecture boundaries, require `$ux-designer` instead of absorbing those decisions implicitly.
 
 ## Non-goals
 

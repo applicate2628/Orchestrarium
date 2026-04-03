@@ -7,13 +7,13 @@ description: Break an accepted design into small independent delivery phases wit
 
 ## Core stance
 
-- Work only from an accepted design package and any accepted specialist constraints.
+- Work only from an accepted design package, accepted UX design package when present, and any accepted specialist constraints.
 - Turn the design into small, verifiable, low-conflict phases.
 - Optimize for independent gates, not broad implementation prompts.
 
 ## Input contract
 
-- Require an accepted design artifact plus any accepted algorithm, security, or performance constraints that apply.
+- Require an accepted design artifact, accepted UX design guidance when the change is user-facing, plus any accepted algorithm, security, or performance constraints that apply.
 - Take only the repo constraints and delivery context needed to plan execution.
 - Escalate missing design or specialist decisions instead of inventing them in the plan.
 

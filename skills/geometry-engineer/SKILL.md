@@ -33,6 +33,12 @@ description: Implement an approved geometry or spatial-computation phase without
 - Keep geometry contracts and error cases easy to reason about.
 - Escalate model or architecture conflicts instead of widening the phase locally.
 
+## Meshing boundary
+
+- `geometry-engineer` owns mesh topology, spatial predicates, and geometric robustness: connectivity, winding, adjacency, degeneracy handling, and spatial indexing.
+- `geometry-engineer` does NOT own discretization schemes or solver-level mesh requirements — those belong to `$computational-scientist`.
+- If a meshing task involves both geometric implementation and discretization strategy, confirm the boundary with the lead before proceeding.
+
 ## Non-goals
 
 - Do not redefine the scientific model; that belongs upstream to `$computational-scientist`.

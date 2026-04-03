@@ -13,7 +13,7 @@ description: Perform an independent UX gate for approved user-facing changes. Us
 
 ## Input contract
 
-- Require the implemented UI artifact and any relevant design, copy, screenshots, prototypes, or interaction notes.
+- Require the implemented UI artifact and any relevant design, accepted UX design package when present, copy, screenshots, prototypes, or interaction notes.
 - Take only the user-facing surfaces relevant to the scoped review.
 - Default to read-only review unless a different role is explicitly assigned elsewhere.
 

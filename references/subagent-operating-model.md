@@ -42,6 +42,8 @@ The lead assigns a task like this:
 7. **QA verifies the integrated result, including basic performance acceptance when relevant, but does not replace algorithm, performance, security, or reliability specialists.**
 8. **Accepted decisions should live near the code as one source of truth.**
 9. **Prefer facts over opinions.** Use factual roles to reduce uncertainty before asking interpretive roles to make tradeoffs or decisions.
+10. **Use re-intake when the admitted item changes.** If scope, priority, or milestone intent drifts enough to redefine the item, send it back to `product-manager` instead of renegotiating it inside delivery.
+11. **Name integration ownership explicitly.** If multiple implementation phases or specialists must land together, one named owner assembles the integrated result before QA.
 
 ---
 
@@ -65,6 +67,12 @@ Delivery loop:
 lead -> research -> design -> plan -> implement -> QA/review -> lead
 ```
 
+Re-intake loop for an in-flight item whose admitted shape has changed:
+
+```text
+lead -> product-manager -> lead
+```
+
 ### 3.2 Specialist constraint owners before implementation
 
 - `algorithm-scientist` — correctness, invariants, asymptotics, mathematical tradeoffs
@@ -72,6 +80,7 @@ lead -> research -> design -> plan -> implement -> QA/review -> lead
 - `performance-engineer` — budgets, methodology, bottlenecks, profiling strategy
 - `security-engineer` — threat model, trust boundaries, controls, secure defaults
 - `reliability-engineer` — SLOs, failure modes, degradation behavior, observability, rollback and recovery constraints
+- `ux-designer` — scoped user flows, interaction states, content hierarchy, and usability guidance before planning and implementation
 
 ### 3.3 Independent reviewers that can block merge or release
 
@@ -98,6 +107,7 @@ product-manager
   -> lead
   -> analyst / product-analyst
   -> architect
+  -> ux-designer                     (if user-facing interaction design needs dedicated ownership)
   -> algorithm-scientist            (if algorithmically sensitive)
   -> computational-scientist        (if scientific or numerical modeling matters)
   -> security-engineer              (if security risk exists)
@@ -117,6 +127,8 @@ product-manager
 - `product-manager` owns what enters discovery or delivery, in what order, and with what bounded outcome.
 - `lead` owns execution of an approved item through the delivery pipeline.
 - `product-analyst` supports both lanes with factual product evidence, but does not own prioritization or delivery orchestration.
+- `ux-designer` owns scoped UX design before implementation when interaction design needs dedicated ownership, but does not own roadmap or technical architecture.
+- If delivery discovers that the admitted item itself has changed materially, `lead` routes it back to `product-manager` for re-intake instead of silently redefining the work.
 
 ### 3.7 Human gate
 
@@ -132,11 +144,13 @@ AI gates do not replace external engineering policy.
 
 - Roadmap and intake default to hub-and-spoke through `product-manager`.
 - Delivery defaults to hub-and-spoke through `lead`.
+- Material scope, priority, or milestone drift routes back through `lead` to `product-manager` for re-intake.
 - Subagents exchange accepted artifacts, not direct peer task assignments.
 - Missing evidence should route back to a factual role through the orchestrating owner before interpretive work continues.
 - If a role disagrees with an upstream artifact, it returns `REVISE` or `BLOCKED` to the orchestrating owner instead of renegotiating scope privately.
 - Reviewers stay independent and return findings to the orchestrating owner instead of driving implementation directly.
 - Direct specialist-to-specialist collaboration is allowed only when the orchestrating owner explicitly approves the edge, scope, and artifact boundary.
+- `$consultant` is an optional independent advisory role; it may be fulfilled by an external provider or an internal independent subagent, but it never becomes a delivery gate.
 
 ### 3.9 Rolling-loop execution
 
@@ -144,6 +158,7 @@ AI gates do not replace external engineering policy.
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays within the same role for a bounded correction.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
+- `RETURN(role)` is used by an independent reviewer when the upstream artifact has a structural gap requiring that role's expertise — not a bounded fix. The lead routes the finding to the named upstream role. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely.
 - Keep handoff latency low and avoid pausing between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 
 ---
@@ -163,6 +178,8 @@ Constraints:
 Expected artifact:
 Acceptance criteria:
 Gate to next stage:
+Pre-mortem (implementation phases, optional): if this phase fails in production, what are the top 2 most likely failure modes?
+Integration owner (multi-phase changes, optional):
 ```
 
 Field meanings:
@@ -172,6 +189,7 @@ Field meanings:
 - **Must-not-break surfaces** means nearby areas that must stay stable or receive smoke coverage.
 - **Expected artifact** means one concrete output.
 - **Gate to next stage** means what must be proven before work moves forward.
+- **Integration owner** means the explicitly named owner who assembles one coherent integrated artifact before QA when multiple implementation phases or specialists must land together.
 
 ---
 
@@ -192,7 +210,7 @@ Response format:
 2. Artifact
 3. Risks / Unknowns
 4. Recommended next role
-5. Gate: PASS | REVISE | BLOCKED
+5. Gate: PASS | REVISE | BLOCKED | RETURN(role)
 ```
 
 Decision-making roles should clearly separate confirmed facts, assumptions, and judgment calls in their output.
@@ -208,6 +226,7 @@ Decision-making roles should clearly separate confirmed facts, assumptions, and 
 | `analyst` | Codebase analyst | Facts about the current system | Research memo | Enough evidence exists for design |
 | `product-analyst` | Product analyst | Product scope, user context, constraints | Product brief | The problem is clear enough for design |
 | `architect` | Solution architect | Architecture and change boundaries | Design package or ADR | The design is explicit and testable |
+| `ux-designer` | UX designer | User-facing flows, states, hierarchy, and usability guidance before implementation | UX design package | The interaction design is explicit and implementable |
 | `planner` | Delivery planner | Small independent phases and acceptance criteria | Phase plan | Each phase is implementable on its own |
 | `knowledge-archivist` | Repository steward | Docs, reports, references, archive consistency | Repository stewardship package | Canonical docs stay coherent |
 | `backend-engineer` | Backend engineer | Approved backend phase | Patch and tests | Change matches plan and contracts |
@@ -349,6 +368,8 @@ For each phase, specify:
 
 `toolchain-engineer`: implement the approved build, packaging, compiler, linker, or reproducibility phase without drifting into product architecture or runtime policy.
 
+`ux-designer`: define scoped user flows, interaction states, content hierarchy, usability constraints, and accessibility expectations for approved user-facing work before planning and implementation.
+
 `algorithm-scientist`: formalize the algorithm before implementation; make the problem statement, invariants, assumptions, complexity, and edge cases explicit.
 
 `computational-scientist`: formalize the scientific model before implementation; make equations, units, discretization, solver strategy, and validation explicit.
@@ -390,6 +411,7 @@ It should now be explicit:
 - which modules, data surfaces, and contracts change
 - which edge cases and failure modes were considered
 - how the solution will be validated
+- when user-facing interaction design matters, whether a dedicated UX design package is required before planning
 
 ### Gate 3 — after specialist design roles
 
@@ -421,6 +443,7 @@ It should now be true:
 - scope was not expanded without approval
 - required tests and checks exist
 - touched files and risk surfaces are explicit
+- when multiple implementation phases were required, one explicit integration owner assembled the integrated result and checked cross-phase compatibility before QA
 
 ### Gate 6 — after `qa-engineer`
 
@@ -493,6 +516,12 @@ product-manager -> lead -> analyst -> architect -> reliability-engineer -> plann
 lead -> knowledge-archivist -> lead
 ```
 
+### UX-sensitive user-facing task with dedicated UX ownership
+
+```text
+product-manager -> lead -> product-analyst -> analyst -> architect -> ux-designer -> planner -> frontend-engineer / qt-ui-engineer -> qa-engineer -> ux-reviewer -> lead
+```
+
 ### Build-system or packaging task
 
 ```text
@@ -509,6 +538,12 @@ product-manager -> lead -> analyst -> architect -> planner -> implementation spe
 
 ```text
 product-manager -> product-analyst -> lead
+```
+
+### In-flight item whose admitted scope, priority, or milestone intent has changed
+
+```text
+lead -> product-manager -> lead
 ```
 
 ---
@@ -535,6 +570,7 @@ At minimum, it is useful to keep these artifacts near the repository:
 - research memo
 - product brief
 - design doc or ADR
+- UX design package
 - algorithm note
 - computational model package
 - security design package
@@ -567,6 +603,7 @@ Do not expect one agent to do all of these well at once:
 - prove algorithmic correctness
 - define scientific or numerical validity
 - define performance budgets
+- define user-facing interaction design
 - define security controls
 - implement code
 - perform independent acceptance
@@ -582,6 +619,7 @@ product-manager
 lead
 analyst
 architect
+ux-designer
 planner
 backend-engineer
 frontend-engineer
@@ -596,6 +634,7 @@ lead
 analyst
 product-analyst
 architect
+ux-designer
 planner
 knowledge-archivist
 backend-engineer
@@ -621,6 +660,7 @@ lead
 analyst
 product-analyst
 architect
+ux-designer
 planner
 knowledge-archivist
 backend-engineer

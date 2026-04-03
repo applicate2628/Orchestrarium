@@ -1,8 +1,8 @@
 # Claude Workflow
 
-Use this file only when Claude is installed and selected as the external consultant for `$consultant`.
+Use this file only when Claude is installed and selected as one execution method for `$consultant`.
 
-This file extends, but does not replace, [external-consultant-workflow.md](external-consultant-workflow.md).
+This file extends, but does not replace, [consultant-workflow.md](consultant-workflow.md).
 
 ## Availability
 
@@ -35,4 +35,4 @@ For hard complex tasks, prefer the strongest available profile such as Opus when
 - Wait about 5 to 15 minutes after starting `claude -p` before assuming the run is stalled.
 - Do not start a new chat while the current run may still be alive.
 - If needed, poll or nudge the same session instead of creating a second one.
-- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note and continue locally.
+- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note and continue with the internal-subagent fallback described in [consultant-workflow.md](consultant-workflow.md).

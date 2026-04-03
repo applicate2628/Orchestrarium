@@ -16,7 +16,7 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
 - Do not ask one subagent to deliver a feature end-to-end.
 - Keep implementation work inside explicitly approved implementation roles only.
-- Use `$consultant` only as an optional outside second opinion, never as a required pipeline stage.
+- Use `$consultant` only as an optional independent second opinion, never as a required pipeline stage.
 - Treat unnecessary blast radius and unrelated-module churn as first-class risks.
 
 ## Canonical brief
@@ -34,6 +34,7 @@ The canonical brief should capture:
 - surfaces that should remain untouched or receive explicit smoke coverage
 - critical risks and their owners
 - required roles and mandatory reviewers
+- explicit integration owner, if the work spans multiple implementation phases or specialists
 - optional consultant usage, if any
 - current stage, next stage, and open blockers
 
@@ -47,20 +48,23 @@ The canonical brief should capture:
    - Operating-model alias: `researcher`
    - Output: one factual research artifact per role.
 2. `Design`
-   - Roles: `$architect`, `$algorithm-scientist`, `$computational-scientist`, `$security-engineer`, `$performance-engineer`, `$reliability-engineer` as needed
+   - Roles: `$architect`, `$ux-designer`, `$algorithm-scientist`, `$computational-scientist`, `$security-engineer`, `$performance-engineer`, `$reliability-engineer` as needed
    - Output: one design or specialist-constraint package per role.
 3. `Plan`
    - Role: `$planner`
    - Output: one gated phase plan.
 4. `Implement`
-   - Roles: `$knowledge-archivist`, `$backend-engineer`, `$frontend-engineer`, `$graphics-engineer`, `$visualization-engineer`, `$geometry-engineer`, `$qt-ui-engineer`, `$model-view-engineer`, `$data-engineer`, `$toolchain-engineer`, `$platform-engineer`, or another explicitly approved implementation specialist
+   - Roles: `$backend-engineer`, `$frontend-engineer`, `$graphics-engineer`, `$visualization-engineer`, `$geometry-engineer`, `$qt-ui-engineer`, `$model-view-engineer`, `$data-engineer`, `$toolchain-engineer`, `$platform-engineer`, or another explicitly approved implementation specialist
    - Output: one implementation package for one approved phase.
+   - Cross-cutting hygiene (invoke explicitly, outside the feature phase): `$knowledge-archivist`
+   - If the approved work spans multiple implementation phases or specialists, assign one explicit integration owner before QA. That owner assembles one coherent integrated artifact and checks cross-phase compatibility before verification begins.
 5. `QA`
    - Roles: `$qa-engineer`, `$ui-test-engineer` as needed
    - Output: one verification package per verification role, including basic performance acceptance when relevant.
 6. `Independent review`
    - Roles: `$architecture-reviewer`, `$performance-reviewer`, `$security-reviewer`, `$ux-reviewer`, `$accessibility-reviewer` as needed
    - Output: one review package per independent reviewer.
+   - For each reviewer, choose the review strategy before delegating (see Review strategy rule below).
 7. Human or CI gate
    - Output: explicit human approval, CI status, or documented external blocker.
 8. Optional advisory consultation
@@ -104,7 +108,33 @@ Use the templates in [subagent-contracts.md](references/subagent-contracts.md) f
 - Prefer factual artifacts before interpretive artifacts whenever the next decision depends on unknowns.
 - Use `$analyst` for code and system facts, `$product-analyst` for user or product facts, and accepted metrics or constraints as the basis for roadmap or design decisions.
 - Require decision-making roles such as `$product-manager`, `$architect`, and specialist constraint roles to separate evidence, judgment, assumptions, and open questions explicitly.
-- Treat `$consultant` as optional outside judgment only after the strongest relevant factual slice is already available.
+- Treat `$consultant` as optional independent judgment only after the strongest relevant factual slice is already available.
+
+## Review strategy rule
+
+Before delegating to any independent reviewer, choose one of two strategies and state it explicitly in the task.
+
+**Claim-Verify** — use when the risk surface is known and bounded.
+- Require the upstream specialist to include a **claims section** in their artifact: a numbered list of falsifiable guarantees.
+- Pass the reviewer: the implementation artifact + the claims list only. Do not pass the full design package.
+- Reviewer task: (1) verify each claim against the artifact, (2) identify risk surfaces not covered by any claim.
+
+**Adversarial** — use when the risk surface is novel, externally exposed, or the builder may have systematic blind spots.
+- Pass the reviewer: the implementation artifact only. Do not pass the upstream design package.
+- Reviewer task: assume an adversary or failure mode not anticipated by the builder. Find the three highest-probability ways this artifact fails or is exploited. Show the exact mechanism for each.
+
+**Which to choose:**
+
+| Signal | Claim-Verify | Adversarial |
+|---|---|---|
+| Risk is well-understood and bounded | preferred | — |
+| Risk is novel or externally exposed | — | preferred |
+| Missing an unknown risk is critical | — | preferred |
+| Speed is a constraint | preferred | — |
+
+When both apply, run Claim-Verify first, then Adversarial. The adversarial reviewer must not receive the Claim-Verify report — independence must be preserved.
+
+The full decision guide with examples lives in [operating-model.md](references/operating-model.md) under "Review strategy selection".
 
 ## Gate semantics
 
@@ -113,6 +143,7 @@ Require every pipeline subagent to end with exactly one gate status:
 - `PASS`: the artifact is accepted and may move to the next approved role.
 - `REVISE`: the artifact stays in the same role and needs a bounded correction.
 - `BLOCKED`: the role cannot proceed without new context, a decision, or a different role.
+- `RETURN(role)`: an independent reviewer sends the artifact back to a specific upstream role because the upstream artifact has a structural gap requiring that role's expertise — not a bounded correction. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely. Route the finding to the named role; do not treat it as REVISE or BLOCKED.
 
 Do not advance work on optimism or partial acceptance.
 
@@ -131,10 +162,22 @@ Do not advance work on optimism or partial acceptance.
 - Do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 - Keep the next approved role ready whenever the current gate is likely to pass so the pipeline can keep moving.
 
+## Re-intake rule
+
+- If an in-flight item no longer fits its admitted scope, priority, or milestone intent, stop delivery progression and route the item back to `$product-manager` for re-intake.
+- Do not silently redefine the item inside the delivery lane or compensate by stretching the phase plan.
+- Use re-intake when the work itself has changed; use `REVISE` when the current role can still fix the artifact without changing the admitted item.
+
+## Integration-ownership rule
+
+- If a change spans multiple implementation phases or specialists, assign one explicit integration owner before QA.
+- The integration owner is responsible for assembling one coherent integrated artifact, checking cross-phase compatibility, and handing one verification-ready result to QA or the relevant reviewers.
+- Do not hand QA a partially assembled multi-phase result with integration ownership left implicit.
+
 ## Risk-owner rule
 
 - Assign explicit owners for any risk that can independently fail the result.
-- Common risk-owner roles are `$algorithm-scientist`, `$computational-scientist`, `$performance-engineer`, `$security-engineer`, `$reliability-engineer`, `$knowledge-archivist`, `$toolchain-engineer`, `$qa-engineer`, `$ui-test-engineer`, `$architecture-reviewer`, `$performance-reviewer`, `$security-reviewer`, `$ux-reviewer`, and `$accessibility-reviewer`.
+- Common risk-owner roles are `$ux-designer`, `$algorithm-scientist`, `$computational-scientist`, `$performance-engineer`, `$security-engineer`, `$reliability-engineer`, `$knowledge-archivist`, `$toolchain-engineer`, `$qa-engineer`, `$ui-test-engineer`, `$architecture-reviewer`, `$performance-reviewer`, `$security-reviewer`, `$ux-reviewer`, and `$accessibility-reviewer`.
 - Treat architectural cohesion, extension-seam integrity, dependency direction, and blast radius as explicit risks whenever work touches shared abstractions or core modules.
 - Treat repository knowledge integrity, artifact discoverability, build reproducibility, and toolchain consistency as explicit risks whenever those surfaces matter to the task.
 - Keep builder roles and blocker or reviewer roles separate unless there is a strong reason not to.
@@ -167,21 +210,23 @@ If delegation is needed and no narrower role has already been delegated, use `$l
 
 If the user is asking what should be worked on, what should be prioritized next, what belongs in the next milestone, or whether an initiative should enter discovery at all, route to `$product-manager` instead of treating it as ordinary delivery orchestration.
 
+If delivery discovers that the admitted item itself has changed materially, route back to `$product-manager` for re-intake instead of letting the change drift sideways inside the delivery lane.
+
 Invoke `$consultant` only when the lead wants a second opinion on ambiguity, tradeoffs, or cross-cutting concerns that are not well covered by the current specialist lane. The consultant never replaces a required stage or reviewer.
 
 ## Using Consultant
 
-`$consultant` is the external consultant for this repository. Before using it, read `$CODEX_HOME/skills/consultant/references/external-consultant-workflow.md`.
-If Claude is installed and selected as the provider, also read `$CODEX_HOME/skills/consultant/references/claude-workflow.md`.
+`$consultant` is the independent advisory consultant for this repository. Before using it, read `$CODEX_HOME/skills/consultant/references/consultant-workflow.md`.
+If Claude is installed and selected as one execution method, also read `$CODEX_HOME/skills/consultant/references/claude-workflow.md`.
 
 Lead rules for `$consultant`:
 
-- Use it for hard planning or complex workspace-modifying tasks when an outside view is helpful.
+- Use it for hard planning or complex workspace-modifying tasks when an independent view is helpful.
 - Ask for discussion first, then compare options, and only then ask for a saved plan if a plan is needed.
 - Do not use it for trivial tasks, routine git or admin work, or ordinary read-only investigation.
-- Use the documented `stdin` invocation pattern; do not rely on multiline command-line arguments or TTY.
-- Wait about 5 to 15 minutes before treating a run as stalled, and avoid starting a parallel fresh chat while one may still be running.
-- If the run fails, times out, or hits quota or auth limits, record that in the plan file and continue locally.
+- If the selected execution path is an external provider, use the documented `stdin` invocation pattern and do not rely on multiline command-line arguments or TTY.
+- Wait about 5 to 15 minutes before treating an external-provider run as stalled, and avoid starting a parallel fresh chat while one may still be running.
+- If the external-provider run fails, times out, or hits quota or auth limits, record that in the plan file and continue with an independent internal subagent consultant using the same advisory-only contract.
 
 ## Non-goals
 

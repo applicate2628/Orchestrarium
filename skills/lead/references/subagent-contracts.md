@@ -49,6 +49,7 @@ Fact-first note:
 
 Consultant exception:
 - `$consultant` returns the same first four sections, but ends with `5. Advisory status: NON-BLOCKING`.
+- If the external provider is unavailable or fails, the lead may use an independent internal subagent as `$consultant` with the same advisory-only contract and the same response format.
 
 ## Role map
 
@@ -57,6 +58,7 @@ Use these current skill names in this repository:
 - roadmap ownership, milestone shaping, or prioritization maps to `$product-manager`
 - `researcher` maps to `$analyst`
 - product or business research maps to `$product-analyst`
+- UX design for user flows, interaction states, or content hierarchy maps to `$ux-designer`
 - `backend-dev` maps to `$backend-engineer`
 - `frontend-dev` maps to `$frontend-engineer`
 - `qa` maps to `$qa-engineer`
@@ -387,8 +389,9 @@ Acceptance criteria:
 - if it finds a real blocker, it points back to the proper specialist role
 
 Invocation note:
-- `$consultant` maps to the external consultant workflow documented in `$CODEX_HOME/skills/consultant/references/external-consultant-workflow.md`
+- `$consultant` maps to the consultant workflow documented in `$CODEX_HOME/skills/consultant/references/consultant-workflow.md`
 - provider-specific adapters such as `$CODEX_HOME/skills/consultant/references/claude-workflow.md` are optional and should be used only when that provider is installed and selected
+- if the external provider fails or is unavailable, fall back to an independent internal subagent consultant with the same advisory-only contract
 
 ## Interaction rules
 

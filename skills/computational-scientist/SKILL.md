@@ -35,6 +35,12 @@ description: Formalize physics, simulation, and numerical-method work before imp
 - Separate modeling decisions from pure algorithm-structure decisions when both are present.
 - Escalate discrete algorithm design back to `$algorithm-scientist` when the main question is not scientific modeling or numerics.
 
+## Meshing boundary
+
+- `computational-scientist` owns discretization strategy and solver-level mesh requirements: element type, mesh resolution, refinement criteria, stability constraints, and convergence targets.
+- `computational-scientist` does NOT own geometric implementation of mesh connectivity, topology, or spatial predicates — those belong to `$geometry-engineer`.
+- If a meshing task involves both, produce the discretization specification first so `geometry-engineer` can implement against it.
+
 ## Non-goals
 
 - Do not write production code.

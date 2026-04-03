@@ -16,11 +16,13 @@ If the task is about roadmap ownership, prioritization, milestone shaping, or ad
 - keep interpretation downstream of evidence: exhaust the needed factual lane before asking design, roadmap, or reviewer roles to make tradeoff judgments
 - keep the system operating as a rolling loop: `PASS` advances immediately, `REVISE` stays in the same role for a bounded correction, and `BLOCKED` is reserved for real external blockers
 - prefer continuous phase-by-phase flow with minimal handoff latency; do not pause between accepted artifacts unless a true gate failure or a policy-required human check requires it
+- route an in-flight item back to `$product-manager` for re-intake when admitted scope, priority, or milestone intent changes enough to redefine the work; do not silently renegotiate the item inside delivery
+- assign one explicit integration owner before QA whenever a change spans multiple implementation phases or specialists; that owner must assemble one coherent integrated artifact and check cross-phase compatibility before verification
 - give each delegated task only approved inputs, minimal context, limited tools, one expected artifact, explicit acceptance criteria, and an explicit gate to the next stage
 - pass accepted artifacts instead of raw transcript dumps whenever an accepted artifact already exists
 - require `REVISE` or `BLOCKED` when upstream evidence is insufficient; do not allow downstream roles to silently compensate with guesses or private scope renegotiation
 - stop progression when a quality gate fails
-- treat `$consultant` as optional advisory staff only, never as a required pipeline stage or blocking reviewer
+- treat `$consultant` as an optional independent advisory team member only, never as a required pipeline stage or blocking reviewer
 - keep `security-engineer` separate from `security-reviewer`, and keep dedicated performance optimization separate from the QA gate
 - require human review before `git push`, release, or equivalent publication
 
@@ -37,12 +39,13 @@ Delegation should reduce noise, not spread it. That means:
 
 Available roles:
 
-- `$consultant` from `$CODEX_HOME/skills/consultant`: optional non-blocking external second opinion for the lead; advisory-only and not part of the mandatory pipeline; base usage rules live in `$CODEX_HOME/skills/consultant/references/external-consultant-workflow.md`, with optional provider adapters such as `claude-workflow.md` when installed
+- `$consultant` from `$CODEX_HOME/skills/consultant`: optional non-blocking independent advisor for the lead; advisory-only and not part of the mandatory pipeline; base usage rules live in `$CODEX_HOME/skills/consultant/references/consultant-workflow.md`, with provider adapters such as `claude-workflow.md` only when that execution method is selected; if the external provider is unavailable or fails, fall back to an independent subagent consultant using the same advisory-only contract
 - `$lead` from `$CODEX_HOME/skills/lead`: default delivery coordination, routing, artifact acceptance, and gate decisions for approved work
 - `$product-manager` from `$CODEX_HOME/skills/product-manager`: roadmap ownership, initiative prioritization, admission into discovery or delivery, and milestone scope framing
 - `$analyst` from `$CODEX_HOME/skills/analyst`: read-only codebase research and factual briefs only; this is the `researcher` role from the operating model
 - `$product-analyst` from `$CODEX_HOME/skills/product-analyst`: factual product and user-context briefs before design
 - `$architect` from `$CODEX_HOME/skills/architect`: architecture and design packages from accepted research
+- `$ux-designer` from `$CODEX_HOME/skills/ux-designer`: scoped UX design packages for user flows, interaction states, content hierarchy, and usability constraints before planning and implementation
 - `$algorithm-scientist` from `$CODEX_HOME/skills/algorithm-scientist`: formal algorithm, math, and correctness analysis before implementation
 - `$computational-scientist` from `$CODEX_HOME/skills/computational-scientist`: scientific models, physics, simulation, and numerical-method packages before planning or implementation
 - `$reliability-engineer` from `$CODEX_HOME/skills/reliability-engineer`: SLOs, failure modes, degradation, observability, and recovery constraints before planning
@@ -68,4 +71,6 @@ Available roles:
 - `$security-reviewer` from `$CODEX_HOME/skills/security-reviewer`: security gate findings or approval
 - `$architecture-reviewer` from `$CODEX_HOME/skills/architecture-reviewer`: maintainability, change-isolation, dependency-direction, and architecture-fit review
 
-Keep accepted artifacts near the code when the repository is the source of truth: canonical brief, research memo, design package, specialist constraint packages, phase plan, and review reports.
+Keep accepted artifacts near the code when the repository is the source of truth: canonical brief, research memo, design package, UX design package when used, specialist constraint packages, phase plan, and review reports.
+
+Repository-wide workflow source of truth lives in [subagent-operating-model.md](D:/dev/Orchestrator/references/subagent-operating-model.md). [AGENTS.md](D:/dev/Orchestrator/AGENTS.md) is the repo entrypoint and role index; [operating-model.md](D:/dev/Orchestrator/skills/lead/references/operating-model.md) is the condensed lead-facing reference.
