@@ -19,6 +19,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays inside the same role for a bounded correction.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
+- Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - Handoff latency should stay low: do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 
 ## Fact-first workflow
@@ -44,7 +45,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - Product-sensitive work with unclear scope or user impact:
   `lead -> product-analyst -> analyst -> architect -> planner -> implementation -> qa-engineer -> lead`
 - UX-sensitive user-facing work with meaningful interaction design:
-  `lead -> product-analyst -> analyst -> architect -> ux-designer -> planner -> frontend-engineer / qt-ui-engineer -> qa-engineer -> ux-reviewer -> lead`
+  `lead -> product-analyst -> analyst -> architect -> ux-designer -> planner -> frontend-engineer (web/React) / qt-ui-engineer (Qt desktop) -> qa-engineer -> ux-reviewer -> lead`
 - Algorithmically sensitive work:
   `lead -> analyst -> architect -> algorithm-scientist -> planner -> implementation -> qa-engineer -> lead`
 - Scientific-modeling or numerical-method work:
@@ -80,9 +81,9 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - Extensibility-sensitive or low-blast-radius work:
   `lead -> analyst -> architect -> planner -> implementation -> qa-engineer -> architecture-reviewer -> lead`
 - UX-sensitive user-facing work without a separate UX design lane:
-  `lead -> analyst -> architect -> planner -> frontend-engineer -> qa-engineer -> ux-reviewer -> lead`
+  `lead -> analyst -> architect -> planner -> frontend-engineer (web/React) -> qa-engineer -> ux-reviewer -> lead`
 - Accessibility-sensitive user-facing work:
-  `lead -> analyst -> architect -> planner -> qt-ui-engineer -> ui-test-engineer -> accessibility-reviewer -> lead`
+  `lead -> analyst -> architect -> planner -> qt-ui-engineer (Qt desktop) -> ui-test-engineer -> accessibility-reviewer -> lead`
 - Combined critical work:
   `lead -> product-analyst -> analyst -> architect -> algorithm-scientist -> security-engineer -> performance-engineer -> reliability-engineer -> planner -> implementation -> qa-engineer -> architecture-reviewer -> performance-reviewer -> security-reviewer -> lead`
 

@@ -16,6 +16,7 @@ If the task is about roadmap ownership, prioritization, milestone shaping, or ad
 - minimize opinion-driven work by routing unknowns to factual roles first and requiring decisions to cite accepted evidence
 - keep the system operating as a rolling loop: `PASS` advances immediately, `REVISE` stays in the same role for a bounded correction, and `BLOCKED` is reserved for real external blockers
 - prefer continuous phase-by-phase flow with minimal handoff latency; do not pause between accepted artifacts unless a true gate failure or a policy-required human check requires it
+- close specialist sessions once their artifact is accepted, handed off, or explicitly parked; keep a session open only for a bounded `REVISE` or an immediate same-scope follow-up, and close `BLOCKED` or advisory-only consultant sessions once routing or advisory handoff is complete
 - route an in-flight item back to `$product-manager` for re-intake when admitted scope, priority, or milestone intent changes enough to redefine the work; do not silently renegotiate the item inside delivery
 - assign one explicit integration owner before QA whenever a change spans multiple implementation phases or specialists; that owner must assemble one coherent integrated artifact and check cross-phase compatibility before verification
 - give each delegated task only approved inputs, minimal context, limited tools, one expected artifact, explicit acceptance criteria, and an explicit gate to the next stage
@@ -108,6 +109,8 @@ Research, design, and specialist constraints:
 Implementation:
 
 - `$backend-engineer`, `$frontend-engineer`, `$qt-ui-engineer`, `$model-view-engineer`, `$data-engineer`, `$platform-engineer`, `$toolchain-engineer`, `$geometry-engineer`, `$graphics-engineer`, `$visualization-engineer`
+
+For approved UI implementation phases, `$lead` must select the platform-specific implementer that matches the approved stack: use `$frontend-engineer` for web/React UI and `$qt-ui-engineer` only for Qt desktop UI.
 
 Review and verification:
 

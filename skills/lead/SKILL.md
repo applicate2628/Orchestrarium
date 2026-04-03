@@ -54,7 +54,7 @@ The canonical brief should capture:
    - Role: `$planner`
    - Output: one gated phase plan.
 4. `Implement`
-   - Roles: `$backend-engineer`, `$frontend-engineer`, `$graphics-engineer`, `$visualization-engineer`, `$geometry-engineer`, `$qt-ui-engineer`, `$model-view-engineer`, `$data-engineer`, `$toolchain-engineer`, `$platform-engineer`, or another explicitly approved implementation specialist
+   - Roles: `$backend-engineer`, `$frontend-engineer` for web/React UI, `$graphics-engineer`, `$visualization-engineer`, `$geometry-engineer`, `$qt-ui-engineer` for Qt desktop UI, `$model-view-engineer`, `$data-engineer`, `$toolchain-engineer`, `$platform-engineer`, or another explicitly approved implementation specialist
    - Output: one implementation package for one approved phase.
    - Cross-cutting hygiene (invoke explicitly, outside the feature phase): `$knowledge-archivist`
    - If the approved work spans multiple implementation phases or specialists, assign one explicit integration owner before QA. That owner assembles one coherent integrated artifact and checks cross-phase compatibility before verification begins.
@@ -161,6 +161,12 @@ Do not advance work on optimism or partial acceptance.
 - Prefer continuous phase-by-phase flow with minimal handoff latency.
 - Do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 - Keep the next approved role ready whenever the current gate is likely to pass so the pipeline can keep moving.
+
+## Session lifecycle rule
+
+- Close specialist sessions once their artifact is accepted, handed off, or explicitly parked.
+- Keep a session open only while the same role is actively doing a bounded `REVISE` or an immediate same-scope follow-up.
+- Close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete; do not leave completed specialist sessions hanging.
 
 ## Re-intake rule
 
