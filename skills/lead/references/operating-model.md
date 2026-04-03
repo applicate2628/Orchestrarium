@@ -20,7 +20,16 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - `REVISE` stays inside the same role for a bounded correction.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
 - Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
+- A material revision to an accepted upstream artifact invalidates dependent downstream `PASS` states; the lead marks the affected artifacts for re-review before continuing the pipeline.
 - Handoff latency should stay low: do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
+
+## Change classification
+
+- Classify the change before selecting routing: `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting`.
+- `cosmetic` usually stays on the normal delivery loop with QA only.
+- `additive` stays on the normal delivery loop unless it introduces a new risk owner.
+- `behavioral` should add factual/design scrutiny first when evidence is thin, then QA and reviewers as needed for contracts, user flow, or failure modes.
+- `breaking-or-cross-cutting` should force stronger routing: architect, planner, re-review of affected downstream artifacts, and integration ownership when multiple phases or specialists must land together.
 
 ## Fact-first workflow
 

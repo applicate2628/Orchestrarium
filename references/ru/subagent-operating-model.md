@@ -44,6 +44,8 @@ Lead назначает задачу такого вида:
 9. **Предпочитайте факты мнениям.** Используйте factual-роли, чтобы снизить неопределённость, прежде чем просить interpretive-роли делать tradeoff'ы или принимать решения.
 10. **Используйте re-intake, когда admitted item изменился.** Если scope, priority или milestone intent достаточно сдвинулись, чтобы переопределить item, верните его `product-manager` вместо того, чтобы перепридумывать работу внутри delivery.
 11. **Явно называйте ownership интеграции.** Если несколько implementation-фаз или специалистов должны слиться в один результат, один назначенный владелец собирает integrated result перед QA.
+12. **Сбрасывайте derived `PASS` состояния при материальной правке upstream.** Если принятый upstream artifact был materially revised после того, как downstream artifacts уже получили `PASS`, lead отмечает затронутые derived artifacts на re-review до продолжения delivery. `PASS` не сохраняется автоматически после material upstream change.
+13. **Классифицируйте изменение перед routing.** Используйте `cosmetic`, `additive`, `behavioral` или `breaking-or-cross-cutting`, чтобы определить, насколько сильно lead должен маршрутизировать и gate'ить работу; `breaking-or-cross-cutting` должен усиливать routing, re-review затронутых downstream artifacts и ownership интеграции, когда это нужно.
 
 ---
 

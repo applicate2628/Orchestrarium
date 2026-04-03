@@ -44,6 +44,8 @@ The lead assigns a task like this:
 9. **Prefer facts over opinions.** Use factual roles to reduce uncertainty before asking interpretive roles to make tradeoffs or decisions.
 10. **Use re-intake when the admitted item changes.** If scope, priority, or milestone intent drifts enough to redefine the item, send it back to `product-manager` instead of renegotiating it inside delivery.
 11. **Name integration ownership explicitly.** If multiple implementation phases or specialists must land together, one named owner assembles the integrated result before QA.
+12. **Invalidate derived `PASS` states on material upstream revision.** If an accepted upstream artifact is revised materially after downstream artifacts have already passed, the lead must mark the affected derived artifacts for re-review before delivery continues. `PASS` does not survive a material upstream change automatically.
+13. **Classify change impact before routing.** Use `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting` to decide how strongly the lead should route and gate the work; `breaking-or-cross-cutting` must force stronger routing, re-review of affected downstream artifacts, and integration ownership when needed.
 
 ---
 

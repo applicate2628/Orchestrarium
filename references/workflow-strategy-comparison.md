@@ -47,7 +47,18 @@ Use it together with:
 | `Spec-first + compliance review` | design-control mode | spec vs implementation | API/schema fidelity, predictable execution against stable contracts | weak if the spec itself is wrong | medium to high | contracts and interfaces are the main risk | used in parts of the design/plan flow |
 | `Audit sampling` | governance mode | full stream vs sampled review | throughput in high-volume flows | misses problems by design | low to medium | bulk operations where full review is too expensive | not a core pattern |
 
-## 4. Workflow protection strategies
+## 4. Change classification matrix
+
+Use this before choosing a workflow path. It tells you how risky the change is and what gates it should force.
+
+| Change class | Forced routing / gates | Example |
+|---|---|---|
+| `cosmetic` | Usually QA only; no extra specialist lane by default | wording, formatting, comments, local refactors with no observable behavior change |
+| `additive` | Normal delivery loop; QA required; add a specialist lane only if a new risk owner appears | new code or docs that extend behavior without changing existing contracts or defaults |
+| `behavioral` | Route through factual/design owner first if evidence is thin; QA required; add an independent reviewer when contracts, flow, or failure modes matter | runtime behavior, validation, error handling, or user-facing flow changes |
+| `breaking-or-cross-cutting` | Architect and usually planner; re-review affected downstream artifacts; integration owner when multiple phases or specialists land together; reviewer lanes as needed | contract, migration, seam, dependency direction, rollout/rollback, or multi-boundary changes |
+
+## 5. Workflow protection strategies
 
 Embedded repository defaults are shown in **bold**.
 
@@ -66,7 +77,7 @@ Embedded repository defaults are shown in **bold**.
 | **`Parallel read lanes`** | accelerate independent evidence gathering | serial read-only bottlenecks | scopes overlap or synthesis cost outweighs speed | **supported** |
 | `Parallel write lanes` | accelerate disjoint implementation work | unnecessary serial implementation when boundaries are already frozen | write scopes overlap or contracts are still moving | conditional only |
 
-## 5. Quick selection guide
+## 6. Quick selection guide
 
 | If the situation is... | Start with... | Then add... |
 |---|---|---|
@@ -78,7 +89,7 @@ Embedded repository defaults are shown in **bold**.
 | The work spans multiple implementation phases | `Integration ownership` | QA and reviewer gates after one integrated artifact exists |
 | The diff is getting too broad for a local change | `Change isolation` | re-route to `architect`, `planner`, or `architecture-reviewer` as needed |
 
-## 6. Selection heuristics
+## 7. Selection heuristics
 
 - Use `Claim-Verify` when the reviewer should check whether the builder actually delivered what was promised.
 - Use `Adversarial` when the reviewer should look for what the builder may never have modeled.
