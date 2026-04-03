@@ -1,57 +1,89 @@
 # Operating Model Notes
 
-Use this reference when the manager needs routing, gate, or governance guidance beyond the core skill.
+Use this reference when the lead needs routing, gate, or governance guidance beyond the core skill.
+
+## Delivery loops
+
+- Roadmap and intake loop:
+  `product-manager -> product-analyst -> lead`
+- Delivery loop for an approved item:
+  `lead -> research -> design -> plan -> implement -> QA/review -> lead`
+
+The roadmap loop decides what should enter discovery or delivery. The delivery loop decides how an approved item is executed safely.
+
+## Rolling-loop execution
+
+- The system operates as a rolling loop, not a stop-and-wait chain.
+- `PASS` immediately advances to the next approved role.
+- `REVISE` stays inside the same role for a bounded correction.
+- `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
+- Handoff latency should stay low: do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
+
+## Fact-first workflow
+
+- Prefer factual roles before interpretive roles when the next decision depends on missing evidence.
+- `product-analyst` and `analyst` establish the factual base; `product-manager`, `architect`, and specialist design lanes interpret that base and make bounded decisions.
+- Every decision artifact should separate confirmed facts, explicit assumptions, judgment calls, and unresolved questions.
+- Do not substitute brainstorming for discovery when the missing input can be gathered as evidence.
+- Use `$consultant` only as optional outside judgment after the best available factual slice has already been assembled.
 
 ## Canonical routing patterns
 
+- Roadmap prioritization or milestone shaping:
+  `product-manager -> lead`
+- Roadmap item that needs factual product clarification before admission:
+  `product-manager -> product-analyst -> lead`
 - Advisory-only external consultation:
-  `manager -> consultant`
+  `lead -> consultant`
 - Basic CRUD or integration work:
-  `manager -> analyst -> architect -> planner -> implementation -> qa-engineer -> manager`
+  `lead -> analyst -> architect -> planner -> implementation -> qa-engineer -> lead`
 - Product-sensitive work with unclear scope or user impact:
-  `manager -> product-analyst -> analyst -> architect -> planner -> implementation -> qa-engineer -> manager`
+  `lead -> product-analyst -> analyst -> architect -> planner -> implementation -> qa-engineer -> lead`
 - Algorithmically sensitive work:
-  `manager -> analyst -> architect -> algorithm-scientist -> planner -> implementation -> qa-engineer -> manager`
+  `lead -> analyst -> architect -> algorithm-scientist -> planner -> implementation -> qa-engineer -> lead`
 - Scientific-modeling or numerical-method work:
-  `manager -> analyst -> architect -> computational-scientist -> planner -> implementation -> qa-engineer -> manager`
+  `lead -> analyst -> architect -> computational-scientist -> planner -> implementation -> qa-engineer -> lead`
 - Repository hygiene, documentation, or archival-consistency work:
-  `manager -> knowledge-archivist -> manager`
+  `lead -> knowledge-archivist -> lead`
 - Performance-sensitive work:
-  `manager -> analyst -> architect -> performance-engineer -> planner -> implementation -> qa-engineer -> manager`
+  `lead -> analyst -> architect -> performance-engineer -> planner -> implementation -> qa-engineer -> lead`
 - Reliability-sensitive work:
-  `manager -> analyst -> architect -> reliability-engineer -> planner -> implementation -> qa-engineer -> manager`
+  `lead -> analyst -> architect -> reliability-engineer -> planner -> implementation -> qa-engineer -> lead`
 - Performance-critical work with hard budgets or public SLA:
-  `manager -> analyst -> architect -> performance-engineer -> planner -> implementation -> qa-engineer -> performance-reviewer -> manager`
+  `lead -> analyst -> architect -> performance-engineer -> planner -> implementation -> qa-engineer -> performance-reviewer -> lead`
 - Security-sensitive work:
-  `manager -> analyst -> architect -> security-engineer -> planner -> implementation -> qa-engineer -> security-reviewer -> manager`
+  `lead -> analyst -> architect -> security-engineer -> planner -> implementation -> qa-engineer -> security-reviewer -> lead`
 - Platform-heavy work:
-  `manager -> analyst -> architect -> reliability-engineer -> planner -> platform-engineer -> qa-engineer -> manager`
+  `lead -> analyst -> architect -> reliability-engineer -> planner -> platform-engineer -> qa-engineer -> lead`
 - Build-system or toolchain work:
-  `manager -> analyst -> planner -> toolchain-engineer -> qa-engineer -> manager`
+  `lead -> analyst -> planner -> toolchain-engineer -> qa-engineer -> lead`
 - Graphics or rendering work:
-  `manager -> analyst -> architect -> planner -> graphics-engineer -> qa-engineer -> manager`
+  `lead -> analyst -> architect -> planner -> graphics-engineer -> qa-engineer -> lead`
 - Graphics work with hard frame, memory, or GPU budgets:
-  `manager -> analyst -> architect -> performance-engineer -> planner -> graphics-engineer -> qa-engineer -> performance-reviewer -> manager`
+  `lead -> analyst -> architect -> performance-engineer -> planner -> graphics-engineer -> qa-engineer -> performance-reviewer -> lead`
 - Scientific or data-visualization work:
-  `manager -> analyst -> architect -> computational-scientist -> planner -> visualization-engineer -> qa-engineer -> manager`
+  `lead -> analyst -> architect -> computational-scientist -> planner -> visualization-engineer -> qa-engineer -> lead`
 - Geometry or spatial-computation work:
-  `manager -> analyst -> architect -> computational-scientist -> planner -> geometry-engineer -> qa-engineer -> architecture-reviewer -> manager`
+  `lead -> analyst -> architect -> computational-scientist -> planner -> geometry-engineer -> qa-engineer -> architecture-reviewer -> lead`
 - Qt desktop UI work:
-  `manager -> analyst -> architect -> planner -> qt-ui-engineer -> ui-test-engineer -> manager`
+  `lead -> analyst -> architect -> planner -> qt-ui-engineer -> ui-test-engineer -> lead`
 - Qt model-view-heavy work:
-  `manager -> analyst -> architect -> planner -> model-view-engineer -> ui-test-engineer -> manager`
+  `lead -> analyst -> architect -> planner -> model-view-engineer -> ui-test-engineer -> lead`
 - High-governance or architecture-sensitive work:
-  `manager -> analyst -> architect -> planner -> implementation -> qa-engineer -> architecture-reviewer -> manager`
+  `lead -> analyst -> architect -> planner -> implementation -> qa-engineer -> architecture-reviewer -> lead`
 - Extensibility-sensitive or low-blast-radius work:
-  `manager -> analyst -> architect -> planner -> implementation -> qa-engineer -> architecture-reviewer -> manager`
+  `lead -> analyst -> architect -> planner -> implementation -> qa-engineer -> architecture-reviewer -> lead`
 - UX-sensitive user-facing work:
-  `manager -> analyst -> architect -> planner -> frontend-engineer -> qa-engineer -> ux-reviewer -> manager`
+  `lead -> analyst -> architect -> planner -> frontend-engineer -> qa-engineer -> ux-reviewer -> lead`
 - Accessibility-sensitive user-facing work:
-  `manager -> analyst -> architect -> planner -> qt-ui-engineer -> ui-test-engineer -> accessibility-reviewer -> manager`
+  `lead -> analyst -> architect -> planner -> qt-ui-engineer -> ui-test-engineer -> accessibility-reviewer -> lead`
 - Combined critical work:
-  `manager -> product-analyst -> analyst -> architect -> algorithm-scientist -> security-engineer -> performance-engineer -> reliability-engineer -> planner -> implementation -> qa-engineer -> architecture-reviewer -> performance-reviewer -> security-reviewer -> manager`
+  `lead -> product-analyst -> analyst -> architect -> algorithm-scientist -> security-engineer -> performance-engineer -> reliability-engineer -> planner -> implementation -> qa-engineer -> architecture-reviewer -> performance-reviewer -> security-reviewer -> lead`
 
 ## Stage gates
+
+- After `product-manager`: priority, sequencing rationale, bounded initiative scope, and admission decision are explicit.
+- After `product-analyst`: product context, scope evidence, metrics, and open product questions are explicit.
 
 - After `analyst`: relevant system areas, contracts, constraints, and unknowns are explicit.
 - After `architect`: chosen design, rejected alternatives, boundaries, approved extension seams, dependency direction, stable contracts, expected blast radius, failure modes, and test strategy are explicit.
@@ -74,8 +106,31 @@ Use this reference when the manager needs routing, gate, or governance guidance 
 - After `accessibility-reviewer`: there are no blocking keyboard, focus, labeling, contrast, or assistive-technology issues for the scoped surface.
 - After the human or CI gate: required approvals and automated checks are complete.
 
+## Lead quick checklist
+
+Do:
+
+- assign one explicit owner for each critical risk
+- give each role only the minimal approved context it needs
+- require one artifact and one explicit gate decision per stage
+- block progression until the current artifact is accepted
+- keep one source of truth for the brief, accepted decisions, constraints, and status
+- route roadmap questions to `product-manager` instead of burying them inside the lead lane
+- route unknowns to factual roles before escalating into opinion-heavy discussion
+
+Do not:
+
+- assign one subagent to do the whole feature
+- let delivery start before the roadmap or intake decision is explicit when prioritization is still open
+- mix research, design, planning, implementation, and acceptance without a strong reason
+- skip gates for speed
+- let taste or unsupported opinion replace evidence when the workflow can still gather facts
+- expect QA to replace specialist design lanes
+- allow scope drift or broad write access by default
+
 ## Builder and blocker separation
 
+- `product-manager` owns roadmap priority, sequencing, and admission decisions.
 - `product-analyst` and `analyst` gather facts.
 - `architect`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, and `reliability-engineer` define constraints and recommendations.
 - `knowledge-archivist`, `backend-engineer`, `frontend-engineer`, `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`, `data-engineer`, `toolchain-engineer`, and `platform-engineer` implement approved phases.
@@ -84,6 +139,17 @@ Use this reference when the manager needs routing, gate, or governance guidance 
 - `consultant` is advisory-only and not part of the blocker chain.
 
 Do not let a role that defines a critical constraint act as the only approval gate for that same risk.
+
+## Interaction topology
+
+- Default topology is hub-and-spoke through `$lead` for delivery work.
+- Default topology is hub-and-spoke through `$product-manager` for roadmap and intake work.
+- Subagents hand off artifacts, not direct task assignments, to one another.
+- Factual clarification should move upstream through the orchestrating owner before interpretive roles continue.
+- A downstream role may consume an accepted upstream artifact, but it should not silently rewrite that artifact.
+- If a role finds a conflict with an upstream artifact, it returns `REVISE` or `BLOCKED` to the orchestrating owner instead of negotiating scope privately.
+- Independent reviewers return findings to the orchestrating owner; they do not directly re-task implementation roles.
+- Direct role-to-role collaboration is allowed only when the orchestrating owner explicitly approves the pair, scope, and expected artifact boundary.
 
 ## Parallelism guidance
 
@@ -123,6 +189,7 @@ Do not let a role that defines a critical constraint act as the only approval ga
 
 ## Common alias map
 
+- roadmap owner, PM, or milestone owner means `$product-manager`
 - `researcher` means `$analyst`
 - product clarification means `$product-analyst`
 - `backend-dev` means `$backend-engineer`

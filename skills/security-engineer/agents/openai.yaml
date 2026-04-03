@@ -1,4 +1,4 @@
 interface:
   display_name: "Security Engineer"
   short_description: "Set security constraints"
-  default_prompt: "Use $security-engineer to define the scoped security constraints and return one security design package for this phase."
+  default_prompt: "Use $security-engineer to define the scoped security constraints and return one security design package before planning."

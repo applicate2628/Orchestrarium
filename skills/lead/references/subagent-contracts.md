@@ -1,6 +1,6 @@
 # Subagent Contracts
 
-Use these templates when the manager needs a crisp handoff or a gate checklist.
+Use these templates when the lead needs a crisp handoff or a gate checklist.
 
 ## Shared handoff template
 
@@ -43,6 +43,10 @@ Gate to next stage:
 5. Gate: PASS | REVISE | BLOCKED
 ```
 
+Fact-first note:
+- When a role makes a decision or recommendation, it should clearly distinguish confirmed facts, assumptions, and judgment.
+- If the main gap is missing evidence, recommend the appropriate factual role instead of escalating straight into broader opinion.
+
 Consultant exception:
 - `$consultant` returns the same first four sections, but ends with `5. Advisory status: NON-BLOCKING`.
 
@@ -50,6 +54,7 @@ Consultant exception:
 
 Use these current skill names in this repository:
 
+- roadmap ownership, milestone shaping, or prioritization maps to `$product-manager`
 - `researcher` maps to `$analyst`
 - product or business research maps to `$product-analyst`
 - `backend-dev` maps to `$backend-engineer`
@@ -64,6 +69,18 @@ Use these current skill names in this repository:
 - Qt desktop UI implementation maps to `$qt-ui-engineer`
 - Qt model or view implementation maps to `$model-view-engineer`
 - build systems, packaging, or toolchain implementation maps to `$toolchain-engineer`
+
+## Product Manager
+
+Use when the task is about roadmap ownership, initiative prioritization, milestone shaping, or admission into discovery or delivery.
+
+Return exactly:
+- one roadmap decision package
+
+Acceptance criteria:
+- the priority decision, sequencing rationale, and bounded scope are explicit
+- the package is ready for `$lead`, `$product-analyst`, or `$analyst`
+- no architecture, implementation plan, or delivery ownership is embedded in the roadmap decision
 
 ## Analyst
 
@@ -359,7 +376,7 @@ Acceptance criteria:
 
 ## Consultant
 
-Use only when the manager wants a non-binding second opinion.
+Use only when the lead wants a non-binding second opinion.
 
 Return exactly:
 - one advisory memo
@@ -372,6 +389,17 @@ Acceptance criteria:
 Invocation note:
 - `$consultant` maps to the external consultant workflow documented in `$CODEX_HOME/skills/consultant/references/external-consultant-workflow.md`
 - provider-specific adapters such as `$CODEX_HOME/skills/consultant/references/claude-workflow.md` are optional and should be used only when that provider is installed and selected
+
+## Interaction rules
+
+- The orchestrating owner controls routing:
+  - `$product-manager` for roadmap and intake
+  - `$lead` for approved delivery work
+- Subagents communicate by producing accepted artifacts for the next role, not by assigning work directly to peers.
+- If a role is blocked by missing evidence, it should route back to the orchestrating owner for factual clarification instead of compensating with unsupported opinion.
+- A role may request clarification, but it should route the request through the orchestrating owner unless a direct collaboration edge was explicitly approved.
+- Reviewers report findings and gate outcomes; they do not directly manage implementation.
+- When an upstream artifact is insufficient, return `REVISE` or `BLOCKED` instead of silently redefining the stage contract.
 
 ## Gate questions
 

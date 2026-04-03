@@ -27,6 +27,7 @@ description: Investigate a repository in read-only mode and return a factual res
 - The memo is evidence-backed and internally consistent.
 - No recommendations, plans, or code changes are included.
 - The next role can proceed without reopening broad repository discovery.
+- End with one explicit gate decision: `PASS`, `REVISE`, or `BLOCKED`.
 
 ## Working rules
 

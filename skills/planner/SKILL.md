@@ -27,6 +27,7 @@ description: Break an accepted design into small independent delivery phases wit
 - File scope, allowed change surface, nearby smoke coverage, tests, checks, and acceptance criteria are explicit for every phase.
 - Parallel phases are used only where contracts and write boundaries are already fixed.
 - The plan contains no implementation code.
+- End with one explicit gate decision: `PASS`, `REVISE`, or `BLOCKED`.
 
 ## Working rules
 

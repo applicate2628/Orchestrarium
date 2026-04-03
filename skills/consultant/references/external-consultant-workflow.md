@@ -5,13 +5,13 @@ This file defines how the `$consultant` role is used in this repository.
 ## Identity
 
 - `$consultant` is the repository's external consultant.
-- It is optional, advisory-only, and manager-invoked.
+- It is optional, advisory-only, and lead-invoked.
 - It is not part of the mandatory delivery pipeline and it does not own gates.
 - Provider-specific adapters may exist next to this file. Use them only when that provider is actually installed and selected for the current run.
 
 ## When to invoke
 
-Use `$consultant` when the manager wants a second opinion for:
+Use `$consultant` when the lead wants a second opinion for:
 
 - hard planning
 - complex workspace-modifying tasks
@@ -60,4 +60,4 @@ The normal flow is:
 
 - `$consultant` returns one advisory memo or second-opinion memo.
 - `$consultant` does not route work, assign roles, accept artifacts, or block progress.
-- The manager keeps routing authority and decides whether to adopt the advice.
+- The lead keeps routing authority and decides whether to adopt the advice.

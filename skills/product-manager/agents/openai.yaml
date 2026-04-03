@@ -1,0 +1,4 @@
+interface:
+  display_name: "Product Manager"
+  short_description: "Own roadmap and admission decisions"
+  default_prompt: "Use $product-manager to define the scoped roadmap decision and return one roadmap decision package before discovery or delivery."
