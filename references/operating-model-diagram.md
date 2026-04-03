@@ -154,6 +154,8 @@ flowchart TB
 
 Current team shape: `31 roles`, `6 categories`.
 
+Note: this role map shows the canonical core team only; installed or repo-local specialists are not listed here.
+
 | Category | Roles |
 |---|---|
 | Coordination | `lead`, `product-manager`, `consultant` (advisory-only) |

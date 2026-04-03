@@ -16,6 +16,7 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
 - Do not ask one subagent to deliver a feature end-to-end.
 - Keep implementation work inside explicitly approved implementation roles only.
+- Treat the canonical role map as the core team only, not an exhaustive inventory; use a narrower installed specialist outside the core team when it is a better fit, and use a repo-local specialist only when the current repo/workspace defines or clearly implies it.
 - Use `$consultant` only as an optional independent second opinion, never as a required pipeline stage.
 - Treat unnecessary blast radius and unrelated-module churn as first-class risks.
 
@@ -35,6 +36,7 @@ The canonical brief should capture:
 - surfaces that should remain untouched or receive explicit smoke coverage
 - critical risks and their owners
 - required roles and mandatory reviewers
+- any non-core installed or repo-local specialist selected, if applicable
 - explicit integration owner, if the work spans multiple implementation phases or specialists
 - optional consultant usage, if any
 - current stage, next stage, and open blockers

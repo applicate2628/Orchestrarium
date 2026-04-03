@@ -217,6 +217,7 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - `qa-engineer` and `ui-test-engineer` verify correctness and regressions in their scope.
 - `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, and `accessibility-reviewer` act as independent blockers when their risk domain matters.
 - `consultant` is advisory-only and not part of the blocker chain; if an external provider is unavailable, the lead may fulfill this role through an independent internal subagent instead.
+- The role map in this reference describes the canonical core team only. If a narrower installed specialist outside the core team is a better fit for the scoped work, the lead may use it; if the current repo/workspace defines or clearly implies a repo-local specialist, the lead may use that specialist. Using such a specialist does not add it to the canonical map automatically.
 
 Do not let a role that defines a critical constraint act as the only approval gate for that same risk.
 

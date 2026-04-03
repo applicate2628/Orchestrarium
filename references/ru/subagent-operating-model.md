@@ -46,6 +46,7 @@ Lead назначает задачу такого вида:
 11. **Явно называйте ownership интеграции.** Если несколько implementation-фаз или специалистов должны слиться в один результат, один назначенный владелец собирает integrated result перед QA.
 12. **Сбрасывайте derived `PASS` состояния при материальной правке upstream.** Если принятый upstream artifact был materially revised после того, как downstream artifacts уже получили `PASS`, lead отмечает затронутые derived artifacts на re-review до продолжения delivery. `PASS` не сохраняется автоматически после material upstream change.
 13. **Классифицируйте изменение перед routing.** Используйте `cosmetic`, `additive`, `behavioral` или `breaking-or-cross-cutting`, чтобы определить, насколько сильно lead должен маршрутизировать и gate'ить работу; `breaking-or-cross-cutting` должен усиливать routing, re-review затронутых downstream artifacts и ownership интеграции, когда это нужно.
+14. **Считайте core role map каноническим, но не исчерпывающим.** Role index называет только core team. Lead может выбрать narrower installed specialist вне core team, если он лучше подходит для scoped work, и может выбрать repo-local specialist только когда текущий repo/workspace явно задаёт или явно подразумевает его. Такое использование не добавляет специалиста в canonical team map автоматически.
 
 ---
 
@@ -614,6 +615,8 @@ lead -> product-manager -> lead
 ---
 
 ## 12. Состав команды
+
+Наборы ниже описывают только canonical core team. Они не перечисляют каждый installed или repo-local specialist, доступный в конкретной среде.
 
 ### 12.1 Минимальный практический набор
 
