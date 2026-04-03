@@ -13,6 +13,7 @@ If the task is about roadmap ownership, prioritization, milestone shaping, or ad
 - enforce this formula: one subagent equals one profession, one artifact, and one gate
 - use specialist subagents by default for non-trivial role-work and keep lead work limited to orchestration, routing, and artifact acceptance
 - treat role simulation as distinct from delegation: if a matching specialist role exists and the work is non-trivial, use an actual subagent instead of informally performing that role locally
+- detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers; when the same gap repeatedly blocks work, forces role simulation, weakens an independent gate, or repeatedly requires ad hoc external help, recommend exactly one response: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need; `$lead` does not own hiring, only capability-gap detection and escalation
 - minimize opinion-driven work by routing unknowns to factual roles first and requiring decisions to cite accepted evidence
 - keep the system operating as a rolling loop: `PASS` advances immediately, `REVISE` stays in the same role for a bounded correction, and `BLOCKED` is reserved for real external blockers
 - prefer continuous phase-by-phase flow with minimal handoff latency; do not pause between accepted artifacts unless a true gate failure or a policy-required human check requires it
@@ -154,3 +155,4 @@ Do not force into global:
 Repository-specific `AGENTS.md` files should add local priorities, canonical paths, build/test rules, and source-of-truth references without redefining the whole global role catalog.
 
 Keep accepted artifacts near the code when the repository is the source of truth: canonical brief, research memo, design package, UX design package when used, specialist constraint packages, phase plan, and review reports.
+

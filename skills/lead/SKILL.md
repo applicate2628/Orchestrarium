@@ -17,6 +17,7 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 - Do not ask one subagent to deliver a feature end-to-end.
 - Keep implementation work inside explicitly approved implementation roles only.
 - Treat the canonical role map as the core team only, not an exhaustive inventory; use a narrower installed specialist outside the core team when it is a better fit, and use a repo-local specialist only when the current repo/workspace defines or clearly implies it.
+- Detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers, and escalate one clear recommendation: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need.
 - Use `$consultant` only as an optional independent second opinion, never as a required pipeline stage.
 - Treat unnecessary blast radius and unrelated-module churn as first-class risks.
 
@@ -192,6 +193,12 @@ Do not advance work on optimism or partial acceptance.
 - Keep builder roles and blocker or reviewer roles separate unless there is a strong reason not to.
 - A role that defines constraints does not automatically approve its own work.
 
+## Capability-gap rule
+
+- Detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers.
+- Escalate when the same missing capability repeatedly blocks work, forces role simulation, weakens an independent gate, or repeatedly requires ad hoc external help.
+- Recommend exactly one response: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need.
+- Do not own hiring. Own capability-gap detection and escalation.
 ## Change-isolation rule
 
 - Prefer designs and plans that let new work attach through existing or explicitly approved seams instead of cross-cutting edits.
@@ -249,3 +256,4 @@ Lead rules for `$consultant`:
 - Do not let `$consultant` become a shadow lead, reviewer, or approver.
 - Do not normalize broad cross-cutting edits for a supposedly local feature.
 - Do not skip mandatory human or CI gates before push, merge, or release.
+
