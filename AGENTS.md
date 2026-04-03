@@ -75,7 +75,7 @@ Use these global anchor roles:
 - `$product-manager`: roadmap ownership, initiative prioritization, and admission into discovery or delivery
 - `$consultant`: optional non-blocking independent advisor for the lead; advisory-only and not part of the mandatory pipeline; base usage rules live in `$CODEX_HOME/skills/consultant/references/consultant-workflow.md`, with provider adapters such as `claude-workflow.md` only when that execution method is selected; if the external provider is unavailable or fails, fall back to an independent subagent consultant using the same advisory-only contract
 
-For all other work, use the narrowest matching installed specialist from `$CODEX_HOME/skills`.
+For all other work, use the narrowest matching installed specialist from `$CODEX_HOME/skills`. The role index below names the canonical core team only; installed specialists outside that core team and repo-local specialists may be used by `$lead` when they are a better fit, but they do not become part of the canonical team map automatically.
 
 ## Skill-pack maintenance
 
