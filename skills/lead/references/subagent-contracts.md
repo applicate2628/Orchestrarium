@@ -55,6 +55,10 @@ Consultant exception:
 
 Use these current skill names in this repository:
 
+- Treat this role map as the canonical core team only, not as an exhaustive inventory of every installed or repo-local specialist.
+- If a narrower installed specialist outside the core team is a better fit for scoped work, the lead may use it.
+- If the current repo or workspace defines or clearly implies a repo-local specialist, the lead may use that specialist without adding it to the canonical team map.
+
 - roadmap ownership, milestone shaping, or prioritization maps to `$product-manager`
 - `researcher` maps to `$analyst`
 - product or business research maps to `$product-analyst`

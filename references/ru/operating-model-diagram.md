@@ -154,6 +154,8 @@ flowchart TB
 
 Текущий состав команды: `31 роль`, `6 категорий`.
 
+Примечание: эта role map показывает только canonical core team; installed и repo-local specialists здесь не перечислены.
+
 | Категория | Роли |
 |---|---|
 | Координация | `lead`, `product-manager`, `consultant` (advisory-only) |
