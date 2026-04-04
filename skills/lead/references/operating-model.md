@@ -18,6 +18,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - The system operates as a rolling loop, not a stop-and-wait chain.
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays inside the same role for a bounded correction.
+- Default `REVISE` cap: no more than 2 consecutive `REVISE` cycles for the same role and artifact before the lead re-routes, escalates, or blocks the work.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
 - Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - A material revision to an accepted upstream artifact invalidates dependent downstream `PASS` states; the lead marks the affected artifacts for re-review before continuing the pipeline.
@@ -27,7 +28,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 
 - Classify the change before selecting routing: `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting`.
 - `cosmetic` usually stays on the normal delivery loop with QA only.
-- `additive` stays on the normal delivery loop unless it introduces a new risk owner.
+- `additive` stays on the normal delivery loop unless it introduces a new risk owner. The lead may use a fast lane only when the change stays within one module or clearly bounded seam, introduces no new risk owner, and leaves existing contracts and shared abstractions unchanged.
 - `behavioral` should add factual/design scrutiny first when evidence is thin, then QA and reviewers as needed for contracts, user flow, or failure modes.
 - `breaking-or-cross-cutting` should force stronger routing: architect, planner, re-review of affected downstream artifacts, and integration ownership when multiple phases or specialists must land together.
 
@@ -49,6 +50,8 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
   `lead -> consultant`
 - In-flight item whose admitted scope, priority, or milestone intent has drifted:
   `lead -> product-manager -> lead`
+- Clearly local additive work:
+  `lead -> implementation -> qa-engineer -> lead`
 - Basic CRUD or integration work:
   `lead -> analyst -> architect -> planner -> implementation -> qa-engineer -> lead`
 - Product-sensitive work with unclear scope or user impact:
@@ -59,8 +62,10 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
   `lead -> analyst -> architect -> algorithm-scientist -> planner -> implementation -> qa-engineer -> lead`
 - Scientific-modeling or numerical-method work:
   `lead -> analyst -> architect -> computational-scientist -> planner -> implementation -> qa-engineer -> lead`
-- Repository hygiene, documentation, or archival-consistency work:
+- Repository hygiene, documentation, or archival-consistency work with no semantic control-plane change:
   `lead -> knowledge-archivist -> lead`
+- Repository control-plane semantic change prepared by `knowledge-archivist`:
+  `lead -> knowledge-archivist -> architecture-reviewer -> lead`
 - Performance-sensitive work:
   `lead -> analyst -> architect -> performance-engineer -> planner -> implementation -> qa-engineer -> lead`
 - Reliability-sensitive work:
@@ -109,7 +114,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - After `security-engineer`: threat model, trust boundaries, required controls, and must-fix constraints are explicit.
 - After `performance-engineer`: budgets, methodology, bottlenecks, and blocking performance risks are explicit.
 - After `reliability-engineer`: SLOs, failure modes, degradation behavior, observability expectations, and recovery requirements are explicit.
-- After `knowledge-archivist`: canonical docs, plans, reports, references, archive locations, and repository-facing links are consistent or explicitly blocked.
+- After `knowledge-archivist`: canonical docs, plans, reports, references, archive locations, and repository-facing links are consistent or explicitly blocked. If the patch changes role ownership, gate semantics, workflow routing, task-memory policy, publication-safety policy, periodic controls, or template-driven process requirements, route it through `architecture-reviewer` before completion; hygiene-only edits do not require that extra gate.
 - After `planner`: phases, dependencies, file scope, allowed change surface, must-not-break surfaces, checks, and rollback notes are explicit.
 - After `planner`: shared or core module changes, if any, are isolated into explicit enabling phases instead of being hidden inside local feature work.
 - After implementation: the phase stayed within scope, includes required tests, and reports changed files and risks.
@@ -117,12 +122,12 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - After `toolchain-engineer`: build graph behavior, packaging, reproducibility expectations, and local or CI parity are validated or explicitly blocked.
 - After `qa-engineer`: acceptance criteria, regressions, edge cases, and basic performance acceptance are verified or explicitly blocked.
 - After `ui-test-engineer`: Qt UI interaction states, focus behavior, visual regressions, and high-DPI or theme-sensitive regressions are verified or explicitly blocked.
-- After `architecture-reviewer`: the implementation still fits the accepted design, preserves cohesion and dependency direction, uses approved seams, and keeps blast radius within the agreed change surface.
+- After `architecture-reviewer`: the implementation or control-plane semantics still fit the accepted design or governance intent, preserve cohesion and dependency direction, use approved seams or reviewer boundaries correctly, and keep blast radius within the agreed change surface.
 - After `performance-reviewer`: performance evidence and methodology are valid and there are no blocking regressions.
 - After `security-reviewer`: no blocking security risks remain and must-fix items are closed.
 - After `ux-reviewer`: there are no blocking usability, accessibility, or flow-quality issues.
 - After `accessibility-reviewer`: there are no blocking keyboard, focus, labeling, contrast, or assistive-technology issues for the scoped surface.
-- After the human or CI gate: required approvals and automated checks are complete.
+- After the human or CI gate: required approvals and automated checks are complete, and for publication the approver is not the same role that accepted the artifact into the pipeline.
 
 ## Repository task memory
 

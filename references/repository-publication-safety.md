@@ -23,10 +23,10 @@ The rules below apply to every tracked file in the repository, including docs, r
 ## Review and publication
 
 - Human review is mandatory before `git push`, release, or equivalent publication.
-- Default publication-gate approver is `$lead`. If `$lead` authored or materially edited the change, approval must come from `$knowledge-archivist`. Diffs that touch only docs/governance paths default directly to `$knowledge-archivist`.
+- Default publication-gate approver is `$knowledge-archivist`.
+- `$lead` is the primary operator of the publication-safety scan and prepares the staged diff for publication, but the publication approver must be a different role than the role that accepted the artifact into the pipeline.
 - The reviewer must check the staged diff for leak-prone content, including machine-specific paths, raw operational detail, and sensitive values.
 - If tracked content looks like scratch material, move it back to local-only space or redact it before commit.
-- The primary operator of the publication-safety scan is `$lead` when preparing tracked changes for publication.
 - `$security-reviewer`, `$knowledge-archivist`, or another relevant reviewer may also run the scan as part of a spot check or publication gate.
 - Any author may run the scan as a local self-check, but that does not replace the required human publication review.
 - Only `$security-reviewer` may approve a publication-safety exception to a scan finding. Any publication proceeding without that approval is `BLOCKED`.

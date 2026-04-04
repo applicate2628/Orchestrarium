@@ -4,7 +4,10 @@ Use this file as the first stop when resuming work in this repository.
 
 ## Active items
 
-No active items.
+| Item | Stage | Primary owners | Path |
+|---|---|---|---|
+| Governance control-plane review gate | Verification | `$lead`, `$knowledge-archivist`, `$architecture-reviewer` | `active/2026-04-04-governance-control-plane-review-gate/` |
+| Governance remediation first four | Verification | `$lead`, `$knowledge-archivist` | `active/2026-04-04-governance-remediation-first-four/` |
 
 ## Archive
 

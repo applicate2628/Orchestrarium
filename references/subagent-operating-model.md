@@ -161,6 +161,7 @@ AI gates do not replace external engineering policy.
 - The system operates as a rolling loop, not a stop-and-wait chain.
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays within the same role for a bounded correction.
+- Default `REVISE` cap: no more than 2 consecutive `REVISE` cycles for the same role and artifact before the lead re-routes, escalates, or blocks the work.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
 - Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - `RETURN(role)` is used by an independent reviewer when the upstream artifact has a structural gap requiring that role's expertise — not a bounded fix. The lead routes the finding to the named upstream role. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely.
@@ -260,7 +261,7 @@ Decision-making roles should clearly separate confirmed facts, assumptions, and 
 | `qa-engineer` | QA / SDET | Functional acceptance, regressions, basic performance acceptance | Verification report | Acceptance criteria are met |
 | `ui-test-engineer` | UI test engineer | Dedicated Qt UI regression verification | UI verification report | No blocking UI regressions remain |
 | `security-reviewer` | AppSec reviewer | Independent security acceptance | Security review report | No blocking security risks remain |
-| `architecture-reviewer` | Maintainability reviewer | Independent architecture and maintainability acceptance | Architecture review report | No blocking design deviations remain |
+| `architecture-reviewer` | Maintainability reviewer | Independent architecture, maintainability, and control-plane acceptance | Architecture review report | No blocking design deviations remain |
 | `ux-reviewer` | UX reviewer | Independent usability and flow review | UX review report | No blocking UX issues remain |
 | `accessibility-reviewer` | Accessibility reviewer | Independent accessibility review | Accessibility review report | No blocking accessibility issues remain |
 
@@ -376,7 +377,7 @@ For each phase, specify:
 ### 7.6 Specialist prompts
 
 ```text
-`knowledge-archivist`: maintain accepted documentation, reports, references, and archive structure without inventing new requirements or rewriting accepted history.
+`knowledge-archivist`: maintain accepted documentation, reports, references, and archive structure without inventing new requirements or rewriting accepted history. If the patch changes repository-wide governance semantics rather than hygiene, stop after the stewardship patch and hand it to `architecture-reviewer`.
 
 `toolchain-engineer`: implement the approved build, packaging, compiler, linker, or reproducibility phase without drifting into product architecture or runtime policy.
 
@@ -398,7 +399,7 @@ For each phase, specify:
 
 `security-reviewer`: independently review security risks, classify findings by severity, and state what must be fixed before merge.
 
-`architecture-reviewer`: independently review design alignment, dependency direction, coupling, complexity, extensibility, and blast radius.
+`architecture-reviewer`: independently review design alignment, dependency direction, coupling, complexity, extensibility, blast radius, and semantic control-plane coherence when the artifact changes governance behavior.
 ```
 
 ---
@@ -481,10 +482,19 @@ It should now be confirmed:
 - required human review happened
 - CI, lint, tests, and static analysis passed
 - the relevant owner gave the needed approval
+- for publication, the publication approver is not the same role that accepted the artifact into the pipeline
 
 ---
 
 ## 9. Practical routing patterns
+
+### Clearly local additive task
+
+Use this only when the change is `additive`, stays inside one module or clearly bounded seam, introduces no new risk owner, and leaves existing contracts and shared abstractions unchanged. The lead records the fast-lane decision and inline plan in the brief or status. If the surface widens, re-classify immediately and return to the normal loop.
+
+```text
+product-manager -> lead -> implementation specialist -> qa-engineer -> lead
+```
 
 ### Ordinary CRUD or integration task
 
@@ -522,10 +532,18 @@ product-manager -> lead -> analyst -> architect -> security-engineer -> planner 
 product-manager -> lead -> analyst -> architect -> reliability-engineer -> planner -> implementation specialist -> qa-engineer -> lead
 ```
 
-### Repository-hygiene or documentation-maintenance task
+### Repository-hygiene or documentation-maintenance task with no semantic control-plane change
 
 ```text
 lead -> knowledge-archivist -> lead
+```
+
+### Repository control-plane semantic change
+
+Use this when the archivist patch changes repository-wide role ownership, gate rules, workflow routing, task-memory policy, publication-safety policy, periodic controls, or template-driven process requirements.
+
+```text
+lead -> knowledge-archivist -> architecture-reviewer -> lead
 ```
 
 ### UX-sensitive user-facing task with dedicated UX ownership
