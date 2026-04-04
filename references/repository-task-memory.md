@@ -24,6 +24,7 @@ For any non-trivial work routed through `$lead`, the item folder must contain th
 | `brief.md` | before non-trivial delivery work starts | `$lead` | bounded source of truth for scope, stage, risks, owners, and must-not-break surfaces |
 | `status.md` | before non-trivial delivery work starts | `$lead` | interruption-safe recovery log with current stage, last accepted artifact, next action, and blockers |
 | `plan.md` | before implementation or review starts | `$planner` | approved phase plan and execution checklist |
+| `closure.md` | before moving to archive | `$lead` | final record of outcome, residual risk, and archive location |
 
 Additional artifacts are required when the workflow calls for them:
 
@@ -37,6 +38,7 @@ Additional artifacts are required when the workflow calls for them:
 
 - `$product-manager` owns roadmap admission decisions when roadmap work is explicit.
 - `$lead` owns the active-item folder, the canonical brief, and the recovery status log.
+- `$lead` owns the final closure record before an item moves to archive.
 - `$planner` owns the approved phase plan.
 - Each specialist role owns the artifact for its own lane.
 - `$knowledge-archivist` owns index, template, cross-link, and archive hygiene, but does not become the content owner for roadmap or delivery decisions.
@@ -45,6 +47,7 @@ Additional artifacts are required when the workflow calls for them:
 
 - `$lead` must not continue non-trivial delivery work without `roadmap.md`, `brief.md`, and `status.md`.
 - `$lead` must not start implementation or independent review without `plan.md` and the required upstream accepted artifacts.
+- `$lead` must not move an item to archive without `closure.md`.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
 - After every accepted artifact, interruption, or material route change, `$lead` updates `status.md`.
 - On resume after interruption or context loss, start at `work-items/index.md`, then open the item's `status.md`, then `brief.md`.
@@ -54,6 +57,7 @@ Additional artifacts are required when the workflow calls for them:
 
 - Use `notes.md` or `notes/` for technical findings, implementation discoveries, rejected alternatives, migration caveats, and follow-up ideas that should survive the current session.
 - Use `status.md` for chronological execution state and handoff notes.
+- Use `closure.md` for the final closeout record before an item leaves `active/`.
 - Use `design.md` or `adr.md` for accepted long-lived technical decisions. A note is not a substitute for an accepted decision artifact.
 
 ## Public-git safety

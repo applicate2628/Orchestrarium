@@ -11,6 +11,6 @@
 - Critical risks and owners: false confidence from weak scan coverage owned by `$lead`; archive-hygiene and closure-template correctness owned by `$knowledge-archivist`; maintainability of the scan path owned by the implementing toolchain lane.
 - Required roles and reviewers: `$lead`, `$planner`, `$knowledge-archivist`, `$toolchain-engineer`, and reviewer lanes as needed after implementation.
 - Integration owner: `$knowledge-archivist`
-- Current stage: Planning complete
-- Next stage: Implement Track A publication-safety automation, then Track B closure artifact
+- Current stage: Completed
+- Next stage: None
 - Open blockers: None
