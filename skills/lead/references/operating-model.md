@@ -124,6 +124,17 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - After `accessibility-reviewer`: there are no blocking keyboard, focus, labeling, contrast, or assistive-technology issues for the scoped surface.
 - After the human or CI gate: required approvals and automated checks are complete.
 
+## Repository task memory
+
+- Use `work-items/index.md` as the recovery entry point for this repository.
+- Keep each active lead-routed non-trivial item in `work-items/active/<date>-<slug>/`.
+- Require `roadmap.md`, `brief.md`, and `status.md` before non-trivial work starts or resumes.
+- Require `plan.md` before implementation or review begins.
+- If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
+- Update `status.md` after accepted artifacts, interruptions, or stage changes so work can resume without relying on chat memory.
+- If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery.
+- Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
+
 ## Lead quick checklist
 
 Do:
@@ -133,6 +144,7 @@ Do:
 - require one artifact and one explicit gate decision per stage
 - block progression until the current artifact is accepted
 - keep one source of truth for the brief, accepted decisions, constraints, and status
+- keep durable task memory in `work-items/` instead of relying on session memory
 - route roadmap questions to `product-manager` instead of burying them inside the lead lane
 - route an in-flight item back to `product-manager` when admitted scope, priority, or milestone intent changes materially
 - route unknowns to factual roles before escalating into opinion-heavy discussion
@@ -236,6 +248,7 @@ Do not let a role that defines a critical constraint act as the only approval ga
 ## Governance sources
 
 - [references/subagent-operating-model.md](../../../references/subagent-operating-model.md) is the repository-wide operating-model source of truth.
+- [references/repository-task-memory.md](../../../references/repository-task-memory.md) is the repository-wide task-memory source of truth.
 - This file is the condensed lead-facing operating guide and should stay aligned with, not diverge from, the repository-wide model.
 - [AGENTS.md](../../../AGENTS.md) is the repo entrypoint and role index.
 
@@ -261,7 +274,9 @@ Do not let a role that defines a critical constraint act as the only approval ga
 
 ## Governance artifacts to keep near the code
 
+- roadmap decision package
 - canonical brief
+- status log
 - product brief, if used
 - research memo
 - design doc or ADR
@@ -272,6 +287,7 @@ Do not let a role that defines a critical constraint act as the only approval ga
 - performance package, if used
 - reliability design package, if used
 - phase plan
+- technical notes, if needed
 - repository stewardship package, if used
 - toolchain implementation package, if used
 - QA verification report
@@ -298,3 +314,4 @@ Do not let a role that defines a critical constraint act as the only approval ga
 - `visualization engineer` means `$visualization-engineer`
 - `geometry engineer` means `$geometry-engineer`
 - `build engineer` or `toolchain engineer` means `$toolchain-engineer`
+
