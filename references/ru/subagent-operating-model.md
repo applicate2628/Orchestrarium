@@ -47,6 +47,7 @@ Lead назначает задачу такого вида:
 12. **Сбрасывайте derived `PASS` состояния при материальной правке upstream.** Если принятый upstream artifact был materially revised после того, как downstream artifacts уже получили `PASS`, lead отмечает затронутые derived artifacts на re-review до продолжения delivery. `PASS` не сохраняется автоматически после material upstream change.
 13. **Классифицируйте изменение перед routing.** Используйте `cosmetic`, `additive`, `behavioral` или `breaking-or-cross-cutting`, чтобы определить, насколько сильно lead должен маршрутизировать и gate'ить работу; `breaking-or-cross-cutting` должен усиливать routing, re-review затронутых downstream artifacts и ownership интеграции, когда это нужно.
 14. **Считайте core role map каноническим, но не исчерпывающим.** Role index называет только core team. Lead может выбрать narrower installed specialist вне core team, если он лучше подходит для scoped work, и может выбрать repo-local specialist только когда текущий repo/workspace явно задаёт или явно подразумевает его. Такое использование не добавляет специалиста в canonical team map автоматически.
+15. **Поддерживайте durable task memory для lead-routed работы.** Храните roadmap, brief, status и plan artifacts в repo-local storage, чтобы после прерывания можно было продолжить работу без зависимости от памяти сессии.
 
 ---
 
@@ -571,6 +572,7 @@ lead -> product-manager -> lead
 
 - roadmap decision package
 - canonical brief
+- status log
 - research memo
 - product brief
 - design doc или ADR
@@ -581,13 +583,24 @@ lead -> product-manager -> lead
 - performance package
 - reliability package
 - phase plan
+- technical notes
 - verification report
 - performance review report
 - security review report
 - architecture review report
 - repository stewardship report
 
-### 11.2 Что стоит автоматизировать
+### 11.2 Корень task-memory и восстановление
+
+- Используйте `work-items/` как canonical tracked task-memory root, когда этот репозиторий является source of truth.
+- Держите активные admitted items в `work-items/active/<date>-<slug>/` и начинайте восстановление после прерывания с `work-items/index.md`.
+- Для lead-routed non-trivial work `roadmap.md`, `brief.md` и `status.md` обязательны.
+- `plan.md` становится обязательным до начала implementation или review.
+- Если текущая стадия зависит от upstream artifacts, таких как research, design, specialist constraints, phase plan или required review reports, эти артефакты должны существовать и быть актуальными до продолжения работы.
+- Если обязательные task-memory artifacts отсутствуют или устарели, остановитесь и восстановите их до продолжения delivery.
+- `notes.md` или `notes/` хранит technical findings и discoveries; принятые долгоживущие решения по-прежнему должны жить в design или ADR artifact.
+
+### 11.3 Что стоит автоматизировать
 
 Если политика команды это позволяет, lead должен требовать:
 
@@ -598,7 +611,7 @@ lead -> product-manager -> lead
 - security scanning и dependency checks
 - archived review reports там, где нужна traceability
 
-### 11.3 Чего не стоит ждать от одного универсального subagent
+### 11.4 Чего не стоит ждать от одного универсального subagent
 
 Не ожидайте, что один агент хорошо сделает сразу всё это:
 
@@ -722,3 +735,4 @@ accessibility-reviewer
 Короткая формула команды:
 
 > **Одна роль. Один артефакт. Один gate. Один явный владелец на каждый критичный риск.**
+

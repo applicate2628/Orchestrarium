@@ -47,6 +47,7 @@ The lead assigns a task like this:
 12. **Invalidate derived `PASS` states on material upstream revision.** If an accepted upstream artifact is revised materially after downstream artifacts have already passed, the lead must mark the affected derived artifacts for re-review before delivery continues. `PASS` does not survive a material upstream change automatically.
 13. **Classify change impact before routing.** Use `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting` to decide how strongly the lead should route and gate the work; `breaking-or-cross-cutting` must force stronger routing, re-review of affected downstream artifacts, and integration ownership when needed.
 14. **Treat the core role map as canonical, not exhaustive.** The role index names the core team only. The lead may choose a narrower installed specialist outside the core team when it is a better fit for the scoped work, and may choose a repo-local specialist only when the current repo/workspace defines or clearly implies it. Using such a specialist does not add it to the canonical team map automatically.
+15. **Preserve durable task memory for lead-routed work.** Keep roadmap, brief, status, and plan artifacts in repo-local storage so interrupted work can resume without relying on session memory.
 
 ---
 
@@ -571,6 +572,7 @@ At minimum, it is useful to keep these artifacts near the repository:
 
 - roadmap decision package
 - canonical brief
+- status log
 - research memo
 - product brief
 - design doc or ADR
@@ -581,13 +583,24 @@ At minimum, it is useful to keep these artifacts near the repository:
 - performance package
 - reliability package
 - phase plan
+- technical notes
 - verification report
 - performance review report
 - security review report
 - architecture review report
 - repository stewardship report
 
-### 11.2 What should be automated
+### 11.2 Task-memory root and recovery
+
+- Use `work-items/` as the canonical tracked task-memory root when this repository is the source of truth.
+- Keep active admitted items in `work-items/active/<date>-<slug>/` and use `work-items/index.md` as the first recovery stop after interruption.
+- For lead-routed non-trivial work, `roadmap.md`, `brief.md`, and `status.md` are mandatory.
+- `plan.md` becomes mandatory before implementation or review begins.
+- If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
+- If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery.
+- `notes.md` or `notes/` holds technical findings and discoveries; accepted long-lived decisions still belong in the design or ADR artifact.
+
+### 11.3 What should be automated
 
 Where team policy allows it, the lead should require:
 
@@ -598,7 +611,7 @@ Where team policy allows it, the lead should require:
 - security scanning and dependency checks
 - archived review reports where the team needs traceability
 
-### 11.3 What not to expect from one universal subagent
+### 11.4 What not to expect from one universal subagent
 
 Do not expect one agent to do all of these well at once:
 
@@ -722,3 +735,4 @@ accessibility-reviewer
 Short team formula:
 
 > **One role. One artifact. One gate. One explicit owner for every critical risk.**
+

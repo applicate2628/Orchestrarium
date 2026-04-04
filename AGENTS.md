@@ -154,5 +154,18 @@ Do not force into global:
 
 Repository-specific `AGENTS.md` files should add local priorities, canonical paths, build/test rules, and source-of-truth references without redefining the whole global role catalog.
 
-Keep accepted artifacts near the code when the repository is the source of truth: canonical brief, research memo, design package, UX design package when used, specialist constraint packages, phase plan, and review reports.
+## Repository task memory
+
+- `work-items/` is the canonical tracked task-memory root for this repository. Start from `work-items/index.md`.
+- New admitted work routed through `$lead` belongs in `work-items/active/<date>-<slug>/`. Completed, cancelled, or superseded work moves to `work-items/archive/`.
+- For lead-routed non-trivial work, `roadmap.md`, `brief.md`, and `status.md` are mandatory.
+- `plan.md` becomes mandatory before implementation or review starts.
+- Missing required upstream artifacts are a hard gate. If the current stage needs `roadmap`, `research`, `design`, `plan`, specialist constraints, or review artifacts and they are missing or stale, stop and restore them or route the item back to the required upstream stage before continuing delivery.
+- Ownership: `$product-manager` owns `roadmap.md` when roadmap intake is explicit; if the admission source is a direct human request, `$lead` records that source in `roadmap.md`. `$lead` owns `brief.md` and `status.md`. `$planner` owns `plan.md`. Each specialist owns the artifact for their own lane. `$knowledge-archivist` owns index, template, and archive hygiene.
+- `notes.md` or `notes/` holds technical notes, implementation discoveries, and follow-ups. Accepted long-lived decisions belong in `design.md` or `adr.md`, not only in notes.
+- After interruption or context loss, resume from `work-items/index.md`, then the item's `status.md`, then `brief.md`. If the required docs are missing or stale, stop and restore task memory before continuing delivery.
+- The older ignored `.plans/` directory is legacy local history only. Do not treat it as the canonical tracked source of truth for new work items.
+
+Keep accepted artifacts near the code when the repository is the source of truth: roadmap decision package, canonical brief, status log, research memo, design package, UX design package when used, specialist constraint packages, phase plan, technical notes when needed, and review reports.
+
 

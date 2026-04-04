@@ -1,0 +1,26 @@
+# Roadmap Decision Package
+
+- Date: 2026-04-04
+- Item: durable task memory and mandatory documentation governance
+- Admission source: direct user request recorded in the repository work item
+- Intended outcome: lead-routed work survives interruption without losing roadmap, plan, or current stage
+- Rationale: the current workflow can forget planned work, lose the roadmap, and continue with irrelevant activity after context loss
+- Success signals:
+  - a canonical storage location is explicit
+  - mandatory artifact types and owners are explicit
+  - recovery after interruption is explicit
+  - lead cannot continue non-trivial delivery work without the required docs
+- Scope:
+  - define the repository task-memory layout
+  - define mandatory artifacts and owners
+  - define recovery and enforcement rules
+  - add templates and entry-point docs for the new structure
+- Non-goals:
+  - backfill every legacy file under `.plans/`
+  - add automation hooks or CI enforcement in this change
+  - redesign the delivery pipeline beyond documentation governance
+- Dependencies:
+  - existing operating-model docs
+  - legacy `.plans/` history
+- Admission decision: `delivery`
+- Owner: direct human request captured by `$lead`

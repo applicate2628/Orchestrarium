@@ -42,6 +42,15 @@ The canonical brief should capture:
 - optional consultant usage, if any
 - current stage, next stage, and open blockers
 
+## Task-memory rule
+
+- For this repository, keep each lead-routed non-trivial item in `work-items/active/<date>-<slug>/` and use `work-items/index.md` as the recovery entry point.
+- Before non-trivial work starts or resumes, ensure `roadmap.md`, `brief.md`, and `status.md` exist and are current. `roadmap.md` may link to an upstream roadmap artifact or record a direct human admission source when the user is the roadmap source.
+- Before implementation or review begins, ensure `plan.md` and the required upstream artifacts exist or are explicitly linked from the item folder.
+- If the current stage needs an upstream artifact such as `research.md`, `design.md`, `constraints/*.md`, `plan.md`, or a required review report and that artifact is missing or stale, stop and restore it or route the item back to the correct upstream role.
+- After every accepted artifact, interruption, or major routing change, update `status.md` so the next session can resume without relying on chat memory.
+- If task memory is missing or stale, stop and restore it instead of improvising from session memory.
+
 ## Operating pipeline
 
 0. `Roadmap / Intake`
@@ -216,7 +225,7 @@ Do not advance work on optimism or partial acceptance.
 
 - Keep accepted artifacts near the code when the repo is the source of truth.
 - When an accepted upstream artifact is materially revised, mark dependent downstream artifacts for re-review before progression resumes.
-- At minimum, preserve the canonical brief, accepted design decisions, phase plan, and review outcomes.
+- At minimum, preserve the roadmap decision package, canonical brief, status log, accepted design decisions, phase plan, and review outcomes.
 - Require external human or CI gates whenever team policy demands them.
 
 Detailed routing, stage gates, and artifact guidance live in [operating-model.md](references/operating-model.md).
@@ -256,4 +265,5 @@ Lead rules for `$consultant`:
 - Do not let `$consultant` become a shadow lead, reviewer, or approver.
 - Do not normalize broad cross-cutting edits for a supposedly local feature.
 - Do not skip mandatory human or CI gates before push, merge, or release.
+
 
