@@ -4,9 +4,7 @@ Use this file as the first stop when resuming work in this repository.
 
 ## Active items
 
-| Item | Stage | Primary owners | Path |
-|---|---|---|---|
-| (none) | - | - | - |
+No active items.
 
 ## Archive
 
