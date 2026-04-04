@@ -166,6 +166,13 @@ Repository-specific `AGENTS.md` files should add local priorities, canonical pat
 - After interruption or context loss, resume from `work-items/index.md`, then the item's `status.md`, then `brief.md`. If the required docs are missing or stale, stop and restore task memory before continuing delivery.
 - The older ignored `.plans/` directory is legacy local history only. Do not treat it as the canonical tracked source of truth for new work items.
 
+## Repository publication safety
+
+- [references/repository-publication-safety.md](references/repository-publication-safety.md) is the repo-wide source of truth for what may be committed to tracked git.
+- Root `.gitignore` defines the local-only scratch boundary at `/.scratch/`; keep raw logs, transcripts, temp outputs, and pre-redaction material there.
+- Never hardcode workstation-specific paths, usernames, drive letters, or local tool details into tracked content unless they are intentionally public and synthetic.
+- Human review before `git push`, release, or equivalent publication must include a leak-check of staged changes.
+
 Keep accepted artifacts near the code when the repository is the source of truth: roadmap decision package, canonical brief, status log, research memo, design package, UX design package when used, specialist constraint packages, phase plan, technical notes when needed, and review reports.
 
 

@@ -59,6 +59,7 @@ Additional artifacts are required when the workflow calls for them:
 ## Public-git safety
 
 - `work-items/` is tracked repository documentation and must be safe for publication.
+- The repo-wide policy for all tracked content lives in [`references/repository-publication-safety.md`](repository-publication-safety.md).
 - Do not place secrets, tokens, credentials, customer data, private identifiers, raw logs, full command transcripts, or machine-specific absolute paths into tracked work-item artifacts.
 - Prefer redacted summaries over verbatim operational detail when traceability does not require the raw value.
 - Keep local-only scratch notes and raw artifacts outside tracked `work-items/`.
