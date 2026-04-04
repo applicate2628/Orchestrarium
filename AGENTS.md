@@ -173,6 +173,12 @@ Repository-specific `AGENTS.md` files should add local priorities, canonical pat
 - Never hardcode workstation-specific paths, usernames, drive letters, or local tool details into tracked content unless they are intentionally public and synthetic.
 - Human review before `git push`, release, or equivalent publication must include a leak-check of staged changes.
 
+## Repository periodic controls
+
+- [references/periodic-control-matrix.md](references/periodic-control-matrix.md) is the repo-wide source of truth for periodic controls that complement stage gates.
+- Use periodic controls to catch stale items, drift, archive hygiene issues, repo consistency drift, and publication-safety regressions between stage transitions.
+- Do not use periodic controls to replace mandatory stage gates, reviewer approvals, or human publication review.
+
 Keep accepted artifacts near the code when the repository is the source of truth: roadmap decision package, canonical brief, status log, research memo, design package, UX design package when used, specialist constraint packages, phase plan, technical notes when needed, and review reports.
 
 

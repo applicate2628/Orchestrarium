@@ -45,6 +45,7 @@ The repository is built around a few stable rules:
 Repository-wide operating-model source of truth lives in [references/subagent-operating-model.md](references/subagent-operating-model.md).
 Repository task-memory policy and storage model live in [references/repository-task-memory.md](references/repository-task-memory.md).
 Repository publication-safety policy for all tracked content lives in [references/repository-publication-safety.md](references/repository-publication-safety.md).
+Repository periodic-control matrix lives in [references/periodic-control-matrix.md](references/periodic-control-matrix.md).
 Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md).
 The visual companion to the workflow lives in [references/operating-model-diagram.md](references/operating-model-diagram.md).
 

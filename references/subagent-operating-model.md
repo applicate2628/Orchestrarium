@@ -166,6 +166,13 @@ AI gates do not replace external engineering policy.
 - `RETURN(role)` is used by an independent reviewer when the upstream artifact has a structural gap requiring that role's expertise — not a bounded fix. The lead routes the finding to the named upstream role. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely.
 - Keep handoff latency low and avoid pausing between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 
+## 3.10 Periodic controls
+
+- Periodic controls complement stage gates; they do not replace them.
+- Use [periodic-control-matrix.md](periodic-control-matrix.md) as the canonical cadence, owner, evidence, and fail-action matrix.
+- Use periodic controls for drift between transitions: stale active items, missing recovery state, repo consistency drift, archive hygiene, refactor debt, and publication-safety spot checks.
+- Keep stage-gated artifacts as the authority for whether work may advance to the next phase.
+
 ---
 
 ## 4. Standard task template for any subagent
