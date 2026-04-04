@@ -1,0 +1,4 @@
+interface:
+  display_name: "Ask Claude"
+  short_description: "Invoke Claude CLI for large-context advice"
+  default_prompt: "Use $ask-claude to invoke Claude CLI as an independent second opinion for a large-context planning or strategy question."

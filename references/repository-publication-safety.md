@@ -12,7 +12,7 @@ The rules below apply to every tracked file in the repository, including docs, r
 - Do not commit secrets, tokens, credentials, customer data, private identifiers, raw logs, full command transcripts, screenshots with sensitive content, or machine-specific absolute paths.
 - Prefer redacted summaries, synthetic examples, and repo-relative paths when traceability is enough.
 - Treat provider transcripts, pasted logs, and external snippets as untrusted until sanitized.
-- If an exception is truly required, record it explicitly in the relevant work item before publication.
+- If an exception is truly required, `$security-reviewer` must approve it and the relevant work item must record its scope, reason, and removal condition before publication.
 
 ## Local-only scratch boundary
 
@@ -23,10 +23,12 @@ The rules below apply to every tracked file in the repository, including docs, r
 ## Review and publication
 
 - Human review is mandatory before `git push`, release, or equivalent publication.
+- Default publication-gate approver is `$lead`. If `$lead` authored or materially edited the change, approval must come from `$knowledge-archivist`. Diffs that touch only docs/governance paths default directly to `$knowledge-archivist`.
 - The reviewer must check the staged diff for leak-prone content, including machine-specific paths, raw operational detail, and sensitive values.
 - If tracked content looks like scratch material, move it back to local-only space or redact it before commit.
 - The primary operator of the publication-safety scan is `$lead` when preparing tracked changes for publication.
 - `$security-reviewer`, `$knowledge-archivist`, or another relevant reviewer may also run the scan as part of a spot check or publication gate.
 - Any author may run the scan as a local self-check, but that does not replace the required human publication review.
+- Only `$security-reviewer` may approve a publication-safety exception to a scan finding. Any publication proceeding without that approval is `BLOCKED`.
 - On Git Bash, macOS, or Linux, run `bash scripts/check-publication-safety.sh` as the manual pre-publication scan for staged tracked content before publication.
 - On Windows PowerShell, run `powershell -ExecutionPolicy Bypass -File scripts/check-publication-safety.ps1`; the wrapper resolves Git-for-Windows `bash.exe` and calls the shared scan script so it does not rely on the WSL `bash.exe` stub from `PATH`.
