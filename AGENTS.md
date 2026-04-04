@@ -174,7 +174,9 @@ Repository-specific `AGENTS.md` files should add local priorities, canonical pat
 - Root `.gitignore` defines the local-only scratch boundary at `/.scratch/`; keep raw logs, transcripts, temp outputs, and pre-redaction material there.
 - Never hardcode workstation-specific paths, usernames, drive letters, or local tool details into tracked content unless they are intentionally public and synthetic.
 - Human review before `git push`, release, or equivalent publication must include a leak-check of staged changes.
+- `$lead` is the default human approver at the publication gate. If `$lead` authored or materially edited the change, approval must come from `$knowledge-archivist`; docs/governance-only diffs default directly to `$knowledge-archivist`.
 - `$lead` is the default operator of the publication-safety scan before publication; relevant reviewers may run the same scan for spot checks or gate review, and author self-checks do not replace the required human publication review.
+- Only `$security-reviewer` may approve a publication-safety exception. Without that approval, publication is `BLOCKED`.
 
 ## Repository periodic controls
 
