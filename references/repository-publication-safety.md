@@ -25,4 +25,4 @@ The rules below apply to every tracked file in the repository, including docs, r
 - Human review is mandatory before `git push`, release, or equivalent publication.
 - The reviewer must check the staged diff for leak-prone content, including machine-specific paths, raw operational detail, and sensitive values.
 - If tracked content looks like scratch material, move it back to local-only space or redact it before commit.
-- Run `bash scripts/check-publication-safety.sh` as the manual pre-publication scan for staged tracked content before publication.
+- Run `powershell -File scripts/check-publication-safety.ps1` as the manual pre-publication scan for staged tracked content before publication.
