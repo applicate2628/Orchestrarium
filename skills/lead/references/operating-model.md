@@ -231,6 +231,12 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - `consultant` is advisory-only and not part of the blocker chain; if an external provider is unavailable, the lead may fulfill this role through an independent internal subagent instead.
 - The role map in this reference describes the canonical core team only. If a narrower installed specialist outside the core team is a better fit for the scoped work, the lead may use it; if the current repo/workspace defines or clearly implies a repo-local specialist, the lead may use that specialist. Using such a specialist does not add it to the canonical map automatically.
 
+## Periodic controls
+
+- Periodic controls complement stage gates and should catch drift between transitions, not replace phase acceptance.
+- Use [../../../references/periodic-control-matrix.md](../../../references/periodic-control-matrix.md) as the canonical matrix for freshness, completeness, repo consistency, publication safety, archive hygiene, and refactor-debt checks.
+- Keep the periodic layer lightweight: if a control is really about whether work may advance, it belongs in the stage-gate path instead.
+
 Do not let a role that defines a critical constraint act as the only approval gate for that same risk.
 
 ## Interaction topology

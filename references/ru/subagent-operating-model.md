@@ -166,6 +166,13 @@ AI gates не заменяют внешнюю engineering policy.
 - `RETURN(role)` использует независимый reviewer, когда upstream artifact имеет structural gap, требующий expertise этой роли, а не bounded fix. Lead направляет finding к указанной upstream-роли. Пример: `RETURN(security-engineer)` — threat model вообще не покрывает server-side validation surface.
 - Держите handoff latency низким и не делайте пауз между принятыми артефактами, если только не нужен настоящий gate failure или policy-required human/CI check.
 
+## 3.10 Периодические controls
+
+- Периодические controls дополняют stage gates, но не заменяют их.
+- Используйте [periodic-control-matrix.md](periodic-control-matrix.md) как каноническую матрицу cadence, owner, evidence и fail action.
+- Периодические controls ловят drift между переходами: stale активные items, missing recovery state, repo consistency drift, archive hygiene, refactor debt и publication-safety spot checks.
+- Stage-gated артефакты по-прежнему определяют, может ли работа перейти на следующую фазу.
+
 ---
 
 ## 4. Стандартный шаблон задачи для любого субагента

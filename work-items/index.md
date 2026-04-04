@@ -8,6 +8,7 @@ Use this file as the first stop when resuming work in this repository.
 |---|---|---|---|
 | Task memory governance | Completed | `$lead`, `$knowledge-archivist` | `active/2026-04-04-task-memory-governance/` |
 | Repo publication safety | Completed | `$lead`, `$knowledge-archivist` | `active/2026-04-04-repo-publication-safety/` |
+| Periodic control matrix | Completed | `$lead`, `$knowledge-archivist` | `active/2026-04-04-periodic-control-matrix/` |
 
 ## Archive
 
