@@ -70,6 +70,7 @@ The canonical brief should capture:
    - Roles: `$backend-engineer`, `$frontend-engineer` for web/React UI, `$graphics-engineer`, `$visualization-engineer`, `$geometry-engineer`, `$qt-ui-engineer` for Qt desktop UI, `$model-view-engineer`, `$data-engineer`, `$toolchain-engineer`, `$platform-engineer`, or another explicitly approved implementation specialist
    - Output: one implementation package for one approved phase.
    - Cross-cutting hygiene (invoke explicitly, outside the feature phase): `$knowledge-archivist`
+   - If an archivist patch changes repository-wide control-plane semantics, route it through `$architecture-reviewer` before lead acceptance.
    - If the approved work spans multiple implementation phases or specialists, assign one explicit integration owner before QA. That owner assembles one coherent integrated artifact and checks cross-phase compatibility before verification begins.
 5. `QA`
    - Roles: `$qa-engineer`, `$ui-test-engineer` as needed
@@ -80,11 +81,14 @@ The canonical brief should capture:
    - For each reviewer, choose the review strategy before delegating (see Review strategy rule below).
 7. Human or CI gate
    - Output: explicit human approval, CI status, or documented external blocker.
+   - For publication, `$lead` runs the publication-safety scan and `$knowledge-archivist` is the default publication-gate approver; the approver must be a different role than the role that accepted the artifact into the pipeline.
 8. Optional advisory consultation
    - Role: `$consultant`
    - Output: one non-binding advisory memo when the lead explicitly asks for a second opinion.
 
 Roadmap ownership stays upstream of the lead lane. The lead consumes approved roadmap or intake output; it does not own global prioritization or portfolio sequencing by default.
+
+For clearly local `additive` work, the lead may use a fast lane: record the classification and inline plan in the brief or status, then route `lead -> implementation -> qa -> lead`. Use this only when the change stays within one module or clearly bounded seam, introduces no new risk owner, and leaves existing contracts and shared abstractions unchanged. Re-classify immediately if the surface widens.
 
 ## Delegation contract
 
@@ -157,6 +161,7 @@ Require every pipeline subagent to end with exactly one gate status:
 - `REVISE`: the artifact stays in the same role and needs a bounded correction.
 - `BLOCKED`: the role cannot proceed without new context, a decision, or a different role.
 - `RETURN(role)`: an independent reviewer sends the artifact back to a specific upstream role because the upstream artifact has a structural gap requiring that role's expertise — not a bounded correction. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely. Route the finding to the named role; do not treat it as REVISE or BLOCKED.
+- Default `REVISE` cap: no more than 2 consecutive `REVISE` cycles for the same role and artifact before the lead re-routes, escalates, or blocks the work.
 
 Do not advance work on optimism or partial acceptance.
 
@@ -166,7 +171,7 @@ Do not advance work on optimism or partial acceptance.
 
 - The system operates as a rolling loop, not a stop-and-wait chain.
 - `PASS` should immediately advance to the next approved role.
-- `REVISE` should stay within the same role for a bounded correction instead of reopening the whole pipeline.
+- `REVISE` should stay within the same role for a bounded correction instead of reopening the whole pipeline, but only for up to 2 consecutive cycles on the same role and artifact.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites that cannot be fixed inside the current role.
 
 ## Flow-continuity rule

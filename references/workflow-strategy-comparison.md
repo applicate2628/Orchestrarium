@@ -29,7 +29,7 @@ Use it together with:
 | Critical change with both execution and blind-spot risk | `Claim-Verify + Adversarial` | Run in sequence, preserving reviewer independence |
 | Scope or priority drift | `Re-intake` | Route back to `product-manager` |
 | Multi-phase landing | `Integration ownership` | Name one owner before QA |
-| Stop-and-wait churn | `Rolling loop` | `PASS` advances, `REVISE` stays local, `BLOCKED` stays rare |
+| Stop-and-wait churn | `Rolling loop` | `PASS` advances, `REVISE` stays local for up to 2 consecutive cycles on the same role and artifact, `BLOCKED` stays rare |
 | Broad unnecessary diff | `Change isolation` | Keep approved seams, blast radius, and nearby smoke coverage explicit |
 
 ## 3. Structural and review strategies
@@ -54,7 +54,7 @@ Use this before choosing a workflow path. It tells you how risky the change is a
 | Change class | Forced routing / gates | Example |
 |---|---|---|
 | `cosmetic` | Usually QA only; no extra specialist lane by default | wording, formatting, comments, local refactors with no observable behavior change |
-| `additive` | Normal delivery loop; QA required; add a specialist lane only if a new risk owner appears | new code or docs that extend behavior without changing existing contracts or defaults |
+| `additive` | Normal delivery loop; QA required; add a specialist lane only if a new risk owner appears. The lead may use a fast lane only when the change stays within one module or clearly bounded seam, introduces no new risk owner, and leaves existing contracts and shared abstractions unchanged | new code or docs that extend behavior without changing existing contracts or defaults |
 | `behavioral` | Route through factual/design owner first if evidence is thin; QA required; add an independent reviewer when contracts, flow, or failure modes matter | runtime behavior, validation, error handling, or user-facing flow changes |
 | `breaking-or-cross-cutting` | Architect and usually planner; re-review affected downstream artifacts; integration owner when multiple phases or specialists land together; reviewer lanes as needed | contract, migration, seam, dependency direction, rollout/rollback, or multi-boundary changes |
 
@@ -85,6 +85,7 @@ Embedded repository defaults are shown in **bold**.
 | We know the task but a domain risk can sink it | `Risk-owner routing` | `Builder / blocker separation` if the risk needs independent approval |
 | The risk is known and bounded | `Claim-Verify` | `Adversarial` only if the downside of a missed blind spot is high |
 | The risk is novel, exposed, or poorly modeled | `Adversarial` | `Claim-Verify` first if execution fidelity is also critical |
+| The change is clearly local and additive | `Additive fast lane` | re-classify to the normal delivery loop if the surface widens or a new risk owner appears |
 | The item itself has changed | `Re-intake` | a fresh delivery loop after re-admission |
 | The work spans multiple implementation phases | `Integration ownership` | QA and reviewer gates after one integrated artifact exists |
 | The diff is getting too broad for a local change | `Change isolation` | re-route to `architect`, `planner`, or `architecture-reviewer` as needed |

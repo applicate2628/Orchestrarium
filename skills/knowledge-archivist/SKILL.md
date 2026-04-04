@@ -16,6 +16,7 @@ description: Maintain repository knowledge hygiene without taking product delive
 - Require the accepted artifacts, repository context, and the scoped maintenance goal.
 - Take only the docs, plans, reports, references, and structure surfaces needed for the current stewardship task.
 - Treat new product requirements, architecture redesign, and build or deployment policy changes as out of scope unless already accepted upstream.
+- Treat semantic changes to repository control-plane behavior, such as role ownership, gate rules, workflow routing, task-memory policy, publication-safety policy, periodic controls, or template-driven process requirements, as governance changes that require independent `$architecture-reviewer` approval before the artifact is considered complete.
 
 ## Return exactly one artifact
 
@@ -34,6 +35,8 @@ description: Maintain repository knowledge hygiene without taking product delive
 - Preserve accepted decisions, execution history, and traceability when moving or consolidating artifacts.
 - Fix downstream drift from an accepted source of truth, but return `BLOCKED` when the source of truth is ambiguous.
 - Keep repository hygiene work separate from feature implementation and build remediation.
+- Keep hygiene-only work lightweight: link fixes, formatting, archive moves, index sync, and non-semantic wording cleanup do not require the extra governance reviewer gate.
+- Do not self-certify semantic control-plane changes; stop at the stewardship patch and hand the result to the independent reviewer lane.
 
 ## Non-goals
 
@@ -41,3 +44,4 @@ description: Maintain repository knowledge hygiene without taking product delive
 - Do not invent new requirements, acceptance criteria, or policy decisions.
 - Do not absorb build, CI, packaging, or runtime platform work that belongs to `$toolchain-engineer` or `$platform-engineer`.
 - Do not rewrite accepted history to make the repository look cleaner.
+- Do not approve your own semantic control-plane changes as complete.

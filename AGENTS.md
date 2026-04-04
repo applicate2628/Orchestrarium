@@ -15,11 +15,12 @@ If the task is about roadmap ownership, prioritization, milestone shaping, or ad
 - treat role simulation as distinct from delegation: if a matching specialist role exists and the work is non-trivial, use an actual subagent instead of informally performing that role locally
 - detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers; when the same gap repeatedly blocks work, forces role simulation, weakens an independent gate, or repeatedly requires ad hoc external help, recommend exactly one response: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need; `$lead` does not own hiring, only capability-gap detection and escalation
 - minimize opinion-driven work by routing unknowns to factual roles first and requiring decisions to cite accepted evidence
-- keep the system operating as a rolling loop: `PASS` advances immediately, `REVISE` stays in the same role for a bounded correction, and `BLOCKED` is reserved for real external blockers
+- keep the system operating as a rolling loop: `PASS` advances immediately, `REVISE` stays in the same role for a bounded correction, after 2 consecutive `REVISE` cycles for the same role and artifact the lead must re-route, escalate, or block instead of looping, and `BLOCKED` is reserved for real external blockers
 - prefer continuous phase-by-phase flow with minimal handoff latency; do not pause between accepted artifacts unless a true gate failure or a policy-required human check requires it
 - close specialist sessions once their artifact is accepted, handed off, or explicitly parked; keep a session open only for a bounded `REVISE` or an immediate same-scope follow-up, and close `BLOCKED` or advisory-only consultant sessions once routing or advisory handoff is complete
 - if an accepted upstream artifact is materially revised, mark dependent downstream artifacts for re-review before progression continues; downstream `PASS` does not survive the upstream change automatically
 - classify change impact before route selection: `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting`
+- use an additive fast lane only when the change is additive, confined to one module or clearly bounded seam, introduces no new risk owner, and leaves existing contracts and shared abstractions unchanged
 - route an in-flight item back to `$product-manager` for re-intake when admitted scope, priority, or milestone intent changes enough to redefine the work; do not silently renegotiate the item inside delivery
 - assign one explicit integration owner before QA whenever a change spans multiple implementation phases or specialists; that owner must assemble one coherent integrated artifact and check cross-phase compatibility before verification
 - give each delegated task only approved inputs, minimal context, limited tools, one expected artifact, explicit acceptance criteria, and an explicit gate to the next stage
@@ -35,7 +36,7 @@ Delegation should reduce noise, not spread it. That means:
 - delegate to the narrowest factual role first when the next step is blocked by missing evidence
 - delegate accepted artifacts, not raw transcripts or broad context dumps, whenever an accepted artifact already exists
 - keep interpretive roles downstream of evidence instead of asking them to fill factual gaps with judgment
-- keep `REVISE` local to the same role for bounded correction
+- keep `REVISE` local to the same role for bounded correction, and do not allow more than 2 consecutive `REVISE` cycles for the same role and artifact without re-routing or escalation
 - use `BLOCKED` only for real external blockers, missing decisions, or unavailable prerequisites
 - do not let downstream roles silently redefine upstream artifacts when evidence is thin
 
@@ -88,6 +89,7 @@ When maintaining this skill pack or its source repository:
 - update `references/subagent-operating-model.md` and `skills/lead/references/operating-model.md` when orchestration or gate semantics change
 - update `skills/consultant/references/consultant-workflow.md` and any selected provider adapter when consultant execution policy changes
 - use `$knowledge-archivist` for repository hygiene, canonical-source alignment, documentation upkeep, and reference maintenance
+- route semantic repository control-plane changes prepared by `$knowledge-archivist` through an independent `$architecture-reviewer` gate before completion or publication; hygiene-only edits such as link fixes, formatting, index sync, archive moves, and non-semantic wording cleanup do not require that extra reviewer
 
 Use these roles first for skill-pack support and maintenance:
 
@@ -95,7 +97,7 @@ Use these roles first for skill-pack support and maintenance:
 - `$knowledge-archivist`: docs, references, structure, canonical-source alignment, reports, and hygiene cleanup
 - `$toolchain-engineer`: build, packaging, installation, reproducibility, and developer ergonomics for the skill pack
 - `$qa-engineer`: verification of maintenance changes against accepted behavior and likely regressions
-- `$architecture-reviewer`: maintainability and cohesion gate for structural changes to the pack
+- `$architecture-reviewer`: maintainability and cohesion gate for structural or semantic control-plane changes to the pack
 - `$consultant`: optional independent second opinion for ambiguous workflow or policy changes
 - `$product-manager`: roadmap, sequencing, and admission decisions for the skill pack itself
 
@@ -105,9 +107,9 @@ Roadmap and orchestration:
 
 - `$product-manager`, `$lead`, `$consultant`, `$knowledge-archivist`
 
-Research, design, and specialist constraints:
+Research, design, planning, and specialist constraints:
 
-- `$product-analyst`, `$analyst`, `$architect`, `$ux-designer`, `$algorithm-scientist`, `$computational-scientist`, `$security-engineer`, `$performance-engineer`, `$reliability-engineer`
+- `$product-analyst`, `$analyst`, `$architect`, `$ux-designer`, `$planner`, `$algorithm-scientist`, `$computational-scientist`, `$security-engineer`, `$performance-engineer`, `$reliability-engineer`
 
 Implementation:
 
@@ -174,8 +176,8 @@ Repository-specific `AGENTS.md` files should add local priorities, canonical pat
 - Root `.gitignore` defines the local-only scratch boundary at `/.scratch/`; keep raw logs, transcripts, temp outputs, and pre-redaction material there.
 - Never hardcode workstation-specific paths, usernames, drive letters, or local tool details into tracked content unless they are intentionally public and synthetic.
 - Human review before `git push`, release, or equivalent publication must include a leak-check of staged changes.
-- `$lead` is the default human approver at the publication gate. If `$lead` authored or materially edited the change, approval must come from `$knowledge-archivist`; docs/governance-only diffs default directly to `$knowledge-archivist`.
-- `$lead` is the default operator of the publication-safety scan before publication; relevant reviewers may run the same scan for spot checks or gate review, and author self-checks do not replace the required human publication review.
+- `$knowledge-archivist` is the default human approver at the publication gate. `$lead` remains the default operator of the publication-safety scan and prepares the staged diff for publication, but the publication approver must be a different role than the role that accepted the artifact into the pipeline.
+- Relevant reviewers may run the same publication-safety scan for spot checks or gate review, and author self-checks do not replace the required human publication review.
 - Only `$security-reviewer` may approve a publication-safety exception. Without that approval, publication is `BLOCKED`.
 
 ## Repository periodic controls
