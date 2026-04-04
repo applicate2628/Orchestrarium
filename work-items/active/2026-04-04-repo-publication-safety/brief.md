@@ -11,6 +11,6 @@
 - Critical risks and owners: Leakage risk owned by `$lead` and `$knowledge-archivist`.
 - Required roles and reviewers: `$knowledge-archivist` for hygiene, `$lead` for gate acceptance.
 - Integration owner: `$knowledge-archivist`
-- Current stage: Documentation and ignore boundary update
-- Next stage: Verification and commit
+- Current stage: Completed
+- Next stage: Archive or follow-up automation if separately admitted
 - Open blockers: None
