@@ -25,6 +25,10 @@ Before implementation or review starts, the same item must also contain:
 
 - `plan.md`
 
+Before an item moves to `archive/`, it must also contain:
+
+- `closure.md`
+
 Optional artifacts live beside them as needed:
 
 - `research.md`
@@ -44,5 +48,7 @@ Optional artifacts live beside them as needed:
 
 The older ignored `.plans/` directory is legacy local history from the earlier plan-dump layout.
 Keep it only as local scratch or traceability material; it is not the canonical tracked source of truth for new items.
+
+Completed item folders should preserve their final `closure.md` when they move to `archive/`.
 
 See [`references/repository-task-memory.md`](../references/repository-task-memory.md) for the full policy.

@@ -160,9 +160,11 @@ Repository-specific `AGENTS.md` files should add local priorities, canonical pat
 - New admitted work routed through `$lead` belongs in `work-items/active/<date>-<slug>/`. Completed, cancelled, or superseded work moves to `work-items/archive/`.
 - For lead-routed non-trivial work, `roadmap.md`, `brief.md`, and `status.md` are mandatory.
 - `plan.md` becomes mandatory before implementation or review starts.
+- `closure.md` becomes mandatory before moving an item to `work-items/archive/`.
 - Missing required upstream artifacts are a hard gate. If the current stage needs `roadmap`, `research`, `design`, `plan`, specialist constraints, or review artifacts and they are missing or stale, stop and restore them or route the item back to the required upstream stage before continuing delivery.
 - Ownership: `$product-manager` owns `roadmap.md` when roadmap intake is explicit; if the admission source is a direct human request, `$lead` records that source in `roadmap.md`. `$lead` owns `brief.md` and `status.md`. `$planner` owns `plan.md`. Each specialist owns the artifact for their own lane. `$knowledge-archivist` owns index, template, and archive hygiene.
 - `notes.md` or `notes/` holds technical notes, implementation discoveries, and follow-ups. Accepted long-lived decisions belong in `design.md` or `adr.md`, not only in notes.
+- `closure.md` holds the final closeout record before archive move; `status.md` stays the live recovery log.
 - After interruption or context loss, resume from `work-items/index.md`, then the item's `status.md`, then `brief.md`. If the required docs are missing or stale, stop and restore task memory before continuing delivery.
 - The older ignored `.plans/` directory is legacy local history only. Do not treat it as the canonical tracked source of truth for new work items.
 
