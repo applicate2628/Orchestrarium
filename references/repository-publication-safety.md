@@ -25,5 +25,8 @@ The rules below apply to every tracked file in the repository, including docs, r
 - Human review is mandatory before `git push`, release, or equivalent publication.
 - The reviewer must check the staged diff for leak-prone content, including machine-specific paths, raw operational detail, and sensitive values.
 - If tracked content looks like scratch material, move it back to local-only space or redact it before commit.
+- The primary operator of the publication-safety scan is `$lead` when preparing tracked changes for publication.
+- `$security-reviewer`, `$knowledge-archivist`, or another relevant reviewer may also run the scan as part of a spot check or publication gate.
+- Any author may run the scan as a local self-check, but that does not replace the required human publication review.
 - On Git Bash, macOS, or Linux, run `bash scripts/check-publication-safety.sh` as the manual pre-publication scan for staged tracked content before publication.
 - On Windows PowerShell, run `powershell -ExecutionPolicy Bypass -File scripts/check-publication-safety.ps1`; the wrapper resolves Git-for-Windows `bash.exe` and calls the shared scan script so it does not rely on the WSL `bash.exe` stub from `PATH`.
