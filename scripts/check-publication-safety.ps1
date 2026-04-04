@@ -1,64 +1,40 @@
+[CmdletBinding(PositionalBinding = $false)]
 param(
-  [string]$Path
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]] $Arguments
 )
 
-$patterns = @(
-  'AKIA[0-9A-Z]{16}'
-  'ghp_[A-Za-z0-9]{36}'
-  'sk-[A-Za-z0-9]{20,}'
-  'Bearer[[:space:]]+[A-Za-z0-9._~+/=-]+'
-  '[Pp]assword[[:space:]]*[:=]'
-  '[Ss]ecret[[:space:]]*[:=]'
-  '[Tt]oken[[:space:]]*[:=]'
-  'api[_-]?[Kk]ey[[:space:]]*[:=]'
-  '[A-Za-z]:\\\\Users\\\\'
-  '/Users/'
-  '/home/'
-  '/private/var/folders/'
-  '/var/folders/'
-  '^Human:[[:space:]]*'
-  '^Assistant:[[:space:]]*'
-  '^\$[[:space:]]+'
-  '^>>>[[:space:]]+'
-  '\[[0-9]{2}:[0-9]{2}:[0-9]{2}\]'
+$ErrorActionPreference = 'Stop'
+
+$gitCommand = Get-Command git -ErrorAction Stop
+$gitExecutable = $gitCommand.Source
+if (-not $gitExecutable) {
+  $gitExecutable = $gitCommand.Path
+}
+if (-not $gitExecutable) {
+  throw "Unable to resolve git.exe from Get-Command git."
+}
+
+$gitExecutable = (Resolve-Path $gitExecutable).Path
+$gitInstallRoot = Split-Path -Parent (Split-Path -Parent $gitExecutable)
+$shellCandidates = @(
+  (Join-Path $gitInstallRoot 'bin\bash.exe'),
+  (Join-Path $gitInstallRoot 'usr\bin\bash.exe'),
+  (Join-Path $gitInstallRoot 'usr\bin\sh.exe')
 )
 
-$gitArgs = @(
-  'grep'
-  '-n'
-  '-I'
-  '-E'
-  '--full-name'
-)
-
-foreach ($pattern in $patterns) {
-  $gitArgs += @('-e', $pattern)
+$shellExecutable = $shellCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $shellExecutable) {
+  throw "Unable to locate bundled bash.exe or sh.exe under $gitInstallRoot."
 }
 
-if ($Path) {
-  $gitArgs += @('--no-index', '--', $Path)
-} else {
-  $gitArgs += @('--cached', '--', '.')
+$repoRoot = (& $gitExecutable rev-parse --show-toplevel).Trim()
+if (-not $repoRoot) {
+  throw "Unable to determine repository root."
 }
 
-$env:GIT_PAGER = 'cat'
-$scanOutput = & git --no-pager @gitArgs 2>&1
-$exitCode = $LASTEXITCODE
-$selfPattern = '^scripts/check-publication-safety\.(ps1|sh):'
+Set-Location $repoRoot
+$scriptPath = Join-Path $repoRoot 'scripts\check-publication-safety.sh'
 
-if ($exitCode -eq 0) {
-  $filtered = @($scanOutput | Where-Object { $_ -notmatch $selfPattern })
-  if ($filtered.Count -gt 0) {
-    $filtered
-    Write-Error 'publication-safety scan found potential tracked-content leak markers'
-    exit 1
-  }
-
-  exit 0
-}
-
-if ($exitCode -eq 1) {
-  exit 0
-}
-
-exit $exitCode
+& $shellExecutable $scriptPath @Arguments
+exit $LASTEXITCODE
