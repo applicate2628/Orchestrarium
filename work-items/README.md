@@ -4,6 +4,7 @@
 
 Use it to keep admitted work durable across interruptions, context loss, and session boundaries.
 Stable repository-wide methodology stays in [`references/`](../references/); item-specific execution memory lives here.
+Publication safety for all tracked content lives in [`references/repository-publication-safety.md`](../references/repository-publication-safety.md).
 
 ## Layout
 
@@ -37,7 +38,7 @@ Optional artifacts live beside them as needed:
 - `work-items/` is tracked repository documentation, not a scratchpad.
 - Do not place secrets, tokens, credentials, customer data, private identifiers, raw logs, full command transcripts, or machine-specific absolute paths here.
 - Redact or generalize operational details when a summary is enough for traceability.
-- Keep local-only raw material in ignored scratch space, not in tracked work-item artifacts.
+- Keep local-only raw material in ignored scratch space, such as `/.scratch/`, not in tracked work-item artifacts.
 
 ## Legacy files
 

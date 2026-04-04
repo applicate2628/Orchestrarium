@@ -44,6 +44,7 @@ The repository is built around a few stable rules:
 
 Repository-wide operating-model source of truth lives in [references/subagent-operating-model.md](references/subagent-operating-model.md).
 Repository task-memory policy and storage model live in [references/repository-task-memory.md](references/repository-task-memory.md).
+Repository publication-safety policy for all tracked content lives in [references/repository-publication-safety.md](references/repository-publication-safety.md).
 Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md).
 The visual companion to the workflow lives in [references/operating-model-diagram.md](references/operating-model-diagram.md).
 
@@ -62,6 +63,7 @@ The current pack covers several sub-teams:
 
 - `AGENTS.md`: repo-level delegation rules and skill index
 - `references/`: repository-wide reference documents and the canonical operating-model material
+- `.gitignore`: root ignore file for local-only scratch boundaries
 - `skills/<role>/SKILL.md`: instructions for one role
 - `skills/<role>/agents/openai.yaml`: display metadata and default prompt for the role
 - `skills/lead/references/`: condensed lead-facing routing rules, handoff contracts, and operating-model notes
