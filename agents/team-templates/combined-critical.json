@@ -1,0 +1,24 @@
+{
+  "name": "combined-critical",
+  "description": "All specialist designers — performance + security + reliability + architecture for highest-risk changes",
+  "when": "Changes that touch multiple risk domains simultaneously: distributed system redesign, platform migration, core algorithm overhaul",
+  "roles": [
+    { "agentType": "product-analyst", "stage": "research", "whenNeeded": "product context needed" },
+    { "agentType": "analyst", "stage": "research", "required": true },
+    { "agentType": "architect", "stage": "design", "required": true },
+    { "agentType": "algorithm-scientist", "stage": "design", "whenNeeded": "algorithmically sensitive" },
+    { "agentType": "security-engineer", "stage": "design", "whenNeeded": "security risk exists" },
+    { "agentType": "performance-engineer", "stage": "design", "whenNeeded": "performance budget matters" },
+    { "agentType": "reliability-engineer", "stage": "design", "whenNeeded": "operability/recovery matters" },
+    { "agentType": "planner", "stage": "plan", "required": true },
+    { "agentType": "backend-engineer", "stage": "implement", "whenNeeded": "server-side work" },
+    { "agentType": "frontend-engineer", "stage": "implement", "whenNeeded": "client-side work" },
+    { "agentType": "qa-engineer", "stage": "QA", "required": true },
+    { "agentType": "performance-reviewer", "stage": "review", "whenNeeded": "hard budget" },
+    { "agentType": "architecture-reviewer", "stage": "review", "required": true },
+    { "agentType": "security-reviewer", "stage": "review", "whenNeeded": "security risk exists" }
+  ],
+  "requiredRoles": ["analyst", "architect", "planner", "qa-engineer", "architecture-reviewer"],
+  "minRoles": 5,
+  "notes": "Heavy template — use only when the change affects multiple critical risk domains. Review strategies: Claim-Verify for known surfaces, Adversarial for novel trust boundaries or architectural blind spots."
+}

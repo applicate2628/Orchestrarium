@@ -1,0 +1,16 @@
+{
+  "name": "review",
+  "description": "Independent review of existing work — code, architecture, or documents",
+  "when": "PR review, architecture quality gate, security review, or post-implementation validation",
+  "roles": [
+    { "agentType": "analyst", "stage": "research", "required": true },
+    { "agentType": "qa-engineer", "stage": "QA", "required": true },
+    { "agentType": "architecture-reviewer", "stage": "review" },
+    { "agentType": "security-reviewer", "stage": "review", "whenNeeded": "security-sensitive code" },
+    { "agentType": "performance-reviewer", "stage": "review", "whenNeeded": "performance claims" },
+    { "agentType": "accessibility-reviewer", "stage": "review", "whenNeeded": "user-facing UI" }
+  ],
+  "requiredRoles": ["analyst", "qa-engineer"],
+  "minRoles": 2,
+  "notes": "Lead starts with analyst for fact-finding, then QA for verification, then independent reviewers. No implementation roles."
+}

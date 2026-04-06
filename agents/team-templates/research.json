@@ -1,0 +1,20 @@
+{
+  "name": "research",
+  "description": "Investigation and design only — no implementation",
+  "when": "Exploring a problem space, writing ADRs, evaluating alternatives before committing to delivery",
+  "roles": [
+    { "agentType": "analyst", "stage": "research", "required": true },
+    { "agentType": "product-analyst", "stage": "research", "whenNeeded": "product/business context" },
+    { "agentType": "architect", "stage": "design", "required": true },
+    { "agentType": "ux-designer", "stage": "design", "whenNeeded": "user-facing problem space" },
+    { "agentType": "algorithm-scientist", "stage": "design", "whenNeeded": "mathematical framing" },
+    { "agentType": "computational-scientist", "stage": "design", "whenNeeded": "scientific model" },
+    { "agentType": "security-engineer", "stage": "design", "whenNeeded": "threat model needed" },
+    { "agentType": "performance-engineer", "stage": "design", "whenNeeded": "budget analysis" },
+    { "agentType": "reliability-engineer", "stage": "design", "whenNeeded": "failure-mode analysis" },
+    { "agentType": "planner", "stage": "plan", "whenNeeded": "execution plan needed" }
+  ],
+  "requiredRoles": ["analyst", "architect"],
+  "minRoles": 2,
+  "notes": "Stops after design/plan artifact. No implementation, no QA, no review roles. Lead produces design package + optional plan."
+}
