@@ -44,7 +44,7 @@ flowchart TB
     H --> M
 ```
 
-## 2. Interaction topology
+## 2. Interaction topology (hub-and-spoke)
 
 ```mermaid
 flowchart TB
@@ -79,7 +79,54 @@ flowchart TB
     C -. "advisory memo" .-> M
 ```
 
-## 3. Artifact progression
+## 3. Interaction topology (peer-to-peer)
+
+This diagram complements the hub-and-spoke view in Section 2 with the high-value peer-to-peer edges enabled by the optimized interaction matrix. The lead remains the orchestrating owner; direct edges are optimizations, not replacements.
+
+```mermaid
+flowchart LR
+    subgraph C1["architect"]
+        direction TB
+        AR("architect")
+    end
+
+    subgraph C2["constraint roles (||)"]
+        direction TB
+        SE("security-engineer")
+        PE("performance-engineer")
+        RE("reliability-engineer")
+        AS("algorithm-scientist")
+        CS("computational-scientist")
+        UX("ux-designer")
+    end
+
+    subgraph C3["planner"]
+        direction TB
+        PL("planner")
+    end
+
+    subgraph C4["CLAIMS chain"]
+        direction TB
+        IM("implementers")
+        QA("qa-engineer")
+        RV("reviewers")
+    end
+
+    AR -. "DIRECT ->" .-> C2
+    C2 -. "DIRECT ->" .-> PL
+    PL ==>|"CLAIMS =>"| C4
+
+    QA -. "ESCALATE ^" .-> PE
+    PE -. "fix scope" .-> QA
+    RV -. "RETURN <=" .-> C2
+    RV -. "RETURN <=" .-> AR
+    RV -. "RETURN <=" .-> IM
+
+    CS -. "meshing spec" .-> GE("geometry-engineer")
+    GE -. "RETURN <=" .-> CS
+```
+
+## 4. Artifact progression
 
 ```mermaid
 flowchart TB
@@ -114,7 +161,7 @@ flowchart TB
     R5 --> R6 --> R7 --> R8 --> R9 --> R10
 ```
 
-## 4. Delegation behavior
+## 5. Delegation behavior
 
 ```mermaid
 flowchart TB
@@ -133,10 +180,10 @@ flowchart TB
     I -. "external blocker" .-> B
 ```
 
-## 5. Workflow selection matrix
+## 6. Workflow selection matrix
 
 | Situation | Default strategy | Primary roles | Expected accepted artifact | Escalate when |
-|---|---|---|---|---|
+|-----------|------------------|---------------|----------------------------|---------------|
 | What should enter discovery or delivery next? | `Roadmap / Intake loop` | `$product-manager`, `$product-analyst` as needed | Roadmap decision package, then optional product brief | Product facts are unclear or milestone intent is unstable |
 | Approved item needs normal execution | `Delivery loop` | `$lead -> analyst -> architect -> planner -> implementation -> QA/review` | Canonical brief, research memo, design package, phase plan, implementation and verification artifacts | A critical risk lane or reviewer becomes mandatory |
 | The next decision is blocked by missing facts | `Fact-first routing` | `$analyst`, `$product-analyst`, or a narrow specialist evidence lane | Accepted factual artifact | Interpretive roles are being asked to guess instead of consume evidence |
@@ -149,15 +196,17 @@ flowchart TB
 | Ambiguity or tradeoffs need a non-blocking second opinion | `Consultant advisory` | `$lead -> $consultant` | Advisory memo | Facts are already assembled, but route choice is still ambiguous |
 | Read-heavy scopes are independent | `Parallel read lanes` | Multiple research, triage, or test-analysis roles | Multiple independent factual artifacts | Merge cost would exceed the time saved |
 | Write-heavy scopes are independent and contracts are fixed | `Parallel write lanes` | Multiple implementation roles with disjoint ownership | Multiple implementation artifacts with fixed boundaries | Write scopes overlap or contracts are still moving |
+| Constraint roles run independently after design acceptance | Parallel constraint aggregation | `architect` dispatches constraint roles in parallel; outputs aggregate at planner | Unified constraint picture | Planner cannot reconcile conflicting constraints |
+| Review finding maps to upstream specialist structural gap | RETURN escalation | Reviewer names specific specialist; lead notified but does not re-interpret | Structural gap corrected by correct upstream owner | Finding is bounded and fixable by implementer |
 
-## 6. Role map by category
+## 7. Role map by category
 
 Current team shape: `31 roles`, `6 categories`.
 
 Note: this role map shows the canonical core team only; installed or repo-local specialists are not listed here.
 
 | Category | Roles |
-|---|---|
+|----------|-------|
 | Coordination | `lead`, `product-manager`, `consultant` (advisory-only) |
 | Research | `analyst`, `product-analyst` |
 | Design / Constraints | `architect`, `ux-designer`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, `reliability-engineer` |
@@ -169,7 +218,7 @@ Notes:
 - `knowledge-archivist` is a cross-cutting hygiene lane and is usually invoked outside the main feature phase even though it sits closest to implementation support.
 - `consultant` is advisory-only and does not become a required delivery gate.
 
-## 7. Reading notes
+## 8. Reading notes
 
 - `product-manager` owns what enters discovery or delivery.
 - `lead` owns execution of approved work.
@@ -183,3 +232,21 @@ Notes:
 - Multi-phase or multi-specialist implementation requires one explicit integration owner before QA.
 - Reviewers stay independent and report to the orchestrating owner.
 - `REVISE` returns work to the same stage owner for up to 2 consecutive cycles on the same role and artifact; `BLOCKED` stops progression until a new decision or artifact exists.
+
+## 9. Claims chain
+
+The claims chain is a traveling artifact that ensures builder claims reach reviewers reliably, regardless of lead mediation between stages.
+
+When a work-item requires Claim-Verify review, a `constraints/claims.md` file is created in the work-item folder. Its lifecycle:
+
+1. **Created** after design acceptance — architect seeds the file with initial constraints.
+2. **Populated** by each constraint role (security-engineer, performance-engineer, reliability-engineer, algorithm-scientist, computational-scientist) as they complete.
+3. **Frozen** by the planner before implementation begins. The plan references the claims list.
+4. **Annotated** by each implementer — verification notes only, cannot modify constraint claims.
+5. **Verified** by QA — each claim receives a verification status.
+6. **Reviewed** by each independent reviewer — the claims list is primary input for Claim-Verify.
+7. **Returned** to lead — final claims disposition with pass/fail per review domain.
+
+## 10. Role map note — interaction types
+
+The role categories in Section 7 remain unchanged. Role interactions are now classified by type (`LEAD_MED`, `DIRECT`, `PARALLEL`, `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`) rather than assuming all interactions go through lead. The full role-pair interaction matrix lives in the work-item design document: `work-items/active/2026-04-06-optimize-interaction-matrix/design.md`.

@@ -55,10 +55,10 @@ Additional artifacts are required when the workflow calls for them:
 
 ## Task-memory linkage
 
-- Each work-item in `work-items/` corresponds to a task in the team task list (`~/.claude/tasks/claudestrator/index.json`).
-- The work-item `status.md` SHOULD include a `Task ID` field linking to the corresponding task.
-- The task-list entry SHOULD include a `workItemPath` field pointing to the work-item folder.
+- Each work-item in `work-items/` corresponds to an entry in the team task index managed by the operating environment.
+- The work-item `status.md` SHOULD include a `Task ID` field when the environment supports cross-linking.
 - When a work-item is archived, the corresponding task is marked `completed`/`cancelled` with an archive note.
+- The `work-items/index.md` file is the portable, repo-guaranteed entry point for task recovery — it must always be current.
 - This linkage is maintained by `$lead` at each stage transition and verified by `$knowledge-archivist` during session-start audits.
 
 ## Technical notes and decision history

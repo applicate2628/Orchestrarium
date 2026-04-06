@@ -5,7 +5,7 @@ This reference compares the main workflow, review, and control strategies that m
 Use it together with:
 - [subagent-operating-model.md](subagent-operating-model.md)
 - [operating-model-diagram.md](operating-model-diagram.md)
-- [operating-model.md](../agents/references/operating-model.md)
+- [operating-model.md](../agents/contracts/operating-model.md)
 
 ## 1. Strategy families
 
