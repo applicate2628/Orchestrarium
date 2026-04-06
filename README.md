@@ -108,6 +108,17 @@ Do NOT copy these into a target repo:
 
 The `agents/contracts/` directory is NOT a duplicate of `references/`. It contains the subset of reference files that role definitions actually reference at runtime. The root `references/` directory contains the full canonical set including diagrams, translations, and strategy comparisons — these stay with the skill pack, not with installed targets.
 
+### Memory
+
+The `memory/` directory contains feedback rules collected during real usage. These are universal operating rules that apply across all projects and are populated over time based on experience. Memory files are read automatically at session start.
+
+| Path                         | Scope                                                      |
+|------------------------------|------------------------------------------------------------|
+| `memory/`                    | Rules specific to this skill pack                          |
+| `~/.claude/memory/`          | Universal rules that apply across all projects             |
+
+When installing into a target repo, copy `memory/` if you want experience-based feedback rules to carry over. Otherwise target repos start with a clean memory slate and build their own over time.
+
 ## License
 
 This repository is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
