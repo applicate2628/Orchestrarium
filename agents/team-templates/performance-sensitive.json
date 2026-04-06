@@ -1,0 +1,19 @@
+{
+  "name": "performance-sensitive",
+  "description": "Performance-critical work — hard budgets, SLAs, frame rates, latency targets",
+  "when": "Change targets measurable performance: latency SLO, memory budget, GPU frame time, throughput",
+  "roles": [
+    { "agentType": "analyst", "stage": "research", "required": true },
+    { "agentType": "architect", "stage": "design", "required": true },
+    { "agentType": "performance-engineer", "stage": "design", "required": true },
+    { "agentType": "planner", "stage": "plan", "required": true },
+    { "agentType": "backend-engineer", "stage": "implement", "whenNeeded": "server-side optimization" },
+    { "agentType": "frontend-engineer", "stage": "implement", "whenNeeded": "client-side optimization" },
+    { "agentType": "graphics-engineer", "stage": "implement", "whenNeeded": "rendering optimization" },
+    { "agentType": "qa-engineer", "stage": "QA", "required": true },
+    { "agentType": "performance-reviewer", "stage": "review", "required": true }
+  ],
+  "requiredRoles": ["analyst", "architect", "performance-engineer", "planner", "qa-engineer", "performance-reviewer"],
+  "minRoles": 6,
+  "notes": "Performance review strategy: Claim-Verify for defined budgets. Adversarial only when the bottleneck is novel or the cost of missing it is critical."
+}

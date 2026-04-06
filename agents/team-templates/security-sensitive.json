@@ -1,0 +1,19 @@
+{
+  "name": "security-sensitive",
+  "description": "Security-sensitive work — auth, trust boundaries, secret handling, vulnerability fix",
+  "when": "Change touches auth flows, trust boundaries, credential handling, or fixes a vulnerability",
+  "roles": [
+    { "agentType": "analyst", "stage": "research", "required": true },
+    { "agentType": "architect", "stage": "design", "required": true },
+    { "agentType": "security-engineer", "stage": "design", "required": true },
+    { "agentType": "planner", "stage": "plan", "required": true },
+    { "agentType": "backend-engineer", "stage": "implement", "whenNeeded": "server-side fix" },
+    { "agentType": "frontend-engineer", "stage": "implement", "whenNeeded": "client-side fix" },
+    { "agentType": "qa-engineer", "stage": "QA", "required": true },
+    { "agentType": "security-reviewer", "stage": "review", "required": true },
+    { "agentType": "architecture-reviewer", "stage": "review", "whenNeeded": "structural security impact" }
+  ],
+  "requiredRoles": ["analyst", "architect", "security-engineer", "planner", "qa-engineer", "security-reviewer"],
+  "minRoles": 6,
+  "notes": "Security review strategy: Claim-Verify for known threat model, Adversarial for novel trust boundaries. Security-reviewer is mandatory — no exceptions."
+}

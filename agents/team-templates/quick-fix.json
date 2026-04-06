@@ -1,0 +1,18 @@
+{
+  "name": "quick-fix",
+  "description": "Fast lane for clearly local additive changes — bug fix, typo, small addition",
+  "when": "Change is additive, confined to one module/module seam, no new risk owner, contracts unchanged",
+  "roles": [
+    { "agentType": "analyst", "stage": "research", "whenNeeded": "scope unclear" },
+    { "agentType": "backend-engineer", "stage": "implement", "whenNeeded": "backend fix" },
+    { "agentType": "frontend-engineer", "stage": "implement", "whenNeeded": "frontend fix" },
+    { "agentType": "qt-ui-engineer", "stage": "implement", "whenNeeded": "Qt UI fix" },
+    { "agentType": "toolchain-engineer", "stage": "implement", "whenNeeded": "build/packaging fix" },
+    { "agentType": "data-engineer", "stage": "implement", "whenNeeded": "data/migration fix" },
+    { "agentType": "knowledge-archivist", "stage": "implement", "whenNeeded": "docs/hygiene fix" },
+    { "agentType": "qa-engineer", "stage": "QA", "required": true }
+  ],
+  "requiredRoles": ["qa-engineer"],
+  "minRoles": 1,
+  "notes": "Additive fast lane: lead classifies, dispatches one implementer + QA. Re-classify to full-delivery if scope widens."
+}

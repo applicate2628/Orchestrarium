@@ -1,0 +1,17 @@
+{
+  "name": "geometry-review",
+  "description": "Geometry or spatial-computation work with architecture review — transforms, predicates, meshing, collision detection",
+  "when": "Coordinate transforms, intersections, spatial algorithms, meshing, tessellation, collision or containment logic",
+  "roles": [
+    { "agentType": "analyst", "stage": "research", "required": true },
+    { "agentType": "architect", "stage": "design", "required": true },
+    { "agentType": "computational-scientist", "stage": "design", "required": true },
+    { "agentType": "planner", "stage": "plan", "required": true },
+    { "agentType": "geometry-engineer", "stage": "implement", "required": true },
+    { "agentType": "qa-engineer", "stage": "QA", "required": true },
+    { "agentType": "architecture-reviewer", "stage": "review", "required": true }
+  ],
+  "requiredRoles": ["analyst", "architect", "computational-scientist", "planner", "geometry-engineer", "qa-engineer", "architecture-reviewer"],
+  "minRoles": 7,
+  "notes": "Geometry work needs computational-scientist for numerical robustness AND architecture-reviewer for blast-radius control on spatial abstractions."
+}
