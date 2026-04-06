@@ -62,19 +62,51 @@ The current pack covers several sub-teams:
 
 ## Repository layout
 
-- `CLAUDE.md`: repo-level delegation rules and skill index
-- `references/`: repository-wide reference documents and the canonical operating-model material
-- `.gitignore`: root ignore file for local-only scratch boundaries
-- `agents/<role>.md`: instructions and prompts for one role
-- `agents/references/`: handoff contracts, operating-model notes, and subagent coordination templates
-- `work-items/`: canonical tracked task-memory store for roadmap, brief, status, plans, notes, and review history
-- `scripts/`: publication-safety scan automation (check-publication-safety.sh / .ps1)
+### Installable (ships with skill pack to target repos)
+
+- `agents/<role>.md` — instructions for one role; all 31 roles go here
+- `agents/contracts/` — handoff contracts, operating-model notes, and subagent coordination templates. These ARE the files referenced by role definitions at install time. They ship with the skill pack.
+- `CLAUDE.md` — thin one-line redirector to `agents/rules/orchestration.md`. Add this line to the target repo's existing `CLAUDE.md` or replace it entirely.
+
+### Internal to this skill pack (do NOT install)
+
+- `agents/rules/` — governance of the skill pack itself (bootstrap, delegation policy, engineering hygiene). This is used by the skill pack authors, not by end users.
+- `references/` — full reference documents for this repo only: operating model diagrams, strategy comparisons, periodic control matrix, task-memory policy, publication safety. These are NOT installable by default; target repos use `agents/contracts/` instead.
+- `references/ru/` — Russian translations of reference documents.
+- `work-items/` — this repo's task memory.
+- `scripts/` — publication-safety scan automation.
+- `.gitignore` — scratch boundary at `/.scratch/`.
 
 ## Installation
 
-Install the skill folders from `agents/` into a location where skills can be discovered.
+### What to install
 
-Once installed, restart Claude so the new skills are discovered.
+Copy the following from this repo into your target repository:
+
+| Source                                | Destination in target repo               | Purpose                                                              |
+|---------------------------------------|------------------------------------------|----------------------------------------------------------------------|
+| `agents/<role>.md` (all files)        | `agents/<role>.md`                       | Role definitions                                                     |
+| `agents/contracts/` (entire folder)  | `agents/contracts/`                     | Handoff contracts, operating model notes, subagent coordination      |
+| `CLAUDE.md`                           | Merge into existing `CLAUDE.md` or replace | Governance entry point                                             |
+
+### What NOT to install
+
+Do NOT copy these into a target repo:
+
+| File | Why |
+|------|-----|
+| `agents/rules/` | Skill-pack governance only — internal |
+| `references/` (root) | Full reference documents for this skill pack repo; target repos already get what they need via `agents/contracts/` |
+| `work-items/` | Task memory — target repo has its own |
+| `scripts/` | Optional — only if target repo needs publication-safety automation |
+
+### Steps
+
+1. Copy `agents/` (including `agents/contracts/`) into your target repo
+2. Add the one-line contents of `CLAUDE.md` to your target repo's `CLAUDE.md`, or replace it entirely
+3. Restart Claude so the new skills are discovered
+
+The `agents/contracts/` directory is NOT a duplicate of `references/`. It contains the subset of reference files that role definitions actually reference at runtime. The root `references/` directory contains the full canonical set including diagrams, translations, and strategy comparisons — these stay with the skill pack, not with installed targets.
 
 ## License
 

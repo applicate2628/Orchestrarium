@@ -79,7 +79,7 @@ flowchart TB
     C -. "advisory memo" .-> M
 ```
 
-## 3. Прогрессия артефактов
+## 4. Прогрессия артефактов
 
 ```mermaid
 flowchart TB
@@ -114,7 +114,7 @@ flowchart TB
     R5 --> R6 --> R7 --> R8 --> R9 --> R10
 ```
 
-## 4. Поведение делегирования
+## 5. Поведение делегирования
 
 ```mermaid
 flowchart TB
@@ -133,7 +133,7 @@ flowchart TB
     I -. "external blocker" .-> B
 ```
 
-## 5. Таблица выбора workflow
+## 6. Таблица выбора workflow
 
 | Ситуация | Дефолтная стратегия | Основные роли | Ожидаемый принятый артефакт | Когда эскалировать |
 |---|---|---|---|---|
@@ -183,3 +183,70 @@ flowchart TB
 - Multi-phase или multi-specialist implementation требует одного explicit integration owner до QA.
 - Reviewer'ы остаются независимыми и отчитываются оркестрирующему owner'у.
 - `REVISE` возвращает работу к тому же stage owner'у; `BLOCKED` останавливает progression до появления нового решения или артефакта.
+
+## 3. Топология peer-to-peer взаимодействия
+
+Эта диаграмма дополняет hub-and-spoke вид из секции 2 высокоценными peer-to-peer рёбрами, включёнными оптимизированной матрицей взаимодействий. Lead остаётся оркестрирующим владельцем; прямые рёбра — оптимизации, а не замены.
+
+```mermaid
+flowchart LR
+    subgraph C1["architect"]
+        direction TB
+        AR("architect")
+    end
+
+    subgraph C2["constraint роли (параллельно \|\|)"]
+        direction TB
+        SE("security-engineer")
+        PE("performance-engineer")
+        RE("reliability-engineer")
+        AS("algorithm-scientist")
+        CS("computational-scientist")
+        UX("ux-designer")
+    end
+
+    subgraph C3["planner"]
+        direction TB
+        PL("planner")
+    end
+
+    subgraph C4["CLAIMS chain"]
+        direction TB
+        IM("implementers")
+        QA("qa-engineer")
+        RV("reviewers")
+    end
+
+    AR -. "DIRECT ->" .-> C2
+    C2 -. "DIRECT ->" .-> PL
+    PL ==>|"CLAIMS =>"| C4
+
+    QA -. "ESCALATE ^" .-> PE
+    PE -. "fix scope" .-> QA
+    RV -. "RETURN <=" .-> C2
+    RV -. "RETURN <=" .-> AR
+    RV -. "RETURN <=" .-> IM
+
+    CS -. "meshing spec" .-> GE("geometry-engineer")
+    GE -. "RETURN <=" .-> CS
+```
+
+## 9. Цепочка claims
+
+Цепочка claims — это traveling artifact, гарантирующий что claims builder'ов доходят до reviewers независимо от lead-медиации между стадиями.
+
+Когда work-item требует Claim-Verify review, создаётся файл `constraints/claims.md` в папке work-item. Его жизненный цикл:
+
+1. **Создаётся** после acceptance дизайна — architect заполняет начальными constraints.
+2. **Заполняется** каждым constraint-ролем (security-engineer, performance-engineer, reliability-engineer, algorithm-scientist, computational-scientist) по мере завершения.
+3. **Замораживается** planner'ом до начала implementation. План ссылается на claims list.
+4. **Аннотируется** каждым implementer'ом — только verification notes, нельзя менять constraint claims.
+5. **Верифицируется** QA — каждый claim получает статус верификации.
+6. **Ревиючится** каждым независимым reviewer — claims list является основным входом для Claim-Verify стратегии.
+7. **Возвращается** lead — финальная disposition claims с pass/fail по каждому review domain.
+
+Это разрешает противоречие между существованием стратегии Claim-Verify и отсутствием формального claims артефакта. Файл создаётся на каждый work-item, это не постоянный файл репозитория.
+
+## 10. Примечание к карте ролей — типы взаимодействий
+
+Категории ролей в секции 7 остаются без изменений. Взаимодействия ролей теперь классифицируются по типу (`LEAD_MED`, `DIRECT`, `PARALLEL`, `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`) вместо предположения что все идут через lead. Полная матрица взаимодействий роль-к-роли доступна в документе дизайна work-item: `work-items/active/2026-04-06-optimize-interaction-matrix/design.md`.

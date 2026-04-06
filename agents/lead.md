@@ -105,6 +105,23 @@ Roadmap ownership stays upstream of the lead lane. The lead consumes approved ro
 
 For clearly local `additive` work, the lead may use a fast lane: record the classification and inline plan in the brief or status, then route `lead -> implementation -> qa -> lead`. Use this only when the change stays within one module or clearly bounded seam, introduces no new risk owner, and leaves existing contracts and shared abstractions unchanged. Re-classify immediately if the surface widens.
 
+## Interaction types
+
+Eight interaction types classify how roles communicate. The default is `LEAD_MED`; all others are opt-in optimizations requiring lead authorization and plan reference.
+
+| Type       | Symbol   | Purpose                                                                |
+|------------|----------|------------------------------------------------------------------------|
+| `LEAD_MED` | `->L->`  | Default. Every handoff through lead.                                   |
+| `DIRECT`   | `->`     | Direct artifact handoff; lead notified, not blocking.                  |
+| `PARALLEL` | `\|\|`   | Parallel execution; single aggregator point.                           |
+| `CLAIMS`   | `=>`     | Traveling artifact via `constraints/claims.md`.                        |
+| `RETURN`   | `<=`     | Reviewer returns finding to named specialist (structural gaps only).   |
+| `ESCALATE` | `^`      | Bounded escalation with specific metrics and question.                 |
+| `ADVISORY` | `~>`     | Consultant advisory only; never a pipeline gate.                       |
+| `NONE`     | `.`      | No direct interaction.                                                 |
+
+Full definitions, validity conditions, and safeguards (S1-S10) are in [operating-model.md](references/operating-model.md).
+
 ## Delegation contract
 
 Every delegated task must specify:
@@ -118,6 +135,7 @@ Every delegated task must specify:
 - `Allowed change surface`
 - `Must-not-break surfaces`
 - `Constraints`
+- `Interaction Type`: The interaction type (LEAD_MED, DIRECT, PARALLEL, CLAIMS, RETURN, ESCALATE, ADVISORY) governing this delegation. Default: LEAD_MED.
 - `Expected artifact`
 - `Acceptance criteria`
 - `Gate to next stage`
@@ -178,7 +196,7 @@ Require every pipeline subagent to end with exactly one gate status:
 - `PASS`: the artifact is accepted and may move to the next approved role.
 - `REVISE`: the artifact stays in the same role and needs a bounded correction.
 - `BLOCKED`: the role cannot proceed without new context, a decision, or a different role.
-- `RETURN(role)`: an independent reviewer sends the artifact back to a specific upstream role because the upstream artifact has a structural gap requiring that role's expertise — not a bounded correction. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely. Route the finding to the named role; do not treat it as REVISE or BLOCKED.
+- `RETURN(role)`: an independent reviewer sends the artifact back to a specific upstream role because the upstream artifact has a structural gap requiring that role's expertise — not a bounded correction. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely. Route the finding to the named role; do not treat it as REVISE or BLOCKED. Lead receives notification but does not re-interpret; reviewer must justify RETURN over standard findings. Format details in [subagent-contracts.md](references/subagent-contracts.md).
 - Default `REVISE` cap: no more than 2 consecutive `REVISE` cycles for the same role and artifact before the lead re-routes, escalates, or blocks the work.
 
 Do not advance work on optimism or partial acceptance.
