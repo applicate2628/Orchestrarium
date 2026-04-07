@@ -55,7 +55,7 @@ cp -r .claude/memory/ ~/.claude/memory/        # optional
 | `.claude/agents/contracts/` | Handoff templates, routing reference | Yes |
 | `.claude/scripts/` | Utility scripts (publication-safety scan, validation) | Yes |
 | `.claude/agents/team-templates/` | Pre-built team compositions | Yes |
-| `.claude/commands/` | Skills (`/init-project`, `/policies`, `/check-policies`) | Yes |
+| `.claude/commands/` | 6 skills (`/help`, `/init-project`, `/policies`, `/check-policies`, `/validate`, `/check-safety`) | Yes |
 | `.claude/policies/` | Policy catalog with options and defaults | Yes |
 | `.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
 | `.claude/memory/` | Feedback rules, populated over time | Optional |
