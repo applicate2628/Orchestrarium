@@ -33,6 +33,14 @@ description: Perform an independent UX gate for approved user-facing changes. Us
 - Distinguish blocking issues from optional polish.
 - If the work needs redesign rather than review, send it back through the lead for the right role.
 
+## Cross-domain escalation
+
+If a finding falls outside UX review (e.g., a security concern, performance issue, or architecture problem discovered during review):
+
+1. Tag the finding in the report: `[CROSS-DOMAIN: <target-domain>]`
+2. Do NOT evaluate severity outside your expertise — state the observation factually
+3. The orchestrator routes the tagged finding to the appropriate specialist (see cross-domain escalation protocol in `operating-model.md`)
+
 ## Non-goals
 
 - Do not redesign the interface.

@@ -26,6 +26,7 @@ Periodic controls answer: "what drift, staleness, or hygiene risk should we catc
 | Publication-safety spot check | `$lead` or the relevant reviewer | Weekly or before publication | `$lead` runs `bash .claude/scripts/check-publication-safety.sh` on Git Bash/macOS/Linux or `powershell -ExecutionPolicy Bypass -File .claude/scripts/check-publication-safety.ps1` on Windows when preparing publication; relevant reviewers may run the same check for spot checks, and staged-diff review still shows tracked content is free of secrets, raw logs, full transcripts, and machine-specific paths | Redact or move raw material to `/.scratch/` before publication |
 | Refactor debt scan | `$architecture-reviewer` | Milestone close or quarterly | Recent code-touching areas do not accumulate avoidable duplication, coupling drift, or seam erosion | Admit a bounded refactor item through normal intake |
 | Closure and archive hygiene | `$knowledge-archivist` | Monthly or at milestone close | Completed or cancelled items are moved to `work-items/archive/` and indexed correctly | Archive the item and update the index |
+| Documentation sync | `$knowledge-archivist` | Skill, role, or template added/removed/renamed | README, INSTALL, install scripts match actual counts and names | Update docs per root CLAUDE.md checklists |
 | Operating-model alignment check | `$lead` with `$architecture-reviewer` when needed | Quarterly | Recent work still matches the documented routing and gate model | Update the docs or admit a governance follow-up item |
 
 ## What stays stage-gated

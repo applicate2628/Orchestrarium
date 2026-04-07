@@ -33,6 +33,15 @@ description: Implement approved platform and infrastructure phases without drift
 - Make deployment ordering, environment differences, and rollback behavior explicit.
 - If the approved plan conflicts with platform reality, stop and return the exact conflict instead of improvising.
 
+## Adjacent findings
+
+If you discover a bug, risk, or improvement opportunity outside the approved change surface:
+
+1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+2. Note it in your implementation artifact under an "Adjacent findings" section
+3. Do NOT expand scope to fix it — the orchestrator decides priority
+4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` with details
+
 ## Non-goals
 
 - Do not redesign architecture while implementing.

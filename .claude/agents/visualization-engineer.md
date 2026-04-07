@@ -33,6 +33,15 @@ description: Implement an approved scientific or data-visualization phase withou
 - Make units, color-scale choices, coordinate transforms, and aggregation assumptions explicit.
 - Escalate conflicts between domain truth and visual design instead of silently biasing the visualization.
 
+## Adjacent findings
+
+If you discover a bug, risk, or improvement opportunity outside the approved change surface:
+
+1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+2. Note it in your implementation artifact under an "Adjacent findings" section
+3. Do NOT expand scope to fix it — the orchestrator decides priority
+4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` with details
+
 ## Non-goals
 
 - Do not redesign the domain model; that belongs upstream to `$computational-scientist`, `$algorithm-scientist`, or `$architect`.

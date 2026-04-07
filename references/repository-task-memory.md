@@ -10,9 +10,11 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 - `work-items/index.md` is the recovery entry point.
 - Active admitted items live in `work-items/active/<date>-<slug>/`.
 - Completed, cancelled, or superseded items move to `work-items/archive/<date>-<slug>/`.
-- The older ignored `.plans/` directory is legacy local history. Keep it only as scratch or traceability material; do not use it as the canonical tracked source of truth for new items.
+- `.reports/YYYY-MM/` stores session logs — intermediate results, session summaries. Named `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
+- `.plans/YYYY-MM/` stores plan logs — plan drafts and iterations. Named `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
+- `.reports/` and `.plans/` are traceability logs, not canonical sources. The canonical documentation lives in `work-items/`.
 
-`references/` remains the home for stable repository-wide methodology. `work-items/` is the home for item-specific execution memory.
+`references/` remains the home for stable repository-wide methodology. `work-items/` is the home for item-specific execution memory. `.reports/` and `.plans/` are session-level audit trails.
 
 ## Mandatory artifact set
 
