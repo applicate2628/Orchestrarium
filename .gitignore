@@ -1,3 +1,6 @@
+# Local working install (created by install scripts, not committed)
+/.claude/
+
 # Local-only scratch and legacy plan history.
 /.scratch/
 /.plans/

@@ -7,7 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE="$SCRIPT_DIR/.claude"
+SOURCE="$SCRIPT_DIR/src.claude"
 
 # Directories to install (order doesn't matter)
 DIRS=(agents commands policies scripts)
