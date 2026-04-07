@@ -14,7 +14,11 @@ Run a review chain on current changes using the `review` template.
    - **QA** (`subagent_type: qa-engineer`): verify test coverage, edge cases, regression risk
    - **Architecture reviewer** (`subagent_type: architecture-reviewer`): check fit with existing architecture, readability, maintainability
 
-3. **Compile results.** Present a unified review with:
+3. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
+   - If part of an active work-item → `work-items/active/<slug>/review.md`
+   - Log to `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md`
+
+4. **Compile results.** Present a unified review with:
    - Summary of changes
    - Issues found (CRITICAL / HIGH / MEDIUM / LOW)
    - Recommendations
@@ -22,6 +26,8 @@ Run a review chain on current changes using the `review` template.
 
 ## Rules
 
+- **Every stage MUST be invoked via the Agent tool** with the specified `subagent_type`. Do not role-play specialists inline.
+- Independent stages may be launched in parallel. Sequential stages must wait for the previous agent's artifact.
 - Pass accepted artifacts between stages — analyst findings go to QA, both go to reviewer.
 - If any stage finds a CRITICAL issue, flag it immediately without waiting for later stages.
 - Do not modify any files — this is read-only.

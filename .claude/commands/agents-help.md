@@ -20,10 +20,16 @@ Display a comprehensive overview of the skill-pack for the user.
 | `/agents-design` | Full research-to-plan chain (analyst → architect → planner) |
 | `/agents-security` | Security review (security-engineer → security-reviewer) |
 | `/agents-consult` | Get a second opinion via consultant (Codex) |
+| `/agents-implement` | Execute an approved plan phase by phase |
+| `/agents-perf` | Fix a performance issue (perf-engineer → impl → QA → perf-reviewer) |
+| `/agents-refactor` | Safe refactoring with blast-radius analysis |
+| `/agents-resume` | Resume an interrupted agent chain from saved state |
+| `/agents-qa-session` | Interactive testing: you direct, QA agent investigates |
 | `/agents-init-project` | Configure project policies interactively |
 | `/agents-policies` | View or update a specific policy (`/agents-policies testing tdd`) |
 | `/agents-check-policies` | Audit codebase compliance with configured policies |
 | `/agents-validate` | Structural integrity check of the skill-pack |
+| `/agents-status` | Project dashboard: active chains, policies, pack summary |
 | `/agents-check-safety` | Scan staged files for secrets before commit |
 
 ### Decision tree
