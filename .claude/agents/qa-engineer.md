@@ -36,6 +36,45 @@ description: Verify an approved phase against its acceptance criteria and test s
 - Treat regressions in nominally unrelated but plan-adjacent surfaces as first-class findings, not incidental noise.
 - Return `BLOCKED` when required performance evidence is missing for a performance-sensitive phase.
 
+## Bug registry
+
+When the gate decision is `REVISE` or `BLOCKED`, create a bug file in `work-items/bugs/` before returning the verdict:
+
+```markdown
+---
+severity: high | medium | low
+status: open
+found-by: qa-engineer
+context: <work-item slug or "standalone">
+---
+
+## Description
+
+<What is broken — one paragraph.>
+
+## Reproduction
+
+<Steps or test command to reproduce.>
+
+## Files involved
+
+- <file:line>
+```
+
+Always write bug files before returning a `REVISE` or `BLOCKED` verdict so that defects survive across sessions.
+
+## Test failure classification
+
+When existing tests fail after implementation changes, classify each failure:
+
+| Classification | Meaning | Action |
+| --- | --- | --- |
+| **regression** | Code broke existing behavior that should be preserved | Return `REVISE` — implementer fixes code |
+| **contract-change** | Implementation intentionally changed behavior, tests reflect the old contract | Return `REVISE` — the **same implementer** who changed the behavior updates the tests (QA does NOT fix these) |
+| **test-rot** | Test was already fragile, flaky, or testing an implementation detail rather than behavior | File low-severity bug in `work-items/bugs/`, continue — do not block the phase |
+
+Include the classification in the verification report for each failing test. For `contract-change`: do NOT attempt to fix tests yourself — return `REVISE` so the implementer can update them under the new contract.
+
 ## Non-goals
 
 - Do not implement product features outside test scope.

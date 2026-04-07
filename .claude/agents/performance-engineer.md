@@ -34,6 +34,34 @@ description: Define performance budgets, measurement strategy, bottleneck models
 - Keep performance guidance measurable, scoped, and reversible.
 - Call out workload assumptions, environment limits, and the strength of the evidence.
 
+## Performance issue registry
+
+When identifying a performance issue, create or update a file in `work-items/performance/`:
+
+```markdown
+---
+severity: high | medium | low
+status: open
+found-by: performance-engineer
+context: <work-item slug or "standalone">
+---
+
+## Description
+
+<What is slow or over budget — one paragraph.>
+
+## Metric
+
+- **Metric**: <what is measured>
+- **Budget**: <target value>
+- **Actual**: <measured value>
+- **Baseline**: <value before the change, if known>
+
+## Files involved
+
+- <file:line>
+```
+
 ## Non-goals
 
 - Do not act as the final independent performance gate.
