@@ -35,7 +35,7 @@ You are guiding the user through project policy configuration for the Claudestra
 - **Dependencies:** {policy description}
 ```
 
-6. **Confirm completion.** Tell the user the policies are saved and all agents will follow them. Mention `/policies` to view or update later.
+6. **Confirm completion.** Tell the user the policies are saved and all agents will follow them. Mention `/agents-policies` to view or update later.
 
 ## Rules
 

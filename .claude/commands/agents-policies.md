@@ -6,7 +6,7 @@ You are showing or updating project policies for the Claudestrator skill-pack.
 
 1. **Read current state.** Read `.claude/CLAUDE.md` and find the `## Project policies` section.
 
-2. **If no policies exist:** Tell the user "No project policies configured yet. Run `/init-project` to set them up." and stop.
+2. **If no policies exist:** Tell the user "No project policies configured yet. Run `/agents-init-project` to set them up." and stop.
 
 3. **If policies exist:** Display them in a clean table:
 
@@ -21,7 +21,7 @@ You are showing or updating project policies for the Claudestrator skill-pack.
    - Update the specific policy line in the `## Project policies` section of CLAUDE.md
    - Confirm the change
 
-5. **If no arguments:** After showing the table, ask "Want to change anything? Specify like: `/policies testing tdd`" and list available policy keys from the catalog.
+5. **If no arguments:** After showing the table, ask "Want to change anything? Specify like: `/agents-policies testing tdd`" and list available policy keys from the catalog.
 
 ## Rules
 
