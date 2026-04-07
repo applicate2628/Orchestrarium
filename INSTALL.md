@@ -4,19 +4,37 @@ This repo IS a pre-installed Claude Code skill-pack. The `.claude/` directory co
 
 ## Quick install — current machine (global)
 
-Copy the full skill pack to your global Claude config:
-
-```bash
-cp -r .claude/agents/ ~/.claude/agents/
-cp -r .claude/commands/ ~/.claude/commands/
-cp -r .claude/policies/ ~/.claude/policies/
-cp -r .claude/scripts/ ~/.claude/scripts/
-cp -r .claude/memory/ ~/.claude/memory/        # optional
+```powershell
+# PowerShell (Windows)
+.\install.ps1 -Global
 ```
 
-Then merge `.claude/CLAUDE.md` into `~/.claude/CLAUDE.md` (create if it doesn't exist).
+```bash
+# Bash (macOS / Linux / Git Bash)
+bash install.sh --global
+```
 
-After install, run `/init-project` in any repo to configure project policies.
+## Install into a specific repo
+
+```powershell
+.\install.ps1 -Target "D:\my-repo"
+```
+
+```bash
+bash install.sh --target /path/to/repo
+```
+
+## Install into current repo (default)
+
+```powershell
+.\install.ps1
+```
+
+```bash
+bash install.sh
+```
+
+The scripts handle clean removal of old files, copying, CLAUDE.md merging, and file-level verification. Re-running = reinstall. Memory is preserved across reinstalls.
 
 > **Note:** Global install makes agents and skills available everywhere. Project-specific policies (`## Project policies` in CLAUDE.md) are still per-repo — run `/init-project` in each repo where you want them.
 
