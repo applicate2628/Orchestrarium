@@ -8,8 +8,17 @@ Copy the full skill pack to your global Claude config:
 
 ```bash
 cp -r .claude/agents/ ~/.claude/agents/
+cp -r .claude/commands/ ~/.claude/commands/
+cp -r .claude/policies/ ~/.claude/policies/
+cp -r .claude/scripts/ ~/.claude/scripts/
 cp -r .claude/memory/ ~/.claude/memory/        # optional
 ```
+
+Then merge `.claude/CLAUDE.md` into `~/.claude/CLAUDE.md` (create if it doesn't exist).
+
+After install, run `/init-project` in any repo to configure project policies.
+
+> **Note:** Global install makes agents and skills available everywhere. Project-specific policies (`## Project policies` in CLAUDE.md) are still per-repo — run `/init-project` in each repo where you want them.
 
 ## Install into a target repository
 
