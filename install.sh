@@ -137,7 +137,7 @@ fi
 
 # Commands
 skill_count=$(find "$TARGET/commands" -name '*.md' -type f | wc -l)
-if [[ $skill_count -ge 6 ]]; then
+if [[ $skill_count -ge 13 ]]; then
   echo "  OK  commands/ ($skill_count skills)"
 else
   echo "  FAIL  commands/ (expected 6+, got $skill_count)"

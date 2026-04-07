@@ -63,10 +63,17 @@ All chains with 2+ stages save state in `work-items/active/` — both the status
 
 | Command | Purpose |
 | --- | --- |
+| `/agents-review` | Code review current changes (analyst → QA → reviewer) |
+| `/agents-bugfix` | Fix a bug (analyst → implementer → QA) |
+| `/agents-test` | Write or verify tests for specified code |
+| `/agents-research` | Investigate a question (analyst → architect) |
+| `/agents-design` | Full research-to-plan chain (analyst → architect → planner) |
+| `/agents-security` | Security review (security-engineer → security-reviewer) |
+| `/agents-consult` | Get a second opinion via consultant (Codex) |
 | `/agents-help` | Overview of all agents, templates, skills, and current policies |
-| `/agents-init-project` | Interactive wizard — configure project policies (testing, commits, branching, etc.) |
-| `/agents-policies` | View current policies or update one: `/policies testing tdd` |
-| `/agents-check-policies` | Read-only audit of codebase compliance with configured policies |
+| `/agents-init-project` | Interactive wizard — configure project policies |
+| `/agents-policies` | View current policies or update one: `/agents-policies testing tdd` |
+| `/agents-check-policies` | Audit codebase compliance with configured policies |
 | `/agents-validate` | Structural integrity check of the skill-pack |
 | `/agents-check-safety` | Scan staged files for secrets before commit |
 
@@ -122,7 +129,7 @@ The current pack covers several sub-teams:
 | `.claude/agents/lead.md` | Lead orchestrator — bootstrap, pipeline, delegation, gate semantics |
 | `.claude/scripts/` | Utility scripts: publication-safety scan, skill-pack validation |
 | `.claude/agents/team-templates/` | 8 JSON presets for common team compositions (full-delivery, quick-fix, research, review, etc.) |
-| `.claude/commands/` | 6 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
+| `.claude/commands/` | 13 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
 | `.claude/policies/catalog.md` | Policy catalog — available project-level choices with options and defaults |
 | `.claude/memory/` | Feedback rules from real usage — experience-based operating constraints |
 
@@ -162,7 +169,7 @@ Copy `.claude/` into your target repo:
 | `.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff contracts, operating model, subagent coordination |
 | `.claude/scripts/` | `.claude/scripts/` | Utility scripts (publication-safety scan, validation) |
 | `.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Team composition presets |
-| `.claude/commands/` | `.claude/commands/` | 6 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
+| `.claude/commands/` | `.claude/commands/` | 13 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
 | `.claude/policies/` | `.claude/policies/` | Policy catalog with configurable options |
 | `.claude/CLAUDE.md` | Merge into target `.claude/CLAUDE.md` | Governance entry point |
 | `.claude/memory/` (optional) | `.claude/memory/` | Experience-based feedback rules |
