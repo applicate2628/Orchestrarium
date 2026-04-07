@@ -2,6 +2,8 @@
 
 ## Delegation rule
 
+If `## Project policies` section is missing from this file, suggest running `/init-project` before starting implementation work.
+
 When subagent delegation is appropriate, classify the task and pick the matching team template from `.claude/agents/team-templates/`.
 
 **Decision tree:**
