@@ -19,7 +19,7 @@ cp -r .claude/memory/ ~/.claude/memory/        # optional
 | --- | --- | --- |
 | `.claude/agents/*.md` (31 files) | `.claude/agents/*.md` | Role definitions |
 | `.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff templates, routing reference |
-| `.claude/agents/scripts/` | `.claude/agents/scripts/` | Publication-safety scan automation |
+| `.claude/scripts/` | `.claude/scripts/` | Utility scripts (publication-safety scan, validation) |
 | `.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Pre-built team compositions (8 templates) |
 | `.claude/commands/` | `.claude/commands/` | Skills: `/init-project`, `/policies`, `/check-policies` |
 | `.claude/policies/` | `.claude/policies/` | Policy catalog with configurable options |
@@ -41,7 +41,7 @@ cp -r .claude/memory/ ~/.claude/memory/        # optional
 
 ### Steps
 
-1. Copy `.claude/agents/`, `.claude/commands/`, `.claude/policies/` into target repo's `.claude/`
+1. Copy `.claude/agents/`, `.claude/commands/`, `.claude/policies/`, `.claude/scripts/` into target repo's `.claude/`
 2. Merge `.claude/CLAUDE.md` content at the TOP of target's `.claude/CLAUDE.md` (prepend). Original user content stays below intact.
 3. Optionally copy `.claude/memory/`
 4. Restart Claude
@@ -53,7 +53,7 @@ cp -r .claude/memory/ ~/.claude/memory/        # optional
 | --- | --- | --- |
 | `.claude/agents/*.md` | 31 role definitions | Yes |
 | `.claude/agents/contracts/` | Handoff templates, routing reference | Yes |
-| `.claude/agents/scripts/` | Publication-safety scan | Yes |
+| `.claude/scripts/` | Utility scripts (publication-safety scan, validation) | Yes |
 | `.claude/agents/team-templates/` | Pre-built team compositions | Yes |
 | `.claude/commands/` | Skills (`/init-project`, `/policies`, `/check-policies`) | Yes |
 | `.claude/policies/` | Policy catalog with options and defaults | Yes |

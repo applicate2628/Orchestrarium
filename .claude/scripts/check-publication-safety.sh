@@ -4,8 +4,8 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  bash .claude/agents/scripts/check-publication-safety.sh
-  bash .claude/agents/scripts/check-publication-safety.sh --path <path>
+  bash .claude/scripts/check-publication-safety.sh
+  bash .claude/scripts/check-publication-safety.sh --path <path>
 
 By default, scans staged tracked files in the repository for publication-safety issues.
 Use --path only for local fixture testing or explicit manual checks.
@@ -81,7 +81,7 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 if [[ "$scan_mode" == "tracked" ]]; then
-  cmd+=(--cached -- . ':!.claude/agents/scripts/check-publication-safety.sh')
+  cmd+=(--cached -- . ':!.claude/scripts/check-publication-safety.sh')
 else
   cmd+=(--no-index -- "$scan_path")
 fi
