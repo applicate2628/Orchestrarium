@@ -105,7 +105,7 @@ The repository is built around a few stable rules:
 - re-classify immediately if scope widens beyond the current template
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
-Runtime governance lives in [.claude/CLAUDE.md](.claude/CLAUDE.md) — delegation rule, engineering hygiene, publication safety, role index, and project policies.
+Runtime governance lives in [src.claude/CLAUDE.md](src.claude/CLAUDE.md) — delegation rule, engineering hygiene, publication safety, role index, and project policies.
 Reference blueprints live in [references/](references/) — full operating model, diagrams, control matrix, and RU translations.
 
 ## Team structure
@@ -123,23 +123,23 @@ The current pack covers several sub-teams:
 
 ### Design principle
 
-`references/` contains blueprints — full design documents, diagrams, strategy comparisons, and translations. `.claude/` contains the implementation — self-contained runtime agents, governance, and tooling built from those blueprints. Target repos receive `.claude/` only; they never need `references/`.
+`references/` contains blueprints — full design documents, diagrams, strategy comparisons, and translations. `src.claude/` contains the implementation source — self-contained runtime agents, governance, and tooling built from those blueprints. Install scripts copy `src.claude/` into the target repo's `.claude/`. Target repos receive `.claude/` only; they never need `references/` or `src.claude/`.
 
-### `.claude/` — installable runtime package
+### `src.claude/` — skill-pack source (install copies this to `.claude/`)
 
 | Path | Purpose |
 | --- | --- |
-| `.claude/CLAUDE.md` | Governance: delegation rule, engineering hygiene, publication safety, role index |
-| `.claude/agents/<role>.md` (31 files) | Role definitions — discovered by Claude Code as `subagent_type` |
-| `.claude/agents/contracts/` | Handoff templates, routing reference, subagent coordination |
-| `.claude/agents/lead.md` | Lead orchestrator — bootstrap, pipeline, delegation, gate semantics |
-| `.claude/scripts/` | Utility scripts: publication-safety scan, skill-pack validation |
-| `.claude/agents/team-templates/` | 8 JSON presets for common team compositions (full-delivery, quick-fix, research, review, etc.) |
-| `.claude/commands/` | 19 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
-| `.claude/policies/catalog.md` | Policy catalog — available project-level choices with options and defaults |
-| `.claude/memory/` | Feedback rules from real usage — experience-based operating constraints |
+| `src.claude/CLAUDE.md` | Governance: delegation rule, engineering hygiene, publication safety, role index |
+| `src.claude/agents/<role>.md` (31 files) | Role definitions — discovered by Claude Code as `subagent_type` |
+| `src.claude/agents/contracts/` | Handoff templates, routing reference, subagent coordination |
+| `src.claude/agents/lead.md` | Lead orchestrator — bootstrap, pipeline, delegation, gate semantics |
+| `src.claude/scripts/` | Utility scripts: publication-safety scan, skill-pack validation |
+| `src.claude/agents/team-templates/` | 8 JSON presets for common team compositions (full-delivery, quick-fix, research, review, etc.) |
+| `src.claude/commands/` | 19 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
+| `src.claude/policies/catalog.md` | Policy catalog — available project-level choices with options and defaults |
+| `src.claude/memory/` | Feedback rules from real usage — experience-based operating constraints |
 
-Self-contained. No references to files outside `.claude/`. Can be copied into any repo as-is.
+Self-contained. No references to files outside `src.claude/`. Install scripts copy the contents into the target `.claude/` directory.
 
 ### `references/` — blueprints (dev-only, do NOT install)
 
@@ -167,18 +167,18 @@ Self-contained. No references to files outside `.claude/`. Can be copied into an
 
 ### What to install
 
-Copy `.claude/` into your target repo:
+Use the install scripts, or copy `src.claude/` contents into the target repo's `.claude/`:
 
 | Source | Destination | Purpose |
 | --- | --- | --- |
-| `.claude/agents/<role>.md` (31 files) | `.claude/agents/<role>.md` | Role definitions |
-| `.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff contracts, operating model, subagent coordination |
-| `.claude/scripts/` | `.claude/scripts/` | Utility scripts (publication-safety scan, validation) |
-| `.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Team composition presets |
-| `.claude/commands/` | `.claude/commands/` | 19 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
-| `.claude/policies/` | `.claude/policies/` | Policy catalog with configurable options |
-| `.claude/CLAUDE.md` | Merge into target `.claude/CLAUDE.md` | Governance entry point |
-| `.claude/memory/` (optional) | `.claude/memory/` | Experience-based feedback rules |
+| `src.claude/agents/<role>.md` (31 files) | `.claude/agents/<role>.md` | Role definitions |
+| `src.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff contracts, operating model, subagent coordination |
+| `src.claude/scripts/` | `.claude/scripts/` | Utility scripts (publication-safety scan, validation) |
+| `src.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Team composition presets |
+| `src.claude/commands/` | `.claude/commands/` | 19 skills |
+| `src.claude/policies/` | `.claude/policies/` | Policy catalog with configurable options |
+| `src.claude/CLAUDE.md` | Merge into target `.claude/CLAUDE.md` | Governance entry point |
+| `src.claude/memory/` (optional) | `.claude/memory/` | Experience-based feedback rules |
 
 ### What NOT to install
 
@@ -190,13 +190,13 @@ Copy `.claude/` into your target repo:
 
 ### Steps
 
-1. Copy `.claude/agents/`, `.claude/commands/`, `.claude/policies/`, `.claude/scripts/` into your target repo's `.claude/`
-2. Merge `.claude/CLAUDE.md` content at the TOP of your target repo's `.claude/CLAUDE.md`, or replace it entirely
-3. Optionally copy `.claude/memory/` for experience-based feedback rules
+1. Copy `src.claude/agents/`, `src.claude/commands/`, `src.claude/policies/`, `src.claude/scripts/` into your target repo's `.claude/`
+2. Merge `src.claude/CLAUDE.md` content at the TOP of your target repo's `.claude/CLAUDE.md`, or replace it entirely
+3. Optionally copy `src.claude/memory/` for experience-based feedback rules
 4. Restart Claude so the new agents and skills are discovered
 5. Run `/agents-init-project` to configure project policies
 
-`.claude/agents/contracts/` is NOT a duplicate of `references/`. Contracts contain handoff templates and a compact routing reference for the lead. References are the full canonical set including diagrams, translations, and strategy comparisons — they stay with the skill pack source.
+`src.claude/agents/contracts/` is NOT a duplicate of `references/`. Contracts contain handoff templates and a compact routing reference for the lead. References are the full canonical set including diagrams, translations, and strategy comparisons — they stay with the skill pack source.
 
 ### Memory
 
@@ -207,7 +207,7 @@ The `.claude/memory/` directory contains feedback rules collected during real us
 | `.claude/memory/` | Rules shipped with this skill pack |
 | `~/.claude/memory/` | User's own rules across all projects |
 
-Copy `.claude/memory/` if you want experience-based feedback rules to carry over. Otherwise target repos start with a clean slate and build their own.
+Copy `src.claude/memory/` if you want experience-based feedback rules to carry over. Otherwise target repos start with a clean slate and build their own.
 
 ## License
 

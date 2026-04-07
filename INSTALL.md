@@ -1,6 +1,6 @@
 # Installation
 
-This repo IS a pre-installed Claude Code skill-pack. The `.claude/` directory contains everything Claude Code needs at runtime. Installing into another machine or repository means copying `.claude/` contents to the right location.
+This repo contains the Claudestrator skill-pack source in `src.claude/`. Install scripts copy it into the target `.claude/` directory. Installing into another machine or repository means running `install.ps1` or `install.sh`.
 
 ## Quick install — current machine (global)
 
@@ -44,19 +44,19 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 
 | Source | Destination | Purpose |
 | --- | --- | --- |
-| `.claude/agents/*.md` (31 files) | `.claude/agents/*.md` | Role definitions |
-| `.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff templates, routing reference |
-| `.claude/scripts/` | `.claude/scripts/` | Utility scripts (publication-safety scan, validation) |
-| `.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Pre-built team compositions (8 templates) |
-| `.claude/commands/` | `.claude/commands/` | Skills: `/agents-init-project`, `/agents-policies`, `/agents-check-policies` |
-| `.claude/policies/` | `.claude/policies/` | Policy catalog with configurable options |
-| `.claude/CLAUDE.md` | Merge into target `.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index |
+| `src.claude/agents/*.md` (31 files) | `.claude/agents/*.md` | Role definitions |
+| `src.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff templates, routing reference |
+| `src.claude/scripts/` | `.claude/scripts/` | Utility scripts (publication-safety scan, validation) |
+| `src.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Pre-built team compositions (8 templates) |
+| `src.claude/commands/` | `.claude/commands/` | Skills: `/agents-init-project`, `/agents-policies`, `/agents-check-policies` |
+| `src.claude/policies/` | `.claude/policies/` | Policy catalog with configurable options |
+| `src.claude/CLAUDE.md` | Merge into target `.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index |
 
 ### Optional
 
 | Source | Destination | Purpose |
 | --- | --- | --- |
-| `.claude/memory/` | `.claude/memory/` | Experience-based feedback rules (starts empty if skipped) |
+| `src.claude/memory/` | `.claude/memory/` | Experience-based feedback rules (starts empty if skipped) |
 
 ### What NOT to copy
 
@@ -68,9 +68,9 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 
 ### Steps
 
-1. Copy `.claude/agents/`, `.claude/commands/`, `.claude/policies/`, `.claude/scripts/` into target repo's `.claude/`
-2. Merge `.claude/CLAUDE.md` content at the TOP of target's `.claude/CLAUDE.md` (prepend). Original user content stays below intact.
-3. Optionally copy `.claude/memory/`
+1. Copy `src.claude/agents/`, `src.claude/commands/`, `src.claude/policies/`, `src.claude/scripts/` into target repo's `.claude/`
+2. Merge `src.claude/CLAUDE.md` content at the TOP of target's `.claude/CLAUDE.md` (prepend). Original user content stays below intact.
+3. Optionally copy `src.claude/memory/`
 4. Restart Claude
 5. Run `/agents-init-project` to configure project policies
 
@@ -78,15 +78,15 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 
 | Directory | Contents | Installable? |
 | --- | --- | --- |
-| `.claude/agents/*.md` | 31 role definitions | Yes |
-| `.claude/agents/contracts/` | Handoff templates, routing reference | Yes |
-| `.claude/scripts/` | Utility scripts (publication-safety scan, validation) | Yes |
-| `.claude/agents/team-templates/` | Pre-built team compositions | Yes |
-| `.claude/commands/` | 19 skills (`/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety`) | Yes |
-| `.claude/policies/` | Policy catalog with options and defaults | Yes |
-| `.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
-| `.claude/memory/` | Feedback rules, populated over time | Optional |
+| `src.claude/agents/*.md` | 31 role definitions | Yes |
+| `src.claude/agents/contracts/` | Handoff templates, routing reference | Yes |
+| `src.claude/scripts/` | Utility scripts (publication-safety scan, validation) | Yes |
+| `src.claude/agents/team-templates/` | Pre-built team compositions | Yes |
+| `src.claude/commands/` | 19 skills (`/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety`) | Yes |
+| `src.claude/policies/` | Policy catalog with options and defaults | Yes |
+| `src.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
+| `src.claude/memory/` | Feedback rules, populated over time | Optional |
 | `references/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
 | `work-items/` | This repo's task memory | No — skill-pack internal |
 
-`.claude/agents/contracts/` is NOT a duplicate of `references/`. It contains the subset of files that role definitions actually reference at runtime.
+`src.claude/agents/contracts/` is NOT a duplicate of `references/`. It contains the subset of files that role definitions actually reference at runtime.

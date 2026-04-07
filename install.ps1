@@ -19,7 +19,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Source = Join-Path $ScriptDir ".claude"
+$Source = Join-Path $ScriptDir "src.claude"
 
 $Dirs = @("agents", "commands", "policies", "scripts")
 $OptionalDirs = @("memory")

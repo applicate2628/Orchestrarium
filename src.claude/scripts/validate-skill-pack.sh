@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 # Validate Claudestrator skill-pack structural integrity.
-# Run from repo root: bash .claude/scripts/validate-skill-pack.sh
+# Run from repo root: bash src.claude/scripts/validate-skill-pack.sh
+#   or after install:  bash .claude/scripts/validate-skill-pack.sh
 set -euo pipefail
+
+# Auto-detect pack root: src.claude/ (dev repo) or .claude/ (installed)
+if [[ -d "src.claude/agents" ]]; then
+  PACK="src.claude"
+elif [[ -d ".claude/agents" ]]; then
+  PACK=".claude"
+else
+  echo "FAIL: neither src.claude/ nor .claude/ found. Run from repo root."
+  exit 1
+fi
 
 errors=0
 warnings=0
@@ -16,29 +27,29 @@ echo ""
 
 # 1. Core files exist
 echo "[Core files]"
-for f in .claude/CLAUDE.md .claude/agents/lead.md .claude/agents/consultant.md \
-         .claude/agents/contracts/operating-model.md \
-         .claude/agents/contracts/subagent-contracts.md \
-         .claude/policies/catalog.md; do
+for f in $PACK/CLAUDE.md $PACK/agents/lead.md $PACK/agents/consultant.md \
+         $PACK/agents/contracts/operating-model.md \
+         $PACK/agents/contracts/subagent-contracts.md \
+         $PACK/policies/catalog.md; do
   if [[ -f "$f" ]]; then pass "$f exists"; else fail "$f missing"; fi
 done
 echo ""
 
 # 2. Role index vs actual agent files
 echo "[Role index consistency]"
-if [[ -f .claude/CLAUDE.md ]]; then
+if [[ -f $PACK/CLAUDE.md ]]; then
   # Extract role names from CLAUDE.md (lines with $role-name pattern)
-  roles=$(grep -oE '\$[a-z][-a-z]*' .claude/CLAUDE.md | sed 's/^\$//' | sort -u)
+  roles=$(grep -oE '\$[a-z][-a-z]*' $PACK/CLAUDE.md | sed 's/^\$//' | sort -u)
   for role in $roles; do
-    if [[ -f ".claude/agents/${role}.md" ]]; then
+    if [[ -f "$PACK/agents/${role}.md" ]]; then
       pass "$role has agent file"
     else
-      fail "$role in role index but .claude/agents/${role}.md missing"
+      fail "$role in role index but $PACK/agents/${role}.md missing"
     fi
   done
 
   # Check for orphaned agent files
-  for f in .claude/agents/*.md; do
+  for f in $PACK/agents/*.md; do
     name=$(basename "$f" .md)
     if ! echo "$roles" | grep -qx "$name"; then
       warn "$name has agent file but not in CLAUDE.md role index"
@@ -49,7 +60,7 @@ echo ""
 
 # 3. Team templates have required fields
 echo "[Team templates]"
-for f in .claude/agents/team-templates/*.json; do
+for f in $PACK/agents/team-templates/*.json; do
   name=$(basename "$f")
   if grep -q '"requiresLead"' "$f"; then
     pass "$name has requiresLead"
@@ -66,11 +77,11 @@ echo ""
 
 # 4. Skills reference valid files
 echo "[Skills]"
-for f in .claude/commands/*.md; do
+for f in $PACK/commands/*.md; do
   name=$(basename "$f" .md)
   pass "/$name skill exists"
 done
-if [[ -f .claude/policies/catalog.md ]]; then
+if [[ -f $PACK/policies/catalog.md ]]; then
   pass "policy catalog exists"
 else
   fail "policy catalog missing (commands reference it)"
@@ -79,7 +90,7 @@ echo ""
 
 # 5. Scripts are executable-ready
 echo "[Scripts]"
-for f in .claude/scripts/*.sh; do
+for f in $PACK/scripts/*.sh; do
   if head -1 "$f" | grep -q '^#!'; then
     pass "$(basename "$f") has shebang"
   else
@@ -91,7 +102,7 @@ echo ""
 # 6. CLAUDE.md has required sections
 echo "[CLAUDE.md sections]"
 for section in "Delegation rule" "Role index" "Engineering hygiene" "Publication safety"; do
-  if grep -q "## $section" .claude/CLAUDE.md; then
+  if grep -q "## $section" $PACK/CLAUDE.md; then
     pass "## $section present"
   else
     fail "## $section missing from CLAUDE.md"
