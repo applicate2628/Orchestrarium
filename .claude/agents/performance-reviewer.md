@@ -34,6 +34,12 @@ description: Perform an independent performance gate for an approved phase and r
 - Call out environment limits and measurement blind spots explicitly.
 - If the phase needs new tuning work, send it back through `performance-engineer`.
 
+## Performance issue registry
+
+When the gate decision is `REVISE` or `BLOCKED`, create or update performance issue files in `work-items/performance/` using the same format defined in the `performance-engineer` role. Set `found-by: performance-reviewer`.
+
+Always write performance issue files before returning a `REVISE` or `BLOCKED` verdict.
+
 ## Cross-domain escalation
 
 If a finding falls outside performance review (e.g., a security concern, architecture issue, or accessibility problem discovered during review):
