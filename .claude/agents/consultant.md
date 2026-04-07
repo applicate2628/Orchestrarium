@@ -49,7 +49,7 @@ Do not invoke for:
 
 ### Codex provider (default)
 
-Use when `codex` is available in the environment:
+Check availability first (`which codex` on Unix, `where codex` on Windows, or `command -v codex`). If available:
 
 ```bash
 codex --quiet --full-auto "$PROMPT"
@@ -58,7 +58,7 @@ codex --quiet --full-auto "$PROMPT"
 - For hard tasks, use `--model gpt-5.4 --reasoning-effort xhigh`.
 - Prefer passing context via file references in the prompt rather than piping large artifacts through stdin.
 - Wait 5–15 minutes before treating a run as stalled. Do not start a parallel chat while one may still be running.
-- If Codex fails, times out, or hits quota/auth limits, record that in the plan file and fall back to the internal path.
+- If Codex is not installed, fails, times out, or hits quota/auth limits, fall back to the internal path immediately.
 
 ### Internal-subagent fallback
 
