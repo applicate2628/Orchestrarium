@@ -13,6 +13,13 @@ Display a comprehensive overview of the skill-pack for the user.
 | Command | Purpose |
 | --- | --- |
 | `/agents-help` | This overview |
+| `/agents-review` | Code review current changes (analyst → QA → reviewer) |
+| `/agents-bugfix` | Fix a bug (analyst → implementer → QA) |
+| `/agents-test` | Write or verify tests for specified code |
+| `/agents-research` | Investigate a question (analyst → architect) |
+| `/agents-design` | Full research-to-plan chain (analyst → architect → planner) |
+| `/agents-security` | Security review (security-engineer → security-reviewer) |
+| `/agents-consult` | Get a second opinion via consultant (Codex) |
 | `/agents-init-project` | Configure project policies interactively |
 | `/agents-policies` | View or update a specific policy (`/agents-policies testing tdd`) |
 | `/agents-check-policies` | Audit codebase compliance with configured policies |

@@ -157,7 +157,7 @@ if ($templateCount -ge 8) {
 
 # Commands
 $skillCount = (Get-ChildItem -File (Join-Path $TargetRoot "commands") -Filter "*.md").Count
-if ($skillCount -ge 6) {
+if ($skillCount -ge 13) {
     Write-Host "  OK  commands/ ($skillCount skills)" -ForegroundColor Green
 } else {
     Write-Host "  FAIL  commands/ (expected 6+, got $skillCount)" -ForegroundColor Red
