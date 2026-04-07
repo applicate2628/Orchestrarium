@@ -117,7 +117,7 @@ The current pack covers several sub-teams:
 | `.claude/agents/<role>.md` (31 files) | Role definitions — discovered by Claude Code as `subagent_type` |
 | `.claude/agents/contracts/` | Handoff templates, routing reference, subagent coordination |
 | `.claude/agents/lead.md` | Lead orchestrator — bootstrap, pipeline, delegation, gate semantics |
-| `.claude/agents/scripts/` | Publication-safety scan (`check-publication-safety.sh` / `.ps1`) |
+| `.claude/scripts/` | Utility scripts: publication-safety scan, skill-pack validation |
 | `.claude/agents/team-templates/` | 8 JSON presets for common team compositions (full-delivery, quick-fix, research, review, etc.) |
 | `.claude/commands/` | Skills: `/init-project`, `/policies`, `/check-policies` |
 | `.claude/policies/catalog.md` | Policy catalog — available project-level choices with options and defaults |
@@ -157,7 +157,7 @@ Copy `.claude/` into your target repo:
 | --- | --- | --- |
 | `.claude/agents/<role>.md` (31 files) | `.claude/agents/<role>.md` | Role definitions |
 | `.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff contracts, operating model, subagent coordination |
-| `.claude/agents/scripts/` | `.claude/agents/scripts/` | Publication-safety scan automation |
+| `.claude/scripts/` | `.claude/scripts/` | Utility scripts (publication-safety scan, validation) |
 | `.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Team composition presets |
 | `.claude/commands/` | `.claude/commands/` | Skills: `/init-project`, `/policies`, `/check-policies` |
 | `.claude/policies/` | `.claude/policies/` | Policy catalog with configurable options |
@@ -174,7 +174,7 @@ Copy `.claude/` into your target repo:
 
 ### Steps
 
-1. Copy `.claude/agents/`, `.claude/commands/`, `.claude/policies/` into your target repo's `.claude/`
+1. Copy `.claude/agents/`, `.claude/commands/`, `.claude/policies/`, `.claude/scripts/` into your target repo's `.claude/`
 2. Merge `.claude/CLAUDE.md` content at the TOP of your target repo's `.claude/CLAUDE.md`, or replace it entirely
 3. Optionally copy `.claude/memory/` for experience-based feedback rules
 4. Restart Claude so the new agents and skills are discovered

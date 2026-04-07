@@ -34,7 +34,7 @@ if (-not $repoRoot) {
 }
 
 Set-Location $repoRoot
-$scriptPath = Join-Path $repoRoot '.claude\agents\scripts\check-publication-safety.sh'
+$scriptPath = Join-Path $repoRoot '.claude\scripts\check-publication-safety.sh'
 
 & $shellExecutable $scriptPath @Arguments
 exit $LASTEXITCODE
