@@ -12,10 +12,12 @@ Display a comprehensive overview of the skill-pack for the user.
 
 | Command | Purpose |
 | --- | --- |
-| `/help` | This overview |
-| `/init-project` | Configure project policies interactively |
-| `/policies` | View or update a specific policy (`/policies testing tdd`) |
-| `/check-policies` | Audit codebase compliance with configured policies |
+| `/agents-help` | This overview |
+| `/agents-init-project` | Configure project policies interactively |
+| `/agents-policies` | View or update a specific policy (`/agents-policies testing tdd`) |
+| `/agents-check-policies` | Audit codebase compliance with configured policies |
+| `/agents-validate` | Structural integrity check of the skill-pack |
+| `/agents-check-safety` | Scan staged files for secrets before commit |
 
 ### Decision tree
 

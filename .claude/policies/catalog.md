@@ -1,6 +1,6 @@
 # Policy Catalog
 
-Each policy area has a key, a question for the user, available options, and a default. The `/init-project` skill uses this catalog to guide onboarding. The result is written to `## Project policies` in CLAUDE.md.
+Each policy area has a key, a question for the user, available options, and a default. The `/agents-init-project` skill uses this catalog to guide onboarding. The result is written to `## Project policies` in CLAUDE.md.
 
 ## testing-methodology
 
@@ -128,7 +128,7 @@ This is a free-form field. Examples:
 
 ## Example output
 
-After `/init-project` completes, the following section is added to CLAUDE.md:
+After `/agents-init-project` completes, the following section is added to CLAUDE.md:
 
 ```markdown
 ## Project policies

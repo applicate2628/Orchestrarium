@@ -5,7 +5,7 @@ You are auditing the current codebase for compliance with configured project pol
 ## Steps
 
 1. **Read policies.** Read the `## Project policies` section from `.claude/CLAUDE.md`.
-   - If no policies exist, say "No project policies configured. Run `/init-project` first." and stop.
+   - If no policies exist, say "No project policies configured. Run `/agents-init-project` first." and stop.
 
 2. **Run checks for each configured policy.** Only check policies that are actually set (skip any marked as "none" or absent).
 

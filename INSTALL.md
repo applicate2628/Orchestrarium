@@ -36,7 +36,7 @@ bash install.sh
 
 The scripts handle clean removal of old files, copying, CLAUDE.md merging, and file-level verification. Re-running = reinstall. Memory is preserved across reinstalls.
 
-> **Note:** Global install makes agents and skills available everywhere. Project-specific policies (`## Project policies` in CLAUDE.md) are still per-repo — run `/init-project` in each repo where you want them.
+> **Note:** Global install makes agents and skills available everywhere. Project-specific policies (`## Project policies` in CLAUDE.md) are still per-repo — run `/agents-init-project` in each repo where you want them.
 
 ## Install into a target repository
 
@@ -48,7 +48,7 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 | `.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff templates, routing reference |
 | `.claude/scripts/` | `.claude/scripts/` | Utility scripts (publication-safety scan, validation) |
 | `.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Pre-built team compositions (8 templates) |
-| `.claude/commands/` | `.claude/commands/` | Skills: `/init-project`, `/policies`, `/check-policies` |
+| `.claude/commands/` | `.claude/commands/` | Skills: `/agents-init-project`, `/agents-policies`, `/agents-check-policies` |
 | `.claude/policies/` | `.claude/policies/` | Policy catalog with configurable options |
 | `.claude/CLAUDE.md` | Merge into target `.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index |
 
@@ -72,7 +72,7 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 2. Merge `.claude/CLAUDE.md` content at the TOP of target's `.claude/CLAUDE.md` (prepend). Original user content stays below intact.
 3. Optionally copy `.claude/memory/`
 4. Restart Claude
-5. Run `/init-project` to configure project policies
+5. Run `/agents-init-project` to configure project policies
 
 ## File separation
 
@@ -82,7 +82,7 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 | `.claude/agents/contracts/` | Handoff templates, routing reference | Yes |
 | `.claude/scripts/` | Utility scripts (publication-safety scan, validation) | Yes |
 | `.claude/agents/team-templates/` | Pre-built team compositions | Yes |
-| `.claude/commands/` | 6 skills (`/help`, `/init-project`, `/policies`, `/check-policies`, `/validate`, `/check-safety`) | Yes |
+| `.claude/commands/` | 6 skills (`/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety`) | Yes |
 | `.claude/policies/` | Policy catalog with options and defaults | Yes |
 | `.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
 | `.claude/memory/` | Feedback rules, populated over time | Optional |
