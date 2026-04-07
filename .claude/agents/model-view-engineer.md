@@ -35,6 +35,15 @@ description: Implement an approved Qt model or view phase without redesigning th
 - Make performance-sensitive behavior explicit when changing large tables or trees.
 - If the spec conflicts with Qt semantics or the existing model shape, stop and return the exact conflict.
 
+## Adjacent findings
+
+If you discover a bug, risk, or improvement opportunity outside the approved change surface:
+
+1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+2. Note it in your implementation artifact under an "Adjacent findings" section
+3. Do NOT expand scope to fix it — the orchestrator decides priority
+4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` with details
+
 ## Non-goals
 
 - Do not redesign application UI polish or widget styling.

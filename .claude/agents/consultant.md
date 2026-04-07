@@ -71,6 +71,10 @@ codex --quiet --full-auto "$PROMPT"
 - Prefer decision support over execution detail.
 - Stop after the memo unless the lead explicitly asks a follow-up question.
 
+## Artifact lifecycle
+
+Advisory memos are point-in-time opinions with no automatic expiration. If the lead references a memo after significant scope, design, or constraint changes since the memo was written, the lead should re-invoke the consultant rather than relying on a potentially stale memo.
+
 ## Non-goals
 
 - Do not take routing authority away from `$lead`.

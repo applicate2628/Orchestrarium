@@ -33,6 +33,15 @@ description: Implement an approved frontend phase without redefining product or 
 - Keep state changes, component changes, and visual changes easy to review.
 - If the specification is ambiguous or the plan conflicts with reality, stop and return `BLOCKED` with the exact gap.
 
+## Adjacent findings
+
+If you discover a bug, risk, or improvement opportunity outside the approved change surface:
+
+1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+2. Note it in your implementation artifact under an "Adjacent findings" section
+3. Do NOT expand scope to fix it — the orchestrator decides priority
+4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` with details
+
 ## Non-goals
 
 - Do not redesign the architecture while implementing.

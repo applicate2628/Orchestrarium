@@ -40,6 +40,26 @@ description: Review an approved implementation phase or repository control-plane
 - Treat passing tests as insufficient if architectural cohesion, seam integrity, or module isolation were degraded.
 - For semantic control-plane docs, focus on ownership boundaries, independent gates, route coherence, policy blast radius, and contradictions between source-of-truth files.
 
+## REVISE routing
+
+When returning REVISE, specify the target:
+
+| Finding type | REVISE target | Rationale |
+| --- | --- | --- |
+| Code-level issue (complexity, coupling, naming, diff hygiene) | Implementer | Code fix within approved design |
+| Design-level issue (wrong abstraction, missing seam, contract violation) | Architect | Design revision needed before re-implementation |
+| Plan-level issue (phase boundaries wrong, missing phase, wrong ordering) | Planner | Plan revision needed |
+
+If a single REVISE report contains findings at multiple levels, group them by target. The orchestrator routes each group to the correct role.
+
+## Cross-domain escalation
+
+If a finding falls outside architecture review (e.g., a security concern, performance regression, or accessibility issue discovered during review):
+
+1. Tag the finding in the report: `[CROSS-DOMAIN: <target-domain>]`
+2. Do NOT evaluate severity outside your expertise — state the observation factually
+3. The orchestrator routes the tagged finding to the appropriate specialist (see cross-domain escalation protocol in `operating-model.md`)
+
 ## Non-goals
 
 - Do not re-implement the feature.

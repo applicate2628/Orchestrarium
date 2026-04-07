@@ -39,6 +39,15 @@ description: Implement an approved geometry or spatial-computation phase without
 - `geometry-engineer` does NOT own discretization schemes or solver-level mesh requirements — those belong to `$computational-scientist`.
 - If a meshing task involves both geometric implementation and discretization strategy, confirm the boundary with the lead before proceeding.
 
+## Adjacent findings
+
+If you discover a bug, risk, or improvement opportunity outside the approved change surface:
+
+1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+2. Note it in your implementation artifact under an "Adjacent findings" section
+3. Do NOT expand scope to fix it — the orchestrator decides priority
+4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` with details
+
 ## Non-goals
 
 - Do not redefine the scientific model; that belongs upstream to `$computational-scientist`.
