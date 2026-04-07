@@ -1,6 +1,6 @@
 ---
 name: lead
-description: Coordinate multi-agent work as a lead or orchestrator rather than a coder. Use when Claude Code needs to route work through narrow roles, assign owners for critical risks such as architecture, algorithms, numerics, performance, security, quality, or maintainability, define approved inputs and gates, and keep a single source of truth for accepted decisions. Use by default whenever delegation is needed and no narrower role has already been delegated.
+description: Coordinate complex multi-agent work requiring parallel risk owners, integration ownership, work-items management, or re-intake decisions. Use when the team template says requiresLead is true. For simple chains (quick-fix, research, review), the main conversation manages directly without lead.
 ---
 
 # Lead
@@ -10,10 +10,10 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 > **DO NOT implement.** When receiving a request or delegation, execute in order:
 
 0. **Verify work-items (ENFORCED)** — cannot be skipped:
-   - Invoke `$knowledge-archivist` with task: "Check completeness of all active work-items in `work-items/active/`. For each item verify: `roadmap.md` exists and is current, `brief.md` has scope/owners/stage, `status.md` has current snapshot. Report missing artifacts, stale items, orphaned items."
-   - If active items exist: archivist verifies completeness before lead proceeds to step 1.
-   - If no active items: create first work-item stub with `brief.md` and `status.md` before proceeding to step 1.
-   - Lead CANNOT proceed to step 1 until `$knowledge-archivist` returns a completeness audit.
+   - Check `work-items/active/` for existing items. For each, verify: `roadmap.md` exists, `brief.md` has scope/owners/stage, `status.md` has current snapshot.
+   - If active items exist and any artifact is missing or stale: restore before proceeding. For multiple active items or complex state, invoke `$knowledge-archivist` for a completeness audit before continuing.
+   - If no active items: create the work-item folder stub. Step 2 populates it.
+   - **Admission source (ENFORCED)**: every `roadmap.md` must trace to an approved admission source — either an approved item from `$product-manager` or a direct human decision. Lead CANNOT generate a roadmap item on its own authority. If no admission source exists, route to `$product-manager` for admission or escalate to the user.
 1. **Classify** the request: cosmetic | additive | behavioral | breaking-or-cross-cutting
 2. **Restore or create**: `roadmap.md`, `brief.md`, `status.md` in `work-items/active/`
 3. **Route** to the narrowest specialist role — do not perform specialist work yourself
@@ -60,10 +60,11 @@ The canonical brief should capture:
 ## Task-memory rule
 
 - For this repository, keep each lead-routed non-trivial item in `work-items/active/<date>-<slug>/` and use `work-items/index.md` as the recovery entry point.
-- Before non-trivial work starts or resumes, ensure `roadmap.md`, `brief.md`, and `status.md` exist and are current. `roadmap.md` may link to an upstream roadmap artifact or record a direct human admission source when the user is the roadmap source.
+- Before non-trivial work starts or resumes, ensure `roadmap.md`, `brief.md`, and `status.md` exist and are current. `roadmap.md` must trace to an approved admission source: an approved item from `$product-manager` or a direct human decision. Lead cannot generate a roadmap item on its own authority.
 - Before implementation or review begins, ensure `plan.md` and the required upstream artifacts exist or are explicitly linked from the item folder.
 - If the current stage needs an upstream artifact such as `research.md`, `design.md`, `constraints/*.md`, `plan.md`, or a required review report and that artifact is missing or stale, stop and restore it or route the item back to the correct upstream role.
 - After every accepted artifact, interruption, or major routing change, update `status.md` so the next session can resume without relying on chat memory.
+- `closure.md` is mandatory before moving an item to `work-items/archive/`. It holds the final closeout record: outcome, residual risk, and archive location.
 - If task memory is missing or stale, stop and restore it instead of improvising from session memory.
 
 ## Operating pipeline
@@ -105,46 +106,11 @@ Roadmap ownership stays upstream of the lead lane. The lead consumes approved ro
 
 For clearly local `additive` work, the lead may use a fast lane: record the classification and inline plan in the brief or status, then route `lead -> implementation -> qa -> lead`. Use this only when the change stays within one module or clearly bounded seam, introduces no new risk owner, and leaves existing contracts and shared abstractions unchanged. Re-classify immediately if the surface widens.
 
-## Interaction types
-
-Eight interaction types classify how roles communicate. The default is `LEAD_MED`; all others are opt-in optimizations requiring lead authorization and plan reference.
-
-| Type       | Symbol   | Purpose                                                                |
-|------------|----------|------------------------------------------------------------------------|
-| `LEAD_MED` | `->L->`  | Default. Every handoff through lead.                                   |
-| `DIRECT`   | `->`     | Direct artifact handoff; lead notified, not blocking.                  |
-| `PARALLEL` | `\|\|`   | Parallel execution; single aggregator point.                           |
-| `CLAIMS`   | `=>`     | Traveling artifact via `constraints/claims.md`.                        |
-| `RETURN`   | `<=`     | Reviewer returns finding to named specialist (structural gaps only).   |
-| `ESCALATE` | `^`      | Bounded escalation with specific metrics and question.                 |
-| `ADVISORY` | `~>`     | Consultant advisory only; never a pipeline gate.                       |
-| `NONE`     | `.`      | No direct interaction.                                                 |
-
-Full definitions, validity conditions, and safeguards (S1-S10) are in [operating-model.md](references/operating-model.md).
-
 ## Delegation contract
 
-Every delegated task must specify:
+Use the handoff template and response format in [subagent-contracts.md](contracts/subagent-contracts.md). If any field is missing, tighten the task before delegating.
 
-- `Role`
-- `Goal`
-- `Approved inputs`
-- `Allowed tools`
-- `Scope`
-- `Out of scope`
-- `Allowed change surface`
-- `Must-not-break surfaces`
-- `Constraints`
-- `Interaction Type`: The interaction type (LEAD_MED, DIRECT, PARALLEL, CLAIMS, RETURN, ESCALATE, ADVISORY) governing this delegation. Default: LEAD_MED.
-- `Expected artifact`
-- `Acceptance criteria`
-- `Gate to next stage`
-
-If any field is missing, tighten the task before delegating it.
-
-- **No delegation without verified brief**: do not dispatch any specialist role until `brief.md` and `status.md` exist and pass the `$knowledge-archivist` completeness audit.
-
-Use the templates in [subagent-contracts.md](references/subagent-contracts.md) for concrete handoffs and response format.
+- **No delegation without verified brief**: do not dispatch any specialist role until `brief.md` and `status.md` exist and are current.
 
 ## Delegation-first rule
 
@@ -165,29 +131,12 @@ Use the templates in [subagent-contracts.md](references/subagent-contracts.md) f
 
 ## Review strategy rule
 
-Before delegating to any independent reviewer, choose one of two strategies and state it explicitly in the task.
+Before delegating to any independent reviewer, choose one of two strategies:
 
-**Claim-Verify** — use when the risk surface is known and bounded.
-- Require the upstream specialist to include a **claims section** in their artifact: a numbered list of falsifiable guarantees.
-- Pass the reviewer: the implementation artifact + the claims list only. Do not pass the full design package.
-- Reviewer task: (1) verify each claim against the artifact, (2) identify risk surfaces not covered by any claim.
+- **Claim-Verify**: risk is known and bounded. Builder includes claims list; reviewer verifies claims + finds uncovered surfaces.
+- **Adversarial**: risk is novel or externally exposed. Reviewer receives only the artifact and finds top 3 failure/attack vectors.
 
-**Adversarial** — use when the risk surface is novel, externally exposed, or the builder may have systematic blind spots.
-- Pass the reviewer: the implementation artifact only. Do not pass the upstream design package.
-- Reviewer task: assume an adversary or failure mode not anticipated by the builder. Find the three highest-probability ways this artifact fails or is exploited. Show the exact mechanism for each.
-
-**Which to choose:**
-
-| Signal | Claim-Verify | Adversarial |
-|---|---|---|
-| Risk is well-understood and bounded | preferred | — |
-| Risk is novel or externally exposed | — | preferred |
-| Missing an unknown risk is critical | — | preferred |
-| Speed is a constraint | preferred | — |
-
-When both apply, run Claim-Verify first, then Adversarial. The adversarial reviewer must not receive the Claim-Verify report — independence must be preserved.
-
-The full decision guide with examples lives in [operating-model.md](references/operating-model.md) under "Review strategy selection".
+When both apply, run Claim-Verify first, then Adversarial. The adversarial reviewer must not receive the Claim-Verify report.
 
 ## Gate semantics
 
@@ -196,105 +145,41 @@ Require every pipeline subagent to end with exactly one gate status:
 - `PASS`: the artifact is accepted and may move to the next approved role.
 - `REVISE`: the artifact stays in the same role and needs a bounded correction.
 - `BLOCKED`: the role cannot proceed without new context, a decision, or a different role.
-- `RETURN(role)`: an independent reviewer sends the artifact back to a specific upstream role because the upstream artifact has a structural gap requiring that role's expertise — not a bounded correction. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely. Route the finding to the named role; do not treat it as REVISE or BLOCKED. Lead receives notification but does not re-interpret; reviewer must justify RETURN over standard findings. Format details in [subagent-contracts.md](references/subagent-contracts.md).
-- Default `REVISE` cap: no more than 2 consecutive `REVISE` cycles for the same role and artifact before the lead re-routes, escalates, or blocks the work.
+- `RETURN(role)`: an independent reviewer sends the artifact back to a specific upstream role because the upstream artifact has a structural gap requiring that role's expertise — not a bounded correction. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely. Route the finding to the named role; do not treat it as REVISE or BLOCKED. Lead receives notification but does not re-interpret; reviewer must justify RETURN over standard findings. Format details in [subagent-contracts.md](contracts/subagent-contracts.md).
+- Default `REVISE` cap: no more than 2 consecutive `REVISE` cycles for the same role and artifact before the lead re-routes, escalates, or blocks the work. The counter does not reset on a brief re-route; only a full re-classification resets it.
 
 Do not advance work on optimism or partial acceptance.
 
 `$consultant` is the explicit exception: it returns advisory input, not a pipeline gate.
 
-## Rolling-loop rule
+## Flow rules
 
-- The system operates as a rolling loop, not a stop-and-wait chain.
-- `PASS` should immediately advance to the next approved role.
-- `REVISE` should stay within the same role for a bounded correction instead of reopening the whole pipeline, but only for up to 2 consecutive cycles on the same role and artifact.
-- `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites that cannot be fixed inside the current role.
+- The system operates as a rolling loop: `PASS` immediately advances, `REVISE` stays in the same role, `BLOCKED` waits for external resolution.
+- Do not pause between accepted artifacts unless a gate failure or human/CI check requires it.
+- Close specialist sessions once their artifact is accepted. Keep open only for bounded `REVISE`.
 
-## Flow-continuity rule
+## Operational rules
 
-- Prefer continuous phase-by-phase flow with minimal handoff latency.
-- Do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
-- Keep the next approved role ready whenever the current gate is likely to pass so the pipeline can keep moving.
+- **Re-intake**: if an item no longer fits its admitted scope/priority/milestone, route back to `$product-manager`. Do not silently redefine the item inside the delivery lane or compensate by stretching the phase plan. Cap: 2 re-intakes, then escalate to user.
+- **Integration ownership**: if work spans multiple implementation phases or specialists, assign one integration owner before QA. That owner assembles one coherent artifact and checks cross-phase compatibility.
+- **Risk owners**: assign explicit owners for risks that can independently fail the result. Keep builder and reviewer roles separate. A role that defines constraints does not approve its own work.
+- **Change isolation**: prefer additive change through approved seams. If a local feature requires cross-cutting edits, route back to `$architect` or `$architecture-reviewer`.
+- **Parallelism**: parallelize read-heavy work (research, triage) when scopes are independent. Write-heavy work needs explicit ownership boundaries.
+- **Capability gaps**: if approved work cannot be routed cleanly, escalate one recommendation: use installed specialist, define repo-local specialist, create new skill, or escalate hiring need.
+- **Governance**: when an accepted upstream artifact is materially revised, mark dependent downstream artifacts for re-review. Require human/CI gates when team policy demands them.
 
-## Session lifecycle rule
+Routing principles and periodic controls are in [operating-model.md](contracts/operating-model.md).
 
-- Close specialist sessions once their artifact is accepted, handed off, or explicitly parked.
-- Keep a session open only while the same role is actively doing a bounded `REVISE` or an immediate same-scope follow-up.
-- Close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete; do not leave completed specialist sessions hanging.
+## Stage gates
 
-## Re-intake rule
+These gates are mandatory. Do not advance work past a gate without meeting the condition.
 
-- If an in-flight item no longer fits its admitted scope, priority, or milestone intent, stop delivery progression and route the item back to `$product-manager` for re-intake.
-- Do not silently redefine the item inside the delivery lane or compensate by stretching the phase plan.
-- Use re-intake when the work itself has changed; use `REVISE` when the current role can still fix the artifact without changing the admitted item.
-- Re-intake cap: a single item may be re-intaked at most 2 times. On the 3rd re-intake request, the lead must escalate to the user with all prior re-intake reasons and ask for a final decision (reduce scope, defer, or cancel).
+- `roadmap.md`, `brief.md`, and `status.md` before non-trivial work starts or resumes
+- `plan.md` and required upstream artifacts before implementation or review begins
+- Independent reviewer approval for security, architecture, performance, UX, accessibility, and QA gates when triggered by risk classification
+- Human review before `git push`, release, or equivalent publication
 
-## Integration-ownership rule
-
-- If a change spans multiple implementation phases or specialists, assign one explicit integration owner before QA.
-- The integration owner is responsible for assembling one coherent integrated artifact, checking cross-phase compatibility, and handing one verification-ready result to QA or the relevant reviewers.
-- Do not hand QA a partially assembled multi-phase result with integration ownership left implicit.
-
-## Risk-owner rule
-
-- Assign explicit owners for any risk that can independently fail the result.
-- Common risk-owner roles are `$ux-designer`, `$algorithm-scientist`, `$computational-scientist`, `$performance-engineer`, `$security-engineer`, `$reliability-engineer`, `$knowledge-archivist`, `$toolchain-engineer`, `$qa-engineer`, `$ui-test-engineer`, `$architecture-reviewer`, `$performance-reviewer`, `$security-reviewer`, `$ux-reviewer`, and `$accessibility-reviewer`.
-- Treat architectural cohesion, extension-seam integrity, dependency direction, and blast radius as explicit risks whenever work touches shared abstractions or core modules.
-- Treat repository knowledge integrity, artifact discoverability, build reproducibility, and toolchain consistency as explicit risks whenever those surfaces matter to the task.
-- Keep builder roles and blocker or reviewer roles separate unless there is a strong reason not to.
-- A role that defines constraints does not automatically approve its own work.
-
-## Capability-gap rule
-
-- Detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers.
-- Escalate when the same missing capability repeatedly blocks work, forces role simulation, weakens an independent gate, or repeatedly requires ad hoc external help.
-- Recommend exactly one response: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need.
-- Do not own hiring. Own capability-gap detection and escalation.
-## Change-isolation rule
-
-- Prefer designs and plans that let new work attach through existing or explicitly approved seams instead of cross-cutting edits.
-- If a local feature requires unrelated-module changes, shared abstraction churn, or reversed dependency direction, stop and route back to `$architect`, `$planner`, or `$architecture-reviewer` as appropriate.
-- Require `$architecture-reviewer` when extensibility, module boundaries, or blast radius are critical to the task.
-- Keep the approved change surface explicit and require smoke coverage for nearby but nominally unrelated surfaces.
-
-## Parallelism rule
-
-- Parallelize read-heavy work such as research, triage, summarization, and test analysis when the scopes are independent.
-- Be conservative with write-heavy work. Parallel edits are acceptable only when write scopes and contracts are already fixed.
-- If merge or coordination cost is likely to exceed the benefit, do not parallelize.
-
-## Governance rule
-
-- Keep accepted artifacts near the code when the repo is the source of truth.
-- When an accepted upstream artifact is materially revised, mark dependent downstream artifacts for re-review before progression resumes.
-- At minimum, preserve the roadmap decision package, canonical brief, status log, accepted design decisions, phase plan, and review outcomes.
-- Require external human or CI gates whenever team policy demands them.
-
-Detailed routing, stage gates, and artifact guidance live in [operating-model.md](references/operating-model.md).
-
-## Default routing rule
-
-If delegation is needed and no narrower role has already been delegated, use `$lead` first. The lead may then route work to specialist roles, but only after defining the phase, artifact, and gate.
-
-If the user is asking what should be worked on, what should be prioritized next, what belongs in the next milestone, or whether an initiative should enter discovery at all, route to `$product-manager` instead of treating it as ordinary delivery orchestration.
-
-If delivery discovers that the admitted item itself has changed materially, route back to `$product-manager` for re-intake instead of letting the change drift sideways inside the delivery lane.
-
-Invoke `$consultant` only when the lead wants a second opinion on ambiguity, tradeoffs, or cross-cutting concerns that are not well covered by the current specialist lane. The consultant never replaces a required stage or reviewer.
-
-## Using Consultant
-
-`$consultant` is the independent advisory consultant for this repository. Before using it, read [consultant-workflow.md](references/consultant-workflow.md).
-If Claude is installed and selected as one execution method, also read [claude-workflow.md](references/claude-workflow.md).
-
-Lead rules for `$consultant`:
-
-- Use it for hard planning or complex workspace-modifying tasks when an independent view is helpful.
-- Ask for discussion first, then compare options, and only then ask for a saved plan if a plan is needed.
-- Do not use it for trivial tasks, routine git or admin work, or ordinary read-only investigation.
-- If the selected execution path is an external provider, use the documented `stdin` invocation pattern and do not rely on multiline command-line arguments or TTY.
-- Wait about 5 to 15 minutes before treating an external-provider run as stalled, and avoid starting a parallel fresh chat while one may still be running.
-- If the external-provider run fails, times out, or hits quota or auth limits, record that in the plan file and continue with an independent internal subagent consultant using the same advisory-only contract.
+Periodic controls (drift detection between gates) are in [operating-model.md](contracts/operating-model.md).
 
 ## Non-goals
 
@@ -307,5 +192,3 @@ Lead rules for `$consultant`:
 - Do not let `$consultant` become a shadow lead, reviewer, or approver.
 - Do not normalize broad cross-cutting edits for a supposedly local feature.
 - Do not skip mandatory human or CI gates before push, merge, or release.
-
-
