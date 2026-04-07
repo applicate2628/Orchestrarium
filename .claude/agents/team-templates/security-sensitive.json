@@ -1,7 +1,9 @@
 {
   "name": "security-sensitive",
-  "description": "Security-sensitive work — auth, trust boundaries, secret handling, vulnerability fix",
+  "description": "Security-sensitive work \u2014 auth, trust boundaries, secret handling, vulnerability fix",
   "when": "Change touches auth flows, trust boundaries, credential handling, or fixes a vulnerability",
+  "requiresLead": true,
+  "chain": ["research", "design", "plan", "implement", "QA", "review"],
   "roles": [
     { "agentType": "analyst", "stage": "research", "required": true },
     { "agentType": "architect", "stage": "design", "required": true },
@@ -15,5 +17,5 @@
   ],
   "requiredRoles": ["analyst", "architect", "security-engineer", "planner", "qa-engineer", "security-reviewer"],
   "minRoles": 6,
-  "notes": "Security review strategy: Claim-Verify for known threat model, Adversarial for novel trust boundaries. Security-reviewer is mandatory — no exceptions."
+  "notes": "Lead coordinates parallel risk owners. Security-reviewer mandatory \u2014 no exceptions. Review strategy: Claim-Verify for known threat model, Adversarial for novel trust boundaries."
 }

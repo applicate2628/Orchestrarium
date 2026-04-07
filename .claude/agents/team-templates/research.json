@@ -1,7 +1,9 @@
 {
   "name": "research",
-  "description": "Investigation and design only — no implementation",
+  "description": "Investigation and design only \u2014 no implementation",
   "when": "Exploring a problem space, writing ADRs, evaluating alternatives before committing to delivery",
+  "requiresLead": false,
+  "chain": ["research", "design", "plan"],
   "roles": [
     { "agentType": "analyst", "stage": "research", "required": true },
     { "agentType": "product-analyst", "stage": "research", "whenNeeded": "product/business context" },
@@ -16,5 +18,5 @@
   ],
   "requiredRoles": ["analyst", "architect"],
   "minRoles": 2,
-  "notes": "Stops after design/plan artifact. No implementation, no QA, no review roles. Lead produces design package + optional plan."
+  "notes": "Main conversation chains analyst \u2192 architect \u2192 planner. Stops after design/plan artifact. No implementation, no QA."
 }

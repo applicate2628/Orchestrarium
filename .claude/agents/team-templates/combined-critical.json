@@ -1,7 +1,9 @@
 {
   "name": "combined-critical",
-  "description": "All specialist designers — performance + security + reliability + architecture for highest-risk changes",
+  "description": "All specialist designers \u2014 performance + security + reliability + architecture for highest-risk changes",
   "when": "Changes that touch multiple risk domains simultaneously: distributed system redesign, platform migration, core algorithm overhaul",
+  "requiresLead": true,
+  "chain": ["research", "design", "plan", "implement", "QA", "review"],
   "roles": [
     { "agentType": "product-analyst", "stage": "research", "whenNeeded": "product context needed" },
     { "agentType": "analyst", "stage": "research", "required": true },
@@ -20,5 +22,5 @@
   ],
   "requiredRoles": ["analyst", "architect", "planner", "qa-engineer", "architecture-reviewer"],
   "minRoles": 5,
-  "notes": "Heavy template — use only when the change affects multiple critical risk domains. Review strategies: Claim-Verify for known surfaces, Adversarial for novel trust boundaries or architectural blind spots."
+  "notes": "Lead coordinates parallel risk owners and integration. Heavy template \u2014 use only for multi-domain critical changes."
 }

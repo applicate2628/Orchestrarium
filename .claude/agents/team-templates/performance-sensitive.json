@@ -1,7 +1,9 @@
 {
   "name": "performance-sensitive",
-  "description": "Performance-critical work — hard budgets, SLAs, frame rates, latency targets",
+  "description": "Performance-critical work \u2014 hard budgets, SLAs, frame rates, latency targets",
   "when": "Change targets measurable performance: latency SLO, memory budget, GPU frame time, throughput",
+  "requiresLead": true,
+  "chain": ["research", "design", "plan", "implement", "QA", "review"],
   "roles": [
     { "agentType": "analyst", "stage": "research", "required": true },
     { "agentType": "architect", "stage": "design", "required": true },
@@ -15,5 +17,5 @@
   ],
   "requiredRoles": ["analyst", "architect", "performance-engineer", "planner", "qa-engineer", "performance-reviewer"],
   "minRoles": 6,
-  "notes": "Performance review strategy: Claim-Verify for defined budgets. Adversarial only when the bottleneck is novel or the cost of missing it is critical."
+  "notes": "Lead coordinates. Review strategy: Claim-Verify for defined budgets, Adversarial when bottleneck is novel."
 }

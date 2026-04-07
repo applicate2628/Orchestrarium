@@ -1,16 +1,18 @@
 {
   "name": "review",
-  "description": "Independent review of existing work — code, architecture, or documents",
+  "description": "Independent review of existing work \u2014 code, architecture, or documents",
   "when": "PR review, architecture quality gate, security review, or post-implementation validation",
+  "requiresLead": false,
+  "chain": ["research", "QA", "review"],
   "roles": [
     { "agentType": "analyst", "stage": "research", "required": true },
     { "agentType": "qa-engineer", "stage": "QA", "required": true },
-    { "agentType": "architecture-reviewer", "stage": "review" },
+    { "agentType": "architecture-reviewer", "stage": "review", "required": true },
     { "agentType": "security-reviewer", "stage": "review", "whenNeeded": "security-sensitive code" },
     { "agentType": "performance-reviewer", "stage": "review", "whenNeeded": "performance claims" },
     { "agentType": "accessibility-reviewer", "stage": "review", "whenNeeded": "user-facing UI" }
   ],
-  "requiredRoles": ["analyst", "qa-engineer"],
-  "minRoles": 2,
-  "notes": "Lead starts with analyst for fact-finding, then QA for verification, then independent reviewers. No implementation roles."
+  "requiredRoles": ["analyst", "qa-engineer", "architecture-reviewer"],
+  "minRoles": 3,
+  "notes": "Main conversation chains analyst \u2192 QA \u2192 reviewers. No implementation roles."
 }
