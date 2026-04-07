@@ -163,7 +163,7 @@ AI gates do not replace external engineering policy.
 - The system operates as a rolling loop, not a stop-and-wait chain.
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays within the same role for a bounded correction.
-- Default `REVISE` cap: no more than 2 consecutive `REVISE` cycles for the same role and artifact before the lead re-routes, escalates, or blocks the work.
+- Default `REVISE` cap: no more than 3 consecutive `REVISE` iterations for the same role and artifact before the lead escalates to the user (see REVISE iteration cap in `operating-model.md`).
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
 - Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - `RETURN(role)` is used by an independent reviewer when the upstream artifact has a structural gap requiring that role's expertise — not a bounded fix. The lead routes the finding to the named upstream role. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely.

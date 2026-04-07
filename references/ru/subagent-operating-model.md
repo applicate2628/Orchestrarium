@@ -163,7 +163,7 @@ AI gates не заменяют внешнюю engineering policy.
 - Система работает как rolling loop, а не как stop-and-wait chain.
 - `PASS` сразу продвигает к следующей утверждённой роли.
 - `REVISE` остаётся внутри той же роли для bounded correction.
-- Дефолтный предел `REVISE`: не более 2 подряд `REVISE`-циклов для одной и той же роли и одного и того же артефакта, после чего lead обязан пере-маршрутизировать работу, эскалировать её или пометить как `BLOCKED`.
+- Дефолтный предел `REVISE`: не более 3 подряд `REVISE`-итераций для одной и той же роли и одного и того же артефакта, после чего lead эскалирует пользователю (см. REVISE iteration cap в `operating-model.md`).
 - `BLOCKED` зарезервирован для реальных внешних blocker'ов, недостающих решений или недоступных prerequisites.
 - Закрывайте specialist-сессии, как только их артефакт принят, передан дальше или явно parked. Держите сессию открытой только для bounded `REVISE` или immediate same-scope follow-up; закрывайте `BLOCKED` и advisory-only consultant sessions после routing или advisory handoff.
 - `RETURN(role)` использует независимый reviewer, когда upstream artifact имеет structural gap, требующий expertise этой роли, а не bounded fix. Lead направляет finding к указанной upstream-роли. Пример: `RETURN(security-engineer)` — threat model вообще не покрывает server-side validation surface.
