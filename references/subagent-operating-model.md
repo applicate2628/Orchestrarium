@@ -1,5 +1,7 @@
 # Subagent Operating Model — v2
 
+> **Note**: this document describes the original architecture (blueprint). The current runtime model uses template-based routing — see `.claude/CLAUDE.md` and `.claude/agents/team-templates/`.
+
 Visual companion: [operating-model-diagram.md](operating-model-diagram.md)
 
 ## 1. Main rule for the lead

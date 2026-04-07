@@ -5,7 +5,7 @@
 Используйте его вместе с:
 - [subagent-operating-model.md](subagent-operating-model.md)
 - [operating-model-diagram.md](operating-model-diagram.md)
-- [operating-model.md](../agents/contracts/operating-model.md)
+- [operating-model.md](../../.claude/agents/contracts/operating-model.md)
 
 ## 1. Семейства стратегий
 

@@ -20,7 +20,7 @@ For any non-trivial work routed through `$lead`, the item folder must contain th
 
 | Artifact | Required when | Content owner | Purpose |
 |---|---|---|---|
-| `roadmap.md` | before non-trivial delivery work starts | `$product-manager`, or `$lead` when recording a direct human admission source | why this item exists, what outcome is admitted, what is explicitly out of scope |
+| `roadmap.md` | before non-trivial delivery work starts | `$product-manager`, or the user directly | why this item exists, what outcome is admitted, what is explicitly out of scope. Lead cannot generate a roadmap item on its own authority. |
 | `brief.md` | before non-trivial delivery work starts | `$lead` | bounded source of truth for scope, stage, risks, owners, and must-not-break surfaces |
 | `status.md` | before non-trivial delivery work starts | `$lead` | interruption-safe recovery log with current stage, last accepted artifact, next action, and blockers |
 | `plan.md` | before implementation or review starts | `$planner` | approved phase plan and execution checklist |

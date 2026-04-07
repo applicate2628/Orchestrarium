@@ -1,5 +1,7 @@
 # Модель работы субагентов — v2
 
+> **Примечание**: этот документ описывает исходную архитектуру (blueprint). Актуальная runtime-модель использует template-based routing — см. [template-routing.md](template-routing.md) и `.claude/CLAUDE.md`.
+
 Визуальное дополнение: [operating-model-diagram.md](operating-model-diagram.md)
 
 ## 1. Основное правило для lead

@@ -9,7 +9,7 @@ work-items/
   index.md              # Recovery entry point — всегда актуален
   active/
     <date>-<slug>/      # Текущая работа в delivery
-      roadmap.md        # Решение по допуске (owned by product-manager или lead для direct human request)
+      roadmap.md        # Решение по допуске (owned by product-manager или пользователь напрямую)
       brief.md          # Канонический brief (owned by lead)
       status.md         # Живой журнал выполнения (owned by lead)
       plan.md           # План фазы (owned by planner, требуется перед implementation/review)
