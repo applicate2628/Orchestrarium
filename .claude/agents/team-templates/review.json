@@ -1,7 +1,7 @@
 {
   "name": "review",
   "description": "Independent review of existing work \u2014 code, architecture, or documents",
-  "when": "PR review, architecture quality gate, security review, or post-implementation validation",
+  "when": "Architecture/code quality gate, project audit, security review, or post-implementation validation",
   "requiresLead": false,
   "chain": ["research", "QA", "review"],
   "roles": [
