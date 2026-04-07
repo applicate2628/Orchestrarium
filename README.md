@@ -48,7 +48,7 @@ You can talk to agents naturally — Claude reads the delegation rule and picks 
 | --- | --- | --- | --- |
 | `quick-fix` | No | 1 | Bug fix, typo, small local addition |
 | `research` | No | 2 | Investigation, ADR, exploring alternatives |
-| `review` | No | 3 | Architecture/code quality gate, project audit, post-impl validation |
+| `review` | No | 5 | Architecture/code quality gate, project audit, post-impl validation |
 | `full-delivery` | Yes | 4 | New feature, substantial multi-stage change |
 | `security-sensitive` | Yes | 6 | Auth, trust boundaries, credentials, vulnerabilities |
 | `performance-sensitive` | Yes | 6 | Hard budgets, SLAs, latency/throughput targets |
