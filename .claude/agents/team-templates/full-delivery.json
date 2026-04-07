@@ -1,7 +1,9 @@
 {
   "name": "full-delivery",
-  "description": "Full delivery from intake to release — roadmap → research → design → plan → implement → QA → review",
-  "when": "New feature or substantial change requiring end-to-end delivery pipeline",
+  "description": "Full delivery from intake to release \u2014 roadmap \u2192 research \u2192 design \u2192 plan \u2192 implement \u2192 QA \u2192 review",
+  "when": "New feature or substantial change requiring end-to-end delivery pipeline with coordination",
+  "requiresLead": true,
+  "chain": ["intake", "research", "design", "plan", "implement", "QA", "review"],
   "roles": [
     { "agentType": "product-manager", "stage": "intake", "whenNeeded": "scope/priority unclear" },
     { "agentType": "product-analyst", "stage": "research", "whenNeeded": "product context unclear" },
@@ -26,5 +28,5 @@
   ],
   "requiredRoles": ["analyst", "architect", "planner", "qa-engineer"],
   "minRoles": 4,
-  "notes": "Lead selects implementation specialists (backend/frontend/qt/data/etc) based on approved phase plan. Not all optional roles fire for every task."
+  "notes": "Lead coordinates: manages work-items, assigns risk owners, handles re-intake and integration ownership."
 }

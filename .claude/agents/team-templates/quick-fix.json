@@ -1,7 +1,9 @@
 {
   "name": "quick-fix",
-  "description": "Fast lane for clearly local additive changes — bug fix, typo, small addition",
-  "when": "Change is additive, confined to one module/module seam, no new risk owner, contracts unchanged",
+  "description": "Fast lane for clearly local additive changes \u2014 bug fix, typo, small addition",
+  "when": "Change is additive, confined to one module/seam, no new risk owner, contracts unchanged",
+  "requiresLead": false,
+  "chain": ["implement", "QA"],
   "roles": [
     { "agentType": "analyst", "stage": "research", "whenNeeded": "scope unclear" },
     { "agentType": "backend-engineer", "stage": "implement", "whenNeeded": "backend fix" },
@@ -14,5 +16,5 @@
   ],
   "requiredRoles": ["qa-engineer"],
   "minRoles": 1,
-  "notes": "Additive fast lane: lead classifies, dispatches one implementer + QA. Re-classify to full-delivery if scope widens."
+  "notes": "Main conversation picks the implementer, passes artifact to QA. Re-classify to full-delivery if scope widens."
 }
