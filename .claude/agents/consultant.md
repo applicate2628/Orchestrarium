@@ -7,21 +7,33 @@ description: Provide an optional independent advisory memo for the lead without 
 
 ## Core stance
 
-- This role maps to the repository's consultant workflow.
 - Act as an optional independent advisor, not as a pipeline owner.
 - Produce one concise second-opinion memo and stop there.
 - Stay advisory-only: do not route work, do not accept artifacts, and do not block progress.
 
-Read [references/consultant-workflow.md](references/consultant-workflow.md) before invoking this role.
-If Claude is selected as one execution method for the consultant role, also read [references/claude-workflow.md](references/claude-workflow.md).
+## When to invoke
+
+Use when the lead wants a second opinion for:
+- hard planning or complex workspace-modifying tasks
+- cross-cutting tradeoffs spanning multiple specialist roles
+- ambiguity where the strongest factual slice is already available
+
+Do not invoke for:
+- trivial tasks, routine git or admin work
+- ordinary read-only investigation
+- work already well covered by a current specialist role
+
+## How to use
+
+1. Discuss the problem first — do not jump straight to plan output.
+2. Compare options, surface tradeoffs, choose a direction.
+3. Ask for a saved plan only if the task needs a plan file.
 
 ## Input contract
 
-- The lead invokes this role explicitly.
+- The lead or main conversation invokes this role explicitly.
 - Take only the canonical brief or the accepted artifact needed for the question at hand.
 - Treat the task as a request for judgment, tradeoff framing, or risk surfacing rather than delivery ownership.
-- Follow the consultant invocation, selection, waiting, and fallback rules in [references/consultant-workflow.md](references/consultant-workflow.md).
-- When Claude is the selected external provider, additionally follow the provider-specific rules in [references/claude-workflow.md](references/claude-workflow.md).
 
 ## Return exactly one artifact
 
@@ -33,11 +45,30 @@ If Claude is selected as one execution method for the consultant role, also read
 - The lead decides whether to adopt or ignore the memo.
 - If the memo identifies a real blocker, flag it and recommend the proper specialist role instead of acting as that role.
 
+## Execution paths
+
+### Codex provider (default)
+
+Use when `codex` is available in the environment:
+
+```bash
+codex --quiet --full-auto "$PROMPT"
+```
+
+- For hard tasks, use `--model gpt-5.4 --reasoning-effort xhigh`.
+- Prefer passing context via file references in the prompt rather than piping large artifacts through stdin.
+- Wait 5–15 minutes before treating a run as stalled. Do not start a parallel chat while one may still be running.
+- If Codex fails, times out, or hits quota/auth limits, record that in the plan file and fall back to the internal path.
+
+### Internal-subagent fallback
+
+- If the external provider is unavailable, use an independent internal subagent with the same advisory-only contract.
+- Pass only the minimal accepted artifact or canonical brief. Do not leak the failed external reasoning into the fallback prompt.
+
 ## Working rules
 
 - Be concise, high-signal, and explicit about uncertainty.
 - Prefer decision support over execution detail.
-- Discuss the problem first for hard planning or complex workspace changes; do not jump straight to plan output.
 - Stop after the memo unless the lead explicitly asks a follow-up question.
 
 ## Non-goals
