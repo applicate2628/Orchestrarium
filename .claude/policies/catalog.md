@@ -38,7 +38,7 @@ Each policy area has a key, a question for the user, available options, and a de
 | `descriptive` | Free-form but descriptive: summary line + optional body explaining why |
 | `custom` | Project-specific template (user provides format) |
 
-**Default:** `descriptive`
+**Default:** `conventional`
 
 ## branching-model
 
@@ -123,3 +123,23 @@ This is a free-form field. Examples:
 | `liberal` | Use best available package for the job |
 
 **Default:** `pragmatic`
+
+---
+
+## Example output
+
+After `/init-project` completes, the following section is added to CLAUDE.md:
+
+```markdown
+## Project policies
+
+- **Testing:** test-after, 80% coverage target
+- **Commits:** conventional commits (type(scope): description)
+- **Branching:** trunk-based with short-lived feature branches
+- **File size:** soft guidance at 500 lines, review trigger at 800
+- **Error handling:** validate at system boundaries only, trust internal code
+- **PR review:** required before merge
+- **Documentation:** document non-obvious decisions and trade-offs only
+- **Language style:** follow existing codebase conventions
+- **Dependencies:** pragmatic — add when they save significant effort
+```

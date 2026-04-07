@@ -59,6 +59,16 @@ You can talk to agents naturally — Claude reads the delegation rule and picks 
 
 All chains with 2+ stages save state in `work-items/active/` — both the status and the accepted artifacts. If a session is interrupted, any future session can resume from the last accepted artifact.
 
+### Skills
+
+| Command | Purpose |
+| --- | --- |
+| `/init-project` | Interactive wizard — configure project policies (testing, commits, branching, etc.) |
+| `/policies` | View current policies or update one: `/policies testing tdd` |
+| `/check-policies` | Read-only audit of codebase compliance with configured policies |
+
+Run `/init-project` after installing to configure project-level choices. All agents read the resulting `## Project policies` section in CLAUDE.md automatically.
+
 ## Core principles
 
 - One subagent = one profession + one artifact + one gate.
@@ -79,12 +89,8 @@ The repository is built around a few stable rules:
 - re-classify immediately if scope widens beyond the current template
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
-Repository-wide operating-model source of truth lives in [references/subagent-operating-model.md](references/subagent-operating-model.md).
-Repository task-memory policy and storage model live in [references/repository-task-memory.md](references/repository-task-memory.md).
-Repository publication-safety policy for all tracked content lives in [references/repository-publication-safety.md](references/repository-publication-safety.md).
-Repository periodic-control matrix lives in [references/periodic-control-matrix.md](references/periodic-control-matrix.md).
-Repository-level delegation and role definitions live in [.claude/CLAUDE.md](.claude/CLAUDE.md).
-The visual companion to the workflow lives in [references/operating-model-diagram.md](references/operating-model-diagram.md).
+Runtime governance lives in [.claude/CLAUDE.md](.claude/CLAUDE.md) — delegation rule, engineering hygiene, publication safety, role index, and project policies.
+Reference blueprints live in [references/](references/) — full operating model, diagrams, control matrix, and RU translations.
 
 ## Team structure
 
@@ -113,6 +119,8 @@ The current pack covers several sub-teams:
 | `.claude/agents/lead.md` | Lead orchestrator — bootstrap, pipeline, delegation, gate semantics |
 | `.claude/agents/scripts/` | Publication-safety scan (`check-publication-safety.sh` / `.ps1`) |
 | `.claude/agents/team-templates/` | 8 JSON presets for common team compositions (full-delivery, quick-fix, research, review, etc.) |
+| `.claude/commands/` | Skills: `/init-project`, `/policies`, `/check-policies` |
+| `.claude/policies/catalog.md` | Policy catalog — available project-level choices with options and defaults |
 | `.claude/memory/` | Feedback rules from real usage — experience-based operating constraints |
 
 Self-contained. No references to files outside `.claude/`. Can be copied into any repo as-is.
@@ -121,13 +129,14 @@ Self-contained. No references to files outside `.claude/`. Can be copied into an
 
 | Path | Purpose |
 | --- | --- |
-| `references/subagent-operating-model.md` | Full operating model blueprint (33K) — `.claude/agents/contracts/operating-model.md` is the compact runtime reference |
-| `references/operating-model-diagram.md` | Visual companion diagram |
-| `references/periodic-control-matrix.md` | Control matrix blueprint — implemented in `operating-model.md` |
-| `references/repository-publication-safety.md` | Publication safety blueprint — implemented in `CLAUDE.md` |
-| `references/repository-task-memory.md` | Task-memory methodology |
-| `references/workflow-strategy-comparison.md` | Strategy comparison notes |
-| `references/ru/` | Russian translations |
+| `references/operating-model-diagram.md` | Visual companion — mermaid diagrams for routing and lifecycle |
+| `references/periodic-control-matrix.md` | Control matrix — periodic audits and their owners |
+| `references/repository-publication-safety.md` | Publication safety — implemented in `CLAUDE.md` |
+| `references/repository-task-memory.md` | Task-memory methodology — work-items structure and ownership |
+| `references/template-routing.md` (EN in CLAUDE.md) | Template routing — current runtime model |
+| `references/subagent-operating-model.md` | Original architecture blueprint — superseded by template routing |
+| `references/workflow-strategy-comparison.md` | Strategy comparison — historical reference |
+| `references/ru/` | Russian translations of all reference docs |
 
 ### Root — repo metadata
 
@@ -150,6 +159,8 @@ Copy `.claude/` into your target repo:
 | `.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff contracts, operating model, subagent coordination |
 | `.claude/agents/scripts/` | `.claude/agents/scripts/` | Publication-safety scan automation |
 | `.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Team composition presets |
+| `.claude/commands/` | `.claude/commands/` | Skills: `/init-project`, `/policies`, `/check-policies` |
+| `.claude/policies/` | `.claude/policies/` | Policy catalog with configurable options |
 | `.claude/CLAUDE.md` | Merge into target `.claude/CLAUDE.md` | Governance entry point |
 | `.claude/memory/` (optional) | `.claude/memory/` | Experience-based feedback rules |
 
@@ -163,10 +174,11 @@ Copy `.claude/` into your target repo:
 
 ### Steps
 
-1. Copy `.claude/agents/` into your target repo's `.claude/agents/`
+1. Copy `.claude/agents/`, `.claude/commands/`, `.claude/policies/` into your target repo's `.claude/`
 2. Merge `.claude/CLAUDE.md` content at the TOP of your target repo's `.claude/CLAUDE.md`, or replace it entirely
 3. Optionally copy `.claude/memory/` for experience-based feedback rules
-4. Restart Claude so the new agents are discovered
+4. Restart Claude so the new agents and skills are discovered
+5. Run `/init-project` to configure project policies
 
 `.claude/agents/contracts/` is NOT a duplicate of `references/`. Contracts contain handoff templates and a compact routing reference for the lead. References are the full canonical set including diagrams, translations, and strategy comparisons — they stay with the skill pack source.
 
