@@ -1,52 +1,89 @@
 # Claudestrator
 
-A lead-routed Claude Code skill pack for research-grade engineering, scientific workflows, and role-based subagent orchestration.
+A template-routed Claude Code skill pack for research-grade engineering, scientific workflows, and role-based subagent orchestration.
 
-Claudestrator is a Claude Code skill-pack for running a lead-routed multi-agent engineering workflow.
+Claudestrator turns subagents into narrow professional roles instead of generic "mini developers" and scales from a 2-agent bug fix to a full multi-risk delivery pipeline:
 
-It turns subagents into narrow professional roles instead of generic "mini developers" and routes work through an explicit pipeline:
+```text
+quick-fix:        implementer → QA                              (2 agents, no lead)
+research:         analyst → architect → planner                 (2-3 agents, no lead)
+full-delivery:    lead → research → design → plan → impl → QA  (4+ agents, lead coordinates)
+combined-critical: lead → all risk owners → full pipeline       (5+ agents, lead coordinates)
+```
 
-`Roadmap / Intake -> Research -> Design -> Plan -> Implement -> QA / Review / Security`
+## Usage
 
-The default coordinator is `$lead`. It owns orchestration, routing, artifact acceptance, and quality gates for approved work, while specialist roles handle the actual role-work in their own lane. Roadmap ownership sits upstream in `$product-manager`.
+### How to pick a template
+
+```text
+Does the task need parallel risk owners (security + performance + ...)?
+  Yes → requiresLead: true template (full-delivery / security / performance / geometry / combined-critical)
+  No  → Does it need implementation?
+          No  → research or review
+          Yes → One module, contracts unchanged?
+                  Yes → quick-fix
+                  No  → full-delivery
+```
+
+### How to invoke agents
+
+You can talk to agents naturally — Claude reads the delegation rule and picks the right template. Or invoke directly:
+
+| You say | What happens |
+| --- | --- |
+| "fix this bug in auth.ts" | Main conv picks `quick-fix` → implementer → QA |
+| "review this PR" | Main conv picks `review` → analyst → QA → reviewers |
+| "investigate how caching works" | Main conv picks `research` → analyst → architect |
+| "build user registration feature" | Main conv picks `full-delivery` → `$lead` coordinates |
+| "$lead review" | Lead invoked directly, runs full review pipeline |
+| "$consultant" | Consultant invoked for advisory second opinion |
+| "$analyst investigate the auth module" | Analyst invoked directly, returns research memo |
+| "$product-manager what should we build next?" | PM invoked for roadmap/priority decisions |
+
+### Templates
+
+8 team templates in `.claude/agents/team-templates/`:
+
+| Template | Lead? | Min roles | Use case |
+| --- | --- | --- | --- |
+| `quick-fix` | No | 1 | Bug fix, typo, small local addition |
+| `research` | No | 2 | Investigation, ADR, exploring alternatives |
+| `review` | No | 3 | PR review, quality gate, post-impl validation |
+| `full-delivery` | Yes | 4 | New feature, substantial multi-stage change |
+| `security-sensitive` | Yes | 6 | Auth, trust boundaries, credentials, vulnerabilities |
+| `performance-sensitive` | Yes | 6 | Hard budgets, SLAs, latency/throughput targets |
+| `geometry-review` | Yes | 7 | Spatial computation, transforms, meshing |
+| `combined-critical` | Yes | 5 | Multiple risk domains simultaneously |
+
+### Recovery
+
+All chains with 2+ stages save state in `work-items/active/` — both the status and the accepted artifacts. If a session is interrupted, any future session can resume from the last accepted artifact.
 
 ## Core principles
 
 - One subagent = one profession + one artifact + one gate.
-- The lead coordinates the flow of context and accepted artifacts, not end-to-end code generation.
+- Templates define team composition; lead coordinates only when needed.
 - Code belongs in `Implement` only.
-- Every delegated task should carry minimal context, explicit scope, allowed change surface, must-not-break surfaces, and a clear acceptance gate.
+- Every delegated task carries minimal context, explicit scope, and a clear acceptance gate.
 - Work does not progress when a gate fails.
-- Human review is still required before push, release, or equivalent publication.
-
-## What is in this repository
-
-This repository contains installable Claude Code skills for:
-
-- roadmap, coordination, and discovery: `product-manager`, `lead`, `consultant`, `analyst`, `product-analyst`
-- design and planning: `architect`, `ux-designer`, `planner`
-- repository operations: `knowledge-archivist`, `toolchain-engineer`
-- specialist design lanes: `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, `reliability-engineer`
-- implementation roles: `backend-engineer`, `frontend-engineer`, `data-engineer`, `toolchain-engineer`, `platform-engineer`
-- graphics and technical UI: `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`
-- verification and independent gates: `qa-engineer`, `ui-test-engineer`, `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, `accessibility-reviewer`
+- Human review is required before push, release, or equivalent publication.
 
 ## Operating model
 
 The repository is built around a few stable rules:
 
-- use `$lead` by default when delegation is appropriate and no narrower role was explicitly requested
+- pick the right team template for the task complexity — do not default to `$lead` for everything
 - do not assign one subagent to "build the whole feature"
 - keep architecture, numerics, performance, security, and maintainability as explicit risk-owner lanes
 - prefer additive change through approved seams over cross-cutting edits
-- protect blast radius and require smoke coverage for nearby but nominally unrelated surfaces
+- re-classify immediately if scope widens beyond the current template
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
 Repository-wide operating-model source of truth lives in [references/subagent-operating-model.md](references/subagent-operating-model.md).
 Repository task-memory policy and storage model live in [references/repository-task-memory.md](references/repository-task-memory.md).
 Repository publication-safety policy for all tracked content lives in [references/repository-publication-safety.md](references/repository-publication-safety.md).
 Repository periodic-control matrix lives in [references/periodic-control-matrix.md](references/periodic-control-matrix.md).
-Repository-level delegation and role definitions live in [CLAUDE.md](CLAUDE.md).
+Repository-level delegation and role definitions live in [.claude/CLAUDE.md](.claude/CLAUDE.md).
 The visual companion to the workflow lives in [references/operating-model-diagram.md](references/operating-model-diagram.md).
 
 ## Team structure
@@ -62,67 +99,88 @@ The current pack covers several sub-teams:
 
 ## Repository layout
 
-### Installable (ships with skill pack to target repos)
+### Design principle
 
-- `agents/<role>.md` — instructions for one role; all 31 roles go here
-- `agents/contracts/` — handoff contracts, operating-model notes, and subagent coordination templates. These ARE the files referenced by role definitions at install time. They ship with the skill pack.
-- `CLAUDE.md` — thin one-line redirector to `agents/rules/orchestration.md`. Add this line to the target repo's existing `CLAUDE.md` or replace it entirely.
+`references/` contains blueprints — full design documents, diagrams, strategy comparisons, and translations. `.claude/` contains the implementation — self-contained runtime agents, governance, and tooling built from those blueprints. Target repos receive `.claude/` only; they never need `references/`.
 
-### Internal to this skill pack (do NOT install)
+### `.claude/` — installable runtime package
 
-- `agents/rules/` — governance of the skill pack itself (bootstrap, delegation policy, engineering hygiene). This is used by the skill pack authors, not by end users.
-- `references/` — full reference documents for this repo only: operating model diagrams, strategy comparisons, periodic control matrix, task-memory policy, publication safety. These are NOT installable by default; target repos use `agents/contracts/` instead.
-- `references/ru/` — Russian translations of reference documents.
-- `work-items/` — this repo's task memory.
-- `scripts/` — publication-safety scan automation.
-- `.gitignore` — scratch boundary at `/.scratch/`.
+| Path | Purpose |
+| --- | --- |
+| `.claude/CLAUDE.md` | Governance: delegation rule, engineering hygiene, publication safety, role index |
+| `.claude/agents/<role>.md` (31 files) | Role definitions — discovered by Claude Code as `subagent_type` |
+| `.claude/agents/contracts/` | Handoff templates, routing reference, subagent coordination |
+| `.claude/agents/lead.md` | Lead orchestrator — bootstrap, pipeline, delegation, gate semantics |
+| `.claude/agents/scripts/` | Publication-safety scan (`check-publication-safety.sh` / `.ps1`) |
+| `.claude/agents/team-templates/` | 8 JSON presets for common team compositions (full-delivery, quick-fix, research, review, etc.) |
+| `.claude/memory/` | Feedback rules from real usage — experience-based operating constraints |
+
+Self-contained. No references to files outside `.claude/`. Can be copied into any repo as-is.
+
+### `references/` — blueprints (dev-only, do NOT install)
+
+| Path | Purpose |
+| --- | --- |
+| `references/subagent-operating-model.md` | Full operating model blueprint (33K) — `.claude/agents/contracts/operating-model.md` is the compact runtime reference |
+| `references/operating-model-diagram.md` | Visual companion diagram |
+| `references/periodic-control-matrix.md` | Control matrix blueprint — implemented in `operating-model.md` |
+| `references/repository-publication-safety.md` | Publication safety blueprint — implemented in `CLAUDE.md` |
+| `references/repository-task-memory.md` | Task-memory methodology |
+| `references/workflow-strategy-comparison.md` | Strategy comparison notes |
+| `references/ru/` | Russian translations |
+
+### Root — repo metadata
+
+| Path | Purpose |
+| --- | --- |
+| `README.md` | This file |
+| `INSTALL.md` | Detailed installation instructions |
+| `LICENSE` | Apache 2.0 |
+| `.gitignore` | Scratch boundary at `/.scratch/` |
 
 ## Installation
 
 ### What to install
 
-Copy the following from this repo into your target repository:
+Copy `.claude/` into your target repo:
 
-| Source                                | Destination in target repo               | Purpose                                                              |
-|---------------------------------------|------------------------------------------|----------------------------------------------------------------------|
-| `agents/<role>.md` (all files)        | `agents/<role>.md`                       | Role definitions                                                     |
-| `agents/contracts/` (entire folder)  | `agents/contracts/`                     | Handoff contracts, operating model notes, subagent coordination      |
-| `CLAUDE.md`                           | Merge into existing `CLAUDE.md` or replace | Governance entry point                                             |
+| Source | Destination | Purpose |
+| --- | --- | --- |
+| `.claude/agents/<role>.md` (31 files) | `.claude/agents/<role>.md` | Role definitions |
+| `.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff contracts, operating model, subagent coordination |
+| `.claude/agents/scripts/` | `.claude/agents/scripts/` | Publication-safety scan automation |
+| `.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Team composition presets |
+| `.claude/CLAUDE.md` | Merge into target `.claude/CLAUDE.md` | Governance entry point |
+| `.claude/memory/` (optional) | `.claude/memory/` | Experience-based feedback rules |
 
 ### What NOT to install
 
-Do NOT copy these into a target repo:
-
-| File | Why |
-|------|-----|
-| `agents/rules/` | Skill-pack governance only — internal |
-| `references/` (root) | Full reference documents for this skill pack repo; target repos already get what they need via `agents/contracts/` |
+| Path | Why |
+| --- | --- |
+| `references/` | Blueprints — target repos get the implementation via `.claude/` |
 | `work-items/` | Task memory — target repo has its own |
-| `scripts/` | Optional — only if target repo needs publication-safety automation |
+| `README.md`, `INSTALL.md`, `LICENSE` | Repo metadata |
 
 ### Steps
 
-1. Copy `agents/` (including `agents/contracts/`) into your target repo
-2. Add the one-line contents of `CLAUDE.md` to your target repo's `CLAUDE.md`, or replace it entirely
-3. Restart Claude so the new skills are discovered
+1. Copy `.claude/agents/` into your target repo's `.claude/agents/`
+2. Merge `.claude/CLAUDE.md` content at the TOP of your target repo's `.claude/CLAUDE.md`, or replace it entirely
+3. Optionally copy `.claude/memory/` for experience-based feedback rules
+4. Restart Claude so the new agents are discovered
 
-The `agents/contracts/` directory is NOT a duplicate of `references/`. It contains the subset of reference files that role definitions actually reference at runtime. The root `references/` directory contains the full canonical set including diagrams, translations, and strategy comparisons — these stay with the skill pack, not with installed targets.
+`.claude/agents/contracts/` is NOT a duplicate of `references/`. Contracts contain handoff templates and a compact routing reference for the lead. References are the full canonical set including diagrams, translations, and strategy comparisons — they stay with the skill pack source.
 
 ### Memory
 
-The `memory/` directory contains feedback rules collected during real usage. These are universal operating rules that apply across all projects and are populated over time based on experience. Memory files are read automatically at session start.
+The `.claude/memory/` directory contains feedback rules collected during real usage — universal operating constraints populated over time based on experience.
 
-| Path                         | Scope                                                      |
-|------------------------------|------------------------------------------------------------|
-| `memory/`                    | Rules specific to this skill pack                          |
-| `~/.claude/memory/`          | Universal rules that apply across all projects             |
+| Path | Scope |
+| --- | --- |
+| `.claude/memory/` | Rules shipped with this skill pack |
+| `~/.claude/memory/` | User's own rules across all projects |
 
-When installing into a target repo, copy `memory/` if you want experience-based feedback rules to carry over. Otherwise target repos start with a clean memory slate and build their own over time.
+Copy `.claude/memory/` if you want experience-based feedback rules to carry over. Otherwise target repos start with a clean slate and build their own.
 
 ## License
 
 This repository is licensed under the Apache License 2.0. See [LICENSE](LICENSE).
-
-## GitHub About
-
-`A lead-routed Claude Code skill pack for research-grade engineering, scientific workflows, and role-based subagent orchestration.`
