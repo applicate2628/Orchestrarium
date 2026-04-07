@@ -19,7 +19,7 @@ When subagent delegation is appropriate, classify the task and pick the matching
 | --- | --- | --- | --- |
 | `quick-fix` | Local additive change, one module, no new risk | No | Main conv → implementer → QA |
 | `research` | Investigation, ADR, alternatives — no implementation | No | Main conv → analyst → architect → planner |
-| `review` | PR review, quality gate, post-implementation validation | No | Main conv → analyst → QA → reviewers |
+| `review` | Architecture/code quality gate, project audit, post-impl validation | No | Main conv → analyst → QA → reviewers |
 | `full-delivery` | New feature, substantial change, multi-stage pipeline | Yes | `$lead` coordinates full pipeline |
 | `security-sensitive` | Auth, trust boundaries, credentials, vulnerability | Yes | `$lead` coordinates, security-reviewer mandatory |
 | `performance-sensitive` | Hard budgets, SLAs, latency targets | Yes | `$lead` coordinates, performance-reviewer mandatory |
@@ -39,7 +39,7 @@ When subagent delegation is appropriate, classify the task and pick the matching
 **Recovery rule:**
 
 - For `requiresLead: true` chains, `$lead` manages recovery through `work-items/` (roadmap.md, brief.md, status.md).
-- For `requiresLead: false` chains with 2+ stages, the main conversation must save recovery state in `work-items/active/<date>-<slug>/` after each accepted artifact: `status.md` (template name, current stage, next role) and the accepted artifact itself (e.g. `research.md`, `design.md`, `plan.md`). This allows any future session to resume from the last accepted artifact without replaying the chain.
+- For `requiresLead: false` chains with 2+ stages, the main conversation must save recovery state in `work-items/active/<date>-<slug>/` after each stage transition: `status.md` (format defined in `subagent-contracts.md` — includes template, orchestrator role, active/completed agents, next action) and the accepted artifact itself (e.g. `research.md`, `design.md`, `plan.md`). This allows any future session to resume from the last accepted artifact without replaying the chain.
 - For single-specialist invocations (user names a role directly), no recovery file is needed.
 
 ## Role index

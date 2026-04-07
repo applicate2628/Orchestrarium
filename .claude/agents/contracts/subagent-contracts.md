@@ -2,6 +2,10 @@
 
 Handoff templates and response format for lead-to-specialist delegation.
 
+## Execution mechanism
+
+Every specialist invocation MUST use the **Agent tool** with the matching `subagent_type` parameter. The handoff template below becomes the agent's `prompt`. The orchestrator (main conversation or lead) MUST NOT role-play specialists inline — each role runs in an isolated agent context.
+
 ## Handoff template
 
 ```text
@@ -34,9 +38,54 @@ Gate to next stage:
 A lead MUST NOT delegate work until the work-item folder contains a verified `brief.md` and `status.md`.
 
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
-- `status.md` must have a current snapshot with stage, last accepted artifact, and next concrete action.
+- `status.md` must follow the format below and be updated after every stage transition, agent launch, or interruption.
 - If either artifact is missing, stale, or incomplete, the lead restores them BEFORE delegating any specialist role.
 - The only exception is the additive fast lane where the lead records the decision in status.md instead.
+
+### status.md format
+
+```markdown
+---
+template: <template name>
+orchestrator: main | lead
+started: <YYYY-MM-DD>
+updated: <YYYY-MM-DD HH:MM>
+---
+
+## Current state
+
+- **Stage**: <current stage name or number>
+- **Main conv role**: <what main conversation is doing: orchestrating | waiting for agents | reviewing artifact | idle>
+- **Last accepted artifact**: <filename or "none">
+
+## Active agents
+
+| Agent | subagent_type | Status | Launched |
+| --- | --- | --- | --- |
+| <description> | <type> | running | <HH:MM> |
+
+## Completed agents
+
+| Agent | subagent_type | Result | Artifact |
+| --- | --- | --- | --- |
+| <description> | <type> | PASS/REVISE/BLOCKED | <filename> |
+
+## REVISE loop
+
+| Field | Value |
+| --- | --- |
+| **Stage** | <stage name where REVISE occurred> |
+| **Iteration** | <1-3, or "escalated"> |
+| **Gate role** | <qa-engineer, security-reviewer, etc.> |
+| **Last finding summary** | <one-line summary of what the gate found> |
+| **Owner of next action** | <implementer role that must fix, or "user" if escalated> |
+
+## Next action
+
+<What happens next: which agent to launch, what artifact to review, or what decision to make.>
+```
+
+The REVISE loop section is optional — include it only when a stage has returned REVISE and the loop is active. Remove it when the loop resolves (PASS or escalation).
 
 ## Response format
 
@@ -45,12 +94,23 @@ A lead MUST NOT delegate work until the work-item folder contains a verified `br
 2. Artifact
 3. Risks / Unknowns
 4. Recommended next role
-5. Gate: PASS | REVISE | BLOCKED | RETURN(role)
+5. Gate: PASS | REVISE | BLOCKED:<class> | RETURN(role)
 ```
 
 - When a role makes a decision, it should clearly distinguish confirmed facts, assumptions, and judgment.
 - If the main gap is missing evidence, recommend the appropriate factual role instead of escalating into opinion.
 - `$consultant` replaces the Gate line with `5. Advisory status: NON-BLOCKING`.
+
+### BLOCKED classification
+
+When returning BLOCKED, specify the class:
+
+| Class | Meaning | Orchestrator action |
+| --- | --- | --- |
+| `BLOCKED:dependency` | Cannot proceed — missing tool, environment, access, or information that no current agent can provide | Present to user for resolution |
+| `BLOCKED:prerequisite` | Discovered adjacent work that must complete first (e.g., broken adjacent module, missing migration) | File in `work-items/bugs/` → user decides priority → resume when resolved |
+
+If no class is specified, treat as `BLOCKED:dependency` (conservative default).
 
 ## Interaction rules
 
@@ -59,6 +119,17 @@ A lead MUST NOT delegate work until the work-item folder contains a verified `br
 - If blocked by missing evidence, route back to the orchestrating owner for factual clarification.
 - Reviewers report findings and gate outcomes; they do not manage implementation.
 - When an upstream artifact is insufficient, return `REVISE` or `BLOCKED` instead of silently redefining the contract.
+
+## Test ownership boundary
+
+| Test type | Owner | When |
+| --- | --- | --- |
+| Unit tests for new/changed code | Implementer | Written as part of the implementation artifact |
+| Regression tests for existing behavior | QA engineer | Written during verification if missing |
+| Integration / end-to-end tests | QA engineer | Written or updated during verification |
+| Contract-change test updates | Implementer | When QA classifies a failure as `contract-change` — the implementer who changed the behavior updates the tests |
+
+If the plan specifies a different test ownership split, follow the plan. This table is the default when no plan-level override exists.
 
 ## Gate questions
 

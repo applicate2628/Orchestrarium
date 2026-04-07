@@ -48,7 +48,7 @@ You can talk to agents naturally — Claude reads the delegation rule and picks 
 | --- | --- | --- | --- |
 | `quick-fix` | No | 1 | Bug fix, typo, small local addition |
 | `research` | No | 2 | Investigation, ADR, exploring alternatives |
-| `review` | No | 3 | PR review, quality gate, post-impl validation |
+| `review` | No | 3 | Architecture/code quality gate, project audit, post-impl validation |
 | `full-delivery` | Yes | 4 | New feature, substantial multi-stage change |
 | `security-sensitive` | Yes | 6 | Auth, trust boundaries, credentials, vulnerabilities |
 | `performance-sensitive` | Yes | 6 | Hard budgets, SLAs, latency/throughput targets |
@@ -70,11 +70,17 @@ All chains with 2+ stages save state in `work-items/active/` — both the status
 | `/agents-design` | Full research-to-plan chain (analyst → architect → planner) |
 | `/agents-security` | Security review (security-engineer → security-reviewer) |
 | `/agents-consult` | Get a second opinion via consultant (Codex) |
+| `/agents-implement` | Execute an approved plan phase by phase |
+| `/agents-perf` | Fix a performance issue (perf-engineer → impl → QA → perf-reviewer) |
+| `/agents-refactor` | Safe refactoring with blast-radius analysis |
+| `/agents-resume` | Resume an interrupted agent chain from saved state |
+| `/agents-qa-session` | Interactive testing: you direct, QA agent investigates |
 | `/agents-help` | Overview of all agents, templates, skills, and current policies |
 | `/agents-init-project` | Interactive wizard — configure project policies |
 | `/agents-policies` | View current policies or update one: `/agents-policies testing tdd` |
 | `/agents-check-policies` | Audit codebase compliance with configured policies |
 | `/agents-validate` | Structural integrity check of the skill-pack |
+| `/agents-status` | Project dashboard: active chains, policies, pack summary |
 | `/agents-check-safety` | Scan staged files for secrets before commit |
 
 Run `/agents-init-project` after installing to configure project-level choices. All agents read the resulting `## Project policies` section in CLAUDE.md automatically.
@@ -129,7 +135,7 @@ The current pack covers several sub-teams:
 | `.claude/agents/lead.md` | Lead orchestrator — bootstrap, pipeline, delegation, gate semantics |
 | `.claude/scripts/` | Utility scripts: publication-safety scan, skill-pack validation |
 | `.claude/agents/team-templates/` | 8 JSON presets for common team compositions (full-delivery, quick-fix, research, review, etc.) |
-| `.claude/commands/` | 13 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
+| `.claude/commands/` | 19 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
 | `.claude/policies/catalog.md` | Policy catalog — available project-level choices with options and defaults |
 | `.claude/memory/` | Feedback rules from real usage — experience-based operating constraints |
 
@@ -169,7 +175,7 @@ Copy `.claude/` into your target repo:
 | `.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff contracts, operating model, subagent coordination |
 | `.claude/scripts/` | `.claude/scripts/` | Utility scripts (publication-safety scan, validation) |
 | `.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Team composition presets |
-| `.claude/commands/` | `.claude/commands/` | 13 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
+| `.claude/commands/` | `.claude/commands/` | 19 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
 | `.claude/policies/` | `.claude/policies/` | Policy catalog with configurable options |
 | `.claude/CLAUDE.md` | Merge into target `.claude/CLAUDE.md` | Governance entry point |
 | `.claude/memory/` (optional) | `.claude/memory/` | Experience-based feedback rules |

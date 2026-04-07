@@ -34,6 +34,14 @@ description: Perform an independent performance gate for an approved phase and r
 - Call out environment limits and measurement blind spots explicitly.
 - If the phase needs new tuning work, send it back through `performance-engineer`.
 
+## Cross-domain escalation
+
+If a finding falls outside performance review (e.g., a security concern, architecture issue, or accessibility problem discovered during review):
+
+1. Tag the finding in the report: `[CROSS-DOMAIN: <target-domain>]`
+2. Do NOT evaluate severity outside your expertise — state the observation factually
+3. The orchestrator routes the tagged finding to the appropriate specialist (see cross-domain escalation protocol in `operating-model.md`)
+
 ## Non-goals
 
 - Do not replace `performance-engineer`.
