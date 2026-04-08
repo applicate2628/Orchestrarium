@@ -131,6 +131,17 @@ If no class is specified, treat as `BLOCKED:dependency` (conservative default).
 
 If the plan specifies a different test ownership split, follow the plan. This table is the default when no plan-level override exists.
 
+## Structured completion report
+
+For substantial tasks, prefer a structured closeout in the final summary:
+
+- **Changed:** what was modified and why
+- **Verified:** what was tested or checked, with evidence
+- **Not verified:** what was not checked and why
+- **Risks / follow-ups:** residual risks, deferred work, or known limitations
+
+This is a recommended format for user-facing task completion, not a mandatory gate artifact. For pipeline handoffs, use the shared response format above.
+
 ## Gate questions
 
 Ask these before advancing:
