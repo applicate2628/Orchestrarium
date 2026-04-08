@@ -719,6 +719,12 @@ Before launching parallel agents, complete this 4-step pre-flight:
 3. **Post-completion conflict check**: after all agents finish, the integration owner checks for semantic conflicts across the combined output.
 4. **Independent REVISE**: if one agent receives `REVISE`, it iterates independently without blocking the others.
 
+### 11.7 Engineering hygiene
+
+- **Ambiguity resolution discipline:** do not guess; verify. Resolve factual ambiguity by inspecting code, config, data, or authoritative docs before choosing an interpretation, and state what was confirmed. If the ambiguity is about user intent, policy, scope, or architecture and inspection cannot settle it, do not invent an answer: either ask, or proceed only with the smallest safe reversible subset that does not lock in the unresolved choice, and state what was deferred and why. Block only when no safe forward action exists. Implementation-relevant decisions must trace to verified evidence or explicit user instruction, not assumption.
+- **Explicit bounds for background and fan-out work:** do not introduce long-lived background processes, automation that executes outside the direct request path (cron jobs, scheduled tasks, system hooks, startup scripts), or network listeners without explicit user approval. If such a mechanism is needed, state the justification and ask before implementing. Any approved background or fan-out work must have clear trigger conditions, concurrency limits, cancellation, and shutdown behavior.
+- **Autonomous external side effects:** do not create tickets, send messages, post to external services, mutate SaaS or cloud state, or trigger actions visible to third parties without explicit user approval. If an external side effect is needed, state the justification and ask before executing.
+
 ---
 
 ## 12. Team composition
