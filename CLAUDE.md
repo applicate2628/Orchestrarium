@@ -47,6 +47,8 @@ When modifying `src.claude/CLAUDE.md`, `operating-model.md`, or `subagent-contra
 
 - These are the governance core. Changes propagate to all users on next install.
 - State explicitly what behavior changes and what is preserved.
+- **MUST** update `references/subagent-operating-model.md` and all `references/` docs when any governance, protocol, gate, or routing semantic changes in the installed pack. Reference docs are the canonical methodology source of truth — they MUST stay aligned with the installed contracts. A governance change that updates `src.claude/` without updating `references/` is incomplete.
+- **MUST** update `README.md` and `INSTALL.md` when pack structure, skill count, install targets, or entry points change. A structural change without doc update is incomplete.
 - Run `/agents-validate` after changes.
 - Test install: `install.ps1 -Global` and verify CLAUDE.md sections.
 
