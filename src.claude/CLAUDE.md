@@ -1,6 +1,8 @@
+@AGENTS.md
+
 # Claudestrator
 
-Platform-specific rules for Claude Code. Shared governance (hygiene, publication safety, role index, core delegation) lives in `AGENTS.md` which Claude Code loads alongside this file.
+Platform-specific rules for Claude Code. Shared governance (hygiene, publication safety, role index, core delegation) is imported from `AGENTS.md` above via `@import`.
 
 ## Delegation rule
 
