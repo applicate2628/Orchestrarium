@@ -33,7 +33,7 @@ description: Coordinate complex multi-agent work requiring parallel risk owners,
 - Keep implementation work inside explicitly approved implementation roles only.
 - Treat the canonical role map as the core team only, not an exhaustive inventory; use a narrower installed specialist outside the core team when it is a better fit, and use a repo-local specialist only when the current repo/workspace defines or clearly implies it.
 - Detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers, and escalate one clear recommendation: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need.
-- Use `$consultant` only as an optional independent second opinion, never as a required pipeline stage.
+- Use `$consultant` only as an optional independent second opinion, never as a required pipeline stage. Consultant mode `external` requires user approval for fallback. Mode `auto` allows silent fallback with disclosure.
 - Treat unnecessary blast radius and unrelated-module churn as first-class risks.
 
 ## Canonical brief

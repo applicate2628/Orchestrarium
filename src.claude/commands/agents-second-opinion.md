@@ -7,6 +7,7 @@ Get an independent second opinion via the consultant agent.
 0. **Check toggle mode.** Before invoking the consultant:
    - If `$ARGUMENTS` is one of the toggle sub-commands, handle it directly:
      - `enable` → write `mode: external` to `.claude/.consultant-mode`. Print "Consultant enabled (external-first)." and exit.
+     - `auto` → write `mode: auto` to `.claude/.consultant-mode`. Print "Consultant enabled (external-first with silent fallback)." and exit.
      - `internal` → write `mode: internal` to `.claude/.consultant-mode`. Print "Consultant set to internal-only." and exit.
      - `disable` → write `mode: disabled` to `.claude/.consultant-mode`. Print "Consultant disabled." and exit.
      - `status` → read `.claude/.consultant-mode`. If no file: print "disabled (no file — run `/agents-second-opinion enable` to activate)". Otherwise print the current mode. Exit.
