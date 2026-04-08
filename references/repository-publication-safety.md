@@ -30,5 +30,5 @@ The rules below apply to every tracked file in the repository, including docs, r
 - `$security-reviewer`, `$knowledge-archivist`, or another relevant reviewer may also run the scan as part of a spot check or publication gate.
 - Any author may run the scan as a local self-check, but that does not replace the required human publication review.
 - Only `$security-reviewer` may approve a publication-safety exception to a scan finding. Any publication proceeding without that approval is `BLOCKED`.
-- On Git Bash, macOS, or Linux, run `bash .claude/scripts/check-publication-safety.sh` as the manual pre-publication scan for staged tracked content before publication.
-- On Windows PowerShell, run `powershell -ExecutionPolicy Bypass -File .claude/scripts/check-publication-safety.ps1`; the wrapper resolves Git-for-Windows `bash.exe` and calls the shared scan script so it does not rely on the WSL `bash.exe` stub from `PATH`.
+- On Git Bash, macOS, or Linux, run `bash .claude/agents/scripts/check-publication-safety.sh` as the manual pre-publication scan for staged tracked content before publication.
+- On Windows PowerShell, run `powershell -ExecutionPolicy Bypass -File .claude/agents/scripts/check-publication-safety.ps1`; the wrapper resolves Git-for-Windows `bash.exe` and calls the shared scan script so it does not rely on the WSL `bash.exe` stub from `PATH`.

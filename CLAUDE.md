@@ -58,8 +58,8 @@ src.claude/              ← skill-pack source (install copies to target .claude
   agents/                ← 31 role definitions
     contracts/           ← operating model + subagent contracts + policy catalog
     team-templates/      ← 8 routing templates (JSON)
-  commands/              ← 19 skills (slash commands)
     scripts/             ← validation + safety scripts
+  commands/              ← 19 skills (slash commands)
 .claude/                 ← local working install (in .gitignore, NOT committed)
 CLAUDE.md                ← THIS FILE (repo-local dev rules, NOT installed)
 README.md                ← public docs
