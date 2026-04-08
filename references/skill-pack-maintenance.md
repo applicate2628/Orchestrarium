@@ -14,11 +14,11 @@ Internal rules for maintaining the Claudestrator skill pack. Not installed into 
 
 ## Maintenance rules
 
-- Keep `.claude/CLAUDE.md` as the repo-level governance source
+- Keep `src.claude/CLAUDE.md` as the repo-level governance source
 - Changes to shared governance rules (delegation, gate semantics, REVISE cap, re-intake, task memory) must be propagated to `lead.md` in the same commit; `operating-model.md` is a reference only and should stay aligned
-- Update `.claude/agents/<role>.md` when trigger or prompt behavior changes
-- Update `.claude/agents/contracts/operating-model.md` when orchestration or gate semantics change
-- Update `.claude/agents/consultant.md` when consultant execution policy or provider rules change
+- Update `src.claude/agents/<role>.md` when trigger or prompt behavior changes
+- Update `src.claude/agents/contracts/operating-model.md` when orchestration or gate semantics change
+- Update `src.claude/agents/consultant.md` when consultant execution policy, toggle logic, or provider paths change
 - Use `$knowledge-archivist` for repository hygiene, canonical-source alignment, documentation upkeep, and reference maintenance
 - Route semantic repository control-plane changes prepared by `$knowledge-archivist` through an independent `$architecture-reviewer` gate before completion or publication; hygiene-only edits such as link fixes, formatting, index sync, archive moves, and non-semantic wording cleanup do not require that extra reviewer
 
