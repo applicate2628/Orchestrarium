@@ -526,33 +526,32 @@ src_md="$SOURCE/CLAUDE.md"
 dst_md="$TARGET/CLAUDE.md"
 
 if [[ -f "$dst_md" ]]; then
-  content="$(cat "$dst_md")"
-  if grep -q "## Delegation rule" "$dst_md" 2>/dev/null; then
-    if grep -qn "^# Claudestrator" "$dst_md"; then
-      echo "  CLAUDE.md: replacing Claudestrator section..."
-      head_lines=$(($(grep -n "^# Claudestrator" "$dst_md" | head -1 | cut -d: -f1) - 1))
-      if [[ $head_lines -gt 0 ]]; then
-        if [ "$DRY_RUN" -eq 1 ]; then
-          echo "    [dry-run] would replace Claudestrator section in CLAUDE.md"
-        else
-          head -n "$head_lines" "$dst_md" > "$dst_md.tmp"
-          cat "$src_md" >> "$dst_md.tmp"
-          mv "$dst_md.tmp" "$dst_md"
-        fi
-      else
-        if [ "$DRY_RUN" -eq 1 ]; then
-          echo "    [dry-run] would replace CLAUDE.md"
-        else
-          cp "$src_md" "$dst_md"
-        fi
-      fi
+  if grep -q "^@AGENTS.md" "$dst_md" 2>/dev/null || grep -q "^# Claudestrator" "$dst_md" 2>/dev/null; then
+    # Existing Claudestrator install — find where user content ends and pack content begins.
+    # User content (## Project policies, custom rules) lives AFTER the pack section.
+    # Pack section starts at @AGENTS.md or # Claudestrator (whichever comes first).
+    pack_start=$(grep -n "^@AGENTS.md\|^# Claudestrator" "$dst_md" | head -1 | cut -d: -f1)
+    total_lines=$(wc -l < "$dst_md")
+    # Everything before pack_start is user content (if any)
+    head_lines=$((pack_start - 1))
+    echo "  CLAUDE.md: replacing Claudestrator section..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would replace Claudestrator section in CLAUDE.md"
     else
-      echo "  CLAUDE.md: full replace..."
-      if [ "$DRY_RUN" -eq 1 ]; then
-        echo "    [dry-run] would replace CLAUDE.md"
+      if [ "$head_lines" -gt 0 ]; then
+        head -n "$head_lines" "$dst_md" > "$dst_md.tmp"
+        cat "$src_md" >> "$dst_md.tmp"
+        mv "$dst_md.tmp" "$dst_md"
       else
         cp "$src_md" "$dst_md"
       fi
+    fi
+  elif grep -q "## Delegation rule" "$dst_md" 2>/dev/null; then
+    echo "  CLAUDE.md: full replace (has delegation rule but no Claudestrator header)..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would replace CLAUDE.md"
+    else
+      cp "$src_md" "$dst_md"
     fi
   else
     echo "  CLAUDE.md: prepending Claudestrator content..."
