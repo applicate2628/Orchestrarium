@@ -19,7 +19,7 @@ When adding, renaming, or removing a skill (`src.claude/commands/agents-*.md`):
 5. Update `README.md` — update skill count
 6. Update `install.ps1` — update skill count threshold in verification
 7. Update `install.sh` — update skill count threshold in verification
-8. Update `src.claude/scripts/validate-skill-pack.sh` — add skill to validation list if not auto-discovered
+8. Update `src.claude/agents/scripts/validate-skill-pack.sh` — add skill to validation list if not auto-discovered
 9. Run `/agents-validate` to confirm structural integrity
 10. Run `install.ps1 -Global` to install and verify
 
@@ -59,7 +59,7 @@ src.claude/              ← skill-pack source (install copies to target .claude
     contracts/           ← operating model + subagent contracts + policy catalog
     team-templates/      ← 8 routing templates (JSON)
   commands/              ← 19 skills (slash commands)
-  scripts/               ← validation + safety scripts
+    scripts/             ← validation + safety scripts
 .claude/                 ← local working install (in .gitignore, NOT committed)
 CLAUDE.md                ← THIS FILE (repo-local dev rules, NOT installed)
 README.md                ← public docs
