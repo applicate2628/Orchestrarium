@@ -3,6 +3,8 @@
 This file provides a visual companion to [subagent-operating-model.md](subagent-operating-model.md).
 Strategy comparison companion: [workflow-strategy-comparison.md](workflow-strategy-comparison.md).
 
+**Platform note:** Orchestrarium targets Codex, which uses sequential skill invocation. Unlike Claude Code's parallel Agent tool dispatch, Codex processes one skill at a time. Diagrams below reflect this sequential execution model.
+
 ## 1. End-to-end operating flow
 
 ```mermaid
@@ -24,46 +26,50 @@ flowchart LR
     M -. "needs product facts" .-> PA
 ```
 
-## 2. Hub-and-spoke topology
+## 2. Hub-and-spoke topology (sequential)
+
+Lead invokes one role at a time. Each role completes and returns before the next is invoked. No native parallel dispatch.
 
 ```mermaid
 flowchart TB
     PM["product-manager"] -->|"admit item"| L["lead"]
     L -. "re-intake" .-> PM
 
-    L <-->|"facts"| AN["analyst\nproduct-analyst"]
-    L <-->|"design"| AR["architect\nconstraint roles"]
-    L <-->|"plan"| PL["planner"]
-    L <-->|"build"| IM["implementers\nintegration owner"]
-    L <-->|"verify"| QA["QA / reviewers"]
-    L -. "advisory" .-> CO["consultant"]
+    L -->|"1. facts"| AN["analyst\nproduct-analyst"]
+    AN -->|"artifact"| L
+    L -->|"2. design"| AR["architect\nconstraint roles"]
+    AR -->|"artifact"| L
+    L -->|"3. plan"| PL["planner"]
+    PL -->|"artifact"| L
+    L -->|"4. build"| IM["implementers"]
+    IM -->|"artifact"| L
+    L -->|"5. verify"| QA["QA / reviewers"]
+    QA -->|"artifact"| L
+    L -. "advisory (optional)" .-> CO["consultant"]
 ```
 
-## 3. Direct peer edges (optimizations)
+## 3. Sequential handoff chain (no native parallel)
 
-These edges complement hub-and-spoke. Lead remains orchestrating owner; direct edges require lead authorization.
+Unlike Claude Code, Codex does not dispatch multiple skills simultaneously. Constraint roles run sequentially, not in parallel. Lead orchestrates the ordering.
 
 ```mermaid
 flowchart LR
-    AR("architect") -. "DIRECT" .-> SE("security-eng")
-    AR -. "DIRECT" .-> PE("performance-eng")
-    AR -. "DIRECT" .-> RE("reliability-eng")
-    AR -. "DIRECT" .-> AS("algorithm-sci")
-    AR -. "DIRECT" .-> CS("computational-sci")
+    AR("architect") --> SE("security-eng")
+    SE --> PE("performance-eng")
+    PE --> RE("reliability-eng")
 
-    SE & PE & RE & AS & CS -. "DIRECT" .-> PL("planner")
+    RE --> PL("planner")
 
-    PL ==>|"CLAIMS"| IM("implementers")
-    IM ==>|"CLAIMS"| QA("qa-engineer")
-    QA ==>|"CLAIMS"| RV("reviewers")
+    PL -->|"CLAIMS"| IM("implementers")
+    IM -->|"CLAIMS"| QA("qa-engineer")
+    QA -->|"CLAIMS"| RV("reviewers")
 
     QA -. "ESCALATE" .-> PE
     RV -. "RETURN" .-> AR
-    RV -. "RETURN" .-> SE
     RV -. "RETURN" .-> IM
-
-    CS -. "meshing spec" .-> GE("geometry-eng")
 ```
+
+Note: if a project requires algorithm-scientist, computational-scientist, or ux-designer constraints, they are invoked sequentially before the planner, not in parallel with security/performance/reliability.
 
 ## 4. Artifact progression
 
@@ -102,16 +108,16 @@ flowchart TB
 | Situation | Strategy | Key roles |
 | --- | --- | --- |
 | What should enter delivery next? | Roadmap / Intake loop | `$product-manager`, `$product-analyst` |
-| Approved item needs execution | Delivery loop | `$lead` -> research -> design -> plan -> implement -> QA/review |
+| Approved item needs execution | Delivery loop (sequential) | `$lead` -> research -> design -> plan -> implement -> QA/review |
 | Next decision blocked by missing facts | Fact-first routing | `$analyst`, `$product-analyst`, specialist evidence lane |
-| Domain risk can independently fail result | Risk-owner routing | Relevant constraint role + corresponding reviewer |
+| Domain risk can independently fail result | Risk-owner routing (sequential) | Relevant constraint role then corresponding reviewer |
 | Admitted item changed mid-delivery | Re-intake loop | `$lead` -> `$product-manager` -> `$lead` |
 | Multiple phases must land together | Integration ownership | `$lead` + one integration owner |
 | Known risk needs checking | Claim-Verify review | Builder (with claims list) + reviewer |
 | Novel risk needs blind-spot hunting | Adversarial review | Reviewer only (no design package) |
 | Need non-blocking second opinion | Consultant advisory | `$lead` -> `$consultant` |
-| Independent read-heavy scopes | Parallel read lanes | Multiple research/triage roles |
-| Independent write-heavy scopes (fixed contracts) | Parallel write lanes | Multiple implementers with disjoint ownership |
+| Independent read-heavy scopes | Sequential fact-gathering | Research roles invoked one at a time |
+| Independent write-heavy scopes (fixed contracts) | Sequential implementation | Implementers invoked one at a time with disjoint ownership |
 
 ## 7. Role map
 
@@ -147,7 +153,7 @@ flowchart LR
 Lifecycle of `constraints/claims.md` in the work-item folder:
 
 1. **Created** after design acceptance — architect seeds initial constraints.
-2. **Populated** by each constraint role as they complete.
+2. **Populated** by each constraint role as they complete (sequentially).
 3. **Frozen** by the planner before implementation. The plan references the claims list.
 4. **Annotated** by each implementer — verification notes only, cannot modify claims.
 5. **Verified** by QA — each claim receives a verification status.
@@ -159,11 +165,11 @@ Lifecycle of `constraints/claims.md` in the work-item folder:
 - `product-manager` owns what enters delivery. `lead` owns execution of approved work.
 - `analyst` and `product-analyst` reduce uncertainty before interpretive roles make tradeoff decisions.
 - Delegation passes accepted artifacts, not raw transcripts.
+- **Codex sequential model:** one skill invocation at a time. No native parallel dispatch. If independent work could theoretically run in parallel, lead still invokes roles sequentially and manages the ordering.
 - `REVISE` returns work to the responsible role for up to 3 iterations; after 3, escalate to the user. `BLOCKED` stops progression — classified as `BLOCKED:dependency` (external blocker) or `BLOCKED:prerequisite` (adjacent work needed first).
 - Multi-phase implementation requires one explicit integration owner before QA.
 - Reviewers stay independent and report to the orchestrating owner.
-- Interaction types: `LEAD_MED` (default), `DIRECT`, `PARALLEL`, `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`.
+- Interaction types: `LEAD_MED` (default), `DIRECT` (sequential, lead-authorized), `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`. Note: `PARALLEL` is not natively supported in Codex — independent scopes are handled sequentially.
 - Reviewers tag cross-domain findings with `[CROSS-DOMAIN: <target-domain>]`; the orchestrator routes them to the appropriate specialist.
 - Any role files adjacent findings in `work-items/bugs/` without expanding scope.
 - Every completed chain persists artifacts: canonical docs in `work-items/`, session logs in `.reports/`, plan logs in `.plans/`.
-- Parallel agents must have non-overlapping change surfaces; an integration check runs after all parallel agents complete.
