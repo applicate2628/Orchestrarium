@@ -20,7 +20,7 @@
   - `AGENTS.md`
   - `references/subagent-operating-model.md`
   - `references/periodic-control-matrix.md` if needed
-  - `skills/lead/references/operating-model.md`
+  - `src.codex/skills/lead/operating-model.md`
   - `work-items/`
 - Must-not-break surfaces:
   - current publication-safety policy
