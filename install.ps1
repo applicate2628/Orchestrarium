@@ -434,38 +434,39 @@ $dstMd = Join-Path $TargetRoot "CLAUDE.md"
 
 if (Test-Path $dstMd) {
     $content = Get-Content $dstMd -Raw
-    if ($content -match "## Delegation rule") {
-        if ($content -match "(?m)^# Claudestrator") {
-            # Extract content before "# Claudestrator", replace rest
-            $lines = Get-Content $dstMd
-            $idx = 0
-            for ($i = 0; $i -lt $lines.Count; $i++) {
-                if ($lines[$i] -match "^# Claudestrator") { $idx = $i; break }
-            }
-            if ($idx -gt 0) {
-                Write-Host "  CLAUDE.md: replacing Claudestrator section..."
-                $userContent = ($lines[0..($idx-1)] -join "`n") + "`n"
-                $newContent = Get-Content $srcMd -Raw
-                if (-not $DryRun) {
-                    Set-Content -Path $dstMd -Value ($userContent + $newContent) -NoNewline
-                } else {
-                    Write-Host "    [dry-run] would replace Claudestrator section in CLAUDE.md"
-                }
+    $lines = Get-Content $dstMd
+    # Find pack section start: @AGENTS.md or # Claudestrator
+    $packStart = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match "^@AGENTS\.md" -or $lines[$i] -match "^# Claudestrator") {
+            $packStart = $i
+            break
+        }
+    }
+    if ($packStart -ge 0) {
+        Write-Host "  CLAUDE.md: replacing Claudestrator section..."
+        if ($packStart -gt 0) {
+            # Preserve user content before pack section
+            $userContent = ($lines[0..($packStart-1)] -join "`n") + "`n"
+            $newContent = Get-Content $srcMd -Raw
+            if (-not $DryRun) {
+                Set-Content -Path $dstMd -Value ($userContent + $newContent) -NoNewline
             } else {
-                Write-Host "  CLAUDE.md: full replace..."
-                if (-not $DryRun) {
-                    Copy-Item -Force $srcMd $dstMd
-                } else {
-                    Write-Host "    [dry-run] would replace CLAUDE.md"
-                }
+                Write-Host "    [dry-run] would replace Claudestrator section in CLAUDE.md"
             }
         } else {
-            Write-Host "  CLAUDE.md: full replace..."
             if (-not $DryRun) {
                 Copy-Item -Force $srcMd $dstMd
             } else {
                 Write-Host "    [dry-run] would replace CLAUDE.md"
             }
+        }
+    } elseif ($content -match "## Delegation rule") {
+        Write-Host "  CLAUDE.md: full replace (has delegation rule but no Claudestrator header)..."
+        if (-not $DryRun) {
+            Copy-Item -Force $srcMd $dstMd
+        } else {
+            Write-Host "    [dry-run] would replace CLAUDE.md"
         }
     } else {
         Write-Host "  CLAUDE.md: prepending Claudestrator content..."
