@@ -45,7 +45,7 @@ description: Produce a design package from accepted research without writing imp
 
 When scope investigation reveals issues outside the admitted scope:
 
-1. File the issue in `work-items/bugs/` using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
 2. Mention it in the current artifact under an "Adjacent findings" section.
 3. Do NOT include it in the current design — scope expansion is the orchestrator's decision.
 4. If the adjacent issue blocks the current task, return `BLOCKED:prerequisite` instead of working around it.

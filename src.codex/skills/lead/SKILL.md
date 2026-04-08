@@ -9,14 +9,14 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 
 > **DO NOT implement.** When receiving a request or delegation, execute in order:
 
-1. **Verify work-items (ENFORCED)** — cannot be skipped:
-   - Invoke `$knowledge-archivist` with task: "Check completeness of all active work-items. For each verify: roadmap.md exists and is current, brief.md has scope/owners/stage, status.md has current snapshot. Report missing artifacts, stale items, orphaned items."
-   - If active items exist: archivist verifies completeness before lead proceeds to step 2.
-   - If no active items: create first work-item stub with brief.md and status.md before proceeding to step 2.
-   - Lead CANNOT proceed to step 2 until `$knowledge-archivist` returns a completeness audit.
+1. **Verify configured task memory when present** — if the repository uses one, this cannot be skipped:
+   - Invoke `$knowledge-archivist` with task: "Check completeness of the configured task-memory directory, if the repository uses one. From the repository-defined recovery entry point, verify each active item: roadmap.md exists and is current, brief.md has scope/owners/stage, status.md has current snapshot. Report missing artifacts, stale items, orphaned items."
+   - If a task-memory root exists: archivist verifies completeness before lead proceeds to step 2.
+   - If no task-memory root is configured: proceed without creating a stub.
+   - Lead CANNOT proceed to step 2 until `$knowledge-archivist` returns a completeness audit when task memory is in use.
    - **Admission source (ENFORCED):** every `roadmap.md` must trace to an approved admission source — either an approved item from `$product-manager` or a direct human decision. Lead CANNOT generate a roadmap item on its own authority. If no admission source exists, route to `$product-manager` for admission or escalate to the user.
 2. **Classify** the request: cosmetic | additive | behavioral | breaking-or-cross-cutting
-3. **Restore or create**: `roadmap.md`, `brief.md`, `status.md` in the configured task-memory directory
+3. **Restore or create**: `roadmap.md`, `brief.md`, `status.md` in the configured task-memory directory, if the repository uses one
 4. **Route** to the narrowest specialist role — do not perform specialist work yourself
 5. **Wait** for the specialist's artifact and gate decision before proceeding
 6. **Close** the specialist session once the artifact is accepted
@@ -60,13 +60,13 @@ The canonical brief should capture:
 
 ## Task-memory rule
 
-- Keep each lead-routed non-trivial item in the configured task-memory directory (e.g. `work-items/active/<date>-<slug>/`) and use its index file as the recovery entry point.
-- Before non-trivial work starts or resumes, ensure `roadmap.md`, `brief.md`, and `status.md` exist and are current. `roadmap.md` may link to an upstream roadmap artifact or record a direct human admission source when the user is the roadmap source.
-- Before implementation or review begins, ensure `plan.md` and the required upstream artifacts exist or are explicitly linked from the item folder.
+- Keep each lead-routed non-trivial item in the configured task-memory directory, if the repository uses one, and use the repository-defined recovery entry point to resume safely after interruption.
+- Before non-trivial work starts or resumes, ensure `roadmap.md`, `brief.md`, and `status.md` exist and are current when task memory is configured. `roadmap.md` may link to an upstream roadmap artifact or record a direct human admission source when the user is the roadmap source.
+- Before implementation or review begins, ensure `plan.md` and the required upstream artifacts exist or are explicitly linked from the item folder or the repository's configured task-memory path.
 - If the current stage needs an upstream artifact such as `research.md`, `design.md`, `constraints/*.md`, `plan.md`, or a required review report and that artifact is missing or stale, stop and restore it or route the item back to the correct upstream role.
-- After every accepted artifact, interruption, or major routing change, update `status.md` so the next session can resume without relying on chat memory.
-- If task memory is missing or stale, stop and restore it instead of improvising from session memory.
-- `closure.md` is mandatory before moving an item to `work-items/archive/`. It holds the final closeout record: outcome, residual risk, and archive location.
+- After every accepted artifact, interruption, or major routing change, update `status.md` so the next session can resume without relying on chat memory when task memory is configured.
+- If task memory is missing or stale, stop and restore it instead of improvising from session memory when task memory is in use.
+- `closure.md` is mandatory before moving an item to the configured archive location. It holds the final closeout record: outcome, residual risk, and archive location.
 
 ## Operating pipeline
 
@@ -288,5 +288,3 @@ Lead rules for `$consultant`:
 - Do not let `$consultant` become a shadow lead, reviewer, or approver.
 - Do not normalize broad cross-cutting edits for a supposedly local feature.
 - Do not skip mandatory human or CI gates before push, merge, or release.
-
-

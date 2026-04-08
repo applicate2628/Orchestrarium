@@ -10,13 +10,13 @@ Get an independent advisory memo or manage the consultant toggle.
 ## Steps
 
 0. **Check for toggle command.** If `$ARGUMENTS` is one of the toggle sub-commands, handle it directly:
-   - `enable` → write `mode: external` to `.codex/.consultant-mode`. Print "Consultant enabled (external-first)." and exit.
-   - `internal` → write `mode: internal` to `.codex/.consultant-mode`. Print "Consultant set to internal-only." and exit.
-   - `disable` → write `mode: disabled` to `.codex/.consultant-mode`. Print "Consultant disabled." and exit.
-   - `status` → read `.codex/.consultant-mode`. If no file: print "disabled (no file — run `/second-opinion enable` to activate)". Otherwise print the current mode. Exit.
+   - `enable` → write `mode: external` to `.agents/.consultant-mode`. Print "Consultant enabled (external-first)." and exit.
+   - `internal` → write `mode: internal` to `.agents/.consultant-mode`. Print "Consultant set to internal-only." and exit.
+   - `disable` → write `mode: disabled` to `.agents/.consultant-mode`. Print "Consultant disabled." and exit.
+   - `status` → read `.agents/.consultant-mode`. If no file: print "disabled (no file — run `/second-opinion enable` to activate)". Otherwise print the current mode. Exit.
    - If `$ARGUMENTS` is not a toggle command, proceed to step 1.
 
-1. **Check toggle state.** Read `.codex/.consultant-mode`:
+1. **Check toggle state.** Read `.agents/.consultant-mode`:
    - If the file does not exist: print "disabled (no file — run `/second-opinion enable` to activate)" and exit.
    - If `mode: disabled`: print "Consultant is disabled. Run `/second-opinion enable` first." and exit.
    - If `mode: external` or `mode: internal`: proceed.
@@ -35,7 +35,7 @@ Get an independent advisory memo or manage the consultant toggle.
    - Confidence level
 
 5. **Save.** Persist per artifact persistence protocol:
-   - If part of an active work-item → `work-items/active/<slug>/advisory.md`
+   - If the repository defines an active item artifact path, persist the memo there.
    - Log to `.reports/YYYY-MM/report(consultant)-YYYY-MM-DD_HH-MM_topic.md`
 
 ## Rules
@@ -43,3 +43,4 @@ Get an independent advisory memo or manage the consultant toggle.
 - Consultant is advisory-only — do not treat the memo as a blocking gate.
 - Do not modify any project files (toggle file excluded).
 - If the memo identifies a real blocker, recommend the proper specialist role to handle it.
+- The consultant toggle is project-local state stored at `.agents/.consultant-mode`, even when the skill pack itself is installed globally.

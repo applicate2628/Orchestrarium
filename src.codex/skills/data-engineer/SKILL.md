@@ -37,7 +37,7 @@ description: Implement an approved data phase without changing upstream architec
 
 When implementation reveals bugs, risks, or improvement opportunities outside the approved change surface:
 
-1. File the issue in `work-items/bugs/` using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
 2. Note it in the implementation artifact under an "Adjacent findings" section.
 3. Do NOT expand scope to fix it — the orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.

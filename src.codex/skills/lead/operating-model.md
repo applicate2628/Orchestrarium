@@ -134,13 +134,13 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 
 ## Repository task memory
 
-- Use the configured task-memory index as the recovery entry point (e.g. `work-items/index.md`).
-- Keep each active lead-routed non-trivial item in its own dated directory (e.g. `<task-memory-root>/active/<date>-<slug>/`).
-- Require `roadmap.md`, `brief.md`, and `status.md` before non-trivial work starts or resumes.
-- Require `plan.md` before implementation or review begins.
+- Use the repository-defined recovery entry point, if the repository uses task memory.
+- Keep each active lead-routed non-trivial item in its own dated directory inside the configured task-memory root, if the repository uses one.
+- Require `roadmap.md`, `brief.md`, and `status.md` before non-trivial work starts or resumes when task memory is configured.
+- Require `plan.md` before implementation or review begins when task memory is configured.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
-- Update `status.md` after accepted artifacts, interruptions, or stage changes so work can resume without relying on chat memory.
-- If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery.
+- Update `status.md` after accepted artifacts, interruptions, or stage changes so work can resume without relying on chat memory when task memory is configured.
+- If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery when task memory is in use.
 - Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
 
 ## Lead quick checklist
@@ -259,6 +259,21 @@ Do not let a role that defines a critical constraint act as the only approval ga
 - Independent reviewers return findings to the orchestrating owner; they do not directly re-task implementation roles.
 - Direct role-to-role collaboration is allowed only when the orchestrating owner explicitly approves the pair, scope, and expected artifact boundary.
 
+## Research admission filter
+
+When `$product-manager` admits a new candidate approach into discovery, the roadmap decision package must include:
+
+- **Coherence statement**: what shared state or contract holds this candidate together as one unit
+- **Improvement hypothesis**: which baseline it beats, on which cases, by which metric, through which mechanism
+- **Non-redundancy argument**: why this is meaningfully different from prior rejects with similar failure modes
+- **Expected win cases**: where the candidate is expected to succeed
+- **Expected fail cases**: where it is expected to struggle
+- **Evaluation metric mapping**: how the candidate's optimization objective maps to the benchmark objective
+- **Shortest falsification experiment**: 2–3 cases, clear PASS/FAIL threshold, minimal tuning
+- **Implementation seam**: where this lives in the repo (isolated lane, protected surfaces, minimal seam) — confirmed by `$architect` after admission
+
+`$product-manager` enforces 3 pre-admission gates (coherence, improvement hypothesis, non-redundancy). `$analyst` enforces 4 research-phase gates (regression risk, metric alignment, known limits, bounded falsification). `$architect` confirms the implementation isolation gate after admission.
+
 ## Isolation rule
 
 Every role invocation MUST use the designated agent invocation mechanism with the matching role. Do not simulate roles in the main conversation or emulate a specialist by "acting as" that role. Independent roles (e.g., security-engineer and performance-engineer) SHOULD be launched in parallel when their scopes do not overlap. Sequential dependencies must wait for the previous role to return its accepted artifact.
@@ -289,7 +304,7 @@ When a reviewer finds a significant issue outside their domain:
 
 When any role discovers a bug, risk, or improvement outside the approved change surface:
 
-1. File the issue in `work-items/bugs/` using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
 2. Note it in the current artifact under an "Adjacent findings" section.
 3. Do NOT expand scope to address it — the orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.
@@ -316,7 +331,7 @@ Every completed chain producing an accepted artifact MUST persist it before the 
 
 | Tier | Location | When to use |
 |---|---|---|
-| Canonical | `work-items/active/<date>-<slug>/` | Lead-routed non-trivial work: brief, status, research, design, plan, review, closure |
+| Canonical | `configured task-memory directory` | Lead-routed non-trivial work: brief, status, research, design, plan, review, closure |
 | Session log | `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Session reports, review reports, advisory memos |
 | Plan log | `.plans/YYYY-MM/plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Delivery plans, phase plans |
 
@@ -333,7 +348,7 @@ When NOT to save:
 ## Re-intake and integration ownership
 
 - Re-intake is not the same as `REVISE`. Use re-intake when the admitted item itself has changed; use `REVISE` when the current role can still correct its artifact without changing the admitted item.
-- Re-intake cap: an item may return to `$product-manager` for re-intake at most 2 times. On the 3rd re-intake, the lead escalates to the user with all prior reasons.
+- Re-intake cap: an item may return to `$product-manager` for re-intake at most 2 times. On the 3rd re-intake, the lead must escalate to the user with all prior re-intake reasons and ask for a final decision (reduce scope, defer, or cancel).
 - If scope drift, priority changes, or milestone reshaping materially redefine the work, `$lead` stops delivery progression and routes the item back to `$product-manager`.
 - If a change spans multiple implementation phases or specialists, `$lead` assigns one explicit integration owner before QA.
 - The integration owner assembles one coherent integrated artifact, checks cross-phase compatibility, and hands one verification-ready result to QA or the relevant reviewers.

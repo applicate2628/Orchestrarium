@@ -36,7 +36,7 @@ description: Define performance budgets, measurement strategy, bottleneck models
 
 ## Performance issue registry
 
-When a performance issue is found, record it in `work-items/bugs/` with fields: title, metric affected (latency / throughput / memory / CPU / cost), budget or SLA violated (if known), reproduction environment, severity, and status (open / in-progress / resolved).
+When a performance issue is found, record it in the configured bug registry path, if the repository uses one, with fields: title, metric affected (latency / throughput / memory / CPU / cost), budget or SLA violated (if known), reproduction environment, severity, and status (open / in-progress / resolved).
 
 ## Non-goals
 

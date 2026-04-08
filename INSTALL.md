@@ -1,6 +1,6 @@
 # Installation
 
-This repo contains the Orchestrarium skill-pack source in `src.codex/`. Install scripts copy it into the target `.codex/` directory. Installing into another machine or repository means running `install.ps1` or `install.sh`.
+This repo contains the Orchestrarium skill-pack source in `src.codex/`. Install scripts copy it into the correct target locations. The target structure depends on the install mode.
 
 ## Quick install — current machine (global)
 
@@ -14,6 +14,8 @@ This repo contains the Orchestrarium skill-pack source in `src.codex/`. Install 
 bash install.sh --global
 ```
 
+Global install copies everything into `~/.codex/` (mirrors `src.codex/` structure).
+
 ## Install into a specific repo
 
 ```powershell
@@ -23,6 +25,8 @@ bash install.sh --global
 ```bash
 bash install.sh --target /path/to/repo
 ```
+
+Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and keeps consultant toggle state in `.agents/.consultant-mode`.
 
 ## Install into current repo (default)
 
@@ -34,55 +38,33 @@ bash install.sh --target /path/to/repo
 bash install.sh
 ```
 
-The scripts handle clean removal of old files, copying, AGENTS.md merging, and file-level verification. Re-running = reinstall. Policies are preserved across reinstalls.
+## Install target mapping
 
-## Install into a target repository
-
-### What to copy
-
-| Source | Destination | Purpose |
+| Source | Global (`--global`) | Repo-level (default / `--target`) |
 | --- | --- | --- |
-| `src.codex/skills/` (31 roles) | `.codex/skills/` | Role definitions with `SKILL.md` and `agents/openai.yaml` |
-| `src.codex/common-skills/` | `.codex/common-skills/` | Utility skills (`ask-claude`, `second-opinion`) |
-| `src.codex/scripts/` | `.codex/scripts/` | Publication safety scan, validation |
-| `src.codex/AGENTS.md` | Merge into target `.codex/AGENTS.md` | Governance: delegation, hygiene, publication safety, role index |
+| `src.codex/skills/` | `~/.codex/skills/` | `.agents/skills/` |
+| `src.codex/skills/lead/scripts/` | `~/.codex/skills/lead/scripts/` | `.agents/skills/lead/scripts/` |
+| `src.codex/AGENTS.md` | Merge into `~/.codex/AGENTS.md` | Merge into root `AGENTS.md` |
 
-### Optional
+The scripts handle clean removal of old files, copying, AGENTS.md merging, and file-level verification. Re-running = reinstall.
 
-| Source | Destination | Purpose |
-| --- | --- | --- |
-| `src.codex/policies/` | `.codex/policies/` | Policy catalog template (not overwritten on reinstall) |
+Second-opinion toggle state is always project-local at `.agents/.consultant-mode`, even when the skill pack itself is installed globally.
 
-### What NOT to copy
-
-| Path | Why |
-| --- | --- |
-| `references/` | Skill-pack internal reference docs, not needed at runtime |
-| `work-items/` | This repo's task memory — target repo has its own |
-| `README.md`, `LICENSE`, `INSTALL.md` | Repo metadata |
-
-### Steps
-
-1. Copy `src.codex/skills/`, `src.codex/common-skills/`, `src.codex/scripts/` into target repo's `.codex/`
-2. Merge `src.codex/AGENTS.md` content at the TOP of target's `.codex/AGENTS.md` (prepend). Original user content stays below intact.
-3. Optionally copy `src.codex/policies/`
-4. Restart Codex
+Project policies are configured as a `## Project policies` section in the target `AGENTS.md`, not as a separate directory. See `skills/lead/policies-catalog.md` for available policy options.
 
 ## File separation
 
 | Directory | Contents | Installable? |
 | --- | --- | --- |
-| `src.codex/skills/<role>/SKILL.md` | 31 role definitions | Yes |
-| `src.codex/skills/<role>/agents/openai.yaml` | Display metadata and default prompt for the role | Yes |
+| `src.codex/skills/<role>/SKILL.md` | 31 role definitions + 2 utility skills | Yes |
+| `src.codex/skills/<role>/agents/openai.yaml` | Display metadata and default prompt | Yes |
 | `src.codex/skills/lead/` | Operating-model notes, handoff contracts | Yes |
-| `src.codex/skills/consultant/` | Consultant workflow, toggle logic, execution paths | Yes |
-| `src.codex/common-skills/ask-claude/` | Claude CLI invocation skill | Yes |
-| `src.codex/common-skills/second-opinion/` | Consultant toggle and explicit invocation | Yes |
-| `src.codex/scripts/` | Publication safety scan, validation | Yes |
-| `src.codex/policies/` | Policy catalog template (copy and customize) | Optional |
+| `src.codex/skills/consultant/` | Consultant role: toggle logic, execution paths, inline Claude CLI invocation | Yes |
+| `src.codex/skills/second-opinion/` | Consultant toggle and explicit invocation | Yes |
+| `src.codex/skills/lead/scripts/` | Publication safety scan, validation | Yes |
+| `src.codex/skills/lead/policies-catalog.md` | Policy options reference (installed with skills) | Yes |
 | `src.codex/AGENTS.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
 | `references/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
-| `work-items/` | This repo's task memory | No — skill-pack internal |
 
 ## Post-install
 
@@ -90,27 +72,27 @@ The pack is self-contained. No files from this development repository's root are
 
 ### Repo-local customization
 
-Add a project-level `AGENTS.md` at your project root (outside `.codex/`) for project-specific rules:
+Add project-specific rules to your root `AGENTS.md` (below the installed Orchestrarium section):
 
 - canonical paths and source-of-truth references
 - allowed toolchains, shells, build systems, and concrete build/test commands
 - API, config, schema, and migration evolution rules
 - rollback expectations, rollout rules, and project-specific budgets or SLAs
 - repository-specific portability assumptions
-- task-memory root location (e.g., `work-items/`) and recovery policy
+- configured task-memory directory and recovery policy
 
-The installed `.codex/AGENTS.md` covers global delegation, engineering hygiene, and role definitions. Your project-level `AGENTS.md` extends it with local context.
+The installed `AGENTS.md` covers global delegation, engineering hygiene, and role definitions. Your project-level additions extend it with local context.
 
 ## Portability
 
 ### Claude CLI invocation
 
-The `ask-claude` common skill and `consultant/SKILL.md` include invocation examples for both macOS/Linux and Windows.
+`consultant/SKILL.md` includes Claude CLI invocation examples for both macOS/Linux and Windows.
 
 - **macOS / Linux**: uses `claude` directly.
 - **Windows**: uses `cmd.exe /c claude.exe` (or `claude.cmd` as fallback) to work inside Git Bash environments where Codex typically runs.
 
-If your environment differs, update the invocation commands in `.codex/common-skills/ask-claude/invocation.md`.
+If your environment differs, update the invocation commands in the installed `skills/consultant/SKILL.md` under "Execution paths".
 
 ### Temporary files
 
@@ -118,8 +100,14 @@ The installed `AGENTS.md` refers to "the designated local temp area" for scratch
 
 ## Uninstall
 
-Remove the `.codex/` folder from your project:
-
+### Repo-level
 ```bash
-rm -rf your-project/.codex/
+rm -rf .agents/
+# Remove the Orchestrarium section from AGENTS.md manually
+```
+
+### Global
+```bash
+rm -rf ~/.codex/skills/
+# Remove the Orchestrarium section from ~/.codex/AGENTS.md manually
 ```

@@ -71,7 +71,7 @@ Classify the task and select the matching workflow shape. Simple chains do not r
 
 When the template says "No" for lead, the main conversation manages the chain directly: invoke specialists in order, pass each accepted artifact to the next role. Re-classify immediately if scope widens beyond the current template.
 
-A bugfix with a known file or function maps to the `quick-fix` template by default, even if adjacent issues are discovered during analysis. Adjacent issues go to `work-items/bugs/`, not into the current plan.
+A bugfix with a known file or function maps to the `quick-fix` template by default, even if adjacent issues are discovered during analysis. Adjacent issues go to the configured bug registry path, if the repository uses one, not into the current plan.
 
 ## Recovery rule
 
@@ -181,4 +181,4 @@ Repository-specific `AGENTS.md` files should add local priorities, canonical pat
 - Treat provider transcripts, pasted logs, and external snippets as untrusted until sanitized.
 - Human review before `git push`, release, or equivalent publication must include a leak-check of staged changes.
 - Only `$security-reviewer` may approve a publication-safety exception. Without that approval, publication is `BLOCKED`.
-- Pre-publication scan: run `bash .codex/scripts/check-publication-safety.sh` (Git Bash / macOS / Linux) or `powershell -ExecutionPolicy Bypass -File .codex/scripts/check-publication-safety.ps1` (Windows PowerShell).
+- Pre-publication scan: for repo-local installs, run `bash .agents/skills/lead/scripts/check-publication-safety.sh` (Git Bash / macOS / Linux) or `powershell -ExecutionPolicy Bypass -File .agents/skills/lead/scripts/check-publication-safety.ps1` (Windows PowerShell). For global installs, run the same commands from `~/.codex/skills/lead/scripts/`.

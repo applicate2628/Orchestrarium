@@ -154,17 +154,22 @@ AI gates не заменяют внешнюю engineering policy.
 - Если роль не согласна с upstream artifact, она возвращает `REVISE` или `BLOCKED` orchestrating owner'у вместо приватного переписывания scope.
 - Reviewer'ы остаются независимыми и возвращают findings orchestrating owner'у, а не начинают напрямую управлять implementation.
 - Прямая specialist-to-specialist collaboration допустима только когда orchestrating owner явно одобряет edge, scope и границу артефакта.
-- `$consultant` — опциональная независимая advisory-роль; она может исполняться внешним провайдером или внутренним независимым subagent fallback, но никогда не становится delivery gate.
+- `$consultant` — опциональная независимая advisory-роль; она может исполняться внешним провайдером или внутренним независимым subagent, но никогда не становится delivery gate. Consultant включается через toggle file. Нет toggle file = disabled. Режимы: `external` (cross-provider CLI), `internal` (same-platform subagent), `disabled`. Skill `/second-opinion` (Codex) или команда `/agents-second-opinion` (Claude Code) управляет toggle и вызывает consultant.
 
 ### 3.9 Rolling-loop execution
 
 - Система работает как rolling loop, а не как stop-and-wait chain.
 - `PASS` сразу продвигает к следующей утверждённой роли.
 - `REVISE` остаётся внутри той же роли для bounded correction.
-- Дефолтный предел `REVISE`: не более 2 подряд `REVISE`-циклов для одной и той же роли и одного и того же артефакта, после чего lead обязан пере-маршрутизировать работу, эскалировать её или пометить как `BLOCKED`.
+- Дефолтный предел `REVISE`: не более 3 подряд `REVISE`-циклов для одной и той же роли и одного и того же артефакта, после чего lead обязан пере-маршрутизировать работу, эскалировать её или пометить как `BLOCKED`.
 - `BLOCKED` зарезервирован для реальных внешних blocker'ов, недостающих решений или недоступных prerequisites.
+  - `BLOCKED` имеет два типизированных класса:
+    - `BLOCKED:dependency` — невозможно продолжить, отсутствует инструмент, среда, доступ или информация, которую ни один текущий агент не может предоставить. Orchestrator предъявляет пользователю для решения.
+    - `BLOCKED:prerequisite` — обнаружена смежная работа, которая должна быть завершена сначала (например, сломанный соседний модуль, недостающая миграция). Orchestrator фиксирует в конфигурируемом bug registry, пользователь определяет приоритет, продолжение после решения.
+  - Если класс не указан, считайте `BLOCKED:dependency` (консервативный default).
 - Закрывайте specialist-сессии, как только их артефакт принят, передан дальше или явно parked. Держите сессию открытой только для bounded `REVISE` или immediate same-scope follow-up; закрывайте `BLOCKED` и advisory-only consultant sessions после routing или advisory handoff.
 - `RETURN(role)` использует независимый reviewer, когда upstream artifact имеет structural gap, требующий expertise этой роли, а не bounded fix. Lead направляет finding к указанной upstream-роли. Пример: `RETURN(security-engineer)` — threat model вообще не покрывает server-side validation surface.
+- Предел re-intake: item может быть возвращён `product-manager` для re-intake не более 2 раз. На 3-й re-intake lead обязан эскалировать к пользователю со всеми предыдущими причинами re-intake и запросить окончательное решение (сузить scope, отложить или отменить).
 - Держите handoff latency низким и не делайте пауз между принятыми артефактами, если только не нужен настоящий gate failure или policy-required human/CI check.
 
 ## 3.10 Периодические controls
@@ -173,6 +178,24 @@ AI gates не заменяют внешнюю engineering policy.
 - Используйте [periodic-control-matrix.md](periodic-control-matrix.md) как каноническую матрицу cadence, owner, evidence и fail action.
 - Периодические controls ловят drift между переходами: stale активные items, missing recovery state, repo consistency drift, archive hygiene, refactor debt и publication-safety spot checks.
 - Stage-gated артефакты по-прежнему определяют, может ли работа перейти на следующую фазу.
+
+### 3.11 Протокол adjacent findings
+
+Когда любая роль обнаруживает баг, риск или возможность улучшения за пределами утверждённой change surface:
+
+1. Зафиксируйте проблему в конфигурируемом bug registry, используя bug registry format из `qa-engineer/SKILL.md`, с `context: adjacent-finding` и `status: open`.
+2. Упомяните её в текущем артефакте в разделе "Adjacent findings".
+3. НЕ расширяйте scope — orchestrator решает приоритет и планирование.
+4. Если смежная проблема блокирует текущую фазу, верните `BLOCKED:prerequisite` вместо того, чтобы обходить её.
+
+### 3.12 Протокол cross-domain escalation
+
+Когда reviewer находит значительную проблему за пределами своего домена:
+
+1. Пометьте finding: `[CROSS-DOMAIN: <target-domain>]`.
+2. Изложите наблюдение фактически — не оценивайте severity за пределами своей экспертизы.
+3. Orchestrator направляет помеченное finding соответствующему специалисту.
+4. Это finding не блокирует текущий review gate, если reviewer не может завершить собственную domain assessment без него.
 
 ---
 
@@ -223,7 +246,7 @@ Integration owner (multi-phase changes, optional):
 2. Artifact
 3. Risks / Unknowns
 4. Recommended next role
-5. Gate: PASS | REVISE | BLOCKED | RETURN(role)
+5. Gate: PASS | REVISE | BLOCKED:<class> | RETURN(role)
 ```
 
 Decision-making roles должны явно разделять подтверждённые факты, assumptions и judgment calls в своём output.
@@ -564,6 +587,14 @@ product-manager -> lead -> analyst -> architect -> planner -> toolchain-engineer
 product-manager -> lead -> analyst -> architect -> planner -> implementation specialist -> qa-engineer -> architecture-reviewer -> lead
 ```
 
+### Bugfix с известным файлом или функцией
+
+Bugfix с известным файлом или функцией по умолчанию маршрутизируется через шаблон `quick-fix`, даже если в ходе анализа обнаруживаются смежные проблемы. Смежные проблемы уходят в конфигурируемый bug registry, а не в текущий plan.
+
+```text
+product-manager -> lead -> implementation specialist -> qa-engineer -> lead
+```
+
 ### Roadmap prioritization или milestone shaping
 
 ```text
@@ -575,6 +606,20 @@ product-manager -> product-analyst -> lead
 ```text
 lead -> product-manager -> lead
 ```
+
+### Фильтр допуска в research
+
+При допуске нового кандидатного подхода в discovery, roadmap decision package должен включать:
+
+- **Coherence statement**: какое общее состояние или contract скрепляет этого кандидата как единое целое
+- **Improvement hypothesis**: какой baseline он превосходит, на каких случаях, по какой метрике, через какой механизм
+- **Non-redundancy argument**: почему он существенно отличается от ранее отвергнутых кандидатов с похожими failure modes
+- **Expected win/fail cases**: где кандидат работает хорошо, а где плохо
+- **Evaluation metric mapping**: как optimization objective маппится на benchmark objective
+- **Shortest falsification experiment**: 2-3 случая, чёткий порог PASS/FAIL, минимальный tuning
+- **Implementation seam**: изолированная полоса, защищённые surfaces, минимальный seam
+
+`$product-manager` применяет 3 pre-admission gates (coherence, improvement hypothesis, non-redundancy). `$analyst` применяет 4 research-phase gates (regression risk, metric alignment, known limits, bounded falsification). `$architect` подтверждает implementation isolation gate.
 
 ---
 
@@ -617,13 +662,15 @@ lead -> product-manager -> lead
 
 ### 11.2 Корень task-memory и восстановление
 
-- Используйте `work-items/` как canonical tracked task-memory root, когда этот репозиторий является source of truth.
-- Держите активные admitted items в `work-items/active/<date>-<slug>/` и начинайте восстановление после прерывания с `work-items/index.md`.
-- Для lead-routed non-trivial work `roadmap.md`, `brief.md` и `status.md` обязательны.
+- Используйте конфигурируемый task-memory directory, когда этот репозиторий использует optional tracked task memory.
+- Держите активные admitted items в конфигурируемой active-item directory и начинайте восстановление после прерывания с repository-defined recovery entry point.
+- Для lead-routed non-trivial work `roadmap.md`, `brief.md` и `status.md` обязательны, когда tracked task memory включён.
 - `plan.md` становится обязательным до начала implementation или review.
 - Если текущая стадия зависит от upstream artifacts, таких как research, design, specialist constraints, phase plan или required review reports, эти артефакты должны существовать и быть актуальными до продолжения работы.
-- Если обязательные task-memory artifacts отсутствуют или устарели, остановитесь и восстановите их до продолжения delivery.
+- Если обязательные task-memory artifacts для конфигурируемого workflow отсутствуют или устарели, остановитесь и восстановите их до продолжения delivery.
 - `notes.md` или `notes/` хранит technical findings и discoveries; принятые долгоживущие решения по-прежнему должны жить в design или ADR artifact.
+- `closure.md` обязателен перед перемещением item в конфигурируемую archive location. Содержит финальную запись о закрытии: outcome, residual risk и archive location.
+- `status.md` имеет определённый формат с YAML frontmatter (template, orchestrator, started, updated) и разделами: Current state, Active agents, Completed agents, REVISE loop (опционально), Next action. Полный формат определён в `subagent-contracts.md`.
 
 ### 11.3 Что стоит автоматизировать
 
@@ -760,4 +807,3 @@ accessibility-reviewer
 Короткая формула команды:
 
 > **Одна роль. Один артефакт. Один gate. Один явный владелец на каждый критичный риск.**
-
