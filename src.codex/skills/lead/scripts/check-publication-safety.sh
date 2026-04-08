@@ -4,8 +4,9 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  bash src.codex/scripts/check-publication-safety.sh   (dev repo)
-  bash .codex/scripts/check-publication-safety.sh      (installed)
+  bash src.codex/skills/lead/scripts/check-publication-safety.sh        (dev repo)
+  bash .codex/skills/lead/scripts/check-publication-safety.sh           (global install)
+  bash .agents/skills/lead/scripts/check-publication-safety.sh          (repo-local install)
   bash <path>/check-publication-safety.sh --path <dir>
 
 By default, scans staged tracked files in the repository for publication-safety issues.
@@ -80,9 +81,18 @@ done
 
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
+script_path="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/$(basename "${BASH_SOURCE[0]}")"
+script_rel=""
+if [[ "$script_path" == "$repo_root/"* ]]; then
+  script_rel="${script_path#$repo_root/}"
+fi
 
 if [[ "$scan_mode" == "tracked" ]]; then
-  cmd+=(--cached -- . ':!.codex/scripts/check-publication-safety.sh')
+  if [[ -n "$script_rel" ]]; then
+    cmd+=(--cached -- . ":!$script_rel")
+  else
+    cmd+=(--cached -- .)
+  fi
 else
   cmd+=(--no-index -- "$scan_path")
 fi

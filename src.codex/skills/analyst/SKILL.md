@@ -35,11 +35,22 @@ description: Investigate a repository in read-only mode and return a factual res
 - If evidence is missing, say it is unknown instead of inferring.
 - Prefer concise facts over speculative narration.
 
+## Research admission gates
+
+When investigating a candidate approach admitted by `$product-manager`, verify these gates during research:
+
+1. **Regression risk gate** — explain why the candidate should not break currently-passing cases. If it is expected to be strong only on a narrow class, flag it as a specialist lane rather than a main contender.
+2. **Metric alignment gate** — the optimization objective must match the evaluation objective. If the candidate optimizes one thing but the benchmark judges by another, flag the mismatch before design begins.
+3. **Known-limits gate** — name the expected limiting factors upfront (capacity caps, noise sensitivity, narrow-band specialization, scaling walls). If the candidate has cap-bound behavior without a known path around it, include that in the research memo.
+4. **Bounded falsification gate** — identify a short, honest experiment (2–3 cases, clear PASS/FAIL threshold, minimal tuning) that can confirm or reject the candidate before full implementation. If no such experiment exists, the candidate is too vague for admission.
+
+Include gate assessments in the research memo under a "Research admission gates" section. If any gate fails, recommend `BLOCKED` with the specific gate failure.
+
 ## Adjacent findings protocol
 
 When scope investigation reveals issues outside the admitted scope:
 
-1. File the issue in `work-items/bugs/` using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
 2. Mention it in the current artifact under an "Adjacent findings" section.
 3. Do NOT include it in the current research or design — scope expansion is the orchestrator's decision.
 4. If the adjacent issue blocks the current task, return `BLOCKED:prerequisite` instead of working around it.

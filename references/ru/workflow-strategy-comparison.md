@@ -29,7 +29,7 @@
 | Критичный change с execution и blind-spot риском одновременно | `Claim-Verify + Adversarial` | Запускать по очереди, сохраняя независимость reviewer'ов |
 | Drift scope или priority | `Re-intake` | Возвращать к `product-manager` |
 | Несколько фаз должны слиться в один результат | `Integration ownership` | Назначать одного owner до QA |
-| Stop-and-wait churn | `Rolling loop` | `PASS` двигает дальше, `REVISE` остаётся локальным не более 2 последовательных циклов для одной роли и одного артефакта, `BLOCKED` должен быть редким |
+| Stop-and-wait churn | `Rolling loop` | `PASS` двигает дальше, `REVISE` остаётся локальным не более 3 последовательных циклов для одной роли и одного артефакта, `BLOCKED` должен быть редким |
 | Слишком широкий diff | `Change isolation` | Держать seams, blast radius и nearby smoke coverage явными |
 
 ## 3. Структурные и review-стратегии

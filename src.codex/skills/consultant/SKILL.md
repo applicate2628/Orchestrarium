@@ -13,14 +13,14 @@ description: Provide an optional independent advisory memo for the lead without 
 
 ## Toggle file check
 
-Before any invocation, read `.codex/.consultant-mode`:
+Before any invocation, read `.agents/.consultant-mode`:
 
 - **No file** (default): consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately.
 - **`mode: external`**: enabled, proceed with the external provider path.
 - **`mode: internal`**: use the internal-subagent fallback path only.
 - **`mode: disabled`**: explicitly disabled. Same notification and return as no-file case.
 
-The toggle file is local-only (listed in `.gitignore`) and not committed to git.
+The toggle file is project-local state stored in `.agents/.consultant-mode`. Keep it local-only and do not commit it to git.
 
 ## When to invoke
 
@@ -58,13 +58,24 @@ Do not invoke for:
 
 ### External provider: Claude CLI (default when enabled)
 
-Use the canonical invocation commands and transport rules from the shared `ask-claude` skill:
-[common-skills/ask-claude/invocation.md](../../common-skills/ask-claude/invocation.md).
+Check availability first: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows).
 
-- Check availability first: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows).
+**macOS / Linux:**
+```bash
+printf '%s' "$PROMPT" | claude -p --effort high --permission-mode bypassPermissions
+```
+
+**Windows (Git Bash inside Codex):**
+```bash
+printf '%s' "$PROMPT" | cmd.exe /c claude.exe -p --effort high --permission-mode bypassPermissions
+```
+Fallback if `claude.exe` is not on PATH: use `claude.cmd` instead.
+
+**Rules:**
 - For hard complex tasks, prefer the strongest available profile such as Opus when supported by the installed client.
-- Prefer `stdin` or a file for longer or multiline prompts. Keep direct command-line prompts short to avoid truncation.
+- Do not pass multiline prompts as direct command-line arguments — use `stdin` or a file.
 - Do not use TTY when a non-interactive invocation is available.
+- On Windows, keep command-line prompts short enough to avoid `cmd.exe` truncation.
 - Wait 5–15 minutes before treating a run as stalled. Do not start a parallel chat while one may still be running.
 - If Claude returns quota, auth, or limit errors, record that in the relevant plan or note and fall back to the internal path immediately.
 

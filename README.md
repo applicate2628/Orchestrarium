@@ -26,14 +26,13 @@ This repository has two distinct layers:
 Everything a user installs into their target project. Self-contained, no external dependencies.
 
 - `src.codex/AGENTS.md`: installed delegation rules, engineering hygiene, and role index — loaded automatically by Codex as the main conversation context
-- `src.codex/skills/<role>/SKILL.md`: instructions for one role (31 roles)
+- `src.codex/skills/<role>/SKILL.md`: instructions for one role (31 roles + 2 utility skills)
 - `src.codex/skills/<role>/agents/openai.yaml`: display metadata and default prompt for the role
 - `src.codex/skills/lead/`: includes operating-model notes and handoff contracts alongside SKILL.md
 - `src.codex/skills/consultant/`: consultant workflow, toggle logic, and execution paths
-- `src.codex/common-skills/ask-claude/`: utility skill for Claude CLI invocation
-- `src.codex/common-skills/second-opinion/`: consultant toggle and explicit invocation skill
-- `src.codex/scripts/`: publication safety scan and validation scripts
-- `src.codex/policies/`: policy catalog template (copy and customize per project)
+- `src.codex/skills/second-opinion/`: consultant toggle and explicit invocation skill
+- `src.codex/skills/lead/scripts/`: publication safety scan and validation scripts
+- `src.codex/skills/lead/policies-catalog.md`: policy options reference (installed with skills)
 
 ### Development infrastructure (root)
 
@@ -41,11 +40,10 @@ Used only for developing and maintaining this skill pack. Not part of the instal
 
 - `AGENTS.md`: dev-specific repo rules for skill-pack maintenance (adds dev-layer rules on top of `src.codex/AGENTS.md`)
 - `references/`: canonical operating-model documents, governance references, and diagrams
-- `work-items/`: tracked task memory for dev workflow (active items, archive, templates)
 - `install.sh`, `install.ps1`: install scripts (bash and PowerShell)
 - `INSTALL.md`: installation instructions
 - `LICENSE`: Apache License 2.0
-- `.gitignore`: local-only scratch boundary; `.codex/` is the local working install (not committed)
+- `.gitignore`: local-only scratch boundary; `.agents/` is the local repo-install output (not committed)
 
 ## Installation
 
@@ -61,7 +59,7 @@ bash install.sh --global
 .\install.ps1 -Global
 ```
 
-Or copy the `src.codex/` folder contents into your target project's `.codex/`.
+For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, and the consultant toggle is stored in `.agents/.consultant-mode`. For global install, the pack mirrors into `~/.codex/`, but second-opinion toggle state remains project-local in `.agents/.consultant-mode`. See [INSTALL.md](INSTALL.md) for details.
 
 ## Operating model
 
@@ -76,7 +74,7 @@ The repository is built around a few stable rules:
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
 Repository-wide operating-model source of truth lives in [references/subagent-operating-model.md](references/subagent-operating-model.md).
-Repository task-memory policy and storage model live in [references/repository-task-memory.md](references/repository-task-memory.md).
+Repository task-memory policy and storage model live in [references/repository-task-memory.md](references/repository-task-memory.md). The live task-memory directory, if used, is repository-defined.
 Repository publication-safety policy for all tracked content lives in [references/repository-publication-safety.md](references/repository-publication-safety.md).
 Repository periodic-control matrix lives in [references/periodic-control-matrix.md](references/periodic-control-matrix.md).
 Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md) (dev overlay) and [src.codex/AGENTS.md](src.codex/AGENTS.md) (installed pack source).
@@ -104,7 +102,7 @@ The installable pack includes skills for:
 - implementation roles: `backend-engineer`, `frontend-engineer`, `data-engineer`, `platform-engineer`
 - graphics and technical UI: `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`
 - verification and independent gates: `qa-engineer`, `ui-test-engineer`, `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, `accessibility-reviewer`
-- utility: `ask-claude` (Claude CLI invocation), `second-opinion` (consultant toggle and explicit invocation)
+- utility: `second-opinion` (consultant toggle and explicit invocation)
 
 ## License
 

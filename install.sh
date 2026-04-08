@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Install Orchestrarium skill-pack.
 # Usage:
-#   bash install.sh                  install into current repo (.codex/)
+#   bash install.sh                  install into current repo (.agents/ + AGENTS.md)
 #   bash install.sh --global         install into ~/.codex/
-#   bash install.sh --target DIR     install into DIR/.codex/ (or DIR if DIR ends with .codex)
+#   bash install.sh --target DIR     install into DIR as a project (.agents/ + AGENTS.md)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE="$SCRIPT_DIR/src.codex"
 
 # Directories to install (order doesn't matter)
-DIRS=(skills common-skills scripts)
-OPTIONAL_DIRS=(policies)
+DIRS=(skills)
+OPTIONAL_DIRS=()
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
@@ -20,9 +20,9 @@ TARGET=""
 
 usage() {
   echo "Usage:"
-  echo "  bash install.sh                          Install into current repo (.codex/)"
+  echo "  bash install.sh                          Install into current repo (.agents/ + AGENTS.md)"
   echo "  bash install.sh --global                 Install into ~/.codex/"
-  echo "  bash install.sh --target DIR             Install into DIR/.codex/"
+  echo "  bash install.sh --target DIR             Install into DIR as a project (.agents/ + AGENTS.md)"
   echo "  bash install.sh --force                  Skip deletion prompts"
   echo "  bash install.sh --dry-run                Print planned actions without changing files"
   echo "  bash install.sh --allow-unsafe-target    Override allowlist for custom target path"
@@ -33,10 +33,25 @@ usage() {
 canonical_path() {
   local input_path="$1"
   local expanded="${input_path/#\~/$HOME}"
+  local converter=""
 
   if [ -z "$expanded" ]; then
     echo ""
     return 1
+  fi
+
+  if [[ "$expanded" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      converter="cygpath"
+    elif command -v wslpath >/dev/null 2>&1; then
+      converter="wslpath"
+    fi
+
+    if [ -n "$converter" ]; then
+      expanded="$("$converter" -u "$expanded")"
+    else
+      expanded="${expanded//\\//}"
+    fi
   fi
 
   if [ -d "$expanded" ] || [ -L "$expanded" ]; then
@@ -307,9 +322,9 @@ prompt_install_mode() {
 
   while true; do
     echo "Select installation target:"
-    echo "  1) Local repo (.codex/)"
+    echo "  1) Local repo (.agents/skills + root AGENTS.md)"
     echo "  2) Global (~/.codex/)"
-    echo "  3) Custom target directory"
+    echo "  3) Custom project directory (.agents/skills + root AGENTS.md)"
     echo "  4) Abort"
     echo -n "Choose [1-4, default: 1]: "
     read -r choice
@@ -418,9 +433,28 @@ else
   usage
 fi
 
+# Derive per-mode target paths.
+# Global: everything goes into ~/.codex/ (mirrors src.codex/).
+# Repo/target: skills go into .agents/skills/,
+#              AGENTS.md merges into project root AGENTS.md.
+if [ "$MODE" = "global" ]; then
+  SKILLS_TARGET="$TARGET/skills"
+  LEAD_SCRIPTS_TARGET="$TARGET/skills/lead/scripts"
+  POLICIES_TARGET=""
+  MD_TARGET="$TARGET/AGENTS.md"
+else
+  # Repo-level: TARGET is <root>/.codex but skills go into <root>/.agents/skills/
+  PROJECT_ROOT="$(dirname "$TARGET")"
+  SKILLS_TARGET="$PROJECT_ROOT/.agents/skills"
+  LEAD_SCRIPTS_TARGET="$PROJECT_ROOT/.agents/skills/lead/scripts"
+  POLICIES_TARGET=""
+  MD_TARGET="$PROJECT_ROOT/AGENTS.md"
+fi
+
 echo "=== Orchestrarium Installer ==="
 echo "Source: $SOURCE"
-echo "Target: $TARGET"
+echo "Skills target: $SKILLS_TARGET"
+echo "AGENTS.md target: $MD_TARGET"
 echo "Mode:   $MODE"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "Mode:   dry-run"
@@ -435,28 +469,31 @@ if [[ ! -d "$SOURCE/skills" ]]; then
 fi
 
 DESTROYABLE_DIRS=()
-for dir in "${DIRS[@]}"; do
-  if [[ -d "$TARGET/$dir" ]]; then
-    DESTROYABLE_DIRS+=("$TARGET/$dir")
+for tdir in "$SKILLS_TARGET"; do
+  if [[ -d "$tdir" ]]; then
+    DESTROYABLE_DIRS+=("$tdir")
   fi
 done
 
 confirm_destructive_mode
 
-if [[ ! -d "$TARGET" ]]; then
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[dry-run] would create target root: $TARGET"
-  else
-    mkdir -p "$TARGET"
+# Create parent directories as needed
+for tdir in "$SKILLS_TARGET"; do
+  parent="$(dirname "$tdir")"
+  if [[ ! -d "$parent" ]]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "[dry-run] would create: $parent"
+    else
+      mkdir -p "$parent"
+    fi
   fi
-fi
+done
 
 # Clean install: remove old dirs, then copy fresh
-for dir in "${DIRS[@]}"; do
-  src="$SOURCE/$dir"
-  dst="$TARGET/$dir"
+install_dir() {
+  local src="$1" dst="$2" label="$3"
   if [[ -d "$dst" ]]; then
-    echo "  Removing old $dir/..."
+    echo "  Removing old $label..."
     if ! confirm_removal "$dst"; then
       echo "Install cancelled: existing directory not removed: $dst"
       exit 1
@@ -467,53 +504,50 @@ for dir in "${DIRS[@]}"; do
       rm -rf "$dst"
     fi
   fi
-  echo "  Installing $dir/..."
+  echo "  Installing $label..."
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "    [dry-run] would copy $src -> $dst"
   else
     cp -r "$src" "$dst"
   fi
-done
+}
+
+install_dir "$SOURCE/skills" "$SKILLS_TARGET" "skills/"
 
 # Optional dirs: copy if not present, don't overwrite
-for dir in "${OPTIONAL_DIRS[@]}"; do
-  src="$SOURCE/$dir"
-  dst="$TARGET/$dir"
-  if [[ -d "$dst" ]]; then
-    echo "  Keeping existing $dir/ (optional, not overwritten)"
-  elif [[ -d "$src" ]]; then
-    echo "  Installing $dir/ (optional)..."
-    if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would copy $src -> $dst"
-    else
-      cp -r "$src" "$dst"
-    fi
-  fi
-done
+# Policies live in AGENTS.md as a ## Project policies section, not as a separate directory.
+# See skills/lead/policies-catalog.md for the catalog of available policies.
 
 # AGENTS.md: merge or create
 src_md="$SOURCE/AGENTS.md"
-dst_md="$TARGET/AGENTS.md"
+dst_md="$MD_TARGET"
 
 if [[ -f "$dst_md" ]]; then
   if grep -q "## Template routing" "$dst_md" 2>/dev/null; then
     if grep -qn "^# Default Delegation Rule" "$dst_md"; then
       echo "  AGENTS.md: replacing Orchestrarium section..."
-      head_lines=$(($(grep -n "^# Default Delegation Rule" "$dst_md" | head -1 | cut -d: -f1) - 1))
-      if [[ $head_lines -gt 0 ]]; then
-        if [ "$DRY_RUN" -eq 1 ]; then
-          echo "    [dry-run] would replace Orchestrarium section in AGENTS.md"
-        else
-          head -n "$head_lines" "$dst_md" > "$dst_md.tmp"
-          cat "$src_md" >> "$dst_md.tmp"
-          mv "$dst_md.tmp" "$dst_md"
-        fi
+      pack_start=$(grep -n "^# Default Delegation Rule" "$dst_md" | head -1 | cut -d: -f1)
+      total_lines=$(wc -l < "$dst_md")
+      new_lines=$(wc -l < "$src_md")
+      pack_end=$((pack_start + new_lines - 1))
+      if [ "$pack_end" -gt "$total_lines" ]; then
+        pack_end="$total_lines"
+      fi
+      head_lines=$((pack_start - 1))
+      tail_start=$((pack_end + 1))
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "    [dry-run] would replace Orchestrarium section in AGENTS.md (lines $pack_start-$pack_end)"
       else
-        if [ "$DRY_RUN" -eq 1 ]; then
-          echo "    [dry-run] would replace AGENTS.md"
-        else
-          cp "$src_md" "$dst_md"
-        fi
+        {
+          if [ "$head_lines" -gt 0 ]; then
+            head -n "$head_lines" "$dst_md"
+          fi
+          cat "$src_md"
+          if [ "$tail_start" -le "$total_lines" ]; then
+            tail -n "+$tail_start" "$dst_md"
+          fi
+        } > "$dst_md.tmp"
+        mv "$dst_md.tmp" "$dst_md"
       fi
     else
       echo "  AGENTS.md: full replace..."
@@ -568,18 +602,21 @@ check_file() {
 
 check_installed_manifest() {
   local source_dir="$1"
+  local target_base="$2"
+  local source_base="$3"
   while IFS= read -r -d '' source_file; do
-    local rel_path="${source_file#$SOURCE/}"
-    check_file "$TARGET/$rel_path" "$rel_path"
+    local rel_path="${source_file#$source_base/}"
+    check_file "$target_base/$rel_path" "$rel_path"
   done < <(find "$source_dir" -type f -print0)
 }
 
-for dir in skills common-skills; do
-  check_installed_manifest "$SOURCE/$dir"
-done
+check_installed_manifest "$SOURCE/skills" "$SKILLS_TARGET" "$SOURCE/skills"
 
-check_file "$TARGET/skills/lead/operating-model.md" "skills/lead/operating-model.md"
-check_file "$TARGET/skills/lead/subagent-contracts.md" "skills/lead/subagent-contracts.md"
+check_file "$SKILLS_TARGET/lead/operating-model.md" "skills/lead/operating-model.md"
+check_file "$SKILLS_TARGET/lead/subagent-contracts.md" "skills/lead/subagent-contracts.md"
+check_file "$LEAD_SCRIPTS_TARGET/check-publication-safety.sh" "skills/lead/scripts/check-publication-safety.sh"
+check_file "$LEAD_SCRIPTS_TARGET/check-publication-safety.ps1" "skills/lead/scripts/check-publication-safety.ps1"
+check_file "$LEAD_SCRIPTS_TARGET/validate-skill-pack.sh" "skills/lead/scripts/validate-skill-pack.sh"
 
 if [[ -f "$dst_md" ]]; then
   line_count=$(wc -l < "$dst_md")
@@ -602,7 +639,9 @@ if [[ $errors -gt 0 ]]; then
   echo "RESULT: FAIL ($errors errors)"
   exit 1
 else
-  echo "RESULT: OK — Orchestrarium installed to $TARGET"
+  echo "RESULT: OK — Orchestrarium installed"
+  echo "  Skills: $SKILLS_TARGET"
+  echo "  AGENTS.md: $MD_TARGET"
   echo ""
-  echo "Next: run 'bash $TARGET/scripts/validate-skill-pack.sh' to verify the installation."
+  echo "Next: run 'bash $LEAD_SCRIPTS_TARGET/validate-skill-pack.sh' to verify the installation."
 fi

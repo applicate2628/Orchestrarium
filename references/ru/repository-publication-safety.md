@@ -30,5 +30,5 @@
 - `$security-reviewer`, `$knowledge-archivist` или другой релевантный reviewer может запустить сканирование как часть выборочной проверки или gate публикации.
 - Любой автор может запустить сканирование как локальную self-check, но это не заменяет обязательное человеческое ревью публикации.
 - Только `$security-reviewer` может одобрить исключение безопасности публикации к результату сканирования. Любая публикация без этого одобрения считается `BLOCKED`.
-- На Git Bash, macOS или Linux запустите `bash scripts/check-publication-safety.sh` как ручное сканирование безопасности перед публикацией staged tracked-контента.
-- На Windows PowerShell запустите `powershell -ExecutionPolicy Bypass -File scripts/check-publication-safety.ps1`; обёртка разрешает Git-for-Windows `bash.exe` и вызывает общий скрипт сканирования, не полагаясь на WSL `bash.exe` stub из `PATH`.
+- В этом development-репозитории запустите `bash src.codex/skills/lead/scripts/check-publication-safety.sh` на Git Bash, macOS или Linux как ручное сканирование безопасности перед публикацией staged tracked-контента.
+- В этом development-репозитории запустите `powershell -ExecutionPolicy Bypass -File src.codex/skills/lead/scripts/check-publication-safety.ps1` на Windows PowerShell; обёртка разрешает Git-for-Windows `bash.exe` и вызывает общий скрипт сканирования, не полагаясь на WSL `bash.exe` stub из `PATH`.

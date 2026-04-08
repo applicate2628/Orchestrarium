@@ -34,7 +34,10 @@ if (-not $repoRoot) {
 }
 
 Set-Location $repoRoot
-$scriptPath = Join-Path $repoRoot '.codex\scripts\check-publication-safety.sh'
+$scriptPath = Join-Path $PSScriptRoot 'check-publication-safety.sh'
+if (-not (Test-Path -LiteralPath $scriptPath)) {
+  throw "Unable to locate sibling check-publication-safety.sh next to $PSCommandPath."
+}
 
 & $shellExecutable $scriptPath @Arguments
 exit $LASTEXITCODE

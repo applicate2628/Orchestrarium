@@ -38,7 +38,7 @@ description: Verify an approved phase against its acceptance criteria and test s
 
 ## Bug registry
 
-When a defect is found and the gate is REVISE or BLOCKED, record it in `work-items/bugs/`:
+When a defect is found and the gate is REVISE or BLOCKED, record it in the configured bug registry path, if the repository uses one:
 
 ```yaml
 ---

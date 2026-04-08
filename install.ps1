@@ -2,12 +2,12 @@
 .SYNOPSIS
     Install Orchestrarium skill-pack.
 .DESCRIPTION
-    Copies skills, common-skills, scripts, and AGENTS.md to the target location.
-    Re-running = reinstall. Policies are preserved across reinstalls.
+    Copies the skills tree and AGENTS.md to the target location.
+    Re-running = reinstall.
 .EXAMPLE
-    .\install.ps1                          # Install into current repo's .codex/
+    .\install.ps1                          # Install into current repo (.agents/ + AGENTS.md)
     .\install.ps1 -Global                  # Install into ~/.codex/
-    .\install.ps1 -Target "D:\my-repo"     # Install into D:\my-repo\.codex/
+    .\install.ps1 -Target "D:\my-repo"     # Install into D:\my-repo as a project (.agents/ + AGENTS.md)
 #>
 param(
     [switch]$Global,
@@ -21,8 +21,6 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Source = Join-Path $ScriptDir "src.codex"
 
-$Dirs = @("skills", "common-skills", "scripts")
-$OptionalDirs = @("policies")
 $script:PromptMode = $null
 
 function Test-Interactive {
@@ -178,9 +176,9 @@ function Assert-SafeInstallRoot {
 function Read-InstallMode {
     Write-Host ""
     Write-Host "Select installation target:"
-    Write-Host "  1) Local repo (.codex/)"
+    Write-Host "  1) Local repo (.agents/skills + root AGENTS.md)"
     Write-Host "  2) Global (~/.codex/)"
-    Write-Host "  3) Custom target directory"
+    Write-Host "  3) Custom project directory (.agents/skills + root AGENTS.md)"
     Write-Host "  4) Abort"
 
     while ($true) {
@@ -337,9 +335,25 @@ if ($Global) {
     }
 }
 
+# Derive per-mode target paths.
+# Global: everything goes into ~/.codex/ (mirrors src.codex/).
+# Repo/target: skills go into .agents/skills/,
+#              AGENTS.md merges into project root AGENTS.md.
+if ($Mode -eq "global") {
+    $SkillsTarget = Join-Path $TargetRoot "skills"
+    $LeadScriptsTarget = Join-Path $TargetRoot "skills\lead\scripts"
+    $MdTarget = Join-Path $TargetRoot "AGENTS.md"
+} else {
+    $ProjectRoot = Split-Path $TargetRoot -Parent
+    $SkillsTarget = Join-Path $ProjectRoot ".agents" "skills"
+    $LeadScriptsTarget = Join-Path $ProjectRoot ".agents" "skills\lead\scripts"
+    $MdTarget = Join-Path $ProjectRoot "AGENTS.md"
+}
+
 Write-Host "=== Orchestrarium Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
-Write-Host "Target: $TargetRoot"
+Write-Host "Skills target: $SkillsTarget"
+Write-Host "AGENTS.md target: $MdTarget"
 Write-Host "Mode:   $Mode"
 if ($DryRun) {
     Write-Host "Mode:   dry-run" -ForegroundColor Yellow
@@ -354,48 +368,35 @@ if (-not (Test-Path (Join-Path $Source "skills"))) {
 }
 
 $existingDirs = @()
-foreach ($dir in $Dirs) {
-    $dst = Join-Path $TargetRoot $dir
-    if (Test-Path -LiteralPath $dst) {
-        $existingDirs += $dst
+foreach ($tdir in @($SkillsTarget)) {
+    if (Test-Path -LiteralPath $tdir) {
+        $existingDirs += $tdir
     }
 }
 
 Confirm-DestructiveMode -ExistingDirs $existingDirs
 
-if (-not $DryRun -and -not (Test-Path -LiteralPath $TargetRoot)) {
-    New-Item -ItemType Directory -Path $TargetRoot -Force | Out-Null
-}
-if ($DryRun -and -not (Test-Path -LiteralPath $TargetRoot)) {
-    Write-Host "[dry-run] would create target root: $TargetRoot"
-}
-
-# Clean install: remove old, copy fresh
-foreach ($dir in $Dirs) {
-    $src = Join-Path $Source $dir
-    $dst = Join-Path $TargetRoot $dir
-    Copy-RequiredDirectory -SourceDir $src -TargetDir $dst -Label "$dir\"
-}
-
-# Optional dirs: copy if not present, don't overwrite
-foreach ($dir in $OptionalDirs) {
-    $src = Join-Path $Source $dir
-    $dst = Join-Path $TargetRoot $dir
-    if (Test-Path $dst) {
-        Write-Host "  Keeping existing $dir\ (optional, not overwritten)"
-    } elseif (Test-Path $src) {
-        Write-Host "  Installing $dir\ (optional)..."
+# Create parent directories as needed
+foreach ($tdir in @($SkillsTarget)) {
+    $parent = Split-Path $tdir -Parent
+    if (-not (Test-Path -LiteralPath $parent)) {
         if (-not $DryRun) {
-            Copy-Item -Recurse -Force $src $dst
+            New-Item -ItemType Directory -Path $parent -Force | Out-Null
         } else {
-            Write-Host "    [dry-run] would copy $src -> $dst"
+            Write-Host "[dry-run] would create: $parent"
         }
     }
 }
 
+# Clean install: remove old, copy fresh
+Copy-RequiredDirectory -SourceDir (Join-Path $Source "skills") -TargetDir $SkillsTarget -Label "skills\"
+
+# Policies live in AGENTS.md as a ## Project policies section, not as a separate directory.
+# See skills/lead/policies-catalog.md for the catalog of available policies.
+
 # AGENTS.md merge
 $srcMd = Join-Path $Source "AGENTS.md"
-$dstMd = Join-Path $TargetRoot "AGENTS.md"
+$dstMd = $MdTarget
 
 if (Test-Path $dstMd) {
     $content = Get-Content $dstMd -Raw
@@ -482,23 +483,19 @@ function Get-SourceFiles($DirRoot) {
     return $items
 }
 
-# Verify all files in skills/ and common-skills/
-foreach ($dir in @("skills", "common-skills")) {
-    Write-Host "Verifying $dir/ files..."
-    foreach ($relative in Get-SourceFiles $dir) {
-        Test-InstalledFile (Join-Path $TargetRoot $relative) $relative
-    }
-}
-
-# Verify scripts/ files
-Write-Host "Verifying scripts/ files..."
-foreach ($relative in Get-SourceFiles "scripts") {
-    Test-InstalledFile (Join-Path $TargetRoot $relative) $relative
+# Verify all files in skills/
+Write-Host "Verifying skills/ files..."
+foreach ($relative in Get-SourceFiles "skills") {
+    $relFile = $relative.Substring("skills\".Length)
+    Test-InstalledFile (Join-Path $SkillsTarget $relFile) $relative
 }
 
 # Explicit contract requirements
-Test-InstalledFile (Join-Path $TargetRoot "skills/lead/operating-model.md") "skills/lead/operating-model.md"
-Test-InstalledFile (Join-Path $TargetRoot "skills/lead/subagent-contracts.md") "skills/lead/subagent-contracts.md"
+Test-InstalledFile (Join-Path $SkillsTarget "lead/operating-model.md") "skills/lead/operating-model.md"
+Test-InstalledFile (Join-Path $SkillsTarget "lead/subagent-contracts.md") "skills/lead/subagent-contracts.md"
+Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.sh") "skills/lead/scripts/check-publication-safety.sh"
+Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.ps1") "skills/lead/scripts/check-publication-safety.ps1"
+Test-InstalledFile (Join-Path $LeadScriptsTarget "validate-skill-pack.sh") "skills/lead/scripts/validate-skill-pack.sh"
 
 if (Test-Path $dstMd) {
     $mdContent = Get-Content $dstMd -Raw
@@ -522,8 +519,9 @@ if ($errors -gt 0) {
     Write-Host "RESULT: FAIL ($errors errors)" -ForegroundColor Red
     exit 1
 } else {
-    Write-Host "RESULT: OK - Orchestrarium installed to $TargetRoot" -ForegroundColor Green
+    Write-Host "RESULT: OK - Orchestrarium installed" -ForegroundColor Green
+    Write-Host "  Skills: $SkillsTarget"
+    Write-Host "  AGENTS.md: $MdTarget"
     Write-Host ""
-    Write-Host "Next: run the validation script to verify the skill-pack structure:"
-    Write-Host "  bash .codex/scripts/validate-skill-pack.sh"
+    Write-Host "Next: run 'bash $LeadScriptsTarget/validate-skill-pack.sh' to verify the installation."
 }

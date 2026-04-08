@@ -35,12 +35,12 @@ Gate to next stage:
 
 ## Artifact gate — no delegation without brief
 
-A lead MUST NOT delegate work until the work-item folder contains a verified `brief.md` and `status.md`.
+A lead MUST NOT delegate work until the configured task-memory item folder, if the repository uses one, contains a verified `brief.md` and `status.md`.
 
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
 - `status.md` must have a current snapshot with stage, last accepted artifact, and next concrete action.
-- If either artifact is missing, stale, or incomplete, the lead restores them BEFORE delegating any specialist role.
-- This gate is non-negotiable for non-trivial work. The only exception is the additive fast lane where the lead records the decision in status.md instead.
+- If either artifact is missing, stale, or incomplete, the lead restores them BEFORE delegating any specialist role when task memory is configured.
+- This gate is non-negotiable for non-trivial work when the repository uses task memory. The only exception is the additive fast lane where the lead records the decision in status.md instead.
 
 ### status.md format
 
@@ -53,31 +53,39 @@ updated: <YYYY-MM-DD HH:MM>
 ---
 
 ## Current state
-- **Stage**: <current pipeline stage>
-- **Orchestrator role**: <main conversation | $lead>
-- **Last accepted artifact**: <artifact name and date>
+
+- **Stage**: <current stage name or number>
+- **Main conv role**: <what main conversation is doing: orchestrating | waiting for agents | reviewing artifact | idle>
+- **Last accepted artifact**: <filename or "none">
 
 ## Active agents
+
 | Agent | Role | Status | Launched |
-|---|---|---|---|
-| ... | ... | running / waiting | YYYY-MM-DD |
+| --- | --- | --- | --- |
+| <description> | <role> | running | <HH:MM> |
 
 ## Completed agents
-| Agent | Role | Result | Artifact |
-|---|---|---|---|
-| ... | ... | PASS / REVISE / BLOCKED | <artifact path> |
 
-## REVISE loop (include only when active)
+| Agent | Role | Result | Artifact |
+| --- | --- | --- | --- |
+| <description> | <role> | PASS/REVISE/BLOCKED | <filename> |
+
+## REVISE loop
+
 | Field | Value |
-|---|---|
-| Role | <role under revision> |
-| Iteration | <1-3> |
-| Remaining findings | <count> |
-| Escalation threshold | 3 |
+| --- | --- |
+| **Stage** | <stage name where REVISE occurred> |
+| **Iteration** | <1-3, or "escalated"> |
+| **Gate role** | <qa-engineer, security-reviewer, etc.> |
+| **Last finding summary** | <one-line summary of what the gate found> |
+| **Owner of next action** | <implementer role that must fix, or "user" if escalated> |
 
 ## Next action
-<What happens next — specific role, artifact, and gate expected>
+
+<What happens next: which role to invoke, what artifact to review, or what decision to make.>
 ```
+
+The REVISE loop section is optional — include it only when a stage has returned REVISE and the loop is active. Remove it when the loop resolves (PASS or escalation).
 
 ## Shared response format
 
@@ -94,7 +102,7 @@ updated: <YYYY-MM-DD HH:MM>
 | Class | Meaning | Orchestrator action |
 |---|---|---|
 | `BLOCKED:dependency` | Cannot proceed — missing tool, environment, access, or information that no current agent can provide | Present to user for resolution |
-| `BLOCKED:prerequisite` | Discovered adjacent work that must complete first (e.g., broken adjacent module, missing migration) | File in `work-items/bugs/` → user decides priority → resume when resolved |
+| `BLOCKED:prerequisite` | Discovered adjacent work that must complete first (e.g., broken adjacent module, missing migration) | File in the configured bug registry path → user decides priority → resume when resolved |
 
 If no class is specified, treat as `BLOCKED:dependency` (conservative default).
 
@@ -142,6 +150,20 @@ Acceptance criteria:
 - the priority decision, sequencing rationale, and bounded scope are explicit
 - the package is ready for `$lead`, `$product-analyst`, or `$analyst`
 - no architecture, implementation plan, or delivery ownership is embedded in the roadmap decision
+- for new candidate approaches entering discovery, the research admission filter gates (coherence, improvement hypothesis, non-redundancy) are addressed in the package
+
+### Minimum research admission package
+
+When admitting a new candidate into discovery, the roadmap decision package must include:
+
+- **Coherence statement**: what shared state or contract holds this candidate together as one unit
+- **Improvement hypothesis**: which baseline it beats, on which cases, by which metric, through which mechanism
+- **Non-redundancy argument**: why this is meaningfully different from prior rejects with similar failure modes
+- **Expected win cases**: where the candidate is expected to succeed
+- **Expected fail cases**: where it is expected to struggle
+- **Evaluation metric mapping**: how the candidate's optimization objective maps to the benchmark objective
+- **Shortest falsification experiment**: 2–3 cases, clear PASS/FAIL threshold, minimal tuning
+- **Implementation seam**: where this lives in the repo (isolated lane, protected surfaces, minimal seam) — confirmed by `$architect` after admission
 
 ## Analyst
 

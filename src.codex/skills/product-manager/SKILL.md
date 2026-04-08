@@ -38,6 +38,18 @@ description: Own roadmap decisions and admission into discovery or delivery. Use
 - Call out dependencies, ordering constraints, and items that should stay out of the current milestone.
 - Prefer roadmap decisions that can be turned into a canonical brief without major reinterpretation.
 
+## Research admission filter
+
+When admitting a new candidate approach, method, or initiative into discovery, apply these gates before approval:
+
+1. **Coherence gate** — the candidate must show what shared state, contract, or mechanism holds it together as a single unit of work. If it is just a collection of loosely related ideas, it is not admitted as one item.
+2. **Improvement hypothesis gate** — must state which specific baseline it beats, on which cases, by which metric, and through which mechanism. "May be useful" or "interesting approach" is not an admission argument.
+3. **Non-redundancy gate** — must be meaningfully independent from already-failed or already-rejected approaches. If it shares the same failure mode, the same objective mismatch, or the same core mechanism as a prior reject, show what makes it genuinely different.
+
+If any gate fails, the candidate is not admitted. It may be re-submitted with a stronger argument.
+
+These gates complement the research-phase gates enforced by `$analyst` (regression risk, metric alignment, known limits, falsification experiment) and the implementation-phase gate enforced by `$architect` (implementation isolation).
+
 ## Non-goals
 
 - Do not design the technical solution.
