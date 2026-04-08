@@ -149,4 +149,4 @@ Notes:
 - `$consultant` stays advisory-only whether it is fulfilled by an external provider or by an internal independent subagent fallback.
 - Multi-phase or multi-specialist implementation requires one explicit integration owner before QA.
 - Reviewers stay independent and report to the orchestrating owner.
-- `REVISE` returns work to the same stage owner for up to 3 consecutive cycles on the same role and artifact; `BLOCKED` stops progression until a new decision or artifact exists. `BLOCKED` has two typed classes: `BLOCKED:dependency` (external, escalate to user) and `BLOCKED:prerequisite` (internal blocker, record in the configured bug registry).
+- `REVISE` returns work to the same stage owner for up to 3 consecutive cycles on the same role and artifact; `BLOCKED` stops progression until a new decision or artifact exists. `BLOCKED` has two typed classes: `BLOCKED:dependency` (external, escalate to user) and `BLOCKED:prerequisite` (internal blocker, record in the configured bug registry path if the repository uses one).

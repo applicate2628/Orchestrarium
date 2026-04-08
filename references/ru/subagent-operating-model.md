@@ -165,7 +165,7 @@ AI gates не заменяют внешнюю engineering policy.
 - `BLOCKED` зарезервирован для реальных внешних blocker'ов, недостающих решений или недоступных prerequisites.
   - `BLOCKED` имеет два типизированных класса:
     - `BLOCKED:dependency` — невозможно продолжить, отсутствует инструмент, среда, доступ или информация, которую ни один текущий агент не может предоставить. Orchestrator предъявляет пользователю для решения.
-    - `BLOCKED:prerequisite` — обнаружена смежная работа, которая должна быть завершена сначала (например, сломанный соседний модуль, недостающая миграция). Orchestrator фиксирует в конфигурируемом bug registry, пользователь определяет приоритет, продолжение после решения.
+    - `BLOCKED:prerequisite` — обнаружена смежная работа, которая должна быть завершена сначала (например, сломанный соседний модуль, недостающая миграция). Orchestrator фиксирует её в конфигурируемом bug registry path, если репозиторий его использует; пользователь определяет приоритет, продолжение после решения.
   - Если класс не указан, считайте `BLOCKED:dependency` (консервативный default).
 - Закрывайте specialist-сессии, как только их артефакт принят, передан дальше или явно parked. Держите сессию открытой только для bounded `REVISE` или immediate same-scope follow-up; закрывайте `BLOCKED` и advisory-only consultant sessions после routing или advisory handoff.
 - `RETURN(role)` использует независимый reviewer, когда upstream artifact имеет structural gap, требующий expertise этой роли, а не bounded fix. Lead направляет finding к указанной upstream-роли. Пример: `RETURN(security-engineer)` — threat model вообще не покрывает server-side validation surface.
@@ -183,7 +183,7 @@ AI gates не заменяют внешнюю engineering policy.
 
 Когда любая роль обнаруживает баг, риск или возможность улучшения за пределами утверждённой change surface:
 
-1. Зафиксируйте проблему в конфигурируемом bug registry, используя bug registry format из `qa-engineer/SKILL.md`, с `context: adjacent-finding` и `status: open`.
+1. Зафиксируйте проблему в конфигурируемом bug registry path, если репозиторий его использует, используя bug registry format из `qa-engineer/SKILL.md`, с `context: adjacent-finding` и `status: open`.
 2. Упомяните её в текущем артефакте в разделе "Adjacent findings".
 3. НЕ расширяйте scope — orchestrator решает приоритет и планирование.
 4. Если смежная проблема блокирует текущую фазу, верните `BLOCKED:prerequisite` вместо того, чтобы обходить её.
@@ -589,7 +589,7 @@ product-manager -> lead -> analyst -> architect -> planner -> implementation spe
 
 ### Bugfix с известным файлом или функцией
 
-Bugfix с известным файлом или функцией по умолчанию маршрутизируется через шаблон `quick-fix`, даже если в ходе анализа обнаруживаются смежные проблемы. Смежные проблемы уходят в конфигурируемый bug registry, а не в текущий plan.
+Bugfix с известным файлом или функцией по умолчанию маршрутизируется через шаблон `quick-fix`, даже если в ходе анализа обнаруживаются смежные проблемы. Смежные проблемы уходят в конфигурируемый bug registry path, если репозиторий его использует, а не в текущий plan.
 
 ```text
 product-manager -> lead -> implementation specialist -> qa-engineer -> lead
