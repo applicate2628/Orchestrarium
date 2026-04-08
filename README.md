@@ -79,6 +79,7 @@ Repository publication-safety policy for all tracked content lives in [reference
 Repository periodic-control matrix lives in [references/periodic-control-matrix.md](references/periodic-control-matrix.md).
 Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md) (dev overlay) and [src.codex/AGENTS.md](src.codex/AGENTS.md) (installed pack source).
 The visual companion to the workflow lives in [references/operating-model-diagram.md](references/operating-model-diagram.md).
+Evidence-based answer pipeline for high-stakes domains lives in [references/evidence-based-answer-pipeline.md](references/evidence-based-answer-pipeline.md).
 
 ## Team structure
 
