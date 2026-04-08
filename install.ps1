@@ -2,7 +2,7 @@
 .SYNOPSIS
     Install Claudestrator skill-pack.
 .DESCRIPTION
-    Copies agents, commands, policies, scripts, and CLAUDE.md to the target location.
+    Copies agents (with contracts, templates, scripts), commands, and CLAUDE.md to the target location.
     Re-running = reinstall. Memory is preserved across reinstalls.
 .EXAMPLE
     .\install.ps1                          # Install into current repo's .claude/
