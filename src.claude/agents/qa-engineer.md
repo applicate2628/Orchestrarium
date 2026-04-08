@@ -38,26 +38,26 @@ description: Verify an approved phase against its acceptance criteria and test s
 
 ## Bug registry
 
-When the gate decision is `REVISE` or `BLOCKED`, create a bug file in `work-items/bugs/` before returning the verdict:
+When the gate decision is `REVISE` or `BLOCKED`, record the defect in `work-items/bugs/` before returning the verdict:
 
 ```markdown
 ---
-severity: high | medium | low
-status: open
+title: <short description>
+severity: critical | high | medium | low
 found-by: qa-engineer
+found-in-phase: <phase name>
+affected-surface: <file or module>
 context: <work-item slug or "standalone">
+status: open
 ---
 
-## Description
-
-<What is broken — one paragraph.>
-
 ## Reproduction
+<steps or test command to reproduce>
 
-<Steps or test command to reproduce.>
+## Expected vs actual
+<what should happen vs what happens>
 
 ## Files involved
-
 - <file:line>
 ```
 
