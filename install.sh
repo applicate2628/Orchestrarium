@@ -278,40 +278,7 @@ confirm_removal() {
   done
 }
 
-confirm_destructive_mode() {
-  if [ "$FORCE" -eq 1 ] || [ "$DRY_RUN" -eq 1 ]; then
-    return 0
-  fi
-
-  if [ "${#DESTROYABLE_DIRS[@]}" -eq 0 ]; then
-    return 0
-  fi
-
-  if [ ! -t 0 ]; then
-    return 0
-  fi
-
-  echo "Destructive install will replace existing directories:"
-  for d in "${DESTROYABLE_DIRS[@]}"; do
-    echo "  - $d"
-  done
-
-  while true; do
-    read -r -p "Proceed with destructive reinstall? [y/N] " answer
-    case "${answer,,}" in
-      y|yes)
-        return 0
-        ;;
-      n|no|"")
-        echo "Install cancelled by user." >&2
-        return 1
-        ;;
-      *)
-        echo "Please answer y or n."
-        ;;
-    esac
-  done
-}
+# Per-skill install preserves user-added skills — no destructive directory wipe needed.
 
 prompt_install_mode() {
   if [ ! -t 0 ]; then
@@ -439,15 +406,11 @@ fi
 #              AGENTS.md merges into project root AGENTS.md.
 if [ "$MODE" = "global" ]; then
   SKILLS_TARGET="$TARGET/skills"
-  LEAD_SCRIPTS_TARGET="$TARGET/skills/lead/scripts"
-  POLICIES_TARGET=""
   MD_TARGET="$TARGET/AGENTS.md"
 else
-  # Repo-level: TARGET is <root>/.codex but skills go into <root>/.agents/skills/
+  # Repo-level: TARGET is <root>/.codex but skills go into <root>/.agents/
   PROJECT_ROOT="$(dirname "$TARGET")"
   SKILLS_TARGET="$PROJECT_ROOT/.agents/skills"
-  LEAD_SCRIPTS_TARGET="$PROJECT_ROOT/.agents/skills/lead/scripts"
-  POLICIES_TARGET=""
   MD_TARGET="$PROJECT_ROOT/AGENTS.md"
 fi
 
@@ -468,16 +431,7 @@ if [[ ! -d "$SOURCE/skills" ]]; then
   exit 1
 fi
 
-DESTROYABLE_DIRS=()
-for tdir in "$SKILLS_TARGET"; do
-  if [[ -d "$tdir" ]]; then
-    DESTROYABLE_DIRS+=("$tdir")
-  fi
-done
-
-confirm_destructive_mode
-
-# Create parent directories as needed
+# Create target parent directories as needed
 for tdir in "$SKILLS_TARGET"; do
   parent="$(dirname "$tdir")"
   if [[ ! -d "$parent" ]]; then
@@ -489,34 +443,89 @@ for tdir in "$SKILLS_TARGET"; do
   fi
 done
 
-# Clean install: remove old dirs, then copy fresh
-install_dir() {
+# Per-skill install: only replace pack skills, preserve user-added skills
+install_skill() {
   local src="$1" dst="$2" label="$3"
   if [[ -d "$dst" ]]; then
-    echo "  Removing old $label..."
-    if ! confirm_removal "$dst"; then
-      echo "Install cancelled: existing directory not removed: $dst"
-      exit 1
-    fi
     if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would remove $dst"
+      echo "    [dry-run] would replace $label"
     else
       rm -rf "$dst"
+      cp -r "$src" "$dst"
     fi
-  fi
-  echo "  Installing $label..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    [dry-run] would copy $src -> $dst"
   else
-    cp -r "$src" "$dst"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would install $label"
+    else
+      cp -r "$src" "$dst"
+    fi
   fi
 }
 
-install_dir "$SOURCE/skills" "$SKILLS_TARGET" "skills/"
+echo "  Installing skills (per-skill, preserving user-added skills)..."
+if [[ ! -d "$SKILLS_TARGET" ]]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $SKILLS_TARGET"
+  else
+    mkdir -p "$SKILLS_TARGET"
+  fi
+fi
 
-# Optional dirs: copy if not present, don't overwrite
-# Policies live in AGENTS.md as a ## Project policies section, not as a separate directory.
-# See skills/lead/policies-catalog.md for the catalog of available policies.
+# Count what will be replaced and confirm
+pack_skills=()
+for skill_dir in "$SOURCE/skills"/*/; do
+  [[ -d "$skill_dir" ]] || continue
+  pack_skills+=("$(basename "$skill_dir")")
+done
+
+existing_count=0
+if [[ -d "$SKILLS_TARGET" ]]; then
+  for d in "$SKILLS_TARGET"/*/; do
+    [[ -d "$d" ]] || continue
+    existing_count=$((existing_count + 1))
+  done
+fi
+
+if [ "$existing_count" -gt 0 ] && [ "$FORCE" -ne 1 ] && [ "$DRY_RUN" -ne 1 ] && [ -t 0 ]; then
+  user_count=$((existing_count - ${#pack_skills[@]}))
+  if [ "$user_count" -lt 0 ]; then user_count=0; fi
+  echo ""
+  echo "  Reinstall will replace ${#pack_skills[@]} pack skills. $user_count user skill(s) will be preserved."
+  while true; do
+    read -r -p "  Proceed? [y/N] " answer
+    case "${answer,,}" in
+      y|yes) break ;;
+      n|no|"") echo "Install cancelled by user." >&2; exit 1 ;;
+      *) echo "  Please answer y or n." ;;
+    esac
+  done
+fi
+
+pack_skills=()
+for skill_dir in "$SOURCE/skills"/*/; do
+  [[ -d "$skill_dir" ]] || continue
+  skill_name="$(basename "$skill_dir")"
+  pack_skills+=("$skill_name")
+  install_skill "$skill_dir" "$SKILLS_TARGET/$skill_name" "skills/$skill_name"
+done
+echo "  Installed ${#pack_skills[@]} pack skills."
+
+# Report user-added skills that were preserved
+if [[ -d "$SKILLS_TARGET" ]]; then
+  for existing_dir in "$SKILLS_TARGET"/*/; do
+    [[ -d "$existing_dir" ]] || continue
+    existing_name="$(basename "$existing_dir")"
+    is_pack=0
+    for ps in "${pack_skills[@]}"; do
+      if [[ "$ps" == "$existing_name" ]]; then is_pack=1; break; fi
+    done
+    if [[ $is_pack -eq 0 ]]; then
+      echo "  Preserved user skill: $existing_name"
+    fi
+  done
+fi
+
+# Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
 
 # AGENTS.md: merge or create
 src_md="$SOURCE/AGENTS.md"
@@ -614,9 +623,9 @@ check_installed_manifest "$SOURCE/skills" "$SKILLS_TARGET" "$SOURCE/skills"
 
 check_file "$SKILLS_TARGET/lead/operating-model.md" "skills/lead/operating-model.md"
 check_file "$SKILLS_TARGET/lead/subagent-contracts.md" "skills/lead/subagent-contracts.md"
-check_file "$LEAD_SCRIPTS_TARGET/check-publication-safety.sh" "skills/lead/scripts/check-publication-safety.sh"
-check_file "$LEAD_SCRIPTS_TARGET/check-publication-safety.ps1" "skills/lead/scripts/check-publication-safety.ps1"
-check_file "$LEAD_SCRIPTS_TARGET/validate-skill-pack.sh" "skills/lead/scripts/validate-skill-pack.sh"
+check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.sh" "skills/lead/scripts/check-publication-safety.sh"
+check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.ps1" "skills/lead/scripts/check-publication-safety.ps1"
+check_file "$SKILLS_TARGET/lead/scripts/validate-skill-pack.sh" "skills/lead/scripts/validate-skill-pack.sh"
 
 if [[ -f "$dst_md" ]]; then
   line_count=$(wc -l < "$dst_md")
@@ -643,5 +652,5 @@ else
   echo "  Skills: $SKILLS_TARGET"
   echo "  AGENTS.md: $MD_TARGET"
   echo ""
-  echo "Next: run 'bash $LEAD_SCRIPTS_TARGET/validate-skill-pack.sh' to verify the installation."
+  echo "Next: run 'bash $SKILLS_TARGET/lead/scripts/validate-skill-pack.sh' to verify the installation."
 fi
