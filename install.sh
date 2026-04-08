@@ -263,40 +263,7 @@ confirm_removal() {
   done
 }
 
-confirm_destructive_mode() {
-  if [ "$FORCE" -eq 1 ] || [ "$DRY_RUN" -eq 1 ]; then
-    return 0
-  fi
-
-  if [ "${#DESTROYABLE_DIRS[@]}" -eq 0 ]; then
-    return 0
-  fi
-
-  if [ ! -t 0 ]; then
-    return 0
-  fi
-
-  echo "Destructive install will replace existing directories:"
-  for d in "${DESTROYABLE_DIRS[@]}"; do
-    echo "  - $d"
-  done
-
-  while true; do
-    read -r -p "Proceed with destructive reinstall? [y/N] " answer
-    case "${answer,,}" in
-      y|yes)
-        return 0
-        ;;
-      n|no|"")
-        echo "Install cancelled by user." >&2
-        return 1
-        ;;
-      *)
-        echo "Please answer y or n."
-        ;;
-    esac
-  done
-}
+# Per-item install preserves user-added files — no destructive directory wipe needed.
 
 prompt_install_mode() {
   if [ ! -t 0 ]; then
@@ -434,15 +401,6 @@ if [[ ! -d "$SOURCE/agents" ]]; then
   exit 1
 fi
 
-DESTROYABLE_DIRS=()
-for dir in "${DIRS[@]}"; do
-  if [[ -d "$TARGET/$dir" ]]; then
-    DESTROYABLE_DIRS+=("$TARGET/$dir")
-  fi
-done
-
-confirm_destructive_mode
-
 if [[ ! -d "$TARGET" ]]; then
   if [ "$DRY_RUN" -eq 1 ]; then
     echo "[dry-run] would create target root: $TARGET"
@@ -451,28 +409,100 @@ if [[ ! -d "$TARGET" ]]; then
   fi
 fi
 
-# Clean install: remove old dirs, then copy fresh
+# Per-item install: only replace pack items, preserve user-added files
+install_item() {
+  local src="$1" dst="$2"
+  if [[ -e "$dst" ]]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would replace $(basename "$dst")"
+    else
+      rm -rf "$dst"
+      cp -r "$src" "$dst"
+    fi
+  else
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would install $(basename "$dst")"
+    else
+      cp -r "$src" "$dst"
+    fi
+  fi
+}
+
+# Count existing items and confirm reinstall
+if [ "$FORCE" -ne 1 ] && [ "$DRY_RUN" -ne 1 ] && [ -t 0 ]; then
+  existing_total=0
+  pack_total=0
+  for dir in "${DIRS[@]}"; do
+    dst="$TARGET/$dir"
+    src="$SOURCE/$dir"
+    if [[ -d "$dst" ]]; then
+      for f in "$dst"/*; do [[ -e "$f" ]] && existing_total=$((existing_total + 1)); done
+    fi
+    for f in "$src"/*; do [[ -e "$f" ]] && pack_total=$((pack_total + 1)); done
+  done
+  if [ "$existing_total" -gt 0 ]; then
+    user_count=$((existing_total - pack_total))
+    if [ "$user_count" -lt 0 ]; then user_count=0; fi
+    echo ""
+    echo "  Reinstall will replace $pack_total pack items. $user_count user item(s) will be preserved."
+    while true; do
+      read -r -p "  Proceed? [y/N] " answer
+      case "${answer,,}" in
+        y|yes) break ;;
+        n|no|"") echo "Install cancelled by user." >&2; exit 1 ;;
+        *) echo "  Please answer y or n." ;;
+      esac
+    done
+  fi
+fi
+
 for dir in "${DIRS[@]}"; do
   src="$SOURCE/$dir"
   dst="$TARGET/$dir"
-  if [[ -d "$dst" ]]; then
-    echo "  Removing old $dir/..."
-    if ! confirm_removal "$dst"; then
-      echo "Install cancelled: existing directory not removed: $dst"
-      exit 1
-    fi
+
+  echo "  Installing $dir/ (per-item, preserving user-added files)..."
+  if [[ ! -d "$dst" ]]; then
     if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would remove $dst"
+      echo "    [dry-run] would create $dst"
     else
-      rm -rf "$dst"
+      mkdir -p "$dst"
     fi
   fi
-  echo "  Installing $dir/..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    [dry-run] would copy $src -> $dst"
-  else
-    cp -r "$src" "$dst"
-  fi
+
+  # Copy subdirectories (e.g., agents/contracts/, agents/team-templates/, agents/scripts/)
+  for sub in "$src"/*/; do
+    [[ -d "$sub" ]] || continue
+    sub_name="$(basename "$sub")"
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would replace $dir/$sub_name/"
+    else
+      rm -rf "$dst/$sub_name"
+      cp -r "$sub" "$dst/$sub_name"
+    fi
+  done
+
+  # Copy individual files (e.g., agents/*.md, commands/*.md)
+  pack_items=()
+  for item in "$src"/*; do
+    [[ -f "$item" ]] || continue
+    item_name="$(basename "$item")"
+    pack_items+=("$item_name")
+    install_item "$item" "$dst/$item_name"
+  done
+
+  # Report preserved user files
+  for existing in "$dst"/*; do
+    [[ -f "$existing" ]] || continue
+    existing_name="$(basename "$existing")"
+    is_pack=0
+    for pi in "${pack_items[@]}"; do
+      if [[ "$pi" == "$existing_name" ]]; then is_pack=1; break; fi
+    done
+    if [[ $is_pack -eq 0 ]]; then
+      # Check it's not in a subdirectory (those were fully replaced)
+      echo "  Preserved user file: $dir/$existing_name"
+    fi
+  done
 done
 
 # Optional dirs: copy if not present, don't overwrite
