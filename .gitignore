@@ -1,6 +1,10 @@
-# Local working install (created by install scripts, not committed)
+# Local repo-install output (created by install scripts, not committed)
+/.agents/
+
+# Legacy local working install (still kept local, not committed)
 /.codex/
 
 # Local-only scratch and legacy plan history.
 /.scratch/
 /.plans/
+/work-items/
