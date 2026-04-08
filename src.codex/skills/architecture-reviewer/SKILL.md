@@ -44,11 +44,13 @@ description: Review an approved implementation phase or repository control-plane
 
 When returning REVISE, route the finding to the correct upstream role:
 
-| Finding type | Route to |
-|---|---|
-| Code-level issue (readability, coupling, naming) | Implementer |
-| Design-level issue (seam, boundary, contract) | `$architect` |
-| Plan-level issue (phase scope, ordering, gate) | `$planner` |
+| Finding type | Route to | Rationale |
+|---|---|---|
+| Code-level issue (readability, coupling, naming) | Implementer | The implementer owns the code and can fix without redesign |
+| Design-level issue (seam, boundary, contract) | `$architect` | Requires design-level authority to change boundaries |
+| Plan-level issue (phase scope, ordering, gate) | `$planner` | Requires replanning, not just code or design changes |
+
+If a single REVISE report contains findings at multiple levels, group them by target. The orchestrator routes each group to the correct role.
 
 ## Cross-domain escalation
 
