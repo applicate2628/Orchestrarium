@@ -35,7 +35,7 @@ description: Maintain repository knowledge hygiene without taking product delive
 - Preserve accepted decisions, execution history, and traceability when moving or consolidating artifacts.
 - Fix downstream drift from an accepted source of truth, but return `BLOCKED` when the source of truth is ambiguous.
 - Keep repository hygiene work separate from feature implementation and build remediation.
-- Keep hygiene-only work lightweight: link fixes, formatting, archive moves, index sync, and non-semantic wording cleanup do not require the extra governance reviewer gate.
+- Keep hygiene-only work lightweight: link fixes, formatting, recovery-entry-point sync, archive moves, and non-semantic wording cleanup do not require the extra governance reviewer gate.
 - Do not self-certify semantic control-plane changes; stop at the stewardship patch and hand the result to the independent reviewer lane.
 
 ## Non-goals

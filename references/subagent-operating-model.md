@@ -165,7 +165,7 @@ AI gates do not replace external engineering policy.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
   - `BLOCKED` has two typed classes:
     - `BLOCKED:dependency` — cannot proceed, missing tool, environment, access, or information that no current agent can provide. Orchestrator presents to user for resolution.
-- `BLOCKED:prerequisite` — discovered adjacent work that must complete first (e.g., broken adjacent module, missing migration). Orchestrator records it in the configured bug registry, user decides priority, resume when resolved.
+- `BLOCKED:prerequisite` — discovered adjacent work that must complete first (e.g., broken adjacent module, missing migration). Orchestrator records it in the configured bug registry path, if the repository uses one; user decides priority, resume when resolved.
   - If no class is specified, treat as `BLOCKED:dependency` (conservative default).
 - Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - `RETURN(role)` is used by an independent reviewer when the upstream artifact has a structural gap requiring that role's expertise — not a bounded fix. The lead routes the finding to the named upstream role. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely.
@@ -183,7 +183,7 @@ AI gates do not replace external engineering policy.
 
 When any role discovers a bug, risk, or improvement outside the approved change surface:
 
-1. File the issue in the configured bug registry using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
+1. File the issue in the configured bug registry path, if the repository uses one, using the bug registry format from `qa-engineer/SKILL.md`, with `context: adjacent-finding` and `status: open`.
 2. Note it in the current artifact under an "Adjacent findings" section.
 3. Do NOT expand scope — the orchestrator decides priority and scheduling.
 4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.
@@ -591,7 +591,7 @@ product-manager -> lead -> analyst -> architect -> planner -> implementation spe
 
 ### Bugfix with known file or function
 
-A bugfix with a known file or function maps to the `quick-fix` template by default, even if adjacent issues are discovered during analysis. Adjacent issues go to the configured bug registry, not into the current plan.
+A bugfix with a known file or function maps to the `quick-fix` template by default, even if adjacent issues are discovered during analysis. Adjacent issues go to the configured bug registry path, if the repository uses one, not into the current plan.
 
 ```text
 product-manager -> lead -> implementation specialist -> qa-engineer -> lead

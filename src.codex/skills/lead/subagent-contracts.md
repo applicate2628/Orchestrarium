@@ -102,7 +102,7 @@ The REVISE loop section is optional — include it only when a stage has returne
 | Class | Meaning | Orchestrator action |
 |---|---|---|
 | `BLOCKED:dependency` | Cannot proceed — missing tool, environment, access, or information that no current agent can provide | Present to user for resolution |
-| `BLOCKED:prerequisite` | Discovered adjacent work that must complete first (e.g., broken adjacent module, missing migration) | File in the configured bug registry path → user decides priority → resume when resolved |
+| `BLOCKED:prerequisite` | Discovered adjacent work that must complete first (e.g., broken adjacent module, missing migration) | File in the configured bug registry path, if the repository uses one → user decides priority → resume when resolved |
 
 If no class is specified, treat as `BLOCKED:dependency` (conservative default).
 
