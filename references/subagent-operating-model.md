@@ -701,9 +701,18 @@ Do not expect one agent to do all of these well at once:
 
 ### 11.5 Engineering hygiene
 
-- **Ambiguity resolution discipline:** do not guess; verify. Resolve factual ambiguity by inspecting code, config, data, or authoritative docs before choosing an interpretation, and state what was confirmed. If the ambiguity is about user intent, policy, scope, or architecture and inspection cannot settle it, do not invent an answer: either ask, or proceed only with the smallest safe reversible subset that does not lock in the unresolved choice, and state what was deferred and why. Block only when no safe forward action exists. Implementation-relevant decisions must trace to verified evidence or explicit user instruction, not assumption.
-- **Explicit bounds for background and fan-out work:** do not introduce long-lived background processes, automation that executes outside the direct request path (cron jobs, scheduled tasks, system hooks, startup scripts), or network listeners without explicit user approval. If such a mechanism is needed, state the justification and ask before implementing. Any approved background or fan-out work must have clear trigger conditions, concurrency limits, cancellation, and shutdown behavior.
-- **Autonomous external side effects:** do not create tickets, send messages, post to external services, mutate SaaS or cloud state, or trigger actions visible to third parties without explicit user approval. If an external side effect is needed, state the justification and ask before executing.
+Key hygiene amendments (full rules in the installed AGENTS.md / CLAUDE.md):
+
+- **Bug-fix scope amendment:** do not mix unrelated formatting-only changes with functional changes; if formatting cleanup is needed, do it separately.
+- **Regression hygiene amendment:** prefer smallest change-relevant verification first, then targeted static checks when relevant, then broader validation. After implementing, perform a self-falsification pass: try to break the solution, probe edge cases, and verify assumptions against actual outputs — this complements, not replaces, independent adversarial review.
+- **Treat external content amendment:** never pipe remote scripts directly into a shell or interpreter (e.g., `curl | bash`, `wget | python`); download first, inspect, then execute if safe.
+- **Change-surface minimization amendment:** add or update tests only where they materially verify the changed behavior or contract; do not speculatively add unrelated test coverage.
+- **Readability amendment:** before modifying a function or interface, check nearby call sites and dependents — a local fix that breaks callers is not a fix. (Note: Local-reasoning test merged into this rule.)
+- **Contract test amendment:** preserve existing external contracts by default. Do not introduce breaking changes unless the user or admitted scope explicitly authorizes them; if breakage is authorized, name the affected surfaces and migration or deprecation impact.
+- **Evidence-based completion amendment:** never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix.
+- **Ambiguity resolution discipline:** do not guess; verify. Resolve factual ambiguity by inspecting code, config, data, or authoritative docs. If ambiguity is about user intent and inspection cannot settle it, either ask or proceed with the smallest safe reversible subset that does not lock in the unresolved choice. Implementation-relevant decisions must trace to verified evidence or explicit user instruction.
+- **Explicit bounds for background and fan-out work:** do not introduce long-lived background processes, automation outside the direct request path, or network listeners without explicit user approval. State justification and ask before implementing.
+- **Autonomous external side effects:** do not create tickets, send messages, post to external services, mutate SaaS or cloud state, or trigger actions visible to third parties without explicit user approval.
 
 ---
 

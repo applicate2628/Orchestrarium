@@ -16,8 +16,9 @@ description: Provide an optional independent advisory memo for the lead without 
 Before any invocation, read `.agents/.consultant-mode`:
 
 - **No file** (default): consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately.
-- **`mode: external`**: enabled, proceed with the external provider path.
-- **`mode: internal`**: use the internal-subagent fallback path only.
+- **`mode: external`**: external-first. Attempt external CLI. If external fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal.
+- **`mode: auto`**: external-first with silent fallback. Attempt external CLI. If unavailable, fall back to internal subagent automatically. Disclose the actual execution path in the memo header.
+- **`mode: internal`**: internal subagent only.
 - **`mode: disabled`**: explicitly disabled. Same notification and return as no-file case.
 
 The toggle file is project-local state stored in `.agents/.consultant-mode`. Keep it local-only and do not commit it to git.
@@ -47,6 +48,10 @@ Do not invoke for:
 ## Return exactly one artifact
 
 - Return one advisory memo covering recommended direction, alternatives considered, major tradeoffs, key risks, assumptions, and confidence level.
+- Every consultant memo must include a provenance header:
+  - **Requested mode:** <external | auto | internal>
+  - **Actual execution path:** <external CLI (provider name) | internal subagent | role-play (violation)>
+  - **Deviation reason:** <none | external unavailable: [reason] | fallback approved by user>
 
 ## Advisory status
 

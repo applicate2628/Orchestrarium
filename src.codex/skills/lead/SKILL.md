@@ -276,6 +276,7 @@ Lead rules for `$consultant`:
 - If the selected execution path is an external provider, use the documented `stdin` invocation pattern and do not rely on multiline command-line arguments or TTY.
 - Wait about 5 to 15 minutes before treating an external-provider run as stalled, and avoid starting a parallel fresh chat while one may still be running.
 - If the external-provider run fails, times out, or hits quota or auth limits, record that in the plan file and continue with an independent internal subagent consultant using the same advisory-only contract.
+- When mode is `external`, do not approve fallback to internal without user confirmation. When mode is `auto`, fallback is automatic but must be disclosed in the memo header.
 
 ## Non-goals
 

@@ -11,6 +11,7 @@ Get an independent advisory memo or manage the consultant toggle.
 
 0. **Check for toggle command.** If `$ARGUMENTS` is one of the toggle sub-commands, handle it directly:
    - `enable` → write `mode: external` to `.agents/.consultant-mode`. Print "Consultant enabled (external-first)." and exit.
+   - `auto` → write `mode: auto` to `.agents/.consultant-mode`. Print "Consultant enabled (external-first with silent fallback)." and exit.
    - `internal` → write `mode: internal` to `.agents/.consultant-mode`. Print "Consultant set to internal-only." and exit.
    - `disable` → write `mode: disabled` to `.agents/.consultant-mode`. Print "Consultant disabled." and exit.
    - `status` → read `.agents/.consultant-mode`. If no file: print "disabled (no file — run `/second-opinion enable` to activate)". Otherwise print the current mode. Exit.
