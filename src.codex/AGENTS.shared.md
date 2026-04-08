@@ -41,6 +41,7 @@ Delegation should reduce noise, not spread it. That means:
 - use `BLOCKED` only for real external blockers, missing decisions, or unavailable prerequisites
 - do not let downstream roles silently redefine upstream artifacts when evidence is thin
 - never guess or assume facts about the codebase, file contents, or system behavior — always verify by reading or searching before stating or acting on a claim
+- do not silently drop interrupted tasks: if a side request (clarification, quick fix, lookup) interrupts an in-progress task, resume and complete the original task after the side request is handled — unless the user explicitly cancels or reprioritizes it; announce the resumption so the user knows where you are
 
 ## Engineering hygiene
 
@@ -72,6 +73,7 @@ Delegation should reduce noise, not spread it. That means:
 - **Resource lifecycle hygiene:** any handle, connection, subscription, lock, transaction, temporary resource, or acquired external state must have explicit cleanup or release behavior on success, failure, cancellation, and timeout paths.
 - **Retry / re-entry / idempotency safety:** any code that may be retried, replayed, resumed, or invoked concurrently should avoid duplicate side effects, inconsistent state, or double application unless explicit guards, idempotency keys, or compensating controls are in place.
 - **Evidence-based completion:** do not claim a task is done without fresh execution evidence. "Should work" and "no issues expected" are not evidence; neither are results from prior runs — code may have changed. Show test results, build output, or a verification checklist. If verification is not possible, state explicitly what was not checked. Never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix.
+- **Worktree safety:** the working tree is often dirty with unrelated local changes. Never revert, discard, or overwrite uncommitted changes that are not part of the current task. If a clean state is needed, ask the user first.
 
 ## Role index
 
@@ -125,6 +127,15 @@ Do not force into global:
 - academic reminders without a concrete decision test
 - tool-specific safety rules already enforced elsewhere
 - vague slogans such as `KISS`, `YAGNI`, or `clean code` without a falsifiable use rule
+
+## Artifact persistence
+
+- `.reports/YYYY-MM/` — session logs, review reports, advisory memos. Naming: `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
+- `.plans/YYYY-MM/` — delivery plans, phase plans. Naming: `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
+- `work-items/` — canonical tracked task memory (briefs, status, research, design, plans, reviews, closures). Structure defined by the lead and knowledge-archivist roles.
+- Do not persist intermediate REVISE drafts — only the final accepted version.
+- Do not persist raw session transcripts or debug logs in canonical storage.
+- Do not duplicate an artifact across tiers — choose the primary tier and link from others if needed.
 
 ## Publication safety
 
