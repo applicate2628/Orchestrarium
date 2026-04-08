@@ -70,9 +70,26 @@ Project policies are configured as a `## Project policies` section in the target
 
 The pack is self-contained. No files from this development repository's root are needed at runtime.
 
+### How Codex discovers governance and config
+
+Codex reads two kinds of project-level files:
+
+**`AGENTS.md` (governance — rules, delegation, hygiene):**
+- Codex searches from project root **down** to the current working directory
+- One file per directory; `AGENTS.override.md` takes priority over `AGENTS.md` in the same directory
+- Content closer to cwd appears later in prompt and effectively overrides earlier content
+- `.codex/AGENTS.md` or `.agents/AGENTS.md` are **NOT** read — Codex only reads `AGENTS.md` in directories on the root→cwd path
+- The install script places the pack `AGENTS.md` in the project root — this is the only location Codex will read it from
+
+**`.codex/config.toml` (configuration — model, sandbox, approval policy):**
+- Global: `~/.codex/config.toml`
+- Project: `<project>/.codex/config.toml` (read only if the project is trusted)
+- Closest to cwd wins
+- Use for: model overrides, sandbox mode, approval policy, MCP servers — not for governance rules
+
 ### Repo-local customization
 
-Add project-specific rules to your root `AGENTS.md` (below the installed Orchestrarium section):
+Add project-specific rules **below** the installed Orchestrarium section in root `AGENTS.md`:
 
 - canonical paths and source-of-truth references
 - allowed toolchains, shells, build systems, and concrete build/test commands
@@ -80,8 +97,27 @@ Add project-specific rules to your root `AGENTS.md` (below the installed Orchest
 - rollback expectations, rollout rules, and project-specific budgets or SLAs
 - repository-specific portability assumptions
 - configured task-memory directory and recovery policy
+- project policies (see `skills/lead/policies-catalog.md` for options)
 
-The installed `AGENTS.md` covers global delegation, engineering hygiene, and role definitions. Your project-level additions extend it with local context.
+The installed pack occupies the top of `AGENTS.md`. Your project-specific rules go below it. On reinstall, the pack section is replaced; your rules below it are preserved. Content lower in the file has higher effective priority — your project rules override pack defaults where they conflict.
+
+### Dual-platform projects (Codex + Claude Code)
+
+If both Orchestrarium and Claudestrator are installed in the same project:
+
+```
+project/
+  AGENTS.md           ← Orchestrarium (shared + Codex-specific, read by Codex)
+  .claude/
+    AGENTS.md         ← Claudestrator shared governance (read by Claude Code via @import)
+    CLAUDE.md         ← @AGENTS.md + Claude-specific rules
+```
+
+Shared governance (hygiene rules, delegation principles, role index) is duplicated in both locations because Codex and Claude Code read from different paths. Both are generated from the same `AGENTS.shared.md` source, so content stays in sync across reinstalls.
+
+To add project-specific rules that apply to both platforms:
+1. Add rules to root `AGENTS.md` (below the pack section) — Codex reads them directly
+2. Claude Code reads `.claude/CLAUDE.md` which imports `.claude/AGENTS.md` — to add project rules for Claude Code, edit `.claude/CLAUDE.md` below the pack section
 
 ## Portability
 
