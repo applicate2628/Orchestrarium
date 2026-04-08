@@ -37,6 +37,7 @@ description: Break an accepted design into small independent delivery phases wit
 - If a supposedly local phase requires unrelated module edits, shared abstraction churn, or dependency-direction changes, send it back for design review instead of normalizing it in the plan.
 - Call out phases that require specialist review before implementation or merge.
 - Split shared or core module changes into explicit enabling phases with tighter review instead of hiding them inside feature work.
+- If the work item includes an admitted bug or prerequisite issue, always make that fix Phase A. Cleanup, adjacent fixes, and feature work come only after the admitted issue is verified fixed.
 
 ## Non-goals
 
