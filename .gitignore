@@ -8,3 +8,6 @@
 /.scratch/
 /.plans/
 /work-items/
+
+# Plugin/tool local state
+/.serena/
