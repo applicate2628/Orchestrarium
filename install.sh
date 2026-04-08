@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE="$SCRIPT_DIR/src.claude"
 
 # Directories to install (order doesn't matter)
-DIRS=(agents commands policies scripts)
+DIRS=(agents commands scripts)
 OPTIONAL_DIRS=(memory)
 FORCE=0
 DRY_RUN=0
@@ -581,7 +581,7 @@ done
 
 check_file "$TARGET/agents/contracts/operating-model.md" "agents/contracts/operating-model.md"
 check_file "$TARGET/agents/contracts/subagent-contracts.md" "agents/contracts/subagent-contracts.md"
-check_file "$TARGET/policies/catalog.md" "policies/catalog.md"
+check_file "$TARGET/agents/contracts/policies-catalog.md" "agents/contracts/policies-catalog.md"
 
 if [[ -f "$dst_md" ]]; then
   md_content="$(cat "$dst_md")"

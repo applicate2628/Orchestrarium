@@ -56,10 +56,9 @@ When modifying `src.claude/CLAUDE.md`, `operating-model.md`, or `subagent-contra
 src.claude/              ← skill-pack source (install copies to target .claude/)
   CLAUDE.md              ← product governance (installed to users)
   agents/                ← 31 role definitions
-    contracts/           ← operating model + subagent contracts
+    contracts/           ← operating model + subagent contracts + policy catalog
     team-templates/      ← 8 routing templates (JSON)
   commands/              ← 19 skills (slash commands)
-  policies/              ← policy catalog
   scripts/               ← validation + safety scripts
 .claude/                 ← local working install (in .gitignore, NOT committed)
 CLAUDE.md                ← THIS FILE (repo-local dev rules, NOT installed)

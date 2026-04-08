@@ -21,7 +21,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Source = Join-Path $ScriptDir "src.claude"
 
-$Dirs = @("agents", "commands", "policies", "scripts")
+$Dirs = @("agents", "commands", "scripts")
 $OptionalDirs = @("memory")
 $script:PromptMode = $null
 
@@ -492,7 +492,7 @@ foreach ($dir in $Dirs) {
 # Explicit contract/script requirements
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/operating-model.md") "agents/contracts/operating-model.md"
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/subagent-contracts.md") "agents/contracts/subagent-contracts.md"
-Test-InstalledFile (Join-Path $TargetRoot "policies/catalog.md") "policies/catalog.md"
+Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/policies-catalog.md") "agents/contracts/policies-catalog.md"
 
 if (Test-Path $dstMd) {
     $mdContent = Get-Content $dstMd -Raw

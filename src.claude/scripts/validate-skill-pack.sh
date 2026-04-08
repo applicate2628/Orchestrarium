@@ -30,7 +30,7 @@ echo "[Core files]"
 for f in $PACK/CLAUDE.md $PACK/agents/lead.md $PACK/agents/consultant.md \
          $PACK/agents/contracts/operating-model.md \
          $PACK/agents/contracts/subagent-contracts.md \
-         $PACK/policies/catalog.md; do
+         $PACK/agents/contracts/policies-catalog.md; do
   if [[ -f "$f" ]]; then pass "$f exists"; else fail "$f missing"; fi
 done
 echo ""
@@ -81,7 +81,7 @@ for f in $PACK/commands/*.md; do
   name=$(basename "$f" .md)
   pass "/$name skill exists"
 done
-if [[ -f $PACK/policies/catalog.md ]]; then
+if [[ -f "$PACK/agents/contracts/policies-catalog.md" ]]; then
   pass "policy catalog exists"
 else
   fail "policy catalog missing (commands reference it)"
