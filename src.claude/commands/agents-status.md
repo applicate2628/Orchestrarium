@@ -7,7 +7,7 @@ Show a compact status dashboard for the current project.
 1. **Active work-items.** Check if `work-items/active/` exists and contains subdirectories. For each one, read `status.md` and display:
    - Slug, template, orchestrator (main/lead)
    - Current stage and main conv role (orchestrating/waiting/reviewing/idle)
-   - Active agents (subagent_type + status) — if any are running
+   - Active agents (role + status) — if any are running
    - Last completed agent and its result
    - Next action
    If no active work-items, say "No active chains."
@@ -37,8 +37,8 @@ Show a compact status dashboard for the current project.
 Active chains: <count or "none">
   <slug> — <template> (orchestrator: <main|lead>)
     Stage: <current> | Main conv: <role>
-    Active agents: <type> (running), <type> (running)
-    Last completed: <type> → <PASS|REVISE|BLOCKED>
+    Active agents: <role> (running), <role> (running)
+    Last completed: <role> → <PASS|REVISE|BLOCKED>
     Next: <action>
 
 Policies: <configured | not configured>

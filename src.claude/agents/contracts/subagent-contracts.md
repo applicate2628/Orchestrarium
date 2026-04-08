@@ -60,15 +60,15 @@ updated: <YYYY-MM-DD HH:MM>
 
 ## Active agents
 
-| Agent | subagent_type | Status | Launched |
+| Agent | Role | Status | Launched |
 | --- | --- | --- | --- |
-| <description> | <type> | running | <HH:MM> |
+| <description> | <role> | running | <HH:MM> |
 
 ## Completed agents
 
-| Agent | subagent_type | Result | Artifact |
+| Agent | Role | Result | Artifact |
 | --- | --- | --- | --- |
-| <description> | <type> | PASS/REVISE/BLOCKED | <filename> |
+| <description> | <role> | PASS/REVISE/BLOCKED | <filename> |
 
 ## REVISE loop
 
