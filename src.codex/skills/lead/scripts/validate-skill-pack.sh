@@ -9,7 +9,14 @@ set -euo pipefail
 
 # Auto-detect layout.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-if [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DIR/../../../AGENTS.md" ]]; then
+if [[ -d "src.codex/skills" && -f "src.codex/AGENTS.shared.md" ]]; then
+  # Dev repo: assemble AGENTS.md from split source files for validation
+  SKILLS_DIR="$(cd "src.codex/skills" && pwd -P)"
+  SCRIPTS_DIR="$(cd "src.codex/skills/lead/scripts" && pwd -P)"
+  AGENTS_FILE="$(mktemp)"
+  cat "src.codex/AGENTS.shared.md" "src.codex/AGENTS.codex.md" > "$AGENTS_FILE"
+  trap "rm -f '$AGENTS_FILE'" EXIT
+elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DIR/../../../AGENTS.md" ]]; then
   SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
   SCRIPTS_DIR="$SCRIPT_DIR"
   AGENTS_FILE="$(cd "$SCRIPT_DIR/../../.." && pwd -P)/AGENTS.md"
@@ -17,10 +24,6 @@ elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DI
   SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
   SCRIPTS_DIR="$SCRIPT_DIR"
   AGENTS_FILE="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)/AGENTS.md"
-elif [[ -d "src.codex/skills" && -f "src.codex/AGENTS.md" ]]; then
-  SKILLS_DIR="$(cd "src.codex/skills" && pwd -P)"
-  SCRIPTS_DIR="$(cd "src.codex/skills/lead/scripts" && pwd -P)"
-  AGENTS_FILE="$(cd "src.codex" && pwd -P)/AGENTS.md"
 elif [[ -d ".codex/skills" && -f ".codex/AGENTS.md" ]]; then
   SKILLS_DIR="$(cd ".codex/skills" && pwd -P)"
   SCRIPTS_DIR="$(cd ".codex/skills/lead/scripts" && pwd -P)"
@@ -120,7 +123,7 @@ done
 echo ""
 echo "=== AGENTS.md required sections ==="
 
-for section in "Default Delegation Rule" "Role index" "Global engineering hygiene"; do
+for section in "delegation" "Role index" "Engineering hygiene"; do
   if grep -qi "$section" "$AGENTS_FILE"; then
     pass "Section '$section' found"
   else

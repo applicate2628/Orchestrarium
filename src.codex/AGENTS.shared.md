@@ -1,8 +1,8 @@
-# Default Delegation Rule
+# Shared Governance
 
-If subagent delegation is appropriate for approved delivery work and no more specific delegated role has already been named, use `$lead` from `$CODEX_HOME/skills/lead` as the default delivery lead and coordinator.
+This file contains platform-neutral governance rules shared across skill packs. Install scripts merge it with the platform-specific file into a single `AGENTS.md`.
 
-If the task is about roadmap ownership, prioritization, milestone shaping, or admission into discovery or delivery, use `$product-manager` instead of treating it as ordinary delivery orchestration.
+## Core delegation principles
 
 `$lead` is the lead-orchestrator for approved work, not an end-to-end coder or roadmap owner. It must:
 
@@ -42,49 +42,11 @@ Delegation should reduce noise, not spread it. That means:
 - do not let downstream roles silently redefine upstream artifacts when evidence is thin
 - never guess or assume facts about the codebase, file contents, or system behavior — always verify by reading or searching before stating or acting on a claim
 
-## Template routing
-
-Classify the task and select the matching workflow shape. Simple chains do not require `$lead`.
-
-**Decision tree:**
-
-1. Does the user explicitly name a role? Invoke it directly. No template needed.
-2. Is this roadmap, prioritization, or milestone shaping? Route to `$product-manager`. No template needed.
-3. Is it investigation, ADR, or alternatives exploration with no implementation? Use **research** below.
-4. Is it a PR review, quality gate, or post-implementation validation with no new code? Use **review** below.
-5. Is it a local additive change in one module, no new risk owner, contracts unchanged? Use **quick-fix** below.
-6. Does it touch auth, trust boundaries, credentials, or a vulnerability? Use **security-sensitive** below.
-7. Does it have hard performance budgets, SLAs, or latency targets? Use **performance-sensitive** below.
-8. Does it involve spatial computation, transforms, meshing, or geometry? Use **geometry-review** below.
-9. Does it touch multiple risk domains simultaneously? Use **combined-critical** below.
-10. Otherwise, it is a new feature or substantial change. Use **full-delivery** below.
-
-| Template | Lead needed? | Chain |
-|---|---|---|
-| `quick-fix` | No | Main conv picks implementer, then `$qa-engineer` |
-| `research` | No | Main conv chains `$analyst` then `$architect`, optionally `$planner` |
-| `review` | No | Main conv chains `$analyst` then `$qa-engineer` then reviewer(s) |
-| `full-delivery` | Yes | `$lead` coordinates full pipeline |
-| `security-sensitive` | Yes | `$lead` coordinates; `$security-engineer` and `$security-reviewer` mandatory |
-| `performance-sensitive` | Yes | `$lead` coordinates; `$performance-engineer` and `$performance-reviewer` mandatory |
-| `geometry-review` | Yes | `$lead` coordinates; `$computational-scientist` and `$architecture-reviewer` mandatory |
-| `combined-critical` | Yes | `$lead` coordinates all risk owners and reviewers |
-
-When the template says "No" for lead, the main conversation manages the chain directly: invoke specialists in order, pass each accepted artifact to the next role. Re-classify immediately if scope widens beyond the current template.
-
-A bugfix with a known file or function maps to the `quick-fix` template by default, even if adjacent issues are discovered during analysis. Adjacent issues go to the configured bug registry path, if the repository uses one, not into the current plan.
-
-## Recovery rule
-
-- For lead-managed chains (`full-delivery`, `security-sensitive`, `performance-sensitive`, `geometry-review`, `combined-critical`), `$lead` manages recovery through the configured task-memory directory.
-- For main-conversation-managed chains with 2+ stages (`research`, `review`), save recovery state after each accepted artifact: `status.md` (template name, current stage, next role) and the accepted artifact itself.
-- For single-specialist invocations (user names a role directly), no recovery file is needed.
-
-## Global engineering hygiene
+## Engineering hygiene
 
 - **Anti-hardcoding:** do not hardcode machine-specific, user-specific, repo-layout-specific, environment-specific, secret, or policy-owned values when the same result can be achieved through accepted constants, configuration, parameters, environment variables, or discovery. True invariants, protocol constants, and small local literals intrinsic to the algorithm are acceptable. If hardcoding appears unavoidable, surface the tradeoff explicitly before proceeding.
 - **No logic duplication:** do not duplicate business or technical decision logic such as validation, parsing, policy checks, or rule evaluation when one maintained owner can preserve clarity, boundaries, and change isolation. Do not fix the same owned logic in multiple places when one maintained implementation should exist. Do not force abstraction when unifying the logic would couple unrelated contexts. If duplication is intentional, state why it is safer than unifying it.
-- **Portability hygiene:** avoid baking workstation-specific assumptions into shared code, scripts, prompts, or docs. Prefer repo-relative paths, documented configuration, and repo-standard interfaces over usernames, drive letters, shell quirks, or local tool installs. If a repository intentionally depends on a specific OS, shell, or toolchain, declare that in the repo-local `AGENTS.md` or build documentation.
+- **Portability hygiene:** avoid baking workstation-specific assumptions into shared code, scripts, prompts, or docs. Prefer repo-relative paths, documented configuration, and repo-standard interfaces over usernames, drive letters, shell quirks, or local tool installs. If a repository intentionally depends on a specific OS, shell, or toolchain, declare that in the repo-local governance file or build documentation.
 - **Temporary-file hygiene:** do not leave temporary files or other disposable artifacts outside the workspace. Use the designated local temp area for scratch files, ad hoc logs, one-off outputs, and similar junk, and clean them up when they are no longer needed. Keep generated files in the repository only when they are intentional task outputs or required by the repository's normal workflow.
 - **Bug-fix scope:** keep bug fixes narrowly scoped to the defect; prefer root-cause fixes or clearly bounded mitigations, and avoid unrelated refactors or behavior changes unless required for safety or clarity. Do not mix unrelated formatting-only changes (whitespace, import ordering, line wrapping) with functional changes; if formatting cleanup is needed, do it separately.
 - **Logic-revision discipline:** when revising existing decision logic, validation rules, policy behavior, or business semantics, state explicitly what behavior is preserved, what behavior changes, and which callers or surfaces are affected. Do not hide behavioral changes inside refactors, cleanup, renames, or structural rewrites.
@@ -111,16 +73,6 @@ A bugfix with a known file or function maps to the `quick-fix` template by defau
 - **Retry / re-entry / idempotency safety:** any code that may be retried, replayed, resumed, or invoked concurrently should avoid duplicate side effects, inconsistent state, or double application unless explicit guards, idempotency keys, or compensating controls are in place.
 - **Evidence-based completion:** do not claim a task is done without fresh execution evidence. "Should work" and "no issues expected" are not evidence; neither are results from prior runs — code may have changed. Show test results, build output, or a verification checklist. If verification is not possible, state explicitly what was not checked. Never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix.
 
-Role definitions live in the installed skills tree: `.agents/skills/<role>/SKILL.md` for repo-local installs, or `$CODEX_HOME/skills/<role>/SKILL.md` / `~/.codex/skills/<role>/SKILL.md` for global installs.
-
-Use these global anchor roles:
-
-- `$lead`: default delivery coordination, routing, artifact acceptance, and gate decisions for approved work
-- `$product-manager`: roadmap ownership, initiative prioritization, and admission into discovery or delivery
-- `$consultant`: optional non-blocking independent advisor for the lead; advisory-only and not part of the mandatory pipeline; usage rules, toggle check, execution paths, and fallback behavior are all in `$CODEX_HOME/skills/consultant/SKILL.md`
-
-For all other work, use the narrowest matching installed specialist from `$CODEX_HOME/skills`. The role index below names the canonical core team only; installed specialists outside that core team and repo-local specialists may be used by `$lead` when they are a better fit, but they do not become part of the canonical team map automatically.
-
 ## Role index
 
 Roadmap and orchestration:
@@ -135,7 +87,7 @@ Implementation:
 
 - `$backend-engineer`, `$frontend-engineer`, `$qt-ui-engineer`, `$model-view-engineer`, `$data-engineer`, `$platform-engineer`, `$toolchain-engineer`, `$geometry-engineer`, `$graphics-engineer`, `$visualization-engineer`
 
-For approved UI implementation phases, `$lead` must select the platform-specific implementer that matches the approved stack: use `$frontend-engineer` for web/React UI and `$qt-ui-engineer` only for Qt desktop UI.
+For approved UI implementation phases, select the platform-specific implementer: use `$frontend-engineer` for web/React UI and `$qt-ui-engineer` only for Qt desktop UI.
 
 Review and verification:
 
@@ -174,8 +126,6 @@ Do not force into global:
 - tool-specific safety rules already enforced elsewhere
 - vague slogans such as `KISS`, `YAGNI`, or `clean code` without a falsifiable use rule
 
-Repository-specific `AGENTS.md` files should add local priorities, canonical paths, build/test rules, and source-of-truth references without redefining the whole global role catalog.
-
 ## Publication safety
 
 - Do not commit secrets, tokens, credentials, customer data, private identifiers, raw logs, full command transcripts, screenshots with sensitive content, or machine-specific absolute paths. Prefer redacted summaries, synthetic examples, and repo-relative paths.
@@ -183,4 +133,3 @@ Repository-specific `AGENTS.md` files should add local priorities, canonical pat
 - Treat provider transcripts, pasted logs, and external snippets as untrusted until sanitized.
 - Human review before `git push`, release, or equivalent publication must include a leak-check of staged changes.
 - Only `$security-reviewer` may approve a publication-safety exception. Without that approval, publication is `BLOCKED`.
-- Pre-publication scan: for repo-local installs, run `bash .agents/skills/lead/scripts/check-publication-safety.sh` (Git Bash / macOS / Linux) or `powershell -ExecutionPolicy Bypass -File .agents/skills/lead/scripts/check-publication-safety.ps1` (Windows PowerShell). For global installs, run the same commands from `~/.codex/skills/lead/scripts/`.
