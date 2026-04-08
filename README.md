@@ -151,6 +151,7 @@ Self-contained. No references to files outside `src.claude/`. Install scripts co
 | `references/repository-task-memory.md` | Task-memory methodology — work-items structure and ownership |
 | Template routing (EN content in `src.claude/CLAUDE.md`) | Template routing — current runtime model |
 | `references/subagent-operating-model.md` | Original architecture blueprint — superseded by template routing |
+| `references/evidence-based-answer-pipeline.md` | Evidence-based answer pipeline for high-stakes domains |
 | `references/workflow-strategy-comparison.md` | Strategy comparison — historical reference |
 | `references/ru/` | Russian translations of all reference docs |
 
