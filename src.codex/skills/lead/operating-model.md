@@ -18,7 +18,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - The system operates as a rolling loop, not a stop-and-wait chain.
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays inside the same role for a bounded correction.
-- Default `REVISE` cap: no more than 3 consecutive `REVISE` cycles for the same role and artifact before the lead re-routes, escalates, or blocks the work.
+- Default `REVISE` cap: no more than 3 consecutive `REVISE` cycles for the same role and artifact before the lead must escalate to the user with a summary of all iterations, remaining findings, and a recommendation.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
 - Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - A material revision to an accepted upstream artifact invalidates dependent downstream `PASS` states; the lead marks the affected artifacts for re-review before continuing the pipeline.
