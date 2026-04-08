@@ -19,8 +19,8 @@
 - Accepted extension seams:
   - `AGENTS.md`
   - `references/*.md`
-  - `skills/lead/SKILL.md`
-  - `skills/lead/references/operating-model.md`
+  - `src.codex/skills/lead/SKILL.md`
+  - `src.codex/skills/lead/operating-model.md`
 - Must-not-break surfaces:
   - current task-memory rules
   - publication-safety contract
