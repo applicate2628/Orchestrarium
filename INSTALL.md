@@ -90,3 +90,44 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 | `work-items/` | This repo's task memory | No — skill-pack internal |
 
 `src.claude/agents/contracts/` is NOT a duplicate of `references/`. It contains the subset of files that role definitions actually reference at runtime.
+
+## Post-install
+
+### How Claude Code discovers governance
+
+Claude Code reads two types of instruction files:
+
+**`CLAUDE.md` (primary governance):**
+- Claude Code walks **up** from cwd to root, loading all `CLAUDE.md` and `CLAUDE.local.md` files
+- All found files are concatenated (not override) — later content has higher effective priority
+- `@path` syntax imports other files inline (e.g., `@AGENTS.md` pulls shared governance)
+- Claude Code does **NOT** read `AGENTS.md` automatically — it must be imported via `@AGENTS.md` in `CLAUDE.md`
+
+**`CLAUDE.local.md` (personal, gitignored):**
+- Appended after `CLAUDE.md` in each directory
+- For personal preferences, local overrides
+
+### Repo-local customization
+
+Add project-specific rules **below** the installed Claudestrator section in `.claude/CLAUDE.md`:
+
+- canonical paths and source-of-truth references
+- allowed toolchains, shells, build systems, and concrete build/test commands
+- API, config, schema, and migration evolution rules
+- project policies (run `/agents-init-project` to configure interactively)
+
+The installed pack occupies the top of `CLAUDE.md` (starting with `@AGENTS.md` import). Your project-specific rules go below it. On reinstall, the pack section is replaced; your rules below it are preserved.
+
+### Dual-platform projects (Codex + Claude Code)
+
+If both packs are installed in the same project:
+
+```
+project/
+  AGENTS.md           ← Orchestrarium (shared + Codex-specific, read by Codex)
+  .claude/
+    AGENTS.md         ← shared governance (read by Claude Code via @import)
+    CLAUDE.md         ← @AGENTS.md + Claude-specific rules
+```
+
+Shared governance is duplicated because Codex reads root `AGENTS.md` while Claude Code reads `.claude/AGENTS.md`. Both are generated from the same `AGENTS.shared.md` source.
