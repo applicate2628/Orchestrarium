@@ -33,14 +33,14 @@ description: Implement an approved backend phase without redesigning the system.
 - Keep API, storage, and integration changes explicit.
 - If the design or plan conflicts with reality, stop and return the exact conflict instead of patching around it.
 
-## Adjacent findings
+## Adjacent findings protocol
 
 If you discover a bug, risk, or improvement opportunity outside the approved change surface:
 
 1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
 2. Note it in your implementation artifact under an "Adjacent findings" section
 3. Do NOT expand scope to fix it — the orchestrator decides priority
-4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` with details
+4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.
 
 ## Non-goals
 

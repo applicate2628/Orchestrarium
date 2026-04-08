@@ -25,7 +25,22 @@ When lead coordinates, or when the main conversation needs to decide between rol
 1. **Risk owners trigger reviewers**: if a specialist constraint role participated in design, add the corresponding reviewer after QA.
 2. **UX lane**: if user-facing interaction design is needed, add `ux-designer` in design and `ux-reviewer` after QA.
 3. **Parallel read-only**: research roles (analyst, product-analyst) can run in parallel. Write-heavy roles need explicit ownership boundaries.
-4. **Re-intake**: if the admitted item itself changed materially, route back to `product-manager`. Cap: 2 re-intakes, then escalate to user.
+4. **Re-intake**: if the admitted item itself changed materially, route back to `product-manager`. Cap: 2 re-intakes; on the 3rd, escalate to user with all prior re-intake reasons and ask for a final decision (reduce scope, defer, or cancel).
+
+## Research admission filter
+
+When `$product-manager` admits a new candidate approach into discovery, the roadmap decision package must include:
+
+- **Coherence statement**: what shared state or contract holds this candidate together as one unit
+- **Improvement hypothesis**: which baseline it beats, on which cases, by which metric, through which mechanism
+- **Non-redundancy argument**: why this is meaningfully different from prior rejects with similar failure modes
+- **Expected win cases**: where the candidate is expected to succeed
+- **Expected fail cases**: where it is expected to struggle
+- **Evaluation metric mapping**: how the candidate's optimization objective maps to the benchmark objective
+- **Shortest falsification experiment**: 2–3 cases, clear PASS/FAIL threshold, minimal tuning
+- **Implementation seam**: where this lives in the repo (isolated lane, protected surfaces, minimal seam) — confirmed by `$architect` after admission
+
+`$product-manager` enforces 3 pre-admission gates (coherence, improvement hypothesis, non-redundancy). `$analyst` enforces 4 research-phase gates (regression risk, metric alignment, known limits, bounded falsification). `$architect` confirms the implementation isolation gate after admission.
 
 ## Interaction types
 

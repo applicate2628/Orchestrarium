@@ -5,7 +5,7 @@ This reference compares the main workflow, review, and control strategies that m
 Use it together with:
 - [subagent-operating-model.md](subagent-operating-model.md)
 - [operating-model-diagram.md](operating-model-diagram.md)
-- [operating-model.md](../.claude/agents/contracts/operating-model.md)
+- [operating-model.md](../src.claude/agents/contracts/operating-model.md)
 
 ## 1. Strategy families
 
@@ -29,7 +29,7 @@ Use it together with:
 | Critical change with both execution and blind-spot risk | `Claim-Verify + Adversarial` | Run in sequence, preserving reviewer independence |
 | Scope or priority drift | `Re-intake` | Route back to `product-manager` |
 | Multi-phase landing | `Integration ownership` | Name one owner before QA |
-| Stop-and-wait churn | `Rolling loop` | `PASS` advances, `REVISE` stays local for up to 2 consecutive cycles on the same role and artifact, `BLOCKED` stays rare |
+| Stop-and-wait churn | `Rolling loop` | `PASS` advances, `REVISE` stays local for up to 3 consecutive cycles on the same role and artifact, `BLOCKED` stays rare |
 | Broad unnecessary diff | `Change isolation` | Keep approved seams, blast radius, and nearby smoke coverage explicit |
 
 ## 3. Structural and review strategies
