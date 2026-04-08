@@ -35,6 +35,7 @@ When subagent delegation is appropriate, classify the task and pick the matching
 - `$consultant` is optional advisory-only — never a required stage or blocking reviewer.
 - Delegate accepted artifacts, not raw transcripts or broad context dumps.
 - Re-classify immediately if scope widens beyond the current template.
+- A bugfix with a known file or function maps to the `quick-fix` template by default, even if adjacent issues are discovered during analysis. Adjacent issues go to `work-items/bugs/`, not into the current plan.
 
 **Recovery rule:**
 
