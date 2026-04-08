@@ -17,7 +17,7 @@ You are showing or updating project policies for the Claudestrator skill-pack.
 
 4. **Check for arguments.** If the user provided `$ARGUMENTS`:
    - Parse the argument as `<policy-key> <new-value>` (e.g., `testing tdd`, `coverage 80`, `commits conventional`)
-   - Read `.claude/policies/catalog.md` to validate the key and value
+   - Read `.claude/agents/contracts/policies-catalog.md` to validate the key and value
    - Update the specific policy line in the `## Project policies` section of CLAUDE.md
    - Confirm the change
 

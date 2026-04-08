@@ -8,7 +8,7 @@ You are guiding the user through project policy configuration for the Claudestra
    - If it exists, show the current policies and ask: "Project policies are already configured. Do you want to review and update them, or start fresh?"
    - If not, proceed to step 2.
 
-2. **Read the catalog.** Read `.claude/policies/catalog.md` to get all available policy areas with their options.
+2. **Read the catalog.** Read `.claude/agents/contracts/policies-catalog.md` to get all available policy areas with their options.
 
 3. **Present policies in groups.** Walk through each policy area one at a time. For each:
    - State the policy name and question
