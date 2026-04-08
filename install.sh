@@ -573,6 +573,39 @@ else
   fi
 fi
 
+# AGENTS.md: copy or replace shared governance
+src_agents="$SOURCE/AGENTS.md"
+dst_agents="$TARGET/AGENTS.md"
+
+if [[ -f "$src_agents" ]]; then
+  if [[ -f "$dst_agents" ]]; then
+    if grep -q "^# Shared Governance" "$dst_agents" 2>/dev/null; then
+      echo "  AGENTS.md: replacing shared governance..."
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "    [dry-run] would replace AGENTS.md"
+      else
+        cp "$src_agents" "$dst_agents"
+      fi
+    else
+      echo "  AGENTS.md: prepending shared governance..."
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "    [dry-run] would prepend AGENTS.md"
+      else
+        existing="$(cat "$dst_agents")"
+        new="$(cat "$src_agents")"
+        printf '%s\n%s' "$new" "$existing" > "$dst_agents"
+      fi
+    fi
+  else
+    echo "  Creating AGENTS.md..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would create AGENTS.md"
+    else
+      cp "$src_agents" "$dst_agents"
+    fi
+  fi
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
   echo "RESULT: DRY-RUN complete (no files modified)."
