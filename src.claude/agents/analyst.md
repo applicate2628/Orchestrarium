@@ -35,6 +35,15 @@ description: Investigate a repository in read-only mode and return a factual res
 - If evidence is missing, say it is unknown instead of inferring.
 - Prefer concise facts over speculative narration.
 
+## Adjacent findings protocol
+
+When scope investigation reveals issues outside the admitted scope:
+
+1. File the issue in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+2. Mention it in the current artifact under an "Adjacent findings" section.
+3. Do NOT include it in the current research or design — scope expansion is the orchestrator's decision.
+4. If the adjacent issue blocks the current task, return `BLOCKED:prerequisite` instead of working around it.
+
 ## Non-goals
 
 - Do not propose architecture.

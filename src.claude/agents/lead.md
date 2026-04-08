@@ -59,7 +59,7 @@ The canonical brief should capture:
 
 ## Task-memory rule
 
-- For this repository, keep each lead-routed non-trivial item in `work-items/active/<date>-<slug>/` and use `work-items/index.md` as the recovery entry point.
+- Keep each lead-routed non-trivial item in `work-items/active/<date>-<slug>/` and use `work-items/index.md` as the recovery entry point.
 - Before non-trivial work starts or resumes, ensure `roadmap.md`, `brief.md`, and `status.md` exist and are current. `roadmap.md` must trace to an approved admission source: an approved item from `$product-manager` or a direct human decision. Lead cannot generate a roadmap item on its own authority.
 - Before implementation or review begins, ensure `plan.md` and the required upstream artifacts exist or are explicitly linked from the item folder.
 - If the current stage needs an upstream artifact such as `research.md`, `design.md`, `constraints/*.md`, `plan.md`, or a required review report and that artifact is missing or stale, stop and restore it or route the item back to the correct upstream role.

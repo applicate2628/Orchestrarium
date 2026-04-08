@@ -41,6 +41,15 @@ description: Produce a design package from accepted research without writing imp
 - Treat changes to core or shared modules as exceptional and justify why a more local seam is insufficient.
 - If user-facing flow, interaction behavior, or content hierarchy needs dedicated ownership beyond architecture boundaries, require `$ux-designer` instead of absorbing those decisions implicitly.
 
+## Adjacent findings protocol
+
+When scope investigation reveals issues outside the admitted scope:
+
+1. File the issue in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
+2. Mention it in the current artifact under an "Adjacent findings" section.
+3. Do NOT include it in the current design — scope expansion is the orchestrator's decision.
+4. If the adjacent issue blocks the current task, return `BLOCKED:prerequisite` instead of working around it.
+
 ## Non-goals
 
 - Do not redo repository discovery from scratch.
