@@ -6,147 +6,164 @@ Strategy comparison companion: [workflow-strategy-comparison.md](workflow-strate
 ## 1. End-to-end operating flow
 
 ```mermaid
+flowchart LR
+    PM["product-manager\nRoadmap decision"] --> M["lead\nCanonical brief"]
+    PA["product-analyst\nProduct brief"] -.-> M
+
+    M --> A["analyst\nResearch memo"]
+    A --> D["architect + constraints\nDesign package"]
+    D --> P["planner\nPhase plan"]
+    P --> I["implementer\nCode + tests"]
+    I --> INT["integration owner\n(if multi-phase)"]
+    INT --> QA["QA / UI test\nVerification"]
+    QA --> R["independent reviewers\nReview reports"]
+    R --> H["Human / CI gate"]
+    H --> M
+
+    M -. "scope drift" .-> PM
+    M -. "needs product facts" .-> PA
+```
+
+## 2. Hub-and-spoke topology
+
+```mermaid
 flowchart TB
-    subgraph Intake["Roadmap / Intake"]
-        direction LR
-        PM["product-manager"] -. "clarify" .-> PA["product-analyst"]
-    end
-
-    subgraph Prepare["Research → Design → Plan"]
-        direction LR
-        L["lead"] --> A["Research"] --> D["Design &\nConstraints"] --> P["Plan"]
-    end
-
-    subgraph Execute["Implement → Verify → Gate"]
-        direction LR
-        I["Implement"] --> INT["Integrate"] --> QA["Verify"] --> R["Review"] --> H["Human /\nCI gate"]
-    end
-
-    PM -->|admit| L
-    PA -.->|facts| L
-    P --> I
-    H -->|done| L
+    PM["product-manager"] -->|"admit item"| L["lead"]
     L -. "re-intake" .-> PM
+
+    L <-->|"facts"| AN["analyst\nproduct-analyst"]
+    L <-->|"design"| AR["architect\nconstraint roles"]
+    L <-->|"plan"| PL["planner"]
+    L <-->|"build"| IM["implementers\nintegration owner"]
+    L <-->|"verify"| QA["QA / reviewers"]
+    L -. "advisory" .-> CO["consultant"]
 ```
 
-## 2. Interaction topology
+## 3. Direct peer edges (optimizations)
+
+These edges complement hub-and-spoke. Lead remains orchestrating owner; direct edges require lead authorization.
 
 ```mermaid
-flowchart TB
-    R["product-manager +\nproduct-analyst"]
-    L["lead"]
+flowchart LR
+    AR("architect") -. "DIRECT" .-> SE("security-eng")
+    AR -. "DIRECT" .-> PE("performance-eng")
+    AR -. "DIRECT" .-> RE("reliability-eng")
+    AR -. "DIRECT" .-> AS("algorithm-sci")
+    AR -. "DIRECT" .-> CS("computational-sci")
 
-    subgraph Prepare[" "]
-        direction LR
-        F["Research"] ~~~ D["Design /\nConstraints"] ~~~ P["Plan"]
-    end
+    SE & PE & RE & AS & CS -. "DIRECT" .-> PL("planner")
 
-    subgraph Execute[" "]
-        direction LR
-        B["Implement +\nIntegrate"] ~~~ V["QA +\nReview"] ~~~ C["Consultant\n(advisory)"]
-    end
+    PL ==>|"CLAIMS"| IM("implementers")
+    IM ==>|"CLAIMS"| QA("qa-engineer")
+    QA ==>|"CLAIMS"| RV("reviewers")
 
-    R -->|admit| L
-    L -. "re-intake" .-> R
+    QA -. "ESCALATE" .-> PE
+    RV -. "RETURN" .-> AR
+    RV -. "RETURN" .-> SE
+    RV -. "RETURN" .-> IM
 
-    L <--> F
-    L <--> D
-    L <--> P
-    L <--> B
-    L <--> V
-    L -. "second opinion" .-> C
+    CS -. "meshing spec" .-> GE("geometry-eng")
 ```
 
-## 3. Artifact progression
+## 4. Artifact progression
 
 ```mermaid
-flowchart TB
-    subgraph Upstream["Upstream artifacts"]
-        direction LR
-        A1["Roadmap\ndecision"] --> A2["Canonical\nbrief"] --> A3["Research\nmemo"]
-    end
-
-    subgraph Design["Design artifacts"]
-        direction LR
-        A4["Design\npackage"] --> A5["Constraint\npackages"] --> A6["Phase\nplan"]
-    end
-
-    subgraph Delivery["Delivery artifacts"]
-        direction LR
-        A7["Implementation"] --> A8["Integrated\nartifact"] --> A9["Verification +\nreviews"]
-    end
-
-    A3 --> A4
-    A6 --> A7
-    A9 --> A10["Human / CI\napproval"]
+flowchart LR
+    R0["Roadmap\ndecision"] --> R1["Canonical\nbrief"]
+    R1 --> R2["Research\nmemo"]
+    R2 --> R3["Design\npackage"]
+    R3 --> R4["Constraint\npackages"]
+    R4 --> R5["Phase\nplan"]
+    R5 --> R6["Implementation\npackages"]
+    R6 --> R7["Integrated\nartifact"]
+    R7 --> R8["Verification\nreport"]
+    R8 --> R9["Review\nreports"]
+    R9 --> R10["Human / CI\napproval"]
 ```
 
-## 4. Delegation behavior
+## 5. Delegation behavior
 
 ```mermaid
 flowchart TB
     U["Unknown or ambiguity"]
-    F["Narrow factual role<br/>product-analyst / analyst / specialist evidence lane"]
+    F["Narrow factual role\nanalyst / product-analyst"]
     AF["Accepted artifact"]
-    I["Interpretive role<br/>product-manager / lead / architect / reviewer"]
-    R["REVISE<br/>bounded correction in same role"]
-    B["BLOCKED<br/>real external blocker or missing decision"]
+    I["Interpretive role\narchitect / lead / reviewer"]
+    R["REVISE\nbounded correction"]
+    B["BLOCKED\nexternal blocker"]
 
-    U --> F
-    F --> AF
-    AF --> I
-    I -. "evidence insufficient" .-> R
-    R --> F
+    U --> F --> AF --> I
+    I -. "evidence insufficient" .-> R --> F
     I -. "external blocker" .-> B
 ```
 
-## 5. Workflow selection matrix
+## 6. Workflow selection
 
-| Situation | Default strategy | Primary roles | Expected accepted artifact | Escalate when |
-|---|---|---|---|---|
-| What should enter discovery or delivery next? | `Roadmap / Intake loop` | `$product-manager`, `$product-analyst` as needed | Roadmap decision package, then optional product brief | Product facts are unclear or milestone intent is unstable |
-| Approved item needs normal execution | `Delivery loop` | `$lead -> analyst -> architect -> planner -> implementation -> QA/review` | Canonical brief, research memo, design package, phase plan, implementation and verification artifacts | A critical risk lane or reviewer becomes mandatory |
-| The next decision is blocked by missing facts | `Fact-first routing` | `$analyst`, `$product-analyst`, or a narrow specialist evidence lane | Accepted factual artifact | Interpretive roles are being asked to guess instead of consume evidence |
-| A domain risk can independently fail the result | `Risk-owner routing` | `$security-engineer`, `$performance-engineer`, `$reliability-engineer`, `$algorithm-scientist`, `$computational-scientist`, `$ux-designer`, or another explicit owner | One specialist design or constraint package | The risk is being left implicit inside general implementation |
-| The admitted item has changed materially mid-delivery | `Re-intake loop` | `$lead -> $product-manager -> $lead` | Updated roadmap decision package or re-admission decision | Scope, priority, or milestone intent no longer matches the admitted item |
-| Multiple implementation phases or specialists must land together | `Integration ownership` | `$lead` plus one explicit integration owner | One integrated artifact ready for QA | QA would otherwise receive a partial multi-phase result |
-| A known bounded risk needs independent checking | `Claim-Verify review` | Upstream builder plus the relevant independent reviewer | Implementation artifact plus claims list, then review report | The reviewer needs to verify stated guarantees and coverage gaps |
-| A novel or externally exposed risk needs blind-spot hunting | `Adversarial review` | Relevant independent reviewer | Review report against the implementation artifact only | Missing an unknown risk is more dangerous than missing an execution bug |
-| A change needs independence between builder and gate | `Builder / blocker separation` | Builder role plus reviewer/blocker role | Builder artifact, then independent review artifact | The builder would otherwise approve the same risk they introduced |
-| Ambiguity or tradeoffs need a non-blocking second opinion | `Consultant advisory` | `$lead -> $consultant` | Advisory memo | Facts are already assembled, but route choice is still ambiguous |
-| Read-heavy scopes are independent | `Parallel read lanes` | Multiple research, triage, or test-analysis roles | Multiple independent factual artifacts | Merge cost would exceed the time saved |
-| Write-heavy scopes are independent and contracts are fixed | `Parallel write lanes` | Multiple implementation roles with disjoint ownership | Multiple implementation artifacts with fixed boundaries | Write scopes overlap or contracts are still moving |
+| Situation | Strategy | Key roles |
+| --- | --- | --- |
+| What should enter delivery next? | Roadmap / Intake loop | `$product-manager`, `$product-analyst` |
+| Approved item needs execution | Delivery loop | `$lead` -> research -> design -> plan -> implement -> QA/review |
+| Next decision blocked by missing facts | Fact-first routing | `$analyst`, `$product-analyst`, specialist evidence lane |
+| Domain risk can independently fail result | Risk-owner routing | Relevant constraint role + corresponding reviewer |
+| Admitted item changed mid-delivery | Re-intake loop | `$lead` -> `$product-manager` -> `$lead` |
+| Multiple phases must land together | Integration ownership | `$lead` + one integration owner |
+| Known risk needs checking | Claim-Verify review | Builder (with claims list) + reviewer |
+| Novel risk needs blind-spot hunting | Adversarial review | Reviewer only (no design package) |
+| Need non-blocking second opinion | Consultant advisory | `$lead` -> `$consultant` |
+| Independent read-heavy scopes | Parallel read lanes | Multiple research/triage roles |
+| Independent write-heavy scopes (fixed contracts) | Parallel write lanes | Multiple implementers with disjoint ownership |
 
-## 6. Role map by category
+## 7. Role map
 
-Current team shape: `31 roles`, `6 categories`.
-
-Note: this role map shows the canonical core team only; installed or repo-local specialists are not listed here.
+31 roles, 6 categories. Canonical core team only.
 
 | Category | Roles |
-|---|---|
+| --- | --- |
 | Coordination | `lead`, `product-manager`, `consultant` (advisory-only) |
 | Research | `analyst`, `product-analyst` |
 | Design / Constraints | `architect`, `ux-designer`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, `reliability-engineer` |
 | Plan | `planner` |
-| Implement | `backend-engineer`, `frontend-engineer` (web/React UI), `data-engineer`, `platform-engineer`, `toolchain-engineer`, `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer` (Qt desktop UI), `model-view-engineer`, `knowledge-archivist` |
+| Implement | `backend-engineer`, `frontend-engineer`, `data-engineer`, `platform-engineer`, `toolchain-engineer`, `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`, `knowledge-archivist` |
 | QA + Review | `qa-engineer`, `ui-test-engineer`, `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, `accessibility-reviewer` |
 
 Notes:
-- `knowledge-archivist` is a cross-cutting hygiene lane and is usually invoked outside the main feature phase even though it sits closest to implementation support.
-- `consultant` is advisory-only and does not become a required delivery gate.
 
-## 7. Reading notes
+- `knowledge-archivist` is cross-cutting hygiene, usually invoked outside the main feature phase.
+- `consultant` is advisory-only and never a required delivery gate.
 
-- `product-manager` owns what enters discovery or delivery.
-- `lead` owns execution of approved work.
-- `ux-designer` owns scoped interaction design before implementation when the UI surface needs dedicated UX ownership.
-- If an in-flight item no longer fits its admitted scope, priority, or milestone intent, `lead` routes it back to `product-manager` for re-intake.
-- `analyst` and `product-analyst` should reduce uncertainty before interpretive roles make tradeoff decisions.
-- Delegation should reduce noise: pass accepted artifacts, not raw transcript dumps, whenever an accepted artifact already exists.
-- Interpretive roles should consume accepted evidence instead of filling factual gaps with judgment.
-- Subagents exchange accepted artifacts, not direct peer task assignments.
-- `$consultant` stays advisory-only whether it is fulfilled by an external provider or by an internal independent subagent fallback.
-- Multi-phase or multi-specialist implementation requires one explicit integration owner before QA.
+## 8. Claims chain
+
+The claims chain is a traveling artifact that ensures builder claims reach reviewers reliably.
+
+```mermaid
+flowchart LR
+    A["architect\nseeds claims"] --> C["constraint roles\npopulate claims"]
+    C --> PL["planner\nfreezes claims"]
+    PL --> IM["implementers\nannotate only"]
+    IM --> QA["QA\nverifies claims"]
+    QA --> RV["reviewers\nfinal disposition"]
+```
+
+Lifecycle of `constraints/claims.md` in the work-item folder:
+
+1. **Created** after design acceptance — architect seeds initial constraints.
+2. **Populated** by each constraint role as they complete.
+3. **Frozen** by the planner before implementation. The plan references the claims list.
+4. **Annotated** by each implementer — verification notes only, cannot modify claims.
+5. **Verified** by QA — each claim receives a verification status.
+6. **Reviewed** by each independent reviewer — primary input for Claim-Verify.
+7. **Returned** to lead — final claims disposition with pass/fail per review domain.
+
+## 9. Key rules
+
+- `product-manager` owns what enters delivery. `lead` owns execution of approved work.
+- `analyst` and `product-analyst` reduce uncertainty before interpretive roles make tradeoff decisions.
+- Delegation passes accepted artifacts, not raw transcripts.
+- `REVISE` returns work to the responsible role for up to 3 iterations; after 3, escalate to the user. `BLOCKED` stops progression — classified as `BLOCKED:dependency` (external blocker) or `BLOCKED:prerequisite` (adjacent work needed first).
+- Multi-phase implementation requires one explicit integration owner before QA.
 - Reviewers stay independent and report to the orchestrating owner.
-- `REVISE` returns work to the same stage owner for up to 3 consecutive cycles on the same role and artifact; `BLOCKED` stops progression until a new decision or artifact exists. `BLOCKED` has two typed classes: `BLOCKED:dependency` (external, escalate to user) and `BLOCKED:prerequisite` (internal blocker, record in the configured bug registry path if the repository uses one).
+- Interaction types: `LEAD_MED` (default), `DIRECT`, `PARALLEL`, `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`.
+- Reviewers tag cross-domain findings with `[CROSS-DOMAIN: <target-domain>]`; the orchestrator routes them to the appropriate specialist.
+- Any role files adjacent findings in `work-items/bugs/` without expanding scope.
+- Every completed chain persists artifacts: canonical docs in `work-items/`, session logs in `.reports/`, plan logs in `.plans/`.
+- Parallel agents must have non-overlapping change surfaces; an integration check runs after all parallel agents complete.
