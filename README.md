@@ -69,7 +69,7 @@ All chains with 2+ stages save state in `work-items/active/` — both the status
 | `/agents-research` | Investigate a question (analyst → architect) |
 | `/agents-design` | Full research-to-plan chain (analyst → architect → planner) |
 | `/agents-security` | Security review (security-engineer → security-reviewer) |
-| `/agents-consult` | Get a second opinion via consultant (Codex) |
+| `/agents-second-opinion` | Get a second opinion via consultant (Codex) |
 | `/agents-implement` | Execute an approved plan phase by phase |
 | `/agents-perf` | Fix a performance issue (perf-engineer → impl → QA → perf-reviewer) |
 | `/agents-refactor` | Safe refactoring with blast-radius analysis |
@@ -149,7 +149,7 @@ Self-contained. No references to files outside `src.claude/`. Install scripts co
 | `references/periodic-control-matrix.md` | Control matrix — periodic audits and their owners |
 | `references/repository-publication-safety.md` | Publication safety — implemented in `CLAUDE.md` |
 | `references/repository-task-memory.md` | Task-memory methodology — work-items structure and ownership |
-| `references/template-routing.md` (EN in CLAUDE.md) | Template routing — current runtime model |
+| Template routing (EN content in `src.claude/CLAUDE.md`) | Template routing — current runtime model |
 | `references/subagent-operating-model.md` | Original architecture blueprint — superseded by template routing |
 | `references/workflow-strategy-comparison.md` | Strategy comparison — historical reference |
 | `references/ru/` | Russian translations of all reference docs |

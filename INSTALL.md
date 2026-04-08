@@ -82,7 +82,7 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 | `src.claude/agents/contracts/` | Handoff templates, routing reference | Yes |
 | `src.claude/agents/scripts/` | Utility scripts (publication-safety scan, validation) | Yes |
 | `src.claude/agents/team-templates/` | Pre-built team compositions | Yes |
-| `src.claude/commands/` | 19 skills (`/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety`) | Yes |
+| `src.claude/commands/` | 19 skills (`/agents-help`, `/agents-second-opinion`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety`, ...) | Yes |
 | `src.claude/agents/contracts/policies-catalog.md` | Policy catalog with options and defaults | Yes |
 | `src.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
 | `src.claude/memory/` | Feedback rules, populated over time | Optional |
