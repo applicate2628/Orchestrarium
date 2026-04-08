@@ -38,23 +38,30 @@ description: Verify an approved phase against its acceptance criteria and test s
 
 ## Bug registry
 
-When a defect is found and the gate is REVISE or BLOCKED, record it in the configured bug registry path, if the repository uses one:
+When the gate decision is REVISE or BLOCKED, record the defect in `work-items/bugs/` (or the configured bug registry path) before returning the verdict:
 
-```yaml
+```markdown
 ---
 title: <short description>
 severity: critical | high | medium | low
+found-by: qa-engineer
 found-in-phase: <phase name>
 affected-surface: <file or module>
+context: <work-item slug or "standalone">
 status: open
 ---
 
 ## Reproduction
-<steps to reproduce>
+<steps or test command to reproduce>
 
 ## Expected vs actual
 <what should happen vs what happens>
+
+## Files involved
+- <file:line>
 ```
+
+Always write bug files before returning a REVISE or BLOCKED verdict so that defects survive across sessions.
 
 ## Test failure classification
 
