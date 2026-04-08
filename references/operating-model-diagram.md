@@ -164,6 +164,6 @@ Lifecycle of `constraints/claims.md` in the work-item folder:
 - Reviewers stay independent and report to the orchestrating owner.
 - Interaction types: `LEAD_MED` (default), `DIRECT`, `PARALLEL`, `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`.
 - Reviewers tag cross-domain findings with `[CROSS-DOMAIN: <target-domain>]`; the orchestrator routes them to the appropriate specialist.
-- Implementers file adjacent findings in `work-items/bugs/` without expanding scope.
+- Any role files adjacent findings in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`, without expanding scope.
 - Every completed chain persists artifacts: canonical docs in `work-items/`, session logs in `.reports/`, plan logs in `.plans/`.
 - Parallel agents must have non-overlapping change surfaces; an integration check runs after all parallel agents complete.

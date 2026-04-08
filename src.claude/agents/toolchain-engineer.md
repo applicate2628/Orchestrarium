@@ -35,14 +35,14 @@ description: Implement approved build and toolchain phases without drifting into
 - Separate build and packaging concerns from deployment and runtime platform concerns.
 - If the approved plan conflicts with the actual toolchain or build graph, stop and return the exact conflict instead of improvising.
 
-## Adjacent findings
+## Adjacent findings protocol
 
 If you discover a bug, risk, or improvement opportunity outside the approved change surface:
 
 1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
 2. Note it in your implementation artifact under an "Adjacent findings" section
 3. Do NOT expand scope to fix it — the orchestrator decides priority
-4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` with details
+4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.
 
 ## Non-goals
 

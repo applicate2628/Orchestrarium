@@ -160,7 +160,7 @@ Do not advance work on optimism or partial acceptance.
 
 ## Operational rules
 
-- **Re-intake**: if an item no longer fits its admitted scope/priority/milestone, route back to `$product-manager`. Do not silently redefine the item inside the delivery lane or compensate by stretching the phase plan. Cap: 2 re-intakes, then escalate to user.
+- **Re-intake**: if an item no longer fits its admitted scope/priority/milestone, route back to `$product-manager`. Do not silently redefine the item inside the delivery lane or compensate by stretching the phase plan. Cap: 2 re-intakes; on the 3rd, escalate to user with all prior re-intake reasons and ask for a final decision (reduce scope, defer, or cancel).
 - **Integration ownership**: if work spans multiple implementation phases or specialists, assign one integration owner before QA. That owner assembles one coherent artifact and checks cross-phase compatibility.
 - **Risk owners**: assign explicit owners for risks that can independently fail the result. Keep builder and reviewer roles separate. A role that defines constraints does not approve its own work.
 - **Change isolation**: prefer additive change through approved seams. If a local feature requires cross-cutting edits, route back to `$architect` or `$architecture-reviewer`.

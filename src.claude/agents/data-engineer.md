@@ -33,14 +33,14 @@ description: Implement an approved data phase without changing upstream architec
 - Call out operational impacts such as backfills, recomputes, deployment ordering, or recovery steps.
 - If the plan conflicts with the real data shape or platform limits, stop and return the exact conflict.
 
-## Adjacent findings
+## Adjacent findings protocol
 
 If you discover a bug, risk, or improvement opportunity outside the approved change surface:
 
 1. File it in `work-items/bugs/` using the bug registry format, with `context: adjacent-finding` and `status: open`
 2. Note it in your implementation artifact under an "Adjacent findings" section
 3. Do NOT expand scope to fix it — the orchestrator decides priority
-4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` with details
+4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.
 
 ## Non-goals
 

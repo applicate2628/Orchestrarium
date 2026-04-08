@@ -156,18 +156,22 @@ AI gates do not replace external engineering policy.
 - If a role disagrees with an upstream artifact, it returns `REVISE` or `BLOCKED` to the orchestrating owner instead of renegotiating scope privately.
 - Reviewers stay independent and return findings to the orchestrating owner instead of driving implementation directly.
 - Direct specialist-to-specialist collaboration is allowed only when the orchestrating owner explicitly approves the edge, scope, and artifact boundary.
-- `$consultant` is an optional independent advisory role; it may be fulfilled by an external provider or an internal independent subagent, but it never becomes a delivery gate.
+- `$consultant` is an optional independent advisory role; it may be fulfilled by an external provider or an internal independent subagent, but it never becomes a delivery gate. Consultant is opt-in via toggle file. No toggle file = disabled. Modes: `external` (cross-provider CLI), `internal` (same-platform subagent), `disabled`. The `/agents-second-opinion` command manages the toggle and invokes the consultant.
 
 ### 3.9 Rolling-loop execution
 
 - The system operates as a rolling loop, not a stop-and-wait chain.
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays within the same role for a bounded correction.
-- Default `REVISE` cap: no more than 3 consecutive `REVISE` iterations for the same role and artifact before the lead escalates to the user (see REVISE iteration cap in `operating-model.md`).
+- Default `REVISE` cap: no more than 3 consecutive `REVISE` cycles for the same role and artifact before the lead re-routes, escalates, or blocks the work.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
+  - `BLOCKED` has two typed classes:
+    - `BLOCKED:dependency` — cannot proceed, missing tool, environment, access, or information that no current agent can provide. Orchestrator presents to user for resolution.
+    - `BLOCKED:prerequisite` — discovered adjacent work that must complete first (e.g., broken adjacent module, missing migration). Orchestrator files in `work-items/bugs/`, user decides priority, resume when resolved.
+  - If no class is specified, treat as `BLOCKED:dependency` (conservative default).
 - Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - `RETURN(role)` is used by an independent reviewer when the upstream artifact has a structural gap requiring that role's expertise — not a bounded fix. The lead routes the finding to the named upstream role. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely.
-- Re-intake cap: an item may return to `product-manager` for re-intake at most 2 times. On the 3rd re-intake, the lead escalates to the user with all prior reasons.
+- Re-intake cap: an item may return to `product-manager` for re-intake at most 2 times. On the 3rd re-intake, the lead must escalate to the user with all prior re-intake reasons and ask for a final decision (reduce scope, defer, or cancel).
 - Keep handoff latency low and avoid pausing between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 
 ## 3.10 Periodic controls
@@ -176,6 +180,24 @@ AI gates do not replace external engineering policy.
 - Use [periodic-control-matrix.md](periodic-control-matrix.md) as the canonical cadence, owner, evidence, and fail-action matrix.
 - Use periodic controls for drift between transitions: stale active items, missing recovery state, repo consistency drift, archive hygiene, refactor debt, and publication-safety spot checks.
 - Keep stage-gated artifacts as the authority for whether work may advance to the next phase.
+
+### 3.11 Adjacent findings protocol
+
+When any role discovers a bug, risk, or improvement outside the approved change surface:
+
+1. File the issue in `work-items/bugs/` using the bug registry format (from `qa-engineer.md`), with `context: adjacent-finding` and `status: open`.
+2. Note it in the current artifact under an "Adjacent findings" section.
+3. Do NOT expand scope — the orchestrator decides priority and scheduling.
+4. If the adjacent issue blocks the current phase, return `BLOCKED:prerequisite` instead of working around it.
+
+### 3.12 Cross-domain escalation protocol
+
+When a reviewer finds a significant issue outside their domain:
+
+1. Tag the finding: `[CROSS-DOMAIN: <target-domain>]`.
+2. State the observation factually — do not evaluate severity outside your expertise.
+3. The orchestrator routes the tagged finding to the appropriate specialist.
+4. This finding does not block the current review gate unless the reviewer cannot complete their own domain assessment without it.
 
 ---
 
@@ -226,7 +248,7 @@ Response format:
 2. Artifact
 3. Risks / Unknowns
 4. Recommended next role
-5. Gate: PASS | REVISE | BLOCKED | RETURN(role)
+5. Gate: PASS | REVISE | BLOCKED:<class> | RETURN(role)
 ```
 
 Decision-making roles should clearly separate confirmed facts, assumptions, and judgment calls in their output.
@@ -375,6 +397,8 @@ For each phase, specify:
 - acceptance criteria
 - required tests and checks
 - rollback or safe fallback
+
+If the work item includes an admitted bug or prerequisite issue, the fix is always Phase A. Cleanup, adjacent fixes, and feature work come only after the admitted issue is verified fixed.
 ```
 
 ### 7.6 Specialist prompts
@@ -567,6 +591,14 @@ product-manager -> lead -> analyst -> architect -> planner -> toolchain-engineer
 product-manager -> lead -> analyst -> architect -> planner -> implementation specialist -> qa-engineer -> architecture-reviewer -> lead
 ```
 
+### Bugfix with known file or function
+
+A bugfix with a known file or function maps to the `quick-fix` template by default, even if adjacent issues are discovered during analysis. Adjacent issues go to `work-items/bugs/`, not into the current plan.
+
+```text
+product-manager -> lead -> implementation specialist -> qa-engineer -> lead
+```
+
 ### Roadmap prioritization or milestone shaping
 
 ```text
@@ -578,6 +610,20 @@ product-manager -> product-analyst -> lead
 ```text
 lead -> product-manager -> lead
 ```
+
+### Research admission filter
+
+When admitting a new candidate approach into discovery, the roadmap decision package must include:
+
+- **Coherence statement**: what shared state or contract holds this candidate together as one unit
+- **Improvement hypothesis**: which baseline it beats, on which cases, by which metric, through which mechanism
+- **Non-redundancy argument**: why this is meaningfully different from prior rejects with similar failure modes
+- **Expected win/fail cases**: where the candidate succeeds and where it struggles
+- **Evaluation metric mapping**: how the optimization objective maps to the benchmark objective
+- **Shortest falsification experiment**: 2-3 cases, clear PASS/FAIL threshold, minimal tuning
+- **Implementation seam**: isolated lane, protected surfaces, minimal seam
+
+`$product-manager` enforces 3 pre-admission gates (coherence, improvement hypothesis, non-redundancy). `$analyst` enforces 4 research-phase gates (regression risk, metric alignment, known limits, bounded falsification). `$architect` confirms the implementation isolation gate.
 
 ---
 
@@ -627,6 +673,8 @@ At minimum, it is useful to keep these artifacts near the repository:
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
 - If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery.
 - `notes.md` or `notes/` holds technical findings and discoveries; accepted long-lived decisions still belong in the design or ADR artifact.
+- `closure.md` is mandatory before moving an item to `work-items/archive/`. It holds the final closeout record: outcome, residual risk, and archive location.
+- `status.md` has a defined format with YAML frontmatter (template, orchestrator, started, updated) and sections: Current state, Active agents, Completed agents, REVISE loop (optional), Next action. The full format is defined in `subagent-contracts.md`.
 
 ### 11.3 What should be automated
 
@@ -652,6 +700,24 @@ Do not expect one agent to do all of these well at once:
 - define security controls
 - implement code
 - perform independent acceptance
+
+### 11.5 Artifact invalidation protocol
+
+When an upstream artifact is revised after downstream artifacts have already been accepted:
+
+1. Mark all dependent downstream artifacts as `stale` with a timestamp and the upstream revision reason.
+2. Do not use a stale artifact as input to any new stage.
+3. Re-validate each stale artifact against the revised upstream before delivery continues.
+4. If re-validation changes the artifact's gate status, propagate the change downstream.
+
+### 11.6 Parallel execution protocol
+
+Before launching parallel agents, complete this 4-step pre-flight:
+
+1. **Non-overlapping file sets**: confirm each agent's allowed change surface does not overlap with any other agent's.
+2. **Integration owner**: name one owner who will assemble the combined result after all parallel agents complete.
+3. **Post-completion conflict check**: after all agents finish, the integration owner checks for semantic conflicts across the combined output.
+4. **Independent REVISE**: if one agent receives `REVISE`, it iterates independently without blocking the others.
 
 ---
 
@@ -763,4 +829,3 @@ accessibility-reviewer
 Short team formula:
 
 > **One role. One artifact. One gate. One explicit owner for every critical risk.**
-
