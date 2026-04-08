@@ -109,7 +109,7 @@ Target-domain mapping: `security` → `$security-engineer` or `$security-reviewe
 
 ## Adjacent-issue protocol
 
-When an implementer discovers a bug, risk, or improvement opportunity outside the approved change surface:
+When any role discovers a bug, risk, or improvement opportunity outside the approved change surface:
 
 1. **File it** in `work-items/bugs/` using the bug registry format (from `qa-engineer.md`), with `context: adjacent-finding` and `status: open`.
 2. **Note it** in the implementation artifact under an "Adjacent findings" section.
