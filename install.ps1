@@ -25,6 +25,14 @@ $Dirs = @("agents", "commands", "policies", "scripts")
 $OptionalDirs = @("memory")
 $script:PromptMode = $null
 
+function Test-Interactive {
+    try {
+        return [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+    } catch {
+        return $false
+    }
+}
+
 function Get-CanonicalPath {
     param([string]$Path)
 
@@ -145,7 +153,7 @@ function Assert-SafeInstallRoot {
         }
 
         if (-not $isAllowed) {
-            if ($Host.Name -eq "ConsoleHost") {
+            if (Test-Interactive) {
                 Write-Host "WARNING: target '$target' is outside the default allowlist. Suspicious paths are blocked." -ForegroundColor Yellow
                 while ($true) {
                     $rawAnswer = Read-Host "Type 'ALLOW' to proceed with this target"
@@ -218,7 +226,7 @@ function Confirm-Removal {
     if ($Force -or $DryRun) {
         return $true
     }
-    if ($Host.Name -ne "ConsoleHost") {
+    if (-not (Test-Interactive)) {
         Write-Host "Skipping interactive confirmation in non-console host." -ForegroundColor Yellow
         return $true
     }
@@ -240,7 +248,7 @@ function Confirm-DestructiveMode {
     if ($Force -or $DryRun) {
         return
     }
-    if ($Host.Name -ne "ConsoleHost") {
+    if (-not (Test-Interactive)) {
         return
     }
 
@@ -310,7 +318,7 @@ if ($Global) {
     }
     $Mode = "target"
 } else {
-    if ($Host.Name -eq "ConsoleHost") {
+    if (Test-Interactive) {
         $interactiveTarget = Read-InstallMode
         $Mode = $script:PromptMode
         if (-not $Mode) {
