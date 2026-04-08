@@ -243,34 +243,7 @@ function Confirm-Removal {
     }
 }
 
-function Confirm-DestructiveMode {
-    param([string[]]$ExistingDirs)
-    if ($Force -or $DryRun) {
-        return
-    }
-    if (-not (Test-Interactive)) {
-        return
-    }
-
-    if ($ExistingDirs.Count -eq 0) {
-        return
-    }
-
-    Write-Host "Destructive install will remove existing directories:"
-    foreach ($path in $ExistingDirs) {
-        Write-Host "  - $path"
-    }
-
-    while ($true) {
-        $rawAnswer = Read-Host "Proceed with destructive reinstall? [y/N]"
-        $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
-        switch -Regex ($answer.Trim().ToLower()) {
-            "^(y|yes)$" { return }
-            "^n$|^no$|^$" { throw "Install cancelled by user." }
-            default { Write-Host "Please answer y or n." }
-        }
-    }
-}
+# Per-item install preserves user-added files — no destructive directory wipe needed.
 
 function Copy-RequiredDirectory {
     param(
@@ -353,16 +326,6 @@ if (-not (Test-Path (Join-Path $Source "agents"))) {
     exit 1
 }
 
-$existingDirs = @()
-foreach ($dir in $Dirs) {
-    $dst = Join-Path $TargetRoot $dir
-    if (Test-Path -LiteralPath $dst) {
-        $existingDirs += $dst
-    }
-}
-
-Confirm-DestructiveMode -ExistingDirs $existingDirs
-
 if (-not $DryRun -and -not (Test-Path -LiteralPath $TargetRoot)) {
     New-Item -ItemType Directory -Path $TargetRoot -Force | Out-Null
 }
@@ -370,11 +333,82 @@ if ($DryRun -and -not (Test-Path -LiteralPath $TargetRoot)) {
     Write-Host "[dry-run] would create target root: $TargetRoot"
 }
 
-# Clean install: remove old, copy fresh
+# Count and confirm reinstall
+if (-not $Force -and -not $DryRun -and (Test-Interactive)) {
+    $existingTotal = 0
+    $packTotal = 0
+    foreach ($dir in $Dirs) {
+        $dst = Join-Path $TargetRoot $dir
+        $src = Join-Path $Source $dir
+        if (Test-Path -LiteralPath $dst) {
+            $existingTotal += (Get-ChildItem -LiteralPath $dst -File -ErrorAction SilentlyContinue).Count
+        }
+        $packTotal += (Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue).Count
+    }
+    if ($existingTotal -gt 0) {
+        $userCount = $existingTotal - $packTotal
+        if ($userCount -lt 0) { $userCount = 0 }
+        Write-Host ""
+        Write-Host "  Reinstall will replace $packTotal pack items. $userCount user item(s) will be preserved."
+        while ($true) {
+            $rawAnswer = Read-Host "  Proceed? [y/N]"
+            $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
+            switch -Regex ($answer) {
+                "^(y|yes)$" { break }
+                "^n$|^no$|^$" { Write-Host "Install cancelled by user." -ForegroundColor Yellow; exit 1 }
+                default { Write-Host "  Please answer y or n." }
+            }
+        }
+    }
+}
+
+# Per-item install: replace pack items, preserve user-added files
 foreach ($dir in $Dirs) {
     $src = Join-Path $Source $dir
     $dst = Join-Path $TargetRoot $dir
-    Copy-RequiredDirectory -SourceDir $src -TargetDir $dst -Label "$dir\"
+
+    Write-Host "  Installing $dir\ (per-item, preserving user-added files)..."
+    if (-not (Test-Path -LiteralPath $dst)) {
+        if (-not $DryRun) {
+            New-Item -ItemType Directory -Path $dst -Force | Out-Null
+        } else {
+            Write-Host "    [dry-run] would create $dst"
+        }
+    }
+
+    # Copy subdirectories (contracts/, team-templates/, scripts/) — full replace
+    foreach ($sub in Get-ChildItem -LiteralPath $src -Directory -ErrorAction SilentlyContinue) {
+        $subDst = Join-Path $dst $sub.Name
+        if (-not $DryRun) {
+            if (Test-Path -LiteralPath $subDst) { Remove-Item -Recurse -Force $subDst }
+            Copy-Item -Recurse -Force $sub.FullName $subDst
+        } else {
+            Write-Host "    [dry-run] would replace $dir/$($sub.Name)/"
+        }
+    }
+
+    # Copy individual files — per-file, preserve user files
+    $packItems = @()
+    foreach ($item in Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue) {
+        $packItems += $item.Name
+        $itemDst = Join-Path $dst $item.Name
+        if (-not $DryRun) {
+            Copy-Item -Force $item.FullName $itemDst
+        } else {
+            if (Test-Path -LiteralPath $itemDst) {
+                Write-Host "    [dry-run] would replace $($item.Name)"
+            } else {
+                Write-Host "    [dry-run] would install $($item.Name)"
+            }
+        }
+    }
+
+    # Report preserved user files
+    foreach ($existing in Get-ChildItem -LiteralPath $dst -File -ErrorAction SilentlyContinue) {
+        if ($packItems -notcontains $existing.Name) {
+            Write-Host "  Preserved user file: $dir/$($existing.Name)"
+        }
+    }
 }
 
 # Optional dirs: copy if not present, don't overwrite
