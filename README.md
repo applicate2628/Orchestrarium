@@ -26,7 +26,7 @@ This repository has two distinct layers:
 Everything a user installs into their target project. Self-contained, no external dependencies.
 
 - `src.codex/AGENTS.md`: installed delegation rules, engineering hygiene, and role index — loaded automatically by Codex as the main conversation context
-- `src.codex/skills/<role>/SKILL.md`: instructions for one role (31 roles + 2 utility skills)
+- `src.codex/skills/<role>/SKILL.md`: instructions for one role (31 roles + 1 utility skill)
 - `src.codex/skills/<role>/agents/openai.yaml`: display metadata and default prompt for the role
 - `src.codex/skills/lead/`: includes operating-model notes and handoff contracts alongside SKILL.md
 - `src.codex/skills/consultant/`: consultant workflow, toggle logic, and execution paths
