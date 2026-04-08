@@ -350,11 +350,12 @@ if (-not $Force -and -not $DryRun -and (Test-Interactive)) {
         if ($userCount -lt 0) { $userCount = 0 }
         Write-Host ""
         Write-Host "  Reinstall will replace $packTotal pack items. $userCount user item(s) will be preserved."
-        while ($true) {
+        $confirmed = $false
+        while (-not $confirmed) {
             $rawAnswer = Read-Host "  Proceed? [y/N]"
             $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
             switch -Regex ($answer) {
-                "^(y|yes)$" { break }
+                "^(y|yes)$" { $confirmed = $true }
                 "^n$|^no$|^$" { Write-Host "Install cancelled by user." -ForegroundColor Yellow; exit 1 }
                 default { Write-Host "  Please answer y or n." }
             }
