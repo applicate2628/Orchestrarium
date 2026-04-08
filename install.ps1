@@ -485,6 +485,40 @@ if (Test-Path $dstMd) {
     }
 }
 
+# AGENTS.md: copy or replace shared governance
+$srcAgents = Join-Path $Source "AGENTS.md"
+$dstAgents = Join-Path $TargetRoot "AGENTS.md"
+
+if (Test-Path $srcAgents) {
+    if (Test-Path $dstAgents) {
+        $agentsContent = Get-Content $dstAgents -Raw
+        if ($agentsContent -match "# Shared Governance") {
+            Write-Host "  AGENTS.md: replacing shared governance..."
+            if (-not $DryRun) {
+                Copy-Item -Force $srcAgents $dstAgents
+            } else {
+                Write-Host "    [dry-run] would replace AGENTS.md"
+            }
+        } else {
+            Write-Host "  AGENTS.md: prepending shared governance..."
+            if (-not $DryRun) {
+                $existing = Get-Content $dstAgents -Raw
+                $new = Get-Content $srcAgents -Raw
+                Set-Content -Path $dstAgents -Value ($new + "`n" + $existing) -NoNewline
+            } else {
+                Write-Host "    [dry-run] would prepend AGENTS.md"
+            }
+        }
+    } else {
+        Write-Host "  Creating AGENTS.md..."
+        if (-not $DryRun) {
+            Copy-Item -Force $srcAgents $dstAgents
+        } else {
+            Write-Host "    [dry-run] would create AGENTS.md"
+        }
+    }
+}
+
 if ($DryRun) {
     Write-Host ""
     Write-Host "RESULT: DRY-RUN complete (no files modified)."
