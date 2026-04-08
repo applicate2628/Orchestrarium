@@ -527,8 +527,20 @@ fi
 
 # Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
 
-# AGENTS.md: merge or create
-src_md="$SOURCE/AGENTS.md"
+# AGENTS.md: assemble from shared + codex-specific, then merge or create
+src_shared="$SOURCE/AGENTS.shared.md"
+src_platform="$SOURCE/AGENTS.codex.md"
+
+if [[ ! -f "$src_shared" ]] || [[ ! -f "$src_platform" ]]; then
+  echo "FAIL: Missing $src_shared or $src_platform"
+  exit 1
+fi
+
+# Assemble pack AGENTS.md from two source files
+src_md="$(mktemp)"
+cat "$src_shared" "$src_platform" > "$src_md"
+trap "rm -f '$src_md'" EXIT
+
 dst_md="$MD_TARGET"
 
 if [[ -f "$dst_md" ]]; then
