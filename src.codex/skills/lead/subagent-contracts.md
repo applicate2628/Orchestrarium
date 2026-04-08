@@ -498,6 +498,17 @@ Invocation note:
 - Reviewers report findings and gate outcomes; they do not directly manage implementation.
 - When an upstream artifact is insufficient, return `REVISE` or `BLOCKED` instead of silently redefining the stage contract.
 
+## Structured completion report
+
+For substantial tasks, prefer a structured closeout in the final summary:
+
+- **Changed:** what was modified and why
+- **Verified:** what was tested or checked, with evidence
+- **Not verified:** what was not checked and why
+- **Risks / follow-ups:** residual risks, deferred work, or known limitations
+
+This is a recommended format for user-facing task completion, not a mandatory gate artifact. For pipeline handoffs, use the shared response format above.
+
 ## Gate questions
 
 Ask these before advancing:
