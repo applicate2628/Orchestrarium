@@ -241,34 +241,7 @@ function Confirm-Removal {
     }
 }
 
-function Confirm-DestructiveMode {
-    param([string[]]$ExistingDirs)
-    if ($Force -or $DryRun) {
-        return
-    }
-    if (-not (Test-Interactive)) {
-        return
-    }
-
-    if ($ExistingDirs.Count -eq 0) {
-        return
-    }
-
-    Write-Host "Destructive install will remove existing directories:"
-    foreach ($path in $ExistingDirs) {
-        Write-Host "  - $path"
-    }
-
-    while ($true) {
-        $rawAnswer = Read-Host "Proceed with destructive reinstall? [y/N]"
-        $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
-        switch -Regex ($answer.Trim().ToLower()) {
-            "^(y|yes)$" { return }
-            "^n$|^no$|^$" { throw "Install cancelled by user." }
-            default { Write-Host "Please answer y or n." }
-        }
-    }
-}
+# Per-skill install preserves user-added skills — no destructive directory wipe needed.
 
 function Copy-RequiredDirectory {
     param(
@@ -367,15 +340,6 @@ if (-not (Test-Path (Join-Path $Source "skills"))) {
     exit 1
 }
 
-$existingDirs = @()
-foreach ($tdir in @($SkillsTarget)) {
-    if (Test-Path -LiteralPath $tdir) {
-        $existingDirs += $tdir
-    }
-}
-
-Confirm-DestructiveMode -ExistingDirs $existingDirs
-
 # Create parent directories as needed
 foreach ($tdir in @($SkillsTarget)) {
     $parent = Split-Path $tdir -Parent
@@ -388,11 +352,70 @@ foreach ($tdir in @($SkillsTarget)) {
     }
 }
 
-# Clean install: remove old, copy fresh
-Copy-RequiredDirectory -SourceDir (Join-Path $Source "skills") -TargetDir $SkillsTarget -Label "skills\"
+# Count and confirm reinstall
+$packCount = (Get-ChildItem -LiteralPath (Join-Path $Source "skills") -Directory).Count
+$existingCount = 0
+if (Test-Path -LiteralPath $SkillsTarget) {
+    $existingCount = (Get-ChildItem -LiteralPath $SkillsTarget -Directory -ErrorAction SilentlyContinue).Count
+}
+if ($existingCount -gt 0 -and -not $Force -and -not $DryRun -and (Test-Interactive)) {
+    $userCount = $existingCount - $packCount
+    if ($userCount -lt 0) { $userCount = 0 }
+    Write-Host ""
+    Write-Host "  Reinstall will replace $packCount pack skills. $userCount user skill(s) will be preserved."
+    while ($true) {
+        $rawAnswer = Read-Host "  Proceed? [y/N]"
+        $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
+        switch -Regex ($answer) {
+            "^(y|yes)$" { break }
+            "^n$|^no$|^$" { Write-Host "Install cancelled by user." -ForegroundColor Yellow; exit 1 }
+            default { Write-Host "  Please answer y or n." }
+        }
+    }
+}
 
-# Policies live in AGENTS.md as a ## Project policies section, not as a separate directory.
-# See skills/lead/policies-catalog.md for the catalog of available policies.
+# Per-skill install: only replace pack skills, preserve user-added skills
+Write-Host "  Installing skills (per-skill, preserving user-added skills)..."
+if (-not (Test-Path -LiteralPath $SkillsTarget)) {
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Path $SkillsTarget -Force | Out-Null
+    } else {
+        Write-Host "    [dry-run] would create $SkillsTarget"
+    }
+}
+
+$packSkills = @()
+foreach ($skillDir in Get-ChildItem -LiteralPath (Join-Path $Source "skills") -Directory) {
+    $skillName = $skillDir.Name
+    $packSkills += $skillName
+    $dst = Join-Path $SkillsTarget $skillName
+    if (Test-Path -LiteralPath $dst) {
+        if (-not $DryRun) {
+            Remove-Item -Recurse -Force $dst
+            Copy-Item -Recurse -Force $skillDir.FullName $dst
+        } else {
+            Write-Host "    [dry-run] would replace skills/$skillName"
+        }
+    } else {
+        if (-not $DryRun) {
+            Copy-Item -Recurse -Force $skillDir.FullName $dst
+        } else {
+            Write-Host "    [dry-run] would install skills/$skillName"
+        }
+    }
+}
+Write-Host "  Installed $($packSkills.Count) pack skills."
+
+# Report preserved user skills
+if (Test-Path -LiteralPath $SkillsTarget) {
+    foreach ($existingDir in Get-ChildItem -LiteralPath $SkillsTarget -Directory) {
+        if ($packSkills -notcontains $existingDir.Name) {
+            Write-Host "  Preserved user skill: $($existingDir.Name)"
+        }
+    }
+}
+
+# Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
 
 # AGENTS.md merge
 $srcMd = Join-Path $Source "AGENTS.md"
