@@ -45,6 +45,17 @@ Do not invoke for:
 - The lead decides whether to adopt or ignore the memo.
 - If the memo identifies a real blocker, flag it and recommend the proper specialist role instead of acting as that role.
 
+## Toggle file check
+
+Before any invocation, read `.claude/.consultant-mode`:
+
+- **No file** (default): consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/agents-consult enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately.
+- **`mode: external`**: enabled, proceed with the Codex provider path.
+- **`mode: internal`**: use the internal-subagent fallback path only.
+- **`mode: disabled`**: explicitly disabled. Same notification and return as no-file case.
+
+The toggle file is local-only (`.claude/` is in `.gitignore`) and not committed to git.
+
 ## Execution paths
 
 ### Codex provider (default)
