@@ -21,7 +21,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Source = Join-Path $ScriptDir "src.claude"
 
-$Dirs = @("agents", "commands", "scripts")
+$Dirs = @("agents", "commands")
 $OptionalDirs = @("memory")
 $script:PromptMode = $null
 

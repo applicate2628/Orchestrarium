@@ -10,7 +10,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE="$SCRIPT_DIR/src.claude"
 
 # Directories to install (order doesn't matter)
-DIRS=(agents commands scripts)
+DIRS=(agents commands)
 OPTIONAL_DIRS=(memory)
 FORCE=0
 DRY_RUN=0

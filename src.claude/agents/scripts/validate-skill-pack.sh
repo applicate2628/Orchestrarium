@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Validate Claudestrator skill-pack structural integrity.
-# Run from repo root: bash src.claude/scripts/validate-skill-pack.sh
-#   or after install:  bash .claude/scripts/validate-skill-pack.sh
+# Run from repo root: bash src.claude/agents/scripts/validate-skill-pack.sh
+#   or after install:  bash .claude/agents/scripts/validate-skill-pack.sh
 set -euo pipefail
 
 # Auto-detect pack root: src.claude/ (dev repo) or .claude/ (installed)
@@ -90,7 +90,7 @@ echo ""
 
 # 5. Scripts are executable-ready
 echo "[Scripts]"
-for f in $PACK/scripts/*.sh; do
+for f in $PACK/agents/scripts/*.sh; do
   if head -1 "$f" | grep -q '^#!'; then
     pass "$(basename "$f") has shebang"
   else
