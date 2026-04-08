@@ -1,0 +1,4 @@
+interface:
+  display_name: "Second Opinion"
+  short_description: "Get an independent advisory memo or manage consultant toggle"
+  default_prompt: "Use $second-opinion to get an independent second opinion via the consultant agent, or manage the consultant toggle (enable/disable/internal/status)."

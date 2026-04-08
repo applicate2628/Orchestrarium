@@ -1,0 +1,529 @@
+<#
+.SYNOPSIS
+    Install Orchestrarium skill-pack.
+.DESCRIPTION
+    Copies skills, common-skills, scripts, and AGENTS.md to the target location.
+    Re-running = reinstall. Policies are preserved across reinstalls.
+.EXAMPLE
+    .\install.ps1                          # Install into current repo's .codex/
+    .\install.ps1 -Global                  # Install into ~/.codex/
+    .\install.ps1 -Target "D:\my-repo"     # Install into D:\my-repo\.codex/
+#>
+param(
+    [switch]$Global,
+    [string]$Target,
+    [switch]$Force,
+    [switch]$DryRun,
+    [switch]$AllowUnsafeTarget
+)
+
+$ErrorActionPreference = "Stop"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Source = Join-Path $ScriptDir "src.codex"
+
+$Dirs = @("skills", "common-skills", "scripts")
+$OptionalDirs = @("policies")
+$script:PromptMode = $null
+
+function Test-Interactive {
+    try {
+        return [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+    } catch {
+        return $false
+    }
+}
+
+function Get-CanonicalPath {
+    param([string]$Path)
+
+    $expanded = [Environment]::ExpandEnvironmentVariables($Path).Trim('"').Trim()
+    if ([string]::IsNullOrWhiteSpace($expanded)) {
+        throw "Path is empty."
+    }
+
+    try {
+        return (Resolve-Path -LiteralPath $expanded -ErrorAction Stop).Path
+    } catch {
+        return [System.IO.Path]::GetFullPath($expanded)
+    }
+}
+
+function Resolve-InstallTarget {
+    param([string]$InputPath)
+
+    $resolved = Get-CanonicalPath -Path $InputPath
+    if ((Split-Path -Leaf $resolved).ToLowerInvariant() -eq ".codex") {
+        return $resolved
+    }
+    return (Join-Path $resolved ".codex")
+}
+
+function Get-GitRepoRoot {
+    try {
+        $repoRoot = git rev-parse --show-toplevel 2>$null
+        if ($repoRoot) {
+            return (Get-CanonicalPath $repoRoot)
+        }
+    } catch {
+        # fallback below
+    }
+    return (Get-CanonicalPath (Get-Location).Path)
+}
+
+function Test-PathNoReparseChain {
+    param([string]$Path)
+
+    $current = $Path
+    while ($true) {
+        if (Test-Path -LiteralPath $current -ErrorAction SilentlyContinue) {
+            $item = Get-Item -LiteralPath $current -Force
+            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Refusing reparse-point target path: $current"
+            }
+        }
+
+        $parent = Split-Path -Parent $current
+        if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $current) {
+            break
+        }
+        $current = $parent
+    }
+}
+
+function Get-AllowlistRoots {
+    param([string]$Mode)
+
+    $list = @()
+    if ($Mode -eq "repo") {
+        $repoRoot = Get-GitRepoRoot
+        $list += Resolve-InstallTarget -InputPath (Join-Path $repoRoot ".codex")
+    }
+
+    if ($Mode -eq "global") {
+        if (-not $env:USERPROFILE) {
+            throw "USERPROFILE is not set."
+        }
+        $list += Resolve-InstallTarget -InputPath (Join-Path $env:USERPROFILE ".codex")
+    }
+
+    if ($Mode -eq "target") {
+        $repoRoot = Get-GitRepoRoot
+        $list += Resolve-InstallTarget -InputPath (Join-Path $repoRoot ".codex")
+        if ($env:USERPROFILE) {
+            $list += Resolve-InstallTarget -InputPath (Join-Path $env:USERPROFILE ".codex")
+        }
+    }
+
+    if ($env:CODEX_INSTALL_ALLOWLIST) {
+        $envPaths = $env:CODEX_INSTALL_ALLOWLIST -split ","
+        foreach ($entry in $envPaths) {
+            if ([string]::IsNullOrWhiteSpace($entry)) { continue }
+            try {
+                $list += Resolve-InstallTarget -InputPath (Get-CanonicalPath $entry)
+            } catch {
+                $list += Get-CanonicalPath $entry
+            }
+        }
+    }
+
+    return ($list | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
+}
+
+function Assert-SafeInstallRoot {
+    param([string]$Path, [string]$Mode)
+
+    Test-PathNoReparseChain -Path $Path
+    $target = Resolve-InstallTarget -InputPath $Path
+
+    if ((Split-Path -Leaf $target).ToLowerInvariant() -ne ".codex") {
+        throw "Target must resolve to a .codex directory."
+    }
+
+    Test-PathNoReparseChain -Path $target
+
+    $allowlist = Get-AllowlistRoots -Mode $Mode
+    if ($Mode -eq "target" -and -not $AllowUnsafeTarget -and $allowlist.Count -gt 0) {
+        $normalized = $target.ToLowerInvariant()
+        $isAllowed = $false
+        foreach ($item in $allowlist) {
+            if ($normalized -eq $item) {
+                $isAllowed = $true
+                break
+            }
+        }
+
+        if (-not $isAllowed) {
+            if (Test-Interactive) {
+                Write-Host "WARNING: target '$target' is outside the default allowlist. Suspicious paths are blocked." -ForegroundColor Yellow
+                while ($true) {
+                    $rawAnswer = Read-Host "Type 'ALLOW' to proceed with this target"
+                    $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim() }
+                    if ($answer.ToUpperInvariant() -eq "ALLOW") {
+                        break
+                    }
+                    if ($answer -eq "") {
+                        throw "Install cancelled: unsafe target denied."
+                    }
+                    Write-Host "Please type ALLOW to confirm, or press Enter to cancel." -ForegroundColor Yellow
+                }
+            } else {
+                throw "Unsafe target denied for non-interactive install. Use -AllowUnsafeTarget to override."
+            }
+        }
+    }
+
+    return $target
+}
+
+function Read-InstallMode {
+    Write-Host ""
+    Write-Host "Select installation target:"
+    Write-Host "  1) Local repo (.codex/)"
+    Write-Host "  2) Global (~/.codex/)"
+    Write-Host "  3) Custom target directory"
+    Write-Host "  4) Abort"
+
+    while ($true) {
+        $choice = Read-Host "Choose [1-4, default: 1]"
+        if ([string]::IsNullOrWhiteSpace($choice)) {
+            $choice = "1"
+        }
+        switch ($choice.Trim()) {
+            "1" {
+                $script:PromptMode = "repo"
+                return (Join-Path (Get-GitRepoRoot) ".codex")
+            }
+            "2" {
+                $script:PromptMode = "global"
+                if ($env:USERPROFILE) {
+                    return (Join-Path $env:USERPROFILE ".codex")
+                }
+                Write-Host "FAIL: USERPROFILE is not set." -ForegroundColor Red
+                throw "Cannot resolve global install path."
+            }
+            "3" {
+                $script:PromptMode = "target"
+                $custom = Read-Host "Enter target directory path"
+                if ([string]::IsNullOrWhiteSpace($custom)) {
+                    Write-Host "Target cannot be empty." -ForegroundColor Yellow
+                    continue
+                }
+                return $custom
+            }
+            "4" {
+                Write-Host "Install aborted by user." -ForegroundColor Yellow
+                exit 1
+            }
+            default {
+                Write-Host "Please enter 1, 2, 3, or 4." -ForegroundColor Yellow
+            }
+        }
+    }
+}
+
+function Confirm-Removal {
+    param([string]$Path)
+    if ($Force -or $DryRun) {
+        return $true
+    }
+    if (-not (Test-Interactive)) {
+        Write-Host "Skipping interactive confirmation in non-console host." -ForegroundColor Yellow
+        return $true
+    }
+
+    $name = Split-Path $Path -Leaf
+    while ($true) {
+        $rawAnswer = Read-Host "Delete existing '$name' at '$Path' before reinstall? [y/N]"
+        $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
+        switch -Regex ($answer.Trim().ToLower()) {
+            "^(y|yes)$" { return $true }
+            "^n$|^no$|^$" { return $false }
+            default { Write-Host "Please answer y or n." }
+        }
+    }
+}
+
+function Confirm-DestructiveMode {
+    param([string[]]$ExistingDirs)
+    if ($Force -or $DryRun) {
+        return
+    }
+    if (-not (Test-Interactive)) {
+        return
+    }
+
+    if ($ExistingDirs.Count -eq 0) {
+        return
+    }
+
+    Write-Host "Destructive install will remove existing directories:"
+    foreach ($path in $ExistingDirs) {
+        Write-Host "  - $path"
+    }
+
+    while ($true) {
+        $rawAnswer = Read-Host "Proceed with destructive reinstall? [y/N]"
+        $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
+        switch -Regex ($answer.Trim().ToLower()) {
+            "^(y|yes)$" { return }
+            "^n$|^no$|^$" { throw "Install cancelled by user." }
+            default { Write-Host "Please answer y or n." }
+        }
+    }
+}
+
+function Copy-RequiredDirectory {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir,
+        [string]$Label
+    )
+
+    if (Test-Path -LiteralPath $TargetDir) {
+        Write-Host "  Removing old $Label..."
+        if (-not (Confirm-Removal $TargetDir)) {
+            Write-Host "Install cancelled: existing directory not removed: $TargetDir" -ForegroundColor Red
+            exit 1
+        }
+        if (-not $DryRun) {
+            Remove-Item -Recurse -Force $TargetDir
+        } else {
+            Write-Host "    [dry-run] would remove $TargetDir"
+        }
+    }
+    Write-Host "  Installing $Label..."
+    if (-not $DryRun) {
+        Copy-Item -Recurse -Force $SourceDir $TargetDir
+    } else {
+        Write-Host "    [dry-run] would copy $SourceDir -> $TargetDir"
+    }
+}
+
+# Determine target
+if ($Global) {
+    $repoRoot = Get-GitRepoRoot
+    try {
+        $TargetRoot = Assert-SafeInstallRoot -Path (Join-Path $env:USERPROFILE ".codex") -Mode "global"
+    } catch {
+        Write-Host "FAIL: Cannot resolve global target: $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+    $Mode = "global"
+} elseif ($Target) {
+    try {
+        $TargetRoot = Assert-SafeInstallRoot -Path $Target -Mode "target"
+    } catch {
+        Write-Host "FAIL: Cannot resolve target '$Target': $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+    $Mode = "target"
+} else {
+    if (Test-Interactive) {
+        $interactiveTarget = Read-InstallMode
+        $Mode = $script:PromptMode
+        if (-not $Mode) {
+            $Mode = "repo"
+        }
+        try {
+            $TargetRoot = Assert-SafeInstallRoot -Path $interactiveTarget -Mode $Mode
+        } catch {
+            Write-Host "FAIL: Cannot resolve target: $($_.Exception.Message)" -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        Write-Host "FAIL: No install target specified and not running interactively." -ForegroundColor Red
+        Write-Host "Use: .\install.ps1 -Global  or  .\install.ps1 -Target <path>" -ForegroundColor Yellow
+        exit 1
+    }
+}
+
+Write-Host "=== Orchestrarium Installer ===" -ForegroundColor Cyan
+Write-Host "Source: $Source"
+Write-Host "Target: $TargetRoot"
+Write-Host "Mode:   $Mode"
+if ($DryRun) {
+    Write-Host "Mode:   dry-run" -ForegroundColor Yellow
+}
+Write-Host ""
+
+# Verify source
+if (-not (Test-Path (Join-Path $Source "skills"))) {
+    Write-Host "FAIL: Source directory $Source\skills not found." -ForegroundColor Red
+    Write-Host "Run this script from the Orchestrarium repo root."
+    exit 1
+}
+
+$existingDirs = @()
+foreach ($dir in $Dirs) {
+    $dst = Join-Path $TargetRoot $dir
+    if (Test-Path -LiteralPath $dst) {
+        $existingDirs += $dst
+    }
+}
+
+Confirm-DestructiveMode -ExistingDirs $existingDirs
+
+if (-not $DryRun -and -not (Test-Path -LiteralPath $TargetRoot)) {
+    New-Item -ItemType Directory -Path $TargetRoot -Force | Out-Null
+}
+if ($DryRun -and -not (Test-Path -LiteralPath $TargetRoot)) {
+    Write-Host "[dry-run] would create target root: $TargetRoot"
+}
+
+# Clean install: remove old, copy fresh
+foreach ($dir in $Dirs) {
+    $src = Join-Path $Source $dir
+    $dst = Join-Path $TargetRoot $dir
+    Copy-RequiredDirectory -SourceDir $src -TargetDir $dst -Label "$dir\"
+}
+
+# Optional dirs: copy if not present, don't overwrite
+foreach ($dir in $OptionalDirs) {
+    $src = Join-Path $Source $dir
+    $dst = Join-Path $TargetRoot $dir
+    if (Test-Path $dst) {
+        Write-Host "  Keeping existing $dir\ (optional, not overwritten)"
+    } elseif (Test-Path $src) {
+        Write-Host "  Installing $dir\ (optional)..."
+        if (-not $DryRun) {
+            Copy-Item -Recurse -Force $src $dst
+        } else {
+            Write-Host "    [dry-run] would copy $src -> $dst"
+        }
+    }
+}
+
+# AGENTS.md merge
+$srcMd = Join-Path $Source "AGENTS.md"
+$dstMd = Join-Path $TargetRoot "AGENTS.md"
+
+if (Test-Path $dstMd) {
+    $content = Get-Content $dstMd -Raw
+    if ($content -match "## Template routing") {
+        if ($content -match "(?m)^# Default Delegation Rule") {
+            # Extract content before "# Default Delegation Rule", replace rest
+            $lines = Get-Content $dstMd
+            $idx = 0
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match "^# Default Delegation Rule") { $idx = $i; break }
+            }
+            if ($idx -gt 0) {
+                Write-Host "  AGENTS.md: replacing Orchestrarium section..."
+                $userContent = ($lines[0..($idx-1)] -join "`n") + "`n"
+                $newContent = Get-Content $srcMd -Raw
+                if (-not $DryRun) {
+                    Set-Content -Path $dstMd -Value ($userContent + $newContent) -NoNewline
+                } else {
+                    Write-Host "    [dry-run] would replace Orchestrarium section in AGENTS.md"
+                }
+            } else {
+                Write-Host "  AGENTS.md: full replace..."
+                if (-not $DryRun) {
+                    Copy-Item -Force $srcMd $dstMd
+                } else {
+                    Write-Host "    [dry-run] would replace AGENTS.md"
+                }
+            }
+        } else {
+            Write-Host "  AGENTS.md: full replace..."
+            if (-not $DryRun) {
+                Copy-Item -Force $srcMd $dstMd
+            } else {
+                Write-Host "    [dry-run] would replace AGENTS.md"
+            }
+        }
+    } else {
+        Write-Host "  AGENTS.md: prepending Orchestrarium content..."
+        $existing = Get-Content $dstMd -Raw
+        $new = Get-Content $srcMd -Raw
+        if (-not $DryRun) {
+            Set-Content -Path $dstMd -Value ($new + "`n" + $existing) -NoNewline
+        } else {
+            Write-Host "    [dry-run] would prepend AGENTS.md"
+        }
+    }
+} else {
+    Write-Host "  Creating AGENTS.md..."
+    if (-not $DryRun) {
+        Copy-Item -Force $srcMd $dstMd
+    } else {
+        Write-Host "    [dry-run] would create AGENTS.md"
+    }
+}
+
+if ($DryRun) {
+    Write-Host ""
+    Write-Host "RESULT: DRY-RUN complete (no files modified)."
+    exit 0
+}
+
+# Verification -- explicit required-file manifest check
+Write-Host ""
+Write-Host "=== Verification ===" -ForegroundColor Cyan
+$errors = 0
+
+function Test-InstalledFile($path, $label) {
+    if (Test-Path $path) {
+        Write-Host "  OK  $label" -ForegroundColor Green
+    } else {
+        Write-Host "  FAIL  $label" -ForegroundColor Red
+        $script:errors++
+    }
+}
+
+function Get-SourceFiles($DirRoot) {
+    $sourceDir = Join-Path $Source $DirRoot
+    $items = @()
+    foreach ($item in Get-ChildItem -LiteralPath $sourceDir -Recurse -File) {
+        $relative = $item.FullName.Substring($sourceDir.Length)
+        $relative = $relative.TrimStart("\\")
+        $items += (Join-Path $DirRoot $relative)
+    }
+    return $items
+}
+
+# Verify all files in skills/ and common-skills/
+foreach ($dir in @("skills", "common-skills")) {
+    Write-Host "Verifying $dir/ files..."
+    foreach ($relative in Get-SourceFiles $dir) {
+        Test-InstalledFile (Join-Path $TargetRoot $relative) $relative
+    }
+}
+
+# Verify scripts/ files
+Write-Host "Verifying scripts/ files..."
+foreach ($relative in Get-SourceFiles "scripts") {
+    Test-InstalledFile (Join-Path $TargetRoot $relative) $relative
+}
+
+# Explicit contract requirements
+Test-InstalledFile (Join-Path $TargetRoot "skills/lead/operating-model.md") "skills/lead/operating-model.md"
+Test-InstalledFile (Join-Path $TargetRoot "skills/lead/subagent-contracts.md") "skills/lead/subagent-contracts.md"
+
+if (Test-Path $dstMd) {
+    $mdContent = Get-Content $dstMd -Raw
+    $lineCount = (Get-Content $dstMd).Count
+    Write-Host "  OK  AGENTS.md ($lineCount lines)" -ForegroundColor Green
+    foreach ($section in @("## Template routing", "## Role index", "## Global engineering hygiene", "## Publication safety")) {
+        if ($mdContent -match [regex]::Escape($section)) {
+            Write-Host "  OK  AGENTS.md has '$section'" -ForegroundColor Green
+        } else {
+            Write-Host "  FAIL  AGENTS.md missing '$section'" -ForegroundColor Red
+            $errors++
+        }
+    }
+} else {
+    Write-Host "  FAIL  AGENTS.md missing" -ForegroundColor Red
+    $errors++
+}
+
+Write-Host ""
+if ($errors -gt 0) {
+    Write-Host "RESULT: FAIL ($errors errors)" -ForegroundColor Red
+    exit 1
+} else {
+    Write-Host "RESULT: OK - Orchestrarium installed to $TargetRoot" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Next: run the validation script to verify the skill-pack structure:"
+    Write-Host "  bash .codex/scripts/validate-skill-pack.sh"
+}

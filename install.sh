@@ -1,0 +1,608 @@
+#!/usr/bin/env bash
+# Install Orchestrarium skill-pack.
+# Usage:
+#   bash install.sh                  install into current repo (.codex/)
+#   bash install.sh --global         install into ~/.codex/
+#   bash install.sh --target DIR     install into DIR/.codex/ (or DIR if DIR ends with .codex)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SOURCE="$SCRIPT_DIR/src.codex"
+
+# Directories to install (order doesn't matter)
+DIRS=(skills common-skills scripts)
+OPTIONAL_DIRS=(policies)
+FORCE=0
+DRY_RUN=0
+ALLOW_UNSAFE_TARGET=0
+MODE=""
+TARGET=""
+
+usage() {
+  echo "Usage:"
+  echo "  bash install.sh                          Install into current repo (.codex/)"
+  echo "  bash install.sh --global                 Install into ~/.codex/"
+  echo "  bash install.sh --target DIR             Install into DIR/.codex/"
+  echo "  bash install.sh --force                  Skip deletion prompts"
+  echo "  bash install.sh --dry-run                Print planned actions without changing files"
+  echo "  bash install.sh --allow-unsafe-target    Override allowlist for custom target path"
+  echo "  bash install.sh --help                   Show help"
+  exit 1
+}
+
+canonical_path() {
+  local input_path="$1"
+  local expanded="${input_path/#\~/$HOME}"
+
+  if [ -z "$expanded" ]; then
+    echo ""
+    return 1
+  fi
+
+  if [ -d "$expanded" ] || [ -L "$expanded" ]; then
+    local resolved
+    resolved="$(cd "$expanded" && pwd -P)"
+    echo "$resolved"
+    return 0
+  fi
+
+  # For non-existing paths, resolve component-by-component preserving all
+  # virtual segments so we keep the intended directory structure.
+  local result=""
+  local part
+  local next
+
+  if [ "${expanded:0:1}" = "/" ]; then
+    result="/"
+  else
+    result="$(pwd -P)"
+  fi
+
+  local IFS='/'
+  for part in ${expanded}; do
+    case "$part" in
+      ""|".")
+        continue
+        ;;
+      "..")
+        result="$(dirname "$result")"
+        if [ -z "$result" ]; then
+          result="/"
+        fi
+        ;;
+      *)
+        next="$result/$part"
+        if [ "$result" = "/" ]; then
+          next="/$part"
+        fi
+
+        if [ -e "$next" ] || [ -L "$next" ]; then
+          if [ -d "$next" ] || [ -L "$next" ]; then
+            next="$(cd "$next" && pwd -P)"
+          fi
+        fi
+
+        result="$next"
+        ;;
+    esac
+  done
+
+  echo "$result"
+}
+
+resolve_install_target() {
+  local input_path="$1"
+  local normalized
+
+  normalized="$(canonical_path "$input_path")"
+  if [ -z "$normalized" ]; then
+    echo "FAIL: unable to resolve target path '$input_path'" >&2
+    return 1
+  fi
+
+  if [ "$(basename "$normalized")" = ".codex" ]; then
+    printf "%s" "$normalized"
+  else
+    printf "%s/.codex" "$normalized"
+  fi
+}
+
+path_has_reparse_component() {
+  local path="$1"
+  local current="$path"
+
+  while :; do
+    if [ -e "$current" ] && [ -L "$current" ]; then
+      return 0
+    fi
+
+    local parent
+    parent="$(dirname "$current")"
+    if [ "$parent" = "$current" ] || [ -z "$parent" ]; then
+      break
+    fi
+    current="$parent"
+  done
+
+  return 1
+}
+
+is_allowed_target() {
+  local target="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  local candidate
+  for candidate in "${ALLOWLIST[@]}"; do
+    candidate="$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]')"
+    if [ "$target" = "$candidate" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+validate_target_root() {
+  local path="$1"
+  local mode="$2"
+
+  if path_has_reparse_component "$path"; then
+    echo "FAIL: target path '$path' contains a symlink/junction component." >&2
+    return 1
+  fi
+
+  local target
+  target="$(resolve_install_target "$path")"
+  local target_lower
+  target_lower="$(printf '%s' "$target" | tr '[:upper:]' '[:lower:]')"
+
+  if [ -z "$target_lower" ]; then
+    echo "FAIL: empty target" >&2
+    return 1
+  fi
+
+  if [ "$(basename "$target_lower")" != ".codex" ]; then
+    echo "FAIL: target '$target' must resolve to .codex directory" >&2
+    return 1
+  fi
+
+  if [ "$mode" = "target" ] && [ "$ALLOW_UNSAFE_TARGET" -ne 1 ]; then
+    if ! is_allowed_target "$target"; then
+      if [ -t 0 ]; then
+        while :; do
+          echo "WARNING: target '$target' is outside the default allowlist."
+          read -r -p "Type ALLOW to proceed with this target, or press Enter to abort: " confirm
+          if [ "${confirm^^}" = "ALLOW" ]; then
+            break
+          fi
+          if [ -z "$confirm" ]; then
+            echo "Install cancelled: unsafe target denied." >&2
+            return 1
+          fi
+          echo "Please type ALLOW to continue, or press Enter to cancel." >&2
+        done
+      else
+        echo "FAIL: unsafe target denied for non-interactive install. Use --allow-unsafe-target." >&2
+        return 1
+      fi
+    fi
+  fi
+
+  printf "%s" "$target"
+}
+
+build_allowlist() {
+  ALLOWLIST=()
+  local repo_root
+
+  if git rev-parse --show-toplevel &>/dev/null; then
+    repo_root="$(git rev-parse --show-toplevel)"
+  else
+    repo_root="$(pwd)"
+  fi
+
+  if [ "$MODE" = "repo" ] || [ "$MODE" = "target" ]; then
+    ALLOWLIST+=("$(resolve_install_target "$repo_root")")
+  fi
+
+  if [ "$MODE" = "global" ] || [ "$MODE" = "target" ]; then
+    ALLOWLIST+=("$(resolve_install_target "$HOME")")
+  fi
+
+  if [ -n "${CODEX_INSTALL_ALLOWLIST:-}" ]; then
+    IFS=',' read -r -a ALLOWLIST_EXTRA <<< "$CODEX_INSTALL_ALLOWLIST"
+    for raw in "${ALLOWLIST_EXTRA[@]}"; do
+      if [ -n "$raw" ]; then
+        ALLOWLIST+=("$(resolve_install_target "$raw")")
+      fi
+    done
+  fi
+
+  # normalize duplicates
+  local dedup=()
+  local existing
+  for entry in "${ALLOWLIST[@]}"; do
+    local norm
+    norm="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
+    if [ -z "$norm" ]; then
+      continue
+    fi
+    existing=0
+    for item in "${dedup[@]}"; do
+      if [ "$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]')" = "$norm" ]; then
+        existing=1
+        break
+      fi
+    done
+    if [ "$existing" -ne 1 ]; then
+      dedup+=("$entry")
+    fi
+  done
+  ALLOWLIST=("${dedup[@]}")
+}
+
+confirm_removal() {
+  local path="$1"
+  local name
+  name="$(basename "$path")"
+
+  if [ "$FORCE" -eq 1 ] || [ "$DRY_RUN" -eq 1 ]; then
+    return 0
+  fi
+
+  while true; do
+    read -r -p "Delete existing '$name' at '$path' before reinstall? [y/N] " answer
+    case "${answer,,}" in
+      y|yes)
+        return 0
+        ;;
+      n|no|"")
+        return 1
+        ;;
+      *)
+        echo "Please answer y or n."
+        ;;
+    esac
+  done
+}
+
+confirm_destructive_mode() {
+  if [ "$FORCE" -eq 1 ] || [ "$DRY_RUN" -eq 1 ]; then
+    return 0
+  fi
+
+  if [ "${#DESTROYABLE_DIRS[@]}" -eq 0 ]; then
+    return 0
+  fi
+
+  if [ ! -t 0 ]; then
+    return 0
+  fi
+
+  echo "Destructive install will replace existing directories:"
+  for d in "${DESTROYABLE_DIRS[@]}"; do
+    echo "  - $d"
+  done
+
+  while true; do
+    read -r -p "Proceed with destructive reinstall? [y/N] " answer
+    case "${answer,,}" in
+      y|yes)
+        return 0
+        ;;
+      n|no|"")
+        echo "Install cancelled by user." >&2
+        return 1
+        ;;
+      *)
+        echo "Please answer y or n."
+        ;;
+    esac
+  done
+}
+
+prompt_install_mode() {
+  if [ ! -t 0 ]; then
+    echo "FAIL: No install target specified and not running interactively." >&2
+    echo "Use: bash install.sh --global  or  bash install.sh --target <path>" >&2
+    exit 1
+  fi
+
+  while true; do
+    echo "Select installation target:"
+    echo "  1) Local repo (.codex/)"
+    echo "  2) Global (~/.codex/)"
+    echo "  3) Custom target directory"
+    echo "  4) Abort"
+    echo -n "Choose [1-4, default: 1]: "
+    read -r choice
+    choice="${choice:-1}"
+
+    case "$choice" in
+      1)
+        MODE="repo"
+        return
+        ;;
+      2)
+        MODE="global"
+        TARGET="$HOME/.codex"
+        return
+        ;;
+      3)
+        MODE="target"
+        while true; do
+          echo -n "Enter target directory path: "
+          read -r custom
+          if [ -z "$custom" ]; then
+            echo "Target cannot be empty." >&2
+            continue
+          fi
+          TARGET="$custom"
+          return
+        done
+        ;;
+      4)
+        echo "Install aborted by user." >&2
+        exit 1
+        ;;
+      *)
+        echo "Please enter 1, 2, 3, or 4."
+        ;;
+    esac
+  done
+}
+
+# Parse args
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --global)
+      MODE="global"
+      TARGET="$HOME/.codex"
+      shift
+      ;;
+    --target)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --target." >&2
+        usage
+      fi
+      TARGET="$2"
+      MODE="target"
+      shift 2
+      ;;
+    --force)
+      FORCE=1
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --allow-unsafe-target)
+      ALLOW_UNSAFE_TARGET=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      echo "Unknown option: $1"
+      usage
+      ;;
+  esac
+done
+
+if [ -z "$MODE" ]; then
+  prompt_install_mode
+  if [ "$MODE" != "repo" ] && [ "$MODE" != "global" ] && [ "$MODE" != "target" ]; then
+    MODE="repo"
+  fi
+
+  if [ -z "$TARGET" ]; then
+    if [ "$MODE" = "repo" ]; then
+      if git rev-parse --show-toplevel &>/dev/null; then
+        TARGET="$(git rev-parse --show-toplevel)/.codex"
+      else
+        TARGET="$(pwd)/.codex"
+      fi
+    elif [ "$MODE" = "global" ]; then
+      TARGET="$HOME/.codex"
+    else
+      echo "Missing target path in non-interactive mode." >&2
+      usage
+    fi
+  fi
+fi
+
+if [ "$MODE" = "repo" ] || [ "$MODE" = "global" ] || [ "$MODE" = "target" ]; then
+  build_allowlist
+  TARGET="$(validate_target_root "$TARGET" "$MODE")"
+else
+  echo "Invalid mode '$MODE'." >&2
+  usage
+fi
+
+echo "=== Orchestrarium Installer ==="
+echo "Source: $SOURCE"
+echo "Target: $TARGET"
+echo "Mode:   $MODE"
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "Mode:   dry-run"
+fi
+echo
+
+# Verify source
+if [[ ! -d "$SOURCE/skills" ]]; then
+  echo "FAIL: Source directory $SOURCE/skills not found."
+  echo "Run this script from the Orchestrarium repo root."
+  exit 1
+fi
+
+DESTROYABLE_DIRS=()
+for dir in "${DIRS[@]}"; do
+  if [[ -d "$TARGET/$dir" ]]; then
+    DESTROYABLE_DIRS+=("$TARGET/$dir")
+  fi
+done
+
+confirm_destructive_mode
+
+if [[ ! -d "$TARGET" ]]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[dry-run] would create target root: $TARGET"
+  else
+    mkdir -p "$TARGET"
+  fi
+fi
+
+# Clean install: remove old dirs, then copy fresh
+for dir in "${DIRS[@]}"; do
+  src="$SOURCE/$dir"
+  dst="$TARGET/$dir"
+  if [[ -d "$dst" ]]; then
+    echo "  Removing old $dir/..."
+    if ! confirm_removal "$dst"; then
+      echo "Install cancelled: existing directory not removed: $dst"
+      exit 1
+    fi
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would remove $dst"
+    else
+      rm -rf "$dst"
+    fi
+  fi
+  echo "  Installing $dir/..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would copy $src -> $dst"
+  else
+    cp -r "$src" "$dst"
+  fi
+done
+
+# Optional dirs: copy if not present, don't overwrite
+for dir in "${OPTIONAL_DIRS[@]}"; do
+  src="$SOURCE/$dir"
+  dst="$TARGET/$dir"
+  if [[ -d "$dst" ]]; then
+    echo "  Keeping existing $dir/ (optional, not overwritten)"
+  elif [[ -d "$src" ]]; then
+    echo "  Installing $dir/ (optional)..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would copy $src -> $dst"
+    else
+      cp -r "$src" "$dst"
+    fi
+  fi
+done
+
+# AGENTS.md: merge or create
+src_md="$SOURCE/AGENTS.md"
+dst_md="$TARGET/AGENTS.md"
+
+if [[ -f "$dst_md" ]]; then
+  if grep -q "## Template routing" "$dst_md" 2>/dev/null; then
+    if grep -qn "^# Default Delegation Rule" "$dst_md"; then
+      echo "  AGENTS.md: replacing Orchestrarium section..."
+      head_lines=$(($(grep -n "^# Default Delegation Rule" "$dst_md" | head -1 | cut -d: -f1) - 1))
+      if [[ $head_lines -gt 0 ]]; then
+        if [ "$DRY_RUN" -eq 1 ]; then
+          echo "    [dry-run] would replace Orchestrarium section in AGENTS.md"
+        else
+          head -n "$head_lines" "$dst_md" > "$dst_md.tmp"
+          cat "$src_md" >> "$dst_md.tmp"
+          mv "$dst_md.tmp" "$dst_md"
+        fi
+      else
+        if [ "$DRY_RUN" -eq 1 ]; then
+          echo "    [dry-run] would replace AGENTS.md"
+        else
+          cp "$src_md" "$dst_md"
+        fi
+      fi
+    else
+      echo "  AGENTS.md: full replace..."
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "    [dry-run] would replace AGENTS.md"
+      else
+        cp "$src_md" "$dst_md"
+      fi
+    fi
+  else
+    echo "  AGENTS.md: prepending Orchestrarium content..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would prepend AGENTS.md"
+    else
+      existing="$(cat "$dst_md")"
+      new="$(cat "$src_md")"
+      printf '%s\n%s' "$new" "$existing" > "$dst_md"
+    fi
+  fi
+else
+  echo "  Creating AGENTS.md..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create AGENTS.md"
+  else
+    cp "$src_md" "$dst_md"
+  fi
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo ""
+  echo "RESULT: DRY-RUN complete (no files modified)."
+  exit 0
+fi
+
+# Verification — explicit required-file manifest check
+
+echo ""
+echo "=== Verification ==="
+errors=0
+
+check_file() {
+  local path="$1"
+  local label="$2"
+
+  if [[ -f "$path" ]]; then
+    echo "  OK  $label"
+  else
+    echo "  FAIL  $label"
+    errors=$((errors+1))
+  fi
+}
+
+check_installed_manifest() {
+  local source_dir="$1"
+  while IFS= read -r -d '' source_file; do
+    local rel_path="${source_file#$SOURCE/}"
+    check_file "$TARGET/$rel_path" "$rel_path"
+  done < <(find "$source_dir" -type f -print0)
+}
+
+for dir in skills common-skills; do
+  check_installed_manifest "$SOURCE/$dir"
+done
+
+check_file "$TARGET/skills/lead/operating-model.md" "skills/lead/operating-model.md"
+check_file "$TARGET/skills/lead/subagent-contracts.md" "skills/lead/subagent-contracts.md"
+
+if [[ -f "$dst_md" ]]; then
+  line_count=$(wc -l < "$dst_md")
+  echo "  OK  AGENTS.md ($line_count lines)"
+  for section in "## Template routing" "## Role index" "## Global engineering hygiene" "## Publication safety"; do
+    if grep -q "$section" "$dst_md"; then
+      echo "  OK  AGENTS.md has '$section'"
+    else
+      echo "  FAIL  AGENTS.md missing '$section'"
+      errors=$((errors+1))
+    fi
+  done
+else
+  echo "  FAIL  AGENTS.md missing"
+  errors=$((errors+1))
+fi
+
+echo ""
+if [[ $errors -gt 0 ]]; then
+  echo "RESULT: FAIL ($errors errors)"
+  exit 1
+else
+  echo "RESULT: OK — Orchestrarium installed to $TARGET"
+  echo ""
+  echo "Next: run 'bash $TARGET/scripts/validate-skill-pack.sh' to verify the installation."
+fi
