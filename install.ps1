@@ -486,7 +486,7 @@ if (Test-Path $dstMd) {
 }
 
 # AGENTS.md: copy or replace shared governance
-$srcAgents = Join-Path $Source "AGENTS.md"
+$srcAgents = Join-Path $Source "AGENTS.shared.md"
 $dstAgents = Join-Path $TargetRoot "AGENTS.md"
 
 if (Test-Path $srcAgents) {
@@ -562,11 +562,12 @@ Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/operating-model.md")
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/subagent-contracts.md") "agents/contracts/subagent-contracts.md"
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/policies-catalog.md") "agents/contracts/policies-catalog.md"
 
+# Check CLAUDE.md (Claude-specific sections)
 if (Test-Path $dstMd) {
     $mdContent = Get-Content $dstMd -Raw
     $lineCount = (Get-Content $dstMd).Count
     Write-Host "  OK  CLAUDE.md ($lineCount lines)" -ForegroundColor Green
-    foreach ($section in @("## Delegation rule", "## Role index", "## Engineering hygiene", "## Publication safety")) {
+    foreach ($section in @("## Delegation rule", "## Publication safety")) {
         if ($mdContent -match [regex]::Escape($section)) {
             Write-Host "  OK  CLAUDE.md has '$section'" -ForegroundColor Green
         } else {
@@ -574,8 +575,32 @@ if (Test-Path $dstMd) {
             $errors++
         }
     }
+    if ($mdContent -match "@AGENTS\.md") {
+        Write-Host "  OK  CLAUDE.md imports @AGENTS.md" -ForegroundColor Green
+    } else {
+        Write-Host "  FAIL  CLAUDE.md missing @AGENTS.md import" -ForegroundColor Red
+        $errors++
+    }
 } else {
     Write-Host "  FAIL  CLAUDE.md missing" -ForegroundColor Red
+    $errors++
+}
+
+# Check AGENTS.md (shared governance sections)
+if (Test-Path $dstAgents) {
+    $agentsContent = Get-Content $dstAgents -Raw
+    $agentsLineCount = (Get-Content $dstAgents).Count
+    Write-Host "  OK  AGENTS.md ($agentsLineCount lines)" -ForegroundColor Green
+    foreach ($section in @("## Role index", "## Engineering hygiene", "## Core delegation principles", "## Publication safety")) {
+        if ($agentsContent -match [regex]::Escape($section)) {
+            Write-Host "  OK  AGENTS.md has '$section'" -ForegroundColor Green
+        } else {
+            Write-Host "  FAIL  AGENTS.md missing '$section'" -ForegroundColor Red
+            $errors++
+        }
+    }
+} else {
+    Write-Host "  FAIL  AGENTS.md missing" -ForegroundColor Red
     $errors++
 }
 

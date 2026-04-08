@@ -646,11 +646,11 @@ check_file "$TARGET/agents/contracts/operating-model.md" "agents/contracts/opera
 check_file "$TARGET/agents/contracts/subagent-contracts.md" "agents/contracts/subagent-contracts.md"
 check_file "$TARGET/agents/contracts/policies-catalog.md" "agents/contracts/policies-catalog.md"
 
+# Check CLAUDE.md (Claude-specific sections)
 if [[ -f "$dst_md" ]]; then
-  md_content="$(cat "$dst_md")"
   line_count=$(wc -l < "$dst_md")
   echo "  OK  CLAUDE.md ($line_count lines)"
-  for section in "## Delegation rule" "## Role index" "## Engineering hygiene" "## Publication safety"; do
+  for section in "## Delegation rule" "## Publication safety"; do
     if grep -q "$section" "$dst_md"; then
       echo "  OK  CLAUDE.md has '$section'"
     else
@@ -658,8 +658,32 @@ if [[ -f "$dst_md" ]]; then
       errors=$((errors+1))
     fi
   done
+  # Check @AGENTS.md import
+  if grep -q "@AGENTS.md" "$dst_md"; then
+    echo "  OK  CLAUDE.md imports @AGENTS.md"
+  else
+    echo "  FAIL  CLAUDE.md missing @AGENTS.md import"
+    errors=$((errors+1))
+  fi
 else
   echo "  FAIL  CLAUDE.md missing"
+  errors=$((errors+1))
+fi
+
+# Check AGENTS.md (shared governance sections)
+if [[ -f "$dst_agents" ]]; then
+  line_count=$(wc -l < "$dst_agents")
+  echo "  OK  AGENTS.md ($line_count lines)"
+  for section in "## Role index" "## Engineering hygiene" "## Core delegation principles" "## Publication safety"; do
+    if grep -q "$section" "$dst_agents"; then
+      echo "  OK  AGENTS.md has '$section'"
+    else
+      echo "  FAIL  AGENTS.md missing '$section'"
+      errors=$((errors+1))
+    fi
+  done
+else
+  echo "  FAIL  AGENTS.md missing"
   errors=$((errors+1))
 fi
 
