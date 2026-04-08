@@ -109,7 +109,7 @@ A bugfix with a known file or function maps to the `quick-fix` template by defau
 - **Retry / re-entry / idempotency safety:** any code that may be retried, replayed, resumed, or invoked concurrently should avoid duplicate side effects, inconsistent state, or double application unless explicit guards, idempotency keys, or compensating controls are in place.
 - **Evidence-based completion:** do not claim a task is done without fresh execution evidence. "Should work" and "no issues expected" are not evidence; neither are results from prior runs — code may have changed. Show test results, build output, or a verification checklist. If verification is not possible, state explicitly what was not checked.
 
-Role definitions live in the installed skills under `$CODEX_HOME/skills/<role>/SKILL.md`.
+Role definitions live in the installed skills tree: `.agents/skills/<role>/SKILL.md` for repo-local installs, or `$CODEX_HOME/skills/<role>/SKILL.md` / `~/.codex/skills/<role>/SKILL.md` for global installs.
 
 Use these global anchor roles:
 

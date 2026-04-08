@@ -56,7 +56,7 @@ Project policies are configured as a `## Project policies` section in the target
 
 | Directory | Contents | Installable? |
 | --- | --- | --- |
-| `src.codex/skills/<role>/SKILL.md` | 31 role definitions + 2 utility skills | Yes |
+| `src.codex/skills/<role>/SKILL.md` | 31 role definitions + 1 utility skill | Yes |
 | `src.codex/skills/<role>/agents/openai.yaml` | Display metadata and default prompt | Yes |
 | `src.codex/skills/lead/` | Operating-model notes, handoff contracts | Yes |
 | `src.codex/skills/consultant/` | Consultant role: toggle logic, execution paths, inline Claude CLI invocation | Yes |
