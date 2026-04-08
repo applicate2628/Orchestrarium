@@ -300,7 +300,9 @@ confirm_destructive_mode() {
 
 prompt_install_mode() {
   if [ ! -t 0 ]; then
-    return 0
+    echo "FAIL: No install target specified and not running interactively." >&2
+    echo "Use: bash install.sh --global  or  bash install.sh --target <path>" >&2
+    exit 1
   fi
 
   while true; do

@@ -323,14 +323,9 @@ if ($Global) {
             exit 1
         }
     } else {
-        try {
-            $repoRoot = Get-GitRepoRoot
-            $TargetRoot = Assert-SafeInstallRoot -Path (Join-Path $repoRoot ".claude") -Mode "repo"
-            $Mode = "repo"
-        } catch {
-            Write-Host "FAIL: Cannot resolve repository target." -ForegroundColor Red
-            exit 1
-        }
+        Write-Host "FAIL: No install target specified and not running interactively." -ForegroundColor Red
+        Write-Host "Use: .\install.ps1 -Global  or  .\install.ps1 -Target <path>" -ForegroundColor Yellow
+        exit 1
     }
 }
 
