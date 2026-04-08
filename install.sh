@@ -574,7 +574,7 @@ else
 fi
 
 # AGENTS.md: copy or replace shared governance
-src_agents="$SOURCE/AGENTS.md"
+src_agents="$SOURCE/AGENTS.shared.md"
 dst_agents="$TARGET/AGENTS.md"
 
 if [[ -f "$src_agents" ]]; then
