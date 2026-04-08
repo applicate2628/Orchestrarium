@@ -1,0 +1,45 @@
+---
+name: second-opinion
+description: Get an independent second opinion via the consultant agent, or manage the consultant toggle state.
+---
+
+# Second Opinion
+
+Get an independent advisory memo or manage the consultant toggle.
+
+## Steps
+
+0. **Check for toggle command.** If `$ARGUMENTS` is one of the toggle sub-commands, handle it directly:
+   - `enable` → write `mode: external` to `.codex/.consultant-mode`. Print "Consultant enabled (external-first)." and exit.
+   - `internal` → write `mode: internal` to `.codex/.consultant-mode`. Print "Consultant set to internal-only." and exit.
+   - `disable` → write `mode: disabled` to `.codex/.consultant-mode`. Print "Consultant disabled." and exit.
+   - `status` → read `.codex/.consultant-mode`. If no file: print "disabled (no file — run `/second-opinion enable` to activate)". Otherwise print the current mode. Exit.
+   - If `$ARGUMENTS` is not a toggle command, proceed to step 1.
+
+1. **Check toggle state.** Read `.codex/.consultant-mode`:
+   - If the file does not exist: print "disabled (no file — run `/second-opinion enable` to activate)" and exit.
+   - If `mode: disabled`: print "Consultant is disabled. Run `/second-opinion enable` first." and exit.
+   - If `mode: external` or `mode: internal`: proceed.
+
+2. **Get the question.** Use `$ARGUMENTS` as the question or topic. If empty, ask the user what they want a second opinion on.
+
+3. **Invoke consultant.** Use the consultant role:
+   - Pass the question along with relevant context (current file, recent changes, or accepted artifacts).
+   - The consultant follows its execution paths based on the current toggle mode.
+
+4. **Present the memo.** Display the consultant's advisory memo:
+   - Recommended direction
+   - Alternatives considered
+   - Major tradeoffs
+   - Key risks
+   - Confidence level
+
+5. **Save.** Persist per artifact persistence protocol:
+   - If part of an active work-item → `work-items/active/<slug>/advisory.md`
+   - Log to `.reports/YYYY-MM/report(consultant)-YYYY-MM-DD_HH-MM_topic.md`
+
+## Rules
+
+- Consultant is advisory-only — do not treat the memo as a blocking gate.
+- Do not modify any project files (toggle file excluded).
+- If the memo identifies a real blocker, recommend the proper specialist role to handle it.

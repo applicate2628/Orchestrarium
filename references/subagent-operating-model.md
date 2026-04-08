@@ -165,6 +165,7 @@ AI gates do not replace external engineering policy.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
 - Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - `RETURN(role)` is used by an independent reviewer when the upstream artifact has a structural gap requiring that role's expertise — not a bounded fix. The lead routes the finding to the named upstream role. Example: `RETURN(security-engineer)` — threat model missing server-side validation surface entirely.
+- Re-intake cap: an item may return to `product-manager` for re-intake at most 2 times. On the 3rd re-intake, the lead escalates to the user with all prior reasons.
 - Keep handoff latency low and avoid pausing between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 
 ## 3.10 Periodic controls

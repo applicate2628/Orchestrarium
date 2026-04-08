@@ -2,9 +2,7 @@
 
 A lead-routed Codex skill pack for research-grade engineering, scientific workflows, and role-based subagent orchestration.
 
-Orchestrarium is a Codex skill-pack for running a lead-routed multi-agent engineering workflow.
-
-It turns subagents into narrow professional roles instead of generic "mini developers" and routes work through an explicit pipeline:
+Orchestrarium turns subagents into narrow professional roles instead of generic "mini developers" and routes work through an explicit pipeline:
 
 `Roadmap / Intake -> Research -> Design -> Plan -> Implement -> QA / Review / Security`
 
@@ -19,23 +17,58 @@ The default coordinator is `$lead`. It owns orchestration, routing, artifact acc
 - Work does not progress when a gate fails.
 - Human review is still required before push, release, or equivalent publication.
 
-## What is in this repository
+## Repository layout
 
-This repository contains installable Codex skills for:
+This repository has two distinct layers:
 
-- roadmap, coordination, and discovery: `product-manager`, `lead`, `consultant`, `analyst`, `product-analyst`
-- design and planning: `architect`, `ux-designer`, `planner`
-- repository operations: `knowledge-archivist`, `toolchain-engineer`
-- specialist design lanes: `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, `reliability-engineer`
-- implementation roles: `backend-engineer`, `frontend-engineer`, `data-engineer`, `toolchain-engineer`, `platform-engineer`
-- graphics and technical UI: `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`
-- verification and independent gates: `qa-engineer`, `ui-test-engineer`, `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, `accessibility-reviewer`
+### Installable pack (`src.codex/`)
+
+Everything a user installs into their target project. Self-contained, no external dependencies.
+
+- `src.codex/AGENTS.md`: installed delegation rules, engineering hygiene, and role index — loaded automatically by Codex as the main conversation context
+- `src.codex/skills/<role>/SKILL.md`: instructions for one role (31 roles)
+- `src.codex/skills/<role>/agents/openai.yaml`: display metadata and default prompt for the role
+- `src.codex/skills/lead/`: includes operating-model notes and handoff contracts alongside SKILL.md
+- `src.codex/skills/consultant/`: consultant workflow, toggle logic, and execution paths
+- `src.codex/common-skills/ask-claude/`: utility skill for Claude CLI invocation
+- `src.codex/common-skills/second-opinion/`: consultant toggle and explicit invocation skill
+- `src.codex/scripts/`: publication safety scan and validation scripts
+- `src.codex/policies/`: policy catalog template (copy and customize per project)
+
+### Development infrastructure (root)
+
+Used only for developing and maintaining this skill pack. Not part of the installed artifact.
+
+- `AGENTS.md`: dev-specific repo rules for skill-pack maintenance (adds dev-layer rules on top of `src.codex/AGENTS.md`)
+- `references/`: canonical operating-model documents, governance references, and diagrams
+- `work-items/`: tracked task memory for dev workflow (active items, archive, templates)
+- `install.sh`, `install.ps1`: install scripts (bash and PowerShell)
+- `INSTALL.md`: installation instructions
+- `LICENSE`: Apache License 2.0
+- `.gitignore`: local-only scratch boundary; `.codex/` is the local working install (not committed)
+
+## Installation
+
+See [INSTALL.md](INSTALL.md) for full instructions.
+
+Quick start:
+
+```bash
+# Bash (macOS / Linux / Git Bash)
+bash install.sh --global
+
+# PowerShell (Windows)
+.\install.ps1 -Global
+```
+
+Or copy the `src.codex/` folder contents into your target project's `.codex/`.
 
 ## Operating model
 
 The repository is built around a few stable rules:
 
-- use `$lead` by default when delegation is appropriate and no narrower role was explicitly requested
+- use template routing to select the right workflow shape: simple chains (`quick-fix`, `research`, `review`) run without `$lead`; complex delivery (`full-delivery`, `security-sensitive`, etc.) routes through `$lead`
+- a bugfix with a known file or function maps to `quick-fix` by default
 - do not assign one subagent to "build the whole feature"
 - keep architecture, numerics, performance, security, and maintainability as explicit risk-owner lanes
 - prefer additive change through approved seams over cross-cutting edits
@@ -46,7 +79,7 @@ Repository-wide operating-model source of truth lives in [references/subagent-op
 Repository task-memory policy and storage model live in [references/repository-task-memory.md](references/repository-task-memory.md).
 Repository publication-safety policy for all tracked content lives in [references/repository-publication-safety.md](references/repository-publication-safety.md).
 Repository periodic-control matrix lives in [references/periodic-control-matrix.md](references/periodic-control-matrix.md).
-Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md).
+Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md) (dev overlay) and [src.codex/AGENTS.md](src.codex/AGENTS.md) (installed pack source).
 The visual companion to the workflow lives in [references/operating-model-diagram.md](references/operating-model-diagram.md).
 
 ## Team structure
@@ -60,21 +93,18 @@ The current pack covers several sub-teams:
 - Qt UI: widget-focused desktop UI work, model-view work, UI regression testing, accessibility review
 - R&D: algorithms, numerics, simulation, geometry, graphics, and scientific visualization
 
-## Repository layout
+## What is in the pack
 
-- `AGENTS.md`: repo-level delegation rules and skill index
-- `references/`: repository-wide reference documents and the canonical operating-model material
-- `.gitignore`: root ignore file for local-only scratch boundaries
-- `skills/<role>/SKILL.md`: instructions for one role
-- `skills/<role>/agents/openai.yaml`: display metadata and default prompt for the role
-- `skills/lead/references/`: condensed lead-facing routing rules, handoff contracts, and operating-model notes
-- `work-items/`: canonical tracked task-memory store for roadmap, brief, status, plans, notes, and review history
+The installable pack includes skills for:
 
-## Installation
-
-Install the skill folders from `skills/` into `$CODEX_HOME/skills`.
-
-Once installed, restart Codex so the new skills are discovered.
+- roadmap, coordination, and discovery: `product-manager`, `lead`, `consultant`, `analyst`, `product-analyst`
+- design and planning: `architect`, `ux-designer`, `planner`
+- repository operations: `knowledge-archivist`, `toolchain-engineer`
+- specialist design lanes: `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, `reliability-engineer`
+- implementation roles: `backend-engineer`, `frontend-engineer`, `data-engineer`, `platform-engineer`
+- graphics and technical UI: `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`
+- verification and independent gates: `qa-engineer`, `ui-test-engineer`, `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, `accessibility-reviewer`
+- utility: `ask-claude` (Claude CLI invocation), `second-opinion` (consultant toggle and explicit invocation)
 
 ## License
 

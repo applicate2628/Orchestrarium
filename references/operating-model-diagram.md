@@ -7,111 +7,78 @@ Strategy comparison companion: [workflow-strategy-comparison.md](workflow-strate
 
 ```mermaid
 flowchart TB
-    subgraph Intake["0. Roadmap / Intake"]
-        PM["product-manager<br/>Roadmap decision"]
-        PA["product-analyst<br/>Product brief (optional)"]
-        PM -. "needs factual product clarification" .-> PA
+    subgraph Intake["Roadmap / Intake"]
+        direction LR
+        PM["product-manager"] -. "clarify" .-> PA["product-analyst"]
     end
 
-    subgraph Delivery["1-7. Approved delivery work"]
-        direction TB
-        subgraph Row1[" "]
-            direction LR
-            M["lead<br/>Canonical brief"]
-            A["Research<br/>analyst / product-analyst"]
-            D["Design / Constraints<br/>architect / UX / algorithm / computational / security / performance / reliability"]
-            P["Plan<br/>planner"]
-            M --> A --> D --> P
-        end
-
-        subgraph Row2[" "]
-            direction RL
-            I["Implement<br/>implementation specialist"]
-            INT["Integrate<br/>integration owner"]
-            QA["Verify<br/>QA / UI test"]
-            R["Review<br/>independent reviewers"]
-            H["Human / CI gate"]
-            I --> INT --> QA --> R --> H
-        end
+    subgraph Prepare["Research → Design → Plan"]
+        direction LR
+        L["lead"] --> A["Research"] --> D["Design &\nConstraints"] --> P["Plan"]
     end
 
-    PM -->|"admit approved item"| M
-    PA -->|"product facts"| M
-    M -. "scope / priority / milestone drift" .-> PM
-    M -. "product context still unclear" .-> PA
+    subgraph Execute["Implement → Verify → Gate"]
+        direction LR
+        I["Implement"] --> INT["Integrate"] --> QA["Verify"] --> R["Review"] --> H["Human /\nCI gate"]
+    end
 
+    PM -->|admit| L
+    PA -.->|facts| L
     P --> I
-    H --> M
+    H -->|done| L
+    L -. "re-intake" .-> PM
 ```
 
 ## 2. Interaction topology
 
 ```mermaid
 flowchart TB
-    R["Roadmap / Intake hub<br/>product-manager + product-analyst"]
-    M["lead<br/>orchestrating owner"]
+    R["product-manager +\nproduct-analyst"]
+    L["lead"]
 
-    subgraph Delivery["Delivery lanes"]
-        direction TB
-        subgraph Prep["Prepare"]
-            direction LR
-            F["Research / factual lanes<br/>analyst / product-analyst / specialist evidence"]
-            D["Design / constraint lanes<br/>architect / UX / algorithm / computational / security / performance / reliability"]
-            P["Plan lane<br/>planner"]
-        end
-        subgraph Execute["Execute and assure"]
-            direction LR
-            B["Build lanes<br/>implementation specialists + integration owner"]
-            V["Verification lanes<br/>QA / UI test / independent reviewers"]
-            C["Consultant lane<br/>advisory-only"]
-        end
+    subgraph Prepare[" "]
+        direction LR
+        F["Research"] ~~~ D["Design /\nConstraints"] ~~~ P["Plan"]
     end
 
-    R -->|"admit item"| M
-    M -. "re-intake" .-> R
+    subgraph Execute[" "]
+        direction LR
+        B["Implement +\nIntegrate"] ~~~ V["QA +\nReview"] ~~~ C["Consultant\n(advisory)"]
+    end
 
-    M <--> F
-    M <--> D
-    M <--> P
-    M <--> B
-    M <--> V
-    M -. "optional second opinion" .-> C
-    C -. "advisory memo" .-> M
+    R -->|admit| L
+    L -. "re-intake" .-> R
+
+    L <--> F
+    L <--> D
+    L <--> P
+    L <--> B
+    L <--> V
+    L -. "second opinion" .-> C
 ```
 
 ## 3. Artifact progression
 
 ```mermaid
 flowchart TB
-    subgraph RowTop[" "]
+    subgraph Upstream["Upstream artifacts"]
         direction LR
-        subgraph Upstream["Upstream"]
-            direction TB
-            R0["Roadmap decision package"]
-            R1["Canonical brief"]
-            R2["Product brief / research memo"]
-        end
-
-        subgraph Preparation["Preparation"]
-            direction TB
-            R3["Design package"]
-            R4["Specialist constraint packages"]
-            R5["Phase plan"]
-        end
+        A1["Roadmap\ndecision"] --> A2["Canonical\nbrief"] --> A3["Research\nmemo"]
     end
 
-    subgraph BuildGate["Build and gate"]
+    subgraph Design["Design artifacts"]
         direction LR
-        R6["Implementation packages"]
-        R7["Integrated artifact"]
-        R8["Verification package"]
-        R9["Review reports"]
-        R10["Human / CI approval"]
+        A4["Design\npackage"] --> A5["Constraint\npackages"] --> A6["Phase\nplan"]
     end
 
-    R0 --> R1 --> R2
-    R2 --> R3 --> R4 --> R5
-    R5 --> R6 --> R7 --> R8 --> R9 --> R10
+    subgraph Delivery["Delivery artifacts"]
+        direction LR
+        A7["Implementation"] --> A8["Integrated\nartifact"] --> A9["Verification +\nreviews"]
+    end
+
+    A3 --> A4
+    A6 --> A7
+    A9 --> A10["Human / CI\napproval"]
 ```
 
 ## 4. Delegation behavior
