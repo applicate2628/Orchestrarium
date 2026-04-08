@@ -30,7 +30,8 @@ echo "[Core files]"
 for f in $PACK/CLAUDE.md $PACK/agents/lead.md $PACK/agents/consultant.md \
          $PACK/agents/contracts/operating-model.md \
          $PACK/agents/contracts/subagent-contracts.md \
-         $PACK/agents/contracts/policies-catalog.md; do
+         $PACK/agents/contracts/policies-catalog.md \
+         $PACK/commands/agents-second-opinion.md; do
   if [[ -f "$f" ]]; then pass "$f exists"; else fail "$f missing"; fi
 done
 echo ""

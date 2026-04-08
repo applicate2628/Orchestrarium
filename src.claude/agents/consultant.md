@@ -49,7 +49,7 @@ Do not invoke for:
 
 Before any invocation, read `.claude/.consultant-mode`:
 
-- **No file** (default): consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/agents-consult enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately.
+- **No file** (default): consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/agents-second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately.
 - **`mode: external`**: enabled, proceed with the Codex provider path.
 - **`mode: internal`**: use the internal-subagent fallback path only.
 - **`mode: disabled`**: explicitly disabled. Same notification and return as no-file case.

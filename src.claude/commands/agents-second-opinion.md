@@ -1,4 +1,4 @@
-# Consult
+# Second Opinion
 
 Get an independent second opinion via the consultant agent.
 
@@ -9,8 +9,8 @@ Get an independent second opinion via the consultant agent.
      - `enable` → write `mode: external` to `.claude/.consultant-mode`. Print "Consultant enabled (external-first)." and exit.
      - `internal` → write `mode: internal` to `.claude/.consultant-mode`. Print "Consultant set to internal-only." and exit.
      - `disable` → write `mode: disabled` to `.claude/.consultant-mode`. Print "Consultant disabled." and exit.
-     - `status` → read `.claude/.consultant-mode`. If no file: print "disabled (no file — run `/agents-consult enable` to activate)". Otherwise print the current mode. Exit.
-   - If `.claude/.consultant-mode` does not exist: print "Second opinion skipped — consultant disabled. Run `/agents-consult enable` to activate." and exit.
+     - `status` → read `.claude/.consultant-mode`. If no file: print "disabled (no file — run `/agents-second-opinion enable` to activate)". Otherwise print the current mode. Exit.
+   - If `.claude/.consultant-mode` does not exist: print "Second opinion skipped — consultant disabled. Run `/agents-second-opinion enable` to activate." and exit.
    - If the file contains `mode: disabled`: same notification and exit.
    - Otherwise proceed to step 1.
 

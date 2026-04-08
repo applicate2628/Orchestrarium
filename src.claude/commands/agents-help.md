@@ -19,7 +19,7 @@ Display a comprehensive overview of the skill-pack for the user.
 | `/agents-research` | Investigate a question (analyst → architect) |
 | `/agents-design` | Full research-to-plan chain (analyst → architect → planner) |
 | `/agents-security` | Security review (security-engineer → security-reviewer) |
-| `/agents-consult` | Get a second opinion via consultant (Codex) |
+| `/agents-second-opinion` | Get a second opinion via consultant (Codex) |
 | `/agents-implement` | Execute an approved plan phase by phase |
 | `/agents-perf` | Fix a performance issue (perf-engineer → impl → QA → perf-reviewer) |
 | `/agents-refactor` | Safe refactoring with blast-radius analysis |
