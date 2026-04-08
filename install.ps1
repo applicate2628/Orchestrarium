@@ -363,11 +363,12 @@ if ($existingCount -gt 0 -and -not $Force -and -not $DryRun -and (Test-Interacti
     if ($userCount -lt 0) { $userCount = 0 }
     Write-Host ""
     Write-Host "  Reinstall will replace $packCount pack skills. $userCount user skill(s) will be preserved."
-    while ($true) {
+    $confirmed = $false
+    while (-not $confirmed) {
         $rawAnswer = Read-Host "  Proceed? [y/N]"
         $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
         switch -Regex ($answer) {
-            "^(y|yes)$" { break }
+            "^(y|yes)$" { $confirmed = $true }
             "^n$|^no$|^$" { Write-Host "Install cancelled by user." -ForegroundColor Yellow; exit 1 }
             default { Write-Host "  Please answer y or n." }
         }
@@ -417,8 +418,20 @@ if (Test-Path -LiteralPath $SkillsTarget) {
 
 # Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
 
-# AGENTS.md merge
-$srcMd = Join-Path $Source "AGENTS.md"
+# AGENTS.md: assemble from shared + codex-specific, then merge or create
+$srcShared = Join-Path $Source "AGENTS.shared.md"
+$srcPlatform = Join-Path $Source "AGENTS.codex.md"
+
+if (-not (Test-Path $srcShared) -or -not (Test-Path $srcPlatform)) {
+    Write-Host "FAIL: Missing $srcShared or $srcPlatform" -ForegroundColor Red
+    exit 1
+}
+
+$srcMd = Join-Path $env:TEMP "orchestrarium-agents-assembled.md"
+$sharedContent = Get-Content $srcShared -Raw
+$platformContent = Get-Content $srcPlatform -Raw
+Set-Content -Path $srcMd -Value ($sharedContent + "`n" + $platformContent) -NoNewline
+
 $dstMd = $MdTarget
 
 if (Test-Path $dstMd) {
@@ -524,7 +537,7 @@ if (Test-Path $dstMd) {
     $mdContent = Get-Content $dstMd -Raw
     $lineCount = (Get-Content $dstMd).Count
     Write-Host "  OK  AGENTS.md ($lineCount lines)" -ForegroundColor Green
-    foreach ($section in @("## Template routing", "## Role index", "## Global engineering hygiene", "## Publication safety")) {
+    foreach ($section in @("## Template routing", "## Role index", "## Engineering hygiene", "## Publication safety")) {
         if ($mdContent -match [regex]::Escape($section)) {
             Write-Host "  OK  AGENTS.md has '$section'" -ForegroundColor Green
         } else {
