@@ -73,6 +73,7 @@ Notes:
 - Project-level Claude installs create or update `.claude/AGENTS.md` and `.claude/CLAUDE.md`.
 - Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
 - Claude memory is shipped in `src.claude/memory/` and preserved across reinstalls by the existing installer behavior.
+- User-side Claude imports such as `@memory/...` are preserved across reinstalls when they live in the installed `.claude/CLAUDE.md` import block alongside `@AGENTS.md`.
 - The canonical project-local config file is `.claude/.agents-mode`; legacy `.claude/.consultant-mode` is fallback-only during migration.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
 - `consultantMode` still controls `$consultant`; `delegationMode: auto` means ordinary delegation stays enabled without repeated approval while `manual` keeps explicit-permission behavior; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
@@ -110,6 +111,7 @@ Customize each platform in the place that platform actually reads:
 
 - Codex: append project-specific rules below the installed section in the project root `AGENTS.md`.
 - Claude Code: append project-specific rules below the installed section in `.claude/CLAUDE.md`.
+- Claude Code: user-side `@...` imports in `.claude/CLAUDE.md` may live in the import block near `@AGENTS.md`; the installer preserves those imports on reinstall.
 - Configure consultant and external-dispatch preferences in `.agents/.agents-mode` for Codex or `.claude/.agents-mode` for Claude Code.
 - Shared design references in `shared/references/` are repository-maintainer documentation only; they are not copied into target projects and should not be treated as installed runtime docs.
 

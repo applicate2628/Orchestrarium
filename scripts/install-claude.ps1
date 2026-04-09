@@ -319,6 +319,92 @@ function Remove-DanglingLink {
     }
 }
 
+function Get-PreservedClaudeImports {
+    param(
+        [string[]]$Lines,
+        [int]$PackStart
+    )
+
+    $imports = @()
+    if ($PackStart -lt 0 -or $PackStart -ge $Lines.Count) {
+        return $imports
+    }
+
+    $collectImports = $false
+    for ($i = $PackStart; $i -lt $Lines.Count; $i++) {
+        $line = $Lines[$i]
+
+        if (-not $collectImports) {
+            if ($line -match "^@" -or [string]::IsNullOrWhiteSpace($line)) {
+                $collectImports = $true
+            } else {
+                break
+            }
+        }
+
+        if ($line -match "^@") {
+            if ($line -ne "@AGENTS.md" -and $imports -notcontains $line) {
+                $imports += $line
+            }
+            continue
+        }
+
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        break
+    }
+
+    return $imports
+}
+
+function Get-MergedClaudePackContent {
+    param(
+        [string[]]$ExistingLines,
+        [int]$PackStart,
+        [string]$SourcePath
+    )
+
+    $preservedPrefix = @()
+    if ($PackStart -gt 0) {
+        $preservedPrefix = $ExistingLines[0..($PackStart - 1)]
+    }
+
+    $preservedImports = Get-PreservedClaudeImports -Lines $ExistingLines -PackStart $PackStart
+    $sourceLines = Get-Content $SourcePath
+    $mergedPackLines = $sourceLines
+
+    if ($sourceLines.Count -gt 0 -and $sourceLines[0] -eq "@AGENTS.md") {
+        $tailStart = 1
+        while ($tailStart -lt $sourceLines.Count -and [string]::IsNullOrWhiteSpace($sourceLines[$tailStart])) {
+            $tailStart++
+        }
+
+        $tailLines = @()
+        if ($tailStart -lt $sourceLines.Count) {
+            $tailLines = $sourceLines[$tailStart..($sourceLines.Count - 1)]
+        }
+
+        $mergedPackLines = @($sourceLines[0])
+        if ($preservedImports.Count -gt 0) {
+            $mergedPackLines += $preservedImports
+        }
+        if ($tailLines.Count -gt 0) {
+            $mergedPackLines += ""
+            $mergedPackLines += $tailLines
+        }
+    }
+
+    $finalLines = @()
+    if ($preservedPrefix.Count -gt 0) {
+        $finalLines += $preservedPrefix
+    }
+    $finalLines += $mergedPackLines
+
+    return ($finalLines -join "`n")
+}
+
 # Determine target
 if ($Global) {
     $repoRoot = Get-GitRepoRoot
@@ -501,17 +587,17 @@ if (Test-Path $dstMd) {
     if ($packStart -ge 0) {
         Write-Host "  CLAUDE.md: replacing Claude Code pack section..."
         if ($packStart -gt 0) {
-            # Preserve user content before pack section
-            $userContent = ($lines[0..($packStart-1)] -join "`n") + "`n"
-            $newContent = Get-Content $srcMd -Raw
+            # Preserve user content before pack section and merge user-side imports from the pack header block.
+            $newContent = Get-MergedClaudePackContent -ExistingLines $lines -PackStart $packStart -SourcePath $srcMd
             if (-not $DryRun) {
-                Set-Content -Path $dstMd -Value ($userContent + $newContent) -NoNewline
+                Set-Content -Path $dstMd -Value $newContent -NoNewline
             } else {
                 Write-Host "    [dry-run] would replace Claude Code pack section in CLAUDE.md"
             }
         } else {
             if (-not $DryRun) {
-                Copy-Item -Force $srcMd $dstMd
+                $newContent = Get-MergedClaudePackContent -ExistingLines $lines -PackStart $packStart -SourcePath $srcMd
+                Set-Content -Path $dstMd -Value $newContent -NoNewline
             } else {
                 Write-Host "    [dry-run] would replace CLAUDE.md"
             }

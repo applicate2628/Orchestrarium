@@ -477,6 +477,55 @@ remove_dangling_symlink() {
   fi
 }
 
+collect_preserved_claude_imports() {
+  local file="$1"
+  awk '
+    BEGIN { started=0 }
+    /^@AGENTS\.md$|^# Claude Code Pack$|^# Claudestrator$/ { started=1 }
+    started==1 {
+      if ($0 ~ /^@/) {
+        if ($0 != "@AGENTS.md" && !seen[$0]++) print $0
+        next
+      }
+      if ($0 ~ /^[[:space:]]*$/) next
+      exit
+    }
+  ' "$file"
+}
+
+write_merged_claude_md() {
+  local existing="$1"
+  local src="$2"
+  local output="$3"
+  local pack_start="$4"
+  local imports_tmp tail_tmp
+
+  imports_tmp="$(mktemp)"
+  tail_tmp="$(mktemp)"
+  collect_preserved_claude_imports "$existing" > "$imports_tmp"
+
+  : > "$output"
+  if [ "$pack_start" -gt 1 ]; then
+    head -n $((pack_start - 1)) "$existing" >> "$output"
+  fi
+
+  if head -n 1 "$src" | grep -qx "@AGENTS.md"; then
+    printf '%s\n' "@AGENTS.md" >> "$output"
+    if [ -s "$imports_tmp" ]; then
+      cat "$imports_tmp" >> "$output"
+    fi
+    awk 'NR==1 { next } { if (!started && $0 ~ /^[[:space:]]*$/) next; started=1; print }' "$src" > "$tail_tmp"
+    if [ -s "$tail_tmp" ]; then
+      printf '\n' >> "$output"
+      cat "$tail_tmp" >> "$output"
+    fi
+  else
+    cat "$src" >> "$output"
+  fi
+
+  rm -f "$imports_tmp" "$tail_tmp"
+}
+
 # Count existing items and confirm reinstall
 if [ "$FORCE" -ne 1 ] && [ "$DRY_RUN" -ne 1 ] && [ -t 0 ]; then
   existing_total=0
@@ -589,13 +638,8 @@ if [[ -f "$dst_md" ]]; then
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "    [dry-run] would replace Claude Code pack section in CLAUDE.md"
     else
-      if [ "$head_lines" -gt 0 ]; then
-        head -n "$head_lines" "$dst_md" > "$dst_md.tmp"
-        cat "$src_md" >> "$dst_md.tmp"
-        mv "$dst_md.tmp" "$dst_md"
-      else
-        cp "$src_md" "$dst_md"
-      fi
+      write_merged_claude_md "$dst_md" "$src_md" "$dst_md.tmp" "$pack_start"
+      mv "$dst_md.tmp" "$dst_md"
     fi
   elif grep -q "## Delegation rule" "$dst_md" 2>/dev/null; then
     echo "  CLAUDE.md: full replace (has delegation rule but no recognized pack header)..."
