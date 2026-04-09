@@ -14,7 +14,7 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 - `.plans/YYYY-MM/` stores plan logs — plan drafts and iterations. Named `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
 - `.reports/` and `.plans/` are traceability logs, not canonical sources. The canonical documentation lives in `work-items/`.
 
-`references-claude/` remains the home for stable repository-wide methodology. `work-items/` is the home for item-specific execution memory. `.reports/` and `.plans/` are session-level audit trails.
+`shared/references/` is the canonical home for stable repository-wide design methodology. `references-claude/` keeps Claude-specific reference material plus compatibility pointers. `work-items/` is the home for item-specific execution memory. `.reports/` and `.plans/` are session-level audit trails.
 
 ## Mandatory artifact set
 
@@ -73,7 +73,7 @@ Additional artifacts are required when the workflow calls for them:
 ## Public-git safety
 
 - `work-items/` is tracked repository documentation and must be safe for publication.
-- The repo-wide policy for all tracked content lives in [`references-claude/repository-publication-safety.md`](repository-publication-safety.md).
+- The repo-wide policy for all tracked content lives in [`shared/references/repository-publication-safety.md`](../shared/references/repository-publication-safety.md).
 - Do not place secrets, tokens, credentials, customer data, private identifiers, raw logs, full command transcripts, or machine-specific absolute paths into tracked work-item artifacts.
 - Prefer redacted summaries over verbatim operational detail when traceability does not require the raw value.
 - Keep local-only scratch notes and raw artifacts outside tracked `work-items/`.

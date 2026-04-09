@@ -2,24 +2,25 @@
 
 One monorepo for two agent skill packs:
 
-- `src.codex/` — Orchestrarium, the Codex skill pack
-- `src.claude/` — Claudestrator, the Claude Code skill pack
+- `src.codex/` — the Codex pack for Orchestrarium
+- `src.claude/` — the Claude Code skill pack
 
 Both packs share the same governance model and role vocabulary, but each ships in the structure and runtime format expected by its platform.
 
 ## Repository layout
 
 ```text
-shared/             Shared governance (AGENTS.shared.md)
+shared/             Shared governance and canonical shared reference cores
 src.codex/          Codex skill pack source
 src.claude/         Claude Code skill pack source
-references-codex/   Codex reference docs and blueprints
-references-claude/  Claude Code reference docs and blueprints
+references-codex/   Codex-specific addenda and compatibility pointers
+references-claude/  Claude Code-specific addenda and compatibility pointers
+RELEASE_NOTES.md    Canonical tracked release log
 install.sh          Entry-point installer (asks which pack to install)
 install.ps1         Entry-point installer (asks which pack to install)
 scripts/            Pack-specific installers (called by entry points)
 AGENTS.md           Dev overlay for Codex pack maintenance
-CLAUDE.md           Dev overlay for Claude pack maintenance
+CLAUDE.md           Dev overlay for Claude Code pack maintenance
 ```
 
 ## Skill packs
@@ -29,7 +30,7 @@ CLAUDE.md           Dev overlay for Claude pack maintenance
 | Codex | `src.codex/` | `~/.codex/` or project `.agents/skills/` | `src.codex/AGENTS.md` | `bash src.codex/skills/lead/scripts/validate-skill-pack.sh` |
 | Claude Code | `src.claude/` | `~/.claude/` or project `.claude/` | `src.claude/CLAUDE.md` | `bash src.claude/agents/scripts/validate-skill-pack.sh` |
 
-Shared development references live in `references-codex/` and `references-claude/`. Shared governance is maintained across both packs; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
+Shared design references now live in `shared/references/`. Pack-local `references-codex/` and `references-claude/` now keep only pack-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each pack-local tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across both packs; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
 
 Cross-provider execution is available through two routing adapters:
 
@@ -53,32 +54,35 @@ Each router asks what to install:
 
 ```text
 What to install?
-  1) Codex (Orchestrarium)
-  2) Claude Code (Claudestrator)
+  1) Codex pack
+  2) Claude Code
   3) Both
 ```
 
 Then it forwards the same arguments to the pack-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic single-pack automation.
 
-Important: if you want the assistant to actually start a team or delegate to subagents, give explicit delegation permission in your prompt. Naming a role such as `$lead` or clearly asking for delegation is the safe default; without that permission, the assistant may remain in the main conversation instead of launching the team.
+Important: operator preferences now live in pack-local `agents-mode` files; legacy `consultant-mode` files remain fallback-only during migration.
 
-Important: external execution is toggle-driven through the existing consultant-mode files.
-
-- Codex reads `.agents/.consultant-mode`.
-- Claude Code reads `.claude/.consultant-mode`.
-- The file name stays unchanged for backward compatibility.
-- `mode` still controls `$consultant`.
+- Codex reads `.agents/.agents-mode`.
+- Claude Code reads `.claude/.agents-mode`.
+- `consultantMode` controls `$consultant`.
+- `delegationMode: auto` means ordinary team delegation stays enabled without re-asking each turn; `manual` keeps the current explicit-permission behavior.
+- `mcpMode: auto` lets the agent decide when MCP is appropriate; `force` means the config itself is an explicit instruction to use relevant available MCP tools instead of treating MCP usage as optional.
 - `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
+- Codex may additionally use `externalClaudeProfile` to select the Claude CLI execution profile: `sonnet-high` or `opus-max`.
+- Claude Code does not use `externalClaudeProfile` in its canonical config because Claude-line external dispatch goes to Codex CLI.
 - Explicit user role requests still override the toggle state in either direction.
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 
 ## References and maintenance
 
-- `references-codex/` contains the Codex-side design docs, operating model, and translations.
-- `references-claude/` contains the Claude-side design docs, operating model, and translations.
+- `shared/references/` contains cross-pack design-only methodology that current and future packs can reuse.
+- `references-codex/` contains Codex-specific addenda plus compatibility pointers for older reference paths.
+- `references-claude/` contains Claude-specific addenda plus compatibility pointers for older reference paths.
+- `subagent-operating-model` is no longer duplicated per pack: use the shared core for the canonical blueprint and the pack-local file only for runtime and repository concretization.
 - `AGENTS.md` is the root development overlay for Codex pack maintenance.
-- `CLAUDE.md` is the root development overlay for Claude pack maintenance.
+- `CLAUDE.md` is the root development overlay for Claude Code pack maintenance.
 
 Before publishing maintenance changes, validate both packs:
 
@@ -86,6 +90,8 @@ Before publishing maintenance changes, validate both packs:
 bash src.codex/skills/lead/scripts/validate-skill-pack.sh
 bash src.claude/agents/scripts/validate-skill-pack.sh
 ```
+
+For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title.
 
 ## License
 

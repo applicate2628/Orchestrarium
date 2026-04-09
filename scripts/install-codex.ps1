@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Install Orchestrarium skill-pack.
+    Install Codex pack.
 .DESCRIPTION
     Copies the skills tree and AGENTS.md to the target location.
     Re-running = reinstall.
@@ -371,7 +371,7 @@ if ($Mode -eq "global") {
     $MdTarget = Join-Path $ProjectRoot "AGENTS.md"
 }
 
-Write-Host "=== Orchestrarium Installer ===" -ForegroundColor Cyan
+Write-Host "=== Codex Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
 Write-Host "Skills target: $SkillsTarget"
 Write-Host "AGENTS.md target: $MdTarget"
@@ -495,13 +495,13 @@ if (Test-Path $dstMd) {
                 if ($lines[$i] -match "^# Default Delegation Rule") { $idx = $i; break }
             }
             if ($idx -gt 0) {
-                Write-Host "  AGENTS.md: replacing Orchestrarium section..."
+                Write-Host "  AGENTS.md: replacing Codex pack section..."
                 $userContent = ($lines[0..($idx-1)] -join "`n") + "`n"
                 $newContent = Get-Content $srcMd -Raw
                 if (-not $DryRun) {
                     Set-Content -Path $dstMd -Value ($userContent + $newContent) -NoNewline
                 } else {
-                    Write-Host "    [dry-run] would replace Orchestrarium section in AGENTS.md"
+                    Write-Host "    [dry-run] would replace Codex pack section in AGENTS.md"
                 }
             } else {
                 Write-Host "  AGENTS.md: full replace..."
@@ -520,7 +520,7 @@ if (Test-Path $dstMd) {
             }
         }
     } else {
-        Write-Host "  AGENTS.md: prepending Orchestrarium content..."
+        Write-Host "  AGENTS.md: prepending Codex pack content..."
         $existing = Get-Content $dstMd -Raw
         $new = Get-Content $srcMd -Raw
         if (-not $DryRun) {
@@ -609,7 +609,7 @@ if ($errors -gt 0) {
     Write-Host "RESULT: FAIL ($errors errors)" -ForegroundColor Red
     exit 1
 } else {
-    Write-Host "RESULT: OK - Orchestrarium installed" -ForegroundColor Green
+    Write-Host "RESULT: OK - Codex pack installed" -ForegroundColor Green
     Write-Host "  Skills: $SkillsTarget"
     Write-Host "  AGENTS.md: $MdTarget"
     Write-Host ""

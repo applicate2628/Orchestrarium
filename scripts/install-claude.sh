@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Claudestrator skill-pack.
+# Install Claude Code pack.
 # Usage:
 #   bash scripts/install-claude.sh                  install into current repo (.claude/)
 #   bash scripts/install-claude.sh --global         install into ~/.claude/
@@ -392,7 +392,7 @@ else
   PROJECT_ROOT="$(dirname "$TARGET")"
 fi
 
-echo "=== Claudestrator Installer ==="
+echo "=== Claude Code Installer ==="
 echo "Source: $SOURCE"
 echo "Target: $TARGET"
 echo "Mode:   $MODE"
@@ -404,7 +404,7 @@ echo
 # Verify source
 if [[ ! -d "$SOURCE/agents" ]]; then
   echo "FAIL: Source directory $SOURCE/agents not found."
-  echo "Run this script from the Claudestrator repo root."
+  echo "Run this script from the Orchestrarium repo root."
   exit 1
 fi
 
@@ -577,17 +577,17 @@ dst_md="$TARGET/CLAUDE.md"
 remove_dangling_symlink "$dst_md" "CLAUDE.md"
 
 if [[ -f "$dst_md" ]]; then
-  if grep -q "^@AGENTS.md" "$dst_md" 2>/dev/null || grep -q "^# Claudestrator" "$dst_md" 2>/dev/null; then
-    # Existing Claudestrator install — find where user content ends and pack content begins.
+  if grep -q "^@AGENTS.md" "$dst_md" 2>/dev/null || grep -q "^# Claudestrator" "$dst_md" 2>/dev/null || grep -q "^# Claude Code Pack" "$dst_md" 2>/dev/null; then
+    # Existing Claude Code or legacy Claudestrator install — find where user content ends and pack content begins.
     # User content (## Project policies, custom rules) lives AFTER the pack section.
-    # Pack section starts at @AGENTS.md or # Claudestrator (whichever comes first).
-    pack_start=$(grep -n "^@AGENTS.md\|^# Claudestrator" "$dst_md" | head -1 | cut -d: -f1)
+    # Pack section starts at @AGENTS.md, # Claude Code Pack, or legacy # Claudestrator (whichever comes first).
+    pack_start=$(grep -n "^@AGENTS.md\|^# Claude Code Pack\|^# Claudestrator" "$dst_md" | head -1 | cut -d: -f1)
     total_lines=$(wc -l < "$dst_md")
     # Everything before pack_start is user content (if any)
     head_lines=$((pack_start - 1))
-    echo "  CLAUDE.md: replacing Claudestrator section..."
+    echo "  CLAUDE.md: replacing Claude Code pack section..."
     if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would replace Claudestrator section in CLAUDE.md"
+      echo "    [dry-run] would replace Claude Code pack section in CLAUDE.md"
     else
       if [ "$head_lines" -gt 0 ]; then
         head -n "$head_lines" "$dst_md" > "$dst_md.tmp"
@@ -598,14 +598,14 @@ if [[ -f "$dst_md" ]]; then
       fi
     fi
   elif grep -q "## Delegation rule" "$dst_md" 2>/dev/null; then
-    echo "  CLAUDE.md: full replace (has delegation rule but no Claudestrator header)..."
+    echo "  CLAUDE.md: full replace (has delegation rule but no recognized pack header)..."
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "    [dry-run] would replace CLAUDE.md"
     else
       cp "$src_md" "$dst_md"
     fi
   else
-    echo "  CLAUDE.md: prepending Claudestrator content..."
+    echo "  CLAUDE.md: prepending Claude Code pack content..."
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "    [dry-run] would prepend CLAUDE.md"
     else
@@ -748,7 +748,7 @@ if [[ $errors -gt 0 ]]; then
   echo "RESULT: FAIL ($errors errors)"
   exit 1
 else
-  echo "RESULT: OK — Claudestrator installed to $TARGET"
+  echo "RESULT: OK — Claude Code pack installed to $TARGET"
   echo ""
   echo "Next: restart Claude, then run /agents-init-project to configure project policies."
 fi

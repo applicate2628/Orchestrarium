@@ -1,4 +1,4 @@
-# Claudestrator Help
+# Claude Code Pack Help
 
 Display a comprehensive overview of the skill-pack for the user.
 

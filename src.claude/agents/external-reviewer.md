@@ -21,7 +21,7 @@ description: External review-side adapter for Claude-line. Use when an eligible 
 ## Claude-line provider
 
 - Use Codex CLI as the external provider.
-- Honor `.claude/.consultant-mode` and the `preferExternalReviewer` routing preference.
+- Honor `.claude/.agents-mode` first, then legacy `.claude/.consultant-mode`, and apply the `preferExternalReviewer` routing preference.
 - If Codex CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work through another eligible path.
 
 ## Return exactly one artifact
@@ -34,4 +34,3 @@ description: External review-side adapter for Claude-line. Use when an eligible 
 - Do not fall back to an internal reviewer inside the role.
 - Keep QA on the reviewer side; the adapter may verify implementation behavior as part of review.
 - Mandatory internal gates in security-sensitive and performance-sensitive templates remain non-replaceable.
-

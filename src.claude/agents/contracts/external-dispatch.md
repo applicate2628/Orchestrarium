@@ -4,21 +4,30 @@ This contract defines the shared Claude-line routing semantics for the consultan
 
 ## Shared config file
 
-- Path: `.claude/.consultant-mode`
-- File name stays unchanged for backward compatibility.
-- The schema is additive. Existing `mode` workflows continue to work.
+- Canonical path: `.claude/.agents-mode`
+- Legacy fallback: `.claude/.consultant-mode`
+- Existing consultant workflows continue to work through legacy fallback, but new writes should target `.claude/.agents-mode`.
 
-Supported keys:
+Supported canonical keys:
 
-- `mode: external | auto | internal | disabled`
-- `preferExternalWorker: true | false`
-- `preferExternalReviewer: true | false`
+```yaml
+consultantMode: external  # allowed: external | auto | internal | disabled
+delegationMode: manual  # allowed: manual | auto
+mcpMode: auto  # allowed: auto | force
+preferExternalWorker: true  # allowed: false | true
+preferExternalReviewer: true  # allowed: false | true
+```
 
 Semantics:
 
-- `mode` continues to govern `$consultant`.
+- `consultantMode` continues to govern `$consultant`.
+- `delegationMode: auto` means ordinary team delegation stays enabled without per-turn approval; `manual` keeps the current explicit user-request behavior.
+- `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` and `preferExternalReviewer` are routing preferences for eligible external adapter substitutions.
-- Any tool that updates the file must preserve unknown keys and must not rewrite the file back to a mode-only shape.
+- Claude-line no longer treats `externalClaudeProfile` as part of the canonical schema; if it appears in a legacy `.consultant-mode` file, ignore it for Claude-line execution and do not write it into the new `.agents-mode` file during migration.
+- Any tool that updates the file must preserve unknown keys in place and must not rewrite the file back to a consultant-only shape.
+- When writing `.claude/.agents-mode`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
+- If both files exist, `.claude/.agents-mode` wins.
 
 ## Claude-line provider
 
@@ -47,7 +56,7 @@ Semantics:
 
 Every external-adapter artifact should include a provenance header with:
 
-- `Requested mode: <external | auto | internal>`
+- `Requested consultant mode: <external | auto | internal>`
 - `Preferred adapter: <worker | reviewer | none>`
 - `Assigned role: <eligible internal role label>`
 - `Actual execution path: <external CLI (Codex) | role disabled>`

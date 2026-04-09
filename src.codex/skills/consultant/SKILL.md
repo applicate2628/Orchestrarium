@@ -13,23 +13,26 @@ description: Provide an independent advisory memo for the lead without becoming 
 
 ## Toggle file check
 
-Before any invocation, read `.agents/.consultant-mode`:
+Before any invocation, read `.agents/.agents-mode` first and fall back to legacy `.agents/.consultant-mode` only when the new file is absent:
 
 - **No file** (default): consultant is disabled for ordinary optional second-opinion usage. Notify "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. For the mandatory batch-close external consultant-check, do not silently skip: return an advisory memo that records the disabled state and tells the lead to keep the batch open and escalate to the user.
-- **`mode: external`**: external-first. Attempt external CLI. If external fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal for ordinary optional usage. For the mandatory batch-close external consultant-check, do not downgrade to internal fallback; return an unavailable memo and require the lead to keep the batch open and escalate.
-- **`mode: auto`**: external-first with silent fallback for ordinary optional usage. Attempt external CLI. If unavailable, fall back to internal subagent automatically and disclose the actual execution path in the memo header. For the mandatory batch-close external consultant-check, do not silently downgrade; if the external path is unavailable, return an unavailable memo and require the lead to keep the batch open and escalate.
-- **`mode: internal`**: internal subagent only for ordinary optional usage. A mandatory batch-close external consultant-check is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
-- **`mode: disabled`**: explicitly disabled. Same behavior as the no-file case.
+- **`consultantMode: external`** (or legacy `mode: external`): external-first. Attempt external CLI. If external fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal for ordinary optional usage. For the mandatory batch-close external consultant-check, do not downgrade to internal fallback; return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`consultantMode: auto`** (or legacy `mode: auto`): external-first with silent fallback for ordinary optional usage. Attempt external CLI. If unavailable, fall back to internal subagent automatically and disclose the actual execution path in the memo header. For the mandatory batch-close external consultant-check, do not silently downgrade; if the external path is unavailable, return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`consultantMode: internal`** (or legacy `mode: internal`): internal subagent only for ordinary optional usage. A mandatory batch-close external consultant-check is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`consultantMode: disabled`** (or legacy `mode: disabled`): explicitly disabled. Same behavior as the no-file case.
 
-The toggle file is project-local state stored in `.agents/.consultant-mode`. Keep it local-only and do not commit it to git.
+The toggle file is project-local state stored in `.agents/.agents-mode`. Legacy `.agents/.consultant-mode` is read-only fallback state for migration. Keep both local-only and do not commit them to git.
 
-The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/external-dispatch.md). Treat the file as a three-key schema:
+The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/external-dispatch.md). Treat the canonical file as a six-key schema with one Codex-only Claude-profile key:
 
-- `mode`
+- `consultantMode`
+- `delegationMode`
+- `mcpMode`
 - `preferExternalWorker`
 - `preferExternalReviewer`
+- `externalClaudeProfile` (optional; `sonnet-high` or `opus-max`)
 
-When changing `mode`, preserve the preference keys. When creating the file from scratch, initialize all three keys.
+When changing `consultantMode`, preserve the other keys and `externalClaudeProfile` if it exists. When creating the file from scratch, initialize all six keys and default `delegationMode` to `manual`, `mcpMode` to `auto`, and `externalClaudeProfile` to `sonnet-high` unless the user explicitly requested a different Claude profile override.
 
 ## When to invoke
 
@@ -57,7 +60,7 @@ Do not invoke for:
 
 - Return one advisory memo covering recommended direction, alternatives considered, major tradeoffs, key risks, assumptions, and confidence level.
 - Every consultant memo must include a provenance header:
-  - **Requested mode:** <external | auto | internal>
+  - **Requested consultant mode:** <external | auto | internal>
   - **Actual execution path:** <external CLI (provider name) | internal subagent | role-play (violation)>
   - **Deviation reason:** <none | external unavailable: [reason] | fallback approved by user>
 - Every consultant memo must end with an explicit continuation section:
@@ -81,19 +84,30 @@ See the shared dispatch contract in [../lead/external-dispatch.md](../lead/exter
 
 Check availability first: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows).
 
+If `.agents/.agents-mode` (or legacy `.agents/.consultant-mode`) contains `externalClaudeProfile`, map it as follows:
+
+- `sonnet-high` → `--model sonnet --effort high`
+- `opus-max` → `--model opus --effort max`
+- key missing → use the current default Claude CLI invocation for this pack
+
+Examples:
+
 **macOS / Linux:**
 ```bash
-printf '%s' "$PROMPT" | claude -p --effort high --permission-mode bypassPermissions
+printf '%s' "$PROMPT" | claude -p --model sonnet --effort high --permission-mode bypassPermissions
+printf '%s' "$PROMPT" | claude -p --model opus --effort max --permission-mode bypassPermissions
 ```
 
 **Windows (Git Bash inside Codex):**
 ```bash
-printf '%s' "$PROMPT" | cmd.exe /c claude.exe -p --effort high --permission-mode bypassPermissions
+printf '%s' "$PROMPT" | cmd.exe /c claude.exe -p --model sonnet --effort high --permission-mode bypassPermissions
+printf '%s' "$PROMPT" | cmd.exe /c claude.exe -p --model opus --effort max --permission-mode bypassPermissions
 ```
 Fallback if `claude.exe` is not on PATH: use `claude.cmd` instead.
 
 **Rules:**
-- For hard complex tasks, prefer the strongest available profile such as Opus when supported by the installed client.
+- If `externalClaudeProfile` is present, use it instead of improvising a different Claude model or effort level.
+- If the requested Claude profile is unavailable because of plan limits, auth, quota, or client support, treat that as external-provider unavailability and follow the configured fallback rules; do not silently downgrade to another Claude profile.
 - Do not pass multiline prompts as direct command-line arguments — use `stdin` or a file.
 - Do not use TTY when a non-interactive invocation is available.
 - On Windows, keep command-line prompts short enough to avoid `cmd.exe` truncation.

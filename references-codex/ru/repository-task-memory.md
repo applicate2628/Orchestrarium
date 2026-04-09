@@ -14,7 +14,7 @@
 - Завершённые, отменённые или заменённые items перемещаются в конфигурируемую archive location.
 - Старая игнорируемая директория `.plans/` — это legacy локальная история. Храните её только как scratch или материал трассируемости; не используйте как канонический tracked-источник истины для новых items.
 
-`references-codex/` остаётся домом для стабильной общерепозиторной методологии. Конфигурируемая task-memory directory, когда она используется, — дом для item-специфичной памяти выполнения.
+`shared/references/` — канонический дом для стабильной общерепозиторной design-методологии. `references-codex/` хранит Codex-specific reference material и compatibility pointers. Конфигурируемая task-memory directory, когда она используется, — дом для item-специфичной памяти выполнения.
 
 ## Обязательный набор артефактов
 
@@ -65,7 +65,7 @@
 ## Безопасность публикации
 
 - Конфигурируемая tracked task-memory directory, когда она используется, — это документация репозитория и должна быть безопасна для публикации.
-- Общерепозиторная политика для всего tracked-контента живёт в [repository-publication-safety.md](repository-publication-safety.md).
+- Общерепозиторная политика для всего tracked-контента живёт в [shared/references/ru/repository-publication-safety.md](../../shared/references/ru/repository-publication-safety.md).
 - Не помещайте секреты, токены, credentials, клиентские данные, приватные идентификаторы, сырые логи, полные транскрипты команд или machine-specific абсолютные пути в tracked task-memory артефакты.
 - Предпочитайте redacted-выжимки вместо дословных operational-деталей когда трассируемость не требует сырого значения.
 - Храните локальные scratch-заметки и сырые артефакты вне конфигурируемой tracked task-memory directory.

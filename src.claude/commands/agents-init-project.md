@@ -1,6 +1,6 @@
 # Initialize Project Policies
 
-You are guiding the user through project policy configuration for the Claudestrator skill-pack.
+You are guiding the user through project policy configuration for the Claude Code pack.
 
 ## Steps
 

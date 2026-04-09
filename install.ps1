@@ -26,8 +26,8 @@ function Invoke-ChildInstaller {
 }
 
 Write-Host "What to install?"
-Write-Host "  1) Codex (Orchestrarium)"
-Write-Host "  2) Claude Code (Claudestrator)"
+Write-Host "  1) Codex pack"
+Write-Host "  2) Claude Code"
 Write-Host "  3) Both"
 Write-Host "Select 1, 2, or 3: " -NoNewline
 $choice = [Console]::In.ReadLine()

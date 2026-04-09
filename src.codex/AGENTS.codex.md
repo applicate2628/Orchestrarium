@@ -60,8 +60,8 @@ Use these global anchor roles:
 
 External dispatch roles also exist in the installed skills tree as bidirectional adapters:
 
-- `$external-worker`: external implementation adapter for eligible implementer roles; dispatches to Claude CLI in the Codex pack and may be selected by `.agents/.consultant-mode` preferences or explicit override
-- `$external-reviewer`: external review/QA adapter for eligible reviewer roles; dispatches to Claude CLI in the Codex pack and may be selected by `.agents/.consultant-mode` preferences or explicit override
+- `$external-worker`: external implementation adapter for eligible implementer roles; dispatches to Claude CLI in the Codex pack and may be selected by `.agents/.agents-mode` preferences or explicit override
+- `$external-reviewer`: external review/QA adapter for eligible reviewer roles; dispatches to Claude CLI in the Codex pack and may be selected by `.agents/.agents-mode` preferences or explicit override
 
 These roles are not aliases for `$consultant`.
 

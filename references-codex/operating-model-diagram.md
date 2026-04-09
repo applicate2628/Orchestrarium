@@ -1,7 +1,7 @@
 # Operating Model Diagram
 
 This file provides a visual companion to [subagent-operating-model.md](subagent-operating-model.md).
-Strategy comparison companion: [workflow-strategy-comparison.md](workflow-strategy-comparison.md).
+Strategy comparison companion: [shared/references/workflow-strategy-comparison.md](../shared/references/workflow-strategy-comparison.md).
 
 **Platform note:** Orchestrarium targets Codex, which uses sequential skill invocation. Unlike Claude Code's parallel Agent tool dispatch, Codex processes one skill at a time. Diagrams below reflect this sequential execution model.
 

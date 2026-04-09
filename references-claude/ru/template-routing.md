@@ -1,6 +1,6 @@
 # Маршрутизация по шаблонам
 
-Этот документ описывает актуальную runtime-модель маршрутизации. Полный blueprint архитектуры — в [subagent-operating-model.md](subagent-operating-model.md).
+Этот документ описывает актуальную runtime-модель маршрутизации. Shared blueprint core и Claude-specific addendum теперь собраны в [subagent-operating-model.md](subagent-operating-model.md).
 
 ## Дерево выбора шаблона
 

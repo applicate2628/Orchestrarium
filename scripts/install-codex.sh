@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install Orchestrarium skill-pack.
+# Install Codex pack.
 # Usage:
 #   bash scripts/install-codex.sh                  install into current repo (.agents/ + AGENTS.md)
 #   bash scripts/install-codex.sh --global         install into ~/.codex/
@@ -415,7 +415,7 @@ else
   MD_TARGET="$PROJECT_ROOT/AGENTS.md"
 fi
 
-echo "=== Orchestrarium Installer ==="
+echo "=== Codex Installer ==="
 echo "Source: $SOURCE"
 echo "Skills target: $SKILLS_TARGET"
 echo "AGENTS.md target: $MD_TARGET"
@@ -591,7 +591,7 @@ remove_dangling_symlink "$dst_md" "AGENTS.md"
 if [[ -f "$dst_md" ]]; then
   if grep -q "## Template routing" "$dst_md" 2>/dev/null; then
     if grep -qn "^# Default Delegation Rule" "$dst_md"; then
-      echo "  AGENTS.md: replacing Orchestrarium section..."
+      echo "  AGENTS.md: replacing Codex pack section..."
       pack_start=$(grep -n "^# Default Delegation Rule" "$dst_md" | head -1 | cut -d: -f1)
       total_lines=$(wc -l < "$dst_md")
       new_lines=$(wc -l < "$src_md")
@@ -602,7 +602,7 @@ if [[ -f "$dst_md" ]]; then
       head_lines=$((pack_start - 1))
       tail_start=$((pack_end + 1))
       if [ "$DRY_RUN" -eq 1 ]; then
-        echo "    [dry-run] would replace Orchestrarium section in AGENTS.md (lines $pack_start-$pack_end)"
+        echo "    [dry-run] would replace Codex pack section in AGENTS.md (lines $pack_start-$pack_end)"
       else
         {
           if [ "$head_lines" -gt 0 ]; then
@@ -624,7 +624,7 @@ if [[ -f "$dst_md" ]]; then
       fi
     fi
   else
-    echo "  AGENTS.md: prepending Orchestrarium content..."
+    echo "  AGENTS.md: prepending Codex pack content..."
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "    [dry-run] would prepend AGENTS.md"
     else
@@ -709,7 +709,7 @@ if [[ $errors -gt 0 ]]; then
   echo "RESULT: FAIL ($errors errors)"
   exit 1
 else
-  echo "RESULT: OK — Orchestrarium installed"
+  echo "RESULT: OK — Codex pack installed"
   echo "  Skills: $SKILLS_TARGET"
   echo "  AGENTS.md: $MD_TARGET"
   echo ""

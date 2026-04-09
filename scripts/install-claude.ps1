@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Install Claudestrator skill-pack.
+    Install Claude Code pack.
 .DESCRIPTION
     Copies agents (with contracts, templates, scripts), commands, and CLAUDE.md to the target location.
     Re-running = reinstall. Memory is preserved across reinstalls.
@@ -363,7 +363,7 @@ if ($Mode -eq "global") {
     $ProjectRoot = Split-Path $TargetRoot -Parent
 }
 
-Write-Host "=== Claudestrator Installer ===" -ForegroundColor Cyan
+Write-Host "=== Claude Code Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
 Write-Host "Target: $TargetRoot"
 Write-Host "Mode:   $Mode"
@@ -375,7 +375,7 @@ Write-Host ""
 # Verify source
 if (-not (Test-Path (Join-Path $Source "agents"))) {
     Write-Host "FAIL: Source directory $Source\agents not found." -ForegroundColor Red
-    Write-Host "Run this script from the Claudestrator repo root."
+    Write-Host "Run this script from the Orchestrarium repo root."
     exit 1
 }
 
@@ -490,16 +490,16 @@ Remove-DanglingLink -Path $dstMd -Label "CLAUDE.md"
 if (Test-Path $dstMd) {
     $content = Get-Content $dstMd -Raw
     $lines = Get-Content $dstMd
-    # Find pack section start: @AGENTS.md or # Claudestrator
+    # Find pack section start: @AGENTS.md, # Claude Code Pack, or legacy # Claudestrator
     $packStart = -1
     for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match "^@AGENTS\.md" -or $lines[$i] -match "^# Claudestrator") {
+        if ($lines[$i] -match "^@AGENTS\.md" -or $lines[$i] -match "^# Claude Code Pack" -or $lines[$i] -match "^# Claudestrator") {
             $packStart = $i
             break
         }
     }
     if ($packStart -ge 0) {
-        Write-Host "  CLAUDE.md: replacing Claudestrator section..."
+        Write-Host "  CLAUDE.md: replacing Claude Code pack section..."
         if ($packStart -gt 0) {
             # Preserve user content before pack section
             $userContent = ($lines[0..($packStart-1)] -join "`n") + "`n"
@@ -507,7 +507,7 @@ if (Test-Path $dstMd) {
             if (-not $DryRun) {
                 Set-Content -Path $dstMd -Value ($userContent + $newContent) -NoNewline
             } else {
-                Write-Host "    [dry-run] would replace Claudestrator section in CLAUDE.md"
+                Write-Host "    [dry-run] would replace Claude Code pack section in CLAUDE.md"
             }
         } else {
             if (-not $DryRun) {
@@ -517,14 +517,14 @@ if (Test-Path $dstMd) {
             }
         }
     } elseif ($content -match "## Delegation rule") {
-        Write-Host "  CLAUDE.md: full replace (has delegation rule but no Claudestrator header)..."
+        Write-Host "  CLAUDE.md: full replace (has delegation rule but no recognized pack header)..."
         if (-not $DryRun) {
             Copy-Item -Force $srcMd $dstMd
         } else {
             Write-Host "    [dry-run] would replace CLAUDE.md"
         }
     } else {
-        Write-Host "  CLAUDE.md: prepending Claudestrator content..."
+        Write-Host "  CLAUDE.md: prepending Claude Code pack content..."
         $existing = Get-Content $dstMd -Raw
         $new = Get-Content $srcMd -Raw
         if (-not $DryRun) {
@@ -672,7 +672,7 @@ if ($errors -gt 0) {
     Write-Host "RESULT: FAIL ($errors errors)" -ForegroundColor Red
     exit 1
 } else {
-    Write-Host "RESULT: OK - Claudestrator installed to $TargetRoot" -ForegroundColor Green
+    Write-Host "RESULT: OK - Claude Code pack installed to $TargetRoot" -ForegroundColor Green
     Write-Host ""
     Write-Host "Next: restart Claude, then run /agents-init-project to configure project policies."
 }

@@ -21,7 +21,7 @@ description: External implementation adapter for Claude-line. Use when an eligib
 ## Claude-line provider
 
 - Use Codex CLI as the external provider.
-- Honor `.claude/.consultant-mode` and the `preferExternalWorker` routing preference.
+- Honor `.claude/.agents-mode` first, then legacy `.claude/.consultant-mode`, and apply the `preferExternalWorker` routing preference.
 - If Codex CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work through another eligible path.
 
 ## Return exactly one artifact
@@ -34,4 +34,3 @@ description: External implementation adapter for Claude-line. Use when an eligib
 - Do not fall back to an internal implementer inside the role.
 - Keep the implementation scope bounded by the approved change surface.
 - Report the replaced role in provenance so the orchestrator can trace the substitution.
-

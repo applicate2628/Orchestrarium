@@ -4,8 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "What to install?"
-echo "  1) Codex (Orchestrarium)"
-echo "  2) Claude Code (Claudestrator)"
+echo "  1) Codex pack"
+echo "  2) Claude Code"
 echo "  3) Both"
 read -r -p "Select 1, 2, or 3: " choice
 choice="${choice//$'\r'/}"

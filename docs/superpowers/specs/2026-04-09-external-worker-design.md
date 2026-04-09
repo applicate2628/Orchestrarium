@@ -65,24 +65,28 @@ Introduce two new roles and a shared dispatch module:
 
    | Platform | Path |
    |----------|------|
-   | Claude Code | `.claude/.consultant-mode` |
-   | Codex | `.agents/.consultant-mode` |
-
-   File name unchanged for backward compatibility.
+   | Claude Code | `.claude/.agents-mode` (legacy `.claude/.consultant-mode` fallback) |
+   | Codex | `.agents/.agents-mode` (legacy `.agents/.consultant-mode` fallback) |
 
 2. **Extended config format**
 
    ```
-   mode: external
+   consultantMode: external
+   delegationMode: manual
+   mcpMode: auto
    preferExternalWorker: true
    preferExternalReviewer: true
+   externalClaudeProfile: sonnet-high
    ```
 
-   - `mode` — controls consultant (unchanged)
+   - `consultantMode` — consultant-only mode: `external`, `auto`, `internal`, `disabled`
+   - `delegationMode` — `manual` vs `auto` team delegation
+   - `mcpMode` — `auto` vs `force` MCP routing policy
    - `preferExternalWorker` — external-worker as default on `implement` stage
    - `preferExternalReviewer` — external-reviewer as default on `review` + `QA` stages
+   - `externalClaudeProfile` — Codex-line only optional Claude CLI execution profile: `sonnet-high` or `opus-max`
    - Each toggle is independent
-   - Default for new fields: `false` (existing configs unaffected)
+   - Default full shape on first creation: `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`; Codex also writes `externalClaudeProfile: sonnet-high`
 
 3. **Dispatch protocol (platform-dependent)**
 
@@ -108,8 +112,12 @@ Introduce two new roles and a shared dispatch module:
 
 The orchestrator (lead or main conversation) **prefers** external roles by default:
 
+- `consultantMode: external | auto | internal | disabled` — consultant-only behavior
+- `delegationMode: manual | auto` — `auto` keeps ordinary delegation enabled without per-turn approval; `manual` keeps explicit-request behavior
+- `mcpMode: auto | force` — `auto` uses MCP by judgment; `force` treats relevant MCP use as an explicit standing instruction
 - `preferExternalWorker: true` — `$external-worker` on `implement` stage
 - `preferExternalReviewer: true` — `$external-reviewer` on `review` + `QA` stages
+- `externalClaudeProfile: sonnet-high | opus-max` — Codex-line only; when Codex dispatches to Claude CLI, prefer the matching model/effort profile instead of the provider default
 
 Domain specialist is selected instead only when:
 
@@ -157,7 +165,7 @@ Normal routing fallback to domain specialist. Not an error — standard routing 
 - `$external-worker` and `$external-reviewer` must never be the same agent instance on the same task (separation of concerns)
 - Mandatory reviewers in risk-sensitive templates (`security-reviewer` in `security-sensitive`, `performance-reviewer` in `performance-sensitive`) are NOT replaceable by `$external-reviewer`
 - No internal subagent fallback for external roles — either external CLI works or role is disabled
-- Existing `.consultant-mode` files without the new fields continue to work (backward compatible — new fields default to `false`)
+- Existing `.consultant-mode` files continue to work as legacy fallback input. First-write upgrade should migrate them into `.agents-mode`, map legacy `mode` to `consultantMode`, default missing `delegationMode` to `manual`, default missing `mcpMode` to `auto`, and on the Claude line drop any inert `externalClaudeProfile` value instead of carrying it forward.
 
 ## Non-goals
 

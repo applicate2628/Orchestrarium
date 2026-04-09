@@ -31,7 +31,7 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 - Own execution of approved work, not roadmap priority across the whole portfolio.
 - Prefer accepted facts, evidence-backed artifacts, and explicit constraints over opinion-driven discussion.
 - Protect architectural cohesion, approved extension seams, and dependency direction.
-- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement/review roles; prefer them when `.agents/.consultant-mode` says so or when the user explicitly requests external dispatch, and do not route implementation or review work through `$consultant`.
+- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement/review roles; prefer them when `.agents/.agents-mode` says so or when the user explicitly requests external dispatch, and do not route implementation or review work through `$consultant`.
 - One subagent equals one profession, one artifact, and one gate.
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
 - Do not ask one subagent to deliver a feature end-to-end.
