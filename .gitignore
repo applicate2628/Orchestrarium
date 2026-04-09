@@ -3,6 +3,7 @@
 
 # Legacy local working install (still kept local, not committed)
 /.codex/
+/.claude/
 
 # Local-only scratch and legacy plan history.
 /.scratch/

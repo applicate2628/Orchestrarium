@@ -12,7 +12,7 @@ When maintaining this skill pack or its source repository:
 - keep [`src.codex/AGENTS.md`](src.codex/AGENTS.md) aligned with the installed global policy because it is the shared source file for both
 - update `src.codex/skills/<role>/SKILL.md` when a role's contract, artifact, or gate changes
 - update `src.codex/skills/<role>/agents/openai.yaml` when trigger or prompt behavior changes
-- **MUST** update `references/subagent-operating-model.md` and all `references/` docs when any governance, protocol, gate, or routing semantic changes in the installed pack. Reference docs are the canonical methodology source of truth — they MUST stay aligned with the installed contracts. A governance change that updates `src.codex/` without updating `references/` is incomplete.
+- **MUST** update `references-codex/subagent-operating-model.md` and all `references-codex/` docs when any governance, protocol, gate, or routing semantic changes in the installed pack. Reference docs are the canonical methodology source of truth — they MUST stay aligned with the installed contracts. A governance change that updates `src.codex/` without updating `references-codex/` is incomplete.
 - **MUST** update `README.md` and `INSTALL.md` when pack structure, skill count, install targets, or entry points change. A structural change without doc update is incomplete.
 - **No mechanical application:** do not copy, move, rename, merge, or propagate content mechanically — between packs, between files, or within the same file — without verifying that the result is correct in the target context. Platform-specific semantics (execution model, parallelism, invocation mechanism, paths, tool capabilities), ownership boundaries, and behavioral implications must be checked before the change lands. "The other pack has it" or "the source file said so" is not sufficient justification. Every change must be independently valid where it lands.
 - update `src.codex/skills/lead/operating-model.md` when orchestration or gate semantics change
@@ -47,7 +47,7 @@ Tracked task memory is optional and repository-defined. When the repository uses
 
 ## Repository publication safety
 
-- [references/repository-publication-safety.md](references/repository-publication-safety.md) is the repo-wide source of truth for what may be committed to tracked git.
+- [references-codex/repository-publication-safety.md](references-codex/repository-publication-safety.md) is the repo-wide source of truth for what may be committed to tracked git.
 - Root `.gitignore` defines the local-only scratch boundary at `/.scratch/`; keep raw logs, transcripts, temp outputs, and pre-redaction material there.
 - Never hardcode workstation-specific paths, usernames, drive letters, or local tool details into tracked content unless they are intentionally public and synthetic.
 - Human review before `git push`, release, or equivalent publication must include a leak-check of staged changes.
@@ -57,7 +57,7 @@ Tracked task memory is optional and repository-defined. When the repository uses
 
 ## Repository periodic controls
 
-- [references/periodic-control-matrix.md](references/periodic-control-matrix.md) is the repo-wide source of truth for periodic controls that complement stage gates.
+- [references-codex/periodic-control-matrix.md](references-codex/periodic-control-matrix.md) is the repo-wide source of truth for periodic controls that complement stage gates.
 - Use periodic controls to catch stale items, drift, archive hygiene issues, repo consistency drift, and publication-safety regressions between stage transitions.
 - Do not use periodic controls to replace mandatory stage gates, reviewer approvals, or human publication review.
 
