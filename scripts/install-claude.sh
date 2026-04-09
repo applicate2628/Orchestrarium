@@ -386,6 +386,12 @@ else
   usage
 fi
 
+if [ "$MODE" = "global" ]; then
+  PROJECT_ROOT=""
+else
+  PROJECT_ROOT="$(dirname "$TARGET")"
+fi
+
 echo "=== Claudestrator Installer ==="
 echo "Source: $SOURCE"
 echo "Target: $TARGET"
@@ -425,6 +431,48 @@ install_item() {
       echo "    [dry-run] would install $(basename "$dst")"
     else
       cp -r "$src" "$dst"
+    fi
+  fi
+}
+
+ensure_reports_gitignore() {
+  local project_root="$1"
+  local gitignore="$project_root/.gitignore"
+
+  if [[ -f "$gitignore" ]]; then
+    if grep -Fxq "/.reports/" "$gitignore" || grep -Fxq ".reports/" "$gitignore"; then
+      echo "  .gitignore: /.reports/ already present"
+      return
+    fi
+  fi
+
+  echo "  Ensuring .gitignore ignores /.reports/..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if [[ -f "$gitignore" ]]; then
+      echo "    [dry-run] would append '/.reports/' to $gitignore"
+    else
+      echo "    [dry-run] would create $gitignore with '/.reports/'"
+    fi
+    return
+  fi
+
+  if [[ -f "$gitignore" ]] && [[ -s "$gitignore" ]]; then
+    printf '\n/.reports/\n' >> "$gitignore"
+  else
+    printf '/.reports/\n' > "$gitignore"
+  fi
+}
+
+remove_dangling_symlink() {
+  local path="$1"
+  local label="$2"
+
+  if [[ -L "$path" && ! -e "$path" ]]; then
+    echo "  Removing dangling symlink for $label..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would remove dangling symlink $path"
+    else
+      rm -f "$path"
     fi
   fi
 }
@@ -526,6 +574,8 @@ done
 src_md="$SOURCE/CLAUDE.md"
 dst_md="$TARGET/CLAUDE.md"
 
+remove_dangling_symlink "$dst_md" "CLAUDE.md"
+
 if [[ -f "$dst_md" ]]; then
   if grep -q "^@AGENTS.md" "$dst_md" 2>/dev/null || grep -q "^# Claudestrator" "$dst_md" 2>/dev/null; then
     # Existing Claudestrator install — find where user content ends and pack content begins.
@@ -577,6 +627,8 @@ fi
 src_agents="$REPO_DIR/shared/AGENTS.shared.md"
 dst_agents="$TARGET/AGENTS.md"
 
+remove_dangling_symlink "$dst_agents" "AGENTS.md"
+
 if [[ -f "$src_agents" ]]; then
   if [[ -f "$dst_agents" ]]; then
     if grep -q "^# Shared Governance" "$dst_agents" 2>/dev/null; then
@@ -604,6 +656,10 @@ if [[ -f "$src_agents" ]]; then
       cp "$src_agents" "$dst_agents"
     fi
   fi
+fi
+
+if [ "$MODE" != "global" ]; then
+  ensure_reports_gitignore "$PROJECT_ROOT"
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then

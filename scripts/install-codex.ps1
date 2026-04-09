@@ -271,6 +271,52 @@ function Copy-RequiredDirectory {
     }
 }
 
+function Ensure-ReportsGitignore {
+    param([string]$ProjectRoot)
+
+    $gitignore = Join-Path $ProjectRoot ".gitignore"
+    if (Test-Path -LiteralPath $gitignore) {
+        $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
+        if ($existingLines -contains "/.reports/" -or $existingLines -contains ".reports/") {
+            Write-Host "  .gitignore: /.reports/ already present"
+            return
+        }
+    }
+
+    Write-Host "  Ensuring .gitignore ignores /.reports/..."
+    if ($DryRun) {
+        if (Test-Path -LiteralPath $gitignore) {
+            Write-Host "    [dry-run] would append '/.reports/' to $gitignore"
+        } else {
+            Write-Host "    [dry-run] would create $gitignore with '/.reports/'"
+        }
+        return
+    }
+
+    if (Test-Path -LiteralPath $gitignore) {
+        Add-Content -LiteralPath $gitignore -Value "`r`n/.reports/"
+    } else {
+        Set-Content -LiteralPath $gitignore -Value "/.reports/"
+    }
+}
+
+function Remove-DanglingLink {
+    param(
+        [string]$Path,
+        [string]$Label
+    )
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item -and (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) -and -not (Test-Path -LiteralPath $Path)) {
+        Write-Host "  Removing dangling symlink for $Label..."
+        if ($DryRun) {
+            Write-Host "    [dry-run] would remove dangling symlink $Path"
+        } else {
+            Remove-Item -LiteralPath $Path -Force
+        }
+    }
+}
+
 # Determine target
 if ($Global) {
     $repoRoot = Get-GitRepoRoot
@@ -436,6 +482,8 @@ Set-Content -Path $srcMd -Value ($sharedContent + "`n" + $platformContent) -NoNe
 
 $dstMd = $MdTarget
 
+Remove-DanglingLink -Path $dstMd -Label "AGENTS.md"
+
 if (Test-Path $dstMd) {
     $content = Get-Content $dstMd -Raw
     if ($content -match "## Template routing") {
@@ -488,6 +536,10 @@ if (Test-Path $dstMd) {
     } else {
         Write-Host "    [dry-run] would create AGENTS.md"
     }
+}
+
+if ($Mode -ne "global") {
+    Ensure-ReportsGitignore -ProjectRoot $ProjectRoot
 }
 
 if ($DryRun) {

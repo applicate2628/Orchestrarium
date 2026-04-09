@@ -6,6 +6,7 @@
 # Local-only scratch and planning state
 /.scratch/
 /.plans/
+/.reports/
 /work-items/
 
 # Tool and plugin local state

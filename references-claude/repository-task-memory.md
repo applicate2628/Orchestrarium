@@ -10,7 +10,7 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 - `work-items/index.md` is the recovery entry point.
 - Active admitted items live in `work-items/active/<date>-<slug>/`.
 - Completed, cancelled, or superseded items move to `work-items/archive/<date>-<slug>/`.
-- `.reports/YYYY-MM/` stores session logs — intermediate results, session summaries. Named `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
+- `.reports/YYYY-MM/` stores session logs — brief summaries of what happened in a session, not copies of canonical artifacts. Named `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
 - `.plans/YYYY-MM/` stores plan logs — plan drafts and iterations. Named `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
 - `.reports/` and `.plans/` are traceability logs, not canonical sources. The canonical documentation lives in `work-items/`.
 
@@ -81,4 +81,3 @@ Additional artifacts are required when the workflow calls for them:
 ## Minimal operating rule
 
 If the work is important enough to survive an interruption, it is important enough to have a folder in `work-items/active/`.
-

@@ -273,6 +273,52 @@ function Copy-RequiredDirectory {
     }
 }
 
+function Ensure-ReportsGitignore {
+    param([string]$ProjectRoot)
+
+    $gitignore = Join-Path $ProjectRoot ".gitignore"
+    if (Test-Path -LiteralPath $gitignore) {
+        $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
+        if ($existingLines -contains "/.reports/" -or $existingLines -contains ".reports/") {
+            Write-Host "  .gitignore: /.reports/ already present"
+            return
+        }
+    }
+
+    Write-Host "  Ensuring .gitignore ignores /.reports/..."
+    if ($DryRun) {
+        if (Test-Path -LiteralPath $gitignore) {
+            Write-Host "    [dry-run] would append '/.reports/' to $gitignore"
+        } else {
+            Write-Host "    [dry-run] would create $gitignore with '/.reports/'"
+        }
+        return
+    }
+
+    if (Test-Path -LiteralPath $gitignore) {
+        Add-Content -LiteralPath $gitignore -Value "`r`n/.reports/"
+    } else {
+        Set-Content -LiteralPath $gitignore -Value "/.reports/"
+    }
+}
+
+function Remove-DanglingLink {
+    param(
+        [string]$Path,
+        [string]$Label
+    )
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item -and (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) -and -not (Test-Path -LiteralPath $Path)) {
+        Write-Host "  Removing dangling symlink for $Label..."
+        if ($DryRun) {
+            Write-Host "    [dry-run] would remove dangling symlink $Path"
+        } else {
+            Remove-Item -LiteralPath $Path -Force
+        }
+    }
+}
+
 # Determine target
 if ($Global) {
     $repoRoot = Get-GitRepoRoot
@@ -309,6 +355,12 @@ if ($Global) {
         Write-Host "Use: .\scripts\install-claude.ps1 -Global  or  .\scripts\install-claude.ps1 -Target <path>" -ForegroundColor Yellow
         exit 1
     }
+}
+
+if ($Mode -eq "global") {
+    $ProjectRoot = $null
+} else {
+    $ProjectRoot = Split-Path $TargetRoot -Parent
 }
 
 Write-Host "=== Claudestrator Installer ===" -ForegroundColor Cyan
@@ -433,6 +485,8 @@ foreach ($dir in $OptionalDirs) {
 $srcMd = Join-Path $Source "CLAUDE.md"
 $dstMd = Join-Path $TargetRoot "CLAUDE.md"
 
+Remove-DanglingLink -Path $dstMd -Label "CLAUDE.md"
+
 if (Test-Path $dstMd) {
     $content = Get-Content $dstMd -Raw
     $lines = Get-Content $dstMd
@@ -492,6 +546,8 @@ if (Test-Path $dstMd) {
 $srcAgents = Join-Path (Join-Path $RepoDir "shared") "AGENTS.shared.md"
 $dstAgents = Join-Path $TargetRoot "AGENTS.md"
 
+Remove-DanglingLink -Path $dstAgents -Label "AGENTS.md"
+
 if (Test-Path $srcAgents) {
     if (Test-Path $dstAgents) {
         $agentsContent = Get-Content $dstAgents -Raw
@@ -520,6 +576,10 @@ if (Test-Path $srcAgents) {
             Write-Host "    [dry-run] would create AGENTS.md"
         }
     }
+}
+
+if ($Mode -ne "global") {
+    Ensure-ReportsGitignore -ProjectRoot $ProjectRoot
 }
 
 if ($DryRun) {

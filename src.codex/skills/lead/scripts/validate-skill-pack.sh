@@ -91,7 +91,7 @@ done
 echo ""
 echo "=== Orphaned skill directories ==="
 
-UTILITY_SKILLS=(second-opinion)
+UTILITY_SKILLS=(second-opinion review-changes)
 
 for dir in "$SKILLS_DIR"/*/; do
   role="$(basename "$dir")"

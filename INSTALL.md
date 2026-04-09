@@ -49,10 +49,12 @@ Use `scripts/install-codex.sh` or `scripts/install-codex.ps1` when you want the 
 Notes:
 
 - Project-level Codex installs use `.agents/skills/` plus the project root `AGENTS.md`.
+- Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
 - The consultant-mode file remains project-local at `.agents/.consultant-mode`.
 - The same file now carries the extended schema:
   `mode: external`, `preferExternalWorker: true`, `preferExternalReviewer: true`.
 - `mode` still controls `$consultant`; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
+- Completed lead-managed batches now end with one external consultant-check before closure. That check stays advisory-only, but if the external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
 - Validation command: `bash src.codex/skills/lead/scripts/validate-skill-pack.sh`.
 
 ## Claude Code install details
@@ -69,11 +71,13 @@ Use `scripts/install-claude.sh` or `scripts/install-claude.ps1` when you want th
 Notes:
 
 - Project-level Claude installs create or update `.claude/AGENTS.md` and `.claude/CLAUDE.md`.
+- Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
 - Claude memory is shipped in `src.claude/memory/` and preserved across reinstalls by the existing installer behavior.
 - The consultant-mode file remains project-local at `.claude/.consultant-mode`.
 - The same file now carries the extended schema:
   `mode: external`, `preferExternalWorker: true`, `preferExternalReviewer: true`.
 - `mode` still controls `$consultant`; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
+- Completed lead-managed batches now end with one external consultant-check before closure. That check stays advisory-only, but if the external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
 - Validation command: `bash src.claude/agents/scripts/validate-skill-pack.sh`.
 
 ## Dual-platform setup

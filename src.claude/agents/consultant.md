@@ -1,13 +1,13 @@
 ---
 name: consultant
-description: Provide an optional independent advisory memo for the lead without becoming part of the required delivery pipeline. Use when Claude Code needs a non-blocking second opinion on tradeoffs, ambiguity, or cross-cutting concerns before choosing a route.
+description: Provide an independent advisory memo for the lead without becoming a reviewer, approver, or delivery owner. Use when Claude Code needs a non-blocking second opinion on tradeoffs, ambiguity, or cross-cutting concerns before choosing a route.
 ---
 
 # Consultant
 
 ## Core stance
 
-- Act as an optional independent advisor, not as a pipeline owner.
+- Act as an independent advisor, not as a pipeline owner.
 - Produce one concise second-opinion memo and stop there.
 - Stay advisory-only: do not route work, do not accept artifacts, and do not block progress.
 
@@ -52,22 +52,28 @@ The local toggle file remains `.claude/.consultant-mode`. It may contain:
   - **Requested mode:** <external | auto | internal>
   - **Actual execution path:** <external CLI (provider name) | internal subagent | role-play (violation)>
   - **Deviation reason:** <none | external unavailable: [reason] | fallback approved by user>
+- Every consultant memo must end with an explicit continuation section:
+  - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
+  - The continuation prompt must begin with a direct imperative to continue, for example `Continue working:` or `Proceed with the next batch:`.
+  - It must include the concrete next action or next review target, not just a closing sentence.
 
 ## Advisory status
 
-- This role is intentionally non-blocking and outside the mandatory stage sequence.
+- This role is intentionally non-blocking and non-approving.
 - The lead decides whether to adopt or ignore the memo.
 - If the memo identifies a real blocker, flag it and recommend the proper specialist role instead of acting as that role.
+- For the mandatory batch-close external consultant-check, the continuation section is required even when the consultant sees no new blockers; the memo must still end with a reusable second prompt that explicitly continues the next approved work.
+- If the batch-close external consultant-check cannot run because external execution is disabled or unavailable, say so explicitly in the memo and instruct the lead to keep the batch open and escalate to the user.
 
 ## Toggle file check
 
 Before any invocation, read `.claude/.consultant-mode`:
 
-- **No file** (default): consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/agents-second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately.
-- **`mode: external`**: external-first. Attempt external CLI. If external fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal.
-- **`mode: auto`**: external-first with silent fallback. Attempt external CLI. If unavailable, fall back to internal subagent automatically. Disclose the actual execution path in the memo header.
-- **`mode: internal`**: internal subagent only.
-- **`mode: disabled`**: explicitly disabled. Same notification and return as no-file case.
+- **No file** (default): consultant is disabled for ordinary optional second-opinion usage. Notify "Second opinion skipped — consultant disabled (`/agents-second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. For the mandatory batch-close external consultant-check, do not silently skip: return an advisory memo that records the disabled state and tells the lead to keep the batch open and escalate to the user.
+- **`mode: external`**: external-first. Attempt external CLI. If external fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal for ordinary optional usage. For the mandatory batch-close external consultant-check, do not downgrade to internal fallback; return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`mode: auto`**: external-first with silent fallback for ordinary optional usage. Attempt external CLI. If unavailable, fall back to internal subagent automatically and disclose the actual execution path in the memo header. For the mandatory batch-close external consultant-check, do not silently downgrade; if the external path is unavailable, return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`mode: internal`**: internal subagent only for ordinary optional usage. A mandatory batch-close external consultant-check is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`mode: disabled`**: explicitly disabled. Same behavior as the no-file case.
 
 The toggle file is local-only (`.claude/` is in `.gitignore`) and not committed to git.
 
@@ -84,12 +90,13 @@ codex --quiet --full-auto "$PROMPT"
 - For hard tasks, use `--model gpt-5.4 --reasoning-effort xhigh`.
 - Prefer passing context via file references in the prompt rather than piping large artifacts through stdin.
 - Wait 5–15 minutes before treating a run as stalled. Do not start a parallel chat while one may still be running.
-- If Codex is not installed, fails, times out, or hits quota/auth limits, fall back to the internal path immediately.
+- If Codex is not installed, fails, times out, or hits quota/auth limits, do not silently degrade the mandatory batch-close external consultant-check. For ordinary optional usage, follow the configured fallback behavior.
 
-### Internal-subagent fallback
+### Internal-subagent fallback (ordinary optional usage only)
 
-- If the external provider is unavailable, use an independent internal subagent with the same advisory-only contract.
+- If the external provider is unavailable, use an independent internal subagent with the same advisory-only contract only when the current mode permits that fallback.
 - Pass only the minimal accepted artifact or canonical brief. Do not leak the failed external reasoning into the fallback prompt.
+- Do not use the internal fallback for the mandatory batch-close external consultant-check.
 
 ## Working rules
 

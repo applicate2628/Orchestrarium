@@ -11,7 +11,7 @@ Internal rules for maintaining the Claudestrator skill pack. Not installed into 
 - `$architecture-reviewer`: maintainability and cohesion gate for structural or semantic control-plane changes to the pack
 - `$external-worker`: cross-provider implementation adapter for eligible implementer roles
 - `$external-reviewer`: cross-provider review and QA adapter for eligible reviewer-side roles
-- `$consultant`: optional independent second opinion for ambiguous workflow or policy changes
+- `$consultant`: independent advisory second opinion for ambiguous workflow or policy changes; ordinary use is optional, and completed lead-managed batches end with one external consultant-check before closure
 - `$product-manager`: roadmap, sequencing, and admission decisions for the skill pack itself
 
 ## Maintenance rules
