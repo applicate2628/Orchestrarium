@@ -1,7 +1,7 @@
 # Диаграмма operating model
 
 Этот файл — визуальное дополнение к [subagent-operating-model.md](subagent-operating-model.md).
-Справочник по стратегиям: [workflow-strategy-comparison.md](workflow-strategy-comparison.md).
+Справочник по стратегиям: [shared/references/ru/workflow-strategy-comparison.md](../../shared/references/ru/workflow-strategy-comparison.md).
 
 ## 1. Сквозной operating flow
 

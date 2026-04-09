@@ -1,6 +1,6 @@
 # Skill-Pack Maintenance
 
-Internal rules for maintaining the Claudestrator skill pack. Not installed into target repositories.
+Internal rules for maintaining the Claude Code pack. Not installed into target repositories.
 
 ## Maintenance roles
 
@@ -20,7 +20,7 @@ Internal rules for maintaining the Claudestrator skill pack. Not installed into 
 - Changes to shared governance rules (delegation, gate semantics, REVISE cap, re-intake, task memory) must be propagated to `lead.md` in the same commit; `operating-model.md` is a reference only and should stay aligned
 - Update `src.claude/agents/<role>.md` when trigger or prompt behavior changes
 - Update `src.claude/agents/contracts/operating-model.md` when orchestration or gate semantics change
-- Update `src.claude/agents/contracts/external-dispatch.md` when consultant-mode schema, provider paths, provenance rules, or external adapter semantics change
+- Update `src.claude/agents/contracts/external-dispatch.md` when the agents-mode schema, provider paths, provenance rules, or external adapter semantics change
 - Update `src.claude/agents/consultant.md` when consultant execution policy changes, keeping it aligned with the shared external-dispatch contract instead of duplicating dispatch rules inline
 - Use `$knowledge-archivist` for repository hygiene, canonical-source alignment, documentation upkeep, and reference maintenance
 - Route semantic repository control-plane changes prepared by `$knowledge-archivist` through an independent `$architecture-reviewer` gate before completion or publication; hygiene-only edits such as link fixes, formatting, index sync, archive moves, and non-semantic wording cleanup do not require that extra reviewer

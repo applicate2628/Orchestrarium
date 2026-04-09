@@ -1,6 +1,6 @@
 @AGENTS.md
 
-# Claudestrator
+# Claude Code Pack
 
 Platform-specific rules for Claude Code. Shared governance (hygiene, publication safety, role index, core delegation) is imported from `AGENTS.md` above via `@import`.
 
@@ -10,7 +10,7 @@ If `## Project policies` section is missing from this file, suggest running `/ag
 
 When subagent delegation is appropriate, classify the task and pick the matching team template from `.claude/agents/team-templates/`.
 
-External adapter preferences live in `.claude/.consultant-mode`. The file keeps `mode` for consultant behavior and adds `preferExternalWorker` / `preferExternalReviewer` for eligible implement and review-side substitutions without changing team template JSON.
+External adapter preferences live in `.claude/.agents-mode`. The file keeps `consultantMode` for consultant behavior, adds `delegationMode` and `mcpMode` for operator-level routing/tooling preference, and keeps `preferExternalWorker` / `preferExternalReviewer` for eligible implement and review-side substitutions without changing team template JSON. Legacy `.claude/.consultant-mode` is fallback-only; Claude-line canonical config no longer includes `externalClaudeProfile`.
 
 **Decision tree:**
 

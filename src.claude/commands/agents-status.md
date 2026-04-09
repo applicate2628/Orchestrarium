@@ -32,7 +32,7 @@ Show a compact status dashboard for the current project.
 8. **Format.** Display as a compact dashboard:
 
 ```text
-=== Claudestrator Status ===
+=== Claude Code Pack Status ===
 
 Active chains: <count or "none">
   <slug> — <template> (orchestrator: <main|lead>)

@@ -63,7 +63,7 @@ work-items/
 
 ## Правила безопасности публикации
 
-- Правила безопасности публикации репозитория применяются ко всем work-item артефактам. См. [repository-publication-safety.md](repository-publication-safety.md).
+- Правила безопасности публикации репозитория применяются ко всем work-item артефактам. См. [shared/references/ru/repository-publication-safety.md](../../shared/references/ru/repository-publication-safety.md).
 - Секреты, credentials, клиентские данные, и машинно-специфичные пути не должны попадать в work-item папки, которые коммитятся в tracked git.
 - Используйте `/.scratch/` для raw transcript'ов и пред-redaction материала.
 

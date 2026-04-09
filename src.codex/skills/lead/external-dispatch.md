@@ -4,29 +4,43 @@ Shared dispatch contract for `$consultant`, `$external-worker`, and `$external-r
 
 ## Canonical config
 
-The project-local toggle file remains:
+The project-local config file is now:
+
+- `.agents/.agents-mode`
+
+Legacy fallback:
 
 - `.agents/.consultant-mode`
 
-Extended schema:
+Canonical schema:
 
 ```yaml
-mode: external
-preferExternalWorker: true
-preferExternalReviewer: true
+consultantMode: external  # allowed: external | auto | internal | disabled
+delegationMode: manual  # allowed: manual | auto
+mcpMode: auto  # allowed: auto | force
+preferExternalWorker: true  # allowed: false | true
+preferExternalReviewer: true  # allowed: false | true
+externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max
 ```
 
-- `mode` controls `$consultant` behavior and remains backward compatible.
+- `consultantMode` controls `$consultant` behavior.
+- `delegationMode: auto` means ordinary team delegation stays enabled without per-turn approval; `manual` keeps the current explicit user-request behavior.
+- `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` routes eligible implementer roles through `$external-worker` by default.
 - `preferExternalReviewer` routes eligible reviewer/QA roles through `$external-reviewer` by default.
+- `externalClaudeProfile` is Codex-line only and selects the Claude CLI execution profile when Codex dispatches outward to Claude. Supported values: `sonnet-high` (`--model sonnet --effort high`) and `opus-max` (`--model opus --effort max`).
 - The preference flags are independent.
-- Any write to this file must preserve the other keys.
-- If the file is created from scratch, write all three keys with `preferExternalWorker: false` and `preferExternalReviewer: false` unless the user explicitly requested a different preference.
+- Any write to this file must preserve unknown keys and the other known keys.
+- When writing `.agents/.agents-mode`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
+- If both files exist, `.agents/.agents-mode` wins.
+- If only the legacy file exists, treat legacy `mode` as `consultantMode`, default missing `delegationMode` to `manual`, default missing `mcpMode` to `auto`, and preserve any existing `preferExternalWorker`, `preferExternalReviewer`, and `externalClaudeProfile` values during migration.
+- New writes go to `.agents/.agents-mode`; do not create new `.consultant-mode` files.
+- If the file is created from scratch, write the full default shape: the requested `consultantMode`, `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, and `externalClaudeProfile: sonnet-high` unless the user explicitly requested a different Claude profile.
 
 ## Routing model
 
 - `$external-worker` and `$external-reviewer` are bidirectional external adapters, not new narrow professions.
-- On the Codex pack, external dispatch goes to Claude CLI.
+- On the Codex pack, external dispatch goes to Claude CLI and should honor `externalClaudeProfile` when that key is present.
 - The Claude pack mirrors this contract with Codex CLI.
 - The external adapter may be selected by the preference flags or by explicit user / lead override.
 - User override is available in both directions regardless of toggle state.
@@ -37,7 +51,7 @@ preferExternalReviewer: true
 
 ## Role behavior
 
-- `$consultant` stays advisory-only and continues to use the `mode` field.
+- `$consultant` stays advisory-only and continues to use the `consultantMode` field.
 - `$external-worker` is implement-only.
 - `$external-reviewer` covers review and QA on the reviewer side.
 - If the external CLI is unavailable for either external role, that role is disabled at the role level and the orchestrator may reroute to another eligible internal specialist.
@@ -54,7 +68,7 @@ preferExternalReviewer: true
 
 Every external or consultant memo/report should record:
 
-- `Requested mode`
+- `Requested consultant mode`
 - `Actual execution path`
 - `Deviation reason`
 

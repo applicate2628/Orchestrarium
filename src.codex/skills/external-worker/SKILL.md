@@ -26,6 +26,7 @@ description: Implement approved work through an external provider when the routi
 
 - Primary provider: Claude CLI.
 - Check availability first (`claude`, or `claude.exe` / `claude.cmd` on Windows).
+- Read `.agents/.agents-mode` first and fallback to legacy `.agents/.consultant-mode`; honor `externalClaudeProfile` when it is present: `sonnet-high` maps to `--model sonnet --effort high`; `opus-max` maps to `--model opus --effort max`.
 - Use stdin or a file for the prompt; do not pass multiline prompts as direct command-line arguments.
 - If the provider is missing, unauthenticated, quota-limited, or errors, stop and return `BLOCKED:dependency` with the reason.
 - Do not silently fall back to an internal implementer or to `$consultant`.

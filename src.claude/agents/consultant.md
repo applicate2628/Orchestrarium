@@ -37,13 +37,15 @@ Do not invoke for:
 
 ## Shared config format
 
-The local toggle file remains `.claude/.consultant-mode`. It may contain:
+The local config file is now `.claude/.agents-mode`; legacy `.claude/.consultant-mode` is fallback-only for migration. The canonical file may contain:
 
-- `mode: external | auto | internal | disabled`
+- `consultantMode: external | auto | internal | disabled`
+- `delegationMode: manual | auto`
+- `mcpMode: auto | force`
 - `preferExternalWorker: true | false`
 - `preferExternalReviewer: true | false`
 
-`mode` continues to govern consultant behavior. The two preference flags are for the external dispatch contract and must be preserved by any command that updates this file.
+`consultantMode` continues to govern consultant behavior. `delegationMode: auto` means ordinary team delegation stays enabled without per-turn approval, while `manual` keeps explicit user-request behavior. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract and must be preserved by any command that updates this file. Legacy `externalClaudeProfile` values should not be written on the Claude line.
 
 ## Return exactly one artifact
 
@@ -67,7 +69,7 @@ The local toggle file remains `.claude/.consultant-mode`. It may contain:
 
 ## Toggle file check
 
-Before any invocation, read `.claude/.consultant-mode`:
+Before any invocation, read `.claude/.agents-mode` first and fall back to legacy `.claude/.consultant-mode` only when the new file is absent:
 
 - **No file** (default): consultant is disabled for ordinary optional second-opinion usage. Notify "Second opinion skipped — consultant disabled (`/agents-second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. For the mandatory batch-close external consultant-check, do not silently skip: return an advisory memo that records the disabled state and tells the lead to keep the batch open and escalate to the user.
 - **`mode: external`**: external-first. Attempt external CLI. If external fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal for ordinary optional usage. For the mandatory batch-close external consultant-check, do not downgrade to internal fallback; return an unavailable memo and require the lead to keep the batch open and escalate.

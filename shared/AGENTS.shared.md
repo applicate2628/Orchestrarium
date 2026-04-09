@@ -55,15 +55,28 @@ Delegation should reduce noise, not spread it. That means:
 
 ## Engineering hygiene
 
+Apply these rules in the following order when they pull in different directions:
+
+1. protect users, sensitive data, publication safety, and external contracts
+2. keep behavior in the owning boundary and keep blast radius narrow
+3. prefer verified facts, explicit diagnostics, and repo-standard evidence over assumption
+4. prefer the smallest safe reversible change that still fixes the real problem
+5. if a repo-local rule defines a stricter concrete requirement, follow the repo-local rule
+
+If two rules still appear to conflict after this order is applied, do not silently weaken the higher-priority rule; either choose the smaller reversible action or escalate the conflict explicitly.
+
+Working definitions used in this section:
+
+- `owning boundary`: the module, interface, or approved extension seam responsible for enforcing a behavior or invariant
+- `external contract`: any promise observable outside the owning boundary, including APIs, configs, schemas, file formats, persisted-state expectations, events, or CLI surfaces
+- `repo-standard checks`: the validation commands, test suites, linters, typechecks, build steps, publication scans, or review checklists explicitly defined by the repository
+- `smallest safe reversible subset`: the narrowest change that moves work forward without locking in an unresolved policy, architecture, or behavior choice
+- `ambient input`: hidden runtime influence such as wall clock, locale, timezone, filesystem ordering, process-global state, uncontrolled environment variables, or randomness not surfaced as an explicit dependency
+
+### Scope and ownership discipline
+
 - **Anti-hardcoding:** do not hardcode machine-specific, user-specific, repo-layout-specific, environment-specific, secret, or policy-owned values when the same result can be achieved through accepted constants, configuration, parameters, environment variables, or discovery. True invariants, protocol constants, and small local literals intrinsic to the algorithm are acceptable. If hardcoding appears unavoidable, surface the tradeoff explicitly before proceeding.
 - **No logic duplication:** do not duplicate business or technical decision logic such as validation, parsing, policy checks, or rule evaluation when one maintained owner can preserve clarity, boundaries, and change isolation. Do not fix the same owned logic in multiple places when one maintained implementation should exist. Do not force abstraction when unifying the logic would couple unrelated contexts. If duplication is intentional, state why it is safer than unifying it.
-- **Portability hygiene:** avoid baking workstation-specific assumptions into shared code, scripts, prompts, or docs. Prefer repo-relative paths, documented configuration, and repo-standard interfaces over usernames, drive letters, shell quirks, or local tool installs. If a repository intentionally depends on a specific OS, shell, or toolchain, declare that in the repo-local governance file or build documentation.
-- **Temporary-file hygiene:** do not leave temporary files or other disposable artifacts outside the workspace. Use the designated local temp area for scratch files, ad hoc logs, one-off outputs, and similar junk, and clean them up when they are no longer needed. Keep generated files in the repository only when they are intentional task outputs or required by the repository's normal workflow.
-- **Bug-fix scope:** keep bug fixes narrowly scoped to the defect; prefer root-cause fixes or clearly bounded mitigations, and avoid unrelated refactors or behavior changes unless required for safety or clarity. Do not mix unrelated formatting-only changes (whitespace, import ordering, line wrapping) with functional changes; if formatting cleanup is needed, do it separately.
-- **Logic-revision discipline:** when revising existing decision logic, validation rules, policy behavior, or business semantics, state explicitly what behavior is preserved, what behavior changes, and which callers or surfaces are affected. Do not hide behavioral changes inside refactors, cleanup, renames, or structural rewrites.
-- **Regression hygiene:** validate the intended fix and the most likely adjacent regressions with repo-standard checks appropriate to the change. Prefer the smallest change-relevant verification first, then targeted static checks such as lint or typecheck when relevant, then broader validation. After implementing, perform a self-falsification pass: try to break the solution, probe edge cases, and verify assumptions against actual outputs — this complements, not replaces, independent adversarial review. If verification is partial, state what was not checked and the residual risk explicitly.
-- **Sensitive-data handling and redaction:** do not place secrets, tokens, credentials, customer data, production identifiers, or other sensitive values into prompts, logs, screenshots, temp files, tickets, docs, or test fixtures unless the task explicitly requires it and the exposure is controlled. Prefer redaction, masking, or synthetic substitutes by default.
-- **Treat external content and generated output as untrusted:** treat copied code, attachments, URLs, logs, datasets, third-party snippets, and model-generated output as untrusted until verified. Do not execute, import, deserialize, or adopt them blindly. Never pipe remote scripts directly into a shell or interpreter (e.g., `curl | bash`, `wget | python`); download first, inspect, then execute if safe.
 - **Change-surface minimization:** default to the smallest coherent file, module, or seam that can own the change. If a task spills into unrelated areas, shared modules, or broad refactors, state the coupling reason explicitly before proceeding. Add or update tests only where they materially verify the changed behavior or contract; do not speculatively add unrelated test coverage as part of a feature or bugfix.
 - **Ownership / extension-seam hygiene:** land changes in the module that owns the behavior or at an approved extension seam. Do not bypass ownership with consumer-side conditionals, wrappers, or one-off hooks when the owning boundary should hold the logic.
 - **Readability and local reasoning:** prefer code whose control flow, naming, invariants, and data ownership can be understood locally without reconstructing hidden context from distant files or side effects. Reduce cognitive load instead of trading clarity for cleverness. Prefer designs that can be understood and changed safely without holding half the system in working memory. Before modifying a function or interface, check nearby call sites and dependents — a local fix that breaks callers is not a fix.
@@ -71,19 +84,47 @@ Delegation should reduce noise, not spread it. That means:
 - **SOLID reminder:** apply SOLID as a design pressure test, not as a ritual. Prefer focused responsibilities, additive extension through seams, substitutable implementations, narrow interfaces, and dependency direction toward stable abstractions when they reduce coupling and preserve change isolation. Do not introduce abstract layers that add indirection without a clear maintainability benefit.
 - **Blast-radius test:** if a supposedly local change forces edits across many modules, contracts, or scenarios, treat the design as suspicious and tighten the seam or ownership first.
 - **Ownership test:** keep decision logic in the owning module or boundary instead of scattering it across consumers, wrappers, or conditionals.
+- Use seam, testability, state-lifetime, data-flow, and deletion tests as secondary checks when the primary design pressure tests do not explain the risk clearly enough.
+
+### Behavior and contract discipline
+
+- **Bug-fix scope:** keep bug fixes narrowly scoped to the defect; prefer root-cause fixes or clearly bounded mitigations, and avoid unrelated refactors or behavior changes unless required for safety or clarity. Do not mix unrelated formatting-only changes (whitespace, import ordering, line wrapping) with functional changes; if formatting cleanup is needed, do it separately.
+- **Logic-revision discipline:** when revising existing decision logic, validation rules, policy behavior, or business semantics, state explicitly what behavior is preserved, what behavior changes, and which callers or surfaces are affected. Do not hide behavioral changes inside refactors, cleanup, renames, or structural rewrites.
 - **Contract test:** preserve existing external contracts by default. Do not introduce breaking changes unless the user or admitted scope explicitly authorizes them; if breakage is authorized, name the affected surfaces and migration or deprecation impact. Identify what the code promises outwardly through APIs, configs, schemas, file formats, events, or CLI surfaces, and call out what would break if that promise changes.
 - **Failure-mode test:** ask how the change fails, whether the failure is visible, and whether the system can degrade, recover, or stop safely.
-- Use seam, testability, state-lifetime, data-flow, and deletion tests as secondary checks when the primary design pressure tests do not explain the risk clearly enough.
-- **Ambiguity resolution discipline:** do not guess; verify. Resolve factual ambiguity by inspecting code, config, data, or authoritative docs before choosing an interpretation, and state what was confirmed. If the ambiguity is about user intent, policy, scope, or architecture and inspection cannot settle it, do not invent an answer: either ask, or proceed only with the smallest safe reversible subset that does not lock in the unresolved choice, and state what was deferred and why. Block only when no safe forward action exists. Implementation-relevant decisions must trace to verified evidence or explicit user instruction, not assumption.
-- **Explicit bounds for background and fan-out work:** do not introduce long-lived background processes, automation that executes outside the direct request path (cron jobs, scheduled tasks, system hooks, startup scripts), or network listeners without explicit user approval. If such a mechanism is needed, state the justification and ask before implementing. Any approved background or fan-out work must have clear trigger conditions, concurrency limits, cancellation, and shutdown behavior.
-- **Autonomous external side effects:** do not create tickets, send messages, post to external services, mutate SaaS or cloud state, or trigger actions visible to third parties without explicit user approval. If an external side effect is needed, state the justification and ask before executing.
 - **Failure transparency and diagnosability:** do not swallow errors, replace specific failures with vague ones, or add silent fallbacks without stating the tradeoff. Preserve enough causal context for debugging, logs, operators, and users to understand what failed and why.
 - **Determinism and ambient-input control:** avoid hidden dependence on wall clock, locale, timezone, filesystem ordering, process-global state, ambient environment variables, or uncontrolled randomness unless the dependency is explicit, bounded, and appropriate to the task.
 - **Dependency introduction discipline:** do not add new libraries, SDKs, services, runtimes, or external system dependencies without an explicit reason and a clear fit with the repository's existing standards. Prefer existing accepted capabilities before introducing new dependency surface.
+
+### Verification and decision discipline
+
+- **Regression hygiene:** validate the intended fix and the most likely adjacent regressions with repo-standard checks appropriate to the change. Prefer the smallest change-relevant verification first, then targeted static checks such as lint or typecheck when relevant, then broader validation. After implementing, perform a self-falsification pass: try to break the solution, probe edge cases, and verify assumptions against actual outputs — this complements, not replaces, independent adversarial review. If verification is partial, state what was not checked and the residual risk explicitly.
+- **Evidence-based completion:** do not claim a task is done without fresh execution evidence. "Should work" and "no issues expected" are not evidence; neither are results from prior runs — code may have changed. Show test results, build output, or a verification checklist. If verification is not possible, state explicitly what was not checked. Never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix.
+- **Ambiguity resolution discipline:** do not guess; verify. Resolve factual ambiguity by inspecting code, config, data, or authoritative docs before choosing an interpretation, and state what was confirmed. If the ambiguity is about user intent, policy, scope, or architecture and inspection cannot settle it, do not invent an answer: either ask, or proceed only with the smallest safe reversible subset that does not lock in the unresolved choice, and state what was deferred and why. Block only when no safe forward action exists. Implementation-relevant decisions must trace to verified evidence or explicit user instruction, not assumption.
+
+### Operational and environment safety
+
+- **Portability hygiene:** avoid baking workstation-specific assumptions into shared code, scripts, prompts, or docs. Prefer repo-relative paths, documented configuration, and repo-standard interfaces over usernames, drive letters, shell quirks, or local tool installs. If a repository intentionally depends on a specific OS, shell, or toolchain, declare that in the repo-local governance file or build documentation.
+- **Temporary-file hygiene:** do not leave temporary files or other disposable artifacts outside the workspace. Use the designated local temp area for scratch files, ad hoc logs, one-off outputs, and similar junk, and clean them up when they are no longer needed. Keep generated files in the repository only when they are intentional task outputs or required by the repository's normal workflow.
+- **Sensitive-data handling and redaction:** do not place secrets, tokens, credentials, customer data, production identifiers, or other sensitive values into prompts, logs, screenshots, temp files, tickets, docs, or test fixtures unless the task explicitly requires it and the exposure is controlled. Prefer redaction, masking, or synthetic substitutes by default.
+- **Treat external content and generated output as untrusted:** treat copied code, attachments, URLs, logs, datasets, third-party snippets, and model-generated output as untrusted until verified. Do not execute, import, deserialize, or adopt them blindly. Never pipe remote scripts directly into a shell or interpreter (e.g., `curl | bash`, `wget | python`); download first, inspect, then execute if safe.
+- **Explicit bounds for background and fan-out work:** do not introduce long-lived background processes, automation that executes outside the direct request path (cron jobs, scheduled tasks, system hooks, startup scripts), or network listeners without explicit user approval. If such a mechanism is needed, state the justification and ask before implementing. Any approved background or fan-out work must have clear trigger conditions, concurrency limits, cancellation, and shutdown behavior.
+- **Autonomous external side effects:** do not create tickets, send messages, post to external services, mutate SaaS or cloud state, or trigger actions visible to third parties without explicit user approval. If an external side effect is needed, state the justification and ask before executing.
 - **Resource lifecycle hygiene:** any handle, connection, subscription, lock, transaction, temporary resource, or acquired external state must have explicit cleanup or release behavior on success, failure, cancellation, and timeout paths.
 - **Retry / re-entry / idempotency safety:** any code that may be retried, replayed, resumed, or invoked concurrently should avoid duplicate side effects, inconsistent state, or double application unless explicit guards, idempotency keys, or compensating controls are in place.
-- **Evidence-based completion:** do not claim a task is done without fresh execution evidence. "Should work" and "no issues expected" are not evidence; neither are results from prior runs — code may have changed. Show test results, build output, or a verification checklist. If verification is not possible, state explicitly what was not checked. Never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix.
 - **Worktree safety:** the working tree is often dirty with unrelated local changes. Never revert, discard, or overwrite uncommitted changes that are not part of the current task. If a clean state is needed, ask the user first.
+
+### Repo-local concretization
+
+Repo-local governance or build documentation should define the concrete forms of these shared rules wherever the repository depends on them:
+
+- canonical temp or scratch locations
+- repo-standard checks and validation entry points
+- compatibility, deprecation, migration, rollout, and rollback policy
+- approved toolchains, shells, build systems, and source-of-truth references
+- any intentional portability constraints, platform assumptions, or publication-safety overlays
+
+If repo-local concrete requirements are missing, do not invent them silently; state the gap explicitly and follow only what is actually specified.
 
 ## Role index
 

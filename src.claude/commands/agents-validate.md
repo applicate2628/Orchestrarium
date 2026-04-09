@@ -1,6 +1,6 @@
 # Validate Skill-Pack
 
-Run the structural integrity check for the Claudestrator skill-pack.
+Run the structural integrity check for the Claude Code pack.
 
 ## Steps
 

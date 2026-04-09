@@ -34,11 +34,11 @@ description: Coordinate complex multi-agent work requiring parallel risk owners,
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
 - Do not ask one subagent to deliver a feature end-to-end.
 - Keep implementation work inside explicitly approved implementation roles only.
-- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement and review-side slots, selected through `.claude/.consultant-mode` preferences or an explicit request; the team templates themselves stay unchanged.
+- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement and review-side slots, selected through `.claude/.agents-mode` preferences or an explicit request; the team templates themselves stay unchanged.
 - Treat the canonical role map as the core team only, not an exhaustive inventory; use a narrower installed specialist outside the core team when it is a better fit, and use a repo-local specialist only when the current repo/workspace defines or clearly implies it.
 - Detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers, and escalate one clear recommendation: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need.
 - Keep `$consultant` advisory-only and non-approving. Every completed lead-managed task-batch must still end with one external consultant-check before the lead marks the batch closed. Consultant mode `external` requires user approval for fallback. Mode `auto` allows silent fallback with disclosure for ordinary optional consultation.
-- Keep `.claude/.consultant-mode` intact when updating consultant settings; it also carries external adapter preferences.
+- Keep `.claude/.agents-mode` intact when updating consultant settings; it also carries delegation, MCP, and external adapter preferences.
 - Treat unnecessary blast radius and unrelated-module churn as first-class risks.
 
 ## Canonical brief

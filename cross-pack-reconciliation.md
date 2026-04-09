@@ -2,6 +2,8 @@
 
 When editing shared semantic content in either pack's contract docs, update the matching block in the other pack. Platform-specific packaging (routing patterns, per-role contracts, stage gates) is intentionally different and does NOT need cross-pack sync.
 
+Shared design-only methodology references now live in `shared/references/`. Pack-specific reference trees should keep only pack-specific material plus thin compatibility pointers where stable legacy paths still matter.
+
 ## Why the docs differ
 
 Claude Code loads role definitions dynamically via Agent tool → contract docs are compact routing references.
@@ -46,11 +48,31 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 
 | Block | Claude (`src.claude/agents/contracts/external-dispatch.md`) | Codex (`src.codex/skills/lead/external-dispatch.md`) | Notes |
 |-------|-------------------------------------------------------------|-------------------------------------------------------|-------|
-| Config file location | `.claude/.consultant-mode` | `.agents/.consultant-mode` | File name stays unchanged for backward compatibility. |
-| Extended config schema | `mode`, `preferExternalWorker`, `preferExternalReviewer` | `mode`, `preferExternalWorker`, `preferExternalReviewer` | `mode` still controls consultant; the `preferExternal*` booleans drive routing preference for external adapters. |
+| Config file location | `.claude/.agents-mode` (legacy `.claude/.consultant-mode` fallback) | `.agents/.agents-mode` (legacy `.agents/.consultant-mode` fallback) | New writes target `agents-mode`; legacy file stays read-only migration input. |
+| Extended config schema | `consultantMode`, `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer` | `consultantMode`, `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, optional `externalClaudeProfile` | `consultantMode` controls consultant; `delegationMode` and `mcpMode` are operator-level routing/tooling preferences; `externalClaudeProfile` matters only when the external provider is Claude CLI. |
 | Provider dispatch | Codex CLI | Claude CLI | Each pack calls the other CLI as the external provider. |
 | Provenance header | Requested mode / actual execution path / deviation reason | Requested mode / actual execution path / deviation reason | Keep wording semantically aligned even if command examples differ. |
 | Fallback boundary | Role-level no internal fallback; orchestrator may reroute when the role choice is disabled | Role-level no internal fallback; orchestrator may reroute when the role choice is disabled | Avoid ambiguous bare use of the word `fallback`. |
+
+## Shared design-only references
+
+These documents should not be copied again into new pack trees. Future packs, including a Gemini pack, should reuse them from `shared/references/` as the starting layer and keep only pack-specific overlays, wrappers, or vocabulary mapping locally where the shared text is not yet fully pack-agnostic.
+
+| Canonical shared reference | Path | Pack-local expectation |
+|-------|------|------|
+| Evidence pipeline | `shared/references/evidence-based-answer-pipeline.md` | Keep only compatibility pointers if old pack-local links must stay valid |
+| Workflow strategy comparison | `shared/references/workflow-strategy-comparison.md` | Pack-local diagrams and operating-model docs may link here directly |
+| Workflow strategy comparison (ru) | `shared/references/ru/workflow-strategy-comparison.md` | Same as above for Russian docs |
+| Subagent operating model core | `shared/references/subagent-operating-model.md` | Keep pack-local wrapper plus runtime/repository addendum |
+| Subagent operating model core (ru) | `shared/references/ru/subagent-operating-model.md` | Same as above for Russian docs |
+| Repository publication safety | `shared/references/repository-publication-safety.md` | Keep operational commands in root docs and runtime pack docs, not here |
+| Repository publication safety (ru) | `shared/references/ru/repository-publication-safety.md` | Same as above for Russian docs |
+
+Intentional pack-local exceptions:
+
+| Reference | Current home | Why it stays local for now |
+|-------|------|------|
+| Periodic control matrix | `references-codex/periodic-control-matrix.md`, `references-claude/periodic-control-matrix.md` and `ru` variants | Still depends on pack/runtime vocabulary, task-memory layout, and runtime-doc links; move it only after a generic shared skeleton exists |
 
 ## Codex-only sections (no Claude equivalent needed)
 
