@@ -1,14 +1,12 @@
-# Local repo-install output (created by install scripts, not committed)
+# Local install outputs and working copies
 /.agents/
-
-# Legacy local working install (still kept local, not committed)
 /.codex/
 /.claude/
 
-# Local-only scratch and legacy plan history.
+# Local-only scratch and planning state
 /.scratch/
 /.plans/
 /work-items/
 
-# Plugin/tool local state
+# Tool and plugin local state
 /.serena/

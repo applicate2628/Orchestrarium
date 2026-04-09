@@ -1,149 +1,100 @@
 # Installation
 
-This repo contains the Orchestrarium skill-pack source in `src.codex/`. Install scripts copy it into the correct target locations. The target structure depends on the install mode.
+This monorepo ships two pack-specific installers plus two root router installers. The root `install.sh` and `install.ps1` scripts prompt for Codex, Claude Code, or both, then forward the same arguments unchanged to the matching pack-specific installers.
 
-## Quick install — current machine (global)
+## Quick install
 
-```powershell
-# PowerShell (Windows)
-.\install-codex.ps1 -Global
-```
+Run the router installer from the repository root:
 
 ```bash
-# Bash (macOS / Linux / Git Bash)
-bash install-codex.sh --global
+bash install.sh --global
 ```
-
-Global install copies everything into `~/.codex/` (mirrors `src.codex/` structure).
-
-## Install into a specific repo
 
 ```powershell
-.\install-codex.ps1 -Target "D:\my-repo"
+.\install.ps1 -Global
 ```
+
+Or install into a specific project:
 
 ```bash
-bash install-codex.sh --target /path/to/repo
+bash install.sh --target /path/to/project
 ```
-
-Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and keeps consultant toggle state in `.agents/.consultant-mode`.
-
-## Install into current repo (default)
 
 ```powershell
-.\install-codex.ps1
+.\install.ps1 -Target "D:\path\to\project"
 ```
 
-```bash
-bash install-codex.sh
+The router asks which pack to install:
+
+```text
+What to install?
+  1) Codex (Orchestrarium)
+  2) Claude Code (Claudestrator)
+  3) Both
 ```
 
-## Install target mapping
+For `Both`, the router reuses the same forwarded arguments for both pack-specific installers.
 
-| Source | Global (`--global`) | Repo-level (default / `--target`) |
-| --- | --- | --- |
-| `src.codex/skills/` | `~/.codex/skills/` | `.agents/skills/` |
-| `src.codex/skills/lead/scripts/` | `~/.codex/skills/lead/scripts/` | `.agents/skills/lead/scripts/` |
-| `src.codex/AGENTS.md` | Merge into `~/.codex/AGENTS.md` | Merge into root `AGENTS.md` |
+## Codex install details
 
-The scripts handle clean removal of old files, copying, AGENTS.md merging, and file-level verification. Re-running = reinstall.
+Use `install-codex.sh` or `install-codex.ps1` when you want the Codex pack directly.
 
-Second-opinion toggle state is always project-local at `.agents/.consultant-mode`, even when the skill pack itself is installed globally.
+| Command | Result |
+| --- | --- |
+| `bash install-codex.sh --global` | Installs into `~/.codex/` |
+| `bash install-codex.sh --target /path/to/project` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
+| `.\install-codex.ps1 -Global` | Installs into `~/.codex/` |
+| `.\install-codex.ps1 -Target "D:\path\to\project"` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
 
-Project policies are configured as a `## Project policies` section in the target `AGENTS.md`, not as a separate directory. See `skills/lead/policies-catalog.md` for available policy options.
+Notes:
 
-## File separation
+- Project-level Codex installs use `.agents/skills/` plus the project root `AGENTS.md`.
+- The second-opinion toggle remains project-local at `.agents/.consultant-mode`.
+- Validation command: `bash src.codex/skills/lead/scripts/validate-skill-pack.sh`.
 
-| Directory | Contents | Installable? |
-| --- | --- | --- |
-| `src.codex/skills/<role>/SKILL.md` | 31 role definitions + 1 utility skill | Yes |
-| `src.codex/skills/<role>/agents/openai.yaml` | Display metadata and default prompt | Yes |
-| `src.codex/skills/lead/` | Operating-model notes, handoff contracts | Yes |
-| `src.codex/skills/consultant/` | Consultant role: toggle logic, execution paths, inline Claude CLI invocation | Yes |
-| `src.codex/skills/second-opinion/` | Consultant toggle and explicit invocation | Yes |
-| `src.codex/skills/lead/scripts/` | Publication safety scan, validation | Yes |
-| `src.codex/skills/lead/policies-catalog.md` | Policy options reference (installed with skills) | Yes |
-| `src.codex/AGENTS.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
-| `references-codex/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
+## Claude Code install details
 
-## Post-install
+Use `install-claude.sh` or `install-claude.ps1` when you want the Claude Code pack directly.
 
-The pack is self-contained. No files from this development repository's root are needed at runtime.
+| Command | Result |
+| --- | --- |
+| `bash install-claude.sh --global` | Installs into `~/.claude/` |
+| `bash install-claude.sh --target /path/to/project` | Installs into the target project's `.claude/` |
+| `.\install-claude.ps1 -Global` | Installs into `~/.claude/` |
+| `.\install-claude.ps1 -Target "D:\path\to\project"` | Installs into the target project's `.claude/` |
 
-### How Codex discovers governance and config
+Notes:
 
-Codex reads two kinds of project-level files:
+- Project-level Claude installs create or update `.claude/AGENTS.md` and `.claude/CLAUDE.md`.
+- Claude memory is shipped in `src.claude/memory/` and preserved across reinstalls by the existing installer behavior.
+- Validation command: `bash src.claude/agents/scripts/validate-skill-pack.sh`.
 
-**`AGENTS.md` (governance — rules, delegation, hygiene):**
-- Codex searches from project root **down** to the current working directory
-- One file per directory; `AGENTS.override.md` takes priority over `AGENTS.md` in the same directory
-- Content closer to cwd appears later in prompt and effectively overrides earlier content
-- `.codex/AGENTS.md` or `.agents/AGENTS.md` are **NOT** read — Codex only reads `AGENTS.md` in directories on the root→cwd path
-- The install script places the pack `AGENTS.md` in the project root — this is the only location Codex will read it from
+## Dual-platform setup
 
-**`.codex/config.toml` (configuration — model, sandbox, approval policy):**
-- Global: `~/.codex/config.toml`
-- Project: `<project>/.codex/config.toml` (read only if the project is trusted)
-- Closest to cwd wins
-- Use for: model overrides, sandbox mode, approval policy, MCP servers — not for governance rules
+To install both packs into the same target project, either choose `3) Both` in the router or run both pack-specific installers with the same target arguments.
 
-### Repo-local customization
+Expected project-level result:
 
-Add project-specific rules **below** the installed Orchestrarium section in root `AGENTS.md`:
-
-- canonical paths and source-of-truth references
-- allowed toolchains, shells, build systems, and concrete build/test commands
-- API, config, schema, and migration evolution rules
-- rollback expectations, rollout rules, and project-specific budgets or SLAs
-- repository-specific portability assumptions
-- configured task-memory directory and recovery policy
-- project policies (see `skills/lead/policies-catalog.md` for options)
-
-The installed pack occupies the top of `AGENTS.md`. Your project-specific rules go below it. On reinstall, the pack section is replaced; your rules below it are preserved. Content lower in the file has higher effective priority — your project rules override pack defaults where they conflict.
-
-### Dual-platform projects (Codex + Claude Code)
-
-If both Orchestrarium and Claudestrator are installed in the same project:
-
-```
+```text
 project/
-  AGENTS.md           ← Orchestrarium (shared + Codex-specific, read by Codex)
+  AGENTS.md
+  .agents/
+    skills/
   .claude/
-    AGENTS.md         ← Claudestrator shared governance (read by Claude Code via @import)
-    CLAUDE.md         ← @AGENTS.md + Claude-specific rules
+    AGENTS.md
+    CLAUDE.md
 ```
 
-Shared governance (hygiene rules, delegation principles, role index) is duplicated in both locations because Codex and Claude Code read from different paths. Both are generated from the same `AGENTS.shared.md` source, so content stays in sync across reinstalls.
+Reference directories are development-only and are not installed:
 
-To add project-specific rules that apply to both platforms:
-1. Add rules to root `AGENTS.md` (below the pack section) — Codex reads them directly
-2. Claude Code reads `.claude/CLAUDE.md` which imports `.claude/AGENTS.md` — to add project rules for Claude Code, edit `.claude/CLAUDE.md` below the pack section
+- `references-codex/`
+- `references-claude/`
 
-## Portability
+## Post-install customization
 
-### Claude CLI invocation
+Customize each platform in the place that platform actually reads:
 
-`consultant/SKILL.md` includes Claude CLI invocation examples for both macOS/Linux and Windows.
+- Codex: append project-specific rules below the installed section in the project root `AGENTS.md`.
+- Claude Code: append project-specific rules below the installed section in `.claude/CLAUDE.md`.
 
-- **macOS / Linux**: uses `claude` directly.
-- **Windows**: uses `cmd.exe /c claude.exe` (or `claude.cmd` as fallback) to work inside Git Bash environments where Codex typically runs.
-
-If your environment differs, update the invocation commands in the installed `skills/consultant/SKILL.md` under "Execution paths".
-
-### Temporary files
-
-The installed `AGENTS.md` refers to "the designated local temp area" for scratch files. Configure this per your project's conventions (e.g., a gitignored `.scratch/` directory, a RAM disk, or your OS temp folder).
-
-## Uninstall
-
-### Repo-level
-```bash
-rm -rf .agents/
-# Remove the Orchestrarium section from AGENTS.md manually
-```
-
-### Global
-```bash
-rm -rf ~/.codex/skills/
-# Remove the Orchestrarium section from ~/.codex/AGENTS.md manually
-```
+When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
