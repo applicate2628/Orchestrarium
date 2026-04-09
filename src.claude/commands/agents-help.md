@@ -13,7 +13,7 @@ Display a comprehensive overview of the skill-pack for the user.
 | Command | Purpose |
 | --- | --- |
 | `/agents-help` | This overview |
-| `/agents-review` | Code review current changes (analyst → QA → reviewer) |
+| `/agents-review` | Full repo-impact review from current changes or a specified target (analyst → QA → reviewer) |
 | `/agents-bugfix` | Fix a bug (analyst → implementer → QA) |
 | `/agents-test` | Write or verify tests for specified code |
 | `/agents-research` | Investigate a question (analyst → architect) |

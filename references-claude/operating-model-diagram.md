@@ -129,7 +129,7 @@ flowchart TB
 Notes:
 
 - `knowledge-archivist` is cross-cutting hygiene, usually invoked outside the main feature phase.
-- `consultant` is advisory-only and never a required delivery gate.
+- `consultant` is advisory-only and never becomes a reviewer or approver; ordinary consultant use is optional, and completed lead-managed batches still end with one final external consultant-check before closure.
 
 ## 8. Claims chain
 

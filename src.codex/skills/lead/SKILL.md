@@ -16,7 +16,10 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
    - Lead CANNOT proceed to step 2 until `$knowledge-archivist` returns a completeness audit when task memory is in use.
    - **Admission source (ENFORCED):** every `roadmap.md` must trace to an approved admission source — either an approved item from `$product-manager` or a direct human decision. Lead CANNOT generate a roadmap item on its own authority. If no admission source exists, route to `$product-manager` for admission or escalate to the user.
 2. **Classify** the request: cosmetic | additive | behavioral | breaking-or-cross-cutting
-3. **Restore or create**: `roadmap.md`, `brief.md`, `status.md` in the configured task-memory directory, if the repository uses one
+3. **Restore or create lead-owned task memory only**: `roadmap.md`, `brief.md`, `status.md` in the configured task-memory directory, if the repository uses one
+   - Restore from persisted accepted artifacts and the repository-defined recovery sources only.
+   - Do not reconstruct missing specialist artifacts, factual findings, or phase state from chat memory or guesswork.
+   - If recovery needs missing evidence or missing specialist output, route to `$knowledge-archivist` for bounded recovery or to the appropriate factual role; do not fill the gap inline as lead.
 4. **Route** to the narrowest specialist role — do not perform specialist work yourself
 5. **Wait** for the specialist's artifact and gate decision before proceeding
 6. **Close** the specialist session once the artifact is accepted
@@ -35,7 +38,7 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 - Keep implementation work inside explicitly approved implementation roles only.
 - Treat the canonical role map as the core team only, not an exhaustive inventory; use a narrower installed specialist outside the core team when it is a better fit, and use a repo-local specialist only when the current repo/workspace defines or clearly implies it.
 - Detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers, and escalate one clear recommendation: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need.
-- Use `$consultant` only as an optional independent second opinion, never as a required pipeline stage.
+- Keep `$consultant` advisory-only and non-approving. Every completed lead-managed task-batch must still end with one external consultant-check before the lead marks the batch closed.
 - Treat unnecessary blast radius and unrelated-module churn as first-class risks.
 
 ## Canonical brief
@@ -44,6 +47,7 @@ Maintain one source of truth for the task in the lead lane. Keep it concise and 
 
 The canonical brief should capture:
 
+- primary in-progress task and whether any side task is temporarily interrupting it
 - roadmap source item or admission decision, if one exists
 - business or user goal
 - scope and out-of-scope boundaries
@@ -56,7 +60,7 @@ The canonical brief should capture:
 - required roles and mandatory reviewers
 - any non-core installed or repo-local specialist selected, if applicable
 - explicit integration owner, if the work spans multiple implementation phases or specialists
-- optional consultant usage, if any
+- batch-close consultant-check status and any additional optional consultant usage, if any
 - current stage, next stage, and open blockers
 
 ## Task-memory rule
@@ -66,6 +70,7 @@ The canonical brief should capture:
 - Before implementation or review begins, ensure `plan.md` and the required upstream artifacts exist or are explicitly linked from the item folder or the repository's configured task-memory path.
 - If the current stage needs an upstream artifact such as `research.md`, `design.md`, `constraints/*.md`, `plan.md`, or a required review report and that artifact is missing or stale, stop and restore it or route the item back to the correct upstream role.
 - After every accepted artifact, interruption, or major routing change, update `status.md` so the next session can resume without relying on chat memory when task memory is configured.
+- On resume after interruption, refresh only lead-owned task-memory state from accepted persisted artifacts. Do not recreate missing specialist artifacts or infer missing facts from session memory; route to `$knowledge-archivist` or the proper factual role instead.
 - If task memory is missing or stale, stop and restore it instead of improvising from session memory when task memory is in use.
 - `closure.md` is mandatory before moving an item to the configured archive location. It holds the final closeout record: outcome, residual risk, and archive location.
 
@@ -100,9 +105,9 @@ The canonical brief should capture:
 7. Human or CI gate
    - Output: explicit human approval, CI status, or documented external blocker.
    - For publication, `$lead` runs the publication-safety scan and `$knowledge-archivist` is the default publication-gate approver; the approver must be a different role than the role that accepted the artifact into the pipeline.
-8. Optional advisory consultation
+8. Batch-close external consultant-check
    - Role: `$consultant`
-   - Output: one non-binding advisory memo when the lead explicitly asks for a second opinion.
+   - Output: one non-binding advisory memo that performs a final missed-change and residual-risk sweep, then ends with an explicit reusable second prompt for continuing the work.
 
 Roadmap ownership stays upstream of the lead lane. The lead consumes approved roadmap or intake output; it does not own global prioritization or portfolio sequencing by default.
 
@@ -136,6 +141,9 @@ Use the templates in [subagent-contracts.md](subagent-contracts.md) for concrete
 - Use delegation itself as a noise filter: pass accepted artifacts instead of raw transcripts, keep interpretive roles downstream of evidence, and keep bounded corrections local to the current role.
 - Keep lead work limited to canonical brief maintenance, role selection, sequencing, gate decisions, and status synthesis.
 - Only do role-work directly when the task is trivial, purely coordinative, or there is no suitable specialist role.
+- If a worker handoff was interrupted and no artifact was produced, do not compensate by gathering code facts or drafting the missing artifact inline. Re-dispatch the same role with a narrower slice or route to `$analyst` / the appropriate factual role.
+- Maintain exactly one primary in-progress task. Side clarifications may refine it or temporarily interrupt it, but do not replace it unless the user explicitly reprioritizes.
+- If the primary task is a full-impact review or verification pass, keep that task open until a review artifact is produced; do not treat side clarification as completion or replacement of the review.
 - If the lead performs role-work by default, it has stopped acting as a lead and has become a generalist agent.
 
 ## Fact-first rule
@@ -184,7 +192,7 @@ Require every pipeline subagent to end with exactly one gate status:
 
 Do not advance work on optimism or partial acceptance.
 
-`$consultant` is the explicit exception: it returns advisory input, not a pipeline gate.
+`$consultant` is the explicit exception: it returns advisory input, not a pipeline gate. A completed lead-managed batch is not considered closed until its external consultant-check memo is recorded.
 
 ## Rolling-loop rule
 
@@ -198,6 +206,7 @@ Do not advance work on optimism or partial acceptance.
 - Prefer continuous phase-by-phase flow with minimal handoff latency.
 - Do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 - Keep the next approved role ready whenever the current gate is likely to pass so the pipeline can keep moving.
+- After any side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
 
 ## Session lifecycle rule
 
@@ -252,6 +261,7 @@ Do not advance work on optimism or partial acceptance.
 - When an accepted upstream artifact is materially revised, mark dependent downstream artifacts for re-review before progression resumes.
 - At minimum, preserve the roadmap decision package, canonical brief, status log, accepted design decisions, phase plan, and review outcomes.
 - Require external human or CI gates whenever team policy demands them.
+- Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task.
 
 Detailed routing, stage gates, and artifact guidance live in [operating-model.md](operating-model.md).
 
@@ -263,7 +273,7 @@ If the user is asking what should be worked on, what should be prioritized next,
 
 If delivery discovers that the admitted item itself has changed materially, route back to `$product-manager` for re-intake instead of letting the change drift sideways inside the delivery lane.
 
-Invoke `$consultant` only when the lead wants a second opinion on ambiguity, tradeoffs, or cross-cutting concerns that are not well covered by the current specialist lane. The consultant never replaces a required stage or reviewer.
+Invoke `$consultant` when the lead wants a second opinion on ambiguity, tradeoffs, or cross-cutting concerns that are not well covered by the current specialist lane, and always for the final external consultant-check that closes a completed lead-managed batch. The consultant never replaces a required reviewer or approver.
 
 ## Using Consultant
 
@@ -272,12 +282,14 @@ Invoke `$consultant` only when the lead wants a second opinion on ambiguity, tra
 Lead rules for `$consultant`:
 
 - Use it for hard planning or complex workspace-modifying tasks when an independent view is helpful.
+- Every completed lead-managed task-batch must end with one external consultant-check before the lead marks the batch closed, even if the consultant was not used earlier in the batch.
 - Ask for discussion first, then compare options, and only then ask for a saved plan if a plan is needed.
 - Do not use it for trivial tasks, routine git or admin work, or ordinary read-only investigation.
 - If the selected execution path is an external provider, use the documented `stdin` invocation pattern and do not rely on multiline command-line arguments or TTY.
 - Wait about 5 to 15 minutes before treating an external-provider run as stalled, and avoid starting a parallel fresh chat while one may still be running.
-- If the external-provider run fails, times out, or hits quota or auth limits, record that in the plan file and continue with an independent internal subagent consultant using the same advisory-only contract.
+- If the external-provider run fails, times out, or hits quota or auth limits, record that in the plan file. For ordinary optional consultant usage, continue with an independent internal subagent consultant using the same advisory-only contract when the current mode allows it. For the mandatory batch-close external consultant-check, do not close the batch on internal fallback; escalate to the user instead.
 - When mode is `external`, do not approve fallback to internal without user confirmation. When mode is `auto`, fallback is automatic but must be disclosed in the memo header.
+- Require the consultant-check memo to end with a ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action.
 
 ## Non-goals
 

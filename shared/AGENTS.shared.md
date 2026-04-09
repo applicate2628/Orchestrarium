@@ -26,7 +26,7 @@ This file contains platform-neutral governance rules shared across skill packs. 
 - assign one explicit integration owner before QA whenever a change spans multiple implementation phases or specialists; that owner must assemble one coherent integrated artifact and check cross-phase compatibility before verification
 - give each delegated task only approved inputs, minimal context, limited tools, one expected artifact, explicit acceptance criteria, and an explicit gate to the next stage
 - stop progression when a quality gate fails
-- treat `$consultant` as an optional independent advisory team member only, never as a required pipeline stage or blocking reviewer
+- treat `$consultant` as an independent advisory team member only: ordinary consultant use stays optional, it never becomes a blocking reviewer or approver, and any repo-local required consultant-check remains advisory-only rather than a substitute for review or human gates
 - treat `$external-worker` as the external execution adapter for eligible `Implement` roles; it inherits the assigned internal implementer role for provenance and scope, but remains eligible across the whole implement lane
 - treat `$external-reviewer` as the external execution adapter for eligible `Review` and `QA` roles; it inherits the assigned internal reviewer or QA role for provenance and scope
 - keep `$external-worker` out of planning, QA, review, and orchestration work
@@ -47,7 +47,11 @@ Delegation should reduce noise, not spread it. That means:
 - use `BLOCKED` only for real external blockers, missing decisions, or unavailable prerequisites
 - do not let downstream roles silently redefine upstream artifacts when evidence is thin
 - never guess or assume facts about the codebase, file contents, or system behavior — always verify by reading or searching before stating or acting on a claim
+- maintain exactly one primary in-progress task at a time; side requests may refine it or temporarily interrupt it, but do not replace it unless the user explicitly reprioritizes
 - do not silently drop interrupted tasks: if a side request (clarification, quick fix, lookup) interrupts an in-progress task, resume and complete the original task after the side request is handled — unless the user explicitly cancels or reprioritizes it; announce the resumption so the user knows where you are
+- after handling any side request, explicitly resume the primary task and state the next concrete step before doing unrelated work
+- treat an active full-impact review or verification task as non-preemptible by side clarification: clarifications may refine the review criteria, but do not replace the review itself
+- do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task
 
 ## Engineering hygiene
 
@@ -136,12 +140,29 @@ Do not force into global:
 
 ## Artifact persistence
 
-- `.reports/YYYY-MM/` — session logs, review reports, advisory memos. Naming: `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
-- `.plans/YYYY-MM/` — delivery plans, phase plans. Naming: `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
-- `work-items/` — canonical tracked task memory (briefs, status, research, design, plans, reviews, closures). Structure defined by the lead and knowledge-archivist roles.
+Three storage tiers with distinct purposes:
+
+- `work-items/` — **canonical artifacts** (briefs, status, research, design, plans, reviews, closures). Structure defined by the lead and knowledge-archivist roles. This is the source of truth for tracked task memory.
+- `.reports/YYYY-MM/` — **session logs**. Naming: `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`. A session log is a brief record of what happened: who was invoked, what was asked, key decisions made, outcome, and any follow-ups. It is NOT a copy of the canonical artifact.
+- `.plans/YYYY-MM/` — **plan snapshots**. Naming: `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`. Saved when a plan is created or materially revised.
+
+### Session logging rule (mandatory)
+
+Every participant — main conversation, lead, or subagent — MUST write a session log to `.reports/YYYY-MM/` when the session produced a result, made a routing decision, or completed a review. Create the `YYYY-MM/` subdirectory if it does not exist.
+
+A session log contains:
+- One-paragraph summary: what was asked, what was done, key decisions, outcome (`PASS`/`REVISE`/`BLOCKED`/advisory)
+- Participants involved (roles invoked or consulted)
+- Pointer to canonical artifact if one was produced (path in `work-items/`)
+- Follow-ups or open items, if any
+
+If the session also created or revised a plan, save a plan snapshot to `.plans/YYYY-MM/` in addition to the session log.
+
+### Anti-patterns
+
 - Do not persist intermediate REVISE drafts — only the final accepted version.
 - Do not persist raw session transcripts or debug logs in canonical storage.
-- Do not duplicate an artifact across tiers — choose the primary tier and link from others if needed.
+- Do not duplicate an artifact across tiers — the canonical artifact lives in `work-items/`; the session log in `.reports/` is a summary, not a copy.
 
 ## Publication safety
 

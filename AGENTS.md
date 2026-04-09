@@ -31,7 +31,7 @@ Use these roles first for skill-pack support and maintenance:
 - `$architecture-reviewer`: maintainability and cohesion gate for structural or semantic control-plane changes to the pack
 - `$external-worker`: cross-provider implementation adapter for eligible implementer roles; preference comes from `.agents/.consultant-mode` or explicit user routing
 - `$external-reviewer`: cross-provider review and QA adapter for eligible reviewer roles; preference comes from `.agents/.consultant-mode` or explicit user routing
-- `$consultant`: optional independent second opinion for ambiguous workflow or policy changes
+- `$consultant`: independent advisory second opinion for ambiguous workflow or policy changes; ordinary use is optional, and completed lead-managed batches end with one external consultant-check before closure
 - `$product-manager`: roadmap, sequencing, and admission decisions for the skill pack itself
 
 ## Repository task memory

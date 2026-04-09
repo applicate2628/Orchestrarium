@@ -38,6 +38,8 @@ Classify the task and select the matching workflow shape. Simple chains do not r
 
 When the template says "No" for lead, the main conversation manages the chain directly: invoke specialists sequentially, pass each accepted artifact to the next role. Re-classify immediately if scope widens beyond the current template.
 
+For a direct full repository impact review of recent changes, use `$review-changes`. It starts from the current local diff or a specified review target, but checks the wider affected surface, including unchanged dependents and adjacent logic.
+
 A bugfix with a known file or function maps to the `quick-fix` template by default, even if adjacent issues are discovered during analysis. Adjacent issues go to the configured bug registry path, not into the current plan.
 
 ## Recovery rule

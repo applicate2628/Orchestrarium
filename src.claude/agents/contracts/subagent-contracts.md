@@ -53,7 +53,7 @@ A lead MUST NOT delegate work until the work-item folder contains a verified `br
 
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
 - `status.md` must follow the format below and be updated after every stage transition, agent launch, or interruption.
-- If either artifact is missing, stale, or incomplete, the lead restores them BEFORE delegating any specialist role.
+- If either artifact is missing, stale, or incomplete, the lead restores only the lead-owned task-memory state from persisted accepted artifacts BEFORE delegating any specialist role. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
 - The only exception is the additive fast lane where the lead records the decision in status.md instead.
 
 ### status.md format
@@ -68,6 +68,9 @@ updated: <YYYY-MM-DD HH:MM>
 
 ## Current state
 
+- **Primary task**: <one active objective, e.g. "full-impact review of current change set">
+- **Primary task status**: <active | side-interrupted | parked | closed>
+- **Interruption marker**: <none | INTERRUPTED(no-artifact)>
 - **Stage**: <current stage name or number>
 - **Main conv role**: <what main conversation is doing: orchestrating | waiting for agents | reviewing artifact | idle>
 - **Last accepted artifact**: <filename or "none">
@@ -101,6 +104,13 @@ updated: <YYYY-MM-DD HH:MM>
 
 The REVISE loop section is optional — include it only when a stage has returned REVISE and the loop is active. Remove it when the loop resolves (PASS or escalation).
 
+No-artifact interruption rule:
+- A handoff interrupt or worker stall without an artifact does not count as a substantive REVISE artifact.
+- Set `Primary task status: side-interrupted` and `Interruption marker: INTERRUPTED(no-artifact)` in `status.md` for orchestrator bookkeeping.
+- Keep the stage open, and either rerun the same role with a tighter slice or route to the proper factual role.
+- The lead must not synthesize the missing artifact or replace missing factual work inline.
+- If the interrupted stage belongs to a full-impact review or verification pass, keep that review as the primary task until a review artifact is emitted or the user explicitly parks/cancels it.
+
 ## Response format
 
 ```text
@@ -113,7 +123,8 @@ The REVISE loop section is optional — include it only when a stage has returne
 
 - When a role makes a decision, it should clearly distinguish confirmed facts, assumptions, and judgment.
 - If the main gap is missing evidence, recommend the appropriate factual role instead of escalating into opinion.
-- `$consultant` replaces the Gate line with `5. Advisory status: NON-BLOCKING`.
+- `$consultant` replaces the Gate line with `5. Advisory status: NON-BLOCKING` and appends `6. Continuation prompt: <ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action>`.
+- Ordinary optional consultant usage may still follow the configured fallback policy, but the mandatory batch-close external consultant-check may not silently downgrade to an internal-only run. If external execution is unavailable, batch closure stays open and the lead escalates to the user.
 - `external-worker` and `external-reviewer` keep the standard gate line, but their artifact must also carry the external provenance header from `external-dispatch.md`.
 
 ### BLOCKED classification
@@ -145,6 +156,10 @@ If no class is specified, treat as `BLOCKED:dependency` (conservative default).
 | Contract-change test updates | Implementer | When QA classifies a failure as `contract-change` — the implementer who changed the behavior updates the tests |
 
 If the plan specifies a different test ownership split, follow the plan. This table is the default when no plan-level override exists.
+
+## Session logging
+
+Every subagent MUST write a session log to `.reports/YYYY-MM/` before returning its final response when the session produced a result, made a routing decision, or completed a review. This rule applies equally to the main conversation and lead — see `AGENTS.md` § "Session logging rule" for the full contract and log format. Create the `YYYY-MM/` subdirectory if it does not exist. Session logs are summaries, not artifact copies.
 
 ## Structured completion report
 

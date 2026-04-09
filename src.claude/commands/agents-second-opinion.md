@@ -27,6 +27,7 @@ Get an independent second opinion via the consultant agent.
    - Major tradeoffs
    - Key risks
    - Confidence level
+   - Continuation prompt — a ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action
 
 4. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
    - If part of an active work-item → `work-items/active/<slug>/advisory.md`

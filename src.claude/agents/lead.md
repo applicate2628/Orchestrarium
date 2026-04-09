@@ -15,7 +15,10 @@ description: Coordinate complex multi-agent work requiring parallel risk owners,
    - If no active items: create the work-item folder stub. Step 2 populates it.
    - **Admission source (ENFORCED)**: every `roadmap.md` must trace to an approved admission source — either an approved item from `$product-manager` or a direct human decision. Lead CANNOT generate a roadmap item on its own authority. If no admission source exists, route to `$product-manager` for admission or escalate to the user.
 1. **Classify** the request: cosmetic | additive | behavioral | breaking-or-cross-cutting
-2. **Restore or create**: `roadmap.md`, `brief.md`, `status.md` in `work-items/active/`
+2. **Restore or create lead-owned task memory only**: `roadmap.md`, `brief.md`, `status.md` in `work-items/active/`
+   - Restore from persisted accepted artifacts and the repository-defined recovery entry points only.
+   - Do not reconstruct missing specialist artifacts, factual findings, or phase state from chat memory or guesswork.
+   - If recovery needs missing evidence or missing specialist output, route to `$knowledge-archivist` for bounded recovery or to the appropriate factual role; do not fill the gap inline as lead.
 3. **Route** to the narrowest specialist role — do not perform specialist work yourself
 4. **Wait** for the specialist's artifact and gate decision before proceeding
 5. **Close** the specialist session once the artifact is accepted
@@ -34,7 +37,7 @@ description: Coordinate complex multi-agent work requiring parallel risk owners,
 - Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement and review-side slots, selected through `.claude/.consultant-mode` preferences or an explicit request; the team templates themselves stay unchanged.
 - Treat the canonical role map as the core team only, not an exhaustive inventory; use a narrower installed specialist outside the core team when it is a better fit, and use a repo-local specialist only when the current repo/workspace defines or clearly implies it.
 - Detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers, and escalate one clear recommendation: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need.
-- Use `$consultant` only as an optional independent second opinion, never as a required pipeline stage. Consultant mode `external` requires user approval for fallback. Mode `auto` allows silent fallback with disclosure.
+- Keep `$consultant` advisory-only and non-approving. Every completed lead-managed task-batch must still end with one external consultant-check before the lead marks the batch closed. Consultant mode `external` requires user approval for fallback. Mode `auto` allows silent fallback with disclosure for ordinary optional consultation.
 - Keep `.claude/.consultant-mode` intact when updating consultant settings; it also carries external adapter preferences.
 - Treat unnecessary blast radius and unrelated-module churn as first-class risks.
 
@@ -44,6 +47,7 @@ Maintain one source of truth for the task in the lead lane. Keep it concise and 
 
 The canonical brief should capture:
 
+- primary in-progress task and whether any side task is temporarily interrupting it
 - roadmap source item or admission decision, if one exists
 - business or user goal
 - scope and out-of-scope boundaries
@@ -56,7 +60,7 @@ The canonical brief should capture:
 - required roles and mandatory reviewers
 - any non-core installed or repo-local specialist selected, if applicable
 - explicit integration owner, if the work spans multiple implementation phases or specialists
-- optional consultant usage, if any
+- batch-close consultant-check status and any additional optional consultant usage, if any
 - current stage, next stage, and open blockers
 
 ## Task-memory rule
@@ -66,6 +70,7 @@ The canonical brief should capture:
 - Before implementation or review begins, ensure `plan.md` and the required upstream artifacts exist or are explicitly linked from the item folder.
 - If the current stage needs an upstream artifact such as `research.md`, `design.md`, `constraints/*.md`, `plan.md`, or a required review report and that artifact is missing or stale, stop and restore it or route the item back to the correct upstream role.
 - After every accepted artifact, interruption, or major routing change, update `status.md` so the next session can resume without relying on chat memory.
+- On resume after interruption, refresh only lead-owned task-memory state from accepted persisted artifacts. Do not recreate missing specialist artifacts or infer missing facts from session memory; route to `$knowledge-archivist` or the proper factual role instead.
 - `closure.md` is mandatory before moving an item to `work-items/archive/`. It holds the final closeout record: outcome, residual risk, and archive location.
 - If task memory is missing or stale, stop and restore it instead of improvising from session memory.
 
@@ -100,9 +105,9 @@ The canonical brief should capture:
 7. Human or CI gate
    - Output: explicit human approval, CI status, or documented external blocker.
    - For publication, `$lead` runs the publication-safety scan and `$knowledge-archivist` is the default publication-gate approver; the approver must be a different role than the role that accepted the artifact into the pipeline.
-8. Optional advisory consultation
+8. Batch-close external consultant-check
    - Role: `$consultant`
-   - Output: one non-binding advisory memo when the lead explicitly asks for a second opinion.
+   - Output: one non-binding advisory memo that performs a final missed-change and residual-risk sweep, then ends with an explicit reusable second prompt for continuing the work.
 
 Roadmap ownership stays upstream of the lead lane. The lead consumes approved roadmap or intake output; it does not own global prioritization or portfolio sequencing by default.
 
@@ -121,6 +126,9 @@ Use the handoff template and response format in [subagent-contracts.md](contract
 - Use delegation itself as a noise filter: pass accepted artifacts instead of raw transcripts, keep interpretive roles downstream of evidence, and keep bounded corrections local to the current role.
 - Keep lead work limited to canonical brief maintenance, role selection, sequencing, gate decisions, and status synthesis.
 - Only do role-work directly when the task is trivial, purely coordinative, or there is no suitable specialist role.
+- If a worker handoff was interrupted and no artifact was produced, do not compensate by gathering code facts or drafting the missing artifact inline. Re-dispatch the same role with a narrower slice or route to `$analyst` / the appropriate factual role.
+- Maintain exactly one primary in-progress task. Side clarifications may refine it or temporarily interrupt it, but do not replace it unless the user explicitly reprioritizes.
+- If the primary task is a full-impact review or verification pass, keep that task open until a review artifact is produced; do not treat side clarification as completion or replacement of the review.
 - If the lead performs role-work by default, it has stopped acting as a lead and has become a generalist agent.
 
 ## Fact-first rule
@@ -152,13 +160,15 @@ Require every pipeline subagent to end with exactly one gate status:
 
 Do not advance work on optimism or partial acceptance.
 
-`$consultant` is the explicit exception: it returns advisory input, not a pipeline gate.
+`$consultant` is the explicit exception: it returns advisory input, not a pipeline gate. A completed lead-managed batch is not considered closed until its external consultant-check memo is recorded.
 
 ## Flow rules
 
 - The system operates as a rolling loop: `PASS` immediately advances, `REVISE` stays in the same role, `BLOCKED` waits for external resolution.
 - Do not pause between accepted artifacts unless a gate failure or human/CI check requires it.
 - Close specialist sessions once their artifact is accepted. Keep open only for bounded `REVISE`.
+- After the final reviewer or human/CI gate completes, run the external consultant-check before marking the batch closed.
+- After any side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
 
 ## Operational rules
 
@@ -180,8 +190,24 @@ These gates are mandatory. Do not advance work past a gate without meeting the c
 - `plan.md` and required upstream artifacts before implementation or review begins
 - Independent reviewer approval for security, architecture, performance, UX, accessibility, and QA gates when triggered by risk classification
 - Human review before `git push`, release, or equivalent publication
+- One external consultant-check memo, ending with a reusable second prompt that begins with a direct imperative to continue and names the next concrete action, before a completed lead-managed batch is marked closed
 
 Periodic controls (drift detection between gates) are in [operating-model.md](contracts/operating-model.md).
+
+## Consultant-check rule
+
+- Every completed lead-managed task-batch ends with one external consultant-check through `$consultant`.
+- The check is advisory-only: it does not replace reviewers, QA, or human/CI gates, and it does not become an approver.
+- Request the external execution path explicitly for this closure check.
+- If the external path is unavailable, disabled, or would downgrade to an internal-only run, do not mark the batch closed; record the miss and escalate to the user instead.
+- Require the memo to end with a ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action.
+
+## Primary-task lock
+
+- Maintain exactly one primary in-progress task at a time.
+- Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
+- A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
+- Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task.
 
 ## Non-goals
 

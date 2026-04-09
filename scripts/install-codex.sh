@@ -463,6 +463,48 @@ install_skill() {
   fi
 }
 
+ensure_reports_gitignore() {
+  local project_root="$1"
+  local gitignore="$project_root/.gitignore"
+
+  if [[ -f "$gitignore" ]]; then
+    if grep -Fxq "/.reports/" "$gitignore" || grep -Fxq ".reports/" "$gitignore"; then
+      echo "  .gitignore: /.reports/ already present"
+      return
+    fi
+  fi
+
+  echo "  Ensuring .gitignore ignores /.reports/..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if [[ -f "$gitignore" ]]; then
+      echo "    [dry-run] would append '/.reports/' to $gitignore"
+    else
+      echo "    [dry-run] would create $gitignore with '/.reports/'"
+    fi
+    return
+  fi
+
+  if [[ -f "$gitignore" ]] && [[ -s "$gitignore" ]]; then
+    printf '\n/.reports/\n' >> "$gitignore"
+  else
+    printf '/.reports/\n' > "$gitignore"
+  fi
+}
+
+remove_dangling_symlink() {
+  local path="$1"
+  local label="$2"
+
+  if [[ -L "$path" && ! -e "$path" ]]; then
+    echo "  Removing dangling symlink for $label..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would remove dangling symlink $path"
+    else
+      rm -f "$path"
+    fi
+  fi
+}
+
 echo "  Installing skills (per-skill, preserving user-added skills)..."
 if [[ ! -d "$SKILLS_TARGET" ]]; then
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -544,6 +586,8 @@ trap "rm -f '$src_md'" EXIT
 
 dst_md="$MD_TARGET"
 
+remove_dangling_symlink "$dst_md" "AGENTS.md"
+
 if [[ -f "$dst_md" ]]; then
   if grep -q "## Template routing" "$dst_md" 2>/dev/null; then
     if grep -qn "^# Default Delegation Rule" "$dst_md"; then
@@ -598,6 +642,10 @@ else
   fi
 fi
 
+if [ "$MODE" != "global" ]; then
+  ensure_reports_gitignore "$PROJECT_ROOT"
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
   echo "RESULT: DRY-RUN complete (no files modified)."
@@ -643,7 +691,7 @@ check_file "$SKILLS_TARGET/lead/scripts/validate-skill-pack.sh" "skills/lead/scr
 if [[ -f "$dst_md" ]]; then
   line_count=$(wc -l < "$dst_md")
   echo "  OK  AGENTS.md ($line_count lines)"
-  for section in "## Template routing" "## Role index" "## Global engineering hygiene" "## Publication safety"; do
+  for section in "## Template routing" "## Role index" "## Engineering hygiene" "## Publication safety"; do
     if grep -q "$section" "$dst_md"; then
       echo "  OK  AGENTS.md has '$section'"
     else

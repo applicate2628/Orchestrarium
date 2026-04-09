@@ -27,6 +27,21 @@ When lead coordinates, or when the main conversation needs to decide between rol
 3. **Parallel read-only**: research roles (analyst, product-analyst) can run in parallel. Write-heavy roles need explicit ownership boundaries.
 4. **Re-intake**: if the admitted item itself changed materially, route back to `product-manager`. Cap: 2 re-intakes; on the 3rd, escalate to user with all prior re-intake reasons and ask for a final decision (reduce scope, defer, or cancel).
 
+## Interrupted handoff recovery
+
+- A handoff interrupt or worker stall without an artifact is not a completed `REVISE` artifact.
+- Record the interruption in `status.md`, keep the stage open, and either re-dispatch the same role with a narrower slice or route to the proper factual role.
+- The lead must not synthesize the missing artifact or replace missing factual work inline.
+- On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
+
+## Primary-task lock
+
+- Maintain exactly one primary in-progress task at a time.
+- Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
+- After handling a side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
+- Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task.
+
 ## External adapter routing
 
 Claude-line keeps one shared local toggle file at `.claude/.consultant-mode`.
@@ -40,6 +55,17 @@ Claude-line keeps one shared local toggle file at `.claude/.consultant-mode`.
 - If the external CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work to another eligible path.
 - The adapter itself must not silently fall back to an internal specialist.
 - Mandatory security and performance gates remain internal in `security-sensitive` and `performance-sensitive` templates unless a separate approved policy says otherwise.
+
+## Batch-close consultant check
+
+For lead-managed work, every completed task-batch ends with one external consultant-check before closure.
+
+- The check uses `$consultant` as an advisory-only closure sweep; it does not replace reviewers, QA, or human/CI gates.
+- Request the external execution path explicitly for this closure check.
+- If the external path is unavailable, disabled, or would downgrade to an internal-only run, do not mark the batch closed; record the miss and escalate to the user instead.
+- The memo must end with both:
+  - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
+  - The continuation prompt must begin with a direct imperative to continue and name the next concrete action.
 
 ## Research admission filter
 
@@ -90,6 +116,7 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive and update index |
 | Governance alignment | `$knowledge-archivist` | Governance change | Propagate to all governance files in same commit |
 | Documentation sync | `$knowledge-archivist` | Skill, role, or template added/removed/renamed | Update README, INSTALL, install scripts per root CLAUDE.md checklists |
+| Batch-close consultant-check | `$lead` | Every completed lead-managed batch | Run the external consultant-check or keep the batch open and escalate |
 
 ## Non-obvious routing pairs
 
@@ -189,25 +216,27 @@ Every completed chain that produces an accepted artifact MUST persist it before 
 
 | Tier | Location | Purpose | Content |
 | --- | --- | --- | --- |
-| **Canonical** | `work-items/active/<slug>/` | Clean documentation for active work | `research.md`, `design.md`, `plan.md`, `review.md`, `report.md`, `status.md`, `brief.md` |
-| **Session log** | `.reports/YYYY-MM/` | What happened in each session | `report(<role>)-YYYY-MM-DD_HH-MM_topic.md` — intermediate results, session summaries |
-| **Plan log** | `.plans/YYYY-MM/` | Plan drafts and iterations | `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` — plan snapshots |
+| **Canonical** | `work-items/active/<slug>/` | Source of truth for active work | `research.md`, `design.md`, `plan.md`, `review.md`, `report.md`, `status.md`, `brief.md` |
+| **Session log** | `.reports/YYYY-MM/` | Brief record of what happened in each session | `report(<role>)-YYYY-MM-DD_HH-MM_topic.md` — summary, not a copy of the canonical artifact |
+| **Plan log** | `.plans/YYYY-MM/` | Plan snapshots when a plan is created or materially revised | `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` |
 
 `<role>` is the `subagent_type` that produced the artifact (e.g., `analyst`, `security-reviewer`, `planner`, `qa-engineer`).
 
 ### Where to save
 
-| Artifact type | Canonical (work-items) | Session log |
+| Artifact type | Canonical (work-items) | Session log (.reports/) |
 | --- | --- | --- |
-| Research memo | `work-items/active/<slug>/research.md` | `.reports/` copy for traceability |
-| Design artifact | `work-items/active/<slug>/design.md` | — |
-| Plan | `work-items/active/<slug>/plan.md` | `.plans/` copy for traceability |
-| Review report | `work-items/active/<slug>/review.md` | `.reports/` copy |
-| Security review | `work-items/active/<slug>/security-review.md` | `.reports/` copy |
-| Test report | `work-items/active/<slug>/test-report.md` | `.reports/` copy |
-| Advisory memo | `work-items/active/<slug>/advisory.md` | `.reports/` copy |
+| Research memo | `work-items/active/<slug>/research.md` | Session log entry summarizing findings |
+| Design artifact | `work-items/active/<slug>/design.md` | Session log entry if design session was non-trivial |
+| Plan | `work-items/active/<slug>/plan.md` | Plan snapshot in `.plans/YYYY-MM/` |
+| Review report | `work-items/active/<slug>/review.md` | Session log entry summarizing review outcome |
+| Security review | `work-items/active/<slug>/security-review.md` | Session log entry summarizing review outcome |
+| Test report | `work-items/active/<slug>/test-report.md` | Session log entry summarizing QA verdict |
+| Advisory memo | `work-items/active/<slug>/advisory.md` | Session log entry summarizing advisory |
 | Bug finding | `work-items/bugs/YYYY-MM-DD_slug.md` | — |
 | Performance issue | `work-items/performance/YYYY-MM-DD_slug.md` | — |
+
+Session logs are summaries pointing to canonical artifacts, not copies. See `AGENTS.md` § "Session logging rule" for the mandatory logging contract.
 
 **Standalone chains** (no active work-item): create a work-item folder if the result is worth preserving, or save to `.reports/` / `.plans/` only as a session log.
 
