@@ -17,11 +17,11 @@ When adding, renaming, or removing a skill (`src.claude/commands/agents-*.md`):
 3. Update `README.md` — add to the skills table
 4. Update `INSTALL.md` — update skill count
 5. Update `README.md` — update skill count
-6. Update `install.ps1` — update skill count threshold in verification
-7. Update `install.sh` — update skill count threshold in verification
+6. Update `install-claude.ps1` — update skill count threshold in verification
+7. Update `install-claude.sh` — update skill count threshold in verification
 8. Update `src.claude/agents/scripts/validate-skill-pack.sh` — add skill to validation list if not auto-discovered
 9. Run `/agents-validate` to confirm structural integrity
-10. Run `install.ps1 -Global` to install and verify
+10. Run `install-claude.ps1 -Global` to install and verify
 
 ## Role development checklist
 
@@ -47,11 +47,11 @@ When modifying `src.claude/CLAUDE.md`, `operating-model.md`, or `subagent-contra
 
 - These are the governance core. Changes propagate to all users on next install.
 - State explicitly what behavior changes and what is preserved.
-- **MUST** update `references/subagent-operating-model.md` and all `references/` docs when any governance, protocol, gate, or routing semantic changes in the installed pack. Reference docs are the canonical methodology source of truth — they MUST stay aligned with the installed contracts. A governance change that updates `src.claude/` without updating `references/` is incomplete.
+- **MUST** update `references-claude/subagent-operating-model.md` and all `references-claude/` docs when any governance, protocol, gate, or routing semantic changes in the installed pack. Reference docs are the canonical methodology source of truth — they MUST stay aligned with the installed contracts. A governance change that updates `src.claude/` without updating `references-claude/` is incomplete.
 - **MUST** update `README.md` and `INSTALL.md` when pack structure, skill count, install targets, or entry points change. A structural change without doc update is incomplete.
 - **No mechanical application:** do not copy, move, rename, merge, or propagate content mechanically — between packs, between files, or within the same file — without verifying that the result is correct in the target context. Platform-specific semantics (execution model, parallelism, invocation mechanism, paths, tool capabilities), ownership boundaries, and behavioral implications must be checked before the change lands. "The other pack has it" or "the source file said so" is not sufficient justification. Every change must be independently valid where it lands.
 - Run `/agents-validate` after changes.
-- Test install: `install.ps1 -Global` and verify CLAUDE.md sections.
+- Test install: `install-claude.ps1 -Global` and verify CLAUDE.md sections.
 
 ## File layout
 
@@ -67,8 +67,8 @@ src.claude/              ← skill-pack source (install copies to target .claude
 CLAUDE.md                ← THIS FILE (repo-local dev rules, NOT installed)
 README.md                ← public docs
 INSTALL.md               ← install instructions
-install.ps1              ← PowerShell installer
-install.sh               ← Bash installer
+install-claude.ps1              ← PowerShell installer
+install-claude.sh               ← Bash installer
 ```
 
 ## Key invariants

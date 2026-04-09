@@ -106,7 +106,7 @@ The repository is built around a few stable rules:
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
 Runtime governance lives in [src.claude/CLAUDE.md](src.claude/CLAUDE.md) — delegation rule, engineering hygiene, publication safety, role index, and project policies.
-Reference blueprints live in [references/](references/) — full operating model, diagrams, control matrix, and RU translations.
+Reference blueprints live in [references-claude/](references-claude/) — full operating model, diagrams, control matrix, and RU translations.
 
 ## Team structure
 
@@ -123,7 +123,7 @@ The current pack covers several sub-teams:
 
 ### Design principle
 
-`references/` contains blueprints — full design documents, diagrams, strategy comparisons, and translations. `src.claude/` contains the implementation source — self-contained runtime agents, governance, and tooling built from those blueprints. Install scripts copy `src.claude/` into the target repo's `.claude/`. Target repos receive `.claude/` only; they never need `references/` or `src.claude/`.
+`references-claude/` contains blueprints — full design documents, diagrams, strategy comparisons, and translations. `src.claude/` contains the implementation source — self-contained runtime agents, governance, and tooling built from those blueprints. Install scripts copy `src.claude/` into the target repo's `.claude/`. Target repos receive `.claude/` only; they never need `references-claude/` or `src.claude/`.
 
 ### `src.claude/` — skill-pack source (install copies this to `.claude/`)
 
@@ -141,19 +141,19 @@ The current pack covers several sub-teams:
 
 Self-contained. No references to files outside `src.claude/`. Install scripts copy the contents into the target `.claude/` directory.
 
-### `references/` — blueprints (dev-only, do NOT install)
+### `references-claude/` — blueprints (dev-only, do NOT install)
 
 | Path | Purpose |
 | --- | --- |
-| `references/operating-model-diagram.md` | Visual companion — mermaid diagrams for routing and lifecycle |
-| `references/periodic-control-matrix.md` | Control matrix — periodic audits and their owners |
-| `references/repository-publication-safety.md` | Publication safety — implemented in `CLAUDE.md` |
-| `references/repository-task-memory.md` | Task-memory methodology — work-items structure and ownership |
+| `references-claude/operating-model-diagram.md` | Visual companion — mermaid diagrams for routing and lifecycle |
+| `references-claude/periodic-control-matrix.md` | Control matrix — periodic audits and their owners |
+| `references-claude/repository-publication-safety.md` | Publication safety — implemented in `CLAUDE.md` |
+| `references-claude/repository-task-memory.md` | Task-memory methodology — work-items structure and ownership |
 | Template routing (EN content in `src.claude/CLAUDE.md`) | Template routing — current runtime model |
-| `references/subagent-operating-model.md` | Original architecture blueprint — superseded by template routing |
-| `references/evidence-based-answer-pipeline.md` | Evidence-based answer pipeline for high-stakes domains |
-| `references/workflow-strategy-comparison.md` | Strategy comparison — historical reference |
-| `references/ru/` | Russian translations of all reference docs |
+| `references-claude/subagent-operating-model.md` | Original architecture blueprint — superseded by template routing |
+| `references-claude/evidence-based-answer-pipeline.md` | Evidence-based answer pipeline for high-stakes domains |
+| `references-claude/workflow-strategy-comparison.md` | Strategy comparison — historical reference |
+| `references-claude/ru/` | Russian translations of all reference docs |
 
 ### Root — repo metadata
 
@@ -185,7 +185,7 @@ Use the install scripts, or copy `src.claude/` contents into the target repo's `
 
 | Path | Why |
 | --- | --- |
-| `references/` | Blueprints — target repos get the implementation via `.claude/` |
+| `references-claude/` | Blueprints — target repos get the implementation via `.claude/` |
 | `work-items/` | Task memory — target repo has its own |
 | `README.md`, `INSTALL.md`, `LICENSE` | Repo metadata |
 
@@ -197,7 +197,7 @@ Use the install scripts, or copy `src.claude/` contents into the target repo's `
 4. Restart Claude so the new agents and skills are discovered
 5. Run `/agents-init-project` to configure project policies
 
-`src.claude/agents/contracts/` is NOT a duplicate of `references/`. Contracts contain handoff templates and a compact routing reference for the lead. References are the full canonical set including diagrams, translations, and strategy comparisons — they stay with the skill pack source.
+`src.claude/agents/contracts/` is NOT a duplicate of `references-claude/`. Contracts contain handoff templates and a compact routing reference for the lead. References are the full canonical set including diagrams, translations, and strategy comparisons — they stay with the skill pack source.
 
 ### Memory
 

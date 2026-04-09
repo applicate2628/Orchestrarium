@@ -1,37 +1,37 @@
 # Installation
 
-This repo contains the Claudestrator skill-pack source in `src.claude/`. Install scripts copy it into the target `.claude/` directory. Installing into another machine or repository means running `install.ps1` or `install.sh`.
+This repo contains the Claudestrator skill-pack source in `src.claude/`. Install scripts copy it into the target `.claude/` directory. Installing into another machine or repository means running `install-claude.ps1` or `install-claude.sh`.
 
 ## Quick install — current machine (global)
 
 ```powershell
 # PowerShell (Windows)
-.\install.ps1 -Global
+.\install-claude.ps1 -Global
 ```
 
 ```bash
 # Bash (macOS / Linux / Git Bash)
-bash install.sh --global
+bash install-claude.sh --global
 ```
 
 ## Install into a specific repo
 
 ```powershell
-.\install.ps1 -Target "D:\my-repo"
+.\install-claude.ps1 -Target "D:\my-repo"
 ```
 
 ```bash
-bash install.sh --target /path/to/repo
+bash install-claude.sh --target /path/to/repo
 ```
 
 ## Install into current repo (default)
 
 ```powershell
-.\install.ps1
+.\install-claude.ps1
 ```
 
 ```bash
-bash install.sh
+bash install-claude.sh
 ```
 
 The scripts handle clean removal of old files, copying, CLAUDE.md merging, and file-level verification. Re-running = reinstall. Memory is preserved across reinstalls.
@@ -62,7 +62,7 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 
 | Path | Why |
 | --- | --- |
-| `references/` | Skill-pack internal reference docs, not needed at runtime |
+| `references-claude/` | Skill-pack internal reference docs, not needed at runtime |
 | `work-items/` | This repo's task memory — target repo has its own |
 | `README.md`, `LICENSE`, `INSTALL.md` | Repo metadata |
 
@@ -86,10 +86,10 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 | `src.claude/agents/contracts/policies-catalog.md` | Policy catalog with options and defaults | Yes |
 | `src.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
 | `src.claude/memory/` | Feedback rules, populated over time | Optional |
-| `references/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
+| `references-claude/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
 | `work-items/` | This repo's task memory | No — skill-pack internal |
 
-`src.claude/agents/contracts/` is NOT a duplicate of `references/`. It contains the subset of files that role definitions actually reference at runtime.
+`src.claude/agents/contracts/` is NOT a duplicate of `references-claude/`. It contains the subset of files that role definitions actually reference at runtime.
 
 ## Post-install
 
