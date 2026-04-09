@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Install Orchestrarium skill-pack.
 # Usage:
-#   bash install.sh                  install into current repo (.agents/ + AGENTS.md)
-#   bash install.sh --global         install into ~/.codex/
-#   bash install.sh --target DIR     install into DIR as a project (.agents/ + AGENTS.md)
+#   bash install-codex.sh                  install into current repo (.agents/ + AGENTS.md)
+#   bash install-codex.sh --global         install into ~/.codex/
+#   bash install-codex.sh --target DIR     install into DIR as a project (.agents/ + AGENTS.md)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,13 +20,13 @@ TARGET=""
 
 usage() {
   echo "Usage:"
-  echo "  bash install.sh                          Install into current repo (.agents/ + AGENTS.md)"
-  echo "  bash install.sh --global                 Install into ~/.codex/"
-  echo "  bash install.sh --target DIR             Install into DIR as a project (.agents/ + AGENTS.md)"
-  echo "  bash install.sh --force                  Skip deletion prompts"
-  echo "  bash install.sh --dry-run                Print planned actions without changing files"
-  echo "  bash install.sh --allow-unsafe-target    Override allowlist for custom target path"
-  echo "  bash install.sh --help                   Show help"
+  echo "  bash install-codex.sh                          Install into current repo (.agents/ + AGENTS.md)"
+  echo "  bash install-codex.sh --global                 Install into ~/.codex/"
+  echo "  bash install-codex.sh --target DIR             Install into DIR as a project (.agents/ + AGENTS.md)"
+  echo "  bash install-codex.sh --force                  Skip deletion prompts"
+  echo "  bash install-codex.sh --dry-run                Print planned actions without changing files"
+  echo "  bash install-codex.sh --allow-unsafe-target    Override allowlist for custom target path"
+  echo "  bash install-codex.sh --help                   Show help"
   exit 1
 }
 
@@ -283,7 +283,7 @@ confirm_removal() {
 prompt_install_mode() {
   if [ ! -t 0 ]; then
     echo "FAIL: No install target specified and not running interactively." >&2
-    echo "Use: bash install.sh --global  or  bash install.sh --target <path>" >&2
+    echo "Use: bash install-codex.sh --global  or  bash install-codex.sh --target <path>" >&2
     exit 1
   fi
 

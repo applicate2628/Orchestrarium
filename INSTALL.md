@@ -6,12 +6,12 @@ This repo contains the Orchestrarium skill-pack source in `src.codex/`. Install 
 
 ```powershell
 # PowerShell (Windows)
-.\install.ps1 -Global
+.\install-codex.ps1 -Global
 ```
 
 ```bash
 # Bash (macOS / Linux / Git Bash)
-bash install.sh --global
+bash install-codex.sh --global
 ```
 
 Global install copies everything into `~/.codex/` (mirrors `src.codex/` structure).
@@ -19,11 +19,11 @@ Global install copies everything into `~/.codex/` (mirrors `src.codex/` structur
 ## Install into a specific repo
 
 ```powershell
-.\install.ps1 -Target "D:\my-repo"
+.\install-codex.ps1 -Target "D:\my-repo"
 ```
 
 ```bash
-bash install.sh --target /path/to/repo
+bash install-codex.sh --target /path/to/repo
 ```
 
 Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and keeps consultant toggle state in `.agents/.consultant-mode`.
@@ -31,11 +31,11 @@ Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into
 ## Install into current repo (default)
 
 ```powershell
-.\install.ps1
+.\install-codex.ps1
 ```
 
 ```bash
-bash install.sh
+bash install-codex.sh
 ```
 
 ## Install target mapping
@@ -64,7 +64,7 @@ Project policies are configured as a `## Project policies` section in the target
 | `src.codex/skills/lead/scripts/` | Publication safety scan, validation | Yes |
 | `src.codex/skills/lead/policies-catalog.md` | Policy options reference (installed with skills) | Yes |
 | `src.codex/AGENTS.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
-| `references/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
+| `references-codex/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
 
 ## Post-install
 

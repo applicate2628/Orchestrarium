@@ -5,9 +5,9 @@
     Copies the skills tree and AGENTS.md to the target location.
     Re-running = reinstall.
 .EXAMPLE
-    .\install.ps1                          # Install into current repo (.agents/ + AGENTS.md)
-    .\install.ps1 -Global                  # Install into ~/.codex/
-    .\install.ps1 -Target "D:\my-repo"     # Install into D:\my-repo as a project (.agents/ + AGENTS.md)
+    .\install-codex.ps1                          # Install into current repo (.agents/ + AGENTS.md)
+    .\install-codex.ps1 -Global                  # Install into ~/.codex/
+    .\install-codex.ps1 -Target "D:\my-repo"     # Install into D:\my-repo as a project (.agents/ + AGENTS.md)
 #>
 param(
     [switch]$Global,
@@ -303,7 +303,7 @@ if ($Global) {
         }
     } else {
         Write-Host "FAIL: No install target specified and not running interactively." -ForegroundColor Red
-        Write-Host "Use: .\install.ps1 -Global  or  .\install.ps1 -Target <path>" -ForegroundColor Yellow
+        Write-Host "Use: .\install-codex.ps1 -Global  or  .\install-codex.ps1 -Target <path>" -ForegroundColor Yellow
         exit 1
     }
 }
