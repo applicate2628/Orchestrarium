@@ -39,8 +39,8 @@ Everything a user installs into their target project. Self-contained, no externa
 Used only for developing and maintaining this skill pack. Not part of the installed artifact.
 
 - `AGENTS.md`: dev-specific repo rules for skill-pack maintenance (adds dev-layer rules on top of `src.codex/AGENTS.md`)
-- `references/`: canonical operating-model documents, governance references, and diagrams
-- `install.sh`, `install.ps1`: install scripts (bash and PowerShell)
+- `references-codex/`: canonical operating-model documents, governance references, and diagrams
+- `install-codex.sh`, `install-codex.ps1`: install scripts (bash and PowerShell)
 - `INSTALL.md`: installation instructions
 - `LICENSE`: Apache License 2.0
 - `.gitignore`: local-only scratch boundary; `.agents/` is the local repo-install output (not committed)
@@ -53,10 +53,10 @@ Quick start:
 
 ```bash
 # Bash (macOS / Linux / Git Bash)
-bash install.sh --global
+bash install-codex.sh --global
 
 # PowerShell (Windows)
-.\install.ps1 -Global
+.\install-codex.ps1 -Global
 ```
 
 For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, and the consultant toggle is stored in `.agents/.consultant-mode`. For global install, the pack mirrors into `~/.codex/`, but second-opinion toggle state remains project-local in `.agents/.consultant-mode`. See [INSTALL.md](INSTALL.md) for details.
@@ -73,13 +73,13 @@ The repository is built around a few stable rules:
 - protect blast radius and require smoke coverage for nearby but nominally unrelated surfaces
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
-Repository-wide operating-model source of truth lives in [references/subagent-operating-model.md](references/subagent-operating-model.md).
-Repository task-memory policy and storage model live in [references/repository-task-memory.md](references/repository-task-memory.md). The live task-memory directory, if used, is repository-defined.
-Repository publication-safety policy for all tracked content lives in [references/repository-publication-safety.md](references/repository-publication-safety.md).
-Repository periodic-control matrix lives in [references/periodic-control-matrix.md](references/periodic-control-matrix.md).
+Repository-wide operating-model source of truth lives in [references-codex/subagent-operating-model.md](references-codex/subagent-operating-model.md).
+Repository task-memory policy and storage model live in [references-codex/repository-task-memory.md](references-codex/repository-task-memory.md). The live task-memory directory, if used, is repository-defined.
+Repository publication-safety policy for all tracked content lives in [references-codex/repository-publication-safety.md](references-codex/repository-publication-safety.md).
+Repository periodic-control matrix lives in [references-codex/periodic-control-matrix.md](references-codex/periodic-control-matrix.md).
 Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md) (dev overlay) and [src.codex/AGENTS.md](src.codex/AGENTS.md) (installed pack source).
-The visual companion to the workflow lives in [references/operating-model-diagram.md](references/operating-model-diagram.md).
-Evidence-based answer pipeline for high-stakes domains lives in [references/evidence-based-answer-pipeline.md](references/evidence-based-answer-pipeline.md).
+The visual companion to the workflow lives in [references-codex/operating-model-diagram.md](references-codex/operating-model-diagram.md).
+Evidence-based answer pipeline for high-stakes domains lives in [references-codex/evidence-based-answer-pipeline.md](references-codex/evidence-based-answer-pipeline.md).
 
 ## Team structure
 

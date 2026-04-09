@@ -14,7 +14,7 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 - Completed, cancelled, or superseded items move to the configured archive location.
 - The older ignored `.plans/` directory is legacy local history. Keep it only as scratch or traceability material; do not use it as the canonical tracked source of truth for new items.
 
-`references/` remains the home for stable repository-wide methodology. The configured task-memory directory, when used, is the home for item-specific execution memory.
+`references-codex/` remains the home for stable repository-wide methodology. The configured task-memory directory, when used, is the home for item-specific execution memory.
 
 ## Mandatory artifact set
 
@@ -65,7 +65,7 @@ Additional artifacts are required when the workflow calls for them:
 ## Public-git safety
 
 - The configured tracked task-memory directory, when used, is tracked repository documentation and must be safe for publication.
-- The repo-wide policy for all tracked content lives in [`references/repository-publication-safety.md`](repository-publication-safety.md).
+- The repo-wide policy for all tracked content lives in [`references-codex/repository-publication-safety.md`](repository-publication-safety.md).
 - Do not place secrets, tokens, credentials, customer data, private identifiers, raw logs, full command transcripts, or machine-specific absolute paths into tracked task-memory artifacts.
 - Prefer redacted summaries over verbatim operational detail when traceability does not require the raw value.
 - Keep local-only scratch notes and raw artifacts outside the configured tracked task-memory directory.
