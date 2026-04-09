@@ -1,0 +1,20 @@
+{
+  "name": "quick-fix",
+  "description": "Fast lane for clearly local additive changes \u2014 bug fix, typo, small addition",
+  "when": "Change is additive, confined to one module/seam, no new risk owner, contracts unchanged",
+  "requiresLead": false,
+  "chain": ["implement", "QA"],
+  "roles": [
+    { "agentType": "analyst", "stage": "research", "whenNeeded": "scope unclear" },
+    { "agentType": "backend-engineer", "stage": "implement", "whenNeeded": "backend fix" },
+    { "agentType": "frontend-engineer", "stage": "implement", "whenNeeded": "frontend fix" },
+    { "agentType": "qt-ui-engineer", "stage": "implement", "whenNeeded": "Qt UI fix" },
+    { "agentType": "toolchain-engineer", "stage": "implement", "whenNeeded": "build/packaging fix" },
+    { "agentType": "data-engineer", "stage": "implement", "whenNeeded": "data/migration fix" },
+    { "agentType": "knowledge-archivist", "stage": "implement", "whenNeeded": "docs/hygiene fix" },
+    { "agentType": "qa-engineer", "stage": "QA", "required": true }
+  ],
+  "requiredRoles": ["qa-engineer"],
+  "minRoles": 1,
+  "notes": "Main conversation picks the implementer, passes artifact to QA. Re-classify to full-delivery if scope widens."
+}
