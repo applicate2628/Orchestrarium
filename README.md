@@ -59,6 +59,8 @@ bash install-codex.sh --global
 .\install-codex.ps1 -Global
 ```
 
+Important: multi-agent team workflows require explicit delegation permission from the user. Ask directly for delegation, name a role such as `$lead`, or clearly authorize subagents in the prompt; otherwise the assistant may stay in the main conversation instead of starting the team.
+
 For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, and the consultant toggle is stored in `.agents/.consultant-mode`. For global install, the pack mirrors into `~/.codex/`, but second-opinion toggle state remains project-local in `.agents/.consultant-mode`. See [INSTALL.md](INSTALL.md) for details.
 
 ## Operating model
