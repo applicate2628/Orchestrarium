@@ -49,6 +49,10 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
   `product-manager -> product-analyst -> lead`
 - Advisory-only independent consultation:
   `lead -> consultant`
+- Explicit external implementation through the best-fit adapter:
+  `lead -> analyst -> architect -> planner -> external-worker -> external-reviewer -> lead`
+- External review/QA through the best-fit adapter:
+  `lead -> analyst -> architect -> planner -> implementation -> external-reviewer -> lead`
 - In-flight item whose admitted scope, priority, or milestone intent has drifted:
   `lead -> product-manager -> lead`
 - Clearly local additive work:
@@ -236,7 +240,10 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - `knowledge-archivist`, `backend-engineer`, `frontend-engineer`, `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`, `data-engineer`, `toolchain-engineer`, and `platform-engineer` implement approved phases.
 - `qa-engineer` and `ui-test-engineer` verify correctness and regressions in their scope.
 - `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, and `accessibility-reviewer` act as independent blockers when their risk domain matters.
-- `consultant` is advisory-only and not part of the blocker chain; if an external provider is unavailable, the lead may fulfill this role through an independent internal subagent instead.
+- `external-worker` implements approved work through an external provider when the routing decision selects the external adapter for an eligible implementer role.
+- `external-reviewer` performs review and QA through an external provider when the routing decision selects the external adapter for an eligible reviewer or QA role.
+- `consultant` is advisory-only and not part of the blocker chain; if an external provider is unavailable, the lead may fulfill this role through an independent internal subagent instead. That fallback applies only to `$consultant`, not to `$external-worker` or `$external-reviewer`; the external roles are disabled at the role level and the lead may reroute to another eligible specialist.
+- Mandatory `security-reviewer` and `performance-reviewer` gates in risk-sensitive templates remain internal and are not replaced by the external reviewer.
 - The role map in this reference describes the canonical core team only. If a narrower installed specialist outside the core team is a better fit for the scoped work, the lead may use it; if the current repo/workspace defines or clearly implies a repo-local specialist, the lead may use that specialist. Using such a specialist does not add it to the canonical map automatically.
 
 ## Periodic controls
@@ -408,3 +415,5 @@ When NOT to save:
 - `visualization engineer` means `$visualization-engineer`
 - `geometry engineer` means `$geometry-engineer`
 - `build engineer` or `toolchain engineer` means `$toolchain-engineer`
+- `external worker`, `external implementer`, or `external execution worker` means `$external-worker`
+- `external reviewer`, `external audit reviewer`, or `external review` means `$external-reviewer`

@@ -49,7 +49,10 @@ Use `scripts/install-codex.sh` or `scripts/install-codex.ps1` when you want the 
 Notes:
 
 - Project-level Codex installs use `.agents/skills/` plus the project root `AGENTS.md`.
-- The second-opinion toggle remains project-local at `.agents/.consultant-mode`.
+- The consultant-mode file remains project-local at `.agents/.consultant-mode`.
+- The same file now carries the extended schema:
+  `mode: external`, `preferExternalWorker: true`, `preferExternalReviewer: true`.
+- `mode` still controls `$consultant`; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
 - Validation command: `bash src.codex/skills/lead/scripts/validate-skill-pack.sh`.
 
 ## Claude Code install details
@@ -67,6 +70,10 @@ Notes:
 
 - Project-level Claude installs create or update `.claude/AGENTS.md` and `.claude/CLAUDE.md`.
 - Claude memory is shipped in `src.claude/memory/` and preserved across reinstalls by the existing installer behavior.
+- The consultant-mode file remains project-local at `.claude/.consultant-mode`.
+- The same file now carries the extended schema:
+  `mode: external`, `preferExternalWorker: true`, `preferExternalReviewer: true`.
+- `mode` still controls `$consultant`; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
 - Validation command: `bash src.claude/agents/scripts/validate-skill-pack.sh`.
 
 ## Dual-platform setup
@@ -96,5 +103,6 @@ Customize each platform in the place that platform actually reads:
 
 - Codex: append project-specific rules below the installed section in the project root `AGENTS.md`.
 - Claude Code: append project-specific rules below the installed section in `.claude/CLAUDE.md`.
+- Configure consultant and external-dispatch preferences in `.agents/.consultant-mode` for Codex or `.claude/.consultant-mode` for Claude Code.
 
 When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.

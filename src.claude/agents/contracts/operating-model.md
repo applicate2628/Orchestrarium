@@ -27,6 +27,20 @@ When lead coordinates, or when the main conversation needs to decide between rol
 3. **Parallel read-only**: research roles (analyst, product-analyst) can run in parallel. Write-heavy roles need explicit ownership boundaries.
 4. **Re-intake**: if the admitted item itself changed materially, route back to `product-manager`. Cap: 2 re-intakes; on the 3rd, escalate to user with all prior re-intake reasons and ask for a final decision (reduce scope, defer, or cancel).
 
+## External adapter routing
+
+Claude-line keeps one shared local toggle file at `.claude/.consultant-mode`.
+
+- `mode` continues to govern `$consultant`.
+- `preferExternalWorker: true` prefers `$external-worker` for eligible implement-side slots.
+- `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
+- The file name stays unchanged for backward compatibility.
+- The team template JSON does not change; routing substitutions happen at execution time.
+- `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.
+- If the external CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work to another eligible path.
+- The adapter itself must not silently fall back to an internal specialist.
+- Mandatory security and performance gates remain internal in `security-sensitive` and `performance-sensitive` templates unless a separate approved policy says otherwise.
+
 ## Research admission filter
 
 When `$product-manager` admits a new candidate approach into discovery, the roadmap decision package must include:
@@ -110,6 +124,8 @@ These pairings are not derivable from classification alone — lead must know th
 - `visualization engineer` = `$visualization-engineer`
 - `geometry engineer` = `$geometry-engineer`
 - `build engineer` or `toolchain engineer` = `$toolchain-engineer`
+- `external worker` = `$external-worker`
+- `external reviewer` = `$external-reviewer`
 
 ## Cross-domain escalation protocol
 

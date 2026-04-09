@@ -1,0 +1,4 @@
+interface:
+  display_name: "External Reviewer"
+  short_description: "Review approved work through an external provider"
+  default_prompt: "Use $external-reviewer as the universal external review/QA adapter for the eligible reviewer or QA role selected by routing. Treat the assigned reviewer role as provenance only, keep the work review-only, use the shared dispatch contract, and fail fast if the provider is unavailable."

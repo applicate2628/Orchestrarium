@@ -112,7 +112,19 @@ Fact-first note:
 
 Consultant exception:
 - `$consultant` returns the same first four sections, but ends with `5. Advisory status: NON-BLOCKING`.
+- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.consultant-mode` must preserve any existing `preferExternalWorker` and `preferExternalReviewer` values.
 - If the external provider is unavailable or fails, the lead may use an independent internal subagent as `$consultant` with the same advisory-only contract and the same response format.
+
+## Shared external dispatch contract
+
+Use `external-dispatch.md` when the routing decision prefers or explicitly selects an external adapter.
+
+- The config file remains `.agents/.consultant-mode`.
+- The extended schema contains `mode`, `preferExternalWorker`, and `preferExternalReviewer`.
+- `mode` governs `$consultant` behavior only.
+- The preference flags govern whether eligible implement or review/QA slots route to the external adapters by default.
+- The assigned role in the external handoff is a provenance/routing label, not a restriction on universality.
+- If the external CLI is unavailable, the role is disabled at the role level and the orchestrator may reroute to another eligible internal specialist.
 
 ## Role map
 
@@ -314,6 +326,20 @@ Acceptance criteria:
 - required tests and checks were run or explicitly blocked
 - design or plan conflicts are escalated instead of patched over
 
+## External Worker
+
+Use when approved implementation work should run through the external adapter for an eligible implementer role and the handoff names `$external-worker`.
+
+Return exactly:
+- one external implementation package
+
+Acceptance criteria:
+- the handoff includes the internal implementer role label being replaced; that label is provenance/routing metadata only and does not narrow the adapter
+- the requested change stays inside the approved implementation surface
+- the execution path is external and explicit or preference-driven; no silent fallback to `$consultant` or an internal subagent
+- external-provider unavailability is reported as `BLOCKED:dependency` with the provider reason, and the orchestrator may reroute
+- the package reports changed files, tests or checks, explicit assumptions or risks, and provenance
+
 ## Toolchain Engineer
 
 Use when the approved phase is primarily build-system, packaging, compiler, linker, preset, or reproducible-toolchain work.
@@ -471,6 +497,22 @@ Acceptance criteria:
 - blocking accessibility issues are separated from non-blocking improvements
 - approval or rejection is explicit
 
+## External Reviewer
+
+Use when approved review or QA work should run through the external adapter for an eligible reviewer or QA role and the handoff names `$external-reviewer`.
+
+Return exactly:
+- one external review report
+
+Acceptance criteria:
+- the handoff includes the internal reviewer or QA role label being replaced; that label is provenance/routing metadata only and does not narrow the adapter
+- the review stays review-only and does not request or require file edits
+- the requested review strategy is explicit
+- the execution path is external and explicit or preference-driven; no silent fallback to `$consultant` or an internal reviewer
+- external-provider unavailability is reported as `BLOCKED:dependency` with the provider reason, and the orchestrator may reroute
+- the report includes findings, risk surfaces, and an explicit gate decision
+- the role does not satisfy any mandatory internal reviewer requirement in v1
+
 ## Consultant
 
 Use only when the lead wants a non-binding second opinion.
@@ -486,6 +528,14 @@ Acceptance criteria:
 Invocation note:
 - `$consultant` usage rules, toggle check, execution paths, and fallback behavior are in `$CODEX_HOME/skills/consultant/SKILL.md`
 - if the external provider fails or is unavailable, fall back to an independent internal subagent consultant with the same advisory-only contract
+- `external-dispatch.md` is the shared contract for the new external adapters and the consultant config fields they share
+
+## Role Map Notes
+
+- external implementation through a provider maps to `$external-worker`
+- external review or QA through a provider maps to `$external-reviewer`
+- the assigned role in either external handoff is a provenance/routing label, not a constraint on universality
+- `$consultant` remains advisory-only and is not a substitute for either external execution role
 
 ## Interaction rules
 
@@ -497,6 +547,7 @@ Invocation note:
 - A role may request clarification, but it should route the request through the orchestrating owner unless a direct collaboration edge was explicitly approved.
 - Reviewers report findings and gate outcomes; they do not directly manage implementation.
 - When an upstream artifact is insufficient, return `REVISE` or `BLOCKED` instead of silently redefining the stage contract.
+- External execution roles are routing adapters; they do not replace the consultant. They may replace eligible internal implement/review roles when config preference or explicit override selects them, but mandatory internal reviewers in risk-sensitive templates remain non-replaceable.
 
 ## Structured completion report
 

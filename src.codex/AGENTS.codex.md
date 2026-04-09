@@ -56,6 +56,13 @@ Use these global anchor roles:
 - `$product-manager`: roadmap ownership, initiative prioritization, and admission into discovery or delivery
 - `$consultant`: optional non-blocking independent advisor; usage rules, toggle check, execution paths, and fallback behavior are in `$CODEX_HOME/skills/consultant/SKILL.md`
 
+External dispatch roles also exist in the installed skills tree as bidirectional adapters:
+
+- `$external-worker`: external implementation adapter for eligible implementer roles; dispatches to Claude CLI in the Codex pack and may be selected by `.agents/.consultant-mode` preferences or explicit override
+- `$external-reviewer`: external review/QA adapter for eligible reviewer roles; dispatches to Claude CLI in the Codex pack and may be selected by `.agents/.consultant-mode` preferences or explicit override
+
+These roles are not aliases for `$consultant`.
+
 For all other work, use the narrowest matching installed specialist. The role index in shared governance names the canonical core team only; installed specialists outside that core team and repo-local specialists may be used by `$lead` when they are a better fit.
 
 Repository-specific `AGENTS.md` files should add local priorities, canonical paths, build/test rules, and source-of-truth references without redefining the whole global role catalog.

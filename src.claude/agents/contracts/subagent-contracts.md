@@ -6,6 +6,20 @@ Handoff templates and response format for lead-to-specialist delegation.
 
 Every specialist invocation MUST use the **Agent tool** with the matching `subagent_type` parameter. The handoff template below becomes the agent's `prompt`. The orchestrator (main conversation or lead) MUST NOT role-play specialists inline — each role runs in an isolated agent context.
 
+## External dispatch contract
+
+Use this contract when `subagent_type` is `external-worker` or `external-reviewer`.
+
+- These roles are routing adapters, not new business professions.
+- The `Assigned role` field names the internal role being replaced for provenance.
+- Read `.claude/.consultant-mode` and honor `preferExternalWorker` / `preferExternalReviewer` when they are present.
+- Do not silently fall back to an internal specialist if the external CLI is unavailable; the adapter is disabled and the orchestrator may reroute.
+- `external-worker` covers implement-side work only.
+- `external-reviewer` covers review and QA-side work.
+- Mandatory security and performance gates remain non-replaceable unless a separate approved policy says otherwise.
+
+For external adapters, include the provenance header from `external-dispatch.md` in the returned artifact.
+
 ## Handoff template
 
 ```text
@@ -100,6 +114,7 @@ The REVISE loop section is optional — include it only when a stage has returne
 - When a role makes a decision, it should clearly distinguish confirmed facts, assumptions, and judgment.
 - If the main gap is missing evidence, recommend the appropriate factual role instead of escalating into opinion.
 - `$consultant` replaces the Gate line with `5. Advisory status: NON-BLOCKING`.
+- `external-worker` and `external-reviewer` keep the standard gate line, but their artifact must also carry the external provenance header from `external-dispatch.md`.
 
 ### BLOCKED classification
 

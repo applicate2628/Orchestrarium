@@ -15,12 +15,12 @@ Fix a performance issue using the `performance-sensitive` template.
    - Recommend optimization strategy and constraints
    - If the issue is architectural, recommend escalation to `full-delivery`
 
-3. **Implement.** Invoke **Implementer** (Agent tool, appropriate engineer `subagent_type`):
-   - Apply the optimization within the performance engineer's constraints
+3. **Implement.** Invoke **Implementer** (Agent tool, appropriate engineer `subagent_type`, or `external-worker` when external dispatch is preferred):
+   - Apply the optimization within the performance engineer's constraints. When external dispatch is preferred, the implementer may be `external-worker`.
    - Measure before/after
 
-4. **Verify.** Invoke **QA** (Agent tool, `subagent_type: qa-engineer`):
-   - Verify no functional regressions
+4. **Verify.** Invoke **QA** (Agent tool, `subagent_type: qa-engineer`, or `external-reviewer` when external dispatch is preferred):
+   - Verify no functional regressions. When external dispatch is preferred, the QA slot may be `external-reviewer`.
 
 5. **Performance review.** Invoke **Performance reviewer** (Agent tool, `subagent_type: performance-reviewer`):
    - Verify the optimization meets the budget

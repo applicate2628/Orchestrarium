@@ -25,6 +25,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 | Common alias map | §"Common alias map" (L98–112) | §"Common alias map" (L397–410) | Identical mappings, different formatting |
 | Artifact persistence | §"Artifact persistence protocol" (L168–211) | §"Artifact persistence protocol" (L329–341) | Claude: detailed 3-tier table + when-to-save rules. Codex: condensed 3-tier table. |
 | Parallel execution | §"Parallel execution protocol" (L157–166) | §"Parallelism guidance" (L356–360) | Claude: 4-step protocol with integration owner. Codex: 3 brief bullets. |
+| External role routing | External role substitution notes in `operating-model.md` | External role substitution notes in `operating-model.md` | Shared semantics: worker covers `Implement`, reviewer covers `Review + QA`, mandatory internal reviewers remain non-replaceable in risk-sensitive templates, and team template JSON stays unchanged. |
 
 ## Shared semantic blocks — subagent-contracts.md
 
@@ -39,6 +40,17 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 | Test ownership boundary | §"Test ownership boundary" (L123–132) | — | **Claude only.** Codex has no equivalent. |
 | Structured completion report | §"Structured completion report" (L134–143) | §"Structured completion report" (L501–510) | Identical 4-item format |
 | Gate questions | §"Gate questions" (L148–155) | §"Gate questions" (L516–522) | Identical 7 questions |
+| External role contracts | External role summaries + dispatch references in `subagent-contracts.md` | External role sections in `subagent-contracts.md` | Shared semantics: assigned internal role is provenance, not a restriction on universality; roles do not self-fallback to internal specialists; orchestrator may reroute after the external role is disabled. |
+
+## Shared semantic blocks — external dispatch
+
+| Block | Claude (`src.claude/agents/contracts/external-dispatch.md`) | Codex (`src.codex/skills/lead/external-dispatch.md`) | Notes |
+|-------|-------------------------------------------------------------|-------------------------------------------------------|-------|
+| Config file location | `.claude/.consultant-mode` | `.agents/.consultant-mode` | File name stays unchanged for backward compatibility. |
+| Extended config schema | `mode`, `preferExternalWorker`, `preferExternalReviewer` | `mode`, `preferExternalWorker`, `preferExternalReviewer` | `mode` still controls consultant; the `preferExternal*` booleans drive routing preference for external adapters. |
+| Provider dispatch | Codex CLI | Claude CLI | Each pack calls the other CLI as the external provider. |
+| Provenance header | Requested mode / actual execution path / deviation reason | Requested mode / actual execution path / deviation reason | Keep wording semantically aligned even if command examples differ. |
+| Fallback boundary | Role-level no internal fallback; orchestrator may reroute when the role choice is disabled | Role-level no internal fallback; orchestrator may reroute when the role choice is disabled | Avoid ambiguous bare use of the word `fallback`. |
 
 ## Codex-only sections (no Claude equivalent needed)
 

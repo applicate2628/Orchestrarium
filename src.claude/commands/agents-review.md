@@ -11,8 +11,8 @@ Run a review chain on current changes using the `review` template.
 
 2. **Run the review chain.** Follow the `review` template from CLAUDE.md:
    - **Analyst** (`subagent_type: analyst`): investigate the changes — what was modified, why, what contracts are affected
-   - **QA** (`subagent_type: qa-engineer`): verify test coverage, edge cases, regression risk
-   - **Architecture reviewer** (`subagent_type: architecture-reviewer`): check fit with existing architecture, readability, maintainability
+   - **QA / review-side adapter** (`subagent_type: qa-engineer`, or `external-reviewer` when external dispatch is preferred): verify test coverage, edge cases, regression risk
+   - **Architecture reviewer** (`subagent_type: architecture-reviewer`, or `external-reviewer` when the slot is eligible): check fit with existing architecture, readability, maintainability
 
 3. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
    - If part of an active work-item → `work-items/active/<slug>/review.md`

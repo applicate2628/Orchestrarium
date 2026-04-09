@@ -22,9 +22,9 @@ Run a safe refactoring chain with blast-radius analysis and verification.
    - Save plan to `work-items/active/` and suggest `/agents-implement`
 
 5. **Execute.** If single-phase (or user wants immediate execution):
-   - **Implementer** (Agent tool, appropriate engineer `subagent_type`): apply the refactoring within the architect's constraints
-   - **QA** (Agent tool, `subagent_type: qa-engineer`): verify no regressions — all existing tests pass, behavior preserved
-   - **Architecture reviewer** (Agent tool, `subagent_type: architecture-reviewer`): confirm the result improves readability, maintainability, and fits the architecture
+   - **Implementer** (Agent tool, appropriate engineer `subagent_type`, or `external-worker` when external dispatch is preferred): apply the refactoring within the architect's constraints
+   - **QA** (Agent tool, `subagent_type: qa-engineer`, or `external-reviewer` when external dispatch is preferred): verify no regressions — all existing tests pass, behavior preserved
+   - **Architecture reviewer** (Agent tool, `subagent_type: architecture-reviewer`, or `external-reviewer` when the slot is eligible): confirm the result improves readability, maintainability, and fits the architecture
 
 6. **Handle reviewer verdict:**
    - If architecture reviewer returns `PASS` → proceed to report

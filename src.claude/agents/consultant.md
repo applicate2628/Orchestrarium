@@ -35,6 +35,16 @@ Do not invoke for:
 - Take only the canonical brief or the accepted artifact needed for the question at hand.
 - Treat the task as a request for judgment, tradeoff framing, or risk surfacing rather than delivery ownership.
 
+## Shared config format
+
+The local toggle file remains `.claude/.consultant-mode`. It may contain:
+
+- `mode: external | auto | internal | disabled`
+- `preferExternalWorker: true | false`
+- `preferExternalReviewer: true | false`
+
+`mode` continues to govern consultant behavior. The two preference flags are for the external dispatch contract and must be preserved by any command that updates this file.
+
 ## Return exactly one artifact
 
 - Return one advisory memo covering recommended direction, alternatives considered, major tradeoffs, key risks, assumptions, and confidence level.

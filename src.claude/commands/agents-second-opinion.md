@@ -6,11 +6,11 @@ Get an independent second opinion via the consultant agent.
 
 0. **Check toggle mode.** Before invoking the consultant:
    - If `$ARGUMENTS` is one of the toggle sub-commands, handle it directly:
-     - `enable` → write `mode: external` to `.claude/.consultant-mode`. Print "Consultant enabled (external-first)." and exit.
-     - `auto` → write `mode: auto` to `.claude/.consultant-mode`. Print "Consultant enabled (external-first with silent fallback)." and exit.
-     - `internal` → write `mode: internal` to `.claude/.consultant-mode`. Print "Consultant set to internal-only." and exit.
-     - `disable` → write `mode: disabled` to `.claude/.consultant-mode`. Print "Consultant disabled." and exit.
-     - `status` → read `.claude/.consultant-mode`. If no file: print "disabled (no file — run `/agents-second-opinion enable` to activate)". Otherwise print the current mode. Exit.
+     - `enable` → write `mode: external` to `.claude/.consultant-mode`, preserving or initializing `preferExternalWorker: false` and `preferExternalReviewer: false`. Print "Consultant enabled (external-first)." and exit.
+     - `auto` → write `mode: auto` to `.claude/.consultant-mode`, preserving the preference flags. Print "Consultant enabled (external-first with silent fallback)." and exit.
+     - `internal` → write `mode: internal` to `.claude/.consultant-mode`, preserving the preference flags. Print "Consultant set to internal-only." and exit.
+     - `disable` → write `mode: disabled` to `.claude/.consultant-mode`, preserving the preference flags. Print "Consultant disabled." and exit.
+     - `status` → read `.claude/.consultant-mode`. If no file: print "disabled (no file — run `/agents-second-opinion enable` to activate)". Otherwise print the current mode and any `preferExternalWorker` / `preferExternalReviewer` flags that are present. Exit.
    - If `.claude/.consultant-mode` does not exist: print "Second opinion skipped — consultant disabled. Run `/agents-second-opinion enable` to activate." and exit.
    - If the file contains `mode: disabled`: same notification and exit.
    - Otherwise proceed to step 1.
@@ -36,5 +36,6 @@ Get an independent second opinion via the consultant agent.
 
 - **The consultant MUST be invoked via the Agent tool** with `subagent_type: consultant`. Do not role-play the consultant inline.
 - Consultant is advisory-only — do not treat the memo as a blocking gate.
+- The toggle file is shared with the external dispatch contract, so never rewrite it into a mode-only shape.
 - Do not modify any files.
 - If the memo identifies a real blocker, recommend the proper specialist role to handle it.
