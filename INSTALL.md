@@ -1,6 +1,6 @@
 # Installation
 
-This monorepo ships two pack-specific installers plus two root router installers. The root `install.sh` and `install.ps1` scripts prompt for Codex, Claude Code, or both, then forward the same arguments unchanged to the matching pack-specific installers.
+This monorepo ships two unified entry-point installers at the root (`install.sh` and `install.ps1`). They prompt for Codex, Claude Code, or both, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
 ## Quick install
 
@@ -37,14 +37,14 @@ For `Both`, the router reuses the same forwarded arguments for both pack-specifi
 
 ## Codex install details
 
-Use `install-codex.sh` or `install-codex.ps1` when you want the Codex pack directly.
+Use `scripts/install-codex.sh` or `scripts/install-codex.ps1` when you want the Codex pack directly.
 
 | Command | Result |
 | --- | --- |
-| `bash install-codex.sh --global` | Installs into `~/.codex/` |
-| `bash install-codex.sh --target /path/to/project` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
-| `.\install-codex.ps1 -Global` | Installs into `~/.codex/` |
-| `.\install-codex.ps1 -Target "D:\path\to\project"` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
+| `bash scripts/install-codex.sh --global` | Installs into `~/.codex/` |
+| `bash scripts/install-codex.sh --target /path/to/project` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
+| `.\scripts\install-codex.ps1 -Global` | Installs into `~/.codex/` |
+| `.\scripts\install-codex.ps1 -Target "D:\path\to\project"` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
 
 Notes:
 
@@ -54,14 +54,14 @@ Notes:
 
 ## Claude Code install details
 
-Use `install-claude.sh` or `install-claude.ps1` when you want the Claude Code pack directly.
+Use `scripts/install-claude.sh` or `scripts/install-claude.ps1` when you want the Claude Code pack directly.
 
 | Command | Result |
 | --- | --- |
-| `bash install-claude.sh --global` | Installs into `~/.claude/` |
-| `bash install-claude.sh --target /path/to/project` | Installs into the target project's `.claude/` |
-| `.\install-claude.ps1 -Global` | Installs into `~/.claude/` |
-| `.\install-claude.ps1 -Target "D:\path\to\project"` | Installs into the target project's `.claude/` |
+| `bash scripts/install-claude.sh --global` | Installs into `~/.claude/` |
+| `bash scripts/install-claude.sh --target /path/to/project` | Installs into the target project's `.claude/` |
+| `.\scripts\install-claude.ps1 -Global` | Installs into `~/.claude/` |
+| `.\scripts\install-claude.ps1 -Target "D:\path\to\project"` | Installs into the target project's `.claude/` |
 
 Notes:
 

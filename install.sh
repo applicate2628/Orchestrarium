@@ -12,14 +12,14 @@ choice="${choice//$'\r'/}"
 
 case "${choice:-}" in
   1)
-    exec bash "$SCRIPT_DIR/install-codex.sh" "$@"
+    exec bash "$SCRIPT_DIR/scripts/install-codex.sh" "$@"
     ;;
   2)
-    exec bash "$SCRIPT_DIR/install-claude.sh" "$@"
+    exec bash "$SCRIPT_DIR/scripts/install-claude.sh" "$@"
     ;;
   3)
-    bash "$SCRIPT_DIR/install-codex.sh" "$@"
-    bash "$SCRIPT_DIR/install-claude.sh" "$@"
+    bash "$SCRIPT_DIR/scripts/install-codex.sh" "$@"
+    bash "$SCRIPT_DIR/scripts/install-claude.sh" "$@"
     ;;
   *)
     echo "Invalid selection: ${choice:-<empty>}" >&2

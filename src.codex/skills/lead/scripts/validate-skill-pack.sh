@@ -9,12 +9,12 @@ set -euo pipefail
 
 # Auto-detect layout.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-if [[ -d "src.codex/skills" && -f "src.codex/AGENTS.shared.md" ]]; then
+if [[ -d "src.codex/skills" && -f "shared/AGENTS.shared.md" && -f "src.codex/AGENTS.codex.md" ]]; then
   # Dev repo: assemble AGENTS.md from split source files for validation
   SKILLS_DIR="$(cd "src.codex/skills" && pwd -P)"
   SCRIPTS_DIR="$(cd "src.codex/skills/lead/scripts" && pwd -P)"
   AGENTS_FILE="$(mktemp)"
-  cat "src.codex/AGENTS.shared.md" "src.codex/AGENTS.codex.md" > "$AGENTS_FILE"
+  cat "shared/AGENTS.shared.md" "src.codex/AGENTS.codex.md" > "$AGENTS_FILE"
   trap "rm -f '$AGENTS_FILE'" EXIT
 elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DIR/../../../AGENTS.md" ]]; then
   SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"

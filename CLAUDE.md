@@ -17,11 +17,11 @@ When adding, renaming, or removing a skill (`src.claude/commands/agents-*.md`):
 3. Update `README.md` — add to the skills table
 4. Update `INSTALL.md` — update skill count
 5. Update `README.md` — update skill count
-6. Update `install-claude.ps1` — update skill count threshold in verification
-7. Update `install-claude.sh` — update skill count threshold in verification
+6. Update `scripts/install-claude.ps1` — update skill count threshold in verification
+7. Update `scripts/install-claude.sh` — update skill count threshold in verification
 8. Update `src.claude/agents/scripts/validate-skill-pack.sh` — add skill to validation list if not auto-discovered
 9. Run `/agents-validate` to confirm structural integrity
-10. Run `install-claude.ps1 -Global` to install and verify
+10. Run `scripts/install-claude.ps1 -Global` to install and verify
 
 ## Role development checklist
 
@@ -50,12 +50,15 @@ When modifying `src.claude/CLAUDE.md`, `operating-model.md`, or `subagent-contra
 - **MUST** update `references-claude/subagent-operating-model.md` and all `references-claude/` docs when any governance, protocol, gate, or routing semantic changes in the installed pack. Reference docs are the canonical methodology source of truth — they MUST stay aligned with the installed contracts. A governance change that updates `src.claude/` without updating `references-claude/` is incomplete.
 - **MUST** update `README.md` and `INSTALL.md` when pack structure, skill count, install targets, or entry points change. A structural change without doc update is incomplete.
 - **No mechanical application:** do not copy, move, rename, merge, or propagate content mechanically — between packs, between files, or within the same file — without verifying that the result is correct in the target context. Platform-specific semantics (execution model, parallelism, invocation mechanism, paths, tool capabilities), ownership boundaries, and behavioral implications must be checked before the change lands. "The other pack has it" or "the source file said so" is not sufficient justification. Every change must be independently valid where it lands.
+- **Cross-pack sync:** when editing shared semantic blocks in `operating-model.md` or `subagent-contracts.md`, consult [`cross-pack-reconciliation.md`](cross-pack-reconciliation.md) to identify and update the matching block in the other pack.
 - Run `/agents-validate` after changes.
-- Test install: `install-claude.ps1 -Global` and verify CLAUDE.md sections.
+- Test install: `scripts/install-claude.ps1 -Global` and verify CLAUDE.md sections.
 
 ## File layout
 
 ```
+shared/                  ← shared governance source
+  AGENTS.shared.md       ← common governance (merged by installers)
 src.claude/              ← skill-pack source (install copies to target .claude/)
   CLAUDE.md              ← product governance (installed to users)
   agents/                ← 31 role definitions
@@ -65,10 +68,16 @@ src.claude/              ← skill-pack source (install copies to target .claude
   commands/              ← 19 skills (slash commands)
 .claude/                 ← local working install (in .gitignore, NOT committed)
 CLAUDE.md                ← THIS FILE (repo-local dev rules, NOT installed)
+cross-pack-reconciliation.md ← shared semantic block map between packs
 README.md                ← public docs
 INSTALL.md               ← install instructions
-install-claude.ps1              ← PowerShell installer
-install-claude.sh               ← Bash installer
+install.ps1              ← unified PowerShell entry point
+install.sh               ← unified Bash entry point
+scripts/                 ← platform-specific installers
+  install-claude.ps1     ← Claude Code PowerShell installer
+  install-claude.sh      ← Claude Code Bash installer
+  install-codex.ps1      ← Codex PowerShell installer
+  install-codex.sh       ← Codex Bash installer
 ```
 
 ## Key invariants

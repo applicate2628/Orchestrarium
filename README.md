@@ -10,16 +10,14 @@ Both packs share the same governance model and role vocabulary, but each ships i
 ## Repository layout
 
 ```text
+shared/             Shared governance (AGENTS.shared.md)
 src.codex/          Codex skill pack source
 src.claude/         Claude Code skill pack source
 references-codex/   Codex reference docs and blueprints
 references-claude/  Claude Code reference docs and blueprints
-install.sh          Router installer (asks which pack to install)
-install.ps1         Router installer (asks which pack to install)
-install-codex.sh    Codex installer
-install-codex.ps1   Codex installer
-install-claude.sh   Claude Code installer
-install-claude.ps1  Claude Code installer
+install.sh          Entry-point installer (asks which pack to install)
+install.ps1         Entry-point installer (asks which pack to install)
+scripts/            Pack-specific installers (called by entry points)
 AGENTS.md           Dev overlay for Codex pack maintenance
 CLAUDE.md           Dev overlay for Claude pack maintenance
 ```
@@ -54,7 +52,7 @@ What to install?
   3) Both
 ```
 
-Then it forwards the same arguments to `install-codex.*`, `install-claude.*`, or both. Use the pack-specific installers directly when you want deterministic single-pack automation.
+Then it forwards the same arguments to the pack-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic single-pack automation.
 
 Important: if you want the assistant to actually start a team or delegate to subagents, give explicit delegation permission in your prompt. Naming a role such as `$lead` or clearly asking for delegation is the safe default; without that permission, the assistant may remain in the main conversation instead of launching the team.
 
