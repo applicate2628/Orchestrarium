@@ -27,6 +27,12 @@ This file contains platform-neutral governance rules shared across skill packs. 
 - give each delegated task only approved inputs, minimal context, limited tools, one expected artifact, explicit acceptance criteria, and an explicit gate to the next stage
 - stop progression when a quality gate fails
 - treat `$consultant` as an optional independent advisory team member only, never as a required pipeline stage or blocking reviewer
+- treat `$external-worker` as the external execution adapter for eligible `Implement` roles; it inherits the assigned internal implementer role for provenance and scope, but remains eligible across the whole implement lane
+- treat `$external-reviewer` as the external execution adapter for eligible `Review` and `QA` roles; it inherits the assigned internal reviewer or QA role for provenance and scope
+- keep `$external-worker` out of planning, QA, review, and orchestration work
+- keep `$external-reviewer` out of implementation and orchestration work
+- when an external role is selected, the role itself does not fall back to an internal specialist; if the external CLI is unavailable, treat that role choice as disabled and reroute through normal routing rules instead of pretending the same external role succeeded internally
+- keep mandatory internal reviewers in risk-sensitive templates non-replaceable even when external-reviewer is otherwise eligible
 - keep `security-engineer` separate from `security-reviewer`, and keep dedicated performance optimization separate from the QA gate
 - require human review before `git push`, release, or equivalent publication
 
@@ -87,13 +93,13 @@ Research, design, planning, and specialist constraints:
 
 Implementation:
 
-- `$backend-engineer`, `$frontend-engineer`, `$qt-ui-engineer`, `$model-view-engineer`, `$data-engineer`, `$platform-engineer`, `$toolchain-engineer`, `$geometry-engineer`, `$graphics-engineer`, `$visualization-engineer`
+- `$backend-engineer`, `$frontend-engineer`, `$qt-ui-engineer`, `$model-view-engineer`, `$data-engineer`, `$platform-engineer`, `$toolchain-engineer`, `$geometry-engineer`, `$graphics-engineer`, `$visualization-engineer`, `$external-worker`
 
 For approved UI implementation phases, select the platform-specific implementer: use `$frontend-engineer` for web/React UI and `$qt-ui-engineer` only for Qt desktop UI.
 
 Review and verification:
 
-- `$qa-engineer`, `$architecture-reviewer`, `$security-reviewer`, `$performance-reviewer`, `$accessibility-reviewer`, `$ux-reviewer`, `$ui-test-engineer`
+- `$qa-engineer`, `$architecture-reviewer`, `$security-reviewer`, `$performance-reviewer`, `$accessibility-reviewer`, `$ux-reviewer`, `$ui-test-engineer`, `$external-reviewer`
 
 ## Policy boundaries
 

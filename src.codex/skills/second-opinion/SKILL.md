@@ -10,17 +10,18 @@ Get an independent advisory memo or manage the consultant toggle.
 ## Steps
 
 0. **Check for toggle command.** If `$ARGUMENTS` is one of the toggle sub-commands, handle it directly:
-   - `enable` → write `mode: external` to `.agents/.consultant-mode`. Print "Consultant enabled (external-first)." and exit.
-   - `auto` → write `mode: auto` to `.agents/.consultant-mode`. Print "Consultant enabled (external-first with silent fallback)." and exit.
-   - `internal` → write `mode: internal` to `.agents/.consultant-mode`. Print "Consultant set to internal-only." and exit.
-   - `disable` → write `mode: disabled` to `.agents/.consultant-mode`. Print "Consultant disabled." and exit.
-   - `status` → read `.agents/.consultant-mode`. If no file: print "disabled (no file — run `/second-opinion enable` to activate)". Otherwise print the current mode. Exit.
+   - `enable` → write `mode: external` to `.agents/.consultant-mode` while preserving `preferExternalWorker` and `preferExternalReviewer`. If the file does not exist, initialize it with `preferExternalWorker: false` and `preferExternalReviewer: false`. Print "Consultant enabled (external-first)." and exit.
+   - `auto` → write `mode: auto` to `.agents/.consultant-mode` while preserving `preferExternalWorker` and `preferExternalReviewer`. If the file does not exist, initialize it with `preferExternalWorker: false` and `preferExternalReviewer: false`. Print "Consultant enabled (external-first with silent fallback)." and exit.
+   - `internal` → write `mode: internal` to `.agents/.consultant-mode` while preserving `preferExternalWorker` and `preferExternalReviewer`. If the file does not exist, initialize it with `preferExternalWorker: false` and `preferExternalReviewer: false`. Print "Consultant set to internal-only." and exit.
+   - `disable` → write `mode: disabled` to `.agents/.consultant-mode` while preserving `preferExternalWorker` and `preferExternalReviewer`. If the file does not exist, initialize it with `preferExternalWorker: false` and `preferExternalReviewer: false`. Print "Consultant disabled." and exit.
+   - `status` → read `.agents/.consultant-mode`. If no file: print "disabled (no file — run `/second-opinion enable` to activate)". Otherwise print `mode`, `preferExternalWorker`, and `preferExternalReviewer`. Exit.
    - If `$ARGUMENTS` is not a toggle command, proceed to step 1.
 
 1. **Check toggle state.** Read `.agents/.consultant-mode`:
    - If the file does not exist: print "disabled (no file — run `/second-opinion enable` to activate)" and exit.
    - If `mode: disabled`: print "Consultant is disabled. Run `/second-opinion enable` first." and exit.
    - If `mode: external` or `mode: internal`: proceed.
+   - Preserve `preferExternalWorker` and `preferExternalReviewer` on any write; do not clobber them back to defaults when changing `mode`.
 
 2. **Get the question.** Use `$ARGUMENTS` as the question or topic. If empty, ask the user what they want a second opinion on.
 

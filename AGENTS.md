@@ -17,7 +17,8 @@ When maintaining this skill pack or its source repository:
 - **No mechanical application:** do not copy, move, rename, merge, or propagate content mechanically — between packs, between files, or within the same file — without verifying that the result is correct in the target context. Platform-specific semantics (execution model, parallelism, invocation mechanism, paths, tool capabilities), ownership boundaries, and behavioral implications must be checked before the change lands. "The other pack has it" or "the source file said so" is not sufficient justification. Every change must be independently valid where it lands.
 - **Cross-pack sync:** when editing shared semantic blocks in `operating-model.md` or `subagent-contracts.md`, consult [`cross-pack-reconciliation.md`](cross-pack-reconciliation.md) to identify and update the matching block in the other pack.
 - update `src.codex/skills/lead/operating-model.md` when orchestration or gate semantics change
-- update `src.codex/skills/consultant/SKILL.md` when consultant execution policy, toggle logic, or provider paths change
+- update `src.codex/skills/lead/external-dispatch.md` when consultant-mode schema, provider paths, provenance rules, or external role dispatch semantics change
+- update `src.codex/skills/consultant/SKILL.md` when consultant execution policy changes, keeping it aligned with the shared external-dispatch contract instead of duplicating dispatch semantics inline
 - use `$knowledge-archivist` for repository hygiene, canonical-source alignment, documentation upkeep, and reference maintenance
 - route semantic repository control-plane changes prepared by `$knowledge-archivist` through an independent `$architecture-reviewer` gate before completion or publication; hygiene-only edits such as link fixes, formatting, recovery-entry-point sync, archive moves, and non-semantic wording cleanup do not require that extra reviewer
 
@@ -28,6 +29,8 @@ Use these roles first for skill-pack support and maintenance:
 - `$toolchain-engineer`: build, packaging, installation, reproducibility, and developer ergonomics for the skill pack
 - `$qa-engineer`: verification of maintenance changes against accepted behavior and likely regressions
 - `$architecture-reviewer`: maintainability and cohesion gate for structural or semantic control-plane changes to the pack
+- `$external-worker`: cross-provider implementation adapter for eligible implementer roles; preference comes from `.agents/.consultant-mode` or explicit user routing
+- `$external-reviewer`: cross-provider review and QA adapter for eligible reviewer roles; preference comes from `.agents/.consultant-mode` or explicit user routing
 - `$consultant`: optional independent second opinion for ambiguous workflow or policy changes
 - `$product-manager`: roadmap, sequencing, and admission decisions for the skill pack itself
 

@@ -16,8 +16,8 @@ Execute an approved plan from `work-items/active/` phase by phase.
    - Acceptance criteria per phase
 
 3. **Execute phase by phase.** For each phase:
-   - **Implementer** (Agent tool, appropriate engineer `subagent_type`): implement the phase within the allowed change surface. Pass the phase spec, acceptance criteria, and any constraints from the plan.
-   - **QA** (Agent tool, `subagent_type: qa-engineer`): verify the phase — run tests, check acceptance criteria, write bug files if defects found.
+   - **Implementer** (Agent tool, appropriate engineer `subagent_type`, or `external-worker` when external dispatch is preferred): implement the phase within the allowed change surface. Pass the phase spec, acceptance criteria, and any constraints from the plan.
+   - **QA** (Agent tool, `subagent_type: qa-engineer`, or `external-reviewer` when external dispatch is preferred): verify the phase — run tests, check acceptance criteria, write bug files if defects found.
    - If QA returns `PASS` — update `status.md`, move to next phase.
    - If QA returns `REVISE` — check the classification:
      - **regression**: loop back to implementer to fix code, then re-run QA

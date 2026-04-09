@@ -10,10 +10,10 @@ Classify the bug severity and run the appropriate template chain.
 
    | Analyst finding | Template | Chain |
    | --- | --- | --- |
-   | Single file/module, cause clear | `quick-fix` | implementer → QA |
-   | Multiple modules, unclear cause, regression | `full-delivery` | architect → planner → implementer → QA → architecture-reviewer |
-   | Auth, credentials, trust boundary involved | `security-sensitive` | security-engineer → implementer → QA → security-reviewer |
-   | SLA breach, perf degradation | `performance-sensitive` | performance-engineer → implementer → QA → performance-reviewer |
+   | Single file/module, cause clear | `quick-fix` | implementer or external-worker → QA or external-reviewer |
+   | Multiple modules, unclear cause, regression | `full-delivery` | architect → planner → implementer or external-worker → QA or external-reviewer → architecture-reviewer or external-reviewer |
+   | Auth, credentials, trust boundary involved | `security-sensitive` | security-engineer → implementer or external-worker → QA or external-reviewer → security-reviewer |
+   | SLA breach, perf degradation | `performance-sensitive` | performance-engineer → implementer or external-worker → QA or external-reviewer → performance-reviewer |
    | Multiple risk domains | `combined-critical` | lead coordinates all risk owners |
 
 3. **Confirm template with user.** Present the analyst's recommendation and ask the user to confirm or override. For `requiresLead: true` templates, invoke `$lead` to coordinate.
@@ -47,6 +47,7 @@ Classify the bug severity and run the appropriate template chain.
 - **Every stage MUST be invoked via the Agent tool** with the specified `subagent_type`. Do not role-play specialists inline.
 - Keep the fix narrowly scoped — no unrelated refactors.
 - Choose the implementer based on what area the bug is in (backend-engineer, frontend-engineer, etc.).
+- When routing preferences favor external dispatch, `external-worker` may replace the chosen implementer and `external-reviewer` may replace the QA/review-side slot. Mandatory security and performance reviewers remain internal in their sensitive templates.
 - Follow evidence-based completion: show fresh execution evidence before claiming done.
 - **Do NOT commit after fixing.** Present the fix to the user with evidence. The user decides when to commit — only after they are satisfied with testing and fix reliability. Suggest running `/agents-test` or `/agents-review` before committing.
 - When fixing a bug from the registry, update its file: set `status: fixed` only after QA confirms the fix AND the user approves. If QA says REVISE, keep `status: open`.

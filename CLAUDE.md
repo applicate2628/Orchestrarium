@@ -29,8 +29,9 @@ When adding or modifying a role (`src.claude/agents/*.md`):
 
 1. Create/edit the role file in `src.claude/agents/`
 2. Update `src.claude/CLAUDE.md` `## Role index` — add to the correct category
-3. If the role is a new reviewer or constraint role, check if team templates need updating
-4. Run `/agents-validate` to confirm the role is indexed
+3. If the role participates in external dispatch, update `src.claude/agents/contracts/external-dispatch.md` and the consultant-mode schema references that depend on it
+4. If the role is a new reviewer or constraint role, check whether templates stay unchanged by design or require an explicit policy exception
+5. Run `/agents-validate` to confirm the role is indexed
 
 ## Template development checklist
 
@@ -51,6 +52,7 @@ When modifying `src.claude/CLAUDE.md`, `operating-model.md`, or `subagent-contra
 - **MUST** update `README.md` and `INSTALL.md` when pack structure, skill count, install targets, or entry points change. A structural change without doc update is incomplete.
 - **No mechanical application:** do not copy, move, rename, merge, or propagate content mechanically — between packs, between files, or within the same file — without verifying that the result is correct in the target context. Platform-specific semantics (execution model, parallelism, invocation mechanism, paths, tool capabilities), ownership boundaries, and behavioral implications must be checked before the change lands. "The other pack has it" or "the source file said so" is not sufficient justification. Every change must be independently valid where it lands.
 - **Cross-pack sync:** when editing shared semantic blocks in `operating-model.md` or `subagent-contracts.md`, consult [`cross-pack-reconciliation.md`](cross-pack-reconciliation.md) to identify and update the matching block in the other pack.
+- Keep `src.claude/agents/contracts/external-dispatch.md` aligned with `src.codex/skills/lead/external-dispatch.md` whenever consultant-mode schema, provider paths, provenance rules, or external dispatch semantics change.
 - Run `/agents-validate` after changes.
 - Test install: `scripts/install-claude.ps1 -Global` and verify CLAUDE.md sections.
 
@@ -61,7 +63,7 @@ shared/                  ← shared governance source
   AGENTS.shared.md       ← common governance (merged by installers)
 src.claude/              ← skill-pack source (install copies to target .claude/)
   CLAUDE.md              ← product governance (installed to users)
-  agents/                ← 31 role definitions
+  agents/                ← 33 role definitions
     contracts/           ← operating model + subagent contracts + policy catalog
     team-templates/      ← 8 routing templates (JSON)
     scripts/             ← validation + safety scripts
@@ -88,3 +90,5 @@ scripts/                 ← platform-specific installers
 - Every code-writing skill must contain "Do NOT commit"
 - Install script thresholds must match actual counts
 - `src.claude/CLAUDE.md` must NOT contain repo-local content — that goes here
+- `$consultant` stays advisory-only; external execution and external review/QA belong to `$external-worker` and `$external-reviewer`
+- Team template JSON stays unchanged when external dispatch semantics change; routing substitutions belong in contracts and role docs

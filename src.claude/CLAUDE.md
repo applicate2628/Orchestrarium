@@ -10,6 +10,8 @@ If `## Project policies` section is missing from this file, suggest running `/ag
 
 When subagent delegation is appropriate, classify the task and pick the matching team template from `.claude/agents/team-templates/`.
 
+External adapter preferences live in `.claude/.consultant-mode`. The file keeps `mode` for consultant behavior and adds `preferExternalWorker` / `preferExternalReviewer` for eligible implement and review-side substitutions without changing team template JSON.
+
 **Decision tree:**
 
 1. Does the task need parallel risk owners (security + performance + ...)? → `requiresLead: true` template
@@ -36,6 +38,7 @@ When subagent delegation is appropriate, classify the task and pick the matching
 - If the template says `requiresLead: false`, the main conversation manages the chain directly — invoke specialists via Agent tool in order, pass each accepted artifact to the next.
 - If the template says `requiresLead: true`, invoke `$lead` via Agent tool who coordinates work-items, risk owners, integration, and gates.
 - Independent roles (e.g., security-engineer and performance-engineer) SHOULD be launched in parallel via multiple Agent tool calls in a single message when their scopes do not overlap.
+- External adapter substitution is a routing decision, not a template change. When the preferences file favors external dispatch, eligible implementer slots may route through `$external-worker` and eligible review/QA slots through `$external-reviewer`; mandatory security and performance gates stay internal unless the design explicitly says otherwise.
 
 **Recovery rule:**
 

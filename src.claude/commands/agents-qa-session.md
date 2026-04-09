@@ -8,7 +8,7 @@ Interactive testing session — you direct, one QA agent investigates and docume
    - If a scope is given (file, module, feature), start there
    - If empty, ask the user what area to test
 
-2. **Launch QA agent.** Invoke **one** QA agent (Agent tool, `subagent_type: qa-engineer`) with the initial scope and instruction: "This is an interactive QA session. Investigate the given area, report findings, and wait for further direction."
+2. **Launch QA agent.** Invoke **one** QA agent (Agent tool, `subagent_type: qa-engineer`, or `external-reviewer` when external dispatch is preferred) with the initial scope and instruction: "This is an interactive QA session. Investigate the given area, report findings, and wait for further direction."
 
 3. **Enter the loop.** Repeat until the user says "done" or "enough":
 

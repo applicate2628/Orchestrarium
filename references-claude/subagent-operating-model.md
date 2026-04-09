@@ -156,7 +156,8 @@ AI gates do not replace external engineering policy.
 - If a role disagrees with an upstream artifact, it returns `REVISE` or `BLOCKED` to the orchestrating owner instead of renegotiating scope privately.
 - Reviewers stay independent and return findings to the orchestrating owner instead of driving implementation directly.
 - Direct specialist-to-specialist collaboration is allowed only when the orchestrating owner explicitly approves the edge, scope, and artifact boundary.
-- `$consultant` is an optional independent advisory role; it may be fulfilled by an external provider or an internal independent subagent, but it never becomes a delivery gate. Consultant is opt-in via toggle file. No toggle file = disabled. Modes: `external` (cross-provider CLI), `internal` (same-platform subagent), `disabled`. The `/agents-second-opinion` command manages the toggle and invokes the consultant.
+- `$consultant` is an optional independent advisory role; it may be fulfilled by an external provider or an internal independent subagent, but it never becomes a delivery gate. Consultant is opt-in via the consultant-mode file. No toggle file = disabled. The file name stays unchanged for backward compatibility and now carries an additive schema: `mode`, `preferExternalWorker`, and `preferExternalReviewer`. `mode` still governs consultant behavior. The preference flags route eligible implement roles through `$external-worker` and eligible review or QA roles through `$external-reviewer`.
+- `$external-worker` and `$external-reviewer` are bidirectional external adapters, not new narrow professions. On Claude Code they dispatch to Codex CLI; on Codex they dispatch to Claude CLI. The adapter itself does not silently fall back to an internal specialist. If the external CLI is unavailable, the role is disabled and the orchestrator may reroute through a normal internal role.
 
 ### 3.9 Rolling-loop execution
 
@@ -284,6 +285,8 @@ Decision-making roles should clearly separate confirmed facts, assumptions, and 
 | `security-engineer` | Security engineer | Threat model and required controls | Security design package | Required controls are explicit |
 | `reliability-engineer` | Reliability engineer | SLOs, failure modes, degradation, recovery | Reliability package | Reliability constraints are explicit |
 | `qa-engineer` | QA / SDET | Functional acceptance, regressions, basic performance acceptance | Verification report | Acceptance criteria are met |
+| `external-worker` | External implementation adapter | Execute any eligible implement-side role through the other CLI while preserving the assigned role as provenance | External implementation package | The approved implementation lands through the external adapter without changing role ownership semantics |
+| `external-reviewer` | External review and QA adapter | Execute any eligible review-side or QA-side role through the other CLI while preserving the assigned role as provenance | External review or QA report | The eligible review or QA slot is verified through the external adapter without replacing mandatory internal safety gates |
 | `ui-test-engineer` | UI test engineer | Dedicated Qt UI regression verification | UI verification report | No blocking UI regressions remain |
 | `security-reviewer` | AppSec reviewer | Independent security acceptance | Security review report | No blocking security risks remain |
 | `architecture-reviewer` | Maintainability reviewer | Independent architecture, maintainability, and control-plane acceptance | Architecture review report | No blocking design deviations remain |

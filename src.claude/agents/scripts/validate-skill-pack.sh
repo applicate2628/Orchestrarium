@@ -34,7 +34,9 @@ echo ""
 # 1. Core files exist
 echo "[Core files]"
 for f in "$PACK/CLAUDE.md" "$AGENTS_FILE" "$PACK/agents/lead.md" "$PACK/agents/consultant.md" \
+         "$PACK/agents/external-worker.md" "$PACK/agents/external-reviewer.md" \
          $PACK/agents/contracts/operating-model.md \
+         $PACK/agents/contracts/external-dispatch.md \
          $PACK/agents/contracts/subagent-contracts.md \
          $PACK/agents/contracts/policies-catalog.md \
          $PACK/commands/agents-second-opinion.md; do
@@ -58,7 +60,9 @@ if [[ -f "$AGENTS_FILE" ]]; then
   # Check for orphaned agent files
   for f in $PACK/agents/*.md; do
     name=$(basename "$f" .md)
-    if ! echo "$roles" | grep -qx "$name"; then
+    if [[ "$name" == "external-worker" || "$name" == "external-reviewer" ]]; then
+      pass "$name is an expected external adapter file"
+    elif ! echo "$roles" | grep -qx "$name"; then
       warn "$name has agent file but not in AGENTS.md role index"
     fi
   done

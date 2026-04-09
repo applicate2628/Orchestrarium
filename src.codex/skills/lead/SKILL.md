@@ -28,6 +28,7 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 - Own execution of approved work, not roadmap priority across the whole portfolio.
 - Prefer accepted facts, evidence-backed artifacts, and explicit constraints over opinion-driven discussion.
 - Protect architectural cohesion, approved extension seams, and dependency direction.
+- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement/review roles; prefer them when `.agents/.consultant-mode` says so or when the user explicitly requests external dispatch, and do not route implementation or review work through `$consultant`.
 - One subagent equals one profession, one artifact, and one gate.
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
 - Do not ask one subagent to deliver a feature end-to-end.
@@ -84,16 +85,16 @@ The canonical brief should capture:
    - Role: `$planner`
    - Output: one gated phase plan.
 4. `Implement`
-   - Roles: `$backend-engineer`, `$frontend-engineer` for web/React UI, `$graphics-engineer`, `$visualization-engineer`, `$geometry-engineer`, `$qt-ui-engineer` for Qt desktop UI, `$model-view-engineer`, `$data-engineer`, `$toolchain-engineer`, `$platform-engineer`, or another explicitly approved implementation specialist
+   - Roles: `$backend-engineer`, `$frontend-engineer` for web/React UI, `$graphics-engineer`, `$visualization-engineer`, `$geometry-engineer`, `$qt-ui-engineer` for Qt desktop UI, `$model-view-engineer`, `$data-engineer`, `$toolchain-engineer`, `$platform-engineer`, `$external-worker`, or another explicitly approved implementation specialist
    - Output: one implementation package for one approved phase.
    - Cross-cutting hygiene (invoke explicitly, outside the feature phase): `$knowledge-archivist`
    - If an archivist patch changes repository-wide control-plane semantics, route it through `$architecture-reviewer` before lead acceptance.
    - If the approved work spans multiple implementation phases or specialists, assign one explicit integration owner before QA. That owner assembles one coherent integrated artifact and checks cross-phase compatibility before verification begins.
 5. `QA`
-   - Roles: `$qa-engineer`, `$ui-test-engineer` as needed
+   - Roles: `$qa-engineer`, `$ui-test-engineer`, `$external-reviewer` as needed
    - Output: one verification package per verification role, including basic performance acceptance when relevant.
 6. `Independent review`
-   - Roles: `$architecture-reviewer`, `$performance-reviewer`, `$security-reviewer`, `$ux-reviewer`, `$accessibility-reviewer` as needed
+   - Roles: `$architecture-reviewer`, `$performance-reviewer`, `$security-reviewer`, `$ux-reviewer`, `$accessibility-reviewer`, `$external-reviewer` as needed
    - Output: one review package per independent reviewer.
    - For each reviewer, choose the review strategy before delegating (see Review strategy rule below).
 7. Human or CI gate

@@ -23,6 +23,14 @@ Before any invocation, read `.agents/.consultant-mode`:
 
 The toggle file is project-local state stored in `.agents/.consultant-mode`. Keep it local-only and do not commit it to git.
 
+The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/external-dispatch.md). Treat the file as a three-key schema:
+
+- `mode`
+- `preferExternalWorker`
+- `preferExternalReviewer`
+
+When changing `mode`, preserve the preference keys. When creating the file from scratch, initialize all three keys.
+
 ## When to invoke
 
 Use `$consultant` when the lead wants a second opinion for:
@@ -62,6 +70,8 @@ Do not invoke for:
 ## Execution paths
 
 ### External provider: Claude CLI (default when enabled)
+
+See the shared dispatch contract in [../lead/external-dispatch.md](../lead/external-dispatch.md) for the canonical config and provider matrix.
 
 Check availability first: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows).
 

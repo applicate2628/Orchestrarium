@@ -31,6 +31,12 @@ CLAUDE.md           Dev overlay for Claude pack maintenance
 
 Shared development references live in `references-codex/` and `references-claude/`. Shared governance is maintained across both packs; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
 
+Cross-provider execution is available through two routing adapters:
+
+- `$external-worker` is the external execution adapter for eligible implementer roles.
+- `$external-reviewer` is the external execution adapter for eligible review and QA roles.
+- `$consultant` remains advisory-only and is not reused for implementation or review gates.
+
 ## Installation
 
 Use the root router installers for the common path:
@@ -55,6 +61,15 @@ What to install?
 Then it forwards the same arguments to the pack-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic single-pack automation.
 
 Important: if you want the assistant to actually start a team or delegate to subagents, give explicit delegation permission in your prompt. Naming a role such as `$lead` or clearly asking for delegation is the safe default; without that permission, the assistant may remain in the main conversation instead of launching the team.
+
+Important: external execution is toggle-driven through the existing consultant-mode files.
+
+- Codex reads `.agents/.consultant-mode`.
+- Claude Code reads `.claude/.consultant-mode`.
+- The file name stays unchanged for backward compatibility.
+- `mode` still controls `$consultant`.
+- `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
+- Explicit user role requests still override the toggle state in either direction.
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 

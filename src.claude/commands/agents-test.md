@@ -11,15 +11,16 @@ Write or verify tests for specified code using the QA agent.
 
 2. **Read project policies.** Check `## Project policies` in CLAUDE.md for testing methodology and coverage target.
 
-3. **Run QA.** Invoke `subagent_type: qa-engineer`:
+3. **Run QA.** Invoke `subagent_type: qa-engineer` or `external-reviewer` when the routing contract prefers external dispatch:
    - Analyze the target code for testable behavior
    - Write or update tests following the configured testing methodology (TDD, test-after, etc.)
    - Run tests and report results
    - If a coverage target is configured, check coverage meets the target
+   - When external dispatch is preferred, use `external-reviewer` for this QA slot instead of `qa-engineer`
 
 4. **Save.** Persist per artifact persistence protocol (`operating-model.md`):
    - If part of an active work-item → `work-items/active/<slug>/test-report.md`
-   - Log to `.reports/YYYY-MM/report(qa-engineer)-YYYY-MM-DD_HH-MM_topic.md`
+   - Log to `.reports/YYYY-MM/report(<actual-role>)-YYYY-MM-DD_HH-MM_topic.md`
 
 5. **Report.** Present:
    - Tests written or updated (file paths)
@@ -29,7 +30,7 @@ Write or verify tests for specified code using the QA agent.
 
 ## Rules
 
-- **The QA stage MUST be invoked via the Agent tool** with `subagent_type: qa-engineer`. Do not role-play QA inline.
+- **The QA stage MUST be invoked via the Agent tool** with `subagent_type: qa-engineer` or `external-reviewer` when the routing contract prefers external dispatch. Do not role-play QA inline.
 - Follow the project's testing methodology from policies.
 - Match existing test patterns and frameworks in the repo.
 - Do not change source code — only test files.
