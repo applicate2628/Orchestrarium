@@ -5,9 +5,9 @@
     Copies agents (with contracts, templates, scripts), commands, and CLAUDE.md to the target location.
     Re-running = reinstall. Memory is preserved across reinstalls.
 .EXAMPLE
-    .\install.ps1                          # Install into current repo's .claude/
-    .\install.ps1 -Global                  # Install into ~/.claude/
-    .\install.ps1 -Target "D:\my-repo"     # Install into D:\my-repo\.claude/
+    .\install-claude.ps1                          # Install into current repo's .claude/
+    .\install-claude.ps1 -Global                  # Install into ~/.claude/
+    .\install-claude.ps1 -Target "D:\my-repo"     # Install into D:\my-repo\.claude/
 #>
 param(
     [switch]$Global,
@@ -305,7 +305,7 @@ if ($Global) {
         }
     } else {
         Write-Host "FAIL: No install target specified and not running interactively." -ForegroundColor Red
-        Write-Host "Use: .\install.ps1 -Global  or  .\install.ps1 -Target <path>" -ForegroundColor Yellow
+        Write-Host "Use: .\install-claude.ps1 -Global  or  .\install-claude.ps1 -Target <path>" -ForegroundColor Yellow
         exit 1
     }
 }

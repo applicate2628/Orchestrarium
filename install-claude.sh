@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Install Claudestrator skill-pack.
 # Usage:
-#   bash install.sh                  install into current repo (.claude/)
-#   bash install.sh --global         install into ~/.claude/
-#   bash install.sh --target DIR     install into DIR/.claude/ (or DIR if DIR ends with .claude)
+#   bash install-claude.sh                  install into current repo (.claude/)
+#   bash install-claude.sh --global         install into ~/.claude/
+#   bash install-claude.sh --target DIR     install into DIR/.claude/ (or DIR if DIR ends with .claude)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,13 +20,13 @@ TARGET=""
 
 usage() {
   echo "Usage:"
-  echo "  bash install.sh                          Install into current repo (.claude/)"
-  echo "  bash install.sh --global                 Install into ~/.claude/"
-  echo "  bash install.sh --target DIR             Install into DIR/.claude/"
-  echo "  bash install.sh --force                  Skip deletion prompts"
-  echo "  bash install.sh --dry-run                Print planned actions without changing files"
-  echo "  bash install.sh --allow-unsafe-target    Override allowlist for custom target path"
-  echo "  bash install.sh --help                   Show help"
+  echo "  bash install-claude.sh                          Install into current repo (.claude/)"
+  echo "  bash install-claude.sh --global                 Install into ~/.claude/"
+  echo "  bash install-claude.sh --target DIR             Install into DIR/.claude/"
+  echo "  bash install-claude.sh --force                  Skip deletion prompts"
+  echo "  bash install-claude.sh --dry-run                Print planned actions without changing files"
+  echo "  bash install-claude.sh --allow-unsafe-target    Override allowlist for custom target path"
+  echo "  bash install-claude.sh --help                   Show help"
   exit 1
 }
 
@@ -268,7 +268,7 @@ confirm_removal() {
 prompt_install_mode() {
   if [ ! -t 0 ]; then
     echo "FAIL: No install target specified and not running interactively." >&2
-    echo "Use: bash install.sh --global  or  bash install.sh --target <path>" >&2
+    echo "Use: bash install-claude.sh --global  or  bash install-claude.sh --target <path>" >&2
     exit 1
   fi
 
