@@ -18,7 +18,7 @@ function Invoke-ChildInstaller {
         [string]$ScriptName
     )
 
-    $scriptPath = Join-Path $scriptDir $ScriptName
+    $scriptPath = Join-Path $scriptDir "scripts" $ScriptName
     & $runner -File $scriptPath @forwardedArgs
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE

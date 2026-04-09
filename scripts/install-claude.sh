@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Install Claudestrator skill-pack.
 # Usage:
-#   bash install-claude.sh                  install into current repo (.claude/)
-#   bash install-claude.sh --global         install into ~/.claude/
-#   bash install-claude.sh --target DIR     install into DIR/.claude/ (or DIR if DIR ends with .claude)
+#   bash scripts/install-claude.sh                  install into current repo (.claude/)
+#   bash scripts/install-claude.sh --global         install into ~/.claude/
+#   bash scripts/install-claude.sh --target DIR     install into DIR/.claude/ (or DIR if DIR ends with .claude)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE="$SCRIPT_DIR/src.claude"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SOURCE="$REPO_DIR/src.claude"
 
 # Directories to install (order doesn't matter)
 DIRS=(agents commands)
@@ -20,13 +21,13 @@ TARGET=""
 
 usage() {
   echo "Usage:"
-  echo "  bash install-claude.sh                          Install into current repo (.claude/)"
-  echo "  bash install-claude.sh --global                 Install into ~/.claude/"
-  echo "  bash install-claude.sh --target DIR             Install into DIR/.claude/"
-  echo "  bash install-claude.sh --force                  Skip deletion prompts"
-  echo "  bash install-claude.sh --dry-run                Print planned actions without changing files"
-  echo "  bash install-claude.sh --allow-unsafe-target    Override allowlist for custom target path"
-  echo "  bash install-claude.sh --help                   Show help"
+  echo "  bash scripts/install-claude.sh                          Install into current repo (.claude/)"
+  echo "  bash scripts/install-claude.sh --global                 Install into ~/.claude/"
+  echo "  bash scripts/install-claude.sh --target DIR             Install into DIR/.claude/"
+  echo "  bash scripts/install-claude.sh --force                  Skip deletion prompts"
+  echo "  bash scripts/install-claude.sh --dry-run                Print planned actions without changing files"
+  echo "  bash scripts/install-claude.sh --allow-unsafe-target    Override allowlist for custom target path"
+  echo "  bash scripts/install-claude.sh --help                   Show help"
   exit 1
 }
 
@@ -268,7 +269,7 @@ confirm_removal() {
 prompt_install_mode() {
   if [ ! -t 0 ]; then
     echo "FAIL: No install target specified and not running interactively." >&2
-    echo "Use: bash install-claude.sh --global  or  bash install-claude.sh --target <path>" >&2
+    echo "Use: bash scripts/install-claude.sh --global  or  bash scripts/install-claude.sh --target <path>" >&2
     exit 1
   fi
 
@@ -573,7 +574,7 @@ else
 fi
 
 # AGENTS.md: copy or replace shared governance
-src_agents="$SOURCE/AGENTS.shared.md"
+src_agents="$REPO_DIR/shared/AGENTS.shared.md"
 dst_agents="$TARGET/AGENTS.md"
 
 if [[ -f "$src_agents" ]]; then

@@ -7,8 +7,14 @@ set -euo pipefail
 # Auto-detect pack root: src.claude/ (dev repo) or .claude/ (installed)
 if [[ -d "src.claude/agents" ]]; then
   PACK="src.claude"
+  AGENTS_FILE="shared/AGENTS.shared.md"
 elif [[ -d ".claude/agents" ]]; then
   PACK=".claude"
+  if [[ -f "$PACK/AGENTS.md" ]]; then
+    AGENTS_FILE="$PACK/AGENTS.md"
+  else
+    AGENTS_FILE="$PACK/AGENTS.shared.md"
+  fi
 else
   echo "FAIL: neither src.claude/ nor .claude/ found. Run from repo root."
   exit 1
@@ -27,7 +33,7 @@ echo ""
 
 # 1. Core files exist
 echo "[Core files]"
-for f in $PACK/CLAUDE.md $PACK/AGENTS.shared.md $PACK/agents/lead.md $PACK/agents/consultant.md \
+for f in "$PACK/CLAUDE.md" "$AGENTS_FILE" "$PACK/agents/lead.md" "$PACK/agents/consultant.md" \
          $PACK/agents/contracts/operating-model.md \
          $PACK/agents/contracts/subagent-contracts.md \
          $PACK/agents/contracts/policies-catalog.md \
@@ -38,9 +44,9 @@ echo ""
 
 # 2. Role index vs actual agent files
 echo "[Role index consistency]"
-if [[ -f $PACK/AGENTS.shared.md ]]; then
+if [[ -f "$AGENTS_FILE" ]]; then
   # Extract role names from AGENTS.md (shared governance, lines with $role-name pattern)
-  roles=$(grep -oE '\$[a-z][-a-z]*' $PACK/AGENTS.shared.md | sed 's/^\$//' | sort -u)
+  roles=$(grep -oE '\$[a-z][-a-z]*' "$AGENTS_FILE" | sed 's/^\$//' | sort -u)
   for role in $roles; do
     if [[ -f "$PACK/agents/${role}.md" ]]; then
       pass "$role has agent file"
@@ -113,7 +119,7 @@ done
 # 6b. AGENTS.md has required sections (shared governance)
 echo "[AGENTS.md sections]"
 for section in "Role index" "Engineering hygiene" "Publication safety" "Core delegation principles"; do
-  if grep -q "## $section" $PACK/AGENTS.shared.md; then
+  if grep -q "## $section" "$AGENTS_FILE"; then
     pass "## $section present in AGENTS.md"
   else
     fail "## $section missing from AGENTS.md"

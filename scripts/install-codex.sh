@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # Install Orchestrarium skill-pack.
 # Usage:
-#   bash install-codex.sh                  install into current repo (.agents/ + AGENTS.md)
-#   bash install-codex.sh --global         install into ~/.codex/
-#   bash install-codex.sh --target DIR     install into DIR as a project (.agents/ + AGENTS.md)
+#   bash scripts/install-codex.sh                  install into current repo (.agents/ + AGENTS.md)
+#   bash scripts/install-codex.sh --global         install into ~/.codex/
+#   bash scripts/install-codex.sh --target DIR     install into DIR as a project (.agents/ + AGENTS.md)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE="$SCRIPT_DIR/src.codex"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SOURCE="$REPO_DIR/src.codex"
 
 # Directories to install (order doesn't matter)
 DIRS=(skills)
@@ -20,13 +21,13 @@ TARGET=""
 
 usage() {
   echo "Usage:"
-  echo "  bash install-codex.sh                          Install into current repo (.agents/ + AGENTS.md)"
-  echo "  bash install-codex.sh --global                 Install into ~/.codex/"
-  echo "  bash install-codex.sh --target DIR             Install into DIR as a project (.agents/ + AGENTS.md)"
-  echo "  bash install-codex.sh --force                  Skip deletion prompts"
-  echo "  bash install-codex.sh --dry-run                Print planned actions without changing files"
-  echo "  bash install-codex.sh --allow-unsafe-target    Override allowlist for custom target path"
-  echo "  bash install-codex.sh --help                   Show help"
+  echo "  bash scripts/install-codex.sh                          Install into current repo (.agents/ + AGENTS.md)"
+  echo "  bash scripts/install-codex.sh --global                 Install into ~/.codex/"
+  echo "  bash scripts/install-codex.sh --target DIR             Install into DIR as a project (.agents/ + AGENTS.md)"
+  echo "  bash scripts/install-codex.sh --force                  Skip deletion prompts"
+  echo "  bash scripts/install-codex.sh --dry-run                Print planned actions without changing files"
+  echo "  bash scripts/install-codex.sh --allow-unsafe-target    Override allowlist for custom target path"
+  echo "  bash scripts/install-codex.sh --help                   Show help"
   exit 1
 }
 
@@ -283,7 +284,7 @@ confirm_removal() {
 prompt_install_mode() {
   if [ ! -t 0 ]; then
     echo "FAIL: No install target specified and not running interactively." >&2
-    echo "Use: bash install-codex.sh --global  or  bash install-codex.sh --target <path>" >&2
+    echo "Use: bash scripts/install-codex.sh --global  or  bash scripts/install-codex.sh --target <path>" >&2
     exit 1
   fi
 
@@ -528,7 +529,7 @@ fi
 # Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
 
 # AGENTS.md: assemble from shared + codex-specific, then merge or create
-src_shared="$SOURCE/AGENTS.shared.md"
+src_shared="$REPO_DIR/shared/AGENTS.shared.md"
 src_platform="$SOURCE/AGENTS.codex.md"
 
 if [[ ! -f "$src_shared" ]] || [[ ! -f "$src_platform" ]]; then

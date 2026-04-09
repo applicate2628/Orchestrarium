@@ -5,9 +5,9 @@
     Copies agents (with contracts, templates, scripts), commands, and CLAUDE.md to the target location.
     Re-running = reinstall. Memory is preserved across reinstalls.
 .EXAMPLE
-    .\install-claude.ps1                          # Install into current repo's .claude/
-    .\install-claude.ps1 -Global                  # Install into ~/.claude/
-    .\install-claude.ps1 -Target "D:\my-repo"     # Install into D:\my-repo\.claude/
+    .\scripts\install-claude.ps1                          # Install into current repo's .claude/
+    .\scripts\install-claude.ps1 -Global                  # Install into ~/.claude/
+    .\scripts\install-claude.ps1 -Target "D:\my-repo"     # Install into D:\my-repo\.claude/
 #>
 param(
     [switch]$Global,
@@ -19,7 +19,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Source = Join-Path $ScriptDir "src.claude"
+$RepoDir = Split-Path -Parent $ScriptDir
+$Source = Join-Path $RepoDir "src.claude"
 
 $Dirs = @("agents", "commands")
 $OptionalDirs = @("memory")
@@ -305,7 +306,7 @@ if ($Global) {
         }
     } else {
         Write-Host "FAIL: No install target specified and not running interactively." -ForegroundColor Red
-        Write-Host "Use: .\install-claude.ps1 -Global  or  .\install-claude.ps1 -Target <path>" -ForegroundColor Yellow
+        Write-Host "Use: .\scripts\install-claude.ps1 -Global  or  .\scripts\install-claude.ps1 -Target <path>" -ForegroundColor Yellow
         exit 1
     }
 }
@@ -488,7 +489,7 @@ if (Test-Path $dstMd) {
 }
 
 # AGENTS.md: copy or replace shared governance
-$srcAgents = Join-Path $Source "AGENTS.shared.md"
+$srcAgents = Join-Path (Join-Path $RepoDir "shared") "AGENTS.shared.md"
 $dstAgents = Join-Path $TargetRoot "AGENTS.md"
 
 if (Test-Path $srcAgents) {

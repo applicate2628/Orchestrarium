@@ -5,9 +5,9 @@
     Copies the skills tree and AGENTS.md to the target location.
     Re-running = reinstall.
 .EXAMPLE
-    .\install-codex.ps1                          # Install into current repo (.agents/ + AGENTS.md)
-    .\install-codex.ps1 -Global                  # Install into ~/.codex/
-    .\install-codex.ps1 -Target "D:\my-repo"     # Install into D:\my-repo as a project (.agents/ + AGENTS.md)
+    .\scripts\install-codex.ps1                          # Install into current repo (.agents/ + AGENTS.md)
+    .\scripts\install-codex.ps1 -Global                  # Install into ~/.codex/
+    .\scripts\install-codex.ps1 -Target "D:\my-repo"     # Install into D:\my-repo as a project (.agents/ + AGENTS.md)
 #>
 param(
     [switch]$Global,
@@ -19,7 +19,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Source = Join-Path $ScriptDir "src.codex"
+$RepoDir = Split-Path -Parent $ScriptDir
+$Source = Join-Path $RepoDir "src.codex"
 
 $script:PromptMode = $null
 
@@ -303,7 +304,7 @@ if ($Global) {
         }
     } else {
         Write-Host "FAIL: No install target specified and not running interactively." -ForegroundColor Red
-        Write-Host "Use: .\install-codex.ps1 -Global  or  .\install-codex.ps1 -Target <path>" -ForegroundColor Yellow
+        Write-Host "Use: .\scripts\install-codex.ps1 -Global  or  .\scripts\install-codex.ps1 -Target <path>" -ForegroundColor Yellow
         exit 1
     }
 }
@@ -318,8 +319,9 @@ if ($Mode -eq "global") {
     $MdTarget = Join-Path $TargetRoot "AGENTS.md"
 } else {
     $ProjectRoot = Split-Path $TargetRoot -Parent
-    $SkillsTarget = Join-Path $ProjectRoot ".agents" "skills"
-    $LeadScriptsTarget = Join-Path $ProjectRoot ".agents" "skills\lead\scripts"
+    $AgentsRoot = Join-Path $ProjectRoot ".agents"
+    $SkillsTarget = Join-Path $AgentsRoot "skills"
+    $LeadScriptsTarget = Join-Path $SkillsTarget "lead\scripts"
     $MdTarget = Join-Path $ProjectRoot "AGENTS.md"
 }
 
@@ -419,7 +421,7 @@ if (Test-Path -LiteralPath $SkillsTarget) {
 # Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
 
 # AGENTS.md: assemble from shared + codex-specific, then merge or create
-$srcShared = Join-Path $Source "AGENTS.shared.md"
+$srcShared = Join-Path (Join-Path $RepoDir "shared") "AGENTS.shared.md"
 $srcPlatform = Join-Path $Source "AGENTS.codex.md"
 
 if (-not (Test-Path $srcShared) -or -not (Test-Path $srcPlatform)) {

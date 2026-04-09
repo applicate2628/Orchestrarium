@@ -3,18 +3,19 @@
 The installable skill pack source lives in [`src.codex/`](src.codex/).
 See [INSTALL.md](INSTALL.md) for installation instructions.
 
-When working inside this development repository, Codex loads this file as the main conversation context. Use it together with [src.codex/AGENTS.md](src.codex/AGENTS.md), which is the shared source file for the installable pack. The local `.agents/` directory is repo-install output created by the install scripts and is not committed.
+When working inside this development repository, Codex loads this file as the main conversation context. Use it together with the shared governance in [`shared/AGENTS.shared.md`](shared/AGENTS.shared.md). The local `.agents/` directory is repo-install output created by the install scripts and is not committed.
 
 ## Skill-pack maintenance
 
 When maintaining this skill pack or its source repository:
 
-- keep [`src.codex/AGENTS.md`](src.codex/AGENTS.md) aligned with the installed global policy because it is the shared source file for both
+- keep [`shared/AGENTS.shared.md`](shared/AGENTS.shared.md) aligned with the installed global policy because it is the single shared source for both packs
 - update `src.codex/skills/<role>/SKILL.md` when a role's contract, artifact, or gate changes
 - update `src.codex/skills/<role>/agents/openai.yaml` when trigger or prompt behavior changes
 - **MUST** update `references-codex/subagent-operating-model.md` and all `references-codex/` docs when any governance, protocol, gate, or routing semantic changes in the installed pack. Reference docs are the canonical methodology source of truth — they MUST stay aligned with the installed contracts. A governance change that updates `src.codex/` without updating `references-codex/` is incomplete.
 - **MUST** update `README.md` and `INSTALL.md` when pack structure, skill count, install targets, or entry points change. A structural change without doc update is incomplete.
 - **No mechanical application:** do not copy, move, rename, merge, or propagate content mechanically — between packs, between files, or within the same file — without verifying that the result is correct in the target context. Platform-specific semantics (execution model, parallelism, invocation mechanism, paths, tool capabilities), ownership boundaries, and behavioral implications must be checked before the change lands. "The other pack has it" or "the source file said so" is not sufficient justification. Every change must be independently valid where it lands.
+- **Cross-pack sync:** when editing shared semantic blocks in `operating-model.md` or `subagent-contracts.md`, consult [`cross-pack-reconciliation.md`](cross-pack-reconciliation.md) to identify and update the matching block in the other pack.
 - update `src.codex/skills/lead/operating-model.md` when orchestration or gate semantics change
 - update `src.codex/skills/consultant/SKILL.md` when consultant execution policy, toggle logic, or provider paths change
 - use `$knowledge-archivist` for repository hygiene, canonical-source alignment, documentation upkeep, and reference maintenance
