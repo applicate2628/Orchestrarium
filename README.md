@@ -56,6 +56,8 @@ What to install?
 
 Then it forwards the same arguments to `install-codex.*`, `install-claude.*`, or both. Use the pack-specific installers directly when you want deterministic single-pack automation.
 
+Important: if you want the assistant to actually start a team or delegate to subagents, give explicit delegation permission in your prompt. Naming a role such as `$lead` or clearly asking for delegation is the safe default; without that permission, the assistant may remain in the main conversation instead of launching the team.
+
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 
 ## References and maintenance
