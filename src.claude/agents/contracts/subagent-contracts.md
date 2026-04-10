@@ -52,7 +52,7 @@ Gate to next stage:
 A lead MUST NOT delegate work until the work-item folder contains a verified `brief.md` and `status.md`.
 
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
-- `status.md` must follow the format below and be updated after every stage transition, agent launch, or interruption.
+- `status.md` must follow the format below and be updated after every stage transition, agent launch, or interruption, including any open obligations that still block closeout.
 - If either artifact is missing, stale, or incomplete, the lead restores only the lead-owned task-memory state from persisted accepted artifacts BEFORE delegating any specialist role. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
 - The only exception is the additive fast lane where the lead records the decision in status.md instead.
 
@@ -74,6 +74,7 @@ updated: <YYYY-MM-DD HH:MM>
 - **Stage**: <current stage name or number>
 - **Main conv role**: <what main conversation is doing: orchestrating | waiting for agents | reviewing artifact | idle>
 - **Last accepted artifact**: <filename or "none">
+- **Open obligations before closeout**: <none | remaining required work still inside admitted scope>
 
 ## Active agents
 
@@ -168,6 +169,7 @@ For substantial tasks, prefer a structured closeout in the final summary:
 - **Changed:** what was modified and why
 - **Verified:** what was tested or checked, with evidence
 - **Not verified:** what was not checked and why
+- **Still open:** remaining required work to satisfy the current request, or `none`
 - **Risks / follow-ups:** residual risks, deferred work, or known limitations
 
 This is a recommended format for user-facing task completion, not a mandatory gate artifact. For pipeline handoffs, use the shared response format above.
@@ -183,3 +185,4 @@ Ask these before advancing:
 5. Is the next stage receiving only the context it truly needs?
 6. Is an independent reviewer or human gate still required?
 7. Is the blast radius still inside the approved change surface?
+8. Is any admitted-scope obligation still open even though one sub-batch is finished?

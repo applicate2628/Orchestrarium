@@ -39,6 +39,9 @@ When lead coordinates, or when the main conversation needs to decide between rol
 - Maintain exactly one primary in-progress task at a time.
 - Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
 - After handling a side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
+- Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
+- Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
 - Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task.
 
@@ -69,6 +72,7 @@ For lead-managed work, every completed task-batch ends with one external consult
 - The memo must end with both:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
   - The continuation prompt must begin with a direct imperative to continue and name the next concrete action.
+- Before closure after that memo, reconcile the requested outcome against remaining open obligations; if admitted-scope work remains, keep the batch open.
 
 ## Research admission filter
 
