@@ -5,6 +5,9 @@ Read GEMINI.md, skills/README.md, and skills/lead/SKILL.md.
 Summarize:
 - the current Gemini provider-pack structure
 - the role of GEMINI.md
+- the role of Gemini CLI /init and .gemini/settings.json
+- the role of the Gemini init-project helper for .gemini/.agents-mode
+- the role of .gemini/.agents-mode as an Orchestrarium-specific shared-routing overlay
 - the local command namespace
 - the distinction between Gemini-native skills and Gemini-native runtime commands
 """

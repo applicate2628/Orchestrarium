@@ -74,6 +74,7 @@ Important: operator preferences now live in pack-local `agents-mode` files; lega
 - `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
 - Codex may additionally use `externalClaudeProfile` to select the Claude CLI execution profile: `sonnet-high` or `opus-max`.
 - Claude Code does not use `externalClaudeProfile` in its canonical config because Claude-line external dispatch goes to Codex CLI.
+- For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config stays in `.gemini/settings.json`; the Orchestrarium Gemini `init-project` helper only bootstraps the optional `.gemini/.agents-mode` overlay after `/init`.
 - Explicit user role requests still override the toggle state in either direction.
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
