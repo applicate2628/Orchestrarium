@@ -11,6 +11,7 @@ Use it together with:
 The structure follows the official Gemini-preferred model instead of mirroring the Codex or Claude lines:
 
 - `GEMINI.md` as the runtime entrypoint
+- `AGENTS.shared.md` as the imported shared-governance module loaded by `GEMINI.md`
 - Gemini CLI built-in `/init` as the official project bootstrap for `GEMINI.md`
 - `.gemini/settings.json` as the official runtime-state and configuration surface
 - `skills/init-project/SKILL.md` plus `commands/agents/init-project.toml` to bootstrap Orchestrarium's `.gemini/.agents-mode` overlay after the official `/init`
@@ -18,6 +19,6 @@ The structure follows the official Gemini-preferred model instead of mirroring t
 - `commands/*.toml` for Gemini custom commands
 - `extension/gemini-extension.json` for future MCP and tool packaging
 
-This source tree intentionally avoids extra repo-local runtime abstractions such as a Gemini-specific `agents/` tree or copied contract catalogs.
+This source tree intentionally avoids an `AGENTS.md` runtime entrypoint, a Gemini-specific `agents/` tree, or settings-owned MCP wiring inside instruction files. Shared governance is carried as one imported markdown module, while MCP servers such as Serena, Fetch, or Context7 remain a `settings.json` or extension-manifest concern.
 
 Inside the monorepo, this subtree carries the Gemini source surface and the shared-reference alignment work, not the standalone installer entrypoints. When Orchestrarium needs the same shared routing toggles used on the Codex and Claude lines, that provider-local overlay belongs in `.gemini/.agents-mode`; it complements official `.gemini/settings.json` instead of replacing it, and the local `init-project` helper exists to initialize that overlay after Gemini's built-in `/init`. When Gemini routes external work to Claude CLI, the same overlay may also carry `externalClaudeSecretMode: auto | force`.

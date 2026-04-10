@@ -18,7 +18,7 @@ function Invoke-ChildInstaller {
         [string]$ScriptName
     )
 
-    $scriptPath = Join-Path $scriptDir "scripts" $ScriptName
+    $scriptPath = Join-Path (Join-Path $scriptDir "scripts") $ScriptName
     & $runner -File $scriptPath @forwardedArgs
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
@@ -28,8 +28,9 @@ function Invoke-ChildInstaller {
 Write-Host "What to install?"
 Write-Host "  1) Codex pack"
 Write-Host "  2) Claude Code"
-Write-Host "  3) Both"
-Write-Host "Select 1, 2, or 3: " -NoNewline
+Write-Host "  3) Gemini CLI"
+Write-Host "  4) All three"
+Write-Host "Select 1, 2, 3, or 4: " -NoNewline
 $choice = [Console]::In.ReadLine()
 
 if ($null -eq $choice) {
@@ -40,9 +41,11 @@ if ($null -eq $choice) {
 switch ($choice.Trim()) {
     "1" { Invoke-ChildInstaller -ScriptName "install-codex.ps1" }
     "2" { Invoke-ChildInstaller -ScriptName "install-claude.ps1" }
-    "3" {
+    "3" { Invoke-ChildInstaller -ScriptName "install-gemini.ps1" }
+    "4" {
         Invoke-ChildInstaller -ScriptName "install-codex.ps1"
         Invoke-ChildInstaller -ScriptName "install-claude.ps1"
+        Invoke-ChildInstaller -ScriptName "install-gemini.ps1"
     }
     default {
         Write-Error "Invalid selection: $choice"

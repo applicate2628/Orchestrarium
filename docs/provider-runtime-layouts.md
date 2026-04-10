@@ -67,6 +67,7 @@ Do not confuse these runtime surfaces with the monorepo authoring trees such as 
 | Item | Path or shape | Notes |
 | --- | --- | --- |
 | Global context file | `~/.gemini/GEMINI.md` | Official user-level Gemini context file |
+| Global shared-governance import | `~/.gemini/AGENTS.shared.md` | Orchestrarium-installed markdown module imported by `GEMINI.md`; not a Gemini-native required filename |
 | Global user skills | `~/.gemini/skills/` | Official user-level skill location |
 | Global user skills alias | `~/.agents/skills/` | Official alias; within the user tier, the alias takes precedence over `~/.gemini/skills/` |
 | Global custom commands | `~/.gemini/commands/` | Official user-level Gemini custom commands |
@@ -79,6 +80,7 @@ Do not confuse these runtime surfaces with the monorepo authoring trees such as 
 | Item | Path or shape | Notes |
 | --- | --- | --- |
 | Project context file | `<project>/GEMINI.md` | Official default project-level Gemini context file; built-in `/init` generates or tailors this file |
+| Project shared-governance import | `<project>/AGENTS.shared.md` | Orchestrarium-installed markdown module imported by `GEMINI.md`; not a Gemini-native required filename |
 | Parent-context hierarchy | `<project>/../GEMINI.md` up to project root | Gemini walks parent directories until the `.git` root |
 | Sub-directory context | `<project>/<subdir>/GEMINI.md` | Gemini also loads more specific context files below the current working directory |
 | Workspace skills | `<project>/.gemini/skills/` | Official workspace skill location |
@@ -86,7 +88,7 @@ Do not confuse these runtime surfaces with the monorepo authoring trees such as 
 | Workspace custom commands | `<project>/.gemini/commands/` | Official project-local Gemini custom commands |
 | Workspace settings | `<project>/.gemini/settings.json` | Official project-local Gemini settings |
 | Orchestrarium operator overlay | `<project>/.gemini/.agents-mode` | Repo-local shared routing overlay for consultant, delegation, MCP, and external-provider preferences; not a Gemini-native settings surface and should be initialized separately after Gemini `/init` |
-| Optional context filename override | `context.fileName` in settings | `AGENTS.md` is not a default Gemini entrypoint; it must be added explicitly if desired |
+| Optional context filename override | `context.fileName` in settings | `AGENTS.md` is not a default Gemini entrypoint; Orchestrarium uses `GEMINI.md` imports instead of taking over this settings-owned surface |
 | Extension-provided skills | installed extension content | Official third discovery tier after workspace and user skills |
 | Important overlap note | workspace `.agents/skills/` | If a repository already uses `.agents/skills/` for Codex, Gemini will also discover those skills because this alias is official Gemini behavior |
 
