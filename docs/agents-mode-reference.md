@@ -95,6 +95,14 @@ Do not stop only because one local batch of work is complete if the next concret
 
 `PASS` advances immediately. Pause only on `REVISE`, `BLOCKED`, explicit user reprioritization, or a required human approval point.
 
+## Completion integrity
+
+Before declaring the current task, batch, or closeout complete, reconcile the result against the original user request, the accepted scope, and any still-open required follow-up.
+
+If a concrete required next action is already known and still inside the current task, keep the task open and continue instead of stopping at a partial sub-batch.
+
+When a non-trivial task is interrupted, record a durable resume point: current stage, last accepted artifact, and next concrete step in the owning status surface when available; otherwise state it explicitly in the handoff or closeout.
+
 ## Interpretation notes
 
 | Rule | Meaning |
