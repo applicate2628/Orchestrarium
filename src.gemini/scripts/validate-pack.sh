@@ -14,6 +14,7 @@ fi
 
 required=(
   "$PACK_ROOT/GEMINI.md"
+  "$PACK_ROOT/AGENTS.shared.md"
   "$PACK_ROOT/skills/README.md"
   "$PACK_ROOT/skills/lead/SKILL.md"
   "$PACK_ROOT/skills/init-project/SKILL.md"
@@ -30,13 +31,15 @@ for path in "${required[@]}"; do
   fi
 done
 
+IMPORT_ROOT="$(dirname "$PACK_ROOT/GEMINI.md")"
+
 while IFS= read -r import_line; do
   import_target="${import_line#@}"
   if [[ -z "$import_target" ]]; then
     continue
   fi
-  if [[ ! -f "$PACK_ROOT/$import_target" ]]; then
-    echo "FAIL: GEMINI.md import target missing: $PACK_ROOT/$import_target"
+  if [[ ! -f "$IMPORT_ROOT/$import_target" ]]; then
+    echo "FAIL: GEMINI.md import target missing: $IMPORT_ROOT/$import_target"
     exit 1
   fi
 done < <(grep '^@' "$PACK_ROOT/GEMINI.md" || true)
@@ -58,6 +61,13 @@ fi
 
 if ! grep -q '\.gemini/settings\.json' "$PACK_ROOT/GEMINI.md"; then
   echo "FAIL: GEMINI.md should mention .gemini/settings.json as the official Gemini runtime-state surface"
+  exit 1
+fi
+
+start_count="$(grep -cF '<!-- ORCHESTRARIUM_GEMINI_PACK:START -->' "$PACK_ROOT/GEMINI.md" || true)"
+end_count="$(grep -cF '<!-- ORCHESTRARIUM_GEMINI_PACK:END -->' "$PACK_ROOT/GEMINI.md" || true)"
+if [[ "$start_count" -ne 1 || "$end_count" -ne 1 ]]; then
+  echo "FAIL: GEMINI.md should contain exactly one managed Orchestrarium pack block"
   exit 1
 fi
 

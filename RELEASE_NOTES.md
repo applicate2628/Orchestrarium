@@ -10,6 +10,14 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-04-11
+
+### Changed
+
+- Gemini installs now ship a pack-local `AGENTS.shared.md` next to `GEMINI.md`, and `GEMINI.md` imports it through Gemini CLI's standard markdown import mechanism instead of pretending shared governance should be baked into `.gemini/settings.json`. This restores the shared-governance layer that Codex and Claude already had while preserving the official Gemini split between instruction files and settings-owned MCP wiring.
+- The root router installers, `install.sh` and `install.ps1`, now install all three provider lines instead of stopping at Codex and Claude. Maintainers can choose Codex, Claude Code, Gemini CLI, or all three from one entrypoint, and the new root `scripts/install-gemini.*` path uses the same validated Gemini payload shape as the standalone Gemini branch.
+- Added missing PowerShell validator wrappers to all provider source trees. `src.codex`, `src.claude`, and `src.gemini` now each carry a `ps1` companion for their source-surface validation script, so Windows maintainers no longer have to drop into Git Bash just to run the canonical pack checks.
+
 ## 2026-04-10
 
 ### Added
