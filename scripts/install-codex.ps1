@@ -21,6 +21,8 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoDir = Split-Path -Parent $ScriptDir
 $Source = Join-Path $RepoDir "src.codex"
+$script:CodexPackBeginMarker = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
+$script:CodexPackEndMarker = "<!-- END ORCHESTRARIUM CODEX PACK -->"
 
 $script:PromptMode = $null
 
@@ -317,6 +319,86 @@ function Remove-DanglingLink {
     }
 }
 
+function Get-CodexPackStartIndex {
+    param([string[]]$Lines)
+
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        if ($Lines[$i] -eq $script:CodexPackBeginMarker) {
+            return $i
+        }
+        if ($Lines[$i] -match "^# Shared Governance$" -or $Lines[$i] -match "^# Codex Platform Rules$" -or $Lines[$i] -match "^# Default Delegation Rule$") {
+            return $i
+        }
+    }
+
+    return -1
+}
+
+function Get-CodexPackEndIndex {
+    param(
+        [string[]]$ExistingLines,
+        [int]$PackStart,
+        [string[]]$SourceLines
+)
+
+    for ($i = $PackStart; $i -lt $ExistingLines.Count; $i++) {
+        if ($ExistingLines[$i] -eq $script:CodexPackEndMarker) {
+            return $i
+        }
+    }
+
+    for ($i = ($PackStart + 1); $i -lt $ExistingLines.Count; $i++) {
+        if ($ExistingLines[$i] -eq "## Project policies") {
+            return ($i - 1)
+        }
+    }
+
+    $footer = $null
+    for ($i = $SourceLines.Count - 1; $i -ge 0; $i--) {
+        if (-not [string]::IsNullOrWhiteSpace($SourceLines[$i])) {
+            $footer = $SourceLines[$i]
+            break
+        }
+    }
+
+    if ($footer) {
+        for ($i = $PackStart; $i -lt $ExistingLines.Count; $i++) {
+            if ($ExistingLines[$i] -eq $footer) {
+                return $i
+            }
+        }
+    }
+
+    $fallback = $PackStart + $SourceLines.Count - 1
+    if ($fallback -ge $ExistingLines.Count) {
+        return ($ExistingLines.Count - 1)
+    }
+
+    return $fallback
+}
+
+function Get-MergedCodexAgentsContent {
+    param(
+        [string[]]$ExistingLines,
+        [int]$PackStart,
+        [string]$SourcePath
+    )
+
+    $sourceLines = Get-Content $SourcePath
+    $packEnd = Get-CodexPackEndIndex -ExistingLines $ExistingLines -PackStart $PackStart -SourceLines $sourceLines
+
+    $finalLines = @()
+    if ($PackStart -gt 0) {
+        $finalLines += $ExistingLines[0..($PackStart - 1)]
+    }
+    $finalLines += $sourceLines
+    if ($packEnd + 1 -lt $ExistingLines.Count) {
+        $finalLines += $ExistingLines[($packEnd + 1)..($ExistingLines.Count - 1)]
+    }
+
+    return ($finalLines -join "`n")
+}
+
 # Determine target
 if ($Global) {
     $repoRoot = Get-GitRepoRoot
@@ -478,7 +560,14 @@ if (-not (Test-Path $srcShared) -or -not (Test-Path $srcPlatform)) {
 $srcMd = Join-Path $env:TEMP "orchestrarium-agents-assembled.md"
 $sharedContent = Get-Content $srcShared -Raw
 $platformContent = Get-Content $srcPlatform -Raw
-Set-Content -Path $srcMd -Value ($sharedContent + "`n" + $platformContent) -NoNewline
+$assembledContent = @(
+    $script:CodexPackBeginMarker
+    $sharedContent.TrimEnd()
+    ""
+    $platformContent.TrimEnd()
+    $script:CodexPackEndMarker
+) -join "`n"
+Set-Content -Path $srcMd -Value $assembledContent -NoNewline
 
 $dstMd = $MdTarget
 
@@ -487,29 +576,15 @@ Remove-DanglingLink -Path $dstMd -Label "AGENTS.md"
 if (Test-Path $dstMd) {
     $content = Get-Content $dstMd -Raw
     if ($content -match "## Template routing") {
-        if ($content -match "(?m)^# Default Delegation Rule") {
-            # Extract content before "# Default Delegation Rule", replace rest
-            $lines = Get-Content $dstMd
-            $idx = 0
-            for ($i = 0; $i -lt $lines.Count; $i++) {
-                if ($lines[$i] -match "^# Default Delegation Rule") { $idx = $i; break }
-            }
-            if ($idx -gt 0) {
-                Write-Host "  AGENTS.md: replacing Codex pack section..."
-                $userContent = ($lines[0..($idx-1)] -join "`n") + "`n"
-                $newContent = Get-Content $srcMd -Raw
-                if (-not $DryRun) {
-                    Set-Content -Path $dstMd -Value ($userContent + $newContent) -NoNewline
-                } else {
-                    Write-Host "    [dry-run] would replace Codex pack section in AGENTS.md"
-                }
+        $lines = Get-Content $dstMd
+        $packStart = Get-CodexPackStartIndex -Lines $lines
+        if ($packStart -ge 0) {
+            Write-Host "  AGENTS.md: replacing Codex pack section..."
+            if (-not $DryRun) {
+                $newContent = Get-MergedCodexAgentsContent -ExistingLines $lines -PackStart $packStart -SourcePath $srcMd
+                Set-Content -Path $dstMd -Value $newContent -NoNewline
             } else {
-                Write-Host "  AGENTS.md: full replace..."
-                if (-not $DryRun) {
-                    Copy-Item -Force $srcMd $dstMd
-                } else {
-                    Write-Host "    [dry-run] would replace AGENTS.md"
-                }
+                Write-Host "    [dry-run] would replace Codex pack section in AGENTS.md"
             }
         } else {
             Write-Host "  AGENTS.md: full replace..."
@@ -613,5 +688,6 @@ if ($errors -gt 0) {
     Write-Host "  Skills: $SkillsTarget"
     Write-Host "  AGENTS.md: $MdTarget"
     Write-Host ""
-    Write-Host "Next: run 'bash $LeadScriptsTarget/validate-skill-pack.sh' to verify the installation."
+    Write-Host "Next: open Codex in the target project and run '`$init-project' to configure project policies and .agents/.agents-mode."
+    Write-Host "Then run 'bash $LeadScriptsTarget/validate-skill-pack.sh' if you are validating the installation from a maintainer shell."
 }
