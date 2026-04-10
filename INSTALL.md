@@ -2,7 +2,7 @@
 
 This monorepo ships two unified entry-point installers at the root (`install.sh` and `install.ps1`). They prompt for Codex, Claude Code, or both, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
-Gemini CLI currently ships as a source-only scaffold and does not yet route through the root installers.
+The root router currently installs Codex and Claude Code only. The monorepo still carries a first-class Gemini source tree in `src.gemini/` with `GEMINI.md` as its runtime entrypoint and validates that source surface separately.
 
 ## Quick install
 
@@ -125,9 +125,9 @@ Customize each platform in the place that platform actually reads:
 
 When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
 
-## Gemini source scaffold
+## Gemini source tree in the monorepo
 
-The Gemini line currently exists as source only:
+This branch keeps the Gemini line as a validated source tree even though the root router does not install it:
 
 - runtime entrypoint: `src.gemini/GEMINI.md`
 - branch-level docs entrypoint: `docs/README.md`

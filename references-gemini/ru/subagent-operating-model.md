@@ -13,7 +13,7 @@
 - `.gemini/settings.json` остаётся Gemini-native runtime config surface.
 - `.gemini/.agents-mode` — optional Orchestrarium overlay, а не замена `.gemini/settings.json`.
 - Gemini runtime assets живут в `src.gemini/skills/`, `src.gemini/commands/` и `src.gemini/extension/`.
-- Текущий Gemini scaffold остаётся sequential и human-steered; не предполагайте native parallel dispatch.
+- Текущее Gemini source tree остаётся sequential и human-steered; не предполагайте native parallel dispatch.
 - На Gemini-линии `externalProvider: auto` не задаёт standing external default. Если Gemini явно выбирает Claude как external provider, нужно уважать `externalClaudeSecretMode`.
 
 ## Gemini-side repository concretization

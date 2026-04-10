@@ -1,12 +1,12 @@
 # Orchestrarium
 
-A cross-provider agent orchestration monorepo for provider-specific agent packs:
+A cross-provider agent orchestration monorepo that keeps the Codex, Claude Code, and Gemini provider trees aligned on one shared governance and reference core:
 
-- `src.codex/` — the Codex provider pack
-- `src.claude/` — the Claude Code provider pack
-- `src.gemini/` — the Gemini CLI provider-pack scaffold
+- `src.codex/` — the Codex provider pack source
+- `src.claude/` — the Claude Code provider pack source
+- `src.gemini/` — the Gemini provider-pack source tree with `GEMINI.md` as its runtime entrypoint
 
-Current provider packs share the same governance model and role vocabulary, while each ships in the structure and runtime format expected by its own provider line. The Gemini line currently enters as a lean source scaffold on the same cross-provider core rather than as a third independent methodology tree.
+The provider lines share one governance model and role vocabulary, while each keeps the runtime structure expected by its own provider. In this branch, the root router installers cover Codex and Claude Code; the Gemini line remains visible as a first-class source tree and is validated here through its own source-surface checks.
 
 ## Repository layout
 
@@ -15,7 +15,7 @@ shared/             Shared cross-provider governance and canonical reference cor
 docs/               Common branch-level docs index and operator/runtime references
 src.codex/          Codex provider-pack source
 src.claude/         Claude Code provider-pack source
-src.gemini/         Gemini CLI provider-pack scaffold
+src.gemini/         Gemini provider-pack source tree with `GEMINI.md`
 references-codex/   Codex-specific addenda and compatibility pointers
 references-claude/  Claude Code-specific addenda and compatibility pointers
 references-gemini/  Gemini-specific addenda and compatibility pointers
@@ -29,11 +29,11 @@ CLAUDE.md           Dev overlay for Claude Code pack maintenance
 
 ## Provider Packs
 
-| Pack | Source | Installs into | Runtime governance | Validation |
+| Pack | Source | Runtime entrypoint in source | Packaging in this branch | Validation |
 | --- | --- | --- | --- | --- |
-| Codex | `src.codex/` | `~/.codex/` or project `.agents/skills/` | `src.codex/AGENTS.md` | `bash src.codex/skills/lead/scripts/validate-skill-pack.sh` |
-| Claude Code | `src.claude/` | `~/.claude/` or project `.claude/` | `src.claude/CLAUDE.md` | `bash src.claude/agents/scripts/validate-skill-pack.sh` |
-| Gemini CLI | `src.gemini/` | scaffold only for now | `src.gemini/GEMINI.md` | `bash src.gemini/scripts/validate-pack.sh` |
+| Codex | `src.codex/` | assembled installed `AGENTS.md` from `shared/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | root router installers plus `scripts/install-codex.*` | `bash src.codex/skills/lead/scripts/validate-skill-pack.sh` |
+| Claude Code | `src.claude/` | `src.claude/CLAUDE.md` | root router installers plus `scripts/install-claude.*` | `bash src.claude/agents/scripts/validate-skill-pack.sh` |
+| Gemini CLI | `src.gemini/` | `src.gemini/GEMINI.md` | source tree and shared-reference maintenance surface only; no root-router installer in this branch | `bash src.gemini/scripts/validate-pack.sh` |
 
 Shared design references now live in `shared/references/`. Provider-local `references-codex/`, `references-claude/`, and `references-gemini/` keep provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each provider-local tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
 
@@ -65,6 +65,8 @@ What to install?
 ```
 
 Then it forwards the same arguments to the provider-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic single-provider automation.
+
+The root router in this branch does not install Gemini. The Gemini line is still a maintained source tree here: `src.gemini/GEMINI.md` remains the Gemini runtime entrypoint in source, and `src.gemini/scripts/validate-pack.sh` keeps that source surface honest.
 
 Important: operator preferences now live in pack-local `agents-mode` files; legacy `consultant-mode` files remain fallback-only during migration.
 

@@ -61,7 +61,7 @@ Introduce two new roles and a shared dispatch module:
 
 ### Contents
 
-Full value-by-value operator semantics now live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md). Keep this design spec at the decision level and let the dedicated reference own the complete `value | meaning` tables.
+Full value-by-value operator semantics now live in [`agents-mode-reference.md`](agents-mode-reference.md). Keep this design spec at the decision level and let the dedicated reference own the complete `value | meaning` tables.
 
 1. **Config file location**
 

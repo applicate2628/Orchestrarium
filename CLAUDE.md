@@ -66,7 +66,7 @@ shared/                  ← shared governance + shared design-reference source
   references/            ← canonical shared design-only references
 references-codex/        ← Codex-specific addenda + compatibility pointers for shared references
 references-claude/       ← Claude-specific addenda + compatibility pointers for shared references
-src.gemini/              ← Gemini CLI provider-pack scaffold source
+src.gemini/              ← Gemini provider-pack source tree
 src.claude/              ← Claude Code pack source (install copies to target .claude/)
   CLAUDE.md              ← product governance (installed to users)
   agents/                ← 33 role definitions

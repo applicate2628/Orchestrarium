@@ -8,7 +8,7 @@ description: >
 
 # Lead
 
-Use `$lead` as the minimal orchestration skill in the Gemini scaffold.
+Use `$lead` as the minimal orchestration skill in the Gemini source tree.
 
 Responsibilities:
 
@@ -18,4 +18,4 @@ Responsibilities:
 - keep Gemini-native runtime surfaces official-first: use `/init` for `GEMINI.md`, `.gemini/settings.json` for Gemini runtime config, and reserve `.gemini/.agents-mode` for Orchestrarium's shared routing overlay only
 - avoid inventing a custom `agents/` tree for Gemini when `GEMINI.md`, skills, and commands already cover the official runtime model
 
-This skill stays intentionally short in the scaffold. The shared governance blueprint lives in `../../../shared/AGENTS.shared.md`.
+This skill stays intentionally short in the source tree. The shared governance blueprint lives in `../../../shared/AGENTS.shared.md`.

@@ -20,4 +20,4 @@ Use together with:
 
 - [../docs/README.md](../docs/README.md) for the common branch-level docs index
 - [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) for shared operator semantics when the Gemini line matters
-- [../src.gemini/README.md](../src.gemini/README.md) for the Gemini source scaffold
+- [../src.gemini/README.md](../src.gemini/README.md) for the Gemini source tree

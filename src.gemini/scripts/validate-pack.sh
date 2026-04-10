@@ -42,12 +42,12 @@ while IFS= read -r import_line; do
 done < <(grep '^@' "$PACK_ROOT/GEMINI.md" || true)
 
 if [[ -e "$PACK_ROOT/AGENTS.md" ]]; then
-  echo "FAIL: $PACK_ROOT/AGENTS.md should not exist in the preferred Gemini scaffold"
+  echo "FAIL: $PACK_ROOT/AGENTS.md should not exist in the preferred Gemini source tree"
   exit 1
 fi
 
 if [[ -e "$PACK_ROOT/agents" ]]; then
-  echo "FAIL: $PACK_ROOT/agents should not exist in the preferred Gemini scaffold"
+  echo "FAIL: $PACK_ROOT/agents should not exist in the preferred Gemini source tree"
   exit 1
 fi
 
@@ -112,4 +112,4 @@ with json_path.open("r", encoding="utf-8") as fh:
     json.load(fh)
 PY
 
-echo "PASS: Gemini scaffold present at $PACK_ROOT"
+echo "PASS: Gemini source tree present at $PACK_ROOT"

@@ -2,9 +2,9 @@
 
 # Gemini Provider Pack
 
-This file is the Gemini-native runtime entrypoint for the Orchestrarium Gemini pack scaffold.
+This file is the Gemini-native runtime entrypoint for the Orchestrarium Gemini pack source tree.
 
-Use this pack as a minimal Gemini-native scaffold built on official runtime surfaces:
+Use this pack as a lean Gemini-native runtime surface built on official Gemini entrypoints:
 
 - `GEMINI.md` is the native runtime instruction file.
 - Gemini CLI's built-in `/init` command is the official way to create or refresh the project `GEMINI.md`.
@@ -14,7 +14,7 @@ Use this pack as a minimal Gemini-native scaffold built on official runtime surf
 - `commands/` contains Gemini-native TOML custom commands.
 - `extension/` is reserved for Gemini-native MCP and tools packaging.
 
-This scaffold intentionally stays lean and official-preferred:
+This source tree intentionally stays lean and official-preferred:
 
 - shared governance is imported directly from `../shared/AGENTS.shared.md` through standard `GEMINI.md` imports
 - the expertise layer is modeled as Gemini skills, not a custom `agents/` tree
