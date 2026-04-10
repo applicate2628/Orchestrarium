@@ -1,6 +1,6 @@
 # Модель работы субагентов — Claude Addendum
 
-> **Примечание**: этот файл хранит Claude-specific addendum к shared blueprint. Актуальная runtime-модель использует template-based routing — см. [template-routing.md](template-routing.md) и `.claude/CLAUDE.md`.
+> **Примечание**: этот файл хранит Claude-specific addendum к shared blueprint. Актуальная runtime-модель закреплена в этом addendum и `.claude/CLAUDE.md`.
 
 Канонический shared core: [shared/references/ru/subagent-operating-model.md](../../shared/references/ru/subagent-operating-model.md)
 

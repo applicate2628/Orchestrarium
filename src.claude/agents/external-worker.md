@@ -28,6 +28,7 @@ description: External implementation adapter for Claude-line. Use when an eligib
 ## Return exactly one artifact
 
 - Return one implementation artifact containing the change summary, provenance header, verification evidence if available, residual risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED:dependency`.
+- If provenance is included inline, use the execution-record fields from `contracts/external-dispatch.md` verbatim instead of inventing a shorter custom header.
 
 ## Working rules
 

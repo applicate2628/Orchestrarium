@@ -197,14 +197,24 @@ A session log contains:
 - Participants involved (roles invoked or consulted)
 - Pointer to canonical artifact if one was produced (path in `work-items/`)
 - Follow-ups or open items, if any
+- If the session used a provider-backed path or an external adapter, add a short execution record that keeps these facts on separate lines instead of collapsing them into one mixed label:
+  - `Execution role`
+  - `Assigned / replaced internal role` when an adapter stood in for another role; otherwise `none`
+  - `Requested provider` using only `internal`, `claude`, `codex`, or `gemini`
+  - `Resolved provider` after routing/default resolution; otherwise `none`
+  - `Actual execution path`
+  - `Model / profile used` when the runtime exposed it; otherwise `unspecified by runtime`
+  - `Deviation reason`
 
 If the session also created or revised a plan, save a plan snapshot to `.plans/YYYY-MM/` in addition to the session log.
+If the plan itself was produced or materially revised through a provider-backed path or an external adapter, include the same execution record in the plan snapshot.
 
 ### Anti-patterns
 
 - Do not persist intermediate REVISE drafts — only the final accepted version.
 - Do not persist raw session transcripts or debug logs in canonical storage.
 - Do not duplicate an artifact across tiers — the canonical artifact lives in `work-items/`; the session log in `.reports/` is a summary, not a copy.
+- Do not collapse actual execution role and provenance role into one ambiguous field such as `external-reviewer (qa-engineer provenance)`; record them as separate fields.
 
 ## Publication safety
 

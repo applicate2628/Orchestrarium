@@ -31,9 +31,10 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 - `preferExternalWorker`
 - `preferExternalReviewer`
 - `externalProvider`
+- `externalClaudeSecretMode` (`auto` or `force`; default `auto` when the key is absent after migration)
 - `externalClaudeProfile` (optional; `sonnet-high` or `opus-max`)
 
-When changing `consultantMode`, preserve the other keys and `externalClaudeProfile` if it exists. When creating the file from scratch, initialize all seven keys and default `delegationMode` to `manual`, `mcpMode` to `auto`, `externalProvider` to `auto`, and `externalClaudeProfile` to `sonnet-high` unless the user explicitly requested a different Claude profile override.
+When changing `consultantMode`, preserve the other keys and `externalClaudeProfile` if it exists. When creating the file from scratch, initialize all eight keys and default `delegationMode` to `manual`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalClaudeSecretMode` to `auto`, and `externalClaudeProfile` to `sonnet-high` unless the user explicitly requested a different Claude profile override.
 
 ## When to invoke
 
@@ -61,8 +62,13 @@ Do not invoke for:
 
 - Return one advisory memo covering recommended direction, alternatives considered, major tradeoffs, key risks, assumptions, and confidence level.
 - Every consultant memo must include a provenance header:
-  - **Requested consultant mode:** <external | auto | internal>
+  - **Execution role:** `consultant`
+  - **Assigned / replaced internal role:** `none`
+  - **Requested provider:** <internal | claude | gemini>
+  - **Resolved provider:** <Claude CLI | Gemini CLI | none>
+  - **Requested consultant mode:** <external | auto | internal | disabled>
   - **Actual execution path:** <external CLI (provider name) | internal subagent | role-play (violation)>
+  - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
   - **Deviation reason:** <none | external unavailable: [reason] | fallback approved by user>
 - Every consultant memo must end with an explicit continuation section:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
@@ -116,15 +122,22 @@ printf '%s' "$PROMPT" | cmd.exe /c claude.exe -p --model opus --effort max --per
 ```
 Fallback if `claude.exe` is not on PATH: use `claude.cmd` instead.
 
+Claude SECRET mode:
+- If `externalClaudeSecretMode: auto` (or the key is absent in older migrated state), run the first profile-correct Claude CLI call normally. If that call fails with quota, limit, or reset errors, perform one SECRET-backed retry by rerunning the same Claude command with `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_AUTH_TOKEN` from the local Claude `SECRET.md` (for example `~/.claude/SECRET.md`) added to that command's environment in the same one-liner.
+- If `externalClaudeSecretMode: force`, add the same `ANTHROPIC_*` values from the local Claude `SECRET.md` to the primary Claude call immediately. Do not perform a second SECRET-backed retry because the primary call already used that environment override.
+- Do not switch providers, downgrade the Claude profile, or rewrite tracked config during either Claude path.
+
 **Rules:**
 - If `externalClaudeProfile` is present, use it instead of improvising a different Claude model or effort level.
+- If `externalClaudeSecretMode: force` is selected and the local Claude `SECRET.md` cannot supply all three `ANTHROPIC_*` values, treat that as external-provider unavailability instead of silently dropping back to a plain Claude call.
 - If `externalProvider: gemini` is selected, do not silently reroute to Claude; disclose provider failure explicitly and follow the configured fallback rules.
-- If the requested Claude profile is unavailable because of plan limits, auth, quota, or client support, treat that as external-provider unavailability and follow the configured fallback rules; do not silently downgrade to another Claude profile.
+- If the requested Claude profile is unavailable because of auth, client support, or non-limit CLI failures, treat that as external-provider unavailability and follow the configured fallback rules.
+- If the requested Claude profile fails because of plan limits, quota, or reset errors, honor `externalClaudeSecretMode`: `auto` tries the single SECRET-backed one-line retry first, while `force` treats the already-SECRET-backed primary call as the full allowed Claude path. If that allowed Claude path still fails, treat the provider as unavailable; do not silently downgrade to another Claude profile.
 - Do not pass multiline prompts as direct command-line arguments — use `stdin` or a file.
 - Do not use TTY when a non-interactive invocation is available.
 - On Windows, keep command-line prompts short enough to avoid `cmd.exe` truncation.
 - Wait 5–15 minutes before treating a run as stalled. Do not start a parallel chat while one may still be running.
-- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note. For ordinary optional usage, follow the configured fallback behavior. For the mandatory batch-close external consultant-check, do not silently fall back; return an unavailable memo and require the lead to keep the batch open and escalate.
+- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note, including the resolved `externalClaudeSecretMode`, whether a SECRET-backed Claude path was attempted, and how it ended. For ordinary optional usage, follow the configured fallback behavior. For the mandatory batch-close external consultant-check, do not silently fall back; return an unavailable memo and require the lead to keep the batch open and escalate.
 
 ### Internal-subagent fallback (ordinary optional usage only)
 
