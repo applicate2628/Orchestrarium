@@ -28,15 +28,39 @@ echo ""
 # 1. Core files exist
 echo "[Core files]"
 for f in $PACK/CLAUDE.md $PACK/AGENTS.shared.md $PACK/agents/lead.md $PACK/agents/consultant.md \
+         $PACK/agents/external-worker.md \
+         $PACK/agents/external-reviewer.md \
          $PACK/agents/contracts/operating-model.md \
+         $PACK/agents/contracts/external-dispatch.md \
          $PACK/agents/contracts/subagent-contracts.md \
          $PACK/agents/contracts/policies-catalog.md \
+         $PACK/agents/scripts/check-publication-safety.sh \
+         $PACK/agents/scripts/check-publication-safety.ps1 \
          $PACK/skills/agents-second-opinion/SKILL.md; do
   if [[ -f "$f" ]]; then pass "$f exists"; else fail "$f missing"; fi
 done
 
 if [[ "$PACK" == "src.claude" ]]; then
-  for f in src.claude/README.md docs/README.md docs/agents-mode-reference.md docs/provider-runtime-layout.md references-claude/README.md; do
+  for f in \
+    src.claude/README.md \
+    docs/README.md \
+    docs/agents-mode-reference.md \
+    docs/provider-runtime-layout.md \
+    references-claude/README.md \
+    references-claude/evidence-based-answer-pipeline.md \
+    references-claude/operating-model-diagram.md \
+    references-claude/periodic-control-matrix.md \
+    references-claude/repository-publication-safety.md \
+    references-claude/repository-task-memory.md \
+    references-claude/subagent-operating-model.md \
+    references-claude/workflow-strategy-comparison.md \
+    references-claude/ru/operating-model-diagram.md \
+    references-claude/ru/periodic-control-matrix.md \
+    references-claude/ru/repository-publication-safety.md \
+    references-claude/ru/repository-task-memory.md \
+    references-claude/ru/subagent-operating-model.md \
+    references-claude/ru/workflow-strategy-comparison.md
+  do
     if [[ -f "$f" ]]; then pass "$f exists"; else fail "$f missing"; fi
   done
 fi
@@ -64,7 +88,9 @@ if [[ -f $PACK/AGENTS.shared.md ]]; then
   # Check for orphaned agent files
   for f in $PACK/agents/*.md; do
     name=$(basename "$f" .md)
-    if ! echo "$roles" | grep -qx "$name"; then
+    if [[ "$name" == "external-worker" || "$name" == "external-reviewer" ]]; then
+      pass "$name is an expected external adapter file"
+    elif ! echo "$roles" | grep -qx "$name"; then
       warn "$name has agent file but not in AGENTS.md role index"
     fi
   done

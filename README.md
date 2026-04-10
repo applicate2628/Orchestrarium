@@ -105,7 +105,7 @@ The repository is built around a few stable rules:
 - re-classify immediately if scope widens beyond the current template
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
-Runtime governance lives in [src.claude/CLAUDE.md](src.claude/CLAUDE.md) — delegation rule, engineering hygiene, publication safety, role index, and project policies.
+Runtime governance lives in [src.claude/CLAUDE.md](src.claude/CLAUDE.md) — delegation rule, engineering hygiene, publication safety, role index, project policies, and the external-dispatch entrypoint.
 Branch-local docs live in [docs/README.md](docs/README.md) — root surface index, Claude-line `.claude/.agents-mode` reference, and runtime-layout notes.
 Reference blueprints live in [references-claude/](references-claude/) — a common provider-local reference tree with a README, core operating-model docs, and RU translations.
 
@@ -131,8 +131,8 @@ The current pack covers several sub-teams:
 | Path | Purpose |
 | --- | --- |
 | `src.claude/CLAUDE.md` | Governance: delegation rule, engineering hygiene, publication safety, role index |
-| `src.claude/agents/<role>.md` (31 files) | Role definitions — discovered by Claude Code as `subagent_type` |
-| `src.claude/agents/contracts/` | Handoff templates, routing reference, subagent coordination |
+| `src.claude/agents/<role>.md` (33 files: 31 indexed roles + 2 external adapters) | Role definitions — discovered by Claude Code as `subagent_type` |
+| `src.claude/agents/contracts/` | Handoff templates, routing reference, subagent coordination, and the external-dispatch contract |
 | `src.claude/agents/lead.md` | Lead orchestrator — bootstrap, pipeline, delegation, gate semantics |
 | `src.claude/agents/scripts/` | Utility scripts: publication-safety scan, skill-pack validation |
 | `src.claude/agents/team-templates/` | 8 JSON presets for common team compositions (full-delivery, quick-fix, research, review, etc.) |
@@ -174,7 +174,7 @@ Use the install scripts, or copy `src.claude/` contents into the target repo's `
 
 | Source | Destination | Purpose |
 | --- | --- | --- |
-| `src.claude/agents/<role>.md` (31 files) | `.claude/agents/<role>.md` | Role definitions |
+| `src.claude/agents/<role>.md` (33 files: 31 indexed roles + 2 external adapters) | `.claude/agents/<role>.md` | Role definitions |
 | `src.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff contracts, operating model, subagent coordination |
 | `src.claude/agents/scripts/` | `.claude/agents/scripts/` | Utility scripts (publication-safety scan, validation) |
 | `src.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Team composition presets |
