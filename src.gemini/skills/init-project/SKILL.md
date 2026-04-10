@@ -17,6 +17,13 @@ It must not replace Gemini's official runtime config in:
 
 - `.gemini/settings.json`
 
+## Continuity contract
+
+- Use one primary in-progress task at a time.
+- Side requests may temporarily interrupt that task, but they do not replace it unless the user explicitly reprioritizes, cancels, or parks it.
+- After any side request, explicitly resume the primary task and state the next concrete step.
+- After an accepted phase or completed batch, continue to the next clear step unless a real gate blocks progression.
+
 ## Steps
 
 1. **Verify the official Gemini bootstrap first.**

@@ -44,6 +44,8 @@ This branch is a standalone Gemini pack with a lean official-preferred install s
 2. If the target repository already has a user-owned `GEMINI.md`, the installer preserves it and prepends only the managed Orchestrarium pack block.
 3. Run Gemini's built-in `/init` when you want Gemini to refresh or extend the user-owned portion of `GEMINI.md`.
 4. Use the Orchestrarium Gemini `init-project` helper only if you also want the optional `.gemini/.agents-mode` overlay.
+
+The overlay reference in [docs/agents-mode-reference.md](docs/agents-mode-reference.md) also records task continuity and continue-by-default execution expectations for initialized projects.
 5. Keep `.gemini/settings.json` as the Gemini-native runtime config surface.
 
 ## Validation

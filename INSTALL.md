@@ -59,7 +59,7 @@ bash src.gemini/scripts/validate-pack.sh .
 
 ## Operator overlay reference
 
-The canonical value-by-value reference for the optional `.gemini/.agents-mode` overlay lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md).
+The canonical value-by-value reference for the optional `.gemini/.agents-mode` overlay lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md). That reference also records task continuity and continue-by-default execution expectations for initialized projects.
 
 The branch-level docs index and runtime-layout map live in [docs/README.md](docs/README.md) and [docs/provider-runtime-layout.md](docs/provider-runtime-layout.md).
 
