@@ -6,12 +6,15 @@ Update `RELEASE_NOTES.md` in the same change whenever tracked modifications affe
 
 Release-note entries should explain improvements, not just name them. For each release-relevant entry, state what changed, why it matters, which user or operator workflow is affected, and any important preserved behavior, boundary, or exemption when that context helps the reader understand the impact.
 
+Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanatory bullets under the current date heading, or create today's date heading if it is missing. Do not keep a long-lived `## Unreleased` bucket or silently rewrite older dated sections in place.
+
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
-## Unreleased
+## 2026-04-10
 
 ### Added
 
+- Added a repo-local publication gate at `scripts/check-publication-gate.sh` and `scripts/check-publication-gate.ps1`. The gate now combines the existing staged leak scan with an explicit `RELEASE_NOTES.md` check for release-relevant staged changes, so maintainers no longer have to rely on prose-only repo rules to remember this step before publication.
 - Added canonical `RELEASE_NOTES.md` tracking for release-relevant tracked changes in the Orchestrarium monorepo. This gives the repository one stable place to describe important behavior, workflow, and governance changes that matter at publication time instead of scattering that context across commit messages and session reports.
 - Made release-note updates mandatory before publication when staged tracked changes affect installed behavior, governance, routing, role contracts, install surface, or developer and operator workflow. This closes a documentation gap in the publication path: significant changes now need an explicit human-readable explanation before release instead of relying on readers to reconstruct impact from diffs alone.
 - Added a Gemini CLI provider-pack scaffold in `src.gemini/`. The scaffold follows the official Gemini-preferred model with `GEMINI.md` as the native entrypoint, `skills/<name>/SKILL.md` as the expertise layer, `commands/*.toml` as user command shortcuts, and `extension/gemini-extension.json` as the future MCP and extension boundary.
@@ -19,6 +22,7 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 
 ### Changed
 
+- Migrated the canonical release log away from a single `## Unreleased` bucket into dated sections. Future updates now append under the current `## YYYY-MM-DD` heading, which keeps publication history chronological without repeatedly rewriting one shared scratch section.
 - Reframed the public repository wording around `cross-provider` orchestration instead of describing the monorepo only as two current agent packs. README, shared reference guidance, and GitHub About now present Codex and Claude Code as provider-specific packs built on one shared governance and reference core, which makes the repository's intended extension path for future providers such as Gemini much clearer.
 - Fixed the Claude installer so reinstalling the Claude pack no longer drops user-side `@...` imports that live in the installed `.claude/CLAUDE.md` import block next to `@AGENTS.md`. This matters for local customizations such as `@memory/...`: pack source still owns the installed Claude section, but user-side imports in the target file now survive reinstall instead of being silently erased.
 - Reworked `Engineering hygiene` application guidance with explicit rule precedence, working definitions, thematic grouping, and repo-local concretization guidance. This keeps the underlying standards intact while making them much easier to apply consistently during implementation and review, especially when multiple rules pull in different directions or when a reader needs to know which repo-local details must still be defined.
