@@ -6,6 +6,7 @@ Use it together with:
 
 - [../README.md](../README.md) for the repository overview
 - [../INSTALL.md](../INSTALL.md) for install and runtime rules
+- [../src.codex/README.md](../src.codex/README.md) for the installable source subtree
 - [../references-codex/README.md](../references-codex/README.md) for the provider-local reference tree
 
 Current docs in this branch:
