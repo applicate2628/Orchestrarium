@@ -79,17 +79,17 @@ done < <(grep '^@' "$GEMINI_FILE" || true)
 
 if [[ "$MODE" == "source" ]]; then
   if [[ ! -f "$ROOT/docs/agents-mode-reference.md" ]]; then
-    echo "FAIL: source scaffold requires $ROOT/docs/agents-mode-reference.md for init-project overlay guidance"
+    echo "FAIL: source Gemini pack surface requires $ROOT/docs/agents-mode-reference.md for init-project overlay guidance"
     exit 1
   fi
 
   if [[ ! -f "$ROOT/docs/README.md" ]]; then
-    echo "FAIL: source scaffold requires $ROOT/docs/README.md for branch-level docs entrypoint"
+    echo "FAIL: source Gemini pack surface requires $ROOT/docs/README.md for branch-level docs entrypoint"
     exit 1
   fi
 
   if [[ ! -f "$ROOT/docs/provider-runtime-layout.md" ]]; then
-    echo "FAIL: source scaffold requires $ROOT/docs/provider-runtime-layout.md for branch-level runtime-layout guidance"
+    echo "FAIL: source Gemini pack surface requires $ROOT/docs/provider-runtime-layout.md for branch-level runtime-layout guidance"
     exit 1
   fi
 
@@ -149,12 +149,12 @@ done
 
 if [[ "$MODE" == "source" ]]; then
   if [[ -e "$PACK_ROOT/AGENTS.md" ]]; then
-    echo "FAIL: $PACK_ROOT/AGENTS.md should not exist in the preferred Gemini scaffold"
+    echo "FAIL: $PACK_ROOT/AGENTS.md should not exist in the preferred Gemini pack surface"
     exit 1
   fi
 
   if [[ -e "$PACK_ROOT/agents" ]]; then
-    echo "FAIL: $PACK_ROOT/agents should not exist in the preferred Gemini scaffold"
+    echo "FAIL: $PACK_ROOT/agents should not exist in the preferred Gemini pack surface"
     exit 1
   fi
 
@@ -197,4 +197,4 @@ if mode == "source":
         json.load(fh)
 PY
 
-echo "PASS: Gemini scaffold present in $MODE mode at $ROOT"
+echo "PASS: Gemini pack surface present in $MODE mode at $ROOT"

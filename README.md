@@ -1,6 +1,6 @@
 # Orchestrarium Gemini
 
-A standalone Gemini CLI provider-pack scaffold built around the official Gemini-preferred runtime model.
+A standalone Gemini CLI provider pack built around the official Gemini-preferred runtime model.
 
 This branch intentionally keeps only Gemini-specific source and one small Orchestrarium overlay layer:
 
@@ -14,12 +14,12 @@ This branch intentionally keeps only Gemini-specific source and one small Orches
 install-gemini.ps1          Windows installer
 install-gemini.sh           POSIX installer
 references-gemini/          Required Gemini-side maintainer references
-src.gemini/                 Gemini source scaffold
+src.gemini/                 Gemini pack source tree
   GEMINI.md                 Native Gemini entrypoint
   skills/<name>/SKILL.md    Gemini Agent Skills
   commands/**/*.toml        Gemini custom commands
   extension/                Future extension and MCP boundary
-  scripts/validate-pack.sh  Standalone scaffold validation
+  scripts/validate-pack.sh  Standalone pack validation
 docs/agents-mode-reference.md
                             Canonical reference for the optional Orchestrarium
                             `.gemini/.agents-mode` overlay

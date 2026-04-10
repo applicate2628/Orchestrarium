@@ -8,7 +8,7 @@ This file is the branch-local runtime-layout reference for the standalone Gemini
 |---|---|
 | `docs/` | Branch-local operator and layout docs |
 | `references-gemini/` | Repo-local governance references and diagrams |
-| `src.gemini/` | Installable Gemini scaffold source |
+| `src.gemini/` | Installable Gemini pack source tree |
 | `install-gemini.sh`, `install-gemini.ps1` | Installer entrypoints |
 | `README.md`, `INSTALL.md` | Maintainer-facing repo manuals |
 

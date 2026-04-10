@@ -41,7 +41,7 @@ bash install-gemini.sh --target /path/to/my-repo
 
 1. Install the pack into the target project or globally.
 2. Use Gemini CLI `/init` in the target project when you want Gemini to create or refresh the user-owned portion of `GEMINI.md`.
-3. Treat `src.gemini/` as the source scaffold for Gemini-specific skills, commands, and future extension packaging.
+3. Treat `src.gemini/` as the source tree for Gemini-specific skills, commands, and future extension packaging.
 4. If Orchestrarium shared-routing toggles are needed, use the Gemini `init-project` helper to create `.gemini/.agents-mode` after `/init`.
 
 Important:

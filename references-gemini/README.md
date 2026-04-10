@@ -9,7 +9,7 @@ Use together with:
 - [../README.md](../README.md) for the standalone branch layout
 - [../INSTALL.md](../INSTALL.md) for installer and runtime-surface rules
 - [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) for the optional `.gemini/.agents-mode` overlay
-- [../src.gemini/](../src.gemini/README.md) for the actual runtime scaffold
+- [../src.gemini/](../src.gemini/README.md) for the actual runtime pack surface
 
 This standalone branch intentionally keeps `references-gemini/` self-contained instead of reintroducing the monorepo `shared/` reference layer.
 

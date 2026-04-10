@@ -1,9 +1,9 @@
 <!-- ORCHESTRARIUM_GEMINI_PACK:START -->
 # Gemini Provider Pack
 
-This file is the Gemini-native runtime entrypoint for the Orchestrarium Gemini pack scaffold.
+This file is the Gemini-native runtime entrypoint for the Orchestrarium Gemini pack.
 
-Use this pack as a minimal Gemini-native scaffold built on official runtime surfaces:
+Use this pack as a lean Gemini-native runtime surface built on official Gemini entrypoints:
 
 - `GEMINI.md` is the native runtime instruction file.
 - Gemini CLI's built-in `/init` command is the official way to create or refresh the project `GEMINI.md`.
@@ -13,9 +13,9 @@ Use this pack as a minimal Gemini-native scaffold built on official runtime surf
 - `commands/` contains Gemini-native TOML custom commands.
 - `extension/` is reserved for Gemini-native MCP and tools packaging.
 
-This scaffold intentionally stays lean and official-preferred:
+This pack intentionally stays lean and official-preferred:
 
-- governance and runtime notes stay local to the Gemini scaffold instead of importing a shared monorepo layer
+- governance and runtime notes stay local to the Gemini pack instead of importing a shared monorepo layer
 - the expertise layer is modeled as Gemini skills, not a custom `agents/` tree
 - commands stay user-invoked TOML shortcuts rather than pretending to be skills
 - Orchestrarium-specific cross-provider routing semantics, when needed, belong in `.gemini/.agents-mode` as a repo-local overlay rather than as a replacement for official Gemini settings

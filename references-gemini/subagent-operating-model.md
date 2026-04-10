@@ -12,7 +12,7 @@ This standalone branch keeps one Gemini-local operating-model reference instead 
 - `.gemini/.agents-mode` is an optional Orchestrarium overlay, not a replacement for `.gemini/settings.json`.
 - Skills live in `skills/<name>/SKILL.md`.
 - User-invoked command helpers live in `commands/**/*.toml`.
-- The current scaffold stays sequential and human-steered; do not assume native parallel dispatch.
+- The current pack surface stays sequential and human-steered; do not assume native parallel dispatch.
 
 ## Delivery model
 

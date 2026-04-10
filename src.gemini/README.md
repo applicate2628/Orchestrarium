@@ -1,6 +1,6 @@
 # Gemini Pack Source
 
-This directory contains the source scaffold for the Orchestrarium Gemini provider pack.
+This directory contains the source tree for the Orchestrarium Gemini provider pack.
 
 Use it together with:
 
@@ -17,7 +17,7 @@ The structure follows the official Gemini-preferred model instead of mirroring t
 - `commands/*.toml` for Gemini custom commands
 - `extension/gemini-extension.json` for future MCP and tool packaging
 
-This scaffold intentionally avoids extra repo-local runtime abstractions such as a Gemini-specific `agents/` tree.
+This source tree intentionally avoids extra repo-local runtime abstractions such as a Gemini-specific `agents/` tree.
 
 The standalone branch still carries one required repo-local maintainer reference tree at `../references-gemini/`. That tree is source-branch documentation only; it is not part of the installed runtime payload.
 

@@ -3,7 +3,7 @@
 Этот файл является визуальным дополнением к [subagent-operating-model.md](subagent-operating-model.md).
 Справочник по стратегиям: [workflow-strategy-comparison.md](workflow-strategy-comparison.md).
 
-Platform note: текущий standalone Gemini scaffold остаётся последовательным и human-steered. Диаграммы ниже показывают целевую governance-модель, а не обещание native parallel dispatch.
+Platform note: текущий standalone Gemini pack остаётся последовательным и human-steered. Диаграммы ниже показывают целевую governance-модель, а не обещание native parallel dispatch.
 
 ## 1. Сквозной поток работы
 
