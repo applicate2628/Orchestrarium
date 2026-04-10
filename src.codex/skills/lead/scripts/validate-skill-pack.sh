@@ -66,7 +66,26 @@ done
 if [[ -d "src.codex/skills" && -f "src.codex/AGENTS.shared.md" ]]; then
   echo ""
   echo "=== Branch-level docs surface ==="
-  for f in src.codex/README.md docs/README.md docs/provider-runtime-layout.md docs/agents-mode-reference.md references-codex/README.md; do
+  for f in \
+    src.codex/README.md \
+    docs/README.md \
+    docs/provider-runtime-layout.md \
+    docs/agents-mode-reference.md \
+    references-codex/README.md \
+    references-codex/evidence-based-answer-pipeline.md \
+    references-codex/operating-model-diagram.md \
+    references-codex/periodic-control-matrix.md \
+    references-codex/repository-publication-safety.md \
+    references-codex/repository-task-memory.md \
+    references-codex/subagent-operating-model.md \
+    references-codex/workflow-strategy-comparison.md \
+    references-codex/ru/operating-model-diagram.md \
+    references-codex/ru/periodic-control-matrix.md \
+    references-codex/ru/repository-publication-safety.md \
+    references-codex/ru/repository-task-memory.md \
+    references-codex/ru/subagent-operating-model.md \
+    references-codex/ru/workflow-strategy-comparison.md
+  do
     if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
   done
 fi
