@@ -9,6 +9,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE="$REPO_DIR/src.codex"
+CODEX_PACK_BEGIN_MARKER='<!-- BEGIN ORCHESTRARIUM CODEX PACK -->'
+CODEX_PACK_END_MARKER='<!-- END ORCHESTRARIUM CODEX PACK -->'
 
 # Directories to install (order doesn't matter)
 DIRS=(skills)
@@ -505,6 +507,83 @@ remove_dangling_symlink() {
   fi
 }
 
+find_codex_pack_start_line() {
+  local file="$1"
+  local marker_line
+  marker_line="$(grep -n "^$CODEX_PACK_BEGIN_MARKER$" "$file" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+  if [[ -n "$marker_line" ]]; then
+    printf "%s" "$marker_line"
+    return
+  fi
+  grep -n "^# Shared Governance$\|^# Codex Platform Rules$\|^# Default Delegation Rule$" "$file" 2>/dev/null | head -1 | cut -d: -f1
+}
+
+find_codex_pack_end_line() {
+  local existing="$1"
+  local src="$2"
+  local pack_start="$3"
+  local footer
+
+  if awk -v start="$pack_start" -v marker="$CODEX_PACK_END_MARKER" '
+    NR < start { next }
+    $0 == marker { print NR; found=1; exit }
+    END { exit(found ? 0 : 1) }
+  ' "$existing"; then
+    return
+  fi
+
+  if awk -v start="$pack_start" '
+    NR <= start { next }
+    $0 == "## Project policies" { print NR - 1; found=1; exit }
+    END { exit(found ? 0 : 1) }
+  ' "$existing"; then
+    return
+  fi
+
+  footer="$(awk 'NF { line=$0 } END { print line }' "$src")"
+
+  if [[ -n "$footer" ]]; then
+    awk -v start="$pack_start" -v footer="$footer" '
+      NR < start { next }
+      $0 == footer { print NR; exit }
+    ' "$existing"
+  fi
+}
+
+write_merged_codex_agents_md() {
+  local existing="$1"
+  local src="$2"
+  local output="$3"
+  local pack_start="$4"
+  local total_lines head_lines tail_start pack_end new_lines footer_end
+
+  total_lines=$(wc -l < "$existing")
+  new_lines=$(wc -l < "$src")
+  footer_end="$(find_codex_pack_end_line "$existing" "$src" "$pack_start")"
+
+  if [[ -n "$footer_end" ]]; then
+    pack_end="$footer_end"
+  else
+    pack_end=$((pack_start + new_lines - 1))
+    if [[ "$pack_end" -gt "$total_lines" ]]; then
+      pack_end="$total_lines"
+    fi
+  fi
+
+  head_lines=$((pack_start - 1))
+  tail_start=$((pack_end + 1))
+
+  {
+    if [[ "$head_lines" -gt 0 ]]; then
+      head -n "$head_lines" "$existing"
+    fi
+    cat "$src"
+    if [[ "$tail_start" -le "$total_lines" ]]; then
+      tail -n "+$tail_start" "$existing"
+    fi
+  } > "$output"
+}
+
 echo "  Installing skills (per-skill, preserving user-added skills)..."
 if [[ ! -d "$SKILLS_TARGET" ]]; then
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -581,7 +660,13 @@ fi
 
 # Assemble pack AGENTS.md from two source files
 src_md="$(mktemp)"
-cat "$src_shared" "$src_platform" > "$src_md"
+{
+  printf '%s\n' "$CODEX_PACK_BEGIN_MARKER"
+  cat "$src_shared"
+  printf '\n'
+  cat "$src_platform"
+  printf '\n%s\n' "$CODEX_PACK_END_MARKER"
+} > "$src_md"
 trap "rm -f '$src_md'" EXIT
 
 dst_md="$MD_TARGET"
@@ -590,29 +675,13 @@ remove_dangling_symlink "$dst_md" "AGENTS.md"
 
 if [[ -f "$dst_md" ]]; then
   if grep -q "## Template routing" "$dst_md" 2>/dev/null; then
-    if grep -qn "^# Default Delegation Rule" "$dst_md"; then
+    pack_start="$(find_codex_pack_start_line "$dst_md")"
+    if [[ -n "$pack_start" ]]; then
       echo "  AGENTS.md: replacing Codex pack section..."
-      pack_start=$(grep -n "^# Default Delegation Rule" "$dst_md" | head -1 | cut -d: -f1)
-      total_lines=$(wc -l < "$dst_md")
-      new_lines=$(wc -l < "$src_md")
-      pack_end=$((pack_start + new_lines - 1))
-      if [ "$pack_end" -gt "$total_lines" ]; then
-        pack_end="$total_lines"
-      fi
-      head_lines=$((pack_start - 1))
-      tail_start=$((pack_end + 1))
       if [ "$DRY_RUN" -eq 1 ]; then
-        echo "    [dry-run] would replace Codex pack section in AGENTS.md (lines $pack_start-$pack_end)"
+        echo "    [dry-run] would replace Codex pack section in AGENTS.md"
       else
-        {
-          if [ "$head_lines" -gt 0 ]; then
-            head -n "$head_lines" "$dst_md"
-          fi
-          cat "$src_md"
-          if [ "$tail_start" -le "$total_lines" ]; then
-            tail -n "+$tail_start" "$dst_md"
-          fi
-        } > "$dst_md.tmp"
+        write_merged_codex_agents_md "$dst_md" "$src_md" "$dst_md.tmp" "$pack_start"
         mv "$dst_md.tmp" "$dst_md"
       fi
     else
@@ -713,5 +782,6 @@ else
   echo "  Skills: $SKILLS_TARGET"
   echo "  AGENTS.md: $MD_TARGET"
   echo ""
-  echo "Next: run 'bash $SKILLS_TARGET/lead/scripts/validate-skill-pack.sh' to verify the installation."
+  echo "Next: open Codex in the target project and run '\$init-project' to configure project policies and .agents/.agents-mode."
+  echo "Then run 'bash $SKILLS_TARGET/lead/scripts/validate-skill-pack.sh' if you are validating the installation from a maintainer shell."
 fi
