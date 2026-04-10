@@ -33,6 +33,9 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - Maintain exactly one primary in-progress task at a time.
 - Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
 - After handling a side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
+- Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
+- Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
 - Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task.
 
@@ -149,7 +152,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - After `ux-reviewer`: there are no blocking usability, accessibility, or flow-quality issues.
 - After `accessibility-reviewer`: there are no blocking keyboard, focus, labeling, contrast, or assistive-technology issues for the scoped surface.
 - After the human or CI gate: required approvals and automated checks are complete, and for publication the approver is not the same role that accepted the artifact into the pipeline.
-- Before a completed lead-managed batch is marked closed: one external consultant-check memo exists, ends with a reusable second prompt that begins with a direct imperative to continue and names the next concrete action, and records residual concerns, overlooked surfaces, and follow-up recommendations.
+- Before a completed lead-managed batch is marked closed: one external consultant-check memo exists, ends with a reusable second prompt that begins with a direct imperative to continue and names the next concrete action, records residual concerns, overlooked surfaces, and follow-up recommendations, and the lead has reconciled the requested outcome against remaining open obligations.
 
 ## Repository task memory
 
@@ -159,6 +162,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - Require `plan.md` before implementation or review begins when task memory is configured.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
 - Update `status.md` after accepted artifacts, interruptions, or stage changes so work can resume without relying on chat memory when task memory is configured.
+- Keep `status.md` explicit about the next concrete action and any open obligations that still block closeout.
 - If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery when task memory is in use.
 - Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
 - On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.

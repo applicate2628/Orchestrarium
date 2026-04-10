@@ -61,6 +61,7 @@ The canonical brief should capture:
 - any non-core installed or repo-local specialist selected, if applicable
 - explicit integration owner, if the work spans multiple implementation phases or specialists
 - batch-close consultant-check status and any additional optional consultant usage, if any
+- open obligations that must be cleared before closeout
 - current stage, next stage, and open blockers
 
 ## Task-memory rule
@@ -70,9 +71,11 @@ The canonical brief should capture:
 - Before implementation or review begins, ensure `plan.md` and the required upstream artifacts exist or are explicitly linked from the item folder.
 - If the current stage needs an upstream artifact such as `research.md`, `design.md`, `constraints/*.md`, `plan.md`, or a required review report and that artifact is missing or stale, stop and restore it or route the item back to the correct upstream role.
 - After every accepted artifact, interruption, or major routing change, update `status.md` so the next session can resume without relying on chat memory.
+- Record the durable resume point in `status.md`: current stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.
 - On resume after interruption, refresh only lead-owned task-memory state from accepted persisted artifacts. Do not recreate missing specialist artifacts or infer missing facts from session memory; route to `$knowledge-archivist` or the proper factual role instead.
 - `closure.md` is mandatory before moving an item to `work-items/archive/`. It holds the final closeout record: outcome, residual risk, and archive location.
 - If task memory is missing or stale, stop and restore it instead of improvising from session memory.
+- Before marking a batch closed, reconcile `brief.md`, `status.md`, the latest accepted artifact, required checks, canonical-source updates, and any open obligations. If admitted-scope work remains, keep the item active instead of closing it.
 
 ## Operating pipeline
 
@@ -161,6 +164,7 @@ Require every pipeline subagent to end with exactly one gate status:
 Do not advance work on optimism or partial acceptance.
 
 `$consultant` is the explicit exception: it returns advisory input, not a pipeline gate. A completed lead-managed batch is not considered closed until its external consultant-check memo is recorded.
+`PASS` advances the pipeline, but it does not by itself close the batch. Batch closure requires requested-scope reconciliation and no remaining open obligations unless the user explicitly parks or reprioritizes them.
 
 ## Flow rules
 
@@ -169,6 +173,7 @@ Do not advance work on optimism or partial acceptance.
 - Close specialist sessions once their artifact is accepted. Keep open only for bounded `REVISE`.
 - After the final reviewer or human/CI gate completes, run the external consultant-check before marking the batch closed.
 - After any side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- Do not stop at one completed sub-batch when a known admitted-scope next action already exists; keep the task open and continue until a real gate or explicit user reprioritization intervenes.
 
 ## Operational rules
 
@@ -206,6 +211,9 @@ Periodic controls (drift detection between gates) are in [operating-model.md](co
 
 - Maintain exactly one primary in-progress task at a time.
 - Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
+- When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
+- Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
+- Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
 - Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task.
 
