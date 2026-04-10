@@ -52,6 +52,8 @@ Operator state is always project-local at `.agents/.agents-mode`, even when the 
 
 Project policies are configured as a `## Project policies` section in the target `AGENTS.md`, not as a separate directory. See `skills/lead/policies-catalog.md` for available policy options.
 
+After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and initialize `.agents/.agents-mode`.
+
 ## File separation
 
 | Directory | Contents | Installable? |
