@@ -58,7 +58,7 @@ When modifying `src.claude/CLAUDE.md`, `operating-model.md`, or `subagent-contra
 ```
 src.claude/              ← skill-pack source (install copies to target .claude/)
   CLAUDE.md              ← product governance (installed to users)
-  agents/                ← 31 role definitions
+  agents/                ← 33 role-definition files (31 indexed roles + 2 external adapters)
     contracts/           ← operating model + subagent contracts + policy catalog
     team-templates/      ← 8 routing templates (JSON)
     scripts/             ← validation + safety scripts

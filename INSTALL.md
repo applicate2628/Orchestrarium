@@ -44,7 +44,7 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 
 | Source | Destination | Purpose |
 | --- | --- | --- |
-| `src.claude/agents/*.md` (31 files) | `.claude/agents/*.md` | Role definitions |
+| `src.claude/agents/*.md` (33 files: 31 indexed roles + 2 external adapters) | `.claude/agents/*.md` | Role definitions |
 | `src.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff templates, routing reference |
 | `src.claude/agents/scripts/` | `.claude/agents/scripts/` | Utility scripts (publication-safety scan, validation) |
 | `src.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Pre-built team compositions (8 templates) |
@@ -78,8 +78,8 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 
 | Directory | Contents | Installable? |
 | --- | --- | --- |
-| `src.claude/agents/*.md` | 31 role definitions | Yes |
-| `src.claude/agents/contracts/` | Handoff templates, routing reference | Yes |
+| `src.claude/agents/*.md` | 33 role-definition files: 31 indexed roles + 2 external adapters | Yes |
+| `src.claude/agents/contracts/` | Handoff templates, routing reference, and the external-dispatch contract | Yes |
 | `src.claude/agents/scripts/` | Utility scripts (publication-safety scan, validation) | Yes |
 | `src.claude/agents/team-templates/` | Pre-built team compositions | Yes |
 | `src.claude/skills/` | 19 slash skills (`/agents-help`, `/agents-second-opinion`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety`, ...) | Yes |
