@@ -4,8 +4,9 @@ A cross-provider agent orchestration monorepo for provider-specific agent packs:
 
 - `src.codex/` — the Codex provider pack
 - `src.claude/` — the Claude Code provider pack
+- `src.gemini/` — the Gemini CLI provider-pack scaffold
 
-Current provider packs share the same governance model and role vocabulary, while each ships in the structure and runtime format expected by its own provider line. Future provider packs such as Gemini should extend the same cross-provider core instead of forking a third methodology tree.
+Current provider packs share the same governance model and role vocabulary, while each ships in the structure and runtime format expected by its own provider line. The Gemini line currently enters as a lean source scaffold on the same cross-provider core rather than as a third independent methodology tree.
 
 ## Repository layout
 
@@ -13,6 +14,7 @@ Current provider packs share the same governance model and role vocabulary, whil
 shared/             Shared cross-provider governance and canonical reference cores
 src.codex/          Codex provider-pack source
 src.claude/         Claude Code provider-pack source
+src.gemini/         Gemini CLI provider-pack scaffold
 references-codex/   Codex-specific addenda and compatibility pointers
 references-claude/  Claude Code-specific addenda and compatibility pointers
 RELEASE_NOTES.md    Canonical tracked release log
@@ -29,6 +31,7 @@ CLAUDE.md           Dev overlay for Claude Code pack maintenance
 | --- | --- | --- | --- | --- |
 | Codex | `src.codex/` | `~/.codex/` or project `.agents/skills/` | `src.codex/AGENTS.md` | `bash src.codex/skills/lead/scripts/validate-skill-pack.sh` |
 | Claude Code | `src.claude/` | `~/.claude/` or project `.claude/` | `src.claude/CLAUDE.md` | `bash src.claude/agents/scripts/validate-skill-pack.sh` |
+| Gemini CLI | `src.gemini/` | scaffold only for now | `src.gemini/GEMINI.md` | `bash src.gemini/scripts/validate-pack.sh` |
 
 Shared design references now live in `shared/references/`. Provider-local `references-codex/` and `references-claude/` now keep only provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each provider-local tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
 
@@ -86,11 +89,12 @@ See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, d
 - `AGENTS.md` is the root development overlay for Codex provider-pack maintenance.
 - `CLAUDE.md` is the root development overlay for Claude Code provider-pack maintenance.
 
-Before publishing maintenance changes, validate both packs:
+Before publishing maintenance changes, validate the active provider surfaces:
 
 ```bash
 bash src.codex/skills/lead/scripts/validate-skill-pack.sh
 bash src.claude/agents/scripts/validate-skill-pack.sh
+bash src.gemini/scripts/validate-pack.sh
 ```
 
 For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title.

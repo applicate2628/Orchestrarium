@@ -1,0 +1,10 @@
+description = "Summarize the Gemini provider-pack structure, roles, and command surfaces."
+prompt = """
+Read GEMINI.md, skills/README.md, and skills/lead/SKILL.md.
+
+Summarize:
+- the current Gemini provider-pack structure
+- the role of GEMINI.md
+- the local command namespace
+- the distinction between Gemini-native skills and Gemini-native runtime commands
+"""
