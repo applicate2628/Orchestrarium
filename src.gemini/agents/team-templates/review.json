@@ -1,0 +1,18 @@
+{
+  "name": "review",
+  "description": "Independent review of existing work \u2014 code, architecture, or documents",
+  "when": "Architecture/code quality gate, project audit, security review, or post-implementation validation",
+  "requiresLead": false,
+  "chain": ["research", "QA", "review"],
+  "roles": [
+    { "agentType": "analyst", "stage": "research", "required": true },
+    { "agentType": "qa-engineer", "stage": "QA", "required": true },
+    { "agentType": "architecture-reviewer", "stage": "review", "required": true },
+    { "agentType": "security-reviewer", "stage": "review", "required": true },
+    { "agentType": "performance-reviewer", "stage": "review", "required": true },
+    { "agentType": "accessibility-reviewer", "stage": "review", "whenNeeded": "user-facing UI" }
+  ],
+  "requiredRoles": ["analyst", "qa-engineer", "architecture-reviewer", "security-reviewer", "performance-reviewer"],
+  "minRoles": 5,
+  "notes": "security-reviewer and performance-reviewer are mandatory for this template (no default waivers). Any exception must be explicitly documented in the work-item claims."
+}

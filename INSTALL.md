@@ -9,6 +9,7 @@ This standalone Gemini branch now ships a finished Gemini-native installer surfa
 | `src.gemini/GEMINI.md` | present |
 | `src.gemini/AGENTS.shared.md` | present |
 | `src.gemini/skills/` | present |
+| `src.gemini/agents/` | present |
 | `src.gemini/commands/` | present |
 | `src.gemini/extension/` | present |
 | `src.gemini/scripts/validate-pack.sh` | present |
@@ -20,8 +21,8 @@ This standalone Gemini branch now ships a finished Gemini-native installer surfa
 
 | Mode | Installed surface |
 |---|---|
-| project-local | `<project>/GEMINI.md`, `<project>/AGENTS.shared.md`, `<project>/.gemini/skills/`, `<project>/.gemini/commands/` |
-| global | `~/.gemini/GEMINI.md`, `~/.gemini/AGENTS.shared.md`, `~/.gemini/skills/`, `~/.gemini/commands/` |
+| project-local | `<project>/GEMINI.md`, root `<project>/AGENTS.md` when absent, `<project>/.gemini/skills/`, `<project>/.gemini/agents/`, `<project>/.gemini/commands/` |
+| global | `~/.gemini/GEMINI.md`, `~/.gemini/AGENTS.md`, `~/.gemini/skills/`, `~/.gemini/agents/`, `~/.gemini/commands/` |
 
 `references-gemini/` is required in the source branch, but it is not copied into target projects or global Gemini homes. It remains a repo-local maintainer reference surface.
 
@@ -43,16 +44,18 @@ bash install-gemini.sh --target /path/to/my-repo
 
 1. Install the pack into the target project or globally.
 2. Use Gemini CLI `/init` in the target project when you want Gemini to create or refresh the user-owned portion of `GEMINI.md`.
-3. Treat `src.gemini/` as the source tree for Gemini-specific skills, commands, and future extension packaging.
+3. Treat `src.gemini/` as the source tree for Gemini-specific skills, preview subagents, commands, and future extension packaging.
 4. If Orchestrarium shared-routing toggles are needed, use the Gemini `init-project` helper to create `.gemini/.agents-mode` after `/init`.
 
 Important:
 
 - `GEMINI.md` remains owned by Gemini `/init`.
 - The installer manages only the `<!-- ORCHESTRARIUM_GEMINI_PACK:... -->` block inside `GEMINI.md`; all content outside that block is preserved on reinstall.
-- `AGENTS.shared.md` is the pack-managed shared-governance module imported by `GEMINI.md`.
+- User-side `@...` imports that live in the installed `GEMINI.md` import block alongside `@./AGENTS.md` are preserved on reinstall.
+- Installed runtime uses `AGENTS.md` as the pack-managed shared-governance module imported by `GEMINI.md`. The source tree still keeps `src.gemini/AGENTS.shared.md` as the canonical shared module.
+- Installed runtime includes both `.gemini/skills/` and `.gemini/agents/` so the Gemini line can execute the same shared role principle as the neighboring packs.
 - `.gemini/settings.json` remains Gemini-native runtime config.
-- MCP servers such as Serena, Fetch, or Context7 still belong in `.gemini/settings.json` or `extension/gemini-extension.json`, not inside `AGENTS.shared.md`.
+- MCP servers such as Serena, Fetch, or Context7 still belong in `.gemini/settings.json` or `extension/gemini-extension.json`, not inside `AGENTS.md`.
 - `.gemini/.agents-mode` is an optional Orchestrarium overlay, not a Gemini-native replacement.
 
 ## Validation

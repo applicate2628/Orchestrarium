@@ -14,7 +14,7 @@ TARGET=""
 usage() {
   cat <<'EOF'
 Usage:
-  bash install-gemini.sh                    Install into current repo (GEMINI.md + .gemini/)
+  bash install-gemini.sh                    Install into current repo (GEMINI.md + AGENTS.md + .gemini/)
   bash install-gemini.sh --global           Install into ~/.gemini/
   bash install-gemini.sh --target DIR       Install into DIR as a project root
   bash install-gemini.sh --force            Skip confirmation prompts
@@ -141,14 +141,112 @@ install_tree() {
   shopt -u nullglob
 }
 
+collect_preserved_gemini_imports() {
+  local existing="$1" start_line="$2" end_line="$3"
+  awk -v start="$start_line" -v end="$end_line" '
+    NR <= start || NR >= end { next }
+    {
+      if (!collect) {
+        if ($0 ~ /^@/ || $0 ~ /^[[:space:]]*$/) {
+          collect = 1
+        } else {
+          exit
+        }
+      }
+      if ($0 ~ /^@/) {
+        if ($0 != "@./AGENTS.md" && $0 != "@./AGENTS.shared.md" && !seen[$0]++) {
+          print $0
+        }
+        next
+      }
+      if ($0 ~ /^[[:space:]]*$/) {
+        next
+      }
+      exit
+    }
+  ' "$existing"
+}
+
+write_merged_gemini_md() {
+  local existing="$1" src="$2" output="$3" start_line="$4" end_line="$5"
+  local imports_tmp managed_tmp tail_tmp total_lines
+  imports_tmp="$(mktemp)"
+  managed_tmp="$(mktemp)"
+  tail_tmp="$(mktemp)"
+
+  collect_preserved_gemini_imports "$existing" "$start_line" "$end_line" > "$imports_tmp"
+  awk -v imports_file="$imports_tmp" '
+    BEGIN {
+      while ((getline line < imports_file) > 0) {
+        imports[++import_count] = line
+      }
+      close(imports_file)
+    }
+    {
+      if ($0 == "@./AGENTS.shared.md") {
+        $0 = "@./AGENTS.md"
+      }
+      source[++source_count] = $0
+    }
+    END {
+      import_line = 0
+      for (i = 1; i <= source_count; i++) {
+        if (source[i] ~ /^@/) {
+          import_line = i
+          break
+        }
+      }
+
+      if (import_line == 0) {
+        for (i = 1; i <= source_count; i++) {
+          print source[i]
+        }
+        exit
+      }
+
+      for (i = 1; i < import_line; i++) {
+        print source[i]
+      }
+      print source[import_line]
+      for (i = 1; i <= import_count; i++) {
+        print imports[i]
+      }
+
+      tail_start = import_line + 1
+      while (tail_start <= source_count && source[tail_start] ~ /^[[:space:]]*$/) {
+        tail_start++
+      }
+
+      if (tail_start <= source_count) {
+        print ""
+        for (i = tail_start; i <= source_count; i++) {
+          print source[i]
+        }
+      }
+    }
+  ' "$src" > "$managed_tmp"
+
+  : > "$output"
+  if (( start_line > 1 )); then
+    head -n $((start_line - 1)) "$existing" > "$output"
+  fi
+  cat "$managed_tmp" >> "$output"
+
+  total_lines=$(wc -l < "$existing")
+  if (( end_line < total_lines )); then
+    tail -n +$((end_line + 1)) "$existing" > "$tail_tmp"
+    if [[ -s "$tail_tmp" ]]; then
+      cat "$tail_tmp" >> "$output"
+    fi
+  fi
+
+  rm -f "$imports_tmp" "$managed_tmp" "$tail_tmp"
+}
+
 merge_gemini_file() {
   local src="$1" dst="$2"
-  local managed existing
-  local py_bin="python"
-  if ! command -v "$py_bin" >/dev/null 2>&1; then
-    py_bin="python3"
-  fi
-  managed="$(cat "$src")"
+  local managed existing start_line end_line
+  managed="$(sed 's|@\\./AGENTS\\.shared\\.md|@./AGENTS.md|' "$src")"
   if [[ ! -f "$dst" ]]; then
     echo "  Creating GEMINI.md..."
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -165,19 +263,10 @@ merge_gemini_file() {
     if [[ "$DRY_RUN" -eq 1 ]]; then
       echo "    [dry-run] would replace managed GEMINI.md block"
     else
-      "$py_bin" - "$dst" "$src" "$MANAGED_START" "$MANAGED_END" <<'PY'
-from pathlib import Path
-import re
-import sys
-dst = Path(sys.argv[1])
-src = Path(sys.argv[2])
-start = re.escape(sys.argv[3])
-end = re.escape(sys.argv[4])
-managed = src.read_text(encoding="utf-8")
-text = dst.read_text(encoding="utf-8")
-updated = re.sub(start + r"[\s\S]*?" + end, managed, text, count=1)
-dst.write_text(updated, encoding="utf-8")
-PY
+      start_line=$(grep -nF "$MANAGED_START" "$dst" | head -1 | cut -d: -f1)
+      end_line=$(grep -nF "$MANAGED_END" "$dst" | head -1 | cut -d: -f1)
+      write_merged_gemini_md "$dst" "$src" "$dst.tmp" "$start_line" "$end_line"
+      mv "$dst.tmp" "$dst"
     fi
   else
     echo "  GEMINI.md: prepending managed Orchestrarium block..."
@@ -190,8 +279,12 @@ PY
 }
 
 install_pack_file() {
-  local src="$1" dst="$2" label="$3"
+  local src="$1" dst="$2" label="$3" preserve_existing="${4:-0}"
   if [[ -e "$dst" ]]; then
+    if [[ "$preserve_existing" == "1" ]]; then
+      echo "  Preserving existing $label..."
+      return
+    fi
     echo "  Replacing $label..."
     if [[ "$DRY_RUN" -eq 1 ]]; then
       echo "    [dry-run] would replace $dst"
@@ -206,6 +299,19 @@ install_pack_file() {
     echo "    [dry-run] would create $dst"
   else
     cp -f "$src" "$dst"
+  fi
+}
+
+remove_legacy_pack_file() {
+  local dst="$1" label="$2"
+  if [[ ! -e "$dst" ]]; then
+    return
+  fi
+  echo "  Removing legacy $label..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would remove $dst"
+  else
+    rm -f "$dst"
   fi
 }
 
@@ -243,7 +349,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -d "$SOURCE/skills" || ! -d "$SOURCE/commands" || ! -f "$SOURCE/GEMINI.md" || ! -f "$SOURCE/AGENTS.shared.md" ]]; then
+if [[ ! -d "$SOURCE/skills" || ! -d "$SOURCE/agents" || ! -d "$SOURCE/commands" || ! -f "$SOURCE/GEMINI.md" || ! -f "$SOURCE/AGENTS.shared.md" ]]; then
   echo "FAIL: src.gemini is incomplete at $SOURCE" >&2
   exit 1
 fi
@@ -251,8 +357,10 @@ fi
 if [[ "$MODE" == "global" ]]; then
   INSTALL_ROOT="$(canonical_path "$HOME/.gemini")"
   GEMINI_TARGET="$INSTALL_ROOT/GEMINI.md"
-  SHARED_TARGET="$INSTALL_ROOT/AGENTS.shared.md"
+  SHARED_TARGET="$INSTALL_ROOT/AGENTS.md"
+  LEGACY_SHARED_TARGET="$INSTALL_ROOT/AGENTS.shared.md"
   SKILLS_TARGET="$INSTALL_ROOT/skills"
+  AGENTS_TARGET="$INSTALL_ROOT/agents"
   COMMANDS_TARGET="$INSTALL_ROOT/commands"
 else
   PROJECT_ROOT="$(resolve_project_root "${TARGET:-$(repo_root)}")"
@@ -265,8 +373,10 @@ else
   fi
   INSTALL_ROOT="$PROJECT_ROOT/.gemini"
   GEMINI_TARGET="$PROJECT_ROOT/GEMINI.md"
-  SHARED_TARGET="$PROJECT_ROOT/AGENTS.shared.md"
+  SHARED_TARGET="$PROJECT_ROOT/AGENTS.md"
+  LEGACY_SHARED_TARGET="$PROJECT_ROOT/AGENTS.shared.md"
   SKILLS_TARGET="$INSTALL_ROOT/skills"
+  AGENTS_TARGET="$INSTALL_ROOT/agents"
   COMMANDS_TARGET="$INSTALL_ROOT/commands"
 fi
 
@@ -275,11 +385,12 @@ echo "Source: $SOURCE"
 echo "Mode:   $MODE"
 echo "Runtime root: $INSTALL_ROOT"
 echo "GEMINI.md:    $GEMINI_TARGET"
-echo "Shared file:  $SHARED_TARGET"
+echo "AGENTS.md:    $SHARED_TARGET"
+echo "Agents:       $AGENTS_TARGET"
 [[ "$DRY_RUN" -eq 1 ]] && echo "Mode:   dry-run"
 echo
 
-if [[ -e "$GEMINI_TARGET" || -e "$SHARED_TARGET" || -d "$SKILLS_TARGET" || -d "$COMMANDS_TARGET" ]]; then
+if [[ -e "$GEMINI_TARGET" || -e "$SHARED_TARGET" || -d "$SKILLS_TARGET" || -d "$AGENTS_TARGET" || -d "$COMMANDS_TARGET" ]]; then
   if ! confirm_action "Proceed with reinstall/update of the Gemini pack?"; then
     echo "Install cancelled by user." >&2
     exit 1
@@ -288,9 +399,15 @@ fi
 
 ensure_dir "$INSTALL_ROOT"
 install_tree "$SOURCE/skills" "$SKILLS_TARGET" "skills"
+install_tree "$SOURCE/agents" "$AGENTS_TARGET" "agents"
 install_tree "$SOURCE/commands" "$COMMANDS_TARGET" "commands"
 merge_gemini_file "$SOURCE/GEMINI.md" "$GEMINI_TARGET"
-install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.shared.md"
+if [[ "$MODE" == "global" ]]; then
+  install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md"
+else
+  install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md" 1
+fi
+remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo
@@ -307,6 +424,9 @@ for path in \
   "$SKILLS_TARGET/README.md" \
   "$SKILLS_TARGET/lead/SKILL.md" \
   "$SKILLS_TARGET/init-project/SKILL.md" \
+  "$AGENTS_TARGET/README.md" \
+  "$AGENTS_TARGET/lead.md" \
+  "$AGENTS_TARGET/team-templates/full-delivery.json" \
   "$COMMANDS_TARGET/agents/help.toml" \
   "$COMMANDS_TARGET/agents/init-project.toml"; do
   if [[ -e "$path" ]]; then
