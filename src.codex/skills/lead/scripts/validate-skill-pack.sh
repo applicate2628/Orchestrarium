@@ -243,6 +243,8 @@ for f in \
   "$SKILLS_DIR/lead/operating-model.md" \
   "$SKILLS_DIR/lead/subagent-contracts.md" \
   "$SKILLS_DIR/lead/external-dispatch.md" \
+  "$SKILLS_DIR/init-project/SKILL.md" \
+  "$SKILLS_DIR/init-project/agents/openai.yaml" \
   "$SKILLS_DIR/consultant/SKILL.md" \
   "$SKILLS_DIR/second-opinion/SKILL.md" \
   "$SCRIPTS_DIR/check-publication-safety.sh" \
@@ -353,7 +355,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex runtime-notes section documents the Codex-only externalClaudeProfile field"
   check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
     "## Codex-specific runtime notes" \
-    "dispatch from Codex to Claude CLI" \
+    "Codex dispatch on Claude CLI" \
     "Codex runtime-notes section documents Codex-to-Claude external dispatch"
   check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
     "## Codex-specific runtime notes" \
@@ -395,10 +397,10 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CODEX_REF_DIR/subagent-operating-model.md" 120 \
     "Codex addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "64bef87b2e7e92caa3c2f2b612a1a7beefd7ae92809f5ee8f84dc46b52999bed" \
+    "1ac13e05cf1c258b6bd43ecc49328192106618d7806b95438ef6008804b56690" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
-    "d9bc89e7696d08998ba5374ebae4815969714d46754ffa2021d4bae662827d2c" \
+    "feffe12f846d7e0b6a275b452cc43b90db8d1604836f6112cbc9acc3dfb23d0d" \
     "Codex addendum matches the current canonical normalized fingerprint"
 fi
 
@@ -432,7 +434,7 @@ done
 echo ""
 echo "=== Orphaned skill directories ==="
 
-UTILITY_SKILLS=(second-opinion review-changes)
+UTILITY_SKILLS=(init-project second-opinion review-changes)
 
 for dir in "$SKILLS_DIR"/*/; do
   role="$(basename "$dir")"

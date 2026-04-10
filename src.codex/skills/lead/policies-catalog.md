@@ -1,6 +1,6 @@
 # Policy Catalog
 
-Each policy area has a key, a question for the user, available options, and a default. The result is written as a `## Project policies` section in the project's root `AGENTS.md`.
+Each policy area has a key, a question for the user, available options, and a default. The `$init-project` utility uses this catalog during onboarding, and the result is written as a `## Project policies` section in the project's root `AGENTS.md`.
 
 ## testing-methodology
 

@@ -54,9 +54,10 @@ Notes:
 - Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
 - The canonical project-local config file is `.agents/.agents-mode`; legacy `.agents/.consultant-mode` is fallback-only during migration.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
-- `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
+- `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`; and `externalProvider: auto` keeps the line default external CLI unless the operator explicitly selects another installed provider such as `gemini`.
 - `externalClaudeProfile` is Codex-line only and selects the Claude CLI execution profile: `sonnet-high` maps to Sonnet with `--effort high`, and `opus-max` maps to Opus with `--effort max`.
 - Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
+- After first-time Codex project install, run `$init-project` in Codex to write `## Project policies` to the root `AGENTS.md` and initialize `.agents/.agents-mode`.
 - Completed lead-managed batches now end with one external consultant-check before closure. That check stays advisory-only, but if the external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
 - Validation command: `bash src.codex/skills/lead/scripts/validate-skill-pack.sh`.
 
@@ -79,7 +80,7 @@ Notes:
 - User-side Claude imports such as `@memory/...` are preserved across reinstalls when they live in the installed `.claude/CLAUDE.md` import block alongside `@AGENTS.md`.
 - The canonical project-local config file is `.claude/.agents-mode`; legacy `.claude/.consultant-mode` is fallback-only during migration.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
-- `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
+- `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`; and `externalProvider: auto` keeps the Claude-line default external CLI unless the operator explicitly selects another installed provider such as `gemini`.
 - Claude-line external dispatch uses Codex CLI, so `externalClaudeProfile` is not part of the Claude-line canonical config.
 - Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
 - Completed lead-managed batches now end with one external consultant-check before closure. That check stays advisory-only, but if the external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
@@ -126,9 +127,13 @@ When both packs are installed, keep shared project policies aligned across both 
 The Gemini line currently exists as source only:
 
 - runtime entrypoint: `src.gemini/GEMINI.md`
+- built-in initialization: Gemini CLI `/init` writes or tailors the project `GEMINI.md`
 - expertise layer: `src.gemini/skills/<name>/SKILL.md`
 - custom commands: `src.gemini/commands/**/*.toml`
+- official runtime config: project `.gemini/settings.json`
+- Orchestrarium operator overlay: project `.gemini/.agents-mode`
 - extension boundary: `src.gemini/extension/gemini-extension.json`
 - validation command: `bash src.gemini/scripts/validate-pack.sh`
+- Orchestrarium overlay bootstrap: `src.gemini/commands/agents/init-project.toml` and `src.gemini/skills/init-project/SKILL.md`
 
-It intentionally follows the official Gemini-preferred layout (`GEMINI.md` + `skills` + `commands` + `extension`) instead of inventing a Claude-like `agents/` source tree.
+It intentionally follows the official Gemini-preferred layout (`GEMINI.md` + `skills` + `commands` + `extension`) instead of inventing a Claude-like `agents/` source tree. Use Gemini's built-in `/init` for the official `GEMINI.md` bootstrap first. When Orchestrarium needs the same cross-provider routing toggles used on the Codex and Claude lines, initialize the repo-local `.gemini/.agents-mode` overlay separately through the Orchestrarium Gemini init helper rather than replacing Gemini's official `.gemini/settings.json`.

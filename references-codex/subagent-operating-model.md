@@ -10,8 +10,8 @@ This file keeps only Codex-specific runtime and repository concretization for th
 
 - Codex uses sequential skill invocation. There is no native parallel skill dispatch, so any theoretically independent work is still orchestrated sequentially on the Codex line.
 - Consultant config lives in `.agents/.agents-mode`; legacy `.agents/.consultant-mode` remains fallback-only during migration.
-- Codex may extend the shared `agents-mode` schema with `externalClaudeProfile` to select the Claude CLI execution profile (`sonnet-high` or `opus-max`).
-- `$external-worker` and `$external-reviewer` dispatch from Codex to Claude CLI.
+- Codex may extend the shared `agents-mode` schema with `externalClaudeProfile` to select the Claude CLI execution profile (`sonnet-high` or `opus-max`) when `externalProvider` resolves to Claude.
+- `externalProvider: auto` keeps Codex dispatch on Claude CLI; explicit provider selection may also route eligible external work to Gemini CLI.
 
 ## Codex-side repository concretization
 

@@ -122,7 +122,7 @@ Fact-first note:
 
 Consultant exception:
 - `$consultant` returns the same first four sections, but ends with `5. Advisory status: NON-BLOCKING` and `6. Continuation prompt: <ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action>`.
-- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.agents-mode` must preserve any existing `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, and `externalClaudeProfile` values.
+- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.agents-mode` must preserve any existing `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, and `externalClaudeProfile` values.
 - If the external provider is unavailable or fails, the lead may use an independent internal subagent as `$consultant` with the same advisory-only contract and the same response format for ordinary optional consultant usage. The mandatory batch-close external consultant-check does not use that fallback; if external execution is unavailable, batch closure stays open and the lead escalates to the user.
 
 ## Shared external dispatch contract
@@ -130,7 +130,7 @@ Consultant exception:
 Use `external-dispatch.md` when the routing decision prefers or explicitly selects an external adapter.
 
 - The canonical config file is `.agents/.agents-mode`; legacy `.agents/.consultant-mode` is fallback-only.
-- The extended schema contains `consultantMode`, `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, and an optional `externalClaudeProfile` used for Codex-line Claude CLI profile selection.
+- The extended schema contains `consultantMode`, `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, and an optional `externalClaudeProfile` used for Codex-line Claude CLI profile selection.
 - `consultantMode` governs `$consultant` behavior only.
 - The preference flags govern whether eligible implement or review/QA slots route to the external adapters by default.
 - The assigned role in the external handoff is a provenance/routing label, not a restriction on universality.

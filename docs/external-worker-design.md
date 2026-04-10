@@ -78,6 +78,7 @@ Full value-by-value operator semantics now live in [`docs/agents-mode-reference.
    mcpMode: auto
    preferExternalWorker: true
    preferExternalReviewer: true
+   externalProvider: auto
    externalClaudeProfile: sonnet-high
    ```
 
@@ -86,22 +87,23 @@ Full value-by-value operator semantics now live in [`docs/agents-mode-reference.
    - `mcpMode` — `auto` vs `force` MCP routing policy
    - `preferExternalWorker` — external-worker as default on `implement` stage
    - `preferExternalReviewer` — external-reviewer as default on `review` + `QA` stages
+   - `externalProvider` — `auto`, `claude`, `codex`, or `gemini` for provider-backed consultant / adapter selection
    - `externalClaudeProfile` — Codex-line only optional Claude CLI execution profile: `sonnet-high` or `opus-max`
    - Each toggle is independent
-   - Default full shape on first creation: `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`; Codex also writes `externalClaudeProfile: sonnet-high`
+   - Default full shape on first creation: `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`; Codex also writes `externalClaudeProfile: sonnet-high`
 
 3. **Dispatch protocol (platform-dependent)**
 
-   | Context | External CLI | Command |
-   |---------|-------------|---------|
-   | Claude Code calling external | Codex | `codex --quiet --full-auto "$PROMPT"` |
-   | Codex calling external | Claude CLI | `printf '%s' "$PROMPT" \| claude -p --effort high --permission-mode bypassPermissions` |
+| Context | `externalProvider: auto` | Explicit alternate |
+|---------|-------------|---------|
+| Claude Code calling external | Codex CLI via `codex --quiet --full-auto "$PROMPT"` | Gemini CLI via `printf '%s' "$PROMPT" \| gemini -p "" --model gemini-2.5-pro --approval-mode yolo` |
+| Codex calling external | Claude CLI via `printf '%s' "$PROMPT" \| claude -p --effort high --permission-mode bypassPermissions` | Gemini CLI via `printf '%s' "$PROMPT" \| gemini -p "" --model gemini-2.5-pro --approval-mode yolo` |
 
-   Each pack calls the *other* CLI as the external provider.
+   `externalProvider: auto` preserves the original peer-provider pairing, while explicit provider selection can widen the external target set to Gemini without changing the role model.
 
 4. **Common rules**
-   - CLI availability check before dispatch (`which codex` / `where codex` on Claude Code; `claude` / `claude.exe` on Codex)
-   - Hard tasks: `--model gpt-5.4 --reasoning-effort xhigh` (Codex) or `--effort high` (Claude CLI)
+   - CLI availability check before dispatch (`which codex` / `where codex` on Claude Code, `claude` / `claude.exe` on Codex, `gemini` wherever Gemini is selected)
+   - Hard tasks: `--model gpt-5.4 --reasoning-effort xhigh` (Codex), `--effort high` (Claude CLI), or `--model gemini-2.5-pro` (Gemini CLI)
    - Timeout: 5-15 minutes before treating a run as stalled
    - Provenance header mandatory for all three roles:
      - **Requested mode:** `<external | auto | internal>`
@@ -119,6 +121,7 @@ The orchestrator (lead or main conversation) **prefers** external roles by defau
 - `mcpMode: auto | force` — `auto` uses MCP by judgment; `force` treats relevant MCP use as an explicit standing instruction
 - `preferExternalWorker: true` — `$external-worker` on `implement` stage
 - `preferExternalReviewer: true` — `$external-reviewer` on `review` + `QA` stages
+- `externalProvider: auto | claude | codex | gemini` — keep the existing line-default external provider or explicitly steer external execution to another installed provider
 - `externalClaudeProfile: sonnet-high | opus-max` — Codex-line only; when Codex dispatches to Claude CLI, prefer the matching model/effort profile instead of the provider default
 
 Domain specialist is selected instead only when:
