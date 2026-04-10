@@ -66,7 +66,7 @@ done
 if [[ -d "src.codex/skills" && -f "src.codex/AGENTS.shared.md" ]]; then
   echo ""
   echo "=== Branch-level docs surface ==="
-  for f in docs/README.md docs/provider-runtime-layout.md docs/agents-mode-reference.md references-codex/README.md; do
+  for f in src.codex/README.md docs/README.md docs/provider-runtime-layout.md docs/agents-mode-reference.md references-codex/README.md; do
     if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
   done
 fi
