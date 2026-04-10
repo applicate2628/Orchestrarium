@@ -61,6 +61,8 @@ Introduce two new roles and a shared dispatch module:
 
 ### Contents
 
+Full value-by-value operator semantics now live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md). Keep this design spec at the decision level and let the dedicated reference own the complete `value | meaning` tables.
+
 1. **Config file location**
 
    | Platform | Path |
@@ -80,7 +82,7 @@ Introduce two new roles and a shared dispatch module:
    ```
 
    - `consultantMode` — consultant-only mode: `external`, `auto`, `internal`, `disabled`
-   - `delegationMode` — `manual` vs `auto` team delegation
+   - `delegationMode` — `manual`, `auto`, or `force` team delegation
    - `mcpMode` — `auto` vs `force` MCP routing policy
    - `preferExternalWorker` — external-worker as default on `implement` stage
    - `preferExternalReviewer` — external-reviewer as default on `review` + `QA` stages
@@ -113,7 +115,7 @@ Introduce two new roles and a shared dispatch module:
 The orchestrator (lead or main conversation) **prefers** external roles by default:
 
 - `consultantMode: external | auto | internal | disabled` — consultant-only behavior
-- `delegationMode: manual | auto` — `auto` keeps ordinary delegation enabled without per-turn approval; `manual` keeps explicit-request behavior
+- `delegationMode: manual | auto | force` — `manual` keeps explicit-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist
 - `mcpMode: auto | force` — `auto` uses MCP by judgment; `force` treats relevant MCP use as an explicit standing instruction
 - `preferExternalWorker: true` — `$external-worker` on `implement` stage
 - `preferExternalReviewer: true` — `$external-reviewer` on `review` + `QA` stages

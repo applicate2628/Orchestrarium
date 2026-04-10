@@ -52,8 +52,9 @@ Notes:
 - Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
 - The canonical project-local config file is `.agents/.agents-mode`; legacy `.agents/.consultant-mode` is fallback-only during migration.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
-- `consultantMode` still controls `$consultant`; `delegationMode: auto` means ordinary delegation stays enabled without repeated approval while `manual` keeps explicit-permission behavior; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
+- `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
 - `externalClaudeProfile` is Codex-line only and selects the Claude CLI execution profile: `sonnet-high` maps to Sonnet with `--effort high`, and `opus-max` maps to Opus with `--effort max`.
+- Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
 - Completed lead-managed batches now end with one external consultant-check before closure. That check stays advisory-only, but if the external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
 - Validation command: `bash src.codex/skills/lead/scripts/validate-skill-pack.sh`.
 
@@ -76,8 +77,9 @@ Notes:
 - User-side Claude imports such as `@memory/...` are preserved across reinstalls when they live in the installed `.claude/CLAUDE.md` import block alongside `@AGENTS.md`.
 - The canonical project-local config file is `.claude/.agents-mode`; legacy `.claude/.consultant-mode` is fallback-only during migration.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
-- `consultantMode` still controls `$consultant`; `delegationMode: auto` means ordinary delegation stays enabled without repeated approval while `manual` keeps explicit-permission behavior; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
+- `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
 - Claude-line external dispatch uses Codex CLI, so `externalClaudeProfile` is not part of the Claude-line canonical config.
+- Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
 - Completed lead-managed batches now end with one external consultant-check before closure. That check stays advisory-only, but if the external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
 - Validation command: `bash src.claude/agents/scripts/validate-skill-pack.sh`.
 

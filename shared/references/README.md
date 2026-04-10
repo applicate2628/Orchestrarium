@@ -17,6 +17,8 @@ Do not use `shared/references/` for:
 
 Exact operational instructions belong in the root repository docs and the corresponding agent pack runtime docs.
 
+For exact provider runtime layout differences such as `global` vs `local` install roots, instruction entrypoints, and native command or extension directories, keep that reference outside `shared/references/`; the current canonical runtime-layout note lives in [`docs/provider-runtime-layouts.md`](../../docs/provider-runtime-layouts.md).
+
 Provider-specific reference trees such as `references-codex/` and `references-claude/` should keep only provider-specific material plus thin compatibility pointers when an older path must remain stable for existing links, reports, or notes.
 
 Shared-core documents may still keep provider-local addenda when the shared blueprint needs runtime-specific concretization. `subagent-operating-model` now follows that pattern: the canonical shared core lives here, while each provider-local tree keeps only its runtime and repository-specific addendum.

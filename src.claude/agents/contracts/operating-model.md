@@ -47,7 +47,7 @@ When lead coordinates, or when the main conversation needs to decide between rol
 Claude-line keeps one shared local config file at `.claude/.agents-mode`; legacy `.claude/.consultant-mode` is fallback-only.
 
 - `consultantMode` continues to govern `$consultant`.
-- `delegationMode: auto` keeps ordinary team delegation enabled without per-turn re-approval; `manual` keeps delegation explicit-by-request.
+- `delegationMode: manual` keeps delegation explicit-by-request, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible implement-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.

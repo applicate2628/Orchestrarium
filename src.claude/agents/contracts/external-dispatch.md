@@ -7,12 +7,13 @@ This contract defines the shared Claude-line routing semantics for the consultan
 - Canonical path: `.claude/.agents-mode`
 - Legacy fallback: `.claude/.consultant-mode`
 - Existing consultant workflows continue to work through legacy fallback, but new writes should target `.claude/.agents-mode`.
+- Full value-by-value operator semantics live in [../../../docs/agents-mode-reference.md](../../../docs/agents-mode-reference.md).
 
 Supported canonical keys:
 
 ```yaml
 consultantMode: external  # allowed: external | auto | internal | disabled
-delegationMode: manual  # allowed: manual | auto
+delegationMode: manual  # allowed: manual | auto | force
 mcpMode: auto  # allowed: auto | force
 preferExternalWorker: true  # allowed: false | true
 preferExternalReviewer: true  # allowed: false | true
@@ -21,7 +22,7 @@ preferExternalReviewer: true  # allowed: false | true
 Semantics:
 
 - `consultantMode` continues to govern `$consultant`.
-- `delegationMode: auto` means ordinary team delegation stays enabled without per-turn approval; `manual` keeps the current explicit user-request behavior.
+- `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` and `preferExternalReviewer` are routing preferences for eligible external adapter substitutions.
 - Claude-line no longer treats `externalClaudeProfile` as part of the canonical schema; if it appears in a legacy `.consultant-mode` file, ignore it for Claude-line execution and do not write it into the new `.agents-mode` file during migration.
