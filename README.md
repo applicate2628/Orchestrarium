@@ -22,7 +22,7 @@ references-gemini/  Gemini-specific addenda and compatibility pointers
 RELEASE_NOTES.md    Canonical tracked release log
 install.sh          Entry-point installer (asks which pack to install)
 install.ps1         Entry-point installer (asks which pack to install)
-scripts/            Pack-specific installers (called by entry points)
+scripts/            Pack-specific installers plus the repo-local publication gate
 AGENTS.md           Dev overlay for Codex pack maintenance
 CLAUDE.md           Dev overlay for Claude Code pack maintenance
 ```
@@ -107,7 +107,15 @@ bash src.claude/agents/scripts/validate-skill-pack.sh
 bash src.gemini/scripts/validate-pack.sh
 ```
 
-For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title.
+For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title. Keep release notes in reverse-chronological `## YYYY-MM-DD` sections instead of one long-lived `## Unreleased` bucket, and run the repo-local gate before publication:
+
+```bash
+bash scripts/check-publication-gate.sh
+```
+
+```powershell
+.\scripts\check-publication-gate.ps1
+```
 
 ## License
 
