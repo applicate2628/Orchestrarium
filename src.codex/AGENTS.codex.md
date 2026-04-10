@@ -38,6 +38,8 @@ Classify the task and select the matching workflow shape. Simple chains do not r
 
 When the template says "No" for lead, the main conversation manages the chain directly: invoke specialists sequentially, pass each accepted artifact to the next role. Re-classify immediately if scope widens beyond the current template.
 
+For a direct full repository impact review of recent changes, use `$review-changes`. It starts from the current local diff or a specified review target, but checks the wider affected surface, including unchanged dependents and adjacent logic.
+
 A bugfix with a known file or function maps to the `quick-fix` template by default, even if adjacent issues are discovered during analysis. Adjacent issues go to the configured bug registry path, not into the current plan.
 
 ## Recovery rule
@@ -50,15 +52,28 @@ A bugfix with a known file or function maps to the `quick-fix` template by defau
 
 Role definitions live in the installed skills tree: `.agents/skills/<role>/SKILL.md` for repo-local installs, or `$CODEX_HOME/skills/<role>/SKILL.md` / `~/.codex/skills/<role>/SKILL.md` for global installs.
 
+Utility skills live in the same installed skills tree and may be invoked directly when their workflow fits. In particular, use `$init-project` to initialize project policies in the root `AGENTS.md` and bootstrap `.agents/.agents-mode` for a new Codex project.
+
 Use these global anchor roles:
 
 - `$lead`: default delivery coordination, routing, artifact acceptance, and gate decisions for approved work
 - `$product-manager`: roadmap ownership, initiative prioritization, and admission into discovery or delivery
 - `$consultant`: optional non-blocking independent advisor; usage rules, toggle check, execution paths, and fallback behavior are in `$CODEX_HOME/skills/consultant/SKILL.md`
 
+External dispatch roles also exist in the installed skills tree as bidirectional adapters:
+
+- `$external-worker`: external implementation adapter for eligible implementer roles; dispatches to the provider selected by `.agents/.agents-mode` (Claude by default, Gemini when explicitly chosen) and may be selected by preference or explicit override
+- `$external-reviewer`: external review/QA adapter for eligible reviewer roles; dispatches to the provider selected by `.agents/.agents-mode` (Claude by default, Gemini when explicitly chosen) and may be selected by preference or explicit override
+
+These roles are not aliases for `$consultant`.
+
 For all other work, use the narrowest matching installed specialist. The role index in shared governance names the canonical core team only; installed specialists outside that core team and repo-local specialists may be used by `$lead` when they are a better fit.
 
 Repository-specific `AGENTS.md` files should add local priorities, canonical paths, build/test rules, and source-of-truth references without redefining the whole global role catalog.
+
+## Project bootstrap
+
+If the project root `AGENTS.md` lacks `## Project policies` or `.agents/.agents-mode` is missing, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred.
 
 ## Publication safety scan
 

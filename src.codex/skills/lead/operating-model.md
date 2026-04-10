@@ -8,6 +8,8 @@ Use this reference when the lead needs routing, gate, or governance guidance bey
   `product-manager -> product-analyst -> lead`
 - Delivery loop for an approved item:
   `lead -> research -> design -> plan -> implement -> QA/review -> lead`
+- Batch-close loop for a completed lead-managed item:
+  `lead -> consultant -> lead`
 - Re-intake loop for an in-flight item whose admitted scope, priority, or milestone intent has changed:
   `lead -> product-manager -> lead`
 
@@ -19,10 +21,20 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - `PASS` immediately advances to the next approved role.
 - `REVISE` stays inside the same role for a bounded correction.
 - Default `REVISE` cap: no more than 3 consecutive `REVISE` cycles for the same role and artifact before the lead must escalate to the user with a summary of all iterations, remaining findings, and a recommendation.
+- A handoff interrupt or worker stall without an artifact is not a completed `REVISE` artifact. Keep the stage open, record the interruption in `status.md`, then either re-dispatch the same role with a narrower slice or route to the proper factual role.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
+- Every completed lead-managed batch ends with one external consultant-check before closure. The memo is advisory-only, but the lead must record it before marking the batch closed.
 - Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - A material revision to an accepted upstream artifact invalidates dependent downstream `PASS` states; the lead marks the affected artifacts for re-review before continuing the pipeline.
 - Handoff latency should stay low: do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
+
+## Primary-task lock
+
+- Maintain exactly one primary in-progress task at a time.
+- Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
+- After handling a side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
+- Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task.
 
 ## Change classification
 
@@ -49,6 +61,12 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
   `product-manager -> product-analyst -> lead`
 - Advisory-only independent consultation:
   `lead -> consultant`
+- Completed task-batch closure sweep:
+  `lead -> consultant -> lead`
+- Explicit external implementation through the best-fit adapter:
+  `lead -> analyst -> architect -> planner -> external-worker -> external-reviewer -> lead`
+- External review/QA through the best-fit adapter:
+  `lead -> analyst -> architect -> planner -> implementation -> external-reviewer -> lead`
 - In-flight item whose admitted scope, priority, or milestone intent has drifted:
   `lead -> product-manager -> lead`
 - Clearly local additive work:
@@ -131,6 +149,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - After `ux-reviewer`: there are no blocking usability, accessibility, or flow-quality issues.
 - After `accessibility-reviewer`: there are no blocking keyboard, focus, labeling, contrast, or assistive-technology issues for the scoped surface.
 - After the human or CI gate: required approvals and automated checks are complete, and for publication the approver is not the same role that accepted the artifact into the pipeline.
+- Before a completed lead-managed batch is marked closed: one external consultant-check memo exists, ends with a reusable second prompt that begins with a direct imperative to continue and names the next concrete action, and records residual concerns, overlooked surfaces, and follow-up recommendations.
 
 ## Repository task memory
 
@@ -142,6 +161,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - Update `status.md` after accepted artifacts, interruptions, or stage changes so work can resume without relying on chat memory when task memory is configured.
 - If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery when task memory is in use.
 - Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
+- On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
 
 ## Lead quick checklist
 
@@ -157,6 +177,7 @@ Do:
 - route an in-flight item back to `product-manager` when admitted scope, priority, or milestone intent changes materially
 - route unknowns to factual roles before escalating into opinion-heavy discussion
 - assign one explicit integration owner before QA when multiple implementation phases or specialists must land together
+- run one external consultant-check before closing any completed lead-managed batch
 
 Do not:
 
@@ -236,7 +257,10 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - `knowledge-archivist`, `backend-engineer`, `frontend-engineer`, `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`, `data-engineer`, `toolchain-engineer`, and `platform-engineer` implement approved phases.
 - `qa-engineer` and `ui-test-engineer` verify correctness and regressions in their scope.
 - `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, and `accessibility-reviewer` act as independent blockers when their risk domain matters.
-- `consultant` is advisory-only and not part of the blocker chain; if an external provider is unavailable, the lead may fulfill this role through an independent internal subagent instead.
+- `external-worker` implements approved work through an external provider when the routing decision selects the external adapter for an eligible implementer role.
+- `external-reviewer` performs review and QA through an external provider when the routing decision selects the external adapter for an eligible reviewer or QA role.
+- `consultant` is advisory-only and not part of the blocker chain; if an external provider is unavailable, the lead may fulfill this role through an independent internal subagent instead. That fallback applies only to `$consultant`, not to `$external-worker` or `$external-reviewer`; the external roles are disabled at the role level and the lead may reroute to another eligible specialist.
+- Mandatory `security-reviewer` and `performance-reviewer` gates in risk-sensitive templates remain internal and are not replaced by the external reviewer.
 - The role map in this reference describes the canonical core team only. If a narrower installed specialist outside the core team is a better fit for the scoped work, the lead may use it; if the current repo/workspace defines or clearly implies a repo-local specialist, the lead may use that specialist. Using such a specialist does not add it to the canonical map automatically.
 
 ## Periodic controls
@@ -332,13 +356,15 @@ Every completed chain producing an accepted artifact MUST persist it before the 
 | Tier | Location | When to use |
 |---|---|---|
 | Canonical | `configured task-memory directory` | Lead-routed non-trivial work: brief, status, research, design, plan, review, closure |
-| Session log | `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Session reports, review reports, advisory memos |
-| Plan log | `.plans/YYYY-MM/plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Delivery plans, phase plans |
+| Session log | `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Brief record of what happened — summary, not a copy of the canonical artifact |
+| Plan log | `.plans/YYYY-MM/plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Plan snapshots when a plan is created or materially revised |
+
+Session logging is mandatory for every participant — orchestrator, lead, or specialist role — when the session produced a result, made a routing decision, or completed a review. A session log summarizes what was asked, what was done, key decisions, outcome, participants, and pointers to canonical artifacts. Create `YYYY-MM/` subdirectory if it does not exist. See `AGENTS.md` § "Session logging rule" for the full contract.
 
 When NOT to save:
 - Do not persist intermediate REVISE drafts — only the final accepted version.
 - Do not persist raw session transcripts or debug logs in canonical storage.
-- Do not duplicate an artifact across tiers — choose the primary tier and link from others if needed.
+- Do not duplicate an artifact across tiers — the canonical artifact lives in the task-memory directory; the session log in `.reports/` is a summary, not a copy.
 
 ## Governance sources
 
@@ -408,3 +434,5 @@ When NOT to save:
 - `visualization engineer` means `$visualization-engineer`
 - `geometry engineer` means `$geometry-engineer`
 - `build engineer` or `toolchain engineer` means `$toolchain-engineer`
+- `external worker`, `external implementer`, or `external execution worker` means `$external-worker`
+- `external reviewer`, `external audit reviewer`, or `external review` means `$external-reviewer`
