@@ -7,6 +7,13 @@ description: Configure project policies in the root AGENTS.md and initialize or 
 
 Guide the user through first-time Codex project bootstrap for project policies and operator mode state.
 
+## Continuity contract
+
+- Use one primary in-progress task at a time.
+- Side requests may temporarily interrupt that task, but they do not replace it unless the user explicitly reprioritizes, cancels, or parks it.
+- After any side request, explicitly resume the primary task and state the next concrete step.
+- After an accepted phase or completed batch, continue to the next clear step unless a real gate blocks progression.
+
 ## Steps
 
 1. **Read current state.**
