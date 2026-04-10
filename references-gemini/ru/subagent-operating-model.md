@@ -12,7 +12,7 @@
 - `.gemini/.agents-mode` — optional Orchestrarium overlay, а не замена `.gemini/settings.json`.
 - Skills живут в `skills/<name>/SKILL.md`.
 - Пользовательские command helpers живут в `commands/**/*.toml`.
-- Текущий scaffold остаётся последовательным и human-steered; не предполагайте native parallel dispatch.
+- Текущий pack surface остаётся последовательным и human-steered; не предполагайте native parallel dispatch.
 
 ## Delivery model
 
@@ -24,7 +24,7 @@
 ## Gemini-side repository concretization
 
 - `references-gemini/` — обязательное standalone reference tree.
-- [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) — канонический operator reference для `.gemini/.agents-mode`.
+- [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md) — канонический operator reference для `.gemini/.agents-mode`.
 - Task-memory root, recovery entry point, active-item directory и archive location остаются repository-defined, когда task memory включён.
 - Periodic controls живут в [periodic-control-matrix.md](periodic-control-matrix.md).
 - Publication safety живёт в [repository-publication-safety.md](repository-publication-safety.md).
