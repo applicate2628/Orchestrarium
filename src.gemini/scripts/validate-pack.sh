@@ -16,7 +16,9 @@ required=(
   "$PACK_ROOT/GEMINI.md"
   "$PACK_ROOT/skills/README.md"
   "$PACK_ROOT/skills/lead/SKILL.md"
+  "$PACK_ROOT/skills/init-project/SKILL.md"
   "$PACK_ROOT/commands/agents/help.toml"
+  "$PACK_ROOT/commands/agents/init-project.toml"
   "$PACK_ROOT/extension/README.md"
   "$PACK_ROOT/extension/gemini-extension.json"
 )
@@ -49,7 +51,17 @@ if [[ -e "$PACK_ROOT/agents" ]]; then
   exit 1
 fi
 
-for skill in "$PACK_ROOT/skills/lead/SKILL.md"; do
+if ! grep -q '/init' "$PACK_ROOT/GEMINI.md"; then
+  echo "FAIL: GEMINI.md should mention the official Gemini /init bootstrap path"
+  exit 1
+fi
+
+if ! grep -q '\.gemini/settings\.json' "$PACK_ROOT/GEMINI.md"; then
+  echo "FAIL: GEMINI.md should mention .gemini/settings.json as the official Gemini runtime-state surface"
+  exit 1
+fi
+
+for skill in "$PACK_ROOT/skills/lead/SKILL.md" "$PACK_ROOT/skills/init-project/SKILL.md"; do
   if ! grep -q '^---$' "$skill"; then
     echo "FAIL: missing frontmatter in $skill"
     exit 1
@@ -78,7 +90,7 @@ else
   exit 1
 fi
 
-"$PYTHON_BIN" - "$PACK_ROOT/commands/agents/help.toml" "$PACK_ROOT/extension/gemini-extension.json" <<'PY'
+"$PYTHON_BIN" - "$PACK_ROOT/commands/agents/help.toml" "$PACK_ROOT/commands/agents/init-project.toml" "$PACK_ROOT/extension/gemini-extension.json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -89,11 +101,12 @@ except ModuleNotFoundError:
     print("FAIL: Python tomllib is unavailable; cannot validate Gemini TOML syntax")
     sys.exit(1)
 
-toml_path = Path(sys.argv[1])
-json_path = Path(sys.argv[2])
+toml_paths = [Path(sys.argv[1]), Path(sys.argv[2])]
+json_path = Path(sys.argv[3])
 
-with toml_path.open("rb") as fh:
-    tomllib.load(fh)
+for toml_path in toml_paths:
+    with toml_path.open("rb") as fh:
+        tomllib.load(fh)
 
 with json_path.open("r", encoding="utf-8") as fh:
     json.load(fh)

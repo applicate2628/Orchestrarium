@@ -20,9 +20,10 @@ description: External implementation adapter for Claude-line. Use when an eligib
 
 ## Claude-line provider
 
-- Use Codex CLI as the external provider.
 - Honor `.claude/.agents-mode` first, then legacy `.claude/.consultant-mode`, and apply the `preferExternalWorker` routing preference.
-- If Codex CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work through another eligible path.
+- `externalProvider: auto` keeps the Claude-line default external provider: Codex CLI.
+- `externalProvider: gemini` routes the same adapter through Gemini CLI instead.
+- If the selected external CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work through another eligible path.
 
 ## Return exactly one artifact
 

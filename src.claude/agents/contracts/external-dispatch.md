@@ -17,6 +17,7 @@ delegationMode: manual  # allowed: manual | auto | force
 mcpMode: auto  # allowed: auto | force
 preferExternalWorker: true  # allowed: false | true
 preferExternalReviewer: true  # allowed: false | true
+externalProvider: auto  # allowed here: auto | codex | gemini
 ```
 
 Semantics:
@@ -25,6 +26,7 @@ Semantics:
 - `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` and `preferExternalReviewer` are routing preferences for eligible external adapter substitutions.
+- `externalProvider: auto` preserves the Claude-line default external provider (Codex CLI). Explicit values may select `gemini`, or keep `codex`, for provider-backed consultant or adapter work.
 - Claude-line no longer treats `externalClaudeProfile` as part of the canonical schema; if it appears in a legacy `.consultant-mode` file, ignore it for Claude-line execution and do not write it into the new `.agents-mode` file during migration.
 - Any tool that updates the file must preserve unknown keys in place and must not rewrite the file back to a consultant-only shape.
 - When writing `.claude/.agents-mode`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
@@ -32,7 +34,8 @@ Semantics:
 
 ## Claude-line provider
 
-- Claude-line external adapters dispatch to Codex CLI.
+- `externalProvider: auto` keeps Claude-line external adapters on Codex CLI.
+- Claude-line may also select Gemini CLI explicitly via `externalProvider: gemini`.
 - The adapter does not change the team template JSON.
 - The adapter replaces an eligible internal role at routing time and keeps the replaced role label in provenance.
 - If the external CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work to another eligible path.

@@ -72,8 +72,11 @@ Important: operator preferences now live in pack-local `agents-mode` files; lega
 - `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` lets the agent decide when MCP is appropriate; `force` means the config itself is an explicit instruction to use relevant available MCP tools instead of treating MCP usage as optional.
 - `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
+- `externalProvider: auto` keeps the line default external CLI, while explicit values such as `gemini` can route provider-backed consultant or external-adapter work through a different installed external CLI.
 - Codex may additionally use `externalClaudeProfile` to select the Claude CLI execution profile: `sonnet-high` or `opus-max`.
 - Claude Code does not use `externalClaudeProfile` in its canonical config because Claude-line external dispatch goes to Codex CLI.
+- For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and create `.agents/.agents-mode`.
+- For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config stays in `.gemini/settings.json`; Orchestrarium-specific shared routing semantics may additionally live in `.gemini/.agents-mode`, which the Gemini `init-project` helper bootstraps separately after `/init`.
 - Explicit user role requests still override the toggle state in either direction.
 - Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
 

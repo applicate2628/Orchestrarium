@@ -10,7 +10,7 @@ If `## Project policies` section is missing from this file, suggest running `/ag
 
 When subagent delegation is appropriate, classify the task and pick the matching team template from `.claude/agents/team-templates/`.
 
-External adapter preferences live in `.claude/.agents-mode`. The file keeps `consultantMode` for consultant behavior, adds `delegationMode` and `mcpMode` for operator-level routing/tooling preference, and keeps `preferExternalWorker` / `preferExternalReviewer` for eligible implement and review-side substitutions without changing team template JSON. Legacy `.claude/.consultant-mode` is fallback-only; Claude-line canonical config no longer includes `externalClaudeProfile`.
+External adapter preferences live in `.claude/.agents-mode`. The file keeps `consultantMode` for consultant behavior, adds `delegationMode` and `mcpMode` for operator-level routing/tooling preference, keeps `preferExternalWorker` / `preferExternalReviewer` for eligible implement and review-side substitutions, and uses `externalProvider: auto | codex | gemini` when the operator wants to steer provider-backed execution to a specific external CLI without changing team template JSON. Legacy `.claude/.consultant-mode` is fallback-only; Claude-line canonical config no longer includes `externalClaudeProfile`.
 
 **Decision tree:**
 

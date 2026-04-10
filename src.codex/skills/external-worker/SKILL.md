@@ -24,9 +24,13 @@ description: Implement approved work through an external provider when the routi
 
 ## External execution
 
-- Primary provider: Claude CLI.
-- Check availability first (`claude`, or `claude.exe` / `claude.cmd` on Windows).
-- Read `.agents/.agents-mode` first and fallback to legacy `.agents/.consultant-mode`; honor `externalClaudeProfile` when it is present: `sonnet-high` maps to `--model sonnet --effort high`; `opus-max` maps to `--model opus --effort max`.
+- Read `.agents/.agents-mode` first and fallback to legacy `.agents/.consultant-mode`.
+- `externalProvider: auto` keeps the Codex-line default external provider: Claude CLI.
+- `externalProvider: gemini` routes the same adapter through Gemini CLI instead.
+- Check the selected provider first:
+  - Claude path: `claude`, `claude.exe`, or `claude.cmd`
+  - Gemini path: `gemini`
+- Honor `externalClaudeProfile` only when the selected provider is Claude: `sonnet-high` maps to `--model sonnet --effort high`; `opus-max` maps to `--model opus --effort max`.
 - Use stdin or a file for the prompt; do not pass multiline prompts as direct command-line arguments.
 - If the provider is missing, unauthenticated, quota-limited, or errors, stop and return `BLOCKED:dependency` with the reason.
 - Do not silently fall back to an internal implementer or to `$consultant`.

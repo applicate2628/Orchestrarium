@@ -30,9 +30,10 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 - `mcpMode`
 - `preferExternalWorker`
 - `preferExternalReviewer`
+- `externalProvider`
 - `externalClaudeProfile` (optional; `sonnet-high` or `opus-max`)
 
-When changing `consultantMode`, preserve the other keys and `externalClaudeProfile` if it exists. When creating the file from scratch, initialize all six keys and default `delegationMode` to `manual`, `mcpMode` to `auto`, and `externalClaudeProfile` to `sonnet-high` unless the user explicitly requested a different Claude profile override.
+When changing `consultantMode`, preserve the other keys and `externalClaudeProfile` if it exists. When creating the file from scratch, initialize all seven keys and default `delegationMode` to `manual`, `mcpMode` to `auto`, `externalProvider` to `auto`, and `externalClaudeProfile` to `sonnet-high` unless the user explicitly requested a different Claude profile override.
 
 ## When to invoke
 
@@ -78,17 +79,27 @@ Do not invoke for:
 
 ## Execution paths
 
-### External provider: Claude CLI (default when enabled)
+### External provider: selected by `externalProvider` (`auto` -> Claude CLI on Codex)
 
 See the shared dispatch contract in [../lead/external-dispatch.md](../lead/external-dispatch.md) for the canonical config and provider matrix.
 
-Check availability first: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows).
+Check the selected provider first:
 
-If `.agents/.agents-mode` (or legacy `.agents/.consultant-mode`) contains `externalClaudeProfile`, map it as follows:
+- Claude path: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows)
+- Gemini path: `gemini`
+
+If `.agents/.agents-mode` (or legacy `.agents/.consultant-mode`) selects Claude and contains `externalClaudeProfile`, map it as follows:
 
 - `sonnet-high` → `--model sonnet --effort high`
 - `opus-max` → `--model opus --effort max`
 - key missing → use the current default Claude CLI invocation for this pack
+
+If `.agents/.agents-mode` selects Gemini (`externalProvider: gemini`), use Gemini CLI in non-interactive mode. Example:
+
+**Windows / macOS / Linux:**
+```bash
+printf '%s' "$PROMPT" | gemini -p "" --model gemini-2.5-pro --approval-mode yolo
+```
 
 Examples:
 
@@ -107,6 +118,7 @@ Fallback if `claude.exe` is not on PATH: use `claude.cmd` instead.
 
 **Rules:**
 - If `externalClaudeProfile` is present, use it instead of improvising a different Claude model or effort level.
+- If `externalProvider: gemini` is selected, do not silently reroute to Claude; disclose provider failure explicitly and follow the configured fallback rules.
 - If the requested Claude profile is unavailable because of plan limits, auth, quota, or client support, treat that as external-provider unavailability and follow the configured fallback rules; do not silently downgrade to another Claude profile.
 - Do not pass multiline prompts as direct command-line arguments — use `stdin` or a file.
 - Do not use TTY when a non-interactive invocation is available.

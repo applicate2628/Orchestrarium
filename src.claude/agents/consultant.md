@@ -44,8 +44,9 @@ The local config file is now `.claude/.agents-mode`; legacy `.claude/.consultant
 - `mcpMode: auto | force`
 - `preferExternalWorker: true | false`
 - `preferExternalReviewer: true | false`
+- `externalProvider: auto | claude | codex | gemini`
 
-`consultantMode` continues to govern consultant behavior. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract and must be preserved by any command that updates this file. Legacy `externalClaudeProfile` values should not be written on the Claude line.
+`consultantMode` continues to govern consultant behavior. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` keeps the Claude-line default external provider unless the operator explicitly selects another installed provider such as `gemini`; these keys must be preserved by any command that updates this file. Legacy `externalClaudeProfile` values should not be written on the Claude line.
 
 For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md).
 
@@ -74,18 +75,23 @@ For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md]
 Before any invocation, read `.claude/.agents-mode` first and fall back to legacy `.claude/.consultant-mode` only when the new file is absent:
 
 - **No file** (default): consultant is disabled for ordinary optional second-opinion usage. Notify "Second opinion skipped — consultant disabled (`/agents-second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. For the mandatory batch-close external consultant-check, do not silently skip: return an advisory memo that records the disabled state and tells the lead to keep the batch open and escalate to the user.
-- **`mode: external`**: external-first. Attempt external CLI. If external fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal for ordinary optional usage. For the mandatory batch-close external consultant-check, do not downgrade to internal fallback; return an unavailable memo and require the lead to keep the batch open and escalate.
-- **`mode: auto`**: external-first with silent fallback for ordinary optional usage. Attempt external CLI. If unavailable, fall back to internal subagent automatically and disclose the actual execution path in the memo header. For the mandatory batch-close external consultant-check, do not silently downgrade; if the external path is unavailable, return an unavailable memo and require the lead to keep the batch open and escalate.
-- **`mode: internal`**: internal subagent only for ordinary optional usage. A mandatory batch-close external consultant-check is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
-- **`mode: disabled`**: explicitly disabled. Same behavior as the no-file case.
+- **`consultantMode: external`**: external-first. Attempt the selected external CLI. If it fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal for ordinary optional usage. For the mandatory batch-close external consultant-check, do not downgrade to internal fallback; return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`consultantMode: auto`**: external-first with silent fallback for ordinary optional usage. Attempt the selected external CLI. If unavailable, fall back to internal subagent automatically and disclose the actual execution path in the memo header. For the mandatory batch-close external consultant-check, do not silently downgrade; if the external path is unavailable, return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`consultantMode: internal`**: internal subagent only for ordinary optional usage. A mandatory batch-close external consultant-check is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`consultantMode: disabled`**: explicitly disabled. Same behavior as the no-file case.
 
 The toggle file is local-only (`.claude/` is in `.gitignore`) and not committed to git.
 
 ## Execution paths
 
-### Codex provider (default)
+### Selected external provider (`auto` -> Codex on the Claude line)
 
-Check availability first (`which codex` on Unix, `where codex` on Windows, or `command -v codex`). If available:
+Check the selected provider first:
+
+- Codex path: `which codex` on Unix, `where codex` on Windows, or `command -v codex`
+- Gemini path: `gemini`
+
+If Codex is selected or implied by `externalProvider: auto`:
 
 ```bash
 codex --quiet --full-auto "$PROMPT"
@@ -95,6 +101,15 @@ codex --quiet --full-auto "$PROMPT"
 - Prefer passing context via file references in the prompt rather than piping large artifacts through stdin.
 - Wait 5–15 minutes before treating a run as stalled. Do not start a parallel chat while one may still be running.
 - If Codex is not installed, fails, times out, or hits quota/auth limits, do not silently degrade the mandatory batch-close external consultant-check. For ordinary optional usage, follow the configured fallback behavior.
+
+If Gemini is selected explicitly:
+
+```bash
+printf '%s' "$PROMPT" | gemini -p "" --model gemini-2.5-pro --approval-mode yolo
+```
+
+- Do not silently downgrade from a selected Gemini path back to Codex.
+- Use stdin or a prompt file rather than trying to push a multiline prompt through a single command-line string.
 
 ### Internal-subagent fallback (ordinary optional usage only)
 

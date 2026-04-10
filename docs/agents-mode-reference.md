@@ -6,8 +6,9 @@ Canonical value-by-value operator reference for pack-local `agents-mode` files. 
 
 | Provider | Canonical file | Legacy fallback | Provider-specific note |
 |---|---|---|---|
-| Codex | `.agents/.agents-mode` | `.agents/.consultant-mode` | May also store `externalClaudeProfile` because Codex dispatches externally to Claude CLI |
-| Claude Code | `.claude/.agents-mode` | `.claude/.consultant-mode` | Canonical Claude-line config does not include `externalClaudeProfile` because Claude dispatches externally to Codex CLI |
+| Codex | `.agents/.agents-mode` | `.agents/.consultant-mode` | `externalProvider: auto` keeps Claude CLI; explicit values may also select Gemini CLI. Codex may additionally store `externalClaudeProfile` when the selected provider is Claude |
+| Claude Code | `.claude/.agents-mode` | `.claude/.consultant-mode` | `externalProvider: auto` keeps Codex CLI; explicit values may also select Gemini CLI. Canonical Claude-line config does not include `externalClaudeProfile` |
+| Gemini CLI | `.gemini/.agents-mode` | none | Orchestrarium-only operator overlay for shared routing semantics; official Gemini runtime config still lives in `.gemini/settings.json`, and the overlay should be initialized after Gemini `/init` rather than treated as a replacement bootstrap |
 
 If both files exist on the same provider line, `agents-mode` wins. New writes should target `agents-mode`; legacy `consultant-mode` files are fallback-only migration input.
 
@@ -55,6 +56,20 @@ Notes:
 | `false` | No default reviewer preference | Eligible review or QA roles may still route to `$external-reviewer` when explicitly requested or otherwise justified, but there is no standing preference. |
 | `true` | Prefer external review adapter | Eligible review and QA roles should prefer `$external-reviewer` as the default routing choice. Mandatory internal reviewers in risk-sensitive templates remain non-replaceable. |
 
+### `externalProvider`
+
+| Value | Meaning | Expected behavior |
+|---|---|---|
+| `auto` | Use the line default external provider | Codex defaults to Claude CLI, Claude Code defaults to Codex CLI, and Gemini has no standing default external provider until a repository explicitly adopts one. |
+| `claude` | Route provider-backed external work to Claude CLI | Valid wherever Claude CLI is installed and the current line is not already Claude-native. Codex-only `externalClaudeProfile` applies when this value is selected. |
+| `codex` | Route provider-backed external work to Codex CLI | Valid wherever Codex CLI is installed and the current line is not already Codex-native. |
+| `gemini` | Route provider-backed external work to Gemini CLI | Valid wherever Gemini CLI is installed and the repository wants Gemini to serve as the external provider for consultant or external-adapter work. |
+
+Notes:
+- `externalProvider` selects the external CLI for provider-backed consultant, `$external-worker`, and `$external-reviewer` execution.
+- If the selected provider is unavailable, the role does not pretend the same provider-backed run succeeded locally; the orchestrator must disclose the failure and reroute explicitly.
+- When the selected provider would collapse into the same provider line, treat that selection as a configuration error and disclose it instead of recursing.
+
 ## Codex-only key
 
 ### `externalClaudeProfile`
@@ -70,10 +85,11 @@ Notes:
 
 ## First-write defaults
 
-| Provider | `consultantMode` | `delegationMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalClaudeProfile` |
-|---|---|---|---|---|---|---|
-| Codex | requested value | `manual` | `auto` | `false` | `false` | `sonnet-high` unless explicitly overridden |
-| Claude Code | requested value | `manual` | `auto` | `false` | `false` | not part of canonical Claude-line config |
+| Provider | `consultantMode` | `delegationMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `externalClaudeProfile` |
+|---|---|---|---|---|---|---|---|
+| Codex | requested value | `manual` | `auto` | `false` | `false` | `auto` | `sonnet-high` unless explicitly overridden |
+| Claude Code | requested value | `manual` | `auto` | `false` | `false` | `auto` | not part of canonical Claude-line config |
+| Gemini CLI | requested value | `manual` | `auto` | `false` | `false` | `auto` | not part of canonical Gemini-line config |
 
 ## Interpretation notes
 
@@ -81,4 +97,5 @@ Notes:
 |---|---|
 | Explicit user override | An explicit user role or routing request can override the standing toggle state in either direction unless a higher-priority platform or policy rule forbids it. |
 | External adapter availability | `$external-worker` and `$external-reviewer` do not silently fall back inside the role. If the external CLI is unavailable, the adapter is disabled and the orchestrator reroutes explicitly. |
+| Line-default provider mapping | `externalProvider: auto` preserves current defaults instead of forcing a new provider choice. Codex keeps Claude CLI, Claude keeps Codex CLI, and Gemini stays explicit-only until a repository adopts a preferred external target. |
 | Unknown keys | Tools that update `agents-mode` should preserve unknown keys and keep the file in expanded multi-key form rather than collapsing it back to a consultant-only shape. |

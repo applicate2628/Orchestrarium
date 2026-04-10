@@ -12,7 +12,7 @@ Use this contract when `subagent_type` is `external-worker` or `external-reviewe
 
 - These roles are routing adapters, not new business professions.
 - The `Assigned role` field names the internal role being replaced for provenance.
-- Read `.claude/.agents-mode` first and fallback to legacy `.claude/.consultant-mode`. Honor `preferExternalWorker` / `preferExternalReviewer` when they are present. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode` file.
+- Read `.claude/.agents-mode` first and fallback to legacy `.claude/.consultant-mode`. Honor `preferExternalWorker`, `preferExternalReviewer`, and `externalProvider` when they are present. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode` file.
 - Do not silently fall back to an internal specialist if the external CLI is unavailable; the adapter is disabled and the orchestrator may reroute.
 - `external-worker` covers implement-side work only.
 - `external-reviewer` covers review and QA-side work.

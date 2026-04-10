@@ -51,6 +51,7 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode`; legacy
 - `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible implement-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
+- `externalProvider: auto` keeps the Claude-line default external provider (Codex CLI); explicit values may select Gemini CLI where the repository allows it.
 - `externalClaudeProfile` is no longer part of the Claude-line canonical schema.
 - The team template JSON does not change; routing substitutions happen at execution time.
 - `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.

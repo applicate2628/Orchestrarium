@@ -52,6 +52,8 @@ A bugfix with a known file or function maps to the `quick-fix` template by defau
 
 Role definitions live in the installed skills tree: `.agents/skills/<role>/SKILL.md` for repo-local installs, or `$CODEX_HOME/skills/<role>/SKILL.md` / `~/.codex/skills/<role>/SKILL.md` for global installs.
 
+Utility skills live in the same installed skills tree and may be invoked directly when their workflow fits. In particular, use `$init-project` to initialize project policies in the root `AGENTS.md` and bootstrap `.agents/.agents-mode` for a new Codex project.
+
 Use these global anchor roles:
 
 - `$lead`: default delivery coordination, routing, artifact acceptance, and gate decisions for approved work
@@ -60,14 +62,18 @@ Use these global anchor roles:
 
 External dispatch roles also exist in the installed skills tree as bidirectional adapters:
 
-- `$external-worker`: external implementation adapter for eligible implementer roles; dispatches to Claude CLI in the Codex pack and may be selected by `.agents/.agents-mode` preferences or explicit override
-- `$external-reviewer`: external review/QA adapter for eligible reviewer roles; dispatches to Claude CLI in the Codex pack and may be selected by `.agents/.agents-mode` preferences or explicit override
+- `$external-worker`: external implementation adapter for eligible implementer roles; dispatches to the provider selected by `.agents/.agents-mode` (Claude by default, Gemini when explicitly chosen) and may be selected by preference or explicit override
+- `$external-reviewer`: external review/QA adapter for eligible reviewer roles; dispatches to the provider selected by `.agents/.agents-mode` (Claude by default, Gemini when explicitly chosen) and may be selected by preference or explicit override
 
 These roles are not aliases for `$consultant`.
 
 For all other work, use the narrowest matching installed specialist. The role index in shared governance names the canonical core team only; installed specialists outside that core team and repo-local specialists may be used by `$lead` when they are a better fit.
 
 Repository-specific `AGENTS.md` files should add local priorities, canonical paths, build/test rules, and source-of-truth references without redefining the whole global role catalog.
+
+## Project bootstrap
+
+If the project root `AGENTS.md` lacks `## Project policies` or `.agents/.agents-mode` is missing, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred.
 
 ## Publication safety scan
 

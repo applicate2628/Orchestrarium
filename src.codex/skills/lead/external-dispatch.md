@@ -22,6 +22,7 @@ delegationMode: manual  # allowed: manual | auto | force
 mcpMode: auto  # allowed: auto | force
 preferExternalWorker: true  # allowed: false | true
 preferExternalReviewer: true  # allowed: false | true
+externalProvider: auto  # allowed here: auto | claude | gemini
 externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max
 ```
 
@@ -30,19 +31,21 @@ externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max
 - `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` routes eligible implementer roles through `$external-worker` by default.
 - `preferExternalReviewer` routes eligible reviewer/QA roles through `$external-reviewer` by default.
-- `externalClaudeProfile` is Codex-line only and selects the Claude CLI execution profile when Codex dispatches outward to Claude. Supported values: `sonnet-high` (`--model sonnet --effort high`) and `opus-max` (`--model opus --effort max`).
+- `externalProvider: auto` preserves the Codex-line default external provider (Claude CLI). Explicit values may select `gemini`, or keep `claude`, for provider-backed consultant or adapter work.
+- `externalClaudeProfile` is Codex-line only and selects the Claude CLI execution profile when `externalProvider` resolves to Claude. Supported values: `sonnet-high` (`--model sonnet --effort high`) and `opus-max` (`--model opus --effort max`).
 - The preference flags are independent.
 - Any write to this file must preserve unknown keys and the other known keys.
 - When writing `.agents/.agents-mode`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
 - If both files exist, `.agents/.agents-mode` wins.
 - If only the legacy file exists, treat legacy `mode` as `consultantMode`, default missing `delegationMode` to `manual`, default missing `mcpMode` to `auto`, and preserve any existing `preferExternalWorker`, `preferExternalReviewer`, and `externalClaudeProfile` values during migration.
 - New writes go to `.agents/.agents-mode`; do not create new `.consultant-mode` files.
-- If the file is created from scratch, write the full default shape: the requested `consultantMode`, `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, and `externalClaudeProfile: sonnet-high` unless the user explicitly requested a different Claude profile.
+- If the file is created from scratch, write the full default shape: the requested `consultantMode`, `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, and `externalClaudeProfile: sonnet-high` unless the user explicitly requested a different Claude profile.
 
 ## Routing model
 
 - `$external-worker` and `$external-reviewer` are bidirectional external adapters, not new narrow professions.
-- On the Codex pack, external dispatch goes to Claude CLI and should honor `externalClaudeProfile` when that key is present.
+- On the Codex pack, `externalProvider: auto` means Claude CLI and should honor `externalClaudeProfile` when that key is present.
+- Codex may also select Gemini CLI explicitly via `externalProvider: gemini`.
 - The Claude pack mirrors this contract with Codex CLI.
 - The external adapter may be selected by the preference flags or by explicit user / lead override.
 - User override is available in both directions regardless of toggle state.
@@ -61,10 +64,11 @@ externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max
 
 ## Provider matrix
 
-| Pack | External provider |
-| --- | --- |
-| Codex | Claude CLI |
-| Claude Code | Codex CLI |
+| Pack | `externalProvider: auto` | Explicit alternates |
+| --- | --- | --- |
+| Codex | Claude CLI | Gemini CLI |
+| Claude Code | Codex CLI | Gemini CLI |
+| Gemini CLI | none | Codex CLI or Claude CLI when a repository explicitly enables Gemini-side external dispatch |
 
 ## Provenance header
 
