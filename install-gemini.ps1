@@ -166,6 +166,27 @@ function Merge-GeminiFile {
     }
 }
 
+function Install-PackFile {
+    param([string]$SourceFile, [string]$TargetFile, [string]$Label)
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        Write-Host "  Replacing $Label..."
+        if (-not $DryRun) {
+            Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
+        } else {
+            Write-Host "    [dry-run] would replace $TargetFile"
+        }
+        return
+    }
+
+    Write-Host "  Installing $Label..."
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
 if ($Global) {
     if (-not $env:USERPROFILE) { throw "USERPROFILE is not set." }
     $Mode = "global"
@@ -183,11 +204,13 @@ if ($Mode -eq "global") {
     $SkillsTarget = Join-Path $InstallRoot "skills"
     $CommandsTarget = Join-Path $InstallRoot "commands"
     $GeminiTarget = Join-Path $InstallRoot "GEMINI.md"
+    $SharedTarget = Join-Path $InstallRoot "AGENTS.shared.md"
 } else {
     $InstallRoot = Join-Path $ProjectRoot ".gemini"
     $SkillsTarget = Join-Path $InstallRoot "skills"
     $CommandsTarget = Join-Path $InstallRoot "commands"
     $GeminiTarget = Join-Path $ProjectRoot "GEMINI.md"
+    $SharedTarget = Join-Path $ProjectRoot "AGENTS.shared.md"
 }
 
 Write-Host "=== Orchestrarium Gemini Installer ===" -ForegroundColor Cyan
@@ -195,14 +218,16 @@ Write-Host "Source: $Source"
 Write-Host "Mode:   $Mode"
 Write-Host "Runtime root: $InstallRoot"
 Write-Host "GEMINI.md:    $GeminiTarget"
+Write-Host "Shared file:  $SharedTarget"
 if ($DryRun) { Write-Host "Mode:   dry-run" -ForegroundColor Yellow }
 Write-Host ""
 
 if (-not (Test-Path -LiteralPath (Join-Path $Source "skills"))) { throw "Missing source skills/ directory." }
 if (-not (Test-Path -LiteralPath (Join-Path $Source "commands"))) { throw "Missing source commands/ directory." }
 if (-not (Test-Path -LiteralPath (Join-Path $Source "GEMINI.md"))) { throw "Missing source GEMINI.md." }
+if (-not (Test-Path -LiteralPath (Join-Path $Source "AGENTS.shared.md"))) { throw "Missing source AGENTS.shared.md." }
 
-if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $CommandsTarget) -or (Test-Path -LiteralPath $GeminiTarget)) {
+if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $CommandsTarget) -or (Test-Path -LiteralPath $GeminiTarget) -or (Test-Path -LiteralPath $SharedTarget)) {
     if (-not (Confirm-Action "Proceed with reinstall/update of the Gemini pack?")) {
         Write-Host "Install cancelled by user." -ForegroundColor Yellow
         exit 1
@@ -213,6 +238,7 @@ Ensure-Dir $InstallRoot
 Install-Tree -SourceDir (Join-Path $Source "skills") -TargetDir $SkillsTarget -Label "skills"
 Install-Tree -SourceDir (Join-Path $Source "commands") -TargetDir $CommandsTarget -Label "commands"
 Merge-GeminiFile -SourceFile (Join-Path $Source "GEMINI.md") -TargetFile $GeminiTarget
+Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.shared.md"
 
 if ($DryRun) {
     Write-Host ""
@@ -225,6 +251,7 @@ Write-Host "=== Verification ===" -ForegroundColor Cyan
 $errors = 0
 foreach ($path in @(
     $GeminiTarget,
+    $SharedTarget,
     (Join-Path $SkillsTarget "README.md"),
     (Join-Path $SkillsTarget "lead\SKILL.md"),
     (Join-Path $SkillsTarget "init-project\SKILL.md"),

@@ -189,6 +189,26 @@ PY
   fi
 }
 
+install_pack_file() {
+  local src="$1" dst="$2" label="$3"
+  if [[ -e "$dst" ]]; then
+    echo "  Replacing $label..."
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "    [dry-run] would replace $dst"
+    else
+      cp -f "$src" "$dst"
+    fi
+    return
+  fi
+
+  echo "  Installing $label..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp -f "$src" "$dst"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --global)
@@ -223,7 +243,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -d "$SOURCE/skills" || ! -d "$SOURCE/commands" || ! -f "$SOURCE/GEMINI.md" ]]; then
+if [[ ! -d "$SOURCE/skills" || ! -d "$SOURCE/commands" || ! -f "$SOURCE/GEMINI.md" || ! -f "$SOURCE/AGENTS.shared.md" ]]; then
   echo "FAIL: src.gemini is incomplete at $SOURCE" >&2
   exit 1
 fi
@@ -231,6 +251,7 @@ fi
 if [[ "$MODE" == "global" ]]; then
   INSTALL_ROOT="$(canonical_path "$HOME/.gemini")"
   GEMINI_TARGET="$INSTALL_ROOT/GEMINI.md"
+  SHARED_TARGET="$INSTALL_ROOT/AGENTS.shared.md"
   SKILLS_TARGET="$INSTALL_ROOT/skills"
   COMMANDS_TARGET="$INSTALL_ROOT/commands"
 else
@@ -244,6 +265,7 @@ else
   fi
   INSTALL_ROOT="$PROJECT_ROOT/.gemini"
   GEMINI_TARGET="$PROJECT_ROOT/GEMINI.md"
+  SHARED_TARGET="$PROJECT_ROOT/AGENTS.shared.md"
   SKILLS_TARGET="$INSTALL_ROOT/skills"
   COMMANDS_TARGET="$INSTALL_ROOT/commands"
 fi
@@ -253,10 +275,11 @@ echo "Source: $SOURCE"
 echo "Mode:   $MODE"
 echo "Runtime root: $INSTALL_ROOT"
 echo "GEMINI.md:    $GEMINI_TARGET"
+echo "Shared file:  $SHARED_TARGET"
 [[ "$DRY_RUN" -eq 1 ]] && echo "Mode:   dry-run"
 echo
 
-if [[ -e "$GEMINI_TARGET" || -d "$SKILLS_TARGET" || -d "$COMMANDS_TARGET" ]]; then
+if [[ -e "$GEMINI_TARGET" || -e "$SHARED_TARGET" || -d "$SKILLS_TARGET" || -d "$COMMANDS_TARGET" ]]; then
   if ! confirm_action "Proceed with reinstall/update of the Gemini pack?"; then
     echo "Install cancelled by user." >&2
     exit 1
@@ -267,6 +290,7 @@ ensure_dir "$INSTALL_ROOT"
 install_tree "$SOURCE/skills" "$SKILLS_TARGET" "skills"
 install_tree "$SOURCE/commands" "$COMMANDS_TARGET" "commands"
 merge_gemini_file "$SOURCE/GEMINI.md" "$GEMINI_TARGET"
+install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.shared.md"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo
@@ -279,6 +303,7 @@ echo "=== Verification ==="
 errors=0
 for path in \
   "$GEMINI_TARGET" \
+  "$SHARED_TARGET" \
   "$SKILLS_TARGET/README.md" \
   "$SKILLS_TARGET/lead/SKILL.md" \
   "$SKILLS_TARGET/init-project/SKILL.md" \

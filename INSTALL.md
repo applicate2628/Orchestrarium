@@ -7,10 +7,12 @@ This standalone Gemini branch now ships a finished Gemini-native installer surfa
 | Surface | Status |
 |---|---|
 | `src.gemini/GEMINI.md` | present |
+| `src.gemini/AGENTS.shared.md` | present |
 | `src.gemini/skills/` | present |
 | `src.gemini/commands/` | present |
 | `src.gemini/extension/` | present |
 | `src.gemini/scripts/validate-pack.sh` | present |
+| `src.gemini/scripts/validate-pack.ps1` | present |
 | `references-gemini/` | present (repo-local maintainer references) |
 | root `install-gemini.*` | present |
 
@@ -18,8 +20,8 @@ This standalone Gemini branch now ships a finished Gemini-native installer surfa
 
 | Mode | Installed surface |
 |---|---|
-| project-local | `<project>/GEMINI.md`, `<project>/.gemini/skills/`, `<project>/.gemini/commands/` |
-| global | `~/.gemini/GEMINI.md`, `~/.gemini/skills/`, `~/.gemini/commands/` |
+| project-local | `<project>/GEMINI.md`, `<project>/AGENTS.shared.md`, `<project>/.gemini/skills/`, `<project>/.gemini/commands/` |
+| global | `~/.gemini/GEMINI.md`, `~/.gemini/AGENTS.shared.md`, `~/.gemini/skills/`, `~/.gemini/commands/` |
 
 `references-gemini/` is required in the source branch, but it is not copied into target projects or global Gemini homes. It remains a repo-local maintainer reference surface.
 
@@ -48,13 +50,19 @@ Important:
 
 - `GEMINI.md` remains owned by Gemini `/init`.
 - The installer manages only the `<!-- ORCHESTRARIUM_GEMINI_PACK:... -->` block inside `GEMINI.md`; all content outside that block is preserved on reinstall.
+- `AGENTS.shared.md` is the pack-managed shared-governance module imported by `GEMINI.md`.
 - `.gemini/settings.json` remains Gemini-native runtime config.
+- MCP servers such as Serena, Fetch, or Context7 still belong in `.gemini/settings.json` or `extension/gemini-extension.json`, not inside `AGENTS.shared.md`.
 - `.gemini/.agents-mode` is an optional Orchestrarium overlay, not a Gemini-native replacement.
 
 ## Validation
 
 ```bash
 bash src.gemini/scripts/validate-pack.sh .
+```
+
+```powershell
+.\src.gemini\scripts\validate-pack.ps1
 ```
 
 ## Operator overlay reference
