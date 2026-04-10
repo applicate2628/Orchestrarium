@@ -12,11 +12,13 @@ Legacy fallback:
 
 - `.agents/.consultant-mode`
 
+Full value-by-value operator semantics live in [../../../docs/agents-mode-reference.md](../../../docs/agents-mode-reference.md).
+
 Canonical schema:
 
 ```yaml
 consultantMode: external  # allowed: external | auto | internal | disabled
-delegationMode: manual  # allowed: manual | auto
+delegationMode: manual  # allowed: manual | auto | force
 mcpMode: auto  # allowed: auto | force
 preferExternalWorker: true  # allowed: false | true
 preferExternalReviewer: true  # allowed: false | true
@@ -24,7 +26,7 @@ externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max
 ```
 
 - `consultantMode` controls `$consultant` behavior.
-- `delegationMode: auto` means ordinary team delegation stays enabled without per-turn approval; `manual` keeps the current explicit user-request behavior.
+- `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` routes eligible implementer roles through `$external-worker` by default.
 - `preferExternalReviewer` routes eligible reviewer/QA roles through `$external-reviewer` by default.

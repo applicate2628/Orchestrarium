@@ -40,12 +40,14 @@ Do not invoke for:
 The local config file is now `.claude/.agents-mode`; legacy `.claude/.consultant-mode` is fallback-only for migration. The canonical file may contain:
 
 - `consultantMode: external | auto | internal | disabled`
-- `delegationMode: manual | auto`
+- `delegationMode: manual | auto | force`
 - `mcpMode: auto | force`
 - `preferExternalWorker: true | false`
 - `preferExternalReviewer: true | false`
 
-`consultantMode` continues to govern consultant behavior. `delegationMode: auto` means ordinary team delegation stays enabled without per-turn approval, while `manual` keeps explicit user-request behavior. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract and must be preserved by any command that updates this file. Legacy `externalClaudeProfile` values should not be written on the Claude line.
+`consultantMode` continues to govern consultant behavior. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract and must be preserved by any command that updates this file. Legacy `externalClaudeProfile` values should not be written on the Claude line.
+
+For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md).
 
 ## Return exactly one artifact
 

@@ -66,18 +66,20 @@ Important: operator preferences now live in pack-local `agents-mode` files; lega
 - Codex reads `.agents/.agents-mode`.
 - Claude Code reads `.claude/.agents-mode`.
 - `consultantMode` controls `$consultant`.
-- `delegationMode: auto` means ordinary team delegation stays enabled without re-asking each turn; `manual` keeps the current explicit-permission behavior.
+- `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` lets the agent decide when MCP is appropriate; `force` means the config itself is an explicit instruction to use relevant available MCP tools instead of treating MCP usage as optional.
 - `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
 - Codex may additionally use `externalClaudeProfile` to select the Claude CLI execution profile: `sonnet-high` or `opus-max`.
 - Claude Code does not use `externalClaudeProfile` in its canonical config because Claude-line external dispatch goes to Codex CLI.
 - Explicit user role requests still override the toggle state in either direction.
+- Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 
 ## References and maintenance
 
 - `shared/references/` contains the shared cross-provider design core that current and future provider packs can reuse.
+- [`docs/provider-runtime-layouts.md`](docs/provider-runtime-layouts.md) records the exact installed runtime layout for Codex, Claude Code, and Gemini, with `global` and `local` scopes split explicitly so install/runtime paths are not confused with repo source trees.
 - `references-codex/` contains Codex-specific addenda plus compatibility pointers for older reference paths.
 - `references-claude/` contains Claude-specific addenda plus compatibility pointers for older reference paths.
 - `subagent-operating-model` is no longer duplicated per provider pack: use the shared core for the canonical blueprint and the provider-local file only for runtime and repository concretization.
