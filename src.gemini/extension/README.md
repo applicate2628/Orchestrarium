@@ -1,4 +1,4 @@
-# Gemini Extension Scaffold
+# Gemini Extension Surface
 
 This directory is reserved for Gemini-native extension packaging.
 

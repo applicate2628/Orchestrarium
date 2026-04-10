@@ -1,7 +1,7 @@
 {
   "name": "orchestrarium-gemini",
   "version": "0.1.0",
-  "description": "Orchestrarium Gemini pack with shared governance, Gemini-native skills, and command surfaces.",
+  "description": "Orchestrarium Gemini source tree with shared governance, Gemini-native skills, and command surfaces.",
   "contextFileName": "GEMINI.md",
   "mcpServers": {}
 }

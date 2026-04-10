@@ -38,9 +38,9 @@ It must not replace Gemini's official runtime config in:
    - If it is missing, start from the canonical defaults below.
    - Preserve unknown keys when updating an existing file.
 
-3. **Read the canonical operator reference.**
-   - Read `../../../docs/agents-mode-reference.md`.
-   - Use it as the canonical source for key meanings, allowed values, and write rules.
+3. **Read the canonical operator reference when it is available.**
+   - If the current repository includes `docs/agents-mode-reference.md`, read it and use it as the authoritative value-by-value reference.
+   - If that document is not present in the installed runtime, rely on this skill's canonical schema and rules below instead of inventing extra Gemini-only keys.
 
 4. **Configure the shared routing overlay.**
    - Walk through these keys one at a time:
@@ -51,14 +51,14 @@ It must not replace Gemini's official runtime config in:
      - `preferExternalReviewer`
      - `externalProvider`
      - `externalClaudeSecretMode`
-    - Use existing values when present; otherwise default to:
-      - `consultantMode: disabled`
-      - `delegationMode: manual`
-      - `mcpMode: auto`
-      - `preferExternalWorker: false`
-      - `preferExternalReviewer: false`
-      - `externalProvider: auto`
-      - `externalClaudeSecretMode: auto`
+   - Use existing values when present; otherwise default to:
+     - `consultantMode: disabled`
+     - `delegationMode: manual`
+     - `mcpMode: auto`
+     - `preferExternalWorker: false`
+     - `preferExternalReviewer: false`
+     - `externalProvider: auto`
+     - `externalClaudeSecretMode: auto`
    - Accept shorthand such as `force`, `external reviewer only`, or `defaults for the rest`.
 
 5. **Confirm before writing.**
