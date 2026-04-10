@@ -1,3 +1,8 @@
+---
+name: agents-research
+description: Investigate a question using the `research` template chain.
+disable-model-invocation: true
+---
 # Research
 
 Investigate a question using the `research` template chain.

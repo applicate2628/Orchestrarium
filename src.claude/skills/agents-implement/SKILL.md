@@ -1,3 +1,8 @@
+---
+name: agents-implement
+description: Execute an approved plan from `work-items/active/` phase by phase.
+disable-model-invocation: true
+---
 # Implement
 
 Execute an approved plan from `work-items/active/` phase by phase.

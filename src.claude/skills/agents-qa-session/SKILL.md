@@ -1,3 +1,8 @@
+---
+name: agents-qa-session
+description: Interactive testing session — you direct, one QA agent investigates and documents.
+disable-model-invocation: true
+---
 # QA Session
 
 Interactive testing session — you direct, one QA agent investigates and documents.

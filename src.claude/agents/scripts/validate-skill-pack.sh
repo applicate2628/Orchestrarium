@@ -31,9 +31,15 @@ for f in $PACK/CLAUDE.md $PACK/AGENTS.shared.md $PACK/agents/lead.md $PACK/agent
          $PACK/agents/contracts/operating-model.md \
          $PACK/agents/contracts/subagent-contracts.md \
          $PACK/agents/contracts/policies-catalog.md \
-         $PACK/commands/agents-second-opinion.md; do
+         $PACK/skills/agents-second-opinion/SKILL.md; do
   if [[ -f "$f" ]]; then pass "$f exists"; else fail "$f missing"; fi
 done
+
+if [[ -d "$PACK/commands" ]]; then
+  fail "$PACK/commands should be absent after skills migration"
+else
+  pass "$PACK/commands absent after skills migration"
+fi
 echo ""
 
 # 2. Role index vs actual agent files
@@ -78,14 +84,18 @@ echo ""
 
 # 4. Skills reference valid files
 echo "[Skills]"
-for f in $PACK/commands/*.md; do
-  name=$(basename "$f" .md)
-  pass "/$name skill exists"
-done
+if compgen -G "$PACK/skills/*/SKILL.md" > /dev/null; then
+  for f in $PACK/skills/*/SKILL.md; do
+    name=$(basename "$(dirname "$f")")
+    pass "/$name skill exists"
+  done
+else
+  fail "no skills found under $PACK/skills/*/SKILL.md"
+fi
 if [[ -f "$PACK/agents/contracts/policies-catalog.md" ]]; then
   pass "policy catalog exists"
 else
-  fail "policy catalog missing (commands reference it)"
+  fail "policy catalog missing (skills reference it)"
 fi
 echo ""
 

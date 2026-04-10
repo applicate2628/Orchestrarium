@@ -10,8 +10,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE="$SCRIPT_DIR/src.claude"
 
 # Directories to install (order doesn't matter)
-DIRS=(agents commands)
+DIRS=(agents skills)
 OPTIONAL_DIRS=(memory)
+LEGACY_COMMANDS=(
+  agents-bugfix
+  agents-check-policies
+  agents-check-safety
+  agents-design
+  agents-help
+  agents-implement
+  agents-init-project
+  agents-perf
+  agents-policies
+  agents-qa-session
+  agents-refactor
+  agents-research
+  agents-resume
+  agents-review
+  agents-second-opinion
+  agents-security
+  agents-status
+  agents-test
+  agents-validate
+)
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
@@ -428,6 +449,37 @@ install_item() {
   fi
 }
 
+cleanup_legacy_pack_commands() {
+  local commands_dir="$TARGET/commands"
+
+  if [[ ! -d "$commands_dir" ]]; then
+    return
+  fi
+
+  echo "  Cleaning up migrated pack-managed legacy commands..."
+  local name legacy_file
+  for name in "${LEGACY_COMMANDS[@]}"; do
+    legacy_file="$commands_dir/$name.md"
+    if [[ -f "$legacy_file" ]]; then
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "    [dry-run] would remove legacy pack command commands/$name.md"
+      else
+        rm -f "$legacy_file"
+        echo "    removed commands/$name.md"
+      fi
+    fi
+  done
+
+  if [[ -d "$commands_dir" && -z "$(find "$commands_dir" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would remove empty commands/ directory"
+    else
+      rmdir "$commands_dir"
+      echo "    removed empty commands/ directory"
+    fi
+  fi
+}
+
 # Count existing items and confirm reinstall
 if [ "$FORCE" -ne 1 ] && [ "$DRY_RUN" -ne 1 ] && [ -t 0 ]; then
   existing_total=0
@@ -481,7 +533,7 @@ for dir in "${DIRS[@]}"; do
     fi
   done
 
-  # Copy individual files (e.g., agents/*.md, commands/*.md)
+  # Copy individual files (e.g., agents/*.md)
   pack_items=()
   for item in "$src"/*; do
     [[ -f "$item" ]] || continue
@@ -504,6 +556,8 @@ for dir in "${DIRS[@]}"; do
     fi
   done
 done
+
+cleanup_legacy_pack_commands
 
 # Optional dirs: copy if not present, don't overwrite
 for dir in "${OPTIONAL_DIRS[@]}"; do

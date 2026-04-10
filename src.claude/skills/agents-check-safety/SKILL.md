@@ -1,3 +1,8 @@
+---
+name: agents-check-safety
+description: Scan staged files for secrets, credentials, and sensitive data before commit or push.
+disable-model-invocation: true
+---
 # Publication Safety Check
 
 Scan staged files for secrets, credentials, and sensitive data before commit or push.

@@ -1,3 +1,8 @@
+---
+name: agents-second-opinion
+description: Get an independent second opinion via the consultant agent.
+disable-model-invocation: true
+---
 # Second Opinion
 
 Get an independent second opinion via the consultant agent.

@@ -1,3 +1,8 @@
+---
+name: agents-init-project
+description: You are guiding the user through project policy configuration for the Claudestrator skill-pack.
+disable-model-invocation: true
+---
 # Initialize Project Policies
 
 You are guiding the user through project policy configuration for the Claudestrator skill-pack.

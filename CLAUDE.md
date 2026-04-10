@@ -10,10 +10,10 @@ Local rules for developing the Claudestrator skill-pack itself. These do NOT get
 
 ## Skill development checklist
 
-When adding, renaming, or removing a skill (`src.claude/commands/agents-*.md`):
+When adding, renaming, or removing a skill (`src.claude/skills/agents-*/SKILL.md`):
 
-1. Create/edit the skill file in `src.claude/commands/`
-2. Update `src.claude/commands/agents-help.md` — add to the skills table
+1. Create/edit the skill file in `src.claude/skills/<skill-name>/SKILL.md`
+2. Update `src.claude/skills/agents-help/SKILL.md` — add to the skills table
 3. Update `README.md` — add to the skills table
 4. Update `INSTALL.md` — update skill count
 5. Update `README.md` — update skill count
@@ -62,7 +62,7 @@ src.claude/              ← skill-pack source (install copies to target .claude
     contracts/           ← operating model + subagent contracts + policy catalog
     team-templates/      ← 8 routing templates (JSON)
     scripts/             ← validation + safety scripts
-  commands/              ← 19 skills (slash commands)
+  skills/                ← 19 slash skills (preferred Claude runtime surface)
 .claude/                 ← local working install (in .gitignore, NOT committed)
 CLAUDE.md                ← THIS FILE (repo-local dev rules, NOT installed)
 README.md                ← public docs

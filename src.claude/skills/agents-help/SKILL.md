@@ -1,3 +1,8 @@
+---
+name: agents-help
+description: Display a comprehensive overview of the skill-pack for the user.
+disable-model-invocation: true
+---
 # Claudestrator Help
 
 Display a comprehensive overview of the skill-pack for the user.
@@ -59,7 +64,7 @@ Show 3-4 natural language examples of how to invoke agents:
 
 ### Project policies
 
-If `## Project policies` section exists in CLAUDE.md, show current policies. If not, say: "No project policies configured. Run `/init-project` to set up."
+If `## Project policies` section exists in CLAUDE.md, show current policies. If not, say: "No project policies configured. Run `/agents-init-project` to set up."
 
 ## Rules
 

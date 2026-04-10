@@ -135,7 +135,7 @@ The current pack covers several sub-teams:
 | `src.claude/agents/lead.md` | Lead orchestrator — bootstrap, pipeline, delegation, gate semantics |
 | `src.claude/agents/scripts/` | Utility scripts: publication-safety scan, skill-pack validation |
 | `src.claude/agents/team-templates/` | 8 JSON presets for common team compositions (full-delivery, quick-fix, research, review, etc.) |
-| `src.claude/commands/` | 19 skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
+| `src.claude/skills/` | 19 preferred slash skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
 | `src.claude/agents/contracts/policies-catalog.md` | Policy catalog — available project-level choices with options and defaults |
 | `src.claude/memory/` | Feedback rules from real usage — experience-based operating constraints |
 
@@ -176,7 +176,7 @@ Use the install scripts, or copy `src.claude/` contents into the target repo's `
 | `src.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff contracts, operating model, subagent coordination |
 | `src.claude/agents/scripts/` | `.claude/agents/scripts/` | Utility scripts (publication-safety scan, validation) |
 | `src.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Team composition presets |
-| `src.claude/commands/` | `.claude/commands/` | 19 skills |
+| `src.claude/skills/` | `.claude/skills/` | 19 preferred slash skills |
 | `src.claude/agents/contracts/policies-catalog.md` | `.claude/agents/contracts/policies-catalog.md` | Policy catalog with configurable options |
 | `src.claude/CLAUDE.md` | Merge into target `.claude/CLAUDE.md` | Governance entry point |
 | `src.claude/memory/` (optional) | `.claude/memory/` | Experience-based feedback rules |
@@ -191,7 +191,7 @@ Use the install scripts, or copy `src.claude/` contents into the target repo's `
 
 ### Steps
 
-1. Copy `src.claude/agents/`, `src.claude/commands/` into your target repo's `.claude/`
+1. Copy `src.claude/agents/`, `src.claude/skills/` into your target repo's `.claude/`
 2. Merge `src.claude/CLAUDE.md` content at the TOP of your target repo's `.claude/CLAUDE.md`, or replace it entirely
 3. Optionally copy `src.claude/memory/` for experience-based feedback rules
 4. Restart Claude so the new agents and skills are discovered

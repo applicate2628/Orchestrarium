@@ -1,3 +1,8 @@
+---
+name: agents-refactor
+description: Run a safe refactoring chain with blast-radius analysis and verification.
+disable-model-invocation: true
+---
 # Refactor
 
 Run a safe refactoring chain with blast-radius analysis and verification.

@@ -1,3 +1,8 @@
+---
+name: agents-test
+description: Write or verify tests for specified code using the QA agent.
+disable-model-invocation: true
+---
 # Test
 
 Write or verify tests for specified code using the QA agent.

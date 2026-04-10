@@ -1,3 +1,8 @@
+---
+name: agents-check-policies
+description: You are auditing the current codebase for compliance with configured project policies.
+disable-model-invocation: true
+---
 # Audit Policy Compliance
 
 You are auditing the current codebase for compliance with configured project policies.

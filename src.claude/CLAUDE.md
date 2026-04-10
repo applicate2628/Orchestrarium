@@ -47,6 +47,8 @@ When subagent delegation is appropriate, classify the task and pick the matching
 
 Role definitions live in `.claude/agents/<role>.md`.
 
+Slash skills live in `.claude/skills/<skill-name>/SKILL.md`.
+
 ## Publication safety scan
 
 Pre-publication scan: run `/agents-check-safety`, or manually: `bash .claude/agents/scripts/check-publication-safety.sh` (Windows PowerShell: `powershell -ExecutionPolicy Bypass -File .claude/agents/scripts/check-publication-safety.ps1`).
