@@ -1,3 +1,8 @@
+---
+name: agents-design
+description: Run the full research-to-plan chain using the `research` template.
+disable-model-invocation: true
+---
 # Design
 
 Run the full research-to-plan chain using the `research` template.

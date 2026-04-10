@@ -1,3 +1,8 @@
+---
+name: agents-review
+description: Run a review chain on current changes using the `review` template.
+disable-model-invocation: true
+---
 # Code Review
 
 Run a review chain on current changes using the `review` template.

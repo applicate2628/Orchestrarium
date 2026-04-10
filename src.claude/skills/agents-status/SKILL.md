@@ -1,3 +1,8 @@
+---
+name: agents-status
+description: Show a compact status dashboard for the current project.
+disable-model-invocation: true
+---
 # Project Status
 
 Show a compact status dashboard for the current project.
@@ -27,7 +32,7 @@ Show a compact status dashboard for the current project.
 7. **Skill-pack summary.** Count and display in one line:
    - Number of role files in `.claude/agents/*.md`
    - Number of team templates in `.claude/agents/team-templates/*.json`
-   - Number of skills in `.claude/commands/*.md`
+   - Number of skills in `.claude/skills/*/SKILL.md`
 
 8. **Format.** Display as a compact dashboard:
 

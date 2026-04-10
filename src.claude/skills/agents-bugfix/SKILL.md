@@ -1,3 +1,8 @@
+---
+name: agents-bugfix
+description: Classify the bug severity and run the appropriate template chain.
+disable-model-invocation: true
+---
 # Bug Fix
 
 Classify the bug severity and run the appropriate template chain.

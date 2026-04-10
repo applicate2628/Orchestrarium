@@ -2,7 +2,7 @@
 .SYNOPSIS
     Install Claudestrator skill-pack.
 .DESCRIPTION
-    Copies agents (with contracts, templates, scripts), commands, and CLAUDE.md to the target location.
+    Copies agents, skills, and CLAUDE.md to the target location, then removes only the migrated pack-managed legacy commands.
     Re-running = reinstall. Memory is preserved across reinstalls.
 .EXAMPLE
     .\install-claude.ps1                          # Install into current repo's .claude/
@@ -21,8 +21,29 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Source = Join-Path $ScriptDir "src.claude"
 
-$Dirs = @("agents", "commands")
+$Dirs = @("agents", "skills")
 $OptionalDirs = @("memory")
+$LegacyCommands = @(
+    "agents-bugfix",
+    "agents-check-policies",
+    "agents-check-safety",
+    "agents-design",
+    "agents-help",
+    "agents-implement",
+    "agents-init-project",
+    "agents-perf",
+    "agents-policies",
+    "agents-qa-session",
+    "agents-refactor",
+    "agents-research",
+    "agents-resume",
+    "agents-review",
+    "agents-second-opinion",
+    "agents-security",
+    "agents-status",
+    "agents-test",
+    "agents-validate"
+)
 $script:PromptMode = $null
 
 function Test-Interactive {
@@ -272,6 +293,37 @@ function Copy-RequiredDirectory {
     }
 }
 
+function Remove-LegacyPackCommands {
+    param([string]$TargetRoot)
+
+    $commandsDir = Join-Path $TargetRoot "commands"
+    if (-not (Test-Path -LiteralPath $commandsDir)) {
+        return
+    }
+
+    Write-Host "  Cleaning up migrated pack-managed legacy commands..."
+    foreach ($name in $LegacyCommands) {
+        $legacyPath = Join-Path $commandsDir ($name + ".md")
+        if (Test-Path -LiteralPath $legacyPath) {
+            if ($DryRun) {
+                Write-Host "    [dry-run] would remove legacy pack command commands/$name.md"
+            } else {
+                Remove-Item -LiteralPath $legacyPath -Force
+                Write-Host "    removed commands/$name.md"
+            }
+        }
+    }
+
+    if ((Test-Path -LiteralPath $commandsDir) -and -not (Get-ChildItem -LiteralPath $commandsDir -Force -ErrorAction SilentlyContinue | Select-Object -First 1)) {
+        if ($DryRun) {
+            Write-Host "    [dry-run] would remove empty commands/ directory"
+        } else {
+            Remove-Item -LiteralPath $commandsDir -Force
+            Write-Host "    removed empty commands/ directory"
+        }
+    }
+}
+
 # Determine target
 if ($Global) {
     $repoRoot = Get-GitRepoRoot
@@ -411,6 +463,8 @@ foreach ($dir in $Dirs) {
         }
     }
 }
+
+Remove-LegacyPackCommands -TargetRoot $TargetRoot
 
 # Optional dirs: copy if not present, don't overwrite
 foreach ($dir in $OptionalDirs) {

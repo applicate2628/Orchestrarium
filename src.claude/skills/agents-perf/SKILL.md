@@ -1,3 +1,8 @@
+---
+name: agents-perf
+description: Fix a performance issue using the `performance-sensitive` template.
+disable-model-invocation: true
+---
 # Performance Fix
 
 Fix a performance issue using the `performance-sensitive` template.

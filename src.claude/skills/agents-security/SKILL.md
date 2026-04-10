@@ -1,3 +1,8 @@
+---
+name: agents-security
+description: Run a security-focused review using the `security-sensitive` template roles.
+disable-model-invocation: true
+---
 # Security Review
 
 Run a security-focused review using the `security-sensitive` template roles.

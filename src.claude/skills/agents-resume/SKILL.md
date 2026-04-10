@@ -1,3 +1,8 @@
+---
+name: agents-resume
+description: Resume an interrupted agent chain from its saved state.
+disable-model-invocation: true
+---
 # Resume
 
 Resume an interrupted agent chain from its saved state.
