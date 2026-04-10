@@ -3,13 +3,13 @@
 The installable skill pack source lives in [`src.codex/`](src.codex/).
 See [INSTALL.md](INSTALL.md) for installation instructions.
 
-When working inside this development repository, Codex loads this file as the main conversation context. Use it together with [src.codex/AGENTS.md](src.codex/AGENTS.md), which is the shared source file for the installable pack. The local `.agents/` directory is repo-install output created by the install scripts and is not committed.
+When working inside this development repository, Codex loads this file as the main conversation context. Use it together with [src.codex/AGENTS.shared.md](src.codex/AGENTS.shared.md) and [src.codex/AGENTS.codex.md](src.codex/AGENTS.codex.md), which merge into the installed `AGENTS.md` for the pack. The local `.agents/` directory is repo-install output created by the install scripts and is not committed.
 
 ## Skill-pack maintenance
 
 When maintaining this skill pack or its source repository:
 
-- keep [`src.codex/AGENTS.md`](src.codex/AGENTS.md) aligned with the installed global policy because it is the shared source file for both
+- keep [`src.codex/AGENTS.shared.md`](src.codex/AGENTS.shared.md) and [`src.codex/AGENTS.codex.md`](src.codex/AGENTS.codex.md) aligned with the installed global policy because they merge into the installed `AGENTS.md`
 - update `src.codex/skills/<role>/SKILL.md` when a role's contract, artifact, or gate changes
 - update `src.codex/skills/<role>/agents/openai.yaml` when trigger or prompt behavior changes
 - **MUST** update `references-codex/subagent-operating-model.md` and all `references-codex/` docs when any governance, protocol, gate, or routing semantic changes in the installed pack. Reference docs are the canonical methodology source of truth — they MUST stay aligned with the installed contracts. A governance change that updates `src.codex/` without updating `references-codex/` is incomplete.

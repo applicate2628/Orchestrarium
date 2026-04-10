@@ -25,7 +25,7 @@ This repository has two distinct layers:
 
 Everything a user installs into their target project. Self-contained, no external dependencies.
 
-- `src.codex/AGENTS.md`: installed delegation rules, engineering hygiene, and role index — loaded automatically by Codex as the main conversation context
+- `src.codex/AGENTS.shared.md` + `src.codex/AGENTS.codex.md`: installed delegation rules, engineering hygiene, and role index — merged into the installed `AGENTS.md` that Codex loads as main conversation context
 - `src.codex/skills/<role>/SKILL.md`: instructions for one role (31 roles + 1 utility skill)
 - `src.codex/skills/<role>/agents/openai.yaml`: display metadata and default prompt for the role
 - `src.codex/skills/lead/`: includes operating-model notes and handoff contracts alongside SKILL.md
@@ -38,7 +38,7 @@ Everything a user installs into their target project. Self-contained, no externa
 
 Used only for developing and maintaining this skill pack. Not part of the installed artifact.
 
-- `AGENTS.md`: dev-specific repo rules for skill-pack maintenance (adds dev-layer rules on top of `src.codex/AGENTS.md`)
+- `AGENTS.md`: dev-specific repo rules for skill-pack maintenance (adds the dev layer on top of the installed `AGENTS.md` assembled from `src.codex/AGENTS.shared.md` + `src.codex/AGENTS.codex.md`)
 - `docs/`: branch-local docs index, runtime-layout notes, and `.agents/.agents-mode` reference
 - `references-codex/`: canonical operating-model documents, governance references, and diagrams
 - `install-codex.sh`, `install-codex.ps1`: install scripts (bash and PowerShell)
@@ -80,7 +80,7 @@ Repository-wide operating-model source of truth lives in [references-codex/subag
 Repository task-memory policy and storage model live in [references-codex/repository-task-memory.md](references-codex/repository-task-memory.md). The live task-memory directory, if used, is repository-defined.
 Repository publication-safety policy for all tracked content lives in [references-codex/repository-publication-safety.md](references-codex/repository-publication-safety.md).
 Repository periodic-control matrix lives in [references-codex/periodic-control-matrix.md](references-codex/periodic-control-matrix.md).
-Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md) (dev overlay) and [src.codex/AGENTS.md](src.codex/AGENTS.md) (installed pack source).
+Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md) (dev overlay) and in the installed-pack source files [src.codex/AGENTS.shared.md](src.codex/AGENTS.shared.md) + [src.codex/AGENTS.codex.md](src.codex/AGENTS.codex.md), which merge into the installed `AGENTS.md`.
 The visual companion to the workflow lives in [references-codex/operating-model-diagram.md](references-codex/operating-model-diagram.md).
 Evidence-based answer pipeline for high-stakes domains lives in [references-codex/evidence-based-answer-pipeline.md](references-codex/evidence-based-answer-pipeline.md).
 The standalone branch-level docs index lives in [docs/README.md](docs/README.md), and the Codex operator-mode reference lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md).

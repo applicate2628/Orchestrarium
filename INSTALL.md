@@ -44,7 +44,7 @@ bash install-codex.sh
 | --- | --- | --- |
 | `src.codex/skills/` | `~/.codex/skills/` | `.agents/skills/` |
 | `src.codex/skills/lead/scripts/` | `~/.codex/skills/lead/scripts/` | `.agents/skills/lead/scripts/` |
-| `src.codex/AGENTS.md` | Merge into `~/.codex/AGENTS.md` | Merge into root `AGENTS.md` |
+| `src.codex/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | Merge into `~/.codex/AGENTS.md` | Merge into root `AGENTS.md` |
 
 The scripts handle clean removal of old files, copying, AGENTS.md merging, and file-level verification. Re-running = reinstall.
 
@@ -63,7 +63,7 @@ Project policies are configured as a `## Project policies` section in the target
 | `src.codex/skills/second-opinion/` | Consultant toggle and explicit invocation | Yes |
 | `src.codex/skills/lead/scripts/` | Publication safety scan, validation | Yes |
 | `src.codex/skills/lead/policies-catalog.md` | Policy options reference (installed with skills) | Yes |
-| `src.codex/AGENTS.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
+| `src.codex/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
 | `docs/` | Branch-local docs index, runtime-layout notes, `.agents/.agents-mode` reference | No — maintainer-facing source docs |
 | `references-codex/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
 
