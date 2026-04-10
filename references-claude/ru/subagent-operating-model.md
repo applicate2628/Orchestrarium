@@ -1,6 +1,6 @@
 # Модель работы субагентов — v2
 
-> **Примечание**: этот документ описывает исходную архитектуру (blueprint). Актуальная runtime-модель использует template-based routing — см. [template-routing.md](template-routing.md) и `.claude/CLAUDE.md`.
+> **Примечание**: этот документ хранит reference blueprint для Claude skill pack. Актуальная runtime-модель закреплена в `.claude/CLAUDE.md` и `.claude/agents/team-templates/`.
 
 Визуальное дополнение: [operating-model-diagram.md](operating-model-diagram.md)
 

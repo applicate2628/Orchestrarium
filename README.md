@@ -106,7 +106,8 @@ The repository is built around a few stable rules:
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
 Runtime governance lives in [src.claude/CLAUDE.md](src.claude/CLAUDE.md) — delegation rule, engineering hygiene, publication safety, role index, and project policies.
-Reference blueprints live in [references-claude/](references-claude/) — full operating model, diagrams, control matrix, and RU translations.
+Branch-local docs live in [docs/README.md](docs/README.md) — root surface index, Claude-line `.claude/.agents-mode` reference, and runtime-layout notes.
+Reference blueprints live in [references-claude/](references-claude/) — a common provider-local reference tree with a README, core operating-model docs, and RU translations.
 
 ## Team structure
 
@@ -145,20 +146,21 @@ Self-contained. No references to files outside `src.claude/`. Install scripts co
 
 | Path | Purpose |
 | --- | --- |
+| `references-claude/README.md` | Directory overview — common provider-local reference layout and navigation |
 | `references-claude/operating-model-diagram.md` | Visual companion — mermaid diagrams for routing and lifecycle |
 | `references-claude/periodic-control-matrix.md` | Control matrix — periodic audits and their owners |
 | `references-claude/repository-publication-safety.md` | Publication safety — implemented in `CLAUDE.md` |
 | `references-claude/repository-task-memory.md` | Task-memory methodology — work-items structure and ownership |
-| Template routing (EN content in `src.claude/CLAUDE.md`) | Template routing — current runtime model |
-| `references-claude/subagent-operating-model.md` | Original architecture blueprint — superseded by template routing |
+| `references-claude/subagent-operating-model.md` | Claude-side operating-model blueprint and runtime addendum reference |
 | `references-claude/evidence-based-answer-pipeline.md` | Evidence-based answer pipeline for high-stakes domains |
 | `references-claude/workflow-strategy-comparison.md` | Strategy comparison — historical reference |
-| `references-claude/ru/` | Russian translations of all reference docs |
+| `references-claude/ru/` | Russian translations of the core reference docs |
 
 ### Root — repo metadata
 
 | Path | Purpose |
 | --- | --- |
+| `docs/` | Branch-local docs index and runtime-layout notes |
 | `README.md` | This file |
 | `INSTALL.md` | Detailed installation instructions |
 | `LICENSE` | Apache 2.0 |
