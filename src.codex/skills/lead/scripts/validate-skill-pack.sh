@@ -255,8 +255,26 @@ do
 done
 
 if [[ $DEV_REPO -eq 1 ]]; then
+  DOCS_DIR="$REPO_ROOT/docs"
   SHARED_REF_DIR="$REPO_ROOT/shared/references"
   CODEX_REF_DIR="$REPO_ROOT/references-codex"
+  CLAUDE_REF_DIR="$REPO_ROOT/references-claude"
+  GEMINI_REF_DIR="$REPO_ROOT/references-gemini"
+
+  echo ""
+  echo "=== Common branch-level surface ==="
+
+  for f in \
+    "$DOCS_DIR/README.md" \
+    "$DOCS_DIR/agents-mode-reference.md" \
+    "$DOCS_DIR/external-worker-design.md" \
+    "$DOCS_DIR/provider-runtime-layouts.md" \
+    "$CODEX_REF_DIR/README.md" \
+    "$CLAUDE_REF_DIR/README.md" \
+    "$GEMINI_REF_DIR/README.md"
+  do
+    if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
+  done
 
   echo ""
   echo "=== Shared references ==="
@@ -284,6 +302,11 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_pointer "$CODEX_REF_DIR/ru/subagent-operating-model.md" "../../shared/references/ru/subagent-operating-model.md"
   check_pointer "$CODEX_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
   check_pointer "$CODEX_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
+  check_pointer "$GEMINI_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
+  check_pointer "$GEMINI_REF_DIR/workflow-strategy-comparison.md" "../shared/references/workflow-strategy-comparison.md"
+  check_pointer "$GEMINI_REF_DIR/repository-publication-safety.md" "../shared/references/repository-publication-safety.md"
+  check_pointer "$GEMINI_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
+  check_pointer "$GEMINI_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
 
   echo ""
   echo "=== Shared core / addendum semantics ==="
@@ -367,6 +390,20 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex runtime-notes section does not accidentally carry Claude agents-mode paths"
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Codex-specific runtime notes" \
     "Codex addendum keeps the Codex runtime-notes section"
+  check_contains "$GEMINI_REF_DIR/subagent-operating-model.md" "## Gemini-specific runtime notes" \
+    "Gemini addendum keeps the Gemini runtime-notes section"
+  check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+    "## Gemini-specific runtime notes" \
+    ".gemini/.agents-mode" \
+    "Gemini runtime-notes section documents the Gemini agents-mode overlay"
+  check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+    "## Gemini-specific runtime notes" \
+    ".gemini/settings.json" \
+    "Gemini runtime-notes section documents the Gemini native runtime config surface"
+  check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+    "## Gemini-specific runtime notes" \
+    "sequential and human-steered" \
+    "Gemini runtime-notes section keeps the sequential human-steered runtime note"
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Codex-side repository concretization" \
     "Codex addendum keeps the Codex repository-concretization section"
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Shared core now owns" \

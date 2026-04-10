@@ -54,8 +54,13 @@ For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md]
 
 - Return one advisory memo covering recommended direction, alternatives considered, major tradeoffs, key risks, assumptions, and confidence level.
 - Every consultant memo must include a provenance header:
-  - **Requested mode:** <external | auto | internal>
+  - **Execution role:** `consultant`
+  - **Assigned / replaced internal role:** `none`
+  - **Requested provider:** <internal | codex | gemini>
+  - **Resolved provider:** <Codex CLI | Gemini CLI | none>
+  - **Requested consultant mode:** <external | auto | internal | disabled>
   - **Actual execution path:** <external CLI (provider name) | internal subagent | role-play (violation)>
+  - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
   - **Deviation reason:** <none | external unavailable: [reason] | fallback approved by user>
 - Every consultant memo must end with an explicit continuation section:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.

@@ -79,6 +79,7 @@ Full value-by-value operator semantics now live in [`docs/agents-mode-reference.
    preferExternalWorker: true
    preferExternalReviewer: true
    externalProvider: auto
+   externalClaudeSecretMode: auto
    externalClaudeProfile: sonnet-high
    ```
 
@@ -88,9 +89,10 @@ Full value-by-value operator semantics now live in [`docs/agents-mode-reference.
    - `preferExternalWorker` — external-worker as default on `implement` stage
    - `preferExternalReviewer` — external-reviewer as default on `review` + `QA` stages
    - `externalProvider` — `auto`, `claude`, `codex`, or `gemini` for provider-backed consultant / adapter selection
+   - `externalClaudeSecretMode` — when the selected provider is Claude, `auto` keeps the first Claude call plain and retries once with `ANTHROPIC_*` from the local Claude `SECRET.md` only after quota, limit, or reset errors; `force` applies the same environment override on the primary Claude call
    - `externalClaudeProfile` — Codex-line only optional Claude CLI execution profile: `sonnet-high` or `opus-max`
    - Each toggle is independent
-   - Default full shape on first creation: `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`; Codex also writes `externalClaudeProfile: sonnet-high`
+   - Default full shape on first creation: `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`; Codex and Gemini also write `externalClaudeSecretMode: auto`, and Codex also writes `externalClaudeProfile: sonnet-high`
 
 3. **Dispatch protocol (platform-dependent)**
 
@@ -104,11 +106,17 @@ Full value-by-value operator semantics now live in [`docs/agents-mode-reference.
 4. **Common rules**
    - CLI availability check before dispatch (`which codex` / `where codex` on Claude Code, `claude` / `claude.exe` on Codex, `gemini` wherever Gemini is selected)
    - Hard tasks: `--model gpt-5.4 --reasoning-effort xhigh` (Codex), `--effort high` (Claude CLI), or `--model gemini-2.5-pro` (Gemini CLI)
+   - If Claude CLI is the selected provider, honor `externalClaudeSecretMode`: `auto` keeps one limit-triggered one-line retry with `ANTHROPIC_*` from the local Claude `SECRET.md`, while `force` applies the same environment override to the primary Claude call. Neither mode counts as a profile downgrade or a provider switch.
    - Timeout: 5-15 minutes before treating a run as stalled
-   - Provenance header mandatory for all three roles:
-     - **Requested mode:** `<external | auto | internal>`
+   - Execution record mandatory for all three roles:
+     - **Execution role:** `<consultant | external-worker | external-reviewer>`
+     - **Assigned / replaced internal role:** `<eligible internal role label | none>`
+     - **Requested provider:** `<internal | claude | codex | gemini>`
+     - **Resolved provider:** `<provider selected after routing/default resolution | none>`
      - **Actual execution path:** `<external CLI (provider name) | internal subagent | role-play (violation)>`
+     - **Model / profile used:** `<actual profile or model when known | runtime default | unspecified by runtime>`
      - **Deviation reason:** `<none | external unavailable: [reason] | fallback approved by user>`
+   - Reporting rule: if the operator or caller left provider selection at runtime default behavior, artifacts must record `Requested provider: internal` and put the real provider choice in `Resolved provider`; do not emit `auto` in the execution record.
 
 ## Routing rules
 
@@ -122,6 +130,7 @@ The orchestrator (lead or main conversation) **prefers** external roles by defau
 - `preferExternalWorker: true` — `$external-worker` on `implement` stage
 - `preferExternalReviewer: true` — `$external-reviewer` on `review` + `QA` stages
 - `externalProvider: auto | claude | codex | gemini` — keep the existing line-default external provider or explicitly steer external execution to another installed provider
+- `externalClaudeSecretMode: auto | force` — when external execution resolves to Claude CLI, `auto` keeps the limit-triggered SECRET-backed retry path and `force` applies the same `ANTHROPIC_*` override to the primary Claude call
 - `externalClaudeProfile: sonnet-high | opus-max` — Codex-line only; when Codex dispatches to Claude CLI, prefer the matching model/effort profile instead of the provider default
 
 Domain specialist is selected instead only when:
@@ -170,7 +179,7 @@ Normal routing fallback to domain specialist. Not an error — standard routing 
 - `$external-worker` and `$external-reviewer` must never be the same agent instance on the same task (separation of concerns)
 - Mandatory reviewers in risk-sensitive templates (`security-reviewer` in `security-sensitive`, `performance-reviewer` in `performance-sensitive`) are NOT replaceable by `$external-reviewer`
 - No internal subagent fallback for external roles — either external CLI works or role is disabled
-- Existing `.consultant-mode` files continue to work as legacy fallback input. First-write upgrade should migrate them into `.agents-mode`, map legacy `mode` to `consultantMode`, default missing `delegationMode` to `manual`, default missing `mcpMode` to `auto`, and on the Claude line drop any inert `externalClaudeProfile` value instead of carrying it forward.
+- Existing `.consultant-mode` files continue to work as legacy fallback input. First-write upgrade should migrate them into `.agents-mode`, map legacy `mode` to `consultantMode`, default missing `delegationMode` to `manual`, default missing `mcpMode` to `auto`, default missing `externalClaudeSecretMode` to `auto` on lines that may route to Claude, and on the Claude line drop any inert Claude-target keys instead of carrying them forward.
 
 ## Non-goals
 

@@ -58,10 +58,19 @@ Semantics:
 
 ## Provenance header
 
-Every external-adapter artifact should include a provenance header with:
+Every external-adapter artifact should include one explicit execution record with these separate fields:
 
-- `Requested consultant mode: <external | auto | internal>`
-- `Preferred adapter: <worker | reviewer | none>`
-- `Assigned role: <eligible internal role label>`
-- `Actual execution path: <external CLI (Codex) | role disabled>`
+- `Execution role: <consultant | external-worker | external-reviewer>`
+- `Assigned / replaced internal role: <eligible internal role label | none>`
+- `Requested provider: <internal | codex | gemini>`
+- `Resolved provider: <Codex CLI | Gemini CLI | none>`
+- `Requested consultant mode: <external | auto | internal | disabled>` when consultant routing is relevant; otherwise `not-applicable`
+- `Actual execution path: <external CLI (Codex CLI) | external CLI (Gemini CLI) | role disabled>`
+- `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
 - `Deviation reason: <none | external unavailable: [reason] | fallback approved by user>`
+
+Rules:
+
+- Keep `Execution role` and `Assigned / replaced internal role` on separate lines. Do not merge them into one ambiguous label.
+- `Requested provider: internal` means no explicit external provider was requested by the caller and routing/default resolution picked the provider. It must not be rendered as `auto` in the artifact.
+- The adapter may replace an internal role for provenance, but the artifact must still show which role actually ran and which role was replaced.

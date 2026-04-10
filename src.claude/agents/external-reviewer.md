@@ -28,6 +28,7 @@ description: External review-side adapter for Claude-line. Use when an eligible 
 ## Return exactly one artifact
 
 - Return one review artifact containing the reviewed surfaces, findings or approval, residual risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- If provenance is included inline, use the execution-record fields from `contracts/external-dispatch.md` verbatim instead of inventing a shorter custom header.
 
 ## Working rules
 

@@ -36,6 +36,7 @@ Guide the user through first-time Codex project bootstrap for project policies a
      - `preferExternalWorker`
      - `preferExternalReviewer`
      - `externalProvider`
+     - `externalClaudeSecretMode`
      - `externalClaudeProfile`
    - Use the existing value when present; otherwise default to:
      - `consultantMode: disabled`
@@ -44,6 +45,7 @@ Guide the user through first-time Codex project bootstrap for project policies a
      - `preferExternalWorker: false`
      - `preferExternalReviewer: false`
      - `externalProvider: auto`
+     - `externalClaudeSecretMode: auto`
      - `externalClaudeProfile: sonnet-high`
    - Accept shorthand answers such as `force`, `external reviewer only`, `opus`, or `defaults for the rest`.
 
@@ -68,6 +70,7 @@ Guide the user through first-time Codex project bootstrap for project policies a
    preferExternalWorker: {value}  # allowed: false | true
    preferExternalReviewer: {value}  # allowed: false | true
    externalProvider: {value}  # allowed here: auto | claude | gemini
+   externalClaudeSecretMode: {value}  # allowed when Claude is selectable: auto | force
    externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max
    ```
 

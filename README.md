@@ -12,11 +12,13 @@ Current provider packs share the same governance model and role vocabulary, whil
 
 ```text
 shared/             Shared cross-provider governance and canonical reference cores
+docs/               Common branch-level docs index and operator/runtime references
 src.codex/          Codex provider-pack source
 src.claude/         Claude Code provider-pack source
 src.gemini/         Gemini CLI provider-pack scaffold
 references-codex/   Codex-specific addenda and compatibility pointers
 references-claude/  Claude Code-specific addenda and compatibility pointers
+references-gemini/  Gemini-specific addenda and compatibility pointers
 RELEASE_NOTES.md    Canonical tracked release log
 install.sh          Entry-point installer (asks which pack to install)
 install.ps1         Entry-point installer (asks which pack to install)
@@ -33,7 +35,7 @@ CLAUDE.md           Dev overlay for Claude Code pack maintenance
 | Claude Code | `src.claude/` | `~/.claude/` or project `.claude/` | `src.claude/CLAUDE.md` | `bash src.claude/agents/scripts/validate-skill-pack.sh` |
 | Gemini CLI | `src.gemini/` | scaffold only for now | `src.gemini/GEMINI.md` | `bash src.gemini/scripts/validate-pack.sh` |
 
-Shared design references now live in `shared/references/`. Provider-local `references-codex/` and `references-claude/` now keep only provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each provider-local tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
+Shared design references now live in `shared/references/`. Provider-local `references-codex/`, `references-claude/`, and `references-gemini/` keep provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each provider-local tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
 
 Cross-provider execution is available through two routing adapters:
 
@@ -72,9 +74,10 @@ Important: operator preferences now live in pack-local `agents-mode` files; lega
 - `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` lets the agent decide when MCP is appropriate; `force` means the config itself is an explicit instruction to use relevant available MCP tools instead of treating MCP usage as optional.
 - `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
-- `externalProvider: auto` keeps the line default external CLI, while explicit values such as `gemini` can route provider-backed consultant or external-adapter work through a different installed external CLI.
+- `externalProvider: auto` keeps the line default external CLI, while explicit values such as `gemini` or `claude` on non-Claude-native lines can route provider-backed consultant or external-adapter work through a different installed external CLI.
+- Codex and Gemini may additionally use `externalClaudeSecretMode: auto | force` when the selected external provider is Claude. `auto` keeps the first Claude call plain and retries with `ANTHROPIC_*` from the local Claude `SECRET.md` only after quota, limit, or reset errors; `force` applies the same environment override to the primary Claude call.
 - Codex may additionally use `externalClaudeProfile` to select the Claude CLI execution profile: `sonnet-high` or `opus-max`.
-- Claude Code does not use `externalClaudeProfile` in its canonical config because Claude-line external dispatch goes to Codex CLI.
+- Claude Code does not use the Claude-target keys `externalClaudeSecretMode` or `externalClaudeProfile` in its canonical config because Claude-line external dispatch goes to Codex CLI.
 - For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and create `.agents/.agents-mode`.
 - For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config stays in `.gemini/settings.json`; Orchestrarium-specific shared routing semantics may additionally live in `.gemini/.agents-mode`, which the Gemini `init-project` helper bootstraps separately after `/init`.
 - Explicit user role requests still override the toggle state in either direction.
@@ -85,9 +88,11 @@ See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, d
 ## References and maintenance
 
 - `shared/references/` contains the shared cross-provider design core that current and future provider packs can reuse.
+- `docs/README.md` is the common branch-level docs entrypoint for operator semantics and runtime-layout references.
 - [`docs/provider-runtime-layouts.md`](docs/provider-runtime-layouts.md) records the exact installed runtime layout for Codex, Claude Code, and Gemini, with `global` and `local` scopes split explicitly so install/runtime paths are not confused with repo source trees.
 - `references-codex/` contains Codex-specific addenda plus compatibility pointers for older reference paths.
 - `references-claude/` contains Claude-specific addenda plus compatibility pointers for older reference paths.
+- `references-gemini/` contains Gemini-specific addenda plus compatibility pointers for older reference paths.
 - `subagent-operating-model` is no longer duplicated per provider pack: use the shared core for the canonical blueprint and the provider-local file only for runtime and repository concretization.
 - `AGENTS.md` is the root development overlay for Codex provider-pack maintenance.
 - `CLAUDE.md` is the root development overlay for Claude Code provider-pack maintenance.
