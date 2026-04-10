@@ -41,7 +41,12 @@ Delegation should reduce noise, not spread it. That means:
 - use `BLOCKED` only for real external blockers, missing decisions, or unavailable prerequisites
 - do not let downstream roles silently redefine upstream artifacts when evidence is thin
 - never guess or assume facts about the codebase, file contents, or system behavior — always verify by reading or searching before stating or acting on a claim
+- maintain exactly one primary in-progress task at a time; side requests may refine it or temporarily interrupt it, but do not replace it unless the user explicitly reprioritizes
 - do not silently drop interrupted tasks: if a side request (clarification, quick fix, lookup) interrupts an in-progress task, resume and complete the original task after the side request is handled — unless the user explicitly cancels or reprioritizes it; announce the resumption so the user knows where you are
+- after handling any side request, explicitly resume the primary task and state the next concrete step before doing unrelated work
+- when switching away from a non-trivial primary task, record a durable resume point — current stage, last accepted artifact, and next concrete step — in the owning status surface when one exists; otherwise state it explicitly in the handoff or summary before switching away
+- before declaring a task, stage, batch, or final answer complete, reconcile the current result against the user's requested outcome, the accepted scope, and any still-open required follow-up; if admitted-scope work remains, keep the primary task open instead of claiming completion
+- do not treat one completed sub-batch, one fixed subproblem, or a documentation-only stop as task completion when a known required next action already exists inside the current admitted scope
 
 ## Engineering hygiene
 
@@ -73,6 +78,7 @@ Delegation should reduce noise, not spread it. That means:
 - **Resource lifecycle hygiene:** any handle, connection, subscription, lock, transaction, temporary resource, or acquired external state must have explicit cleanup or release behavior on success, failure, cancellation, and timeout paths.
 - **Retry / re-entry / idempotency safety:** any code that may be retried, replayed, resumed, or invoked concurrently should avoid duplicate side effects, inconsistent state, or double application unless explicit guards, idempotency keys, or compensating controls are in place.
 - **Evidence-based completion:** do not claim a task is done without fresh execution evidence. "Should work" and "no issues expected" are not evidence; neither are results from prior runs — code may have changed. Show test results, build output, or a verification checklist. If verification is not possible, state explicitly what was not checked. Never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix.
+- **Completion reconciliation discipline:** do not present partial scope coverage as full completion. Before closing a task or user-facing answer, reconcile the delivered result against the original request, accepted scope, required checks, canonical-source updates, and any still-open required follow-up. If anything required remains, say exactly what remains and keep the task open unless the user explicitly parks, cancels, or reprioritizes it.
 - **Worktree safety:** the working tree is often dirty with unrelated local changes. Never revert, discard, or overwrite uncommitted changes that are not part of the current task. If a clean state is needed, ask the user first.
 
 ## Role index

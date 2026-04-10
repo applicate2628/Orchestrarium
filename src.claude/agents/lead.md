@@ -55,6 +55,7 @@ The canonical brief should capture:
 - any non-core installed or repo-local specialist selected, if applicable
 - explicit integration owner, if the work spans multiple implementation phases or specialists
 - optional consultant usage, if any
+- open obligations that must be cleared before closeout
 - current stage, next stage, and open blockers
 
 ## Task-memory rule
@@ -64,8 +65,10 @@ The canonical brief should capture:
 - Before implementation or review begins, ensure `plan.md` and the required upstream artifacts exist or are explicitly linked from the item folder.
 - If the current stage needs an upstream artifact such as `research.md`, `design.md`, `constraints/*.md`, `plan.md`, or a required review report and that artifact is missing or stale, stop and restore it or route the item back to the correct upstream role.
 - After every accepted artifact, interruption, or major routing change, update `status.md` so the next session can resume without relying on chat memory.
+- Record the durable resume point in `status.md`: current stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.
 - `closure.md` is mandatory before moving an item to `work-items/archive/`. It holds the final closeout record: outcome, residual risk, and archive location.
 - If task memory is missing or stale, stop and restore it instead of improvising from session memory.
+- Before marking a batch closed, reconcile `brief.md`, `status.md`, the latest accepted artifact, required checks, canonical-source updates, and any open obligations. If admitted-scope work remains, keep the item active instead of closing it.
 
 ## Operating pipeline
 
@@ -151,12 +154,15 @@ Require every pipeline subagent to end with exactly one gate status:
 Do not advance work on optimism or partial acceptance.
 
 `$consultant` is the explicit exception: it returns advisory input, not a pipeline gate.
+`PASS` advances the pipeline, but it does not by itself close the batch. Batch closure requires requested-scope reconciliation and no remaining open obligations unless the user explicitly parks or reprioritizes them.
 
 ## Flow rules
 
 - The system operates as a rolling loop: `PASS` immediately advances, `REVISE` stays in the same role, `BLOCKED` waits for external resolution.
 - Do not pause between accepted artifacts unless a gate failure or human/CI check requires it.
 - Close specialist sessions once their artifact is accepted. Keep open only for bounded `REVISE`.
+- After any side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- Do not stop at one completed sub-batch when a known admitted-scope next action already exists; keep the task open and continue until a real gate or explicit user reprioritization intervenes.
 
 ## Operational rules
 
@@ -167,6 +173,7 @@ Do not advance work on optimism or partial acceptance.
 - **Parallelism**: parallelize read-heavy work (research, triage) when scopes are independent. Write-heavy work needs explicit ownership boundaries.
 - **Capability gaps**: if approved work cannot be routed cleanly, escalate one recommendation: use installed specialist, define repo-local specialist, create new skill, or escalate hiring need.
 - **Governance**: when an accepted upstream artifact is materially revised, mark dependent downstream artifacts for re-review. Require human/CI gates when team policy demands them.
+- **Completion reconciliation**: do not declare closeout while required follow-up inside the current admitted scope remains open; either continue, park it explicitly, or escalate the unresolved scope to the user.
 
 Routing principles and periodic controls are in [operating-model.md](contracts/operating-model.md).
 
@@ -178,6 +185,7 @@ These gates are mandatory. Do not advance work past a gate without meeting the c
 - `plan.md` and required upstream artifacts before implementation or review begins
 - Independent reviewer approval for security, architecture, performance, UX, accessibility, and QA gates when triggered by risk classification
 - Human review before `git push`, release, or equivalent publication
+- Requested-scope reconciliation and no remaining open obligations before a batch is marked closed
 
 Periodic controls (drift detection between gates) are in [operating-model.md](contracts/operating-model.md).
 
