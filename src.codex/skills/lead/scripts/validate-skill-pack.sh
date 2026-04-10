@@ -265,6 +265,9 @@ if [[ $DEV_REPO -eq 1 ]]; then
   echo "=== Common branch-level surface ==="
 
   for f in \
+    "$REPO_ROOT/src.codex/README.md" \
+    "$REPO_ROOT/src.claude/README.md" \
+    "$REPO_ROOT/src.gemini/README.md" \
     "$DOCS_DIR/README.md" \
     "$DOCS_DIR/agents-mode-reference.md" \
     "$DOCS_DIR/external-worker-design.md" \

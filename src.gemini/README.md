@@ -2,6 +2,12 @@
 
 This directory contains the source scaffold for the Orchestrarium Gemini provider pack.
 
+Use it together with:
+
+- [../docs/README.md](../docs/README.md) for the common branch-level docs surface
+- [../shared/references/README.md](../shared/references/README.md) for the shared design core
+- [../references-gemini/README.md](../references-gemini/README.md) for the Gemini-side provider addendum
+
 The structure follows the official Gemini-preferred model instead of mirroring the Codex or Claude lines:
 
 - `GEMINI.md` as the runtime entrypoint
