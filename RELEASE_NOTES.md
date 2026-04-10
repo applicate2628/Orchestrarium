@@ -14,6 +14,7 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 
 - Added canonical `RELEASE_NOTES.md` tracking for release-relevant tracked changes in the Orchestrarium monorepo. This gives the repository one stable place to describe important behavior, workflow, and governance changes that matter at publication time instead of scattering that context across commit messages and session reports.
 - Made release-note updates mandatory before publication when staged tracked changes affect installed behavior, governance, routing, role contracts, install surface, or developer and operator workflow. This closes a documentation gap in the publication path: significant changes now need an explicit human-readable explanation before release instead of relying on readers to reconstruct impact from diffs alone.
+- Added a Gemini CLI provider-pack scaffold in `src.gemini/`. The scaffold follows the official Gemini-preferred model with `GEMINI.md` as the native entrypoint, `skills/<name>/SKILL.md` as the expertise layer, `commands/*.toml` as user command shortcuts, and `extension/gemini-extension.json` as the future MCP and extension boundary.
 
 ### Changed
 

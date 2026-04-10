@@ -2,6 +2,8 @@
 
 This monorepo ships two unified entry-point installers at the root (`install.sh` and `install.ps1`). They prompt for Codex, Claude Code, or both, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
+Gemini CLI currently ships as a source-only scaffold and does not yet route through the root installers.
+
 ## Quick install
 
 Run the router installer from the repository root:
@@ -52,7 +54,8 @@ Notes:
 - Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
 - The canonical project-local config file is `.agents/.agents-mode`; legacy `.agents/.consultant-mode` is fallback-only during migration.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
-- `consultantMode` still controls `$consultant`; `delegationMode: auto` means ordinary delegation stays enabled without repeated approval while `manual` keeps explicit-permission behavior; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
+- `consultantMode` still controls `$consultant`; `delegationMode` supports `manual | auto | force`, where `manual` keeps explicit delegation, `auto` leaves ordinary delegation to routing judgment, and `force` means delegate whenever a matching role and working tool path are available.
+- `mcpMode: auto | force` lets the agent either choose MCP by routing judgment or treat relevant MCP usage as a standing explicit instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
 - `externalClaudeProfile` is Codex-line only and selects the Claude CLI execution profile: `sonnet-high` maps to Sonnet with `--effort high`, and `opus-max` maps to Opus with `--effort max`.
 - Completed lead-managed batches now end with one external consultant-check before closure. That check stays advisory-only, but if the external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
 - Validation command: `bash src.codex/skills/lead/scripts/validate-skill-pack.sh`.
@@ -76,7 +79,8 @@ Notes:
 - User-side Claude imports such as `@memory/...` are preserved across reinstalls when they live in the installed `.claude/CLAUDE.md` import block alongside `@AGENTS.md`.
 - The canonical project-local config file is `.claude/.agents-mode`; legacy `.claude/.consultant-mode` is fallback-only during migration.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
-- `consultantMode` still controls `$consultant`; `delegationMode: auto` means ordinary delegation stays enabled without repeated approval while `manual` keeps explicit-permission behavior; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
+- `consultantMode` still controls `$consultant`; `delegationMode` supports `manual | auto | force`, where `manual` keeps explicit delegation, `auto` leaves ordinary delegation to routing judgment, and `force` means delegate whenever a matching role and working tool path are available.
+- `mcpMode: auto | force` lets the agent either choose MCP by routing judgment or treat relevant MCP usage as a standing explicit instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
 - Claude-line external dispatch uses Codex CLI, so `externalClaudeProfile` is not part of the Claude-line canonical config.
 - Completed lead-managed batches now end with one external consultant-check before closure. That check stays advisory-only, but if the external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
 - Validation command: `bash src.claude/agents/scripts/validate-skill-pack.sh`.
@@ -116,3 +120,15 @@ Customize each platform in the place that platform actually reads:
 - Shared design references in `shared/references/` are repository-maintainer documentation only; they are not copied into target projects and should not be treated as installed runtime docs.
 
 When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
+
+## Gemini source scaffold
+
+The Gemini line currently exists as source only:
+
+- runtime entrypoint: `src.gemini/GEMINI.md`
+- expertise layer: `src.gemini/skills/<name>/SKILL.md`
+- custom commands: `src.gemini/commands/**/*.toml`
+- extension boundary: `src.gemini/extension/gemini-extension.json`
+- validation command: `bash src.gemini/scripts/validate-pack.sh`
+
+It intentionally follows the official Gemini-preferred layout (`GEMINI.md` + `skills` + `commands` + `extension`) instead of inventing a Claude-like `agents/` source tree.
