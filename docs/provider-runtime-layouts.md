@@ -1,6 +1,6 @@
 # Provider Runtime Layouts
 
-This document records the installed runtime layout for the provider lines used by Orchestrarium today, including source-only scaffolds that already exist in the monorepo. It is an install/runtime reference, not a source-layout reference.
+This document records the installed runtime layout for the provider lines used by Orchestrarium today, including provider source trees that already exist in the monorepo. It is an install/runtime reference, not a source-layout reference.
 
 Do not confuse these runtime surfaces with the monorepo authoring trees such as `src.codex/`, `src.claude/`, or `src.gemini/`.
 
