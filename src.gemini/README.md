@@ -12,6 +12,8 @@ The structure follows the official Gemini-preferred model instead of mirroring t
 - `commands/*.toml` for Gemini custom commands
 - `extension/gemini-extension.json` for future MCP and tool packaging
 
-This scaffold intentionally avoids extra repo-local runtime abstractions such as a Gemini-specific `agents/` tree or copied contract catalogs.
+This scaffold intentionally avoids extra repo-local runtime abstractions such as a Gemini-specific `agents/` tree.
 
-It does not yet include an installer or a full installed-runtime assembly flow. When Orchestrarium needs the same shared routing toggles used on the Codex and Claude lines, that provider-local overlay belongs in `.gemini/.agents-mode`; it complements official `.gemini/settings.json` instead of replacing it, and the local `init-project` helper exists to initialize that overlay after Gemini's built-in `/init`.
+The standalone branch still carries one required repo-local maintainer reference tree at `../references-gemini/`. That tree is source-branch documentation only; it is not part of the installed runtime payload.
+
+The standalone branch now ships a Gemini-native install surface. Project installs place `GEMINI.md` at the project root and Gemini-native runtime assets under `.gemini/`; global installs place the same assets under `~/.gemini/`. When Orchestrarium needs the same shared routing toggles used on the Codex and Claude lines, that provider-local overlay belongs in `.gemini/.agents-mode`; it complements official `.gemini/settings.json` instead of replacing it, and the local `init-project` helper exists to initialize that overlay after Gemini's built-in `/init`. If Gemini routes external work to Claude CLI, that same overlay may also carry `externalClaudeSecretMode: auto | force`.

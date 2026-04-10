@@ -1,4 +1,0 @@
-interface:
-  display_name: "Security Reviewer"
-  short_description: "Run the security gate for a phase"
-  default_prompt: "Use $security-reviewer to perform the security gate for this phase and return findings or approval."

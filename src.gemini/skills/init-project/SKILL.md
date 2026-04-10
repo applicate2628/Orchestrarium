@@ -41,13 +41,15 @@ It must not replace Gemini's official runtime config in:
      - `preferExternalWorker`
      - `preferExternalReviewer`
      - `externalProvider`
-   - Use existing values when present; otherwise default to:
-     - `consultantMode: disabled`
-     - `delegationMode: manual`
-     - `mcpMode: auto`
-     - `preferExternalWorker: false`
-     - `preferExternalReviewer: false`
-     - `externalProvider: auto`
+     - `externalClaudeSecretMode`
+    - Use existing values when present; otherwise default to:
+      - `consultantMode: disabled`
+      - `delegationMode: manual`
+      - `mcpMode: auto`
+      - `preferExternalWorker: false`
+      - `preferExternalReviewer: false`
+      - `externalProvider: auto`
+      - `externalClaudeSecretMode: auto`
    - Accept shorthand such as `force`, `external reviewer only`, or `defaults for the rest`.
 
 5. **Confirm before writing.**
@@ -67,6 +69,7 @@ It must not replace Gemini's official runtime config in:
    preferExternalWorker: {value}  # allowed: false | true
    preferExternalReviewer: {value}  # allowed: false | true
    externalProvider: {value}  # allowed here: auto | codex | claude
+   externalClaudeSecretMode: {value}  # allowed when Claude is selected: auto | force
    ```
 
 7. **Confirm completion.**

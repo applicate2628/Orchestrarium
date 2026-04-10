@@ -1,138 +1,66 @@
 # Installation
 
-This monorepo ships two unified entry-point installers at the root (`install.sh` and `install.ps1`). They prompt for Codex, Claude Code, or both, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
+This standalone Gemini branch now ships a finished Gemini-native installer surface.
 
-Gemini CLI currently ships as a source-only scaffold and does not yet route through the root installers.
+## What exists now
 
-## Quick install
+| Surface | Status |
+|---|---|
+| `src.gemini/GEMINI.md` | present |
+| `src.gemini/skills/` | present |
+| `src.gemini/commands/` | present |
+| `src.gemini/extension/` | present |
+| `src.gemini/scripts/validate-pack.sh` | present |
+| `references-gemini/` | present (repo-local maintainer references) |
+| root `install-gemini.*` | present |
 
-Run the router installer from the repository root:
+## Install targets
 
-```bash
-bash install.sh --global
-```
+| Mode | Installed surface |
+|---|---|
+| project-local | `<project>/GEMINI.md`, `<project>/.gemini/skills/`, `<project>/.gemini/commands/` |
+| global | `~/.gemini/GEMINI.md`, `~/.gemini/skills/`, `~/.gemini/commands/` |
+
+`references-gemini/` is required in the source branch, but it is not copied into target projects or global Gemini homes. It remains a repo-local maintainer reference surface.
+
+## Commands
 
 ```powershell
-.\install.ps1 -Global
+powershell -ExecutionPolicy Bypass -File .\install-gemini.ps1
+powershell -ExecutionPolicy Bypass -File .\install-gemini.ps1 -Global
+powershell -ExecutionPolicy Bypass -File .\install-gemini.ps1 -Target D:\my-repo
 ```
-
-Or install into a specific project:
 
 ```bash
-bash install.sh --target /path/to/project
+bash install-gemini.sh
+bash install-gemini.sh --global
+bash install-gemini.sh --target /path/to/my-repo
 ```
 
-```powershell
-.\install.ps1 -Target "D:\path\to\project"
+## Current usage model
+
+1. Install the pack into the target project or globally.
+2. Use Gemini CLI `/init` in the target project when you want Gemini to create or refresh the user-owned portion of `GEMINI.md`.
+3. Treat `src.gemini/` as the source scaffold for Gemini-specific skills, commands, and future extension packaging.
+4. If Orchestrarium shared-routing toggles are needed, use the Gemini `init-project` helper to create `.gemini/.agents-mode` after `/init`.
+
+Important:
+
+- `GEMINI.md` remains owned by Gemini `/init`.
+- The installer manages only the `<!-- ORCHESTRARIUM_GEMINI_PACK:... -->` block inside `GEMINI.md`; all content outside that block is preserved on reinstall.
+- `.gemini/settings.json` remains Gemini-native runtime config.
+- `.gemini/.agents-mode` is an optional Orchestrarium overlay, not a Gemini-native replacement.
+
+## Validation
+
+```bash
+bash src.gemini/scripts/validate-pack.sh .
 ```
 
-The router asks which pack to install:
+## Operator overlay reference
 
-```text
-What to install?
-  1) Codex pack
-  2) Claude Code
-  3) Both
-```
+The canonical value-by-value reference for the optional `.gemini/.agents-mode` overlay lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md).
 
-For `Both`, the router reuses the same forwarded arguments for both pack-specific installers.
+The branch-level docs index and runtime-layout map live in [docs/README.md](docs/README.md) and [docs/provider-runtime-layout.md](docs/provider-runtime-layout.md).
 
-## Codex install details
-
-Use `scripts/install-codex.sh` or `scripts/install-codex.ps1` when you want the Codex pack directly.
-
-| Command | Result |
-| --- | --- |
-| `bash scripts/install-codex.sh --global` | Installs into `~/.codex/` |
-| `bash scripts/install-codex.sh --target /path/to/project` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
-| `.\scripts\install-codex.ps1 -Global` | Installs into `~/.codex/` |
-| `.\scripts\install-codex.ps1 -Target "D:\path\to\project"` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
-
-Notes:
-
-- Project-level Codex installs use `.agents/skills/` plus the project root `AGENTS.md`.
-- Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
-- The canonical project-local config file is `.agents/.agents-mode`; legacy `.agents/.consultant-mode` is fallback-only during migration.
-- First-time creation should write the full default shape with inline comments listing allowed values for each key.
-- `consultantMode` still controls `$consultant`; `delegationMode` supports `manual | auto | force`, where `manual` keeps explicit delegation, `auto` leaves ordinary delegation to routing judgment, and `force` means delegate whenever a matching role and working tool path are available.
-- `mcpMode: auto | force` lets the agent either choose MCP by routing judgment or treat relevant MCP usage as a standing explicit instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
-- `externalClaudeProfile` is Codex-line only and selects the Claude CLI execution profile: `sonnet-high` maps to Sonnet with `--effort high`, and `opus-max` maps to Opus with `--effort max`.
-- Completed lead-managed batches now end with one external consultant-check before closure. That check stays advisory-only, but if the external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
-- Validation command: `bash src.codex/skills/lead/scripts/validate-skill-pack.sh`.
-
-## Claude Code install details
-
-Use `scripts/install-claude.sh` or `scripts/install-claude.ps1` when you want the Claude Code pack directly.
-
-| Command | Result |
-| --- | --- |
-| `bash scripts/install-claude.sh --global` | Installs into `~/.claude/` |
-| `bash scripts/install-claude.sh --target /path/to/project` | Installs into the target project's `.claude/` |
-| `.\scripts\install-claude.ps1 -Global` | Installs into `~/.claude/` |
-| `.\scripts\install-claude.ps1 -Target "D:\path\to\project"` | Installs into the target project's `.claude/` |
-
-Notes:
-
-- Project-level Claude installs create or update `.claude/AGENTS.md` and `.claude/CLAUDE.md`.
-- Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
-- Claude memory is shipped in `src.claude/memory/` and preserved across reinstalls by the existing installer behavior.
-- User-side Claude imports such as `@memory/...` are preserved across reinstalls when they live in the installed `.claude/CLAUDE.md` import block alongside `@AGENTS.md`.
-- The canonical project-local config file is `.claude/.agents-mode`; legacy `.claude/.consultant-mode` is fallback-only during migration.
-- First-time creation should write the full default shape with inline comments listing allowed values for each key.
-- `consultantMode` still controls `$consultant`; `delegationMode` supports `manual | auto | force`, where `manual` keeps explicit delegation, `auto` leaves ordinary delegation to routing judgment, and `force` means delegate whenever a matching role and working tool path are available.
-- `mcpMode: auto | force` lets the agent either choose MCP by routing judgment or treat relevant MCP usage as a standing explicit instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`.
-- Claude-line external dispatch uses Codex CLI, so `externalClaudeProfile` is not part of the Claude-line canonical config.
-- Completed lead-managed batches now end with one external consultant-check before closure. That check stays advisory-only, but if the external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
-- Validation command: `bash src.claude/agents/scripts/validate-skill-pack.sh`.
-
-## Dual-platform setup
-
-To install both packs into the same target project, either choose `3) Both` in the router or run both pack-specific installers with the same target arguments.
-
-Expected project-level result:
-
-```text
-project/
-  AGENTS.md
-  .agents/
-    skills/
-  .claude/
-    AGENTS.md
-    CLAUDE.md
-```
-
-Reference directories are development-only and are not installed:
-
-- `shared/references/`
-- `references-codex/`
-- `references-claude/`
-
-That split is intentional. `shared/references/` now holds the canonical shared design cores, while `references-codex/` and `references-claude/` keep only pack-local addenda or compatibility pointers. `subagent-operating-model` is the main example: the installed packs keep their runtime docs, but the monorepo now keeps one shared blueprint core plus one addendum per pack instead of two full near-duplicate reference copies.
-
-## Post-install customization
-
-Customize each platform in the place that platform actually reads:
-
-- Codex: append project-specific rules below the installed section in the project root `AGENTS.md`.
-- Claude Code: append project-specific rules below the installed section in `.claude/CLAUDE.md`.
-- Claude Code: user-side `@...` imports in `.claude/CLAUDE.md` may live in the import block near `@AGENTS.md`; the installer preserves those imports on reinstall.
-- Configure consultant and external-dispatch preferences in `.agents/.agents-mode` for Codex or `.claude/.agents-mode` for Claude Code.
-- Shared design references in `shared/references/` are repository-maintainer documentation only; they are not copied into target projects and should not be treated as installed runtime docs.
-
-When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
-
-## Gemini source scaffold
-
-The Gemini line currently exists as source only:
-
-- runtime entrypoint: `src.gemini/GEMINI.md`
-- built-in initialization: Gemini CLI `/init` writes or tailors the project `GEMINI.md`
-- expertise layer: `src.gemini/skills/<name>/SKILL.md`
-- custom commands: `src.gemini/commands/**/*.toml`
-- official runtime config: project `.gemini/settings.json`
-- Orchestrarium operator overlay: project `.gemini/.agents-mode`
-- extension boundary: `src.gemini/extension/gemini-extension.json`
-- validation command: `bash src.gemini/scripts/validate-pack.sh`
-- Orchestrarium overlay bootstrap: `src.gemini/commands/agents/init-project.toml` and `src.gemini/skills/init-project/SKILL.md`
-
-It intentionally follows the official Gemini-preferred layout (`GEMINI.md` + `skills` + `commands` + `extension`) instead of inventing a Claude-like `agents/` source tree. Use Gemini's built-in `/init` for the official `GEMINI.md` bootstrap first. When Orchestrarium needs the same cross-provider routing toggles used on the Codex and Claude lines, initialize the repo-local `.gemini/.agents-mode` overlay separately through the Orchestrarium Gemini init helper rather than replacing Gemini's official `.gemini/settings.json`.
+The canonical repo-local Gemini governance and methodology references live in [references-gemini/](references-gemini/README.md).
