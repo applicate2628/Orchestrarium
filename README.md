@@ -39,6 +39,7 @@ Everything a user installs into their target project. Self-contained, no externa
 Used only for developing and maintaining this skill pack. Not part of the installed artifact.
 
 - `AGENTS.md`: dev-specific repo rules for skill-pack maintenance (adds dev-layer rules on top of `src.codex/AGENTS.md`)
+- `docs/`: branch-local docs index, runtime-layout notes, and `.agents/.agents-mode` reference
 - `references-codex/`: canonical operating-model documents, governance references, and diagrams
 - `install-codex.sh`, `install-codex.ps1`: install scripts (bash and PowerShell)
 - `INSTALL.md`: installation instructions
@@ -61,7 +62,7 @@ bash install-codex.sh --global
 
 Important: multi-agent team workflows require explicit delegation permission from the user. Ask directly for delegation, name a role such as `$lead`, or clearly authorize subagents in the prompt; otherwise the assistant may stay in the main conversation instead of starting the team.
 
-For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, and the consultant toggle is stored in `.agents/.consultant-mode`. For global install, the pack mirrors into `~/.codex/`, but second-opinion toggle state remains project-local in `.agents/.consultant-mode`. See [INSTALL.md](INSTALL.md) for details.
+For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, and operator state lives in `.agents/.agents-mode`. For global install, the pack mirrors into `~/.codex/`, but operator state remains project-local in `.agents/.agents-mode` with legacy `.agents/.consultant-mode` kept only as fallback migration input. See [INSTALL.md](INSTALL.md) for details.
 
 ## Operating model
 
@@ -82,6 +83,7 @@ Repository periodic-control matrix lives in [references-codex/periodic-control-m
 Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md) (dev overlay) and [src.codex/AGENTS.md](src.codex/AGENTS.md) (installed pack source).
 The visual companion to the workflow lives in [references-codex/operating-model-diagram.md](references-codex/operating-model-diagram.md).
 Evidence-based answer pipeline for high-stakes domains lives in [references-codex/evidence-based-answer-pipeline.md](references-codex/evidence-based-answer-pipeline.md).
+The standalone branch-level docs index lives in [docs/README.md](docs/README.md), and the Codex operator-mode reference lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md).
 
 ## Team structure
 

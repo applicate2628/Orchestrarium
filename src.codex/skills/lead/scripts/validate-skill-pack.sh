@@ -63,6 +63,14 @@ do
   if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
 done
 
+if [[ -d "src.codex/skills" && -f "src.codex/AGENTS.shared.md" ]]; then
+  echo ""
+  echo "=== Branch-level docs surface ==="
+  for f in docs/README.md docs/provider-runtime-layout.md docs/agents-mode-reference.md references-codex/README.md; do
+    if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
+  done
+fi
+
 echo ""
 echo "=== Role index consistency ==="
 

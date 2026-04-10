@@ -26,7 +26,7 @@ Global install copies everything into `~/.codex/` (mirrors `src.codex/` structur
 bash install-codex.sh --target /path/to/repo
 ```
 
-Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and keeps consultant toggle state in `.agents/.consultant-mode`.
+Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and keeps operator state in `.agents/.agents-mode` with legacy `.agents/.consultant-mode` as fallback-only migration input.
 
 ## Install into current repo (default)
 
@@ -48,7 +48,7 @@ bash install-codex.sh
 
 The scripts handle clean removal of old files, copying, AGENTS.md merging, and file-level verification. Re-running = reinstall.
 
-Second-opinion toggle state is always project-local at `.agents/.consultant-mode`, even when the skill pack itself is installed globally.
+Operator state is always project-local at `.agents/.agents-mode`, even when the skill pack itself is installed globally. Legacy `.agents/.consultant-mode` remains read-only migration input and should not be newly written.
 
 Project policies are configured as a `## Project policies` section in the target `AGENTS.md`, not as a separate directory. See `skills/lead/policies-catalog.md` for available policy options.
 
@@ -64,6 +64,7 @@ Project policies are configured as a `## Project policies` section in the target
 | `src.codex/skills/lead/scripts/` | Publication safety scan, validation | Yes |
 | `src.codex/skills/lead/policies-catalog.md` | Policy options reference (installed with skills) | Yes |
 | `src.codex/AGENTS.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
+| `docs/` | Branch-local docs index, runtime-layout notes, `.agents/.agents-mode` reference | No — maintainer-facing source docs |
 | `references-codex/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
 
 ## Post-install
@@ -127,6 +128,7 @@ To add project-specific rules that apply to both platforms:
 
 - **macOS / Linux**: uses `claude` directly.
 - **Windows**: uses `cmd.exe /c claude.exe` (or `claude.cmd` as fallback) to work inside Git Bash environments where Codex typically runs.
+- `externalClaudeSecretMode: auto` keeps the first Claude call plain and allows one retry on the same profile with `ANTHROPIC_*` from the local Claude `SECRET.md` only after quota, limit, or reset errors; `externalClaudeSecretMode: force` applies the same environment override to the primary Claude call.
 
 If your environment differs, update the invocation commands in the installed `skills/consultant/SKILL.md` under "Execution paths".
 
