@@ -37,6 +37,7 @@ required=(
 
 if [[ "$MODE" == "source" ]]; then
   required+=(
+    "$PACK_ROOT/README.md"
     "$PACK_ROOT/extension/README.md"
     "$PACK_ROOT/extension/gemini-extension.json"
     "$ROOT/references-gemini/README.md"
