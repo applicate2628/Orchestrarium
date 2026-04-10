@@ -126,9 +126,13 @@ When both packs are installed, keep shared project policies aligned across both 
 The Gemini line currently exists as source only:
 
 - runtime entrypoint: `src.gemini/GEMINI.md`
+- built-in initialization: Gemini CLI `/init` writes or tailors the project `GEMINI.md`
 - expertise layer: `src.gemini/skills/<name>/SKILL.md`
 - custom commands: `src.gemini/commands/**/*.toml`
+- official runtime config: project `.gemini/settings.json`
+- Orchestrarium operator overlay: project `.gemini/.agents-mode`
 - extension boundary: `src.gemini/extension/gemini-extension.json`
 - validation command: `bash src.gemini/scripts/validate-pack.sh`
+- Orchestrarium overlay bootstrap: `src.gemini/commands/agents/init-project.toml` and `src.gemini/skills/init-project/SKILL.md`
 
-It intentionally follows the official Gemini-preferred layout (`GEMINI.md` + `skills` + `commands` + `extension`) instead of inventing a Claude-like `agents/` source tree.
+It intentionally follows the official Gemini-preferred layout (`GEMINI.md` + `skills` + `commands` + `extension`) instead of inventing a Claude-like `agents/` source tree. Use Gemini's built-in `/init` for the official `GEMINI.md` bootstrap first. When Orchestrarium needs the same cross-provider routing toggles used on the Codex and Claude lines, initialize the repo-local `.gemini/.agents-mode` overlay separately through the Orchestrarium Gemini init helper rather than replacing Gemini's official `.gemini/settings.json`.
