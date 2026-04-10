@@ -39,7 +39,7 @@ A lead MUST NOT delegate work until the configured task-memory item folder, if t
 
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
 - `status.md` must have a current snapshot with stage, last accepted artifact, and next concrete action.
-- If either artifact is missing, stale, or incomplete, the lead restores them BEFORE delegating any specialist role when task memory is configured.
+- If either artifact is missing, stale, or incomplete, the lead restores only the lead-owned task-memory state from persisted accepted artifacts BEFORE delegating any specialist role when task memory is configured. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
 - This gate is non-negotiable for non-trivial work when the repository uses task memory. The only exception is the additive fast lane where the lead records the decision in status.md instead.
 
 ### status.md format
@@ -54,6 +54,9 @@ updated: <YYYY-MM-DD HH:MM>
 
 ## Current state
 
+- **Primary task**: <one active objective, e.g. "full-impact review of current change set">
+- **Primary task status**: <active | side-interrupted | parked | closed>
+- **Interruption marker**: <none | INTERRUPTED(no-artifact)>
 - **Stage**: <current stage name or number>
 - **Main conv role**: <what main conversation is doing: orchestrating | waiting for agents | reviewing artifact | idle>
 - **Last accepted artifact**: <filename or "none">
@@ -87,6 +90,13 @@ updated: <YYYY-MM-DD HH:MM>
 
 The REVISE loop section is optional — include it only when a stage has returned REVISE and the loop is active. Remove it when the loop resolves (PASS or escalation).
 
+No-artifact interruption rule:
+- A handoff interrupt or worker stall without an artifact does not count as a substantive REVISE artifact.
+- Set `Primary task status: side-interrupted` and `Interruption marker: INTERRUPTED(no-artifact)` in `status.md` for orchestrator bookkeeping.
+- Keep the stage open, and either rerun the same role with a tighter slice or route to the proper factual role.
+- The lead must not synthesize the missing artifact or replace missing factual work inline.
+- If the interrupted stage belongs to a full-impact review or verification pass, keep that review as the primary task until a review artifact is emitted or the user explicitly parks/cancels it.
+
 ## Shared response format
 
 ```text
@@ -111,8 +121,20 @@ Fact-first note:
 - If the main gap is missing evidence, recommend the appropriate factual role instead of escalating straight into broader opinion.
 
 Consultant exception:
-- `$consultant` returns the same first four sections, but ends with `5. Advisory status: NON-BLOCKING`.
-- If the external provider is unavailable or fails, the lead may use an independent internal subagent as `$consultant` with the same advisory-only contract and the same response format.
+- `$consultant` returns the same first four sections, but ends with `5. Advisory status: NON-BLOCKING` and `6. Continuation prompt: <ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action>`.
+- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.agents-mode` must preserve any existing `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, and `externalClaudeProfile` values.
+- If the external provider is unavailable or fails, the lead may use an independent internal subagent as `$consultant` with the same advisory-only contract and the same response format for ordinary optional consultant usage. The mandatory batch-close external consultant-check does not use that fallback; if external execution is unavailable, batch closure stays open and the lead escalates to the user.
+
+## Shared external dispatch contract
+
+Use `external-dispatch.md` when the routing decision prefers or explicitly selects an external adapter.
+
+- The canonical config file is `.agents/.agents-mode`; legacy `.agents/.consultant-mode` is fallback-only.
+- The extended schema contains `consultantMode`, `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, and an optional `externalClaudeProfile` used for Codex-line Claude CLI profile selection.
+- `consultantMode` governs `$consultant` behavior only.
+- The preference flags govern whether eligible implement or review/QA slots route to the external adapters by default.
+- The assigned role in the external handoff is a provenance/routing label, not a restriction on universality.
+- If the external CLI is unavailable, the role is disabled at the role level and the orchestrator may reroute to another eligible internal specialist.
 
 ## Role map
 
@@ -314,6 +336,20 @@ Acceptance criteria:
 - required tests and checks were run or explicitly blocked
 - design or plan conflicts are escalated instead of patched over
 
+## External Worker
+
+Use when approved implementation work should run through the external adapter for an eligible implementer role and the handoff names `$external-worker`.
+
+Return exactly:
+- one external implementation package
+
+Acceptance criteria:
+- the handoff includes the internal implementer role label being replaced; that label is provenance/routing metadata only and does not narrow the adapter
+- the requested change stays inside the approved implementation surface
+- the execution path is external and explicit or preference-driven; no silent fallback to `$consultant` or an internal subagent
+- external-provider unavailability is reported as `BLOCKED:dependency` with the provider reason, and the orchestrator may reroute
+- the package reports changed files, tests or checks, explicit assumptions or risks, and provenance
+
 ## Toolchain Engineer
 
 Use when the approved phase is primarily build-system, packaging, compiler, linker, preset, or reproducible-toolchain work.
@@ -471,6 +507,22 @@ Acceptance criteria:
 - blocking accessibility issues are separated from non-blocking improvements
 - approval or rejection is explicit
 
+## External Reviewer
+
+Use when approved review or QA work should run through the external adapter for an eligible reviewer or QA role and the handoff names `$external-reviewer`.
+
+Return exactly:
+- one external review report
+
+Acceptance criteria:
+- the handoff includes the internal reviewer or QA role label being replaced; that label is provenance/routing metadata only and does not narrow the adapter
+- the review stays review-only and does not request or require file edits
+- the requested review strategy is explicit
+- the execution path is external and explicit or preference-driven; no silent fallback to `$consultant` or an internal reviewer
+- external-provider unavailability is reported as `BLOCKED:dependency` with the provider reason, and the orchestrator may reroute
+- the report includes findings, risk surfaces, and an explicit gate decision
+- the role does not satisfy any mandatory internal reviewer requirement in v1
+
 ## Consultant
 
 Use only when the lead wants a non-binding second opinion.
@@ -485,7 +537,15 @@ Acceptance criteria:
 
 Invocation note:
 - `$consultant` usage rules, toggle check, execution paths, and fallback behavior are in `$CODEX_HOME/skills/consultant/SKILL.md`
-- if the external provider fails or is unavailable, fall back to an independent internal subagent consultant with the same advisory-only contract
+- if the external provider fails or is unavailable, ordinary optional consultant usage may fall back to an independent internal subagent consultant with the same advisory-only contract, but the mandatory batch-close external consultant-check may not silently downgrade
+- `external-dispatch.md` is the shared contract for the new external adapters and the consultant config fields they share
+
+## Role Map Notes
+
+- external implementation through a provider maps to `$external-worker`
+- external review or QA through a provider maps to `$external-reviewer`
+- the assigned role in either external handoff is a provenance/routing label, not a constraint on universality
+- `$consultant` remains advisory-only and is not a substitute for either external execution role
 
 ## Interaction rules
 
@@ -497,6 +557,11 @@ Invocation note:
 - A role may request clarification, but it should route the request through the orchestrating owner unless a direct collaboration edge was explicitly approved.
 - Reviewers report findings and gate outcomes; they do not directly manage implementation.
 - When an upstream artifact is insufficient, return `REVISE` or `BLOCKED` instead of silently redefining the stage contract.
+- External execution roles are routing adapters; they do not replace the consultant. They may replace eligible internal implement/review roles when config preference or explicit override selects them, but mandatory internal reviewers in risk-sensitive templates remain non-replaceable.
+
+## Session logging
+
+Every role — orchestrator, lead, or specialist — MUST write a session log to `.reports/YYYY-MM/` when the session produced a result, made a routing decision, or completed a review. See `AGENTS.md` § "Session logging rule" for the full contract and log format. Create the `YYYY-MM/` subdirectory if it does not exist. Session logs are summaries, not artifact copies.
 
 ## Structured completion report
 

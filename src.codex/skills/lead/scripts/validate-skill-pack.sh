@@ -51,6 +51,9 @@ for f in \
   "$SKILLS_DIR/lead/SKILL.md" \
   "$SKILLS_DIR/lead/operating-model.md" \
   "$SKILLS_DIR/lead/subagent-contracts.md" \
+  "$SKILLS_DIR/lead/external-dispatch.md" \
+  "$SKILLS_DIR/init-project/SKILL.md" \
+  "$SKILLS_DIR/init-project/agents/openai.yaml" \
   "$SKILLS_DIR/consultant/SKILL.md" \
   "$SKILLS_DIR/second-opinion/SKILL.md" \
   "$SCRIPTS_DIR/check-publication-safety.sh" \

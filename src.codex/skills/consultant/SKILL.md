@@ -1,27 +1,39 @@
 ---
 name: consultant
-description: Provide an optional independent advisory memo for the lead without becoming part of the required delivery pipeline. Use when Codex needs a non-blocking second opinion on tradeoffs, ambiguity, or cross-cutting concerns before choosing a route.
+description: Provide an independent advisory memo for the lead without becoming a reviewer, approver, or delivery owner. Use when Codex needs a non-blocking second opinion on tradeoffs, ambiguity, or cross-cutting concerns before choosing a route.
 ---
 
 # Consultant
 
 ## Core stance
 
-- Act as an optional independent advisor, not as a pipeline owner.
+- Act as an independent advisor, not as a pipeline owner.
 - Produce one concise second-opinion memo and stop there.
 - Stay advisory-only: do not route work, do not accept artifacts, and do not block progress.
 
 ## Toggle file check
 
-Before any invocation, read `.agents/.consultant-mode`:
+Before any invocation, read `.agents/.agents-mode` first and fall back to legacy `.agents/.consultant-mode` only when the new file is absent:
 
-- **No file** (default): consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately.
-- **`mode: external`**: external-first. Attempt external CLI. If external fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal.
-- **`mode: auto`**: external-first with silent fallback. Attempt external CLI. If unavailable, fall back to internal subagent automatically. Disclose the actual execution path in the memo header.
-- **`mode: internal`**: internal subagent only.
-- **`mode: disabled`**: explicitly disabled. Same notification and return as no-file case.
+- **No file** (default): consultant is disabled for ordinary optional second-opinion usage. Notify "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. For the mandatory batch-close external consultant-check, do not silently skip: return an advisory memo that records the disabled state and tells the lead to keep the batch open and escalate to the user.
+- **`consultantMode: external`** (or legacy `mode: external`): external-first. Attempt external CLI. If external fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal for ordinary optional usage. For the mandatory batch-close external consultant-check, do not downgrade to internal fallback; return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`consultantMode: auto`** (or legacy `mode: auto`): external-first with silent fallback for ordinary optional usage. Attempt external CLI. If unavailable, fall back to internal subagent automatically and disclose the actual execution path in the memo header. For the mandatory batch-close external consultant-check, do not silently downgrade; if the external path is unavailable, return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`consultantMode: internal`** (or legacy `mode: internal`): internal subagent only for ordinary optional usage. A mandatory batch-close external consultant-check is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`consultantMode: disabled`** (or legacy `mode: disabled`): explicitly disabled. Same behavior as the no-file case.
 
-The toggle file is project-local state stored in `.agents/.consultant-mode`. Keep it local-only and do not commit it to git.
+The toggle file is project-local state stored in `.agents/.agents-mode`. Legacy `.agents/.consultant-mode` is read-only fallback state for migration. Keep both local-only and do not commit them to git.
+
+The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/external-dispatch.md). Treat the canonical file as a six-key schema with one Codex-only Claude-profile key:
+
+- `consultantMode`
+- `delegationMode`
+- `mcpMode`
+- `preferExternalWorker`
+- `preferExternalReviewer`
+- `externalProvider`
+- `externalClaudeProfile` (optional; `sonnet-high` or `opus-max`)
+
+When changing `consultantMode`, preserve the other keys and `externalClaudeProfile` if it exists. When creating the file from scratch, initialize all seven keys and default `delegationMode` to `manual`, `mcpMode` to `auto`, `externalProvider` to `auto`, and `externalClaudeProfile` to `sonnet-high` unless the user explicitly requested a different Claude profile override.
 
 ## When to invoke
 
@@ -49,46 +61,77 @@ Do not invoke for:
 
 - Return one advisory memo covering recommended direction, alternatives considered, major tradeoffs, key risks, assumptions, and confidence level.
 - Every consultant memo must include a provenance header:
-  - **Requested mode:** <external | auto | internal>
+  - **Requested consultant mode:** <external | auto | internal>
   - **Actual execution path:** <external CLI (provider name) | internal subagent | role-play (violation)>
   - **Deviation reason:** <none | external unavailable: [reason] | fallback approved by user>
+- Every consultant memo must end with an explicit continuation section:
+  - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
+  - The continuation prompt must begin with a direct imperative to continue, for example `Continue working:` or `Proceed with the next batch:`.
+  - It must include the concrete next action or next review target, not just a closing sentence.
 
 ## Advisory status
 
-- This role is intentionally non-blocking and outside the mandatory stage sequence.
+- This role is intentionally non-blocking and non-approving.
 - The lead decides whether to adopt or ignore the memo.
 - If the memo identifies a real blocker, flag it and recommend the proper specialist role instead of acting as that role.
+- For the mandatory batch-close external consultant-check, the continuation section is required even when the consultant sees no new blockers; the memo must still end with a reusable second prompt that explicitly continues the next approved work.
+- If the batch-close external consultant-check cannot run because external execution is disabled or unavailable, say so explicitly in the memo and instruct the lead to keep the batch open and escalate to the user.
 
 ## Execution paths
 
-### External provider: Claude CLI (default when enabled)
+### External provider: selected by `externalProvider` (`auto` -> Claude CLI on Codex)
 
-Check availability first: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows).
+See the shared dispatch contract in [../lead/external-dispatch.md](../lead/external-dispatch.md) for the canonical config and provider matrix.
+
+Check the selected provider first:
+
+- Claude path: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows)
+- Gemini path: `gemini`
+
+If `.agents/.agents-mode` (or legacy `.agents/.consultant-mode`) selects Claude and contains `externalClaudeProfile`, map it as follows:
+
+- `sonnet-high` → `--model sonnet --effort high`
+- `opus-max` → `--model opus --effort max`
+- key missing → use the current default Claude CLI invocation for this pack
+
+If `.agents/.agents-mode` selects Gemini (`externalProvider: gemini`), use Gemini CLI in non-interactive mode. Example:
+
+**Windows / macOS / Linux:**
+```bash
+printf '%s' "$PROMPT" | gemini -p "" --model gemini-2.5-pro --approval-mode yolo
+```
+
+Examples:
 
 **macOS / Linux:**
 ```bash
-printf '%s' "$PROMPT" | claude -p --effort high --permission-mode bypassPermissions
+printf '%s' "$PROMPT" | claude -p --model sonnet --effort high --permission-mode bypassPermissions
+printf '%s' "$PROMPT" | claude -p --model opus --effort max --permission-mode bypassPermissions
 ```
 
 **Windows (Git Bash inside Codex):**
 ```bash
-printf '%s' "$PROMPT" | cmd.exe /c claude.exe -p --effort high --permission-mode bypassPermissions
+printf '%s' "$PROMPT" | cmd.exe /c claude.exe -p --model sonnet --effort high --permission-mode bypassPermissions
+printf '%s' "$PROMPT" | cmd.exe /c claude.exe -p --model opus --effort max --permission-mode bypassPermissions
 ```
 Fallback if `claude.exe` is not on PATH: use `claude.cmd` instead.
 
 **Rules:**
-- For hard complex tasks, prefer the strongest available profile such as Opus when supported by the installed client.
+- If `externalClaudeProfile` is present, use it instead of improvising a different Claude model or effort level.
+- If `externalProvider: gemini` is selected, do not silently reroute to Claude; disclose provider failure explicitly and follow the configured fallback rules.
+- If the requested Claude profile is unavailable because of plan limits, auth, quota, or client support, treat that as external-provider unavailability and follow the configured fallback rules; do not silently downgrade to another Claude profile.
 - Do not pass multiline prompts as direct command-line arguments — use `stdin` or a file.
 - Do not use TTY when a non-interactive invocation is available.
 - On Windows, keep command-line prompts short enough to avoid `cmd.exe` truncation.
 - Wait 5–15 minutes before treating a run as stalled. Do not start a parallel chat while one may still be running.
-- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note and fall back to the internal path immediately.
+- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note. For ordinary optional usage, follow the configured fallback behavior. For the mandatory batch-close external consultant-check, do not silently fall back; return an unavailable memo and require the lead to keep the batch open and escalate.
 
-### Internal-subagent fallback
+### Internal-subagent fallback (ordinary optional usage only)
 
-- If the external provider is unavailable, stalls, or returns quota/auth/limit errors, fall back to an internal independent subagent with the same advisory-only contract.
+- If the external provider is unavailable, stalls, or returns quota/auth/limit errors, fall back to an internal independent subagent with the same advisory-only contract only when the current mode permits that fallback.
 - Give the fallback subagent only the minimal accepted artifact or canonical brief needed for the advisory question.
 - Do not leak the failed external-provider reasoning into the fallback prompt; pass the task and accepted artifacts only.
+- Do not use the internal fallback for the mandatory batch-close external consultant-check.
 
 ## Working rules
 
