@@ -79,6 +79,22 @@ If both files exist, `.agents/.agents-mode` wins. New writes should target `agen
 |---|---|---|---|---|---|---|---|---|
 | Codex | requested value | `manual` | `auto` | `false` | `false` | `auto` | `auto` | `sonnet-high` unless explicitly overridden |
 
+## Task continuity
+
+Side requests may refine or temporarily interrupt the current primary task, but they do not replace it unless the user explicitly reprioritizes, cancels, or parks the original task.
+
+After handling a side request, explicitly resume the primary task and state the next concrete step.
+
+An active review or verification task remains non-preemptible by ordinary side clarification unless the user explicitly changes priority.
+
+## Execution continuity
+
+After an accepted phase, continue directly to the next clear phase or verification step unless a real gate blocks progression.
+
+Do not stop only because one local batch of work is complete if the next concrete step is already clear.
+
+`PASS` advances immediately. Pause only on `REVISE`, `BLOCKED`, explicit user reprioritization, or a required human approval point.
+
 ## Interpretation notes
 
 | Rule | Meaning |

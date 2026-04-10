@@ -64,6 +64,8 @@ Important: multi-agent team workflows require explicit delegation permission fro
 
 For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, and operator state lives in `.agents/.agents-mode`. For global install, the pack mirrors into `~/.codex/`, but operator state remains project-local in `.agents/.agents-mode` with legacy `.agents/.consultant-mode` kept only as fallback migration input. See [INSTALL.md](INSTALL.md) for details.
 
+After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and initialize `.agents/.agents-mode`.
+
 ## Operating model
 
 The repository is built around a few stable rules:
@@ -83,7 +85,7 @@ Repository periodic-control matrix lives in [references-codex/periodic-control-m
 Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md) (dev overlay) and in the installed-pack source files [src.codex/AGENTS.shared.md](src.codex/AGENTS.shared.md) + [src.codex/AGENTS.codex.md](src.codex/AGENTS.codex.md), which merge into the installed `AGENTS.md`.
 The visual companion to the workflow lives in [references-codex/operating-model-diagram.md](references-codex/operating-model-diagram.md).
 Evidence-based answer pipeline for high-stakes domains lives in [references-codex/evidence-based-answer-pipeline.md](references-codex/evidence-based-answer-pipeline.md).
-The standalone branch-level docs index lives in [docs/README.md](docs/README.md), and the Codex operator-mode reference lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md).
+The standalone branch-level docs index lives in [docs/README.md](docs/README.md), and the Codex operator-mode reference lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md). That operator reference also records task continuity and continue-by-default execution expectations for initialized projects.
 
 ## Team structure
 
