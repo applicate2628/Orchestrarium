@@ -6,6 +6,9 @@ Use it together with:
 
 - [../README.md](../README.md) for the repository overview
 - [../INSTALL.md](../INSTALL.md) for install and runtime rules
+- [../src.codex/README.md](../src.codex/README.md) for the Codex source subtree
+- [../src.claude/README.md](../src.claude/README.md) for the Claude source subtree
+- [../src.gemini/README.md](../src.gemini/README.md) for the Gemini source subtree
 - [../shared/references/README.md](../shared/references/README.md) for the shared design core
 - [../references-codex/README.md](../references-codex/README.md)
 - [../references-claude/README.md](../references-claude/README.md)
