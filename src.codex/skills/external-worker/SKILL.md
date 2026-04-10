@@ -31,8 +31,10 @@ description: Implement approved work through an external provider when the routi
   - Claude path: `claude`, `claude.exe`, or `claude.cmd`
   - Gemini path: `gemini`
 - Honor `externalClaudeProfile` only when the selected provider is Claude: `sonnet-high` maps to `--model sonnet --effort high`; `opus-max` maps to `--model opus --effort max`.
+- Honor `externalClaudeSecretMode` when the selected provider is Claude: `auto` keeps the first Claude call plain and allows one SECRET-backed retry only for quota, limit, or reset errors; `force` applies the same `ANTHROPIC_*` environment from the local Claude `SECRET.md` to the primary Claude call.
+- If `externalClaudeSecretMode: force` is selected and the local Claude `SECRET.md` cannot supply all three `ANTHROPIC_*` values, stop and return `BLOCKED:dependency` with that reason.
 - Use stdin or a file for the prompt; do not pass multiline prompts as direct command-line arguments.
-- If the provider is missing, unauthenticated, quota-limited, or errors, stop and return `BLOCKED:dependency` with the reason.
+- If the provider is missing, unauthenticated, or errors after the allowed Claude path, stop and return `BLOCKED:dependency` with the reason.
 - Do not silently fall back to an internal implementer or to `$consultant`.
 - If the provider is unavailable, the role is disabled and the orchestrator may reroute to another eligible internal specialist.
 
