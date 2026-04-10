@@ -2,6 +2,7 @@
 /.agents/
 /.codex/
 /.claude/
+/.gemini/
 
 # Local-only scratch and planning state
 /.scratch/
