@@ -76,6 +76,7 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive and update index |
 | Governance alignment | `$knowledge-archivist` | Governance change | Propagate to all governance files in same commit |
 | Documentation sync | `$knowledge-archivist` | Skill, role, or template added/removed/renamed | Update README, INSTALL, install scripts per root CLAUDE.md checklists |
+| Completion reconciliation | `$lead` | Before closeout or user-facing completion | Keep the batch open until requested-scope coverage and open obligations are reconciled |
 
 ## Non-obvious routing pairs
 
@@ -152,6 +153,14 @@ Any REVISE loop (QA, reviewer, or other gate returning REVISE) is capped at **3 
    - Recommendation: fix approach, redesign, or defer
 3. The user decides: continue fixing, re-plan, or accept with known issues.
 4. The iteration count is tracked in `status.md` under the REVISE loop section.
+
+## Completion reconciliation protocol
+
+Before marking a batch, task, or user-facing answer complete:
+
+1. Reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any still-open required follow-up.
+2. If a concrete required next action is already known and still inside the admitted scope, keep the task open instead of stopping at a partial sub-batch.
+3. Record the durable resume point in `status.md`: current stage, last accepted artifact, next concrete action, and open obligations before switching away or closing.
 
 ## Parallel execution protocol
 
