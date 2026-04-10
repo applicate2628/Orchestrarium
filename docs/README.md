@@ -6,6 +6,7 @@ Use it together with:
 
 - [../README.md](../README.md) for the repository overview
 - [../INSTALL.md](../INSTALL.md) for install and runtime rules
+- [../src.gemini/README.md](../src.gemini/README.md) for the installable source subtree
 - [../references-gemini/README.md](../references-gemini/README.md) for the provider-local reference tree
 
 Current docs in this branch:
