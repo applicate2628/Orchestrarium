@@ -6,7 +6,7 @@ Platform-specific rules for Claude Code. Shared governance (hygiene, publication
 
 ## Delegation rule
 
-If `## Project policies` section is missing from this file, suggest running `/agents-init-project` before starting implementation work.
+If `## Project policies` or `.claude/.agents-mode` is missing for the current project, suggest running `/agents-init-project` before starting implementation work.
 
 When subagent delegation is appropriate, classify the task and pick the matching team template from `.claude/agents/team-templates/`.
 

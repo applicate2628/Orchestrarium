@@ -76,14 +76,14 @@ All chains with 2+ stages save state in `work-items/active/` — both the status
 | `/agents-resume` | Resume an interrupted agent chain from saved state |
 | `/agents-qa-session` | Interactive testing: you direct, QA agent investigates |
 | `/agents-help` | Overview of all agents, templates, skills, and current policies |
-| `/agents-init-project` | Interactive wizard — configure project policies |
+| `/agents-init-project` | Interactive wizard — configure project policies and `.claude/.agents-mode` |
 | `/agents-policies` | View current policies or update one: `/agents-policies testing tdd` |
 | `/agents-check-policies` | Audit codebase compliance with configured policies |
 | `/agents-validate` | Structural integrity check of the skill-pack |
 | `/agents-status` | Project dashboard: active chains, policies, pack summary |
 | `/agents-check-safety` | Scan staged files for secrets before commit |
 
-Run `/agents-init-project` after installing to configure project-level choices. All agents read the resulting `## Project policies` section in CLAUDE.md automatically.
+Run `/agents-init-project` after installing to configure project-level choices. It now writes both the `## Project policies` section in `.claude/CLAUDE.md` and the canonical `.claude/.agents-mode` operator file for the Claude line.
 
 ## Core principles
 
@@ -106,7 +106,7 @@ The repository is built around a few stable rules:
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
 Runtime governance lives in [src.claude/CLAUDE.md](src.claude/CLAUDE.md) — delegation rule, engineering hygiene, publication safety, role index, project policies, and the external-dispatch entrypoint.
-Branch-local docs live in [docs/README.md](docs/README.md) — root surface index, Claude-line `.claude/.agents-mode` reference, and runtime-layout notes.
+Branch-local docs live in [docs/README.md](docs/README.md) — root surface index, Claude-line `.claude/.agents-mode` reference, and runtime-layout notes. The operator reference also records task continuity and continue-by-default execution expectations for initialized projects.
 Reference blueprints live in [references-claude/](references-claude/) — a common provider-local reference tree with a README, core operating-model docs, and RU translations.
 
 ## Team structure
@@ -197,7 +197,7 @@ Use the install scripts, or copy `src.claude/` contents into the target repo's `
 2. Merge `src.claude/CLAUDE.md` content at the TOP of your target repo's `.claude/CLAUDE.md`, or replace it entirely
 3. Optionally copy `src.claude/memory/` for experience-based feedback rules
 4. Restart Claude so the new agents and skills are discovered
-5. Run `/agents-init-project` to configure project policies
+5. Run `/agents-init-project` to configure project policies and initialize `.claude/.agents-mode`
 
 `src.claude/agents/contracts/` is NOT a duplicate of `references-claude/`. Contracts contain handoff templates and a compact routing reference for the lead. References are the full canonical set including diagrams, translations, and strategy comparisons — they stay with the skill pack source.
 
