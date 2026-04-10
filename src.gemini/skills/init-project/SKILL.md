@@ -23,6 +23,8 @@ It must not replace Gemini's official runtime config in:
 - Side requests may temporarily interrupt that task, but they do not replace it unless the user explicitly reprioritizes, cancels, or parks it.
 - After any side request, explicitly resume the primary task and state the next concrete step.
 - After an accepted phase or completed batch, continue to the next clear step unless a real gate blocks progression.
+- Before claiming completion, reconcile the current result against the original request and any still-open required follow-up inside the same task.
+- If a required next action is already known and still inside the current task, keep the task open instead of stopping at a partial batch.
 
 ## Steps
 
