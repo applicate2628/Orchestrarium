@@ -1,4 +1,0 @@
-interface:
-  display_name: "Backend Engineer"
-  short_description: "Implement approved backend phases"
-  default_prompt: "Use $backend-engineer to implement only the approved backend phase and return a small, verified diff."

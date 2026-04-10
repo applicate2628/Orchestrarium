@@ -1,4 +1,0 @@
-interface:
-  display_name: "Knowledge Archivist"
-  short_description: "Maintain docs, plans, and repo hygiene"
-  default_prompt: "Use $knowledge-archivist to update the approved repository knowledge artifacts and return one repository stewardship package. If the patch changes repository-wide control-plane semantics instead of hygiene only, stop at the stewardship patch and expect an independent $architecture-reviewer gate before completion."

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Review Changes"
-  short_description: "Review repo-wide impact of recent changes"
-  default_prompt: "Use $review-changes to run a full read-only repository impact review starting from current local changes or a specified diff, branch, commit range, or PR. Verify that recent fixes are complete, unchanged dependents still hold, logic remains coherent across the wider repo, and regressions or missed edge cases are surfaced before commit."

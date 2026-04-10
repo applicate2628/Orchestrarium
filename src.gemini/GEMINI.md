@@ -1,5 +1,4 @@
-@../shared/AGENTS.shared.md
-
+<!-- ORCHESTRARIUM_GEMINI_PACK:START -->
 # Gemini Provider Pack
 
 This file is the Gemini-native runtime entrypoint for the Orchestrarium Gemini pack scaffold.
@@ -16,9 +15,10 @@ Use this pack as a minimal Gemini-native scaffold built on official runtime surf
 
 This scaffold intentionally stays lean and official-preferred:
 
-- shared governance is imported directly from `../shared/AGENTS.shared.md` through standard `GEMINI.md` imports
+- governance and runtime notes stay local to the Gemini scaffold instead of importing a shared monorepo layer
 - the expertise layer is modeled as Gemini skills, not a custom `agents/` tree
 - commands stay user-invoked TOML shortcuts rather than pretending to be skills
 - Orchestrarium-specific cross-provider routing semantics, when needed, belong in `.gemini/.agents-mode` as a repo-local overlay rather than as a replacement for official Gemini settings
 - use the Orchestrarium Gemini `init-project` helper only after the official `/init` has created or refreshed the project `GEMINI.md`
 - pack growth should stay inside official Gemini surfaces first, then add repo-local layers only when a real runtime need appears
+<!-- ORCHESTRARIUM_GEMINI_PACK:END -->

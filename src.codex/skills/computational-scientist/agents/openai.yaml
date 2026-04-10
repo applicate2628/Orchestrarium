@@ -1,4 +1,0 @@
-interface:
-  display_name: "Computational Scientist"
-  short_description: "Math, physics, and numerics R&D"
-  default_prompt: "Use $computational-scientist to formalize the scientific model, numerical method, solver strategy, and validation criteria before implementation."

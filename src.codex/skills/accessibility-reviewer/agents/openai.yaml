@@ -1,4 +1,0 @@
-interface:
-  display_name: "Accessibility Reviewer"
-  short_description: "Run an independent accessibility gate"
-  default_prompt: "Use $accessibility-reviewer to perform an independent accessibility gate for this phase and return one review report with findings or explicit approval."

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Algorithm Scientist"
-  short_description: "Formalize algorithms before code"
-  default_prompt: "Use $algorithm-scientist to formalize this algorithmic problem and return one scientific analysis package before implementation."

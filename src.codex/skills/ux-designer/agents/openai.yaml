@@ -1,4 +1,0 @@
-interface:
-  display_name: "UX Designer"
-  short_description: "Own pre-implementation UX design"
-  default_prompt: "Use $ux-designer to produce one UX design package for this approved user-facing work before planning and implementation."

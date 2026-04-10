@@ -1,4 +1,0 @@
-interface:
-  display_name: "UI Test Engineer"
-  short_description: "Verify Qt UI regressions and states"
-  default_prompt: "Use $ui-test-engineer to verify the Qt UI for regressions in interaction states, keyboard and focus behavior, high-DPI rendering, theme variance, and visual or screenshot evidence, then return one verification report."

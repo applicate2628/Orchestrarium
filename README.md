@@ -1,102 +1,58 @@
-# Orchestrarium
+# Orchestrarium Gemini
 
-A cross-provider agent orchestration monorepo for provider-specific agent packs:
+A standalone Gemini CLI provider-pack scaffold built around the official Gemini-preferred runtime model.
 
-- `src.codex/` — the Codex provider pack
-- `src.claude/` — the Claude Code provider pack
-- `src.gemini/` — the Gemini CLI provider-pack scaffold
+This branch intentionally keeps only Gemini-specific source and one small Orchestrarium overlay layer:
 
-Current provider packs share the same governance model and role vocabulary, while each ships in the structure and runtime format expected by its own provider line. The Gemini line currently enters as a lean source scaffold on the same cross-provider core rather than as a third independent methodology tree.
+- Gemini owns `GEMINI.md` through the built-in `/init` flow.
+- Gemini runtime config stays in `.gemini/settings.json`.
+- Orchestrarium adds an optional `.gemini/.agents-mode` overlay only when shared routing toggles are needed.
 
 ## Repository layout
 
 ```text
-shared/             Shared cross-provider governance and canonical reference cores
-src.codex/          Codex provider-pack source
-src.claude/         Claude Code provider-pack source
-src.gemini/         Gemini CLI provider-pack scaffold
-references-codex/   Codex-specific addenda and compatibility pointers
-references-claude/  Claude Code-specific addenda and compatibility pointers
-RELEASE_NOTES.md    Canonical tracked release log
-install.sh          Entry-point installer (asks which pack to install)
-install.ps1         Entry-point installer (asks which pack to install)
-scripts/            Pack-specific installers (called by entry points)
-AGENTS.md           Dev overlay for Codex pack maintenance
-CLAUDE.md           Dev overlay for Claude Code pack maintenance
+install-gemini.ps1          Windows installer
+install-gemini.sh           POSIX installer
+references-gemini/          Required Gemini-side maintainer references
+src.gemini/                 Gemini source scaffold
+  GEMINI.md                 Native Gemini entrypoint
+  skills/<name>/SKILL.md    Gemini Agent Skills
+  commands/**/*.toml        Gemini custom commands
+  extension/                Future extension and MCP boundary
+  scripts/validate-pack.sh  Standalone scaffold validation
+docs/agents-mode-reference.md
+                            Canonical reference for the optional Orchestrarium
+                            `.gemini/.agents-mode` overlay
+docs/provider-runtime-layout.md
+                            Source-vs-installed Gemini surface map
+INSTALL.md                  Installation and usage notes for this standalone branch
+LICENSE                     Apache License 2.0
 ```
 
-## Provider Packs
+## Current scope
 
-| Pack | Source | Installs into | Runtime governance | Validation |
-| --- | --- | --- | --- | --- |
-| Codex | `src.codex/` | `~/.codex/` or project `.agents/skills/` | `src.codex/AGENTS.md` | `bash src.codex/skills/lead/scripts/validate-skill-pack.sh` |
-| Claude Code | `src.claude/` | `~/.claude/` or project `.claude/` | `src.claude/CLAUDE.md` | `bash src.claude/agents/scripts/validate-skill-pack.sh` |
-| Gemini CLI | `src.gemini/` | scaffold only for now | `src.gemini/GEMINI.md` | `bash src.gemini/scripts/validate-pack.sh` |
+This branch is a standalone Gemini pack with a lean official-preferred install surface.
 
-Shared design references now live in `shared/references/`. Provider-local `references-codex/` and `references-claude/` now keep only provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each provider-local tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
+- It ships Gemini-native installers for project-local and global installs.
+- It carries one required provider-local reference tree: `references-gemini/`.
+- It does not carry Codex or Claude provider trees.
+- It does not carry shared monorepo reference trees or cross-provider maintenance overlays.
 
-Cross-provider execution is available through two routing adapters:
+## Gemini bootstrap model
 
-- `$external-worker` is the external execution adapter for eligible implementer roles.
-- `$external-reviewer` is the external execution adapter for eligible review and QA roles.
-- `$consultant` remains advisory-only and is not reused for implementation or review gates.
+1. Install the pack with `install-gemini.ps1` or `install-gemini.sh`.
+2. If the target repository already has a user-owned `GEMINI.md`, the installer preserves it and prepends only the managed Orchestrarium pack block.
+3. Run Gemini's built-in `/init` when you want Gemini to refresh or extend the user-owned portion of `GEMINI.md`.
+4. Use the Orchestrarium Gemini `init-project` helper only if you also want the optional `.gemini/.agents-mode` overlay.
+5. Keep `.gemini/settings.json` as the Gemini-native runtime config surface.
 
-## Installation
-
-Use the root router installers for the common path:
+## Validation
 
 ```bash
-bash install.sh --global
+bash src.gemini/scripts/validate-pack.sh .
 ```
 
-```powershell
-.\install.ps1 -Global
-```
-
-Each router asks what to install:
-
-```text
-What to install?
-  1) Codex pack
-  2) Claude Code
-  3) Both
-```
-
-Then it forwards the same arguments to the provider-specific installer in `scripts/`. Use `scripts/install-codex.*` or `scripts/install-claude.*` directly when you want deterministic single-provider automation.
-
-Important: operator preferences now live in pack-local `agents-mode` files; legacy `consultant-mode` files remain fallback-only during migration.
-
-- Codex reads `.agents/.agents-mode`.
-- Claude Code reads `.claude/.agents-mode`.
-- `consultantMode` controls `$consultant`.
-- `delegationMode` supports `manual | auto | force`: `manual` keeps explicit delegation, `auto` leaves ordinary delegation to routing judgment, and `force` means delegate whenever a matching role and working tool path are available.
-- `mcpMode: auto | force` controls MCP usage: `auto` leaves MCP choice to routing judgment, while `force` means the config itself is an explicit instruction to use relevant available MCP tools instead of treating them as optional.
-- `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
-- Codex may additionally use `externalClaudeProfile` to select the Claude CLI execution profile: `sonnet-high` or `opus-max`.
-- Claude Code does not use `externalClaudeProfile` in its canonical config because Claude-line external dispatch goes to Codex CLI.
-- For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config stays in `.gemini/settings.json`; the Orchestrarium Gemini `init-project` helper only bootstraps the optional `.gemini/.agents-mode` overlay after `/init`.
-- Explicit user role requests still override the toggle state in either direction.
-
-See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
-
-## References and maintenance
-
-- `shared/references/` contains the shared cross-provider design core that current and future provider packs can reuse.
-- `references-codex/` contains Codex-specific addenda plus compatibility pointers for older reference paths.
-- `references-claude/` contains Claude-specific addenda plus compatibility pointers for older reference paths.
-- `subagent-operating-model` is no longer duplicated per provider pack: use the shared core for the canonical blueprint and the provider-local file only for runtime and repository concretization.
-- `AGENTS.md` is the root development overlay for Codex provider-pack maintenance.
-- `CLAUDE.md` is the root development overlay for Claude Code provider-pack maintenance.
-
-Before publishing maintenance changes, validate the active provider surfaces:
-
-```bash
-bash src.codex/skills/lead/scripts/validate-skill-pack.sh
-bash src.claude/agents/scripts/validate-skill-pack.sh
-bash src.gemini/scripts/validate-pack.sh
-```
-
-For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title.
+Branch-local docs start at [docs/README.md](docs/README.md).
 
 ## License
 

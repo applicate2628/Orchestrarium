@@ -1,4 +1,0 @@
-interface:
-  display_name: "Frontend Engineer"
-  short_description: "Implement approved frontend phases"
-  default_prompt: "Use $frontend-engineer to implement only the approved frontend phase and return a small, verified diff."
