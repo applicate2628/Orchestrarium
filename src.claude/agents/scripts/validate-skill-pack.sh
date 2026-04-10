@@ -35,6 +35,12 @@ for f in $PACK/CLAUDE.md $PACK/AGENTS.shared.md $PACK/agents/lead.md $PACK/agent
   if [[ -f "$f" ]]; then pass "$f exists"; else fail "$f missing"; fi
 done
 
+if [[ "$PACK" == "src.claude" ]]; then
+  for f in docs/README.md docs/agents-mode-reference.md docs/provider-runtime-layout.md references-claude/README.md; do
+    if [[ -f "$f" ]]; then pass "$f exists"; else fail "$f missing"; fi
+  done
+fi
+
 if [[ -d "$PACK/commands" ]]; then
   fail "$PACK/commands should be absent after skills migration"
 else

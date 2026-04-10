@@ -86,6 +86,7 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 | `src.claude/agents/contracts/policies-catalog.md` | Policy catalog with options and defaults | Yes |
 | `src.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
 | `src.claude/memory/` | Feedback rules, populated over time | Optional |
+| `docs/` | Branch-local docs index, Claude-line `.claude/.agents-mode` reference, and runtime-layout notes | No — maintainer-facing source docs |
 | `references-claude/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
 | `work-items/` | This repo's task memory | No — skill-pack internal |
 
