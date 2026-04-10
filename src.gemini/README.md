@@ -8,17 +8,30 @@ Use it together with:
 - [../shared/references/README.md](../shared/references/README.md) for the shared design core
 - [../references-gemini/README.md](../references-gemini/README.md) for the Gemini-side provider addendum
 
-The structure follows the official Gemini-preferred model instead of mirroring the Codex or Claude lines:
+## Source shape
 
-- `GEMINI.md` as the runtime entrypoint
-- `AGENTS.shared.md` as the imported shared-governance module loaded by `GEMINI.md`
-- Gemini CLI built-in `/init` as the official project bootstrap for `GEMINI.md`
-- `.gemini/settings.json` as the official runtime-state and configuration surface
-- `skills/init-project/SKILL.md` plus `commands/agents/init-project.toml` to bootstrap Orchestrarium's `.gemini/.agents-mode` overlay after the official `/init`
-- `skills/<name>/SKILL.md` for Gemini Agent Skills
-- `commands/*.toml` for Gemini custom commands
-- `extension/gemini-extension.json` for future MCP and tool packaging
+- `GEMINI.md` — Gemini-native runtime entrypoint template
+- `AGENTS.shared.md` — source-side shared-governance module, materialized by installers as runtime `AGENTS.md`
+- `skills/` — full stable Gemini skill catalog for the shared role vocabulary
+- `agents/` — full Gemini preview specialist-team surface
+- `agents/team-templates/` — repo-local orchestration templates for the shared role principle
+- `commands/agents/*.toml` — Gemini command entrypoints
+- `extension/gemini-extension.json` — extension-manifest boundary
 
-This source tree intentionally avoids an `AGENTS.md` runtime entrypoint, a Gemini-specific `agents/` tree, or settings-owned MCP wiring inside instruction files. Shared governance is carried as one imported markdown module, while MCP servers such as Serena, Fetch, or Context7 remain a `settings.json` or extension-manifest concern.
+## Contract
 
-Inside the monorepo, this subtree carries the Gemini source surface and the shared-reference alignment work, not the standalone installer entrypoints. When Orchestrarium needs the same shared routing toggles used on the Codex and Claude lines, that provider-local overlay belongs in `.gemini/.agents-mode`; it complements official `.gemini/settings.json` instead of replacing it, and the local `init-project` helper exists to initialize that overlay after Gemini's built-in `/init`. When Gemini routes external work to Claude CLI, the same overlay may also carry `externalClaudeSecretMode: auto | force`.
+This pack no longer pretends to be a minimal Gemini-only scaffold.
+
+It intentionally combines:
+
+- official stable Gemini `skills/`
+- official preview Gemini `agents/`
+- repo-local team-template metadata
+
+That combination is deliberate: all three Orchestrarium packs now carry the same role principle, while Gemini remains honest about which surfaces are official provider features and which surfaces are Orchestrarium orchestration metadata.
+
+## Orchestration truth
+
+- Gemini specialist subagents exist in `agents/`.
+- The orchestration owner is still the main Gemini session under `skills/lead/SKILL.md`.
+- Team-template execution happens in the main session because Gemini subagents cannot recursively call other subagents.

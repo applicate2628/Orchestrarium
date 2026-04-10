@@ -93,16 +93,18 @@ Use `scripts/install-gemini.sh` or `scripts/install-gemini.ps1` when you want th
 
 | Command | Result |
 | --- | --- |
-| `bash scripts/install-gemini.sh --global` | Installs into `~/.gemini/` |
-| `bash scripts/install-gemini.sh --target /path/to/project` | Installs into the target project's `GEMINI.md`, `AGENTS.shared.md`, and `.gemini/` |
-| `.\scripts\install-gemini.ps1 -Global` | Installs into `~/.gemini/` |
-| `.\scripts\install-gemini.ps1 -Target "D:\path\to\project"` | Installs into the target project's `GEMINI.md`, `AGENTS.shared.md`, and `.gemini/` |
+| `bash scripts/install-gemini.sh --global` | Installs into `~/.gemini/` including `skills/`, `agents/`, and `commands/` |
+| `bash scripts/install-gemini.sh --target /path/to/project` | Installs into the target project's `GEMINI.md`, root `AGENTS.md` when absent, and `.gemini/skills`, `.gemini/agents`, `.gemini/commands` |
+| `.\scripts\install-gemini.ps1 -Global` | Installs into `~/.gemini/` including `skills/`, `agents/`, and `commands/` |
+| `.\scripts\install-gemini.ps1 -Target "D:\path\to\project"` | Installs into the target project's `GEMINI.md`, root `AGENTS.md` when absent, and `.gemini/skills`, `.gemini/agents`, `.gemini/commands` |
 
 Notes:
 
 - Project-level Gemini installs preserve any user-owned content outside the managed Orchestrarium block inside `GEMINI.md`.
-- Gemini installs also place a pack-managed `AGENTS.shared.md` adjacent to `GEMINI.md`; Gemini loads it through the official `@./AGENTS.shared.md` import in `GEMINI.md`.
-- Gemini runtime config and MCP wiring remain owned by `.gemini/settings.json` and `gemini-extension.json`; servers such as Serena, Fetch, or Context7 do not belong inside `AGENTS.shared.md`.
+- User-side `@...` imports that live in the installed `GEMINI.md` import block alongside `@./AGENTS.md` are preserved across reinstalls.
+- Gemini installs materialize the shared-governance layer as `AGENTS.md`; `GEMINI.md` loads it through the official `@./AGENTS.md` import. Project installs preserve an existing root `AGENTS.md` instead of overwriting it.
+- Gemini installs materialize both the stable expertise catalog in `.gemini/skills/` and the preview specialist-team layer in `.gemini/agents/`.
+- Gemini runtime config and MCP wiring remain owned by `.gemini/settings.json` and `gemini-extension.json`; servers such as Serena, Fetch, or Context7 do not belong inside `AGENTS.md`.
 - The optional Orchestrarium overlay file is `.gemini/.agents-mode`.
 - After first-time Gemini project install, run Gemini CLI `/init` if you want Gemini to create or refresh the user-owned portion of `GEMINI.md`, and then use the Orchestrarium Gemini `init-project` helper only if you also want `.gemini/.agents-mode`.
 - Validation commands: `bash src.gemini/scripts/validate-pack.sh` or `.\src.gemini\scripts\validate-pack.ps1`.
@@ -116,7 +118,6 @@ Expected project-level result:
 ```text
 project/
   AGENTS.md
-  AGENTS.shared.md
   GEMINI.md
   .agents/
     skills/
@@ -125,6 +126,7 @@ project/
     CLAUDE.md
   .gemini/
     skills/
+    agents/
     commands/
 ```
 
@@ -159,6 +161,8 @@ The monorepo still keeps the full Gemini line as a validated source tree in addi
 - branch-level docs entrypoint: `docs/README.md`
 - built-in initialization: Gemini CLI `/init` writes or tailors the project `GEMINI.md`
 - expertise layer: `src.gemini/skills/<name>/SKILL.md`
+- preview specialist-team layer: `src.gemini/agents/*.md`
+- repo-local team templates: `src.gemini/agents/team-templates/*.json`
 - custom commands: `src.gemini/commands/**/*.toml`
 - official runtime config: project `.gemini/settings.json`
 - Orchestrarium operator overlay: project `.gemini/.agents-mode`
@@ -167,4 +171,4 @@ The monorepo still keeps the full Gemini line as a validated source tree in addi
 - validation commands: `bash src.gemini/scripts/validate-pack.sh` or `.\src.gemini\scripts\validate-pack.ps1`
 - Orchestrarium overlay bootstrap: `src.gemini/commands/agents/init-project.toml` and `src.gemini/skills/init-project/SKILL.md`
 
-It intentionally follows the official Gemini-preferred layout (`GEMINI.md` + imported markdown modules + `skills` + `commands` + `extension`) instead of inventing a Claude-like `agents/` source tree. Use Gemini's built-in `/init` for the official `GEMINI.md` bootstrap first. When Orchestrarium needs the same cross-provider routing toggles used on the Codex and Claude lines, initialize the repo-local `.gemini/.agents-mode` overlay separately through the Orchestrarium Gemini init helper rather than replacing Gemini's official `.gemini/settings.json`. MCP wiring for servers such as Serena, Fetch, or Context7 remains a `settings.json` or `gemini-extension.json` concern. When Gemini routes external work to Claude CLI, that overlay may also carry `externalClaudeSecretMode: auto | force`. Full operator semantics, including task continuity and continue-by-default execution expectations, live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
+It intentionally combines the official stable Gemini surfaces (`GEMINI.md`, imported markdown modules, `skills`, `commands`, `extension`) with the official preview `agents/` surface so the Gemini line can carry the same shared role principle as the Codex and Claude packs without lying about provider ownership. Use Gemini's built-in `/init` for the official `GEMINI.md` bootstrap first. When Orchestrarium needs the same cross-provider routing toggles used on the Codex and Claude lines, initialize the repo-local `.gemini/.agents-mode` overlay separately through the Orchestrarium Gemini init helper rather than replacing Gemini's official `.gemini/settings.json`. MCP wiring for servers such as Serena, Fetch, or Context7 remains a `settings.json` or `gemini-extension.json` concern. When Gemini routes external work to Claude CLI, that overlay may also carry `externalClaudeSecretMode: auto | force`. Full operator semantics, including task continuity and continue-by-default execution expectations, live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).

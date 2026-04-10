@@ -3,7 +3,7 @@
     Install the Orchestrarium Gemini pack.
 .DESCRIPTION
     Installs Gemini-native runtime surfaces for project-local or global Gemini CLI use.
-    Project installs write GEMINI.md at the project root and commands/skills under .gemini/.
+    Project installs write GEMINI.md and AGENTS.md at the project root and runtime assets under .gemini/.
 .EXAMPLE
     .\scripts\install-gemini.ps1
     .\scripts\install-gemini.ps1 -Global
@@ -130,10 +130,117 @@ function Install-Tree {
     }
 }
 
+function Get-PreservedGeminiImports {
+    param(
+        [string[]]$Lines,
+        [int]$ManagedStartLine,
+        [int]$ManagedEndLine
+    )
+
+    $imports = @()
+    if ($ManagedStartLine -lt 0 -or $ManagedEndLine -le $ManagedStartLine) {
+        return $imports
+    }
+
+    $collectImports = $false
+    for ($i = $ManagedStartLine + 1; $i -lt $ManagedEndLine; $i++) {
+        $line = $Lines[$i]
+
+        if (-not $collectImports) {
+            if ($line -match '^@' -or [string]::IsNullOrWhiteSpace($line)) {
+                $collectImports = $true
+            } else {
+                break
+            }
+        }
+
+        if ($line -match '^@') {
+            if ($line -ne '@./AGENTS.md' -and $line -ne '@./AGENTS.shared.md' -and $imports -notcontains $line) {
+                $imports += $line
+            }
+            continue
+        }
+
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        break
+    }
+
+    return $imports
+}
+
+function Get-MergedGeminiManagedContent {
+    param(
+        [string[]]$ExistingLines,
+        [int]$ManagedStartLine,
+        [int]$ManagedEndLine,
+        [string]$SourceFile
+    )
+
+    $preservedPrefix = @()
+    if ($ManagedStartLine -gt 0) {
+        $preservedPrefix = $ExistingLines[0..($ManagedStartLine - 1)]
+    }
+
+    $preservedSuffix = @()
+    if ($ManagedEndLine + 1 -lt $ExistingLines.Count) {
+        $preservedSuffix = $ExistingLines[($ManagedEndLine + 1)..($ExistingLines.Count - 1)]
+    }
+
+    $preservedImports = Get-PreservedGeminiImports -Lines $ExistingLines -ManagedStartLine $ManagedStartLine -ManagedEndLine $ManagedEndLine
+    $sourceLines = @((Get-Content -LiteralPath $SourceFile) | ForEach-Object { $_ -replace '^@\./AGENTS\.shared\.md$', '@./AGENTS.md' })
+    $importLine = -1
+    for ($i = 0; $i -lt $sourceLines.Count; $i++) {
+        if ($sourceLines[$i] -match '^@') {
+            $importLine = $i
+            break
+        }
+    }
+
+    $mergedManagedLines = $sourceLines
+    if ($importLine -ge 0) {
+        $tailStart = $importLine + 1
+        while ($tailStart -lt $sourceLines.Count -and [string]::IsNullOrWhiteSpace($sourceLines[$tailStart])) {
+            $tailStart++
+        }
+
+        $tailLines = @()
+        if ($tailStart -lt $sourceLines.Count) {
+            $tailLines = $sourceLines[$tailStart..($sourceLines.Count - 1)]
+        }
+
+        $mergedManagedLines = @()
+        if ($importLine -gt 0) {
+            $mergedManagedLines += $sourceLines[0..($importLine - 1)]
+        }
+        $mergedManagedLines += $sourceLines[$importLine]
+        if ($preservedImports.Count -gt 0) {
+            $mergedManagedLines += $preservedImports
+        }
+        if ($tailLines.Count -gt 0) {
+            $mergedManagedLines += ""
+            $mergedManagedLines += $tailLines
+        }
+    }
+
+    $finalLines = @()
+    if ($preservedPrefix.Count -gt 0) {
+        $finalLines += $preservedPrefix
+    }
+    $finalLines += $mergedManagedLines
+    if ($preservedSuffix.Count -gt 0) {
+        $finalLines += $preservedSuffix
+    }
+
+    return ($finalLines -join "`n")
+}
+
 function Merge-GeminiFile {
     param([string]$SourceFile, [string]$TargetFile)
 
-    $managed = Get-Content -LiteralPath $SourceFile -Raw
+    $managed = (Get-Content -LiteralPath $SourceFile -Raw) -replace '@\./AGENTS\.shared\.md', '@./AGENTS.md'
     if (-not (Test-Path -LiteralPath $TargetFile)) {
         Write-Host "  Creating GEMINI.md..."
         if (-not $DryRun) {
@@ -145,13 +252,23 @@ function Merge-GeminiFile {
     }
 
     $existing = Get-Content -LiteralPath $TargetFile -Raw
-    $startIndex = $existing.IndexOf($ManagedStart, [System.StringComparison]::Ordinal)
-    $endIndex = $existing.IndexOf($ManagedEnd, [System.StringComparison]::Ordinal)
-    if ($startIndex -ge 0 -and $endIndex -ge $startIndex) {
+    $lines = Get-Content -LiteralPath $TargetFile
+    $managedStartLine = -1
+    $managedEndLine = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -eq $ManagedStart -and $managedStartLine -lt 0) {
+            $managedStartLine = $i
+        }
+        if ($lines[$i] -eq $ManagedEnd) {
+            $managedEndLine = $i
+            break
+        }
+    }
+
+    if ($managedStartLine -ge 0 -and $managedEndLine -ge $managedStartLine) {
         Write-Host "  GEMINI.md: replacing managed Orchestrarium block..."
         if (-not $DryRun) {
-            $endIndex += $ManagedEnd.Length
-            $updated = $existing.Substring(0, $startIndex) + $managed + $existing.Substring($endIndex)
+            $updated = Get-MergedGeminiManagedContent -ExistingLines $lines -ManagedStartLine $managedStartLine -ManagedEndLine $managedEndLine -SourceFile $SourceFile
             Set-Content -LiteralPath $TargetFile -Value $updated -NoNewline
         } else {
             Write-Host "    [dry-run] would replace managed GEMINI.md block"
@@ -168,9 +285,18 @@ function Merge-GeminiFile {
 }
 
 function Install-PackFile {
-    param([string]$SourceFile, [string]$TargetFile, [string]$Label)
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile,
+        [string]$Label,
+        [switch]$PreserveExisting
+    )
 
     if (Test-Path -LiteralPath $TargetFile) {
+        if ($PreserveExisting) {
+            Write-Host "  Preserving existing $Label..."
+            return
+        }
         Write-Host "  Replacing $Label..."
         if (-not $DryRun) {
             Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
@@ -185,6 +311,21 @@ function Install-PackFile {
         Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
     } else {
         Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
+function Remove-LegacyPackFile {
+    param([string]$TargetFile, [string]$Label)
+
+    if (-not (Test-Path -LiteralPath $TargetFile)) {
+        return
+    }
+
+    Write-Host "  Removing legacy $Label..."
+    if (-not $DryRun) {
+        Remove-Item -LiteralPath $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would remove $TargetFile"
     }
 }
 
@@ -203,15 +344,19 @@ if ($Global) {
 
 if ($Mode -eq "global") {
     $SkillsTarget = Join-Path $InstallRoot "skills"
+    $AgentsTarget = Join-Path $InstallRoot "agents"
     $CommandsTarget = Join-Path $InstallRoot "commands"
     $GeminiTarget = Join-Path $InstallRoot "GEMINI.md"
-    $SharedTarget = Join-Path $InstallRoot "AGENTS.shared.md"
+    $SharedTarget = Join-Path $InstallRoot "AGENTS.md"
+    $LegacySharedTarget = Join-Path $InstallRoot "AGENTS.shared.md"
 } else {
     $InstallRoot = Join-Path $ProjectRoot ".gemini"
     $SkillsTarget = Join-Path $InstallRoot "skills"
+    $AgentsTarget = Join-Path $InstallRoot "agents"
     $CommandsTarget = Join-Path $InstallRoot "commands"
     $GeminiTarget = Join-Path $ProjectRoot "GEMINI.md"
-    $SharedTarget = Join-Path $ProjectRoot "AGENTS.shared.md"
+    $SharedTarget = Join-Path $ProjectRoot "AGENTS.md"
+    $LegacySharedTarget = Join-Path $ProjectRoot "AGENTS.shared.md"
 }
 
 Write-Host "=== Orchestrarium Gemini Installer ===" -ForegroundColor Cyan
@@ -219,16 +364,18 @@ Write-Host "Source: $Source"
 Write-Host "Mode:   $Mode"
 Write-Host "Runtime root: $InstallRoot"
 Write-Host "GEMINI.md:    $GeminiTarget"
-Write-Host "Shared file:  $SharedTarget"
+Write-Host "AGENTS.md:    $SharedTarget"
+Write-Host "Agents:       $AgentsTarget"
 if ($DryRun) { Write-Host "Mode:   dry-run" -ForegroundColor Yellow }
 Write-Host ""
 
 if (-not (Test-Path -LiteralPath (Join-Path $Source "skills"))) { throw "Missing source skills/ directory." }
+if (-not (Test-Path -LiteralPath (Join-Path $Source "agents"))) { throw "Missing source agents/ directory." }
 if (-not (Test-Path -LiteralPath (Join-Path $Source "commands"))) { throw "Missing source commands/ directory." }
 if (-not (Test-Path -LiteralPath (Join-Path $Source "GEMINI.md"))) { throw "Missing source GEMINI.md." }
 if (-not (Test-Path -LiteralPath (Join-Path $Source "AGENTS.shared.md"))) { throw "Missing source AGENTS.shared.md." }
 
-if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $CommandsTarget) -or (Test-Path -LiteralPath $GeminiTarget) -or (Test-Path -LiteralPath $SharedTarget)) {
+if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $AgentsTarget) -or (Test-Path -LiteralPath $CommandsTarget) -or (Test-Path -LiteralPath $GeminiTarget) -or (Test-Path -LiteralPath $SharedTarget)) {
     if (-not (Confirm-Action "Proceed with reinstall/update of the Gemini pack?")) {
         Write-Host "Install cancelled by user." -ForegroundColor Yellow
         exit 1
@@ -237,9 +384,15 @@ if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $Commands
 
 Ensure-Dir $InstallRoot
 Install-Tree -SourceDir (Join-Path $Source "skills") -TargetDir $SkillsTarget -Label "skills"
+Install-Tree -SourceDir (Join-Path $Source "agents") -TargetDir $AgentsTarget -Label "agents"
 Install-Tree -SourceDir (Join-Path $Source "commands") -TargetDir $CommandsTarget -Label "commands"
 Merge-GeminiFile -SourceFile (Join-Path $Source "GEMINI.md") -TargetFile $GeminiTarget
-Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.shared.md"
+if ($Mode -eq "global") {
+    Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.md"
+} else {
+    Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.md" -PreserveExisting
+}
+Remove-LegacyPackFile -TargetFile $LegacySharedTarget -Label "AGENTS.shared.md"
 
 if ($DryRun) {
     Write-Host ""
@@ -256,6 +409,9 @@ foreach ($path in @(
     (Join-Path $SkillsTarget "README.md"),
     (Join-Path $SkillsTarget "lead\SKILL.md"),
     (Join-Path $SkillsTarget "init-project\SKILL.md"),
+    (Join-Path $AgentsTarget "README.md"),
+    (Join-Path $AgentsTarget "lead.md"),
+    (Join-Path $AgentsTarget "team-templates\full-delivery.json"),
     (Join-Path $CommandsTarget "agents\help.toml"),
     (Join-Path $CommandsTarget "agents\init-project.toml")
 )) {

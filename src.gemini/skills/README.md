@@ -1,14 +1,24 @@
 # Gemini Skills
 
-This directory is the canonical Gemini-native expertise layer for the provider pack source tree.
+This directory is the stable Gemini expertise layer for the full shared role vocabulary.
 
-Use `skills/<name>/SKILL.md` for workflow and role-like expertise that Gemini should activate on demand.
+## What lives here
 
-This source tree intentionally stays minimal:
+- every shared specialist role from the common Orchestrarium model
+- Gemini-line `$lead` as the orchestration skill
+- Gemini-line `init-project` as the overlay bootstrap helper
+- Gemini-line `second-opinion`, `consultant`, and external adapter skills
 
-- Gemini skills are official and stable.
-- Gemini `/init` and `.gemini/settings.json` remain the official bootstrap and runtime-state surfaces; skills are expertise, not configuration.
-- `init-project` is the only current skill that touches configuration, and it only owns the Orchestrarium `.gemini/.agents-mode` overlay after the official `/init` step.
-- Gemini extension sub-agents exist, but remain a preview feature in the official docs.
-- The baseline source tree should prefer the stable skills model and keep future preview-agent adoption optional.
-- Only a minimal lead skill plus the overlay-bootstrap `init-project` helper are included until the Gemini line needs a fuller role catalog.
+## Why both `skills/` and `agents/` exist
+
+Gemini now uses two official provider surfaces on purpose:
+
+- `skills/` for stable on-demand expertise
+- `agents/` for explicit preview specialist delegation
+
+The common role principle depends on both:
+
+- skills provide the full durable role catalog
+- agents provide the explicit team members that the main Gemini session can delegate to
+
+Orchestration remains in `skills/lead`, not in a recursive lead subagent.
