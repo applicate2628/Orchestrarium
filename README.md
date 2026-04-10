@@ -5,6 +5,7 @@ A standalone Gemini CLI provider pack built around the official Gemini-preferred
 This branch intentionally keeps only Gemini-specific source and one small Orchestrarium overlay layer:
 
 - Gemini owns `GEMINI.md` through the built-in `/init` flow.
+- Orchestrarium ships one imported shared-governance module as `AGENTS.shared.md`.
 - Gemini runtime config stays in `.gemini/settings.json`.
 - Orchestrarium adds an optional `.gemini/.agents-mode` overlay only when shared routing toggles are needed.
 
@@ -16,10 +17,12 @@ install-gemini.sh           POSIX installer
 references-gemini/          Required Gemini-side maintainer references
 src.gemini/                 Gemini pack source tree
   GEMINI.md                 Native Gemini entrypoint
+  AGENTS.shared.md          Imported shared-governance module for GEMINI.md
   skills/<name>/SKILL.md    Gemini Agent Skills
   commands/**/*.toml        Gemini custom commands
   extension/                Future extension and MCP boundary
-  scripts/validate-pack.sh  Standalone pack validation
+  scripts/validate-pack.sh  Standalone pack validation (bash)
+  scripts/validate-pack.ps1 Standalone pack validation (PowerShell)
 docs/agents-mode-reference.md
                             Canonical reference for the optional Orchestrarium
                             `.gemini/.agents-mode` overlay
@@ -46,12 +49,16 @@ This branch is a standalone Gemini pack with a lean official-preferred install s
 4. Use the Orchestrarium Gemini `init-project` helper only if you also want the optional `.gemini/.agents-mode` overlay.
 
 The overlay reference in [docs/agents-mode-reference.md](docs/agents-mode-reference.md) also records task continuity and continue-by-default execution expectations for initialized projects.
-5. Keep `.gemini/settings.json` as the Gemini-native runtime config surface.
+5. Keep `.gemini/settings.json` and extension manifests as the Gemini-native MCP and runtime-config surface; servers such as Serena, Fetch, or Context7 belong there, not in `AGENTS.shared.md`.
 
 ## Validation
 
 ```bash
 bash src.gemini/scripts/validate-pack.sh .
+```
+
+```powershell
+.\src.gemini\scripts\validate-pack.ps1
 ```
 
 Branch-local docs start at [docs/README.md](docs/README.md).

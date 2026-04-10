@@ -28,6 +28,7 @@ fi
 
 required=(
   "$GEMINI_FILE"
+  "$(dirname "$GEMINI_FILE")/AGENTS.shared.md"
   "$RUNTIME_ROOT/skills/README.md"
   "$RUNTIME_ROOT/skills/lead/SKILL.md"
   "$RUNTIME_ROOT/skills/init-project/SKILL.md"
@@ -66,13 +67,15 @@ for path in "${required[@]}"; do
   fi
 done
 
+IMPORT_ROOT="$(dirname "$GEMINI_FILE")"
+
 while IFS= read -r import_line; do
   import_target="${import_line#@}"
   if [[ -z "$import_target" ]]; then
     continue
   fi
-  if [[ ! -f "$PACK_ROOT/$import_target" ]]; then
-    echo "FAIL: GEMINI.md import target missing: $PACK_ROOT/$import_target"
+  if [[ ! -f "$IMPORT_ROOT/$import_target" ]]; then
+    echo "FAIL: GEMINI.md import target missing: $IMPORT_ROOT/$import_target"
     exit 1
   fi
 done < <(grep '^@' "$GEMINI_FILE" || true)
