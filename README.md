@@ -4,7 +4,7 @@ A cross-provider agent orchestration monorepo that keeps the Codex, Claude Code,
 
 - `src.codex/` — the Codex provider pack source
 - `src.claude/` — the Claude Code provider pack source
-- `src.gemini/` — the Gemini provider-pack source tree with `GEMINI.md` as its runtime entrypoint and a pack-local `AGENTS.shared.md` import module
+- `src.gemini/` — the Gemini provider-pack source tree with `GEMINI.md` as its runtime entrypoint, a pack-local `AGENTS.shared.md` import module, the stable skill catalog, and the preview specialist-agent surface
 
 The provider lines share one governance model and role vocabulary, while each keeps the runtime structure expected by its own provider. In this branch, the root router installers now cover Codex, Claude Code, and Gemini CLI while still keeping each provider line honest through its own source-surface checks.
 
@@ -15,8 +15,8 @@ shared/             Shared cross-provider governance and canonical reference cor
 docs/               Common branch-level docs index and operator/runtime references
 src.codex/          Codex provider-pack source
 src.claude/         Claude Code provider-pack source
-src.gemini/         Gemini provider-pack source tree with `GEMINI.md`
-                    and `AGENTS.shared.md`
+src.gemini/         Gemini provider-pack source tree with `GEMINI.md`,
+                    `AGENTS.shared.md`, stable `skills/`, and preview `agents/`
 references-codex/   Codex-specific addenda and compatibility pointers
 references-claude/  Claude Code-specific addenda and compatibility pointers
 references-gemini/  Gemini-specific addenda and compatibility pointers
@@ -82,7 +82,7 @@ Important: operator preferences now live in pack-local `agents-mode` files; lega
 - Claude Code does not use the Claude-target keys `externalClaudeSecretMode` or `externalClaudeProfile` in its canonical config because Claude-line external dispatch goes to Codex CLI.
 - For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and create `.agents/.agents-mode`.
 - For first-time Claude Code project setup, run `/agents-init-project` to write `## Project policies` in `.claude/CLAUDE.md` and initialize `.claude/.agents-mode`.
-- For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config and MCP wiring stay in `.gemini/settings.json` or extension manifests, while Orchestrarium-specific shared governance is brought in through `GEMINI.md` imports and shared routing semantics may additionally live in `.gemini/.agents-mode`, which the Gemini `init-project` helper bootstraps separately after `/init`.
+- For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config and MCP wiring stay in `.gemini/settings.json` or extension manifests, while Orchestrarium-specific shared governance is brought in through `GEMINI.md` importing project-root `AGENTS.md`, the stable role catalog lives in `.gemini/skills/`, the preview specialist-team layer lives in `.gemini/agents/`, and shared routing semantics may additionally live in `.gemini/.agents-mode`, which the Gemini `init-project` helper bootstraps separately after `/init`.
 - Explicit user role requests still override the toggle state in either direction.
 - Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity and continue-by-default execution expectations for initialized projects.
 
