@@ -374,6 +374,87 @@ function Remove-LegacyPackFile {
     }
 }
 
+function Remove-EmptyDirIfPresent {
+    param([string]$TargetDir)
+
+    if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+        return
+    }
+
+    $children = @(Get-ChildItem -LiteralPath $TargetDir -Force)
+    if ($children.Count -gt 0) {
+        return
+    }
+
+    if (-not $DryRun) {
+        Remove-Item -LiteralPath $TargetDir -Force
+    } else {
+        Write-Host "    [dry-run] would remove empty directory $TargetDir"
+    }
+}
+
+function Remove-LegacyTopLevelPackEntries {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir,
+        [string]$Label
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+        return
+    }
+
+    foreach ($item in Get-ChildItem -LiteralPath $SourceDir -Force) {
+        $targetPath = Join-Path $TargetDir $item.Name
+        if (-not (Test-Path -LiteralPath $targetPath)) {
+            continue
+        }
+
+        Write-Host "  Removing legacy $Label/$($item.Name)..."
+        if (-not $DryRun) {
+            Remove-Item -LiteralPath $targetPath -Recurse -Force
+        } else {
+            Write-Host "    [dry-run] would remove $targetPath"
+        }
+    }
+
+    Remove-EmptyDirIfPresent -TargetDir $TargetDir
+}
+
+function Remove-LegacyMirroredFiles {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir,
+        [string]$Label
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+        return
+    }
+
+    $sourceRoot = [System.IO.Path]::GetFullPath($SourceDir)
+    foreach ($file in Get-ChildItem -LiteralPath $SourceDir -Recurse -File -Force) {
+        $relativePath = $file.FullName.Substring($sourceRoot.Length).TrimStart('\', '/')
+        $targetPath = Join-Path $TargetDir $relativePath
+        if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
+            continue
+        }
+
+        Write-Host "  Removing legacy $Label/$relativePath..."
+        if (-not $DryRun) {
+            Remove-Item -LiteralPath $targetPath -Force
+        } else {
+            Write-Host "    [dry-run] would remove $targetPath"
+        }
+    }
+
+    $directories = @(Get-ChildItem -LiteralPath $TargetDir -Recurse -Directory -Force | Sort-Object FullName -Descending)
+    foreach ($directory in $directories) {
+        Remove-EmptyDirIfPresent -TargetDir $directory.FullName
+    }
+    Remove-EmptyDirIfPresent -TargetDir $TargetDir
+}
+
 if ($Global) {
     if (-not $env:USERPROFILE) { throw "USERPROFILE is not set." }
     $Mode = "global"
@@ -427,8 +508,8 @@ Write-Host "Runtime root: $InstallRoot"
 Write-Host "GEMINI.md:    $GeminiTarget"
 Write-Host "AGENTS.md:    $SharedTarget"
 Write-Host "agents-mode:  $AgentsModeTarget"
-Write-Host "Agents:       $AgentsTarget"
 Write-Host "Extension:    $ExtensionRoot"
+Write-Host "Legacy user tier cleanup roots: $SkillsTarget ; $AgentsTarget ; $CommandsTarget"
 if ($DryRun) { Write-Host "Mode:   dry-run" -ForegroundColor Yellow }
 Write-Host ""
 
@@ -449,9 +530,6 @@ if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $AgentsTa
 }
 
 Ensure-Dir $InstallRoot
-Install-Tree -SourceDir (Join-Path $Source "skills") -TargetDir $SkillsTarget -Label "skills"
-Install-Tree -SourceDir (Join-Path $Source "agents") -TargetDir $AgentsTarget -Label "agents"
-Install-Tree -SourceDir (Join-Path $Source "commands") -TargetDir $CommandsTarget -Label "commands"
 Install-Tree -SourceDir (Join-Path $Source "skills") -TargetDir (Join-Path $ExtensionRoot "skills") -Label "extension/skills"
 Install-Tree -SourceDir (Join-Path $Source "agents") -TargetDir (Join-Path $ExtensionRoot "agents") -Label "extension/agents"
 Install-Tree -SourceDir (Join-Path $Source "commands") -TargetDir (Join-Path $ExtensionRoot "commands") -Label "extension/commands"
@@ -470,6 +548,9 @@ Remove-LegacyPackFile -TargetFile $LegacySharedTarget -Label "AGENTS.shared.md"
 Remove-LegacyPackFile -TargetFile $LegacyAgentsReadmeTarget -Label "agents/README.md"
 Remove-LegacyPackFile -TargetFile $LegacyExtensionSharedTarget -Label "extension AGENTS.shared.md"
 Remove-LegacyPackFile -TargetFile $LegacyExtensionAgentsReadmeTarget -Label "extension agents/README.md"
+Remove-LegacyTopLevelPackEntries -SourceDir (Join-Path $Source "skills") -TargetDir $SkillsTarget -Label "skills"
+Remove-LegacyMirroredFiles -SourceDir (Join-Path $Source "agents") -TargetDir $AgentsTarget -Label "agents"
+Remove-LegacyMirroredFiles -SourceDir (Join-Path $Source "commands") -TargetDir $CommandsTarget -Label "commands"
 
 if ($DryRun) {
     Write-Host ""
@@ -484,19 +565,13 @@ foreach ($path in @(
     $GeminiTarget,
     $SharedTarget,
     $AgentsModeTarget,
-    (Join-Path $SkillsTarget "README.md"),
-    (Join-Path $SkillsTarget "lead\SKILL.md"),
-    (Join-Path $SkillsTarget "init-project\SKILL.md"),
-    (Join-Path $AgentsTarget "lead.md"),
-    (Join-Path $AgentsTarget "team-templates\full-delivery.json"),
-    (Join-Path $CommandsTarget "agents\help.toml"),
-    (Join-Path $CommandsTarget "agents\external-brigade.toml"),
-    (Join-Path $CommandsTarget "agents\init-project.toml"),
     $ExtensionManifestTarget,
     $ExtensionGeminiTarget,
     $ExtensionAgentsTarget,
     (Join-Path $ExtensionRoot "skills\lead\SKILL.md"),
+    (Join-Path $ExtensionRoot "skills\init-project\SKILL.md"),
     (Join-Path $ExtensionRoot "agents\lead.md"),
+    (Join-Path $ExtensionRoot "agents\team-templates\full-delivery.json"),
     (Join-Path $ExtensionRoot "commands\agents\help.toml")
 )) {
     if (Test-Path -LiteralPath $path) {
@@ -504,6 +579,22 @@ foreach ($path in @(
     } else {
         Write-Host "  FAIL  $path" -ForegroundColor Red
         $errors++
+    }
+}
+
+foreach ($legacyPath in @(
+    (Join-Path $SkillsTarget "lead\SKILL.md"),
+    (Join-Path $AgentsTarget "lead.md"),
+    (Join-Path $AgentsTarget "team-templates\full-delivery.json"),
+    (Join-Path $CommandsTarget "agents\help.toml"),
+    (Join-Path $CommandsTarget "agents\external-brigade.toml"),
+    (Join-Path $CommandsTarget "agents\init-project.toml")
+)) {
+    if (Test-Path -LiteralPath $legacyPath) {
+        Write-Host "  FAIL  legacy duplicate still present: $legacyPath" -ForegroundColor Red
+        $errors++
+    } else {
+        Write-Host "  OK  no legacy duplicate at $legacyPath" -ForegroundColor Green
     }
 }
 

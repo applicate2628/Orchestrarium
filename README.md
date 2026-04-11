@@ -52,12 +52,13 @@ This branch is a standalone Gemini pack with a full Gemini-line role surface.
 1. Install the pack with `install-gemini.ps1` or `install-gemini.sh`.
 2. If the target repository already has a user-owned `GEMINI.md`, the installer preserves it and prepends only the managed Orchestrarium pack block.
 3. Run Gemini's built-in `/init` when you want Gemini to refresh or extend the user-owned portion of `GEMINI.md`.
-4. Use the installed `.gemini/skills/` and `.gemini/agents/` layers for the full shared role principle, and treat `.gemini/extensions/orchestrarium-gemini/` as the installed official Gemini extension package.
-5. Use the Orchestrarium Gemini `init-project` helper to review or update the installed default `.gemini/.agents-mode` overlay after `/init`.
-6. Use `external-brigade` when one bounded batch needs multiple parallel external helpers instead of trying to squeeze that through `externalOpinionCounts`.
+4. Use the installed extension payload under `.gemini/extensions/orchestrarium-gemini/` for the full shared role principle.
+5. Keep top-level `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` free for deliberate user overrides instead of mirroring the same Orchestrarium pack there, because Gemini gives those tiers precedence over extension content.
+6. Use the Orchestrarium Gemini `init-project` helper to review or update the installed default `.gemini/.agents-mode` overlay after `/init`.
+7. Use `external-brigade` when one bounded batch needs multiple parallel external helpers instead of trying to squeeze that through `externalOpinionCounts`.
 
 The overlay reference in [docs/agents-mode-reference.md](docs/agents-mode-reference.md) also records task continuity, continue-by-default execution expectations, and the named priority profiles used for multi-opinion routing for initialized projects.
-7. Keep `.gemini/settings.json` and the installed extension package under `.gemini/extensions/orchestrarium-gemini/` as the Gemini-native MCP and runtime-config surface; servers such as Serena, Fetch, or Context7 belong there, not in installed `AGENTS.md`.
+8. Keep `.gemini/settings.json` and the installed extension package under `.gemini/extensions/orchestrarium-gemini/` as the Gemini-native MCP and runtime-config surface; servers such as Serena, Fetch, or Context7 belong there, not in installed `AGENTS.md`.
 
 ## Validation
 

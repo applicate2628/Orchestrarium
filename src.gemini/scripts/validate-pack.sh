@@ -101,21 +101,21 @@ if [[ -d "$ROOT/src.gemini" ]]; then
   GEMINI_FILE="$PACK_ROOT/GEMINI.md"
   SHARED_SOURCE_FILE="$PACK_ROOT/AGENTS.shared.md"
   RUNTIME_AGENTS_FILE="$PACK_ROOT/AGENTS.md"
-  REQUIRE_EXTENSION=1
-elif [[ -f "$ROOT/GEMINI.md" && -d "$ROOT/skills" && -d "$ROOT/agents" ]]; then
+  LEGACY_RUNTIME_ROOT=""
+elif [[ -f "$ROOT/GEMINI.md" && -d "$ROOT/extensions/orchestrarium-gemini" ]]; then
   MODE="installed-root"
-  PACK_ROOT="$ROOT"
+  PACK_ROOT="$ROOT/extensions/orchestrarium-gemini"
   GEMINI_FILE="$ROOT/GEMINI.md"
   SHARED_SOURCE_FILE="$ROOT/AGENTS.shared.md"
   RUNTIME_AGENTS_FILE="$ROOT/AGENTS.md"
-  REQUIRE_EXTENSION=0
-elif [[ -f "$ROOT/GEMINI.md" && -d "$ROOT/.gemini" ]]; then
+  LEGACY_RUNTIME_ROOT="$ROOT"
+elif [[ -f "$ROOT/GEMINI.md" && -d "$ROOT/.gemini/extensions/orchestrarium-gemini" ]]; then
   MODE="installed-project"
-  PACK_ROOT="$ROOT/.gemini"
+  PACK_ROOT="$ROOT/.gemini/extensions/orchestrarium-gemini"
   GEMINI_FILE="$ROOT/GEMINI.md"
   SHARED_SOURCE_FILE="$ROOT/AGENTS.shared.md"
   RUNTIME_AGENTS_FILE="$ROOT/AGENTS.md"
-  REQUIRE_EXTENSION=0
+  LEGACY_RUNTIME_ROOT="$ROOT/.gemini"
 else
   fail "unable to detect Gemini source tree or installed runtime under $ROOT"
 fi
@@ -124,7 +124,7 @@ EXTENSION_NAME="orchestrarium-gemini"
 if [[ "$MODE" == "source" ]]; then
   EXTENSION_ROOT="$PACK_ROOT/extension"
 else
-  EXTENSION_ROOT="$PACK_ROOT/extensions/$EXTENSION_NAME"
+  EXTENSION_ROOT="$PACK_ROOT"
 fi
 EXTENSION_MANIFEST_FILE="$EXTENSION_ROOT/gemini-extension.json"
 EXTENSION_README_FILE="$EXTENSION_ROOT/README.md"
@@ -169,6 +169,13 @@ else
   [[ -f "$EXTENSION_ROOT/agents/team-templates/quick-fix.json" ]] || fail "missing installed extension team template $EXTENSION_ROOT/agents/team-templates/quick-fix.json"
   [[ ! -e "$EXTENSION_ROOT/AGENTS.shared.md" ]] || fail "$EXTENSION_ROOT/AGENTS.shared.md should not exist in the installed extension runtime"
   [[ ! -e "$EXTENSION_ROOT/agents/README.md" ]] || fail "$EXTENSION_ROOT/agents/README.md must not exist in the installed extension runtime"
+  [[ ! -e "$LEGACY_RUNTIME_ROOT/skills/lead/SKILL.md" ]] || fail "$LEGACY_RUNTIME_ROOT/skills/lead/SKILL.md should not exist in the installed runtime"
+  [[ ! -e "$LEGACY_RUNTIME_ROOT/skills/init-project/SKILL.md" ]] || fail "$LEGACY_RUNTIME_ROOT/skills/init-project/SKILL.md should not exist in the installed runtime"
+  [[ ! -e "$LEGACY_RUNTIME_ROOT/agents/lead.md" ]] || fail "$LEGACY_RUNTIME_ROOT/agents/lead.md should not exist in the installed runtime"
+  [[ ! -e "$LEGACY_RUNTIME_ROOT/agents/team-templates/quick-fix.json" ]] || fail "$LEGACY_RUNTIME_ROOT/agents/team-templates/quick-fix.json should not exist in the installed runtime"
+  [[ ! -e "$LEGACY_RUNTIME_ROOT/commands/agents/help.toml" ]] || fail "$LEGACY_RUNTIME_ROOT/commands/agents/help.toml should not exist in the installed runtime"
+  [[ ! -e "$LEGACY_RUNTIME_ROOT/commands/agents/external-brigade.toml" ]] || fail "$LEGACY_RUNTIME_ROOT/commands/agents/external-brigade.toml should not exist in the installed runtime"
+  [[ ! -e "$LEGACY_RUNTIME_ROOT/commands/agents/init-project.toml" ]] || fail "$LEGACY_RUNTIME_ROOT/commands/agents/init-project.toml should not exist in the installed runtime"
 fi
 
 for role in "${skill_roles[@]}"; do
