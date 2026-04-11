@@ -21,8 +21,8 @@ This standalone Gemini branch now ships a finished Gemini-native installer surfa
 
 | Mode | Installed surface |
 |---|---|
-| project-local | `<project>/GEMINI.md`, root `<project>/AGENTS.md` when absent, `<project>/.gemini/skills/`, `<project>/.gemini/agents/`, `<project>/.gemini/commands/`, `<project>/.gemini/extensions/orchestrarium-gemini/`, `<project>/.gemini/.agents-mode` |
-| global | `~/.gemini/GEMINI.md`, `~/.gemini/AGENTS.md`, `~/.gemini/skills/`, `~/.gemini/agents/`, `~/.gemini/commands/`, `~/.gemini/extensions/orchestrarium-gemini/`, `~/.gemini/.agents-mode` |
+| project-local | `<project>/GEMINI.md`, root `<project>/AGENTS.md` when absent, `<project>/.gemini/extensions/orchestrarium-gemini/`, `<project>/.gemini/.agents-mode` |
+| global | `~/.gemini/GEMINI.md`, `~/.gemini/AGENTS.md`, `~/.gemini/extensions/orchestrarium-gemini/`, `~/.gemini/.agents-mode` |
 
 `references-gemini/` is required in the source branch, but it is not copied into target projects or global Gemini homes. It remains a repo-local maintainer reference surface.
 
@@ -53,9 +53,9 @@ Important:
 - The installer manages only the `<!-- ORCHESTRARIUM_GEMINI_PACK:... -->` block inside `GEMINI.md`; all content outside that block is preserved on reinstall.
 - User-side `@...` imports that live in the installed `GEMINI.md` import block alongside `@./AGENTS.md` are preserved on reinstall.
 - Installed runtime uses `AGENTS.md` as the pack-managed shared-governance module imported by `GEMINI.md`. The source tree still keeps `src.gemini/AGENTS.shared.md` as the canonical shared module.
-- Installed runtime includes both `.gemini/skills/` and `.gemini/agents/` so the Gemini line can execute the same shared role principle as the neighboring packs.
-- Installed runtime also includes the official Gemini extension package under `.gemini/extensions/orchestrarium-gemini/`, with mirrored `skills/`, `agents/`, `commands/`, runtime `GEMINI.md`, runtime `AGENTS.md`, and the extension manifest/readme.
-- In the Gemini specialist-team layer, every top-level `.gemini/agents/*.md` file must be a real agent definition with YAML frontmatter; plain README-style docs are invalid there and are removed on reinstall.
+- Installed runtime uses the official Gemini extension package under `.gemini/extensions/orchestrarium-gemini/` as the canonical Orchestrarium payload, with `skills/`, `agents/`, `commands/`, runtime `GEMINI.md`, runtime `AGENTS.md`, and the extension manifest/readme.
+- Top-level `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` stay available for deliberate user overrides instead of carrying a second mirrored Orchestrarium payload, because Gemini resolves precedence as `workspace > user > extension`.
+- Reinstall cleans legacy Orchestrarium-owned duplicates from those top-level Gemini tiers when they would shadow the installed extension and cause conflict warnings.
 - `.gemini/settings.json` remains Gemini-native runtime config.
 - MCP servers such as Serena, Fetch, or Context7 still belong in `.gemini/settings.json` or the installed extension manifest at `.gemini/extensions/orchestrarium-gemini/gemini-extension.json`, not inside `AGENTS.md`.
 - `.gemini/.agents-mode` is the Orchestrarium routing overlay seeded by install, not a Gemini-native replacement.
