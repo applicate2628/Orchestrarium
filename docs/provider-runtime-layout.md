@@ -22,7 +22,7 @@ This file is the branch-local runtime-layout reference for the standalone Gemini
 ## Notes
 
 - `references-gemini/` and `docs/` stay in the source branch; they are not copied into target projects.
-- `.gemini/.agents-mode` is an optional Orchestrarium overlay, not a Gemini-native replacement for `.gemini/settings.json`.
+- `.gemini/.agents-mode` is an optional Orchestrarium overlay, not a Gemini-native replacement for `.gemini/settings.json`. It carries the named priority profiles and per-lane opinion counts used by the Gemini-line external routing story.
 - `GEMINI.md` is still the installed governance entrypoint, and it imports adjacent or project-root `AGENTS.md` through the official Gemini memory-import mechanism.
 - `.gemini/agents/` is the installed preview specialist-team layer, while `.gemini/skills/` remains the stable expertise layer.
 - MCP servers such as Serena, Fetch, or Context7 remain a `settings.json` or `gemini-extension.json` concern rather than a `GEMINI.md` import concern.

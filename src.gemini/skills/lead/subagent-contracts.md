@@ -4,9 +4,10 @@ Use this template whenever the main Gemini session delegates to a Gemini special
 
 ## Invocation rule
 
-- Invoke the matching subagent tool by role name, or force it explicitly with `@role` at the beginning of the prompt.
+- Invoke the matching subagent tool by role name, or force it explicitly with `@role` at the beginning of the prompt, except for provider-backed external adapter routes.
 - Do not role-play specialists inline when a matching Gemini subagent exists.
 - Do not ask one subagent to own the whole feature.
+- `$external-worker` and `$external-reviewer` are direct external launch routes, not Gemini subagent hosts. Do not satisfy them by spawning an internal helper/agent that then relays to another CLI.
 
 ## Handoff template
 
@@ -44,6 +45,22 @@ Gate to next stage:
 4. Recommended next role
 5. Gate: PASS | REVISE | BLOCKED:<class> | RETURN(role)
 ```
+
+## External dispatch contract
+
+Use `external-dispatch.md` when the main Gemini session prefers or explicitly selects an external adapter.
+
+- Resolve external routing in this order: `role eligibility -> provider selection -> CLI availability`.
+- `$consultant` is advisory-only.
+- `$external-worker` covers the full worker-side lane.
+- `$external-reviewer` covers review and QA-side work only.
+- There is no generic external adapter for owner roles such as `$product-manager` or `$lead`. If a request lands in one of those lanes, fail fast with an unsupported-route explanation instead of probing providers.
+- If the selected external CLI is unavailable, the adapter is disabled and the main Gemini session reroutes explicitly.
+- `externalProvider: auto` resolves through the active named priority profile, not a line-specific default. `balanced` is the ordinary baseline; `gemini-crosscheck` is the profile that keeps Gemini in the non-visual advisory and review cross-check set. Explicit user override or documented repo-local heuristics may still prefer Gemini for image, icon, decorative visual, and other clearly visual lanes when that routing remains honest, but same-provider Gemini routing requires an explicit override.
+- If Claude is the resolved provider, honor both `externalClaudeSecretMode` and `externalClaudeApiMode`.
+- If the active lane policy asks for more than one external opinion, the main session may launch multiple independent external adapters in parallel and aggregate the returned artifacts fail closed.
+- Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support concurrent non-interactive execution. If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
+- When the routing decision is "launch a bounded set of external helpers together", prefer the utility skill `external-brigade` so the brigade has one explicit plan, one ownership table, and one aggregated result surface.
 
 ## BLOCKED classes
 

@@ -7,7 +7,8 @@ This directory is the stable Gemini expertise layer for the full shared role voc
 - every shared specialist role from the common Orchestrarium model
 - Gemini-line `$lead` as the orchestration skill
 - Gemini-line `init-project` as the overlay bootstrap helper
-- Gemini-line `second-opinion`, `consultant`, and external adapter skills
+- Gemini-line `second-opinion`, `consultant`, and external adapter skills that honor the shared routing overlay, named priority profiles, and per-lane opinion counts
+- Gemini-line `external-brigade` as the bounded parallel external-helper orchestration utility
 
 ## Why both `skills/` and `agents/` exist
 
@@ -21,4 +22,4 @@ The common role principle depends on both:
 - skills provide the full durable role catalog
 - agents provide the explicit team members that the main Gemini session can delegate to
 
-Orchestration remains in `skills/lead`, not in a recursive lead subagent.
+Orchestration remains in `skills/lead`, not in a recursive lead subagent. The lead skill also owns the overlay-aware external routing story so the pack can switch between `balanced` and `gemini-crosscheck` without changing the role vocabulary, and it uses `external-brigade` when one bounded batch needs multiple parallel external helpers.

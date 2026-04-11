@@ -7,9 +7,10 @@ This branch keeps only Gemini-specific source, but it now ships the same full ro
 - Gemini owns `GEMINI.md` through the built-in `/init` flow.
 - Orchestrarium keeps one source-side shared-governance module in `src.gemini/AGENTS.shared.md`, which installers materialize as runtime `AGENTS.md`.
 - Gemini runtime config stays in `.gemini/settings.json`.
-- Orchestrarium adds an optional `.gemini/.agents-mode` overlay for shared routing semantics.
+- Orchestrarium adds an optional `.gemini/.agents-mode` overlay for shared routing semantics, named priority profiles, and per-lane opinion counts.
 - Stable expertise lives in `src.gemini/skills/`.
 - Preview specialist-team execution lives in `src.gemini/agents/`.
+- Bounded parallel external-helper orchestration lives in `src.gemini/skills/external-brigade/` and `src.gemini/commands/agents/external-brigade.toml`.
 
 ## Repository layout
 
@@ -52,9 +53,10 @@ This branch is a standalone Gemini pack with a full Gemini-line role surface.
 3. Run Gemini's built-in `/init` when you want Gemini to refresh or extend the user-owned portion of `GEMINI.md`.
 4. Use the installed `.gemini/skills/` and `.gemini/agents/` layers for the full shared role principle.
 5. Use the Orchestrarium Gemini `init-project` helper only if you also want the optional `.gemini/.agents-mode` overlay.
+6. Use `external-brigade` when one bounded batch needs multiple parallel external helpers instead of trying to squeeze that through `externalOpinionCounts`.
 
-The overlay reference in [docs/agents-mode-reference.md](docs/agents-mode-reference.md) also records task continuity and continue-by-default execution expectations for initialized projects.
-6. Keep `.gemini/settings.json` and extension manifests as the Gemini-native MCP and runtime-config surface; servers such as Serena, Fetch, or Context7 belong there, not in installed `AGENTS.md`.
+The overlay reference in [docs/agents-mode-reference.md](docs/agents-mode-reference.md) also records task continuity, continue-by-default execution expectations, and the named priority profiles used for multi-opinion routing for initialized projects.
+7. Keep `.gemini/settings.json` and extension manifests as the Gemini-native MCP and runtime-config surface; servers such as Serena, Fetch, or Context7 belong there, not in installed `AGENTS.md`.
 
 ## Validation
 

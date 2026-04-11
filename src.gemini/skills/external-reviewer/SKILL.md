@@ -16,12 +16,20 @@ Use the shared Gemini dispatch contract in [../lead/external-dispatch.md](../lea
 
 ## Gemini-line provider rules
 
-- Read `.gemini/.agents-mode` first, then legacy `.gemini/.consultant-mode`.
-- `externalProvider: auto` keeps provider-backed external dispatch explicit on the Gemini line.
+- Read and normalize `.gemini/.agents-mode` to the current canonical format before trusting its flags.
+- Honor `.gemini/.agents-mode`, including `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`.
+- `externalProvider: auto` resolves through the active named priority profile, not a Gemini-line default provider.
+- `externalPriorityProfile` defaults to `balanced`; `gemini-crosscheck` is the profile that keeps Gemini inside non-visual review cross-check lanes.
 - `externalProvider: codex` resolves to Codex CLI explicitly.
 - `externalProvider: claude` resolves to Claude CLI explicitly.
 - If Claude is selected, honor `externalClaudeSecretMode`.
-- `externalProvider: gemini` is invalid on the Gemini line.
+- If Claude is selected, honor `externalClaudeApiMode`.
+- This adapter is a direct external launch contract. Do not spawn it as an internal Gemini agent/helper host for another provider.
+- `externalProvider: gemini` is allowed only as an explicit self-provider override.
+- Visual review lanes for image, icon, or decorative work are the shared-matrix cases where Gemini should be preferred when that routing remains honest.
+- Same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce.
+- If the active lane policy requests more than one external review or QA opinion, the lead may launch more than one eligible external reviewer in parallel and aggregate the returned review artifacts fail closed.
+- For a bounded batch of multiple independent review helpers, prefer `external-brigade` instead of scattering separate review notes.
 
 ## Return
 
@@ -32,3 +40,5 @@ Return one review artifact with:
 3. Residual risks / unknowns
 4. Recommended next role
 5. Gate: PASS | REVISE | BLOCKED:dependency
+
+If the current runtime cannot launch the selected provider directly, return `BLOCKED:dependency` or a disabled-route result instead of proxying through an internal agent/helper/subagent host.

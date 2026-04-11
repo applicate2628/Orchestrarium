@@ -38,7 +38,7 @@ Run a repository-wide impact review triggered by recent changes. The changed fil
 - Add `$security-reviewer` if the change touches auth, trust boundaries, secrets, dangerous configuration, input validation, or vulnerability surfaces.
 - Add `$performance-reviewer` if the change touches hot paths, query plans, rendering loops, budgets, throughput, or latency-sensitive behavior.
 - Add `$ux-reviewer`, `$accessibility-reviewer`, or `$ui-test-engineer` when the affected surface is clearly user-facing and the risk is interaction quality rather than pure logic.
-- If external review is preferred for an eligible review-side slot, `$external-reviewer` may stand in where policy allows it. Mandatory internal reviewers in risk-sensitive templates remain internal.
+- If external review is preferred for an eligible review-side slot, `$external-reviewer` may stand in for the matching reviewer role.
 4. Keep the chain sequential in Gemini unless the user explicitly approves a delegated team and the scopes are clearly independent.
 
 ## What to verify
