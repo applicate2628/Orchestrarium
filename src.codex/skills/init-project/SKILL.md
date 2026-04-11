@@ -20,7 +20,8 @@ Guide the user through first-time Codex project bootstrap for project policies a
 
 1. **Read current state.**
    - Read the project's root `AGENTS.md` and check whether a `## Project policies` section already exists.
-   - Read `.agents/.agents-mode` first; if it is missing, read legacy `.agents/.consultant-mode` only as migration input.
+   - Read `.agents/.agents-mode` first.
+   - If `.agents/.agents-mode` already exists, normalize it to the current canonical format before presenting or trusting the current values.
    - If either surface already exists, show the current values and ask whether to keep them, review them, or start fresh.
 
 2. **Read the installed canonical sources.**
@@ -45,17 +46,28 @@ Guide the user through first-time Codex project bootstrap for project policies a
      - `preferExternalWorker`
      - `preferExternalReviewer`
      - `externalProvider`
+     - `externalCodexWorkdirMode`
+     - `externalClaudeWorkdirMode`
+     - `externalGeminiWorkdirMode`
      - `externalClaudeSecretMode`
+     - `externalClaudeApiMode`
      - `externalClaudeProfile`
    - Use the existing value when present; otherwise default to:
      - `consultantMode: disabled`
      - `delegationMode: manual`
      - `mcpMode: auto`
-     - `preferExternalWorker: false`
-     - `preferExternalReviewer: false`
-     - `externalProvider: auto`
-     - `externalClaudeSecretMode: auto`
-     - `externalClaudeProfile: sonnet-high`
+   - `preferExternalWorker: false`
+   - `preferExternalReviewer: false`
+   - `externalProvider: auto`
+   - `externalPriorityProfile: balanced`
+   - shipped `externalPriorityProfiles`
+   - `externalOpinionCounts` defaulting each documented lane to `1`
+   - `externalCodexWorkdirMode: neutral`
+   - `externalClaudeWorkdirMode: neutral`
+   - `externalGeminiWorkdirMode: neutral`
+   - `externalClaudeSecretMode: auto`
+   - `externalClaudeApiMode: auto`
+   - `externalClaudeProfile: sonnet-high`
    - Accept shorthand answers such as `force`, `external reviewer only`, `opus`, or `defaults for the rest`.
 
 5. **Confirm the final choices.**
@@ -66,20 +78,27 @@ Guide the user through first-time Codex project bootstrap for project policies a
 6. **Write `.agents/.agents-mode`.**
    - Write the canonical file to `.agents/.agents-mode`.
    - Preserve unknown keys when updating an existing file.
-   - If only legacy `.agents/.consultant-mode` exists, use it as migration input but write the canonical file to `.agents/.agents-mode`.
+   - Treat comment-free, partial, or older-layout files as legacy input and rewrite them to the current canonical format instead of preserving stale layout.
    - Keep one key per line and include the inline allowed-values comment for every canonical key.
-   - Do not create a new legacy `.agents/.consultant-mode` file.
+   - Refresh the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks to the current pack version while preserving the effective values of known keys and any unknown keys.
 
    Use this canonical shape:
 
    ```yaml
-   consultantMode: {value}  # allowed: external | auto | internal | disabled
+   consultantMode: {value}  # allowed: external | internal | disabled
    delegationMode: {value}  # allowed: manual | auto | force
    mcpMode: {value}  # allowed: auto | force
    preferExternalWorker: {value}  # allowed: false | true
    preferExternalReviewer: {value}  # allowed: false | true
-   externalProvider: {value}  # allowed here: auto | claude | gemini
+   externalProvider: {value}  # allowed here: auto | codex | claude | gemini
+   externalPriorityProfile: {value}  # allowed: balanced | gemini-crosscheck | <repo-local profile>
+   externalPriorityProfiles: {value}  # allowed: structured profile map
+   externalOpinionCounts: {value}  # allowed: structured lane-count map
+   externalCodexWorkdirMode: {value}  # allowed: neutral | project
+   externalClaudeWorkdirMode: {value}  # allowed: neutral | project
+   externalGeminiWorkdirMode: {value}  # allowed: neutral | project
    externalClaudeSecretMode: {value}  # allowed when Claude is selectable: auto | force
+   externalClaudeApiMode: {value}  # allowed when Claude is selectable: disabled | auto | force
    externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max
    ```
 
@@ -105,12 +124,13 @@ Guide the user through first-time Codex project bootstrap for project policies a
 
 8. **Confirm completion.**
    - Tell the user the project policies and operator mode file are saved.
-   - Mention `$second-opinion` for later consultant-mode changes.
+   - Mention `$second-opinion` for later consultant toggle changes.
 
 ## Rules
 
 - Be concise; the catalog and dispatch contract hold the details.
 - Do not invent extra policy keys or extra `agents-mode` keys.
 - Preserve unknown keys in `.agents/.agents-mode` when updating.
+- Any read of `.agents/.agents-mode` that drives a decision should normalize the file to the current canonical format before trusting the flags.
 - Do not modify any other section of `AGENTS.md`.
 - Treat root `AGENTS.md` as the project-runtime target, not the Orchestrarium monorepo maintenance overlay.

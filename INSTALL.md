@@ -26,7 +26,7 @@ Global install copies everything into `~/.codex/` (mirrors `src.codex/` structur
 bash install-codex.sh --target /path/to/repo
 ```
 
-Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and keeps operator state in `.agents/.agents-mode` with legacy `.agents/.consultant-mode` as fallback-only migration input.
+Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and keeps operator state in `.agents/.agents-mode`.
 
 ## Install into current repo (default)
 
@@ -48,7 +48,28 @@ bash install-codex.sh
 
 The scripts handle clean removal of old files, copying, AGENTS.md merging, and file-level verification. Re-running = reinstall.
 
-Operator state is always project-local at `.agents/.agents-mode`, even when the skill pack itself is installed globally. Legacy `.agents/.consultant-mode` remains read-only migration input and should not be newly written.
+Operator state is always project-local at `.agents/.agents-mode`, even when the skill pack itself is installed globally.
+
+The canonical Codex-line operator shape is:
+- `consultantMode`
+- `delegationMode`
+- `mcpMode`
+- `preferExternalWorker`
+- `preferExternalReviewer`
+- `externalProvider`
+- `externalPriorityProfile`
+- `externalPriorityProfiles`
+- `externalOpinionCounts`
+- `externalCodexWorkdirMode`
+- `externalClaudeWorkdirMode`
+- `externalGeminiWorkdirMode`
+- `externalClaudeSecretMode`
+- `externalClaudeApiMode`
+- `externalClaudeProfile`
+
+`externalPriorityProfile` selects the active named routing profile, with `balanced` as the ordinary default and `gemini-crosscheck` as the named profile that promotes Gemini into cross-check work when more than one independent external opinion is requested. `externalPriorityProfiles` stores the profile-specific lane ordering data; missing `balanced` means the current shared lane matrix. `externalOpinionCounts` stores how many distinct external opinions each lane should collect; missing counts default to `1`.
+
+`externalProvider: auto` resolves through the active priority profile and requested opinion count, not by host pack. Provider-specific workdir keys default to neutral so comparative or external runs do not inherit repo-local instruction overlays by cwd alone. Explicit `codex`, `claude`, or `gemini` may be selected when routing asks for them, and documented repo-local visual heuristics may still prefer Gemini for image generation, icon work, and decorative visual lanes when that routing remains honest. `externalClaudeApiMode` is the named Claude secondary-transport toggle: `disabled` forbids `claude-api`, `auto` keeps `claude-api` as the fallback after the allowed Claude CLI path is exhausted, and `force` uses `claude-api` as the primary Claude transport immediately.
 
 Project policies are configured as a `## Project policies` section in the target `AGENTS.md`, not as a separate directory. See `skills/lead/policies-catalog.md` for available policy options.
 
@@ -58,13 +79,14 @@ After first-time project install, run `$init-project` to write `## Project polic
 
 | Directory | Contents | Installable? |
 | --- | --- | --- |
-| `src.codex/skills/<role>/SKILL.md` | 31 role definitions + 1 utility skill | Yes |
+| `src.codex/skills/<role>/SKILL.md` | 33 role definitions: 31 indexed roles + 2 external adapters, plus 2 utility skills | Yes |
 | `src.codex/skills/<role>/agents/openai.yaml` | Display metadata and default prompt | Yes |
 | `src.codex/skills/lead/` | Operating-model notes, handoff contracts | Yes |
 | `src.codex/skills/consultant/` | Consultant role: toggle logic, execution paths, inline Claude CLI invocation | Yes |
 | `src.codex/skills/second-opinion/` | Consultant toggle and explicit invocation | Yes |
 | `src.codex/skills/lead/scripts/` | Publication safety scan, validation | Yes |
 | `src.codex/skills/lead/policies-catalog.md` | Policy options reference (installed with skills) | Yes |
+| `src.codex/skills/external-brigade/` | Bounded parallel external helper orchestration | Yes |
 | `src.codex/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
 | `docs/` | Branch-local docs index, runtime-layout notes, `.agents/.agents-mode` reference | No — maintainer-facing source docs |
 | `references-codex/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |

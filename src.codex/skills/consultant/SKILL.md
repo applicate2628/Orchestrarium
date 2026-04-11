@@ -13,17 +13,16 @@ description: Provide an independent advisory memo for the lead without becoming 
 
 ## Toggle file check
 
-Before any invocation, read `.agents/.agents-mode` first and fall back to legacy `.agents/.consultant-mode` only when the new file is absent:
+Before any invocation, read `.agents/.agents-mode` first:
 
 - **No file** (default): consultant is disabled for ordinary optional second-opinion usage. Notify "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. For the mandatory batch-close external consultant-check, do not silently skip: return an advisory memo that records the disabled state and tells the lead to keep the batch open and escalate to the user.
-- **`consultantMode: external`** (or legacy `mode: external`): external-first. Attempt external CLI. If external fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal for ordinary optional usage. For the mandatory batch-close external consultant-check, do not downgrade to internal fallback; return an unavailable memo and require the lead to keep the batch open and escalate.
-- **`consultantMode: auto`** (or legacy `mode: auto`): external-first with silent fallback for ordinary optional usage. Attempt external CLI. If unavailable, fall back to internal subagent automatically and disclose the actual execution path in the memo header. For the mandatory batch-close external consultant-check, do not silently downgrade; if the external path is unavailable, return an unavailable memo and require the lead to keep the batch open and escalate.
-- **`consultantMode: internal`** (or legacy `mode: internal`): internal subagent only for ordinary optional usage. A mandatory batch-close external consultant-check is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
-- **`consultantMode: disabled`** (or legacy `mode: disabled`): explicitly disabled. Same behavior as the no-file case.
+- **`consultantMode: external`**: external-only. Attempt the selected external CLI. If it fails or is unavailable, return an unavailable memo and require the lead to keep routing honest instead of downgrading to an internal consultant path.
+- **`consultantMode: internal`**: internal subagent only for ordinary optional usage. A mandatory batch-close external consultant-check is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`consultantMode: disabled`**: explicitly disabled. Same behavior as the no-file case.
 
-The toggle file is project-local state stored in `.agents/.agents-mode`. Legacy `.agents/.consultant-mode` is read-only fallback state for migration. Keep both local-only and do not commit them to git.
+The toggle file is project-local state stored in `.agents/.agents-mode`. Keep it local-only and do not commit it to git.
 
-The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/external-dispatch.md). Treat the canonical file as a six-key schema with one Codex-only Claude-profile key:
+The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/external-dispatch.md). Treat the canonical file as the shared routing schema plus the profile, opinion-count, and Codex-only Claude transport/profile keys:
 
 - `consultantMode`
 - `delegationMode`
@@ -31,10 +30,20 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 - `preferExternalWorker`
 - `preferExternalReviewer`
 - `externalProvider`
-- `externalClaudeSecretMode` (`auto` or `force`; default `auto` when the key is absent after migration)
-- `externalClaudeProfile` (optional; `sonnet-high` or `opus-max`)
+- `externalPriorityProfile`
+- `externalPriorityProfiles`
+- `externalOpinionCounts`
+- `externalCodexWorkdirMode`
+- `externalClaudeWorkdirMode`
+- `externalGeminiWorkdirMode`
+- `externalClaudeSecretMode`
+- `externalClaudeApiMode`
+- `externalClaudeProfile`
 
-When changing `consultantMode`, preserve the other keys and `externalClaudeProfile` if it exists. When creating the file from scratch, initialize all eight keys and default `delegationMode` to `manual`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalClaudeSecretMode` to `auto`, and `externalClaudeProfile` to `sonnet-high` unless the user explicitly requested a different Claude profile override.
+Read and normalize `.agents/.agents-mode` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
+
+When changing `consultantMode`, preserve the other keys, including the profile, opinion-count, workdir, transport, and Claude-profile fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `delegationMode` to `manual`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` / `externalGeminiWorkdirMode` to `neutral`, `externalClaudeSecretMode` to `auto`, `externalClaudeApiMode` to `auto`, and `externalClaudeProfile` to `sonnet-high` unless the user explicitly requested a different Claude profile override.
+Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 
 ## When to invoke
 
@@ -44,6 +53,7 @@ Use `$consultant` when the lead wants a second opinion for:
 - cross-cutting tradeoffs spanning multiple specialist roles
 - ambiguity where the strongest factual slice is already available
 - comparing options before choosing a route
+- if several independent advisory opinions are needed at once, the orchestrator should launch them as separate brigade items through `$external-brigade` rather than trying to merge them into one memo request
 
 Do not invoke for:
 
@@ -62,9 +72,14 @@ Do not invoke for:
 
 - Return one advisory memo covering recommended direction, alternatives considered, major tradeoffs, key risks, assumptions, and confidence level.
 - Every consultant memo must include a provenance header:
-  - **Requested consultant mode:** <external | auto | internal>
-  - **Actual execution path:** <external CLI (provider name) | internal subagent | role-play (violation)>
-  - **Deviation reason:** <none | external unavailable: [reason] | fallback approved by user>
+  - **Execution role:** `consultant`
+  - **Assigned / replaced internal role:** `none`
+  - **Requested provider:** <internal | claude | gemini>
+  - **Resolved provider:** <Claude CLI | Gemini CLI | none>
+  - **Requested consultant mode:** <external | internal | disabled>
+  - **Actual execution path:** <internal consultant | external CLI (provider name) | role-play (violation)>
+  - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
+  - **Deviation reason:** <none | external unavailable: [reason]>
 - Every consultant memo must end with an explicit continuation section:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
   - The continuation prompt must begin with a direct imperative to continue, for example `Continue working:` or `Proceed with the next batch:`.
@@ -80,7 +95,7 @@ Do not invoke for:
 
 ## Execution paths
 
-### External provider: selected by `externalProvider` (`auto` -> Claude CLI on Codex)
+### External provider: selected by `externalProvider`
 
 See the shared dispatch contract in [../lead/external-dispatch.md](../lead/external-dispatch.md) for the canonical config and provider matrix.
 
@@ -89,7 +104,7 @@ Check the selected provider first:
 - Claude path: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows)
 - Gemini path: `gemini`
 
-If `.agents/.agents-mode` (or legacy `.agents/.consultant-mode`) selects Claude and contains `externalClaudeProfile`, map it as follows:
+If `.agents/.agents-mode` selects Claude and contains `externalClaudeProfile`, map it as follows:
 
 - `sonnet-high` → `--model sonnet --effort high`
 - `opus-max` → `--model opus --effort max`
@@ -118,28 +133,34 @@ printf '%s' "$PROMPT" | cmd.exe /c claude.exe -p --model opus --effort max --per
 Fallback if `claude.exe` is not on PATH: use `claude.cmd` instead.
 
 Claude SECRET mode:
-- If `externalClaudeSecretMode: auto` (or the key is absent in older migrated state), run the first profile-correct Claude CLI call normally. If that call fails with quota, limit, or reset errors, perform one SECRET-backed retry by rerunning the same Claude command with `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_AUTH_TOKEN` from the local Claude `SECRET.md` (for example `~/.claude/SECRET.md`) added to that command's environment in the same one-liner.
+- If `externalClaudeSecretMode: auto`, run the first profile-correct Claude CLI call normally. If that call fails with quota, limit, or reset errors, perform one SECRET-backed retry by rerunning the same Claude command with `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_AUTH_TOKEN` from the local Claude `SECRET.md` (for example `~/.claude/SECRET.md`) added to that command's environment in the same one-liner.
 - If `externalClaudeSecretMode: force`, add the same `ANTHROPIC_*` values from the local Claude `SECRET.md` to the primary Claude call immediately. Do not perform a second SECRET-backed retry because the primary call already used that environment override.
 - Do not switch providers, downgrade the Claude profile, or rewrite tracked config during either Claude path.
+
+Claude API transport:
+- If `externalClaudeApiMode: auto`, treat `claude-api` as the named secondary Claude transport after the allowed Claude CLI path is exhausted.
+- If `externalClaudeApiMode: force`, use `claude-api` as the primary Claude transport immediately instead of spending time on a preceding Claude CLI call.
+- `claude-api` must preserve the same provider intent and requested profile/model family; it is a Claude transport change, not a provider switch.
 
 **Rules:**
 - If `externalClaudeProfile` is present, use it instead of improvising a different Claude model or effort level.
 - If `externalClaudeSecretMode: force` is selected and the local Claude `SECRET.md` cannot supply all three `ANTHROPIC_*` values, treat that as external-provider unavailability instead of silently dropping back to a plain Claude call.
-- If `externalProvider: gemini` is selected, do not silently reroute to Claude; disclose provider failure explicitly and follow the configured fallback rules.
-- If the requested Claude profile is unavailable because of auth, client support, or non-limit CLI failures, treat that as external-provider unavailability and follow the configured fallback rules.
-- If the requested Claude profile fails because of plan limits, quota, or reset errors, honor `externalClaudeSecretMode`: `auto` tries the single SECRET-backed one-line retry first, while `force` treats the already-SECRET-backed primary call as the full allowed Claude path. If that allowed Claude path still fails, treat the provider as unavailable; do not silently downgrade to another Claude profile.
+- If `externalProvider: gemini` is selected, do not silently reroute to Claude; disclose provider failure explicitly and return an unavailable memo.
+- If the requested Claude profile is unavailable because of auth, client support, or non-limit CLI failures, treat that as external-provider unavailability and return an unavailable memo.
+- If the requested Claude profile fails because of plan limits, quota, or reset errors, honor `externalClaudeSecretMode`: `auto` tries the single SECRET-backed one-line retry first, while `force` treats the already-SECRET-backed primary call as the full allowed Claude path. If that allowed Claude CLI path still fails and `externalClaudeApiMode` permits `claude-api`, try `claude-api` before declaring Claude unavailable. Do not silently downgrade to another Claude profile.
+- If `externalClaudeApiMode` requires `claude-api` and that command is unavailable, disclose a dependency/config failure instead of pretending the Claude path was complete.
 - Do not pass multiline prompts as direct command-line arguments — use `stdin` or a file.
 - Do not use TTY when a non-interactive invocation is available.
 - On Windows, keep command-line prompts short enough to avoid `cmd.exe` truncation.
-- Wait 5–15 minutes before treating a run as stalled. Do not start a parallel chat while one may still be running.
-- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note, including the resolved `externalClaudeSecretMode`, whether a SECRET-backed Claude path was attempted, and how it ended. For ordinary optional usage, follow the configured fallback behavior. For the mandatory batch-close external consultant-check, do not silently fall back; return an unavailable memo and require the lead to keep the batch open and escalate.
+- Wait 5–15 minutes before treating a single advisory run as stalled. Do not launch a duplicate advisory call for the same memo while the first may still be running; independent external lanes may still run in parallel when their scopes are disjoint and the routing contract allows it.
+- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note, including the resolved `externalClaudeSecretMode`, whether a SECRET-backed Claude path was attempted, and how it ended. Do not silently fall back; return an unavailable memo and require the lead to keep routing honest.
 
-### Internal-subagent fallback (ordinary optional usage only)
+### No implicit fallback
 
-- If the external provider is unavailable, stalls, or returns quota/auth/limit errors, fall back to an internal independent subagent with the same advisory-only contract only when the current mode permits that fallback.
-- Give the fallback subagent only the minimal accepted artifact or canonical brief needed for the advisory question.
-- Do not leak the failed external-provider reasoning into the fallback prompt; pass the task and accepted artifacts only.
-- Do not use the internal fallback for the mandatory batch-close external consultant-check.
+- `consultantMode: external` is external-only. If the selected external provider is unavailable, stalls, or fails, return an unavailable memo and let the lead reroute honestly.
+- `consultantMode: internal` is the only supported internal consultant path. It must be selected explicitly in `.agents/.agents-mode`; do not downgrade into it automatically after an external failure.
+- Provider-backed consultant execution in `external` mode must use direct external launch from the orchestrating runtime or an approved transport wrapper script. If the current runtime cannot do that, disclose the dependency failure instead of proxying through an internal agent/helper/subagent host.
+- Never turn a failed external consultant run into a hidden internal substitute.
 
 ## Working rules
 

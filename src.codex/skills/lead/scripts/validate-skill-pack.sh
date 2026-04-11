@@ -9,11 +9,14 @@ set -euo pipefail
 
 # Auto-detect layout.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+DEV_REPO=0
 if [[ -d "src.codex/skills" && -f "src.codex/AGENTS.shared.md" ]]; then
   # Dev repo: assemble AGENTS.md from split source files for validation
   SKILLS_DIR="$(cd "src.codex/skills" && pwd -P)"
   SCRIPTS_DIR="$(cd "src.codex/skills/lead/scripts" && pwd -P)"
+  DOCS_DIR="$(cd "docs" && pwd -P)"
   AGENTS_FILE="$(mktemp)"
+  DEV_REPO=1
   cat "src.codex/AGENTS.shared.md" "src.codex/AGENTS.codex.md" > "$AGENTS_FILE"
   trap "rm -f '$AGENTS_FILE'" EXIT
 elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DIR/../../../AGENTS.md" ]]; then
@@ -59,6 +62,13 @@ for f in \
   "$SCRIPTS_DIR/check-publication-safety.sh" \
   "$SCRIPTS_DIR/check-publication-safety.ps1" \
   "$SCRIPTS_DIR/validate-skill-pack.sh"
+do
+  if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
+done
+
+for f in \
+  "$SKILLS_DIR/external-brigade/SKILL.md" \
+  "$SKILLS_DIR/external-brigade/agents/openai.yaml"
 do
   if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
 done
@@ -120,7 +130,7 @@ done
 echo ""
 echo "=== Orphaned skill directories ==="
 
-UTILITY_SKILLS=(second-opinion)
+UTILITY_SKILLS=(second-opinion external-brigade)
 
 for dir in "$SKILLS_DIR"/*/; do
   role="$(basename "$dir")"
@@ -149,6 +159,128 @@ for script in "$SCRIPTS_DIR"/*.sh; do
     warn "$script missing shebang line"
   fi
 done
+
+echo ""
+echo "=== Consultant no-fallback canon ==="
+
+if grep -Fq "consultantMode: auto" "$SKILLS_DIR/consultant/SKILL.md"; then
+  fail "consultant skill does not document consultantMode auto"
+else
+  pass "consultant skill does not document consultantMode auto"
+fi
+if grep -Fq "fallback approved by user" "$SKILLS_DIR/consultant/SKILL.md"; then
+  fail "consultant skill does not reserve consultant fallback deviations"
+else
+  pass "consultant skill does not reserve consultant fallback deviations"
+fi
+if grep -Fq "consultantMode: auto" "$SKILLS_DIR/second-opinion/SKILL.md"; then
+  fail "second-opinion skill does not expose consultantMode auto"
+else
+  pass "second-opinion skill does not expose consultantMode auto"
+fi
+if grep -Fq "allowed: external | auto | internal | disabled" "$SKILLS_DIR/init-project/SKILL.md"; then
+  fail "init-project skill restricts consultantMode to external/internal/disabled"
+else
+  pass "init-project skill restricts consultantMode to external/internal/disabled"
+fi
+if grep -Fq "allowed: external | auto | internal | disabled" "$SKILLS_DIR/lead/external-dispatch.md"; then
+  fail "external-dispatch schema restricts consultantMode to external/internal/disabled"
+else
+  pass "external-dispatch schema restricts consultantMode to external/internal/disabled"
+fi
+if grep -Fq "fallback approved by user" "$SKILLS_DIR/lead/external-dispatch.md"; then
+  fail "external-dispatch does not record consultant fallback approvals"
+else
+  pass "external-dispatch does not record consultant fallback approvals"
+fi
+if grep -Fq 'Read and normalize `.agents/.agents-mode` before trusting its flags.' "$SKILLS_DIR/lead/subagent-contracts.md"; then
+  pass "subagent-contracts require read-time agents-mode normalization"
+else
+  fail "subagent-contracts require read-time agents-mode normalization"
+fi
+if grep -Fq "normalize it to the current canonical format before presenting or trusting the current values." "$SKILLS_DIR/init-project/SKILL.md"; then
+  pass "init-project normalizes existing agents-mode before reading values"
+else
+  fail "init-project normalizes existing agents-mode before reading values"
+fi
+if grep -Fq 'Any read of `.agents/.agents-mode` that drives a decision should normalize the file to the current canonical format before trusting the flags.' "$SKILLS_DIR/init-project/SKILL.md"; then
+  pass "init-project requires read-time agents-mode normalization"
+else
+  fail "init-project requires read-time agents-mode normalization"
+fi
+if grep -Fq 'read and normalize `.agents/.agents-mode` first.' "$SKILLS_DIR/second-opinion/SKILL.md"; then
+  pass "second-opinion normalizes agents-mode before reporting status"
+else
+  fail "second-opinion normalizes agents-mode before reporting status"
+fi
+if grep -Fq 'Adapter host runtime' "$AGENTS_FILE"; then
+  fail "shared governance no longer allows adapter-host metadata for external execution"
+else
+  pass "shared governance no longer allows adapter-host metadata for external execution"
+fi
+if grep -Fq 'must use direct external launch' "$AGENTS_FILE"; then
+  pass "shared governance requires direct external launch"
+else
+  fail "shared governance requires direct external launch"
+fi
+if grep -Fq 'Adapter host runtime:' "$SKILLS_DIR/lead/external-dispatch.md"; then
+  fail "external-dispatch no longer records adapter host runtime"
+else
+  pass "external-dispatch no longer records adapter host runtime"
+fi
+if grep -Fq 'must use direct external launch' "$SKILLS_DIR/lead/external-dispatch.md"; then
+  pass "external-dispatch requires direct external launch"
+else
+  fail "external-dispatch requires direct external launch"
+fi
+if grep -Fq 'Adapter host runtime:' "$SKILLS_DIR/consultant/SKILL.md"; then
+  fail "consultant no longer records adapter host runtime"
+else
+  pass "consultant no longer records adapter host runtime"
+fi
+if grep -Fq 'must use direct external launch' "$SKILLS_DIR/consultant/SKILL.md"; then
+  pass "consultant requires direct external launch when external"
+else
+  fail "consultant requires direct external launch when external"
+fi
+if grep -Fq 'Adapter host runtime:' "$SKILLS_DIR/external-worker/SKILL.md"; then
+  fail "external-worker no longer records adapter host runtime"
+else
+  pass "external-worker no longer records adapter host runtime"
+fi
+if grep -Fq 'direct external launch contract' "$SKILLS_DIR/external-worker/SKILL.md"; then
+  pass "external-worker requires direct external launch"
+else
+  fail "external-worker requires direct external launch"
+fi
+if grep -Fq 'Adapter host runtime:' "$SKILLS_DIR/external-reviewer/SKILL.md"; then
+  fail "external-reviewer no longer records adapter host runtime"
+else
+  pass "external-reviewer no longer records adapter host runtime"
+fi
+if grep -Fq 'direct external launch contract' "$SKILLS_DIR/external-reviewer/SKILL.md"; then
+  pass "external-reviewer requires direct external launch"
+else
+  fail "external-reviewer requires direct external launch"
+fi
+if grep -Fq 'Actual execution path:** <external CLI (provider name) | internal subagent' "$SKILLS_DIR/consultant/SKILL.md"; then
+  fail "consultant does not mislabel internal subagent as actual execution path"
+else
+  pass "consultant does not mislabel internal subagent as actual execution path"
+fi
+
+if [[ $DEV_REPO -eq 1 ]]; then
+  if grep -Fq "## Canonical maintenance" "$DOCS_DIR/agents-mode-reference.md"; then
+    pass "agents-mode reference defines canonical maintenance"
+  else
+    fail "agents-mode reference defines canonical maintenance"
+  fi
+  if grep -Fq "Read-time normalization preserves the effective values of known keys" "$DOCS_DIR/agents-mode-reference.md"; then
+    pass "agents-mode reference documents read-time normalization semantics"
+  else
+    fail "agents-mode reference documents read-time normalization semantics"
+  fi
+fi
 
 echo ""
 echo "=== AGENTS.md required sections ==="
