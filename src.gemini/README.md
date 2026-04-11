@@ -7,7 +7,7 @@ This branch keeps only Gemini-specific source, but it now ships the same full ro
 - Gemini owns `GEMINI.md` through the built-in `/init` flow.
 - Orchestrarium keeps one source-side shared-governance module in `src.gemini/AGENTS.shared.md`, which installers materialize as runtime `AGENTS.md`.
 - Gemini runtime config stays in `.gemini/settings.json`.
-- Orchestrarium adds an optional `.gemini/.agents-mode` overlay for shared routing semantics, named priority profiles, and per-lane opinion counts.
+- Orchestrarium seeds `.gemini/.agents-mode` as the shared routing overlay for named priority profiles and per-lane opinion counts.
 - Stable expertise lives in `src.gemini/skills/`.
 - Bounded parallel external-helper orchestration lives in `src.gemini/skills/external-brigade/` and the Gemini command wrapper under `commands/agents/external-brigade.toml`.
 - Preview specialist-team execution lives in `src.gemini/agents/`.
@@ -26,11 +26,11 @@ src.gemini/                 Gemini pack source tree
   agents/*.md               Gemini preview specialist subagents only
   agents/team-templates/    Repo-local team compositions
   commands/**/*.toml        Gemini custom commands
-  extension/                Future extension and MCP boundary
+  extension/                Extension manifest source for the installed Gemini extension package
   scripts/validate-pack.sh  Standalone pack validation (bash)
   scripts/validate-pack.ps1 Standalone pack validation (PowerShell)
 docs/agents-mode-reference.md
-                            Canonical reference for the optional Orchestrarium
+                            Canonical reference for the installed Orchestrarium
                             `.gemini/.agents-mode` overlay
 docs/provider-runtime-layout.md
                             Source-vs-installed Gemini surface map
@@ -53,7 +53,7 @@ This branch is a standalone Gemini pack with a full Gemini-line role surface.
 2. If the target repository already has a user-owned `GEMINI.md`, the installer preserves it and prepends only the managed Orchestrarium pack block.
 3. Run Gemini's built-in `/init` when you want Gemini to refresh or extend the user-owned portion of `GEMINI.md`.
 4. Use the installed `.gemini/skills/` and `.gemini/agents/` layers for the full shared role principle, including `external-brigade` when one bounded batch needs multiple parallel external helpers.
-5. Use the Orchestrarium Gemini `init-project` helper only if you also want the optional `.gemini/.agents-mode` overlay.
+5. Use the Orchestrarium Gemini `init-project` helper to review or update the installed default `.gemini/.agents-mode` overlay after `/init`.
 
 The overlay reference in [docs/agents-mode-reference.md](docs/agents-mode-reference.md) also records task continuity, continue-by-default execution expectations, and the named priority profiles used for multi-opinion routing.
 6. Keep `.gemini/settings.json` and extension manifests as the Gemini-native MCP and runtime-config surface; servers such as Serena, Fetch, or Context7 belong there, not in installed `AGENTS.md`.

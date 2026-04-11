@@ -21,6 +21,8 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoDir = Split-Path -Parent $ScriptDir
 $Source = Join-Path $RepoDir "src.codex"
+$SharedAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
+$script:DefaultAgentsModeTemp = $null
 $script:CodexPackBeginMarker = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
 $script:CodexPackEndMarker = "<!-- END ORCHESTRARIUM CODEX PACK -->"
 
@@ -319,6 +321,51 @@ function Remove-DanglingLink {
     }
 }
 
+function Ensure-DefaultFile {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    Remove-DanglingLink -Path $TargetFile -Label $Label
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        Write-Host "  Preserving existing $Label..."
+        return
+    }
+
+    Write-Host "  Installing default $Label..."
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
+function Get-DefaultAgentsModeSource {
+    if (-not (Test-Path -LiteralPath $SharedAgentsModeSource)) {
+        throw "Missing shared agents-mode template at $SharedAgentsModeSource."
+    }
+
+    if ($null -eq $script:DefaultAgentsModeTemp) {
+        $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("orchestrarium-codex-agents-mode-{0}.yaml" -f ([guid]::NewGuid().ToString("N")))
+        $content = Get-Content -LiteralPath $SharedAgentsModeSource -Raw
+        if ($content -notmatch "(?m)^externalClaudeProfile:") {
+            if (-not $content.EndsWith("`n")) {
+                $content += "`n"
+            }
+            $content += "externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max`n"
+        }
+        if (-not $DryRun) {
+            Set-Content -LiteralPath $tempPath -Value $content -NoNewline
+        }
+        $script:DefaultAgentsModeTemp = $tempPath
+    }
+
+    return $script:DefaultAgentsModeTemp
+}
+
 function Get-CodexPackStartIndex {
     param([string[]]$Lines)
 
@@ -442,6 +489,7 @@ if ($Global) {
 # Repo/target: skills go into .agents/skills/,
 #              AGENTS.md merges into project root AGENTS.md.
 if ($Mode -eq "global") {
+    $AgentsRoot = $TargetRoot
     $SkillsTarget = Join-Path $TargetRoot "skills"
     $LeadScriptsTarget = Join-Path $TargetRoot "skills\lead\scripts"
     $MdTarget = Join-Path $TargetRoot "AGENTS.md"
@@ -452,11 +500,13 @@ if ($Mode -eq "global") {
     $LeadScriptsTarget = Join-Path $SkillsTarget "lead\scripts"
     $MdTarget = Join-Path $ProjectRoot "AGENTS.md"
 }
+$AgentsModeTarget = Join-Path $AgentsRoot ".agents-mode"
 
 Write-Host "=== Codex Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
 Write-Host "Skills target: $SkillsTarget"
 Write-Host "AGENTS.md target: $MdTarget"
+Write-Host "agents-mode: $AgentsModeTarget"
 Write-Host "Mode:   $Mode"
 if ($DryRun) {
     Write-Host "Mode:   dry-run" -ForegroundColor Yellow
@@ -469,6 +519,7 @@ if (-not (Test-Path (Join-Path $Source "skills"))) {
     Write-Host "Run this script from the Orchestrarium repo root."
     exit 1
 }
+$DefaultAgentsModeSource = Get-DefaultAgentsModeSource
 
 # Create parent directories as needed
 foreach ($tdir in @($SkillsTarget)) {
@@ -617,6 +668,8 @@ if ($Mode -ne "global") {
     Ensure-ReportsGitignore -ProjectRoot $ProjectRoot
 }
 
+Ensure-DefaultFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode"
+
 if ($DryRun) {
     Write-Host ""
     Write-Host "RESULT: DRY-RUN complete (no files modified)."
@@ -661,6 +714,7 @@ Test-InstalledFile (Join-Path $SkillsTarget "lead/subagent-contracts.md") "skill
 Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.sh") "skills/lead/scripts/check-publication-safety.sh"
 Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.ps1") "skills/lead/scripts/check-publication-safety.ps1"
 Test-InstalledFile (Join-Path $LeadScriptsTarget "validate-skill-pack.sh") "skills/lead/scripts/validate-skill-pack.sh"
+Test-InstalledFile $AgentsModeTarget ".agents-mode"
 
 if (Test-Path $dstMd) {
     $mdContent = Get-Content $dstMd -Raw
@@ -687,7 +741,12 @@ if ($errors -gt 0) {
     Write-Host "RESULT: OK - Codex pack installed" -ForegroundColor Green
     Write-Host "  Skills: $SkillsTarget"
     Write-Host "  AGENTS.md: $MdTarget"
+    Write-Host "  agents-mode: $AgentsModeTarget"
     Write-Host ""
-    Write-Host "Next: open Codex in the target project and run '`$init-project' to configure project policies and .agents/.agents-mode."
+    Write-Host "Next: open Codex in the target project and run '`$init-project' to review/update project policies and the installed default .agents/.agents-mode."
     Write-Host "Then run 'bash $LeadScriptsTarget/validate-skill-pack.sh' if you are validating the installation from a maintainer shell."
+}
+
+if (-not $DryRun -and $null -ne $script:DefaultAgentsModeTemp -and (Test-Path -LiteralPath $script:DefaultAgentsModeTemp)) {
+    Remove-Item -LiteralPath $script:DefaultAgentsModeTemp -Force
 }

@@ -83,9 +83,9 @@ Important: operator preferences now live only in pack-local `agents-mode` files.
 - `externalClaudeSecretMode: auto | force` and `externalClaudeApiMode: disabled | auto | force` stay under the `claude` provider. `claude-api` is a secondary Claude transport, not a fourth provider.
 - Codex may additionally use `externalClaudeProfile` to select the Claude CLI execution profile: `sonnet-high` or `opus-max`.
 - Provider-specific workdir keys stay separate and default to `neutral`: `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`.
-- For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and create `.agents/.agents-mode`.
-- For first-time Claude Code project setup, run `/agents-init-project` to write `## Project policies` in `.claude/CLAUDE.md` and initialize `.claude/.agents-mode`.
-- For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config and MCP wiring stay in `.gemini/settings.json` or extension manifests, while Orchestrarium-specific shared governance is brought in through `GEMINI.md` importing project-root `AGENTS.md`, the stable role catalog lives in `.gemini/skills/`, the preview specialist-team layer lives in `.gemini/agents/`, and shared routing semantics may additionally live in `.gemini/.agents-mode`, which the Gemini `init-project` helper bootstraps separately after `/init`. In that preview layer, every top-level `.gemini/agents/*.md` file must be a real agent definition with YAML frontmatter.
+- For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode`.
+- For first-time Claude Code project setup, run `/agents-init-project` to write `## Project policies` in `.claude/CLAUDE.md` and review or update the installed default `.claude/.agents-mode`.
+- For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config and MCP wiring stay in `.gemini/settings.json` or extension manifests, while Orchestrarium-specific shared governance is brought in through `GEMINI.md` importing project-root `AGENTS.md`, the stable role catalog lives in `.gemini/skills/`, the preview specialist-team layer lives in `.gemini/agents/`, and shared routing semantics live in the Orchestrarium overlay `.gemini/.agents-mode`, which install seeds by default and the Gemini `init-project` helper reviews or updates after `/init`. In that preview layer, every top-level `.gemini/agents/*.md` file must be a real agent definition with YAML frontmatter.
 - Explicit user role requests still override the toggle state in either direction.
 - Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity and continue-by-default execution expectations for initialized projects.
 
@@ -115,6 +115,7 @@ See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, d
 ## References and maintenance
 
 - `shared/references/` contains the shared cross-provider design core that current and future provider packs can reuse.
+- `shared/agents-mode.defaults.yaml` is the single editable exemplar for provider default overlays in the monorepo. Main installers seed provider-local or global `agents-mode` files directly from that shared exemplar, with any provider-only additions applied at install time. Standalone pack repositories keep one shipped pack-root default for self-contained install seeding.
 - `docs/README.md` is the common branch-level docs entrypoint for operator semantics and runtime-layout references.
 - [`docs/provider-runtime-layouts.md`](docs/provider-runtime-layouts.md) records the exact installed runtime layout for Codex, Claude Code, and Gemini, with `global` and `local` scopes split explicitly so install/runtime paths are not confused with repo source trees.
 - `references-codex/` contains Codex-specific addenda plus compatibility pointers for older reference paths.
