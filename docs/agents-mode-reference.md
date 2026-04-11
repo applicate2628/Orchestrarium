@@ -6,9 +6,9 @@ Canonical value-by-value operator reference for the standalone Codex pack.
 
 | Provider | Canonical file | Provider-specific note |
 |---|---|---|
-| Codex | `.agents/.agents-mode` | `externalProvider: auto` resolves by the shared lane matrix and the active priority profile, not by host pack. Explicit `codex`, `claude`, or `gemini` may be selected when the user or routing asks for them. Provider-specific workdir keys default to `neutral`. When Claude is selected, honor `externalClaudeSecretMode`, `externalClaudeApiMode`, and `externalClaudeProfile`. |
+| Codex | `.agents/.agents-mode` | `externalProvider: auto` resolves by the shared lane matrix and the active priority profile, not by host pack. Explicit `codex`, `claude`, or `gemini` may be selected when the user or routing asks for them. Provider-specific workdir keys default to `neutral`. When Claude is selected, honor `externalClaudeSecretMode`, `externalClaudeApiMode`, and `externalClaudeProfile`. Installs seed the default file into the active target and preserve existing overlays on reinstall. |
 
-New writes should target `agents-mode`.
+New writes should target `agents-mode`. In the umbrella monorepo workspace, this standalone seed is generated from `Orchestrarium/shared/agents-mode.defaults.yaml`; in this branch, the shipped canonical seed file remains `agents-mode.defaults.yaml`.
 
 ## Canonical maintenance
 

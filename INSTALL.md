@@ -26,7 +26,7 @@ Global install copies everything into `~/.codex/` (mirrors `src.codex/` structur
 bash install-codex.sh --target /path/to/repo
 ```
 
-Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and keeps operator state in `.agents/.agents-mode`.
+Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and seeds the default operator file at `.agents/.agents-mode`.
 
 ## Install into current repo (default)
 
@@ -48,7 +48,7 @@ bash install-codex.sh
 
 The scripts handle clean removal of old files, copying, AGENTS.md merging, and file-level verification. Re-running = reinstall.
 
-Operator state is always project-local at `.agents/.agents-mode`, even when the skill pack itself is installed globally.
+Operator state lives in the installed target: repo installs seed `.agents/.agents-mode`, while global installs seed `~/.codex/.agents-mode`.
 
 The canonical Codex-line operator shape is:
 - `consultantMode`
@@ -73,7 +73,7 @@ The canonical Codex-line operator shape is:
 
 Project policies are configured as a `## Project policies` section in the target `AGENTS.md`, not as a separate directory. See `skills/lead/policies-catalog.md` for available policy options.
 
-After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and initialize `.agents/.agents-mode`.
+After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode`.
 
 ## File separation
 
