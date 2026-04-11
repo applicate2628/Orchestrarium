@@ -12,6 +12,7 @@ skill_roles=(
   backend-engineer
   computational-scientist
   consultant
+  external-brigade
   data-engineer
   external-reviewer
   external-worker
@@ -124,7 +125,9 @@ required_common=(
   "$PACK_ROOT/skills/README.md"
   "$PACK_ROOT/skills/lead/SKILL.md"
   "$PACK_ROOT/skills/init-project/SKILL.md"
+  "$PACK_ROOT/skills/external-brigade/SKILL.md"
   "$PACK_ROOT/commands/agents/help.toml"
+  "$PACK_ROOT/commands/agents/external-brigade.toml"
   "$PACK_ROOT/commands/agents/init-project.toml"
   "$PACK_ROOT/agents/README.md"
   "$PACK_ROOT/agents/lead.md"
@@ -174,7 +177,40 @@ grep -q '\.gemini/settings\.json' "$GEMINI_FILE" || fail "GEMINI.md should menti
 grep -q 'agents/team-templates/' "$GEMINI_FILE" || fail "GEMINI.md should mention agents/team-templates/"
 grep -q 'cannot recursively call' "$PACK_ROOT/skills/lead/SKILL.md" || fail "lead skill should state the Gemini subagent recursion constraint"
 grep -q 'main Gemini session' "$PACK_ROOT/skills/lead/SKILL.md" || fail "lead skill should identify the main Gemini session as orchestration owner"
+grep -q 'external-brigade' "$PACK_ROOT/skills/lead/SKILL.md" || fail "lead skill should mention the external-brigade utility"
 grep -q 'agents/team-templates' "$PACK_ROOT/commands/agents/help.toml" || fail "help command should describe the team-template layer"
+grep -q 'external-brigade' "$PACK_ROOT/commands/agents/help.toml" || fail "help command should describe the external-brigade surface"
+! grep -Fq 'consultantMode: auto' "$PACK_ROOT/skills/second-opinion/SKILL.md" || fail "second-opinion skill should not expose consultantMode auto"
+! grep -Fq 'allowed: external | auto | internal | disabled' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "init-project skill should restrict consultantMode to external/internal/disabled"
+! grep -Fq 'allowed: external | auto | internal | disabled' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should restrict consultantMode to external/internal/disabled"
+! grep -Fq 'fallback approved by user' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should not record consultant fallback approvals"
+grep -Fq 'normalize it to the current canonical format before presenting or trusting any values.' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "init-project should normalize agents-mode before reading values"
+grep -Fq 'Any read of `.gemini/.agents-mode` that drives a decision should normalize the file to the current canonical format before trusting the flags.' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "init-project should require read-time agents-mode normalization"
+grep -Fq 'read and normalize `.gemini/.agents-mode`, then print the current resolved values' "$PACK_ROOT/skills/second-opinion/SKILL.md" || fail "second-opinion should normalize agents-mode before reporting status"
+grep -Fq 'Read and normalize `.gemini/.agents-mode` before routing.' "$PACK_ROOT/skills/consultant/SKILL.md" || fail "consultant should normalize agents-mode before routing"
+grep -Fq 'Any read of `.gemini/.agents-mode` that influences routing must normalize an existing file to the current canonical format before trusting the flags.' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should require read-time agents-mode normalization"
+if [[ "$MODE" == "source" ]]; then
+  grep -Fq 'Adapter host runtime' "$SHARED_SOURCE_FILE" && fail "shared governance should not allow adapter-host metadata for external execution"
+  grep -Fq 'must use direct external launch' "$SHARED_SOURCE_FILE" || fail "shared governance should require direct external launch"
+else
+  grep -Fq 'Adapter host runtime' "$RUNTIME_AGENTS_FILE" && fail "shared governance should not allow adapter-host metadata for external execution"
+  grep -Fq 'must use direct external launch' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require direct external launch"
+fi
+grep -Fq 'Adapter host runtime:' "$PACK_ROOT/skills/lead/external-dispatch.md" && fail "external-dispatch should not record adapter host runtime"
+grep -Fq 'must use direct external launch' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should require direct external launch"
+grep -Fq 'Read and normalize `.gemini/.agents-mode` to the current canonical format before trusting its flags.' "$PACK_ROOT/skills/external-worker/SKILL.md" || fail "external-worker should normalize agents-mode before routing"
+grep -Fq 'Read and normalize `.gemini/.agents-mode` to the current canonical format before trusting its flags.' "$PACK_ROOT/skills/external-reviewer/SKILL.md" || fail "external-reviewer should normalize agents-mode before routing"
+grep -Fq 'externalPriorityProfile' "$PACK_ROOT/skills/external-worker/SKILL.md" || fail "external-worker should honor structured profile keys"
+grep -Fq 'externalPriorityProfile' "$PACK_ROOT/skills/external-reviewer/SKILL.md" || fail "external-reviewer should honor structured profile keys"
+grep -Fq 'direct external launch contract' "$PACK_ROOT/skills/external-worker/SKILL.md" || fail "external-worker should require direct external launch"
+grep -Fq 'direct external launch contract' "$PACK_ROOT/skills/external-reviewer/SKILL.md" || fail "external-reviewer should require direct external launch"
+grep -Fq 'same-provider brigade items may run in parallel' "$PACK_ROOT/skills/external-brigade/SKILL.md" || fail "external-brigade should document same-provider parallel reuse"
+grep -Fq 'It does not cap how many same-provider brigade items may run in parallel' "$PACK_ROOT/skills/external-brigade/SKILL.md" || fail "external-brigade should keep opinion counts separate from concurrency"
+
+if [[ "$MODE" == "source" && -f "$ROOT/docs/agents-mode-reference.md" ]]; then
+  grep -Fq '## Canonical maintenance' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should define canonical maintenance"
+  grep -Fq 'Read-time normalization preserves the effective values of known keys' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document read-time normalization semantics"
+fi
 
 start_count="$(grep -cF '<!-- ORCHESTRARIUM_GEMINI_PACK:START -->' "$GEMINI_FILE" || true)"
 end_count="$(grep -cF '<!-- ORCHESTRARIUM_GEMINI_PACK:END -->' "$GEMINI_FILE" || true)"
@@ -209,7 +245,7 @@ if [[ "$REQUIRE_EXTENSION" -eq 1 ]]; then
   json_targets+=("$PACK_ROOT/extension/gemini-extension.json")
 fi
 
-"$PYTHON_BIN" - "$PACK_ROOT/commands/agents/help.toml" "$PACK_ROOT/commands/agents/init-project.toml" "${json_targets[@]}" <<'PY'
+"$PYTHON_BIN" - "$PACK_ROOT/commands/agents/help.toml" "$PACK_ROOT/commands/agents/external-brigade.toml" "$PACK_ROOT/commands/agents/init-project.toml" "${json_targets[@]}" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -220,8 +256,8 @@ except ModuleNotFoundError:
     print("FAIL: Python tomllib is unavailable; cannot validate Gemini TOML syntax")
     sys.exit(1)
 
-toml_paths = [Path(sys.argv[1]), Path(sys.argv[2])]
-json_paths = [Path(path) for path in sys.argv[3:]]
+toml_paths = [Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])]
+json_paths = [Path(path) for path in sys.argv[4:]]
 
 for toml_path in toml_paths:
     with toml_path.open("rb") as fh:

@@ -245,6 +245,8 @@ for f in \
   "$SKILLS_DIR/lead/external-dispatch.md" \
   "$SKILLS_DIR/init-project/SKILL.md" \
   "$SKILLS_DIR/init-project/agents/openai.yaml" \
+  "$SKILLS_DIR/external-brigade/SKILL.md" \
+  "$SKILLS_DIR/external-brigade/agents/openai.yaml" \
   "$SKILLS_DIR/consultant/SKILL.md" \
   "$SKILLS_DIR/second-opinion/SKILL.md" \
   "$SCRIPTS_DIR/check-publication-safety.sh" \
@@ -381,8 +383,8 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex runtime-notes section documents the Codex-only externalClaudeProfile field"
   check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
     "## Codex-specific runtime notes" \
-    "Codex dispatch on Claude CLI" \
-    "Codex runtime-notes section documents Codex-to-Claude external dispatch"
+    "route eligible external work to Claude CLI or Gemini CLI" \
+    "Codex runtime-notes section documents profile-based Codex external dispatch"
   check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
     "## Codex-specific runtime notes" \
     "sequential skill invocation" \
@@ -437,10 +439,10 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CODEX_REF_DIR/subagent-operating-model.md" 120 \
     "Codex addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "0adc0ebf76426eeede77e86b941651835170dc2cfc7bf3d1ae1342d9ca1ec1a0" \
+    "3e1220bda44c01d8cf3bcbfdd5ce06f36e353feb9b9032d41f0f913f29d5c44d" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
-    "feffe12f846d7e0b6a275b452cc43b90db8d1604836f6112cbc9acc3dfb23d0d" \
+    "9b0d5781035a7016eb38ddb94d80ed752ced13af784f4689864ad01d544c2611" \
     "Codex addendum matches the current canonical normalized fingerprint"
 fi
 
@@ -474,7 +476,7 @@ done
 echo ""
 echo "=== Orphaned skill directories ==="
 
-UTILITY_SKILLS=(init-project second-opinion review-changes)
+UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes)
 
 for dir in "$SKILLS_DIR"/*/; do
   role="$(basename "$dir")"
@@ -503,6 +505,70 @@ for script in "$SCRIPTS_DIR"/*.sh; do
     warn "$script missing shebang line"
   fi
 done
+
+echo ""
+echo "=== Consultant no-fallback canon ==="
+
+check_absent "$SKILLS_DIR/consultant/SKILL.md" "consultantMode: auto" \
+  "consultant skill does not document consultantMode auto"
+check_absent "$SKILLS_DIR/consultant/SKILL.md" "fallback approved by user" \
+  "consultant skill does not reserve consultant fallback deviations"
+check_absent "$SKILLS_DIR/second-opinion/SKILL.md" "consultantMode: auto" \
+  "second-opinion skill does not expose consultantMode auto"
+check_absent "$SKILLS_DIR/init-project/SKILL.md" "allowed: external | auto | internal | disabled" \
+  "init-project skill restricts consultantMode to external/internal/disabled"
+check_absent "$SKILLS_DIR/lead/external-dispatch.md" "allowed: external | auto | internal | disabled" \
+  "external-dispatch schema restricts consultantMode to external/internal/disabled"
+check_absent "$SKILLS_DIR/lead/external-dispatch.md" "fallback approved by user" \
+  "external-dispatch does not record consultant fallback approvals"
+check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "Read and normalize \`.agents/.agents-mode\` before trusting its flags." \
+  "subagent-contracts require read-time agents-mode normalization"
+check_contains "$SKILLS_DIR/init-project/SKILL.md" "normalize it to the current canonical format before presenting or trusting the current values." \
+  "init-project normalizes existing agents-mode before reading values"
+check_contains "$SKILLS_DIR/init-project/SKILL.md" "Any read of \`.agents/.agents-mode\` that drives a decision should normalize the file to the current canonical format before trusting the flags." \
+  "init-project requires read-time agents-mode normalization"
+check_contains "$SKILLS_DIR/second-opinion/SKILL.md" "read and normalize \`.agents/.agents-mode\` first." \
+  "second-opinion normalizes agents-mode before reporting status"
+check_absent "$AGENTS_FILE" "Adapter host runtime" \
+  "shared governance no longer allows adapter-host metadata for external execution"
+check_contains "$AGENTS_FILE" "must use direct external launch" \
+  "shared governance requires direct external launch"
+check_absent "$SKILLS_DIR/lead/external-dispatch.md" "Adapter host runtime:" \
+  "external-dispatch no longer records adapter host runtime"
+check_contains "$SKILLS_DIR/lead/external-dispatch.md" "must use direct external launch" \
+  "external-dispatch requires direct external launch"
+check_absent "$SKILLS_DIR/consultant/SKILL.md" "Adapter host runtime:" \
+  "consultant no longer records adapter host runtime"
+check_contains "$SKILLS_DIR/consultant/SKILL.md" "must use direct external launch" \
+  "consultant requires direct external launch when external"
+check_absent "$SKILLS_DIR/external-worker/SKILL.md" "Adapter host runtime:" \
+  "external-worker no longer records adapter host runtime"
+check_contains "$SKILLS_DIR/external-worker/SKILL.md" "direct external launch contract" \
+  "external-worker requires direct external launch"
+check_absent "$SKILLS_DIR/external-reviewer/SKILL.md" "Adapter host runtime:" \
+  "external-reviewer no longer records adapter host runtime"
+check_contains "$SKILLS_DIR/external-reviewer/SKILL.md" "direct external launch contract" \
+  "external-reviewer requires direct external launch"
+check_absent "$SKILLS_DIR/consultant/SKILL.md" "Actual execution path:** <external CLI (provider name) | internal subagent" \
+  "consultant does not mislabel internal subagent as actual execution path"
+check_contains "$SKILLS_DIR/external-brigade/SKILL.md" "same-provider brigade items may run in parallel" \
+  "external-brigade documents same-provider parallel reuse"
+check_contains "$SKILLS_DIR/external-brigade/SKILL.md" "It does not cap how many same-provider brigade items may run in parallel" \
+  "external-brigade keeps opinion counts separate from concurrency"
+check_contains "$SKILLS_DIR/lead/SKILL.md" "\$external-brigade" \
+  "lead skill mentions the external-brigade utility"
+
+if [[ $DEV_REPO -eq 1 ]]; then
+  check_contains "$REPO_ROOT/src.codex/AGENTS.codex.md" "\$external-brigade" \
+    "Codex platform rules mention the external-brigade utility skill"
+fi
+
+if [[ $DEV_REPO -eq 1 ]]; then
+  check_contains "$DOCS_DIR/agents-mode-reference.md" "## Canonical maintenance" \
+    "agents-mode reference defines canonical maintenance"
+  check_contains "$DOCS_DIR/agents-mode-reference.md" "Read-time normalization preserves the effective values of known keys" \
+    "agents-mode reference documents read-time normalization semantics"
+fi
 
 echo ""
 echo "=== AGENTS.md required sections ==="

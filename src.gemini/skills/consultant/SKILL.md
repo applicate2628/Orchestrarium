@@ -8,26 +8,36 @@ description: Provide an independent advisory memo for the lead without becoming 
 ## Core stance
 
 - Advisory-only.
-- One memo, then stop.
+- One memo per invocation, then stop.
 - No routing authority, no gate authority, no hidden fallback.
 
 ## Toggle state
 
-Read `.gemini/.agents-mode` first and fall back to legacy `.gemini/.consultant-mode` only when the new file is absent.
+Read and normalize `.gemini/.agents-mode` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 
 Relevant keys:
 
 - `consultantMode`
 - `externalProvider`
+- `externalPriorityProfile`
+- `externalPriorityProfiles`
+- `externalOpinionCounts`
 - `externalClaudeSecretMode`
+- `externalClaudeApiMode`
 
 Gemini-line provider rules:
 
-- `externalProvider: auto` keeps provider-backed external dispatch explicit on the Gemini line
+- `externalProvider: auto` resolves through the active named priority profile, not a Gemini-line default provider
+- `externalPriorityProfile` defaults to `balanced`
+- `balanced` mirrors the ordinary shared matrix; `gemini-crosscheck` keeps Gemini in the non-visual advisory and pre-PR review cross-check lanes
 - `externalProvider: codex` means Codex CLI explicitly
 - `externalProvider: claude` means Claude CLI explicitly
-- `externalProvider: gemini` is invalid on the Gemini line
+- `externalProvider: gemini` is allowed only as an explicit self-provider override
 - `externalClaudeSecretMode` matters only when the resolved provider is Claude
+- `externalClaudeApiMode` matters only when the resolved provider is Claude
+- The shared lane matrix still prefers Gemini for image/icon/decorative advisory work when that routing remains honest
+- Same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce
+- When the active lane policy asks for more than one external opinion, the lead may invoke this skill more than once and aggregate the returned memos
 
 ## Return
 
@@ -45,3 +55,4 @@ Return one advisory memo with:
 - Distinguish confirmed facts, assumptions, and judgment.
 - For the mandatory batch-close external consultant-check, do not silently downgrade to an internal-only path.
 - If the external consultant path is unavailable for that mandatory closeout sweep, say so explicitly and keep the batch open for escalation.
+- If the active lane policy requests more than one external consultant-check, each invocation still returns one memo; the lead aggregates the memos and fails closed when the requested count cannot be satisfied.

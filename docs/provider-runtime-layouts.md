@@ -39,7 +39,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Installed pack root | `<project>/.agents/skills/` | Role skills are copied here |
 | Governance entrypoint | `<project>/AGENTS.md` | Codex pack section is merged into the project-root `AGENTS.md` |
 | Skill tree | `<project>/.agents/skills/<role>/SKILL.md` | Mirrors the global `skills/` structure |
-| Local config | `<project>/.agents/.agents-mode` | Canonical Orchestrarium local state file; legacy fallback is `.agents/.consultant-mode` |
+| Local config | `<project>/.agents/.agents-mode` | Canonical Orchestrarium local state file |
 | Validation script | `<project>/.agents/skills/lead/scripts/validate-skill-pack.sh` | Run from the target project root after install |
 | Publication-safety scan | `<project>/.agents/skills/lead/scripts/check-publication-safety.sh` | PowerShell wrapper exists alongside the shell script |
 
@@ -65,7 +65,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Project subagents | `<project>/.claude/agents/*.md` | Official project-level custom subagent surface |
 | Legacy commands | `<project>/.claude/commands/*.md` | Still work, but lose precedence to a skill with the same name |
 | Orchestrarium shared governance copy | `<project>/.claude/AGENTS.md` | Repo-local overlay copied by Orchestrarium install scripts; not a Claude-native runtime requirement |
-| Orchestrarium local config | `<project>/.claude/.agents-mode` | Canonical Orchestrarium local state file; legacy fallback is `.claude/.consultant-mode` |
+| Orchestrarium local config | `<project>/.claude/.agents-mode` | Canonical Orchestrarium local state file |
 | Pack memory | `<project>/.claude/memory/` | Repo-local installed memory payload for the Orchestrarium Claude pack |
 
 ## Gemini CLI
@@ -97,7 +97,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Workspace subagents | `<project>/.gemini/agents/` | Official preview project-level subagent location; Orchestrarium installs the specialist-team layer here |
 | Workspace custom commands | `<project>/.gemini/commands/` | Official project-local Gemini custom commands |
 | Workspace settings | `<project>/.gemini/settings.json` | Official project-local Gemini settings |
-| Orchestrarium operator overlay | `<project>/.gemini/.agents-mode` | Repo-local shared routing overlay for consultant, delegation, MCP, and external-provider preferences; not a Gemini-native settings surface and should be initialized separately after Gemini `/init` |
+| Orchestrarium operator overlay | `<project>/.gemini/.agents-mode` | Repo-local shared routing overlay for consultant, delegation, MCP, external-provider preferences, named priority profiles, and opinion counts; not a Gemini-native settings surface and should be initialized separately after Gemini `/init` |
 | Optional context filename override | `context.fileName` in settings | `AGENTS.md` is not a default Gemini entrypoint; Orchestrarium uses `GEMINI.md` imports instead of taking over this settings-owned surface |
 | Extension-provided skills | installed extension content | Official third discovery tier after workspace and user skills |
 | Important overlap note | workspace `.agents/skills/` | If a repository already uses `.agents/skills/` for Codex, Gemini will also discover those skills because this alias is official Gemini behavior |

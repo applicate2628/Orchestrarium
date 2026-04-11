@@ -37,16 +37,23 @@ Do not invoke for:
 
 ## Shared config format
 
-The local config file is now `.claude/.agents-mode`; legacy `.claude/.consultant-mode` is fallback-only for migration. The canonical file may contain:
+The local config file is `.claude/.agents-mode`. The canonical file may contain:
 
-- `consultantMode: external | auto | internal | disabled`
+- `consultantMode: external | internal | disabled`
 - `delegationMode: manual | auto | force`
 - `mcpMode: auto | force`
 - `preferExternalWorker: true | false`
 - `preferExternalReviewer: true | false`
-- `externalProvider: auto | claude | codex | gemini`
+- `externalProvider: auto | codex | claude | gemini`
+- `externalPriorityProfile: balanced | gemini-crosscheck | <repo-local profile>`
+- `externalPriorityProfiles: structured profile map`
+- `externalOpinionCounts: structured lane-count map`
+- `externalClaudeSecretMode: auto | force`
+- `externalClaudeApiMode: disabled | auto | force`
 
-`consultantMode` continues to govern consultant behavior. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` keeps the Claude-line default external provider unless the operator explicitly selects another installed provider such as `gemini`; these keys must be preserved by any command that updates this file. Legacy `externalClaudeProfile` values should not be written on the Claude line.
+`consultantMode` continues to govern consultant behavior. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. When the resolved provider is `claude`, `externalClaudeSecretMode` and `externalClaudeApiMode` are transport knobs; `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
+
+Read and normalize `.claude/.agents-mode` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 
 For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md).
 
@@ -56,12 +63,12 @@ For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md]
 - Every consultant memo must include a provenance header:
   - **Execution role:** `consultant`
   - **Assigned / replaced internal role:** `none`
-  - **Requested provider:** <internal | codex | gemini>
-  - **Resolved provider:** <Codex CLI | Gemini CLI | none>
-  - **Requested consultant mode:** <external | auto | internal | disabled>
-  - **Actual execution path:** <external CLI (provider name) | internal subagent | role-play (violation)>
+  - **Requested provider:** <internal | codex | claude | gemini>
+  - **Resolved provider:** <Codex CLI | Claude CLI | Gemini CLI | none>
+  - **Requested consultant mode:** <external | internal | disabled>
+  - **Actual execution path:** <internal consultant | external CLI (provider name) | role-play (violation)>
   - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
-  - **Deviation reason:** <none | external unavailable: [reason] | fallback approved by user>
+  - **Deviation reason:** <none | external unavailable: [reason]>
 - Every consultant memo must end with an explicit continuation section:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
   - The continuation prompt must begin with a direct imperative to continue, for example `Continue working:` or `Proceed with the next batch:`.
@@ -72,31 +79,33 @@ For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md]
 - This role is intentionally non-blocking and non-approving.
 - The lead decides whether to adopt or ignore the memo.
 - If the memo identifies a real blocker, flag it and recommend the proper specialist role instead of acting as that role.
-- For the mandatory batch-close external consultant-check, the continuation section is required even when the consultant sees no new blockers; the memo must still end with a reusable second prompt that explicitly continues the next approved work.
-- If the batch-close external consultant-check cannot run because external execution is disabled or unavailable, say so explicitly in the memo and instruct the lead to keep the batch open and escalate to the user.
+- For the mandatory batch-close external consultant requirement, the continuation section is required even when the consultant sees no new blockers; the memo must still end with a reusable second prompt that explicitly continues the next approved work.
+- If the batch-close external consultant requirement cannot run because external execution is disabled or unavailable, say so explicitly in the memo and instruct the lead to keep the batch open and escalate to the user.
 
 ## Toggle file check
 
-Before any invocation, read `.claude/.agents-mode` first and fall back to legacy `.claude/.consultant-mode` only when the new file is absent:
+Before any invocation, read `.claude/.agents-mode`:
 
-- **No file** (default): consultant is disabled for ordinary optional second-opinion usage. Notify "Second opinion skipped — consultant disabled (`/agents-second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. For the mandatory batch-close external consultant-check, do not silently skip: return an advisory memo that records the disabled state and tells the lead to keep the batch open and escalate to the user.
-- **`consultantMode: external`**: external-first. Attempt the selected external CLI. If it fails or is unavailable, do NOT silently fall back — state why external failed and request user approval for fallback to internal for ordinary optional usage. For the mandatory batch-close external consultant-check, do not downgrade to internal fallback; return an unavailable memo and require the lead to keep the batch open and escalate.
-- **`consultantMode: auto`**: external-first with silent fallback for ordinary optional usage. Attempt the selected external CLI. If unavailable, fall back to internal subagent automatically and disclose the actual execution path in the memo header. For the mandatory batch-close external consultant-check, do not silently downgrade; if the external path is unavailable, return an unavailable memo and require the lead to keep the batch open and escalate.
-- **`consultantMode: internal`**: internal subagent only for ordinary optional usage. A mandatory batch-close external consultant-check is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
+- If the file exists, normalize it to the current canonical format before interpreting the flags.
+
+- **No file** (default): consultant is disabled for ordinary optional second-opinion usage. Notify "Second opinion skipped — consultant disabled (`/agents-second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. For the mandatory batch-close external consultant requirement, do not silently skip: return an advisory memo that records the disabled state and tells the lead to keep the batch open and escalate to the user.
+- **`consultantMode: external`**: external-only. Attempt the selected external CLI. If it fails or is unavailable, return an unavailable memo and require the lead to keep routing honest instead of downgrading to an internal consultant path.
+- **`consultantMode: internal`**: internal subagent only for ordinary optional usage. A mandatory batch-close external consultant requirement is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
 - **`consultantMode: disabled`**: explicitly disabled. Same behavior as the no-file case.
 
 The toggle file is local-only (`.claude/` is in `.gitignore`) and not committed to git.
 
 ## Execution paths
 
-### Selected external provider (`auto` -> Codex on the Claude line)
+### Selected external provider (shared lane matrix)
 
 Check the selected provider first:
 
 - Codex path: `which codex` on Unix, `where codex` on Windows, or `command -v codex`
+- Claude path: `claude`
 - Gemini path: `gemini`
 
-If Codex is selected or implied by `externalProvider: auto`:
+If Codex is selected:
 
 ```bash
 codex --quiet --full-auto "$PROMPT"
@@ -104,8 +113,17 @@ codex --quiet --full-auto "$PROMPT"
 
 - For hard tasks, use `--model gpt-5.4 --reasoning-effort xhigh`.
 - Prefer passing context via file references in the prompt rather than piping large artifacts through stdin.
-- Wait 5–15 minutes before treating a run as stalled. Do not start a parallel chat while one may still be running.
-- If Codex is not installed, fails, times out, or hits quota/auth limits, do not silently degrade the mandatory batch-close external consultant-check. For ordinary optional usage, follow the configured fallback behavior.
+- Wait 5–15 minutes before treating a single advisory run as stalled. Do not launch a duplicate advisory call for the same memo while the first may still be running; independent external lanes may still run in parallel when their scopes are disjoint and the routing contract allows it.
+- If Codex is not installed, fails, times out, or hits quota/auth limits, do not silently degrade the consultant requirement. Return an unavailable memo and keep routing honest.
+
+If Claude is selected explicitly:
+
+```bash
+claude --quiet --full-auto "$PROMPT"
+```
+
+- Apply `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is Claude.
+- Do not silently downgrade from a selected Claude path to Codex or Gemini.
 
 If Gemini is selected explicitly:
 
@@ -116,11 +134,12 @@ printf '%s' "$PROMPT" | gemini -p "" --model gemini-2.5-pro --approval-mode yolo
 - Do not silently downgrade from a selected Gemini path back to Codex.
 - Use stdin or a prompt file rather than trying to push a multiline prompt through a single command-line string.
 
-### Internal-subagent fallback (ordinary optional usage only)
+### No implicit fallback
 
-- If the external provider is unavailable, use an independent internal subagent with the same advisory-only contract only when the current mode permits that fallback.
-- Pass only the minimal accepted artifact or canonical brief. Do not leak the failed external reasoning into the fallback prompt.
-- Do not use the internal fallback for the mandatory batch-close external consultant-check.
+- `consultantMode: external` is external-only. If the selected external provider is unavailable or fails, return an unavailable memo and let the lead reroute honestly.
+- `consultantMode: internal` is the only supported internal consultant path. It must be selected explicitly in `.claude/.agents-mode`; do not downgrade into it automatically after an external failure.
+- Provider-backed consultant execution in `external` mode must use direct external launch from the orchestrating runtime or an approved transport wrapper script. If the current runtime cannot do that, disclose the dependency failure instead of proxying through an internal agent/helper/subagent host.
+- Never turn a failed external consultant run into a hidden internal substitute.
 
 ## Working rules
 

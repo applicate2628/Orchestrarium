@@ -47,24 +47,30 @@ When lead coordinates, or when the main conversation needs to decide between rol
 
 ## External adapter routing
 
-Claude-line keeps one shared local config file at `.claude/.agents-mode`; legacy `.claude/.consultant-mode` is fallback-only.
+Claude-line keeps one shared local config file at `.claude/.agents-mode`.
 
 - `consultantMode` continues to govern `$consultant`.
 - `delegationMode: manual` keeps delegation explicit-by-request, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
-- `preferExternalWorker: true` prefers `$external-worker` for eligible implement-side slots.
+- `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
-- `externalProvider: auto` keeps the Claude-line default external provider (Codex CLI); explicit values may select Gemini CLI where the repository allows it.
-- `externalClaudeProfile` is no longer part of the Claude-line canonical schema.
+- `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work.
+- The Claude-line canonical schema may include `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is Claude; `externalClaudeProfile` remains Codex-line only.
 - The team template JSON does not change; routing substitutions happen at execution time.
 - `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.
+- Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.
+- Unsupported external requests fail fast. There is no generic external adapter for owner roles such as `$product-manager` or `$lead` on the Claude line.
+- An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The orchestrator must say the route is unsupported and reroute honestly.
 - If the external CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work to another eligible path.
 - The adapter itself must not silently fall back to an internal specialist.
-- Mandatory security and performance gates remain internal in `security-sensitive` and `performance-sensitive` templates unless a separate approved policy says otherwise.
+- Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support concurrent non-interactive execution.
+- Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the orchestrator may launch repeated same-provider external helpers concurrently.
+- Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices.
+- If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
 
 ## Batch-close consultant check
 
-For lead-managed work, every completed task-batch ends with one external consultant-check before closure.
+For lead-managed work, every completed task-batch must satisfy the active lane policy's external consultant requirement before closure.
 
 - The check uses `$consultant` as an advisory-only closure sweep; it does not replace reviewers, QA, or human/CI gates.
 - Request the external execution path explicitly for this closure check.
@@ -123,7 +129,7 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive and update index |
 | Governance alignment | `$knowledge-archivist` | Governance change | Propagate to all governance files in same commit |
 | Documentation sync | `$knowledge-archivist` | Skill, role, or template added/removed/renamed | Update README, INSTALL, install scripts per root CLAUDE.md checklists |
-| Batch-close consultant-check | `$lead` | Every completed lead-managed batch | Run the external consultant-check or keep the batch open and escalate |
+| Batch-close consultant-check | `$lead` | Every completed lead-managed batch | Satisfy the active lane policy's external consultant requirement or keep the batch open and escalate |
 
 ## Non-obvious routing pairs
 

@@ -32,6 +32,7 @@ description: Implement an approved 2D or 3D graphics phase without redefining re
 - Prefer explicit render-path changes over broad engine churn.
 - Make coordinate-space, shader, material, and asset assumptions easy to review.
 - Escalate architecture or frame-budget conflicts instead of patching around them locally.
+- Decorative image generation, icon production, and purely stylistic visual polish do not automatically belong to this role; when the lane is primarily image/icon/decorative work, the orchestrator may prefer Gemini or Gemini-backed `$external-worker` instead of forcing graphics-engineer ownership.
 
 ## Adjacent findings protocol
 

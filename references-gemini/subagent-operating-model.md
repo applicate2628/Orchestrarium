@@ -13,8 +13,8 @@ This file keeps only Gemini-specific runtime and repository concretization for t
 - `.gemini/settings.json` stays the Gemini-native runtime config surface.
 - `.gemini/.agents-mode` is an optional Orchestrarium overlay, not a replacement for `.gemini/settings.json`.
 - Gemini runtime assets live in `src.gemini/skills/`, `src.gemini/commands/`, and `src.gemini/extension/`.
-- The current Gemini source tree stays sequential and human-steered; do not assume native parallel dispatch.
-- Gemini-line `externalProvider: auto` has no standing external default. If Gemini explicitly selects Claude as the external provider, honor `externalClaudeSecretMode`.
+- The current Gemini source tree stays sequential and human-steered for native internal execution; do not assume native internal parallel dispatch. Independent external adapters may still run in parallel when the routing contract and selected provider runtimes allow it.
+- Gemini-line `externalProvider: auto` keeps Claude as the ordinary external default, while documented repo-local visual-routing heuristics may prefer Gemini itself for image/icon/decorative lanes. When Gemini resolves to Claude, honor both `externalClaudeSecretMode` and `externalClaudeApiMode`.
 
 ## Gemini-side repository concretization
 

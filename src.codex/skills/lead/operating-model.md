@@ -23,7 +23,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - Default `REVISE` cap: no more than 3 consecutive `REVISE` cycles for the same role and artifact before the lead must escalate to the user with a summary of all iterations, remaining findings, and a recommendation.
 - A handoff interrupt or worker stall without an artifact is not a completed `REVISE` artifact. Keep the stage open, record the interruption in `status.md`, then either re-dispatch the same role with a narrower slice or route to the proper factual role.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
-- Every completed lead-managed batch ends with one external consultant-check before closure. The memo is advisory-only, but the lead must record it before marking the batch closed.
+- Every completed lead-managed batch ends with one or more external consultant-checks before closure. The memo is advisory-only, but the lead must record the required opinion set before marking the batch closed.
 - Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - A material revision to an accepted upstream artifact invalidates dependent downstream `PASS` states; the lead marks the affected artifacts for re-review before continuing the pipeline.
 - Handoff latency should stay low: do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
@@ -55,6 +55,18 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - Do not substitute brainstorming for discovery when the missing input can be gathered as evidence.
 - Use `$consultant` only as optional independent judgment after the best available factual slice has already been assembled.
 - When the next decision requires facts from multiple independent domains, independent factual roles (analyst, product-analyst) may be launched in parallel provided their investigation scopes do not overlap.
+
+## External routing order
+
+- Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.
+- If the requested work is not advisory consultant work, worker-side work, or review/QA-side work, fail fast instead of probing provider availability.
+- There is no generic external adapter for owner roles such as `$product-manager` or `$lead`.
+- An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The lead must say the route is unsupported and reroute honestly.
+- `externalProvider: auto` is the ordinary default only; explicit user override or documented repo-local heuristics may still choose a different honest provider for the task domain.
+- In this repository, image generation, icon work, decorative visual polish, and other explicitly visual worker or review lanes should prefer Gemini when Gemini is installed and the lane is actually visual.
+- Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support it. If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters over silent serialization or dropped lanes.
+- Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the lead may launch repeated same-provider external helpers concurrently.
+- Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices.
 
 ## Canonical routing patterns
 
@@ -106,6 +118,10 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
   `lead -> analyst -> architect -> planner -> graphics-engineer -> qa-engineer -> lead`
 - Graphics work with hard frame, memory, or GPU budgets:
   `lead -> analyst -> architect -> performance-engineer -> planner -> graphics-engineer -> qa-engineer -> performance-reviewer -> lead`
+- Decorative visual, icon, or image-generation-heavy work:
+  `lead -> analyst -> architect -> planner -> external-worker (Gemini preferred when the lane is genuinely visual) -> external-reviewer / qa-engineer -> lead`
+- Bounded bundle of independent external helper lanes:
+  `lead -> external-brigade -> lead`
 - Scientific or data-visualization work:
   `lead -> analyst -> architect -> computational-scientist -> planner -> visualization-engineer -> qa-engineer -> lead`
 - Geometry or spatial-computation work:
@@ -152,7 +168,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - After `ux-reviewer`: there are no blocking usability, accessibility, or flow-quality issues.
 - After `accessibility-reviewer`: there are no blocking keyboard, focus, labeling, contrast, or assistive-technology issues for the scoped surface.
 - After the human or CI gate: required approvals and automated checks are complete, and for publication the approver is not the same role that accepted the artifact into the pipeline.
-- Before a completed lead-managed batch is marked closed: one external consultant-check memo exists, ends with a reusable second prompt that begins with a direct imperative to continue and names the next concrete action, records residual concerns, overlooked surfaces, and follow-up recommendations, and the lead has reconciled the requested outcome against remaining open obligations.
+- Before a completed lead-managed batch is marked closed: the required external consultant-check memo set exists, ends with a reusable second prompt that begins with a direct imperative to continue and names the next concrete action, records residual concerns, overlooked surfaces, and follow-up recommendations, and the lead has reconciled the requested outcome against remaining open obligations.
 
 ## Repository task memory
 
@@ -181,7 +197,7 @@ Do:
 - route an in-flight item back to `product-manager` when admitted scope, priority, or milestone intent changes materially
 - route unknowns to factual roles before escalating into opinion-heavy discussion
 - assign one explicit integration owner before QA when multiple implementation phases or specialists must land together
-- run one external consultant-check before closing any completed lead-managed batch
+- run the required external consultant-checks before closing any completed lead-managed batch
 
 Do not:
 
@@ -261,10 +277,9 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - `knowledge-archivist`, `backend-engineer`, `frontend-engineer`, `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`, `data-engineer`, `toolchain-engineer`, and `platform-engineer` implement approved phases.
 - `qa-engineer` and `ui-test-engineer` verify correctness and regressions in their scope.
 - `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, and `accessibility-reviewer` act as independent blockers when their risk domain matters.
-- `external-worker` implements approved work through an external provider when the routing decision selects the external adapter for an eligible implementer role.
+- `external-worker` executes approved worker-side work through an external provider when the routing decision selects the external adapter for an eligible non-owner, non-review role.
 - `external-reviewer` performs review and QA through an external provider when the routing decision selects the external adapter for an eligible reviewer or QA role.
-- `consultant` is advisory-only and not part of the blocker chain; if an external provider is unavailable, the lead may fulfill this role through an independent internal subagent instead. That fallback applies only to `$consultant`, not to `$external-worker` or `$external-reviewer`; the external roles are disabled at the role level and the lead may reroute to another eligible specialist.
-- Mandatory `security-reviewer` and `performance-reviewer` gates in risk-sensitive templates remain internal and are not replaced by the external reviewer.
+- `consultant` is advisory-only and not part of the blocker chain. If the selected external consultant path is unavailable, report that honestly and reroute; use an internal consultant only when `consultantMode: internal` was selected explicitly ahead of time. `$external-worker` and `$external-reviewer` remain fail-closed at the role level and the lead may reroute to another eligible specialist.
 - The role map in this reference describes the canonical core team only. If a narrower installed specialist outside the core team is a better fit for the scoped work, the lead may use it; if the current repo/workspace defines or clearly implies a repo-local specialist, the lead may use that specialist. Using such a specialist does not add it to the canonical map automatically.
 
 ## Periodic controls

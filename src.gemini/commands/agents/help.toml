@@ -8,6 +8,15 @@ Summarize:
 - the distinction between stable skills and preview specialist agents
 - the role of agents/team-templates in the shared role principle
 - why Gemini orchestration stays in the main session under the lead skill
+- why external routing must check role eligibility before provider or CLI feasibility
+- how the three external roles split advisory, worker-side, and review-side substitution
+- how `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts` switch between `balanced` and `gemini-crosscheck`
+- how multi-opinion external lanes fail closed when the requested opinion count cannot be satisfied
+- how `external-brigade` launches a bounded parallel helper set without turning `externalOpinionCounts` into a generic concurrency cap
+- how the same external helper and provider may be reused across multiple disjoint brigade items when the runtime supports concurrent non-interactive execution
+- which owner roles remain unsupported without a dedicated external owner adapter
+- the repo-local visual-routing heuristic that prefers Gemini for image generation, icon work, and decorative visual lanes
+- how `externalClaudeApiMode` changes Claude transport behavior when Gemini routes external work to Claude
 - the role of Gemini CLI /init, .gemini/settings.json, and .gemini/.agents-mode
 - the local command namespace
 """
