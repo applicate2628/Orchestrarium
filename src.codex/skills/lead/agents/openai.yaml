@@ -1,4 +1,4 @@
 interface:
   display_name: "Lead"
   short_description: "Coordinate subagent work with gates"
-  default_prompt: "Use $lead to turn this task into a canonical brief, assign role owners for critical risks, and route the work through gated artifacts before implementation."
+  default_prompt: "Use $lead to turn this task into a canonical brief, assign role owners for critical risks, route the work through gated artifacts before implementation, and use $external-brigade when several independent external helper items should launch or aggregate together."

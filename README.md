@@ -26,11 +26,12 @@ This repository has two distinct layers:
 Everything a user installs into their target project. Self-contained, no external dependencies.
 
 - `src.codex/AGENTS.shared.md` + `src.codex/AGENTS.codex.md`: installed delegation rules, engineering hygiene, and role index — merged into the installed `AGENTS.md` that Codex loads as main conversation context
-- `src.codex/skills/<role>/SKILL.md`: instructions for one role (31 roles + 1 utility skill)
+- `src.codex/skills/<role>/SKILL.md`: instructions for one role (33 role definitions: 31 indexed roles + 2 external adapters, plus 2 utility skills)
 - `src.codex/skills/<role>/agents/openai.yaml`: display metadata and default prompt for the role
 - `src.codex/skills/lead/`: includes operating-model notes and handoff contracts alongside SKILL.md
 - `src.codex/skills/consultant/`: consultant workflow, toggle logic, and execution paths
 - `src.codex/skills/second-opinion/`: consultant toggle and explicit invocation skill
+- `src.codex/skills/external-brigade/`: bounded parallel external helper orchestration
 - `src.codex/skills/lead/scripts/`: publication safety scan and validation scripts
 - `src.codex/skills/lead/policies-catalog.md`: policy options reference (installed with skills)
 
@@ -62,7 +63,7 @@ bash install-codex.sh --global
 
 Important: multi-agent team workflows require explicit delegation permission from the user. Ask directly for delegation, name a role such as `$lead`, or clearly authorize subagents in the prompt; otherwise the assistant may stay in the main conversation instead of starting the team.
 
-For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, and operator state lives in `.agents/.agents-mode`. For global install, the pack mirrors into `~/.codex/`, but operator state remains project-local in `.agents/.agents-mode` with legacy `.agents/.consultant-mode` kept only as fallback migration input. See [INSTALL.md](INSTALL.md) for details.
+For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, and operator state lives in `.agents/.agents-mode`. For global install, the pack mirrors into `~/.codex/`, but operator state remains project-local in `.agents/.agents-mode`. See [INSTALL.md](INSTALL.md) for details.
 
 After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and initialize `.agents/.agents-mode`.
 
@@ -78,7 +79,7 @@ The repository is built around a few stable rules:
 - protect blast radius and require smoke coverage for nearby but nominally unrelated surfaces
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
-Repository-wide operating-model source of truth lives in [references-codex/subagent-operating-model.md](references-codex/subagent-operating-model.md).
+Repository-wide operating-model source of truth lives in [references-codex/subagent-operating-model.md](references-codex/subagent-operating-model.md). The branch-local operator reference also now carries switchable external priority profiles and opinion counts, so `.agents/.agents-mode` can ask for more than one independent external opinion when the workflow needs it.
 Repository task-memory policy and storage model live in [references-codex/repository-task-memory.md](references-codex/repository-task-memory.md). The live task-memory directory, if used, is repository-defined.
 Repository publication-safety policy for all tracked content lives in [references-codex/repository-publication-safety.md](references-codex/repository-publication-safety.md).
 Repository periodic-control matrix lives in [references-codex/periodic-control-matrix.md](references-codex/periodic-control-matrix.md).
@@ -109,7 +110,7 @@ The installable pack includes skills for:
 - implementation roles: `backend-engineer`, `frontend-engineer`, `data-engineer`, `platform-engineer`
 - graphics and technical UI: `graphics-engineer`, `visualization-engineer`, `geometry-engineer`, `qt-ui-engineer`, `model-view-engineer`
 - verification and independent gates: `qa-engineer`, `ui-test-engineer`, `architecture-reviewer`, `performance-reviewer`, `security-reviewer`, `ux-reviewer`, `accessibility-reviewer`
-- utility: `second-opinion` (consultant toggle and explicit invocation)
+- utility: `second-opinion`, `external-brigade` (consultant toggle / explicit invocation, bounded parallel external helper orchestration)
 
 ## License
 
