@@ -339,6 +339,26 @@ if grep -Fq "claude-api" "$PACK/agents/scripts/invoke-claude-api.ps1"; then
 else
   fail "PowerShell Claude API wrapper invokes claude-api"
 fi
+if grep -Fq -- "-AsHashtable" "$PACK/agents/scripts/invoke-claude-api.ps1"; then
+  fail "PowerShell Claude API wrapper avoids ConvertFrom-Json -AsHashtable"
+else
+  pass "PowerShell Claude API wrapper avoids ConvertFrom-Json -AsHashtable"
+fi
+if grep -Fq -- "--print-secret-path" "$PACK/agents/scripts/invoke-claude-api.ps1"; then
+  pass "PowerShell Claude API wrapper supports POSIX-style print-secret-path"
+else
+  fail "PowerShell Claude API wrapper supports POSIX-style print-secret-path"
+fi
+if grep -Fq "CLAUDE_API_BIN" "$PACK/agents/scripts/invoke-claude-api.sh"; then
+  pass "Bash Claude API wrapper documents CLAUDE_API_BIN override"
+else
+  fail "Bash Claude API wrapper documents CLAUDE_API_BIN override"
+fi
+if grep -Fq "claude-api.cmd" "$PACK/agents/scripts/invoke-claude-api.sh"; then
+  pass "Bash Claude API wrapper resolves Windows claude-api.cmd"
+else
+  fail "Bash Claude API wrapper resolves Windows claude-api.cmd"
+fi
 
 echo "[External brigade surface]"
 check_contains "$PACK/skills/agents-external-brigade/SKILL.md" "same-provider helper instances" \
