@@ -49,7 +49,7 @@ check_contains() {
   local label="$3"
   if [[ ! -f "$file" ]]; then
     fail "$label (file missing: $file)"
-  elif grep -Fq "$pattern" "$file"; then
+  elif grep -Fq -- "$pattern" "$file"; then
     pass "$label"
   else
     fail "$label"
@@ -62,7 +62,7 @@ check_absent() {
   local label="$3"
   if [[ ! -f "$file" ]]; then
     fail "$label (file missing: $file)"
-  elif grep -Fq "$pattern" "$file"; then
+  elif grep -Fq -- "$pattern" "$file"; then
     fail "$label"
   else
     pass "$label"
@@ -550,6 +550,14 @@ check_contains "$PACK/agents/scripts/invoke-claude-api.ps1" "SECRET.md" \
   "PowerShell Claude API wrapper reads SECRET.md"
 check_contains "$PACK/agents/scripts/invoke-claude-api.ps1" "claude-api" \
   "PowerShell Claude API wrapper invokes claude-api"
+check_absent "$PACK/agents/scripts/invoke-claude-api.ps1" "-AsHashtable" \
+  "PowerShell Claude API wrapper avoids ConvertFrom-Json -AsHashtable"
+check_contains "$PACK/agents/scripts/invoke-claude-api.ps1" "--print-secret-path" \
+  "PowerShell Claude API wrapper supports POSIX-style print-secret-path"
+check_contains "$PACK/agents/scripts/invoke-claude-api.sh" "CLAUDE_API_BIN" \
+  "Bash Claude API wrapper documents CLAUDE_API_BIN override"
+check_contains "$PACK/agents/scripts/invoke-claude-api.sh" "claude-api.cmd" \
+  "Bash Claude API wrapper resolves Windows claude-api.cmd"
 check_contains "$PACK/agents/contracts/external-dispatch.md" "one instance per helper or provider" \
   "external-dispatch documents same-provider brigade reuse"
 check_contains "$PACK/commands/agents-external-brigade.md" "same-provider helper instances" \

@@ -169,6 +169,18 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - Provider-backed consultant execution in `external` mode and both external adapter roles must use direct external launch from the orchestrating runtime or an approved transport wrapper script. If the host runtime cannot launch the selected provider directly, the route is `role disabled`.
    - Reporting rule: if the operator or caller left provider selection at runtime default behavior, artifacts must record `Requested provider: internal` and put the real provider choice in `Resolved provider`; do not emit `auto` in the execution record.
 
+### Practical launch rules
+
+| Situation | Rule |
+|---|---|
+| Claude CLI is selected and already authenticated | Use the plain Claude CLI path first. |
+| Claude CLI is unauthenticated, or the repository intentionally carries auth in `.claude/SECRET.md` | Prefer the installed Claude API wrapper allowed by `externalClaudeApiMode` instead of repeatedly probing a plain `claude` command that cannot authenticate. |
+| PowerShell Claude API transport | Use `.claude/agents/scripts/invoke-claude-api.ps1`. It must remain compatible with Windows PowerShell 5.1 and PowerShell 7+, and it accepts both `-PrintSecretPath` and `--print-secret-path`. |
+| Bash / Git Bash Claude API transport | Use `.claude/agents/scripts/invoke-claude-api.sh`. It resolves `claude-api`, `claude-api.cmd`, or `claude-api.exe`; if the active shell still cannot see the transport, set `CLAUDE_API_BIN` explicitly. |
+| Codex commit review transport | Use `codex review --commit <sha>` without a free-form prompt. If custom review instructions are needed, prefer a narrower `codex exec` run on the admitted scope instead of mixing text with `review --commit`. |
+| Wide release or parity audits | Split by admitted repo, file set, or lane. Do not default to one mega neutral-dir prompt over the whole pack family because Codex and Gemini are more likely to stall on ultra-wide review scopes. |
+| Neutral workdir default | Keep `external<Provider>WorkdirMode: neutral` unless the external run truly needs in-place filesystem execution or repo-local instruction surfaces, and always pass the exact repo, commit, file, or artifact scope explicitly. |
+
 ## Routing rules
 
 ### When toggles are ON
