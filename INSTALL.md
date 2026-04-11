@@ -36,7 +36,7 @@ bash install-claude.sh
 
 The scripts handle clean removal of old files, copying, CLAUDE.md merging, and file-level verification. Re-running = reinstall. Memory is preserved across reinstalls.
 
-> **Note:** Global install makes agents and skills available everywhere. Project-specific policies (`## Project policies` in CLAUDE.md) and Claude-line operator state (`.claude/.agents-mode`) are still per-repo — run `/agents-init-project` in each repo where you want them. On the Claude line, `externalProvider: auto` resolves through the active named priority profile across `codex`, `claude`, and `gemini`; the canonical Claude-line config may include `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is `claude`, while `externalClaudeProfile` remains Codex-line only. The active profile or a documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. `externalOpinionCounts` is a same-lane distinct-opinion contract, not a cap on parallel helper multiplicity; use the brigade surface when you need bounded same-provider fan-out.
+> **Note:** Global install makes agents and skills available everywhere and seeds `~/.claude/.agents-mode` with the current default overlay. Project-specific policies (`## Project policies` in CLAUDE.md) and project-local Claude-line overrides still belong in each repo where you run `/agents-init-project`. On the Claude line, `externalProvider: auto` resolves through the active named priority profile across `codex`, `claude`, and `gemini`; the canonical Claude-line config may include `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is `claude`, while `externalClaudeProfile` remains Codex-line only. The active profile or a documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. `externalOpinionCounts` is a same-lane distinct-opinion contract, not a cap on parallel helper multiplicity; use the brigade surface when you need bounded same-provider fan-out.
 
 ## Install into a target repository
 
@@ -72,7 +72,7 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 2. Merge `src.claude/CLAUDE.md` content at the TOP of target's `.claude/CLAUDE.md` (prepend). Original user content stays below intact.
 3. Optionally copy `src.claude/memory/`
 4. Restart Claude
-5. Run `/agents-init-project` to configure project policies and initialize `.claude/.agents-mode`
+5. Run `/agents-init-project` to configure project policies and review or update the installed default `.claude/.agents-mode`
 
 ## File separation
 
@@ -115,7 +115,7 @@ Add project-specific rules **below** the installed Claudestrator section in `.cl
 - canonical paths and source-of-truth references
 - allowed toolchains, shells, build systems, and concrete build/test commands
 - API, config, schema, and migration evolution rules
-- project policies and Claude-line operator state (run `/agents-init-project` to configure interactively)
+- project policies and Claude-line operator state (run `/agents-init-project` to review or update repo-local overrides interactively)
 
 The installed pack occupies the top of `CLAUDE.md` (starting with `@AGENTS.md` import). Your project-specific rules go below it. On reinstall, the pack section is replaced; your rules below it are preserved.
 
