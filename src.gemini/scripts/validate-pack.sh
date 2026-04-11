@@ -128,7 +128,6 @@ required_common=(
   "$PACK_ROOT/commands/agents/help.toml"
   "$PACK_ROOT/commands/agents/external-brigade.toml"
   "$PACK_ROOT/commands/agents/init-project.toml"
-  "$PACK_ROOT/agents/README.md"
   "$PACK_ROOT/agents/lead.md"
   "$PACK_ROOT/agents/team-templates/quick-fix.json"
 )
@@ -154,6 +153,15 @@ done
 for role in "${agent_roles[@]}"; do
   [[ -f "$PACK_ROOT/agents/$role.md" ]] || fail "missing agent role $PACK_ROOT/agents/$role.md"
 done
+
+[[ ! -e "$PACK_ROOT/agents/README.md" ]] || fail "$PACK_ROOT/agents/README.md must not exist; all top-level agents/*.md files are loader-visible agent definitions"
+
+shopt -s nullglob
+for agent_md in "$PACK_ROOT"/agents/*.md; do
+  first_line="$(head -n 1 "$agent_md" || true)"
+  [[ "$first_line" == "---" ]] || fail "agent markdown must start with YAML frontmatter: $agent_md"
+done
+shopt -u nullglob
 
 for template in "${team_templates[@]}"; do
   [[ -f "$PACK_ROOT/agents/team-templates/$template.json" ]] || fail "missing team template $PACK_ROOT/agents/team-templates/$template.json"

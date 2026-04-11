@@ -45,7 +45,6 @@ Read these adjacent files when the task needs more than a trivial route decision
 - [operating-model.md](operating-model.md)
 - [subagent-contracts.md](subagent-contracts.md)
 - [external-dispatch.md](external-dispatch.md)
-- [../../agents/README.md](../../agents/README.md)
 
 ## Working rules
 
@@ -54,6 +53,7 @@ Read these adjacent files when the task needs more than a trivial route decision
 - Do not claim the Gemini pack is aligned unless the role surface, the subagent surface, and the documents all match.
 - Do not invent Gemini-only role names when the shared role vocabulary already covers the work.
 - Do not treat `agents/` as a replacement for `skills/`; Gemini uses both on purpose.
+- Do not place plain documentation in `agents/`; every top-level `agents/*.md` file is loader-visible and must be a real Gemini agent definition with YAML frontmatter.
 
 ## Output
 

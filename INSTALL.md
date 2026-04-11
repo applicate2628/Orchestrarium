@@ -54,6 +54,7 @@ Important:
 - User-side `@...` imports that live in the installed `GEMINI.md` import block alongside `@./AGENTS.md` are preserved on reinstall.
 - Installed runtime uses `AGENTS.md` as the pack-managed shared-governance module imported by `GEMINI.md`. The source tree still keeps `src.gemini/AGENTS.shared.md` as the canonical shared module.
 - Installed runtime includes both `.gemini/skills/` and `.gemini/agents/` so the Gemini line can execute the same shared role principle as the neighboring packs.
+- In the Gemini specialist-team layer, every top-level `.gemini/agents/*.md` file must be a real agent definition with YAML frontmatter; plain README-style docs are invalid there and are removed on reinstall.
 - `.gemini/settings.json` remains Gemini-native runtime config.
 - MCP servers such as Serena, Fetch, or Context7 still belong in `.gemini/settings.json` or `extension/gemini-extension.json`, not inside `AGENTS.md`.
 - `.gemini/.agents-mode` is an optional Orchestrarium overlay, not a Gemini-native replacement.
