@@ -9,6 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE="$REPO_DIR/src.codex"
+SHARED_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 CODEX_PACK_BEGIN_MARKER='<!-- BEGIN ORCHESTRARIUM CODEX PACK -->'
 CODEX_PACK_END_MARKER='<!-- END ORCHESTRARIUM CODEX PACK -->'
 
@@ -106,6 +107,21 @@ canonical_path() {
   done
 
   echo "$result"
+}
+
+default_agents_mode_template() {
+  if [[ ! -f "$SHARED_AGENTS_MODE_SOURCE" ]]; then
+    echo "FAIL: missing shared agents-mode template at $SHARED_AGENTS_MODE_SOURCE" >&2
+    return 1
+  fi
+
+  local tmp
+  tmp="$(mktemp)"
+  cat "$SHARED_AGENTS_MODE_SOURCE" > "$tmp"
+  if ! grep -q '^externalClaudeProfile:' "$tmp"; then
+    printf '\nexternalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max\n' >> "$tmp"
+  fi
+  printf '%s' "$tmp"
 }
 
 resolve_install_target() {
@@ -408,19 +424,23 @@ fi
 # Repo/target: skills go into .agents/skills/,
 #              AGENTS.md merges into project root AGENTS.md.
 if [ "$MODE" = "global" ]; then
+  AGENTS_ROOT="$TARGET"
   SKILLS_TARGET="$TARGET/skills"
   MD_TARGET="$TARGET/AGENTS.md"
 else
   # Repo-level: TARGET is <root>/.codex but skills go into <root>/.agents/
   PROJECT_ROOT="$(dirname "$TARGET")"
-  SKILLS_TARGET="$PROJECT_ROOT/.agents/skills"
+  AGENTS_ROOT="$PROJECT_ROOT/.agents"
+  SKILLS_TARGET="$AGENTS_ROOT/skills"
   MD_TARGET="$PROJECT_ROOT/AGENTS.md"
 fi
+AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode"
 
 echo "=== Codex Installer ==="
 echo "Source: $SOURCE"
 echo "Skills target: $SKILLS_TARGET"
 echo "AGENTS.md target: $MD_TARGET"
+echo "agents-mode: $AGENTS_MODE_TARGET"
 echo "Mode:   $MODE"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "Mode:   dry-run"
@@ -433,6 +453,8 @@ if [[ ! -d "$SOURCE/skills" ]]; then
   echo "Run this script from the Orchestrarium repo root."
   exit 1
 fi
+DEFAULT_AGENTS_MODE_SOURCE="$(default_agents_mode_template)"
+trap '[[ -n "${DEFAULT_AGENTS_MODE_SOURCE:-}" && -f "${DEFAULT_AGENTS_MODE_SOURCE:-}" ]] && rm -f "${DEFAULT_AGENTS_MODE_SOURCE:-}"' EXIT
 
 # Create target parent directories as needed
 for tdir in "$SKILLS_TARGET"; do
@@ -504,6 +526,24 @@ remove_dangling_symlink() {
     else
       rm -f "$path"
     fi
+  fi
+}
+
+ensure_default_file() {
+  local src="$1" dst="$2" label="$3"
+
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    echo "  Preserving existing $label..."
+    return
+  fi
+
+  echo "  Installing default $label..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp "$src" "$dst"
   fi
 }
 
@@ -715,6 +755,8 @@ if [ "$MODE" != "global" ]; then
   ensure_reports_gitignore "$PROJECT_ROOT"
 fi
 
+ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode"
+
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
   echo "RESULT: DRY-RUN complete (no files modified)."
@@ -756,6 +798,7 @@ check_file "$SKILLS_TARGET/lead/subagent-contracts.md" "skills/lead/subagent-con
 check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.sh" "skills/lead/scripts/check-publication-safety.sh"
 check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.ps1" "skills/lead/scripts/check-publication-safety.ps1"
 check_file "$SKILLS_TARGET/lead/scripts/validate-skill-pack.sh" "skills/lead/scripts/validate-skill-pack.sh"
+check_file "$AGENTS_MODE_TARGET" ".agents-mode"
 
 if [[ -f "$dst_md" ]]; then
   line_count=$(wc -l < "$dst_md")
@@ -781,7 +824,8 @@ else
   echo "RESULT: OK — Codex pack installed"
   echo "  Skills: $SKILLS_TARGET"
   echo "  AGENTS.md: $MD_TARGET"
+  echo "  agents-mode: $AGENTS_MODE_TARGET"
   echo ""
-  echo "Next: open Codex in the target project and run '\$init-project' to configure project policies and .agents/.agents-mode."
+  echo "Next: open Codex in the target project and run '\$init-project' to review/update project policies and the installed default .agents/.agents-mode."
   echo "Then run 'bash $SKILLS_TARGET/lead/scripts/validate-skill-pack.sh' if you are validating the installation from a maintainer shell."
 fi

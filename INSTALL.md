@@ -51,7 +51,7 @@ Notes:
 
 - Project-level Codex installs use `.agents/skills/` plus the project root `AGENTS.md`.
 - Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
-- The canonical project-local config file is `.agents/.agents-mode`.
+- The canonical Codex-line operator file is `.agents/.agents-mode` for project installs and `~/.codex/.agents-mode` for global installs.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
 - Decision-driving reads of an existing `.agents/.agents-mode` file must also normalize stale, comment-free, or older-layout overlays to the current canonical format before trusting the flags.
 - `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`; `externalProvider` uses the shared provider universe `auto | codex | claude | gemini`; `externalPriorityProfile` selects the active named provider-order profile for `auto`; `externalPriorityProfiles` stores the switchable per-lane provider orders; and `externalOpinionCounts` raises specific lanes above the default single-opinion behavior when one external opinion is not enough. Those counts stay lane-local distinct-opinion requirements; bounded same-provider helper fan-out is handled through the dedicated brigade surfaces.
@@ -61,7 +61,7 @@ Notes:
 - `externalClaudeProfile` is Codex-line only and selects the Claude CLI execution profile: `sonnet-high` maps to Sonnet with `--effort high`, and `opus-max` maps to Opus with `--effort max`.
 - Repo-local routing heuristics may still prefer Gemini for image generation, icon work, and decorative visual lanes when that routing remains honest, and the shipped `gemini-crosscheck` profile is the named way to bring Gemini into broader non-visual advisory or review second-opinion sets.
 - Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
-- After first-time Codex project install, run `$init-project` in Codex to write `## Project policies` to the root `AGENTS.md` and initialize `.agents/.agents-mode`.
+- After first-time Codex project install, run `$init-project` in Codex to write `## Project policies` to the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode`.
 - Completed lead-managed batches now end with one or more external consultant-checks before closure as required by the active lane policy. Those checks stay advisory-only, but if the required external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
 - Validation commands: `bash src.codex/skills/lead/scripts/validate-skill-pack.sh` or `.\src.codex\skills\lead\scripts\validate-skill-pack.ps1`.
 
@@ -82,14 +82,14 @@ Notes:
 - Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
 - Claude memory is shipped in `src.claude/memory/` and preserved across reinstalls by the existing installer behavior.
 - User-side Claude imports such as `@memory/...` are preserved across reinstalls when they live in the installed `.claude/CLAUDE.md` import block alongside `@AGENTS.md`.
-- The canonical project-local config file is `.claude/.agents-mode`.
+- The canonical Claude-line operator file is `.claude/.agents-mode` for project installs and `~/.claude/.agents-mode` for global installs.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
 - Decision-driving reads of an existing `.claude/.agents-mode` file must also normalize stale, comment-free, or older-layout overlays to the current canonical format before trusting the flags.
 - `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`; `externalProvider` uses the same shared provider universe `auto | codex | claude | gemini`; and the switchable `externalPriorityProfile` / `externalPriorityProfiles` / `externalOpinionCounts` block keeps broader Gemini participation and multi-opinion routing in `agents-mode` instead of hidden host-line defaults. Those counts stay distinct-opinion requirements for one lane, while brigade surfaces cover parallel helper multiplicity.
 - Explicit self-provider selection is override-only; ordinary `auto` must not silently resolve back into the same host line.
 - If the resolved provider is Claude, `externalClaudeSecretMode` and `externalClaudeApiMode` remain Claude transport knobs. The preferred Claude API transport surface is `.claude/agents/scripts/invoke-claude-api.sh` or `.ps1`, which reads repo-local `.claude/SECRET.md` first and then `~/.claude/SECRET.md`. `externalClaudeProfile` stays Codex-line only.
 - Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
-- After first-time Claude project install, run `/agents-init-project` in Claude Code to write `## Project policies` in `.claude/CLAUDE.md` and initialize `.claude/.agents-mode`.
+- After first-time Claude project install, run `/agents-init-project` in Claude Code to write `## Project policies` in `.claude/CLAUDE.md` and review or update the installed default `.claude/.agents-mode`.
 - Completed lead-managed batches now end with one or more external consultant-checks before closure as required by the active lane policy. Those checks stay advisory-only, but if the required external consultant path is disabled or unavailable the batch stays open and the lead escalates instead of silently downgrading.
 - Validation commands: `bash src.claude/agents/scripts/validate-skill-pack.sh` or `.\src.claude\agents\scripts\validate-skill-pack.ps1`.
 
@@ -99,10 +99,10 @@ Use `scripts/install-gemini.sh` or `scripts/install-gemini.ps1` when you want th
 
 | Command | Result |
 | --- | --- |
-| `bash scripts/install-gemini.sh --global` | Installs into `~/.gemini/` including `skills/`, `agents/`, and `commands/` |
-| `bash scripts/install-gemini.sh --target /path/to/project` | Installs into the target project's `GEMINI.md`, root `AGENTS.md` when absent, and `.gemini/skills`, `.gemini/agents`, `.gemini/commands` |
-| `.\scripts\install-gemini.ps1 -Global` | Installs into `~/.gemini/` including `skills/`, `agents/`, and `commands/` |
-| `.\scripts\install-gemini.ps1 -Target "D:\path\to\project"` | Installs into the target project's `GEMINI.md`, root `AGENTS.md` when absent, and `.gemini/skills`, `.gemini/agents`, `.gemini/commands` |
+| `bash scripts/install-gemini.sh --global` | Installs into `~/.gemini/` including `skills/`, `agents/`, `commands/`, and the official extension package at `~/.gemini/extensions/orchestrarium-gemini/` |
+| `bash scripts/install-gemini.sh --target /path/to/project` | Installs into the target project's `GEMINI.md`, root `AGENTS.md` when absent, `.gemini/skills`, `.gemini/agents`, `.gemini/commands`, and `.gemini/extensions/orchestrarium-gemini/` |
+| `.\scripts\install-gemini.ps1 -Global` | Installs into `~/.gemini/` including `skills/`, `agents/`, `commands/`, and the official extension package at `~/.gemini/extensions/orchestrarium-gemini/` |
+| `.\scripts\install-gemini.ps1 -Target "D:\path\to\project"` | Installs into the target project's `GEMINI.md`, root `AGENTS.md` when absent, `.gemini/skills`, `.gemini/agents`, `.gemini/commands`, and `.gemini/extensions/orchestrarium-gemini/` |
 
 Notes:
 
@@ -110,11 +110,12 @@ Notes:
 - User-side `@...` imports that live in the installed `GEMINI.md` import block alongside `@./AGENTS.md` are preserved across reinstalls.
 - Gemini installs materialize the shared-governance layer as `AGENTS.md`; `GEMINI.md` loads it through the official `@./AGENTS.md` import. Project installs preserve an existing root `AGENTS.md` instead of overwriting it.
 - Gemini installs materialize both the stable expertise catalog in `.gemini/skills/` and the preview specialist-team layer in `.gemini/agents/`.
+- Gemini installs also materialize the official Gemini extension package under `.gemini/extensions/orchestrarium-gemini/` for project installs and `~/.gemini/extensions/orchestrarium-gemini/` for global installs. That extension mirrors the current Orchestrarium Gemini payload: `gemini-extension.json`, `README.md`, `GEMINI.md`, `AGENTS.md`, `skills/`, `agents/`, and `commands/`.
 - In the Gemini specialist-team layer, every top-level `.gemini/agents/*.md` file must be a real agent definition with YAML frontmatter; plain README-style docs are invalid there and are removed on reinstall.
 - Gemini runtime config and MCP wiring remain owned by `.gemini/settings.json` and `gemini-extension.json`; servers such as Serena, Fetch, or Context7 do not belong inside `AGENTS.md`.
-- The optional Orchestrarium overlay file is `.gemini/.agents-mode`.
+- The Orchestrarium routing overlay file is `.gemini/.agents-mode` for project installs and `~/.gemini/.agents-mode` for global installs.
 - Decision-driving reads of an existing `.gemini/.agents-mode` overlay must normalize stale, comment-free, or older-layout files to the current canonical format before trusting the flags.
-- After first-time Gemini project install, run Gemini CLI `/init` if you want Gemini to create or refresh the user-owned portion of `GEMINI.md`, and then use the Orchestrarium Gemini `init-project` helper only if you also want `.gemini/.agents-mode`.
+- After first-time Gemini project install, run Gemini CLI `/init` if you want Gemini to create or refresh the user-owned portion of `GEMINI.md`, and then use the Orchestrarium Gemini `init-project` helper to review or update the installed default `.gemini/.agents-mode` when you want project-specific routing choices.
 - Validation commands: `bash src.gemini/scripts/validate-pack.sh` or `.\src.gemini\scripts\validate-pack.ps1`.
 
 ## Multi-pack setup
@@ -136,6 +137,8 @@ project/
     skills/
     agents/
     commands/
+    extensions/
+      orchestrarium-gemini/
 ```
 
 Reference directories are development-only and are not installed:
@@ -174,9 +177,9 @@ The monorepo still keeps the full Gemini line as a validated source tree in addi
 - custom commands: `src.gemini/commands/**/*.toml`
 - official runtime config: project `.gemini/settings.json`
 - Orchestrarium operator overlay: project `.gemini/.agents-mode`
-- extension boundary: `src.gemini/extension/gemini-extension.json`
+- installed extension manifest source: `src.gemini/extension/gemini-extension.json`
 - provider-local reference tree: `references-gemini/`
 - validation commands: `bash src.gemini/scripts/validate-pack.sh` or `.\src.gemini\scripts\validate-pack.ps1`
 - Orchestrarium overlay bootstrap: `src.gemini/commands/agents/init-project.toml` and `src.gemini/skills/init-project/SKILL.md`
 
-It intentionally combines the official stable Gemini surfaces (`GEMINI.md`, imported markdown modules, `skills`, `commands`, `extension`) with the official preview `agents/` surface so the Gemini line can carry the same shared role principle as the Codex and Claude packs without lying about provider ownership. Use Gemini's built-in `/init` for the official `GEMINI.md` bootstrap first. When Orchestrarium needs the same cross-provider routing toggles used on the Codex and Claude lines, initialize the repo-local `.gemini/.agents-mode` overlay separately through the Orchestrarium Gemini init helper rather than replacing Gemini's official `.gemini/settings.json`. MCP wiring for servers such as Serena, Fetch, or Context7 remains a `settings.json` or `gemini-extension.json` concern. Gemini shares the same external provider universe `auto | codex | claude | gemini`; ordinary `auto` resolves by lane through the active priority profile, while explicit `gemini` is self-provider override only. The overlay may also carry `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts` so Gemini can participate in broader advisory or review second-opinion sets when the active policy requests more than one external opinion. Those counts stay same-lane distinct-opinion requirements rather than a cap on helper multiplicity; bounded same-provider helper fan-out now routes through `external-brigade`. When the resolved provider is Claude, that overlay may also carry `externalClaudeSecretMode: auto | force` and `externalClaudeApiMode: disabled | auto | force`. Repo-local routing heuristics may still prefer Gemini itself for image generation, icon work, and decorative visual lanes, and `gemini-crosscheck` is the named broader-Gemini profile. Full operator semantics, including task continuity and continue-by-default execution expectations, live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
+It intentionally combines the official stable Gemini surfaces (`GEMINI.md`, imported markdown modules, `skills`, `commands`, `extension`) with the official preview `agents/` surface so the Gemini line can carry the same shared role principle as the Codex and Claude packs without lying about provider ownership. Use Gemini's built-in `/init` for the official `GEMINI.md` bootstrap first. Orchestrarium install seeds `.gemini/.agents-mode` with the current default overlay in either the project target or `~/.gemini/`, and it also materializes the official extension package under `.gemini/extensions/orchestrarium-gemini/` or `~/.gemini/extensions/orchestrarium-gemini/`; use the Orchestrarium Gemini init helper to review or update that installed default rather than replacing Gemini's official `.gemini/settings.json`. MCP wiring for servers such as Serena, Fetch, or Context7 remains a `settings.json` or `gemini-extension.json` concern. Gemini shares the same external provider universe `auto | codex | claude | gemini`; ordinary `auto` resolves by lane through the active priority profile, while explicit `gemini` is self-provider override only. The overlay may also carry `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts` so Gemini can participate in broader advisory or review second-opinion sets when the active policy requests more than one external opinion. Those counts stay same-lane distinct-opinion requirements rather than a cap on helper multiplicity; bounded same-provider helper fan-out now routes through `external-brigade`. When the resolved provider is Claude, that overlay may also carry `externalClaudeSecretMode: auto | force` and `externalClaudeApiMode: disabled | auto | force`. Repo-local routing heuristics may still prefer Gemini itself for image generation, icon work, and decorative visual lanes, and `gemini-crosscheck` is the named broader-Gemini profile. Full operator semantics, including task continuity and continue-by-default execution expectations, live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).

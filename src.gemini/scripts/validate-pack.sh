@@ -120,6 +120,17 @@ else
   fail "unable to detect Gemini source tree or installed runtime under $ROOT"
 fi
 
+EXTENSION_NAME="orchestrarium-gemini"
+if [[ "$MODE" == "source" ]]; then
+  EXTENSION_ROOT="$PACK_ROOT/extension"
+else
+  EXTENSION_ROOT="$PACK_ROOT/extensions/$EXTENSION_NAME"
+fi
+EXTENSION_MANIFEST_FILE="$EXTENSION_ROOT/gemini-extension.json"
+EXTENSION_README_FILE="$EXTENSION_ROOT/README.md"
+EXTENSION_GEMINI_FILE="$EXTENSION_ROOT/GEMINI.md"
+EXTENSION_AGENTS_FILE="$EXTENSION_ROOT/AGENTS.md"
+
 required_common=(
   "$GEMINI_FILE"
   "$PACK_ROOT/skills/README.md"
@@ -140,11 +151,25 @@ done
 if [[ "$MODE" == "source" ]]; then
   [[ -f "$SHARED_SOURCE_FILE" ]] || fail "missing $SHARED_SOURCE_FILE"
   [[ ! -e "$RUNTIME_AGENTS_FILE" ]] || fail "$RUNTIME_AGENTS_FILE should not exist in the source tree"
-  [[ -f "$PACK_ROOT/extension/README.md" ]] || fail "missing $PACK_ROOT/extension/README.md"
-  [[ -f "$PACK_ROOT/extension/gemini-extension.json" ]] || fail "missing $PACK_ROOT/extension/gemini-extension.json"
+  [[ -f "$EXTENSION_README_FILE" ]] || fail "missing $EXTENSION_README_FILE"
+  [[ -f "$EXTENSION_MANIFEST_FILE" ]] || fail "missing $EXTENSION_MANIFEST_FILE"
 else
   [[ -f "$RUNTIME_AGENTS_FILE" ]] || fail "missing runtime governance file $RUNTIME_AGENTS_FILE"
   [[ ! -e "$SHARED_SOURCE_FILE" ]] || fail "$SHARED_SOURCE_FILE should not exist in the installed runtime"
+  [[ -f "$EXTENSION_MANIFEST_FILE" ]] || fail "missing installed extension manifest $EXTENSION_MANIFEST_FILE"
+  [[ -f "$EXTENSION_README_FILE" ]] || fail "missing installed extension README $EXTENSION_README_FILE"
+  [[ -f "$EXTENSION_GEMINI_FILE" ]] || fail "missing installed extension context $EXTENSION_GEMINI_FILE"
+  [[ -f "$EXTENSION_AGENTS_FILE" ]] || fail "missing installed extension governance $EXTENSION_AGENTS_FILE"
+  [[ -f "$EXTENSION_ROOT/skills/README.md" ]] || fail "missing installed extension skills readme $EXTENSION_ROOT/skills/README.md"
+  [[ -f "$EXTENSION_ROOT/skills/lead/SKILL.md" ]] || fail "missing installed extension lead skill $EXTENSION_ROOT/skills/lead/SKILL.md"
+  [[ -f "$EXTENSION_ROOT/skills/init-project/SKILL.md" ]] || fail "missing installed extension init-project skill $EXTENSION_ROOT/skills/init-project/SKILL.md"
+  [[ -f "$EXTENSION_ROOT/commands/agents/help.toml" ]] || fail "missing installed extension help command $EXTENSION_ROOT/commands/agents/help.toml"
+  [[ -f "$EXTENSION_ROOT/commands/agents/external-brigade.toml" ]] || fail "missing installed extension brigade command $EXTENSION_ROOT/commands/agents/external-brigade.toml"
+  [[ -f "$EXTENSION_ROOT/commands/agents/init-project.toml" ]] || fail "missing installed extension init-project command $EXTENSION_ROOT/commands/agents/init-project.toml"
+  [[ -f "$EXTENSION_ROOT/agents/lead.md" ]] || fail "missing installed extension lead agent $EXTENSION_ROOT/agents/lead.md"
+  [[ -f "$EXTENSION_ROOT/agents/team-templates/quick-fix.json" ]] || fail "missing installed extension team template $EXTENSION_ROOT/agents/team-templates/quick-fix.json"
+  [[ ! -e "$EXTENSION_ROOT/AGENTS.shared.md" ]] || fail "$EXTENSION_ROOT/AGENTS.shared.md should not exist in the installed extension runtime"
+  [[ ! -e "$EXTENSION_ROOT/agents/README.md" ]] || fail "$EXTENSION_ROOT/agents/README.md must not exist in the installed extension runtime"
 fi
 
 for role in "${skill_roles[@]}"; do
@@ -175,10 +200,20 @@ while IFS= read -r import_line; do
   [[ -f "$IMPORT_ROOT/$import_target" ]] || fail "GEMINI.md import target missing: $IMPORT_ROOT/$import_target"
 done < <(grep '^@' "$GEMINI_FILE" || true)
 
+if [[ "$MODE" != "source" ]]; then
+  EXTENSION_IMPORT_ROOT="$(dirname "$EXTENSION_GEMINI_FILE")"
+  while IFS= read -r import_line; do
+    import_target="${import_line#@}"
+    [[ -z "$import_target" ]] && continue
+    [[ -f "$EXTENSION_IMPORT_ROOT/$import_target" ]] || fail "extension GEMINI.md import target missing: $EXTENSION_IMPORT_ROOT/$import_target"
+  done < <(grep '^@' "$EXTENSION_GEMINI_FILE" || true)
+fi
+
 if [[ "$MODE" == "source" ]]; then
   grep -q '^@\./AGENTS\.shared\.md$' "$GEMINI_FILE" || fail "source GEMINI.md should import @./AGENTS.shared.md"
 else
   grep -q '^@\./AGENTS\.md$' "$GEMINI_FILE" || fail "installed GEMINI.md should import @./AGENTS.md"
+  grep -q '^@\./AGENTS\.md$' "$EXTENSION_GEMINI_FILE" || fail "installed extension GEMINI.md should import @./AGENTS.md"
 fi
 grep -q '/init' "$GEMINI_FILE" || fail "GEMINI.md should mention the official Gemini /init bootstrap path"
 grep -q '\.gemini/settings\.json' "$GEMINI_FILE" || fail "GEMINI.md should mention .gemini/settings.json as the official Gemini runtime-state surface"
@@ -218,6 +253,8 @@ grep -Fq 'It does not cap how many same-provider brigade items may run in parall
 if [[ "$MODE" == "source" && -f "$ROOT/docs/agents-mode-reference.md" ]]; then
   grep -Fq '## Canonical maintenance' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should define canonical maintenance"
   grep -Fq 'Read-time normalization preserves the effective values of known keys' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document read-time normalization semantics"
+  [[ -f "$ROOT/shared/agents-mode.defaults.yaml" ]] || fail "shared agents-mode defaults exemplar should exist"
+  [[ ! -e "$ROOT/src.gemini/agents-mode.defaults.yaml" ]] || fail "src.gemini/agents-mode.defaults.yaml should not exist in the monorepo"
 fi
 
 start_count="$(grep -cF '<!-- ORCHESTRARIUM_GEMINI_PACK:START -->' "$GEMINI_FILE" || true)"
@@ -249,9 +286,7 @@ json_targets=(
   "$PACK_ROOT/agents/team-templates/security-sensitive.json"
 )
 
-if [[ "$REQUIRE_EXTENSION" -eq 1 ]]; then
-  json_targets+=("$PACK_ROOT/extension/gemini-extension.json")
-fi
+json_targets+=("$EXTENSION_MANIFEST_FILE")
 
 "$PYTHON_BIN" - "$PACK_ROOT/commands/agents/help.toml" "$PACK_ROOT/commands/agents/external-brigade.toml" "$PACK_ROOT/commands/agents/init-project.toml" "${json_targets[@]}" <<'PY'
 import json
@@ -276,8 +311,6 @@ for json_path in json_paths:
         json.load(fh)
 PY
 
-if [[ "$REQUIRE_EXTENSION" -eq 1 ]]; then
-  grep -q '"contextFileName": "GEMINI.md"' "$PACK_ROOT/extension/gemini-extension.json" || fail "extension manifest should declare contextFileName GEMINI.md"
-fi
+grep -q '"contextFileName": "GEMINI.md"' "$EXTENSION_MANIFEST_FILE" || fail "extension manifest should declare contextFileName GEMINI.md"
 
 echo "PASS: Gemini $MODE tree present at $PACK_ROOT"

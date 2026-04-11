@@ -26,7 +26,7 @@ Display a comprehensive overview of the skill-pack for the user.
 | `/agents-refactor` | Safe refactoring with blast-radius analysis |
 | `/agents-resume` | Resume an interrupted agent chain from saved state |
 | `/agents-qa-session` | Interactive testing: you direct, QA agent investigates |
-| `/agents-init-project` | Configure project policies and Claude-line operator mode interactively |
+| `/agents-init-project` | Configure project policies and review or update `.claude/.agents-mode` interactively |
 | `/agents-policies` | View or update a specific policy (`/agents-policies testing tdd`) |
 | `/agents-check-policies` | Audit codebase compliance with configured policies |
 | `/agents-validate` | Structural integrity check of the skill-pack |
@@ -63,7 +63,7 @@ Show 3-4 natural language examples of how to invoke agents:
 
 ### Project policies
 
-If `## Project policies` section exists in CLAUDE.md, show current policies. If not, say: "No project policies configured. Run `/agents-init-project` to set up policies and `.claude/.agents-mode`."
+If `## Project policies` section exists in CLAUDE.md, show current policies. If not, say: "No project policies configured. Run `/agents-init-project` to set up policies and review `.claude/.agents-mode`."
 
 ## Rules
 

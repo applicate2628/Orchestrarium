@@ -11,7 +11,7 @@
 - `src.gemini/GEMINI.md` — Gemini runtime entrypoint в этом монорепозитории.
 - Встроенный Gemini CLI `/init` — канонический способ создать или обновить project `GEMINI.md`.
 - `.gemini/settings.json` остаётся Gemini-native runtime config surface.
-- `.gemini/.agents-mode` — optional Orchestrarium overlay, а не замена `.gemini/settings.json`.
+- `.gemini/.agents-mode` — routing overlay Orchestrarium, который seedится при установке, а не замена `.gemini/settings.json`.
 - Gemini runtime assets живут в `src.gemini/skills/`, `src.gemini/commands/` и `src.gemini/extension/`.
 - Текущее Gemini source tree остаётся sequential и human-steered; не предполагайте native parallel dispatch.
 - На Gemini-линии `externalProvider: auto` сохраняет Claude CLI как обычный внешний default для обычной работы, но документированные repo-local visual heuristics могут честно предпочесть Gemini для image/icon/decorative lanes. Если Gemini резолвится в Claude, нужно уважать и `externalClaudeSecretMode`, и `externalClaudeApiMode`.

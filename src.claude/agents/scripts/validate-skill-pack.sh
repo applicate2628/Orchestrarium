@@ -69,6 +69,26 @@ check_absent() {
   fi
 }
 
+check_file() {
+  local file="$1"
+  local label="$2"
+  if [[ -f "$file" ]]; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+}
+
+check_not_exists() {
+  local path="$1"
+  local label="$2"
+  if [[ ! -e "$path" ]]; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+}
+
 check_max_lines() {
   local file="$1"
   local max_lines="$2"
@@ -544,6 +564,9 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "agents-mode reference defines canonical maintenance"
   check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "Read-time normalization preserves the effective values of known keys" \
     "agents-mode reference documents read-time normalization semantics"
+  check_file "$REPO_ROOT/shared/agents-mode.defaults.yaml" "shared/agents-mode.defaults.yaml"
+  check_not_exists "$REPO_ROOT/src.claude/agents-mode.defaults.yaml" \
+    "src.claude/agents-mode.defaults.yaml removed from the monorepo"
 fi
 echo ""
 

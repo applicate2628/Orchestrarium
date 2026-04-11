@@ -21,6 +21,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoDir = Split-Path -Parent $ScriptDir
 $Source = Join-Path $RepoDir "src.claude"
+$DefaultAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
 
 $Dirs = @("agents", "commands")
 $OptionalDirs = @("memory")
@@ -319,6 +320,28 @@ function Remove-DanglingLink {
     }
 }
 
+function Ensure-DefaultFile {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    Remove-DanglingLink -Path $TargetFile -Label $Label
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        Write-Host "  Preserving existing $Label..."
+        return
+    }
+
+    Write-Host "  Installing default $Label..."
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
 function Get-PreservedClaudeImports {
     param(
         [string[]]$Lines,
@@ -448,10 +471,12 @@ if ($Mode -eq "global") {
 } else {
     $ProjectRoot = Split-Path $TargetRoot -Parent
 }
+$AgentsModeTarget = Join-Path $TargetRoot ".agents-mode"
 
 Write-Host "=== Claude Code Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
 Write-Host "Target: $TargetRoot"
+Write-Host "agents-mode: $AgentsModeTarget"
 Write-Host "Mode:   $Mode"
 if ($DryRun) {
     Write-Host "Mode:   dry-run" -ForegroundColor Yellow
@@ -462,6 +487,10 @@ Write-Host ""
 if (-not (Test-Path (Join-Path $Source "agents"))) {
     Write-Host "FAIL: Source directory $Source\agents not found." -ForegroundColor Red
     Write-Host "Run this script from the Orchestrarium repo root."
+    exit 1
+}
+if (-not (Test-Path -LiteralPath $DefaultAgentsModeSource)) {
+    Write-Host "FAIL: Missing default agents-mode template at $DefaultAgentsModeSource." -ForegroundColor Red
     exit 1
 }
 
@@ -668,6 +697,8 @@ if ($Mode -ne "global") {
     Ensure-ReportsGitignore -ProjectRoot $ProjectRoot
 }
 
+Ensure-DefaultFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode"
+
 if ($DryRun) {
     Write-Host ""
     Write-Host "RESULT: DRY-RUN complete (no files modified)."
@@ -710,6 +741,7 @@ foreach ($dir in $Dirs) {
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/operating-model.md") "agents/contracts/operating-model.md"
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/subagent-contracts.md") "agents/contracts/subagent-contracts.md"
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/policies-catalog.md") "agents/contracts/policies-catalog.md"
+Test-InstalledFile $AgentsModeTarget ".agents-mode"
 
 # Check CLAUDE.md (Claude-specific sections)
 if (Test-Path $dstMd) {
@@ -760,5 +792,5 @@ if ($errors -gt 0) {
 } else {
     Write-Host "RESULT: OK - Claude Code pack installed to $TargetRoot" -ForegroundColor Green
     Write-Host ""
-    Write-Host "Next: restart Claude, then run /agents-init-project to configure project policies."
+    Write-Host "Next: restart Claude, then run /agents-init-project to review/update project policies and the installed default .claude/.agents-mode."
 }

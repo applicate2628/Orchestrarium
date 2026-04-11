@@ -9,6 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE="$REPO_DIR/src.claude"
+DEFAULT_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 
 # Directories to install (order doesn't matter)
 DIRS=(agents commands)
@@ -391,10 +392,12 @@ if [ "$MODE" = "global" ]; then
 else
   PROJECT_ROOT="$(dirname "$TARGET")"
 fi
+AGENTS_MODE_TARGET="$TARGET/.agents-mode"
 
 echo "=== Claude Code Installer ==="
 echo "Source: $SOURCE"
 echo "Target: $TARGET"
+echo "agents-mode: $AGENTS_MODE_TARGET"
 echo "Mode:   $MODE"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "Mode:   dry-run"
@@ -405,6 +408,10 @@ echo
 if [[ ! -d "$SOURCE/agents" ]]; then
   echo "FAIL: Source directory $SOURCE/agents not found."
   echo "Run this script from the Orchestrarium repo root."
+  exit 1
+fi
+if [[ ! -f "$DEFAULT_AGENTS_MODE_SOURCE" ]]; then
+  echo "FAIL: missing default agents-mode template at $DEFAULT_AGENTS_MODE_SOURCE" >&2
   exit 1
 fi
 
@@ -474,6 +481,24 @@ remove_dangling_symlink() {
     else
       rm -f "$path"
     fi
+  fi
+}
+
+ensure_default_file() {
+  local src="$1" dst="$2" label="$3"
+
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    echo "  Preserving existing $label..."
+    return
+  fi
+
+  echo "  Installing default $label..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp "$src" "$dst"
   fi
 }
 
@@ -706,6 +731,8 @@ if [ "$MODE" != "global" ]; then
   ensure_reports_gitignore "$PROJECT_ROOT"
 fi
 
+ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode"
+
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
   echo "RESULT: DRY-RUN complete (no files modified)."
@@ -745,6 +772,7 @@ done
 check_file "$TARGET/agents/contracts/operating-model.md" "agents/contracts/operating-model.md"
 check_file "$TARGET/agents/contracts/subagent-contracts.md" "agents/contracts/subagent-contracts.md"
 check_file "$TARGET/agents/contracts/policies-catalog.md" "agents/contracts/policies-catalog.md"
+check_file "$AGENTS_MODE_TARGET" ".agents-mode"
 
 # Check CLAUDE.md (Claude-specific sections)
 if [[ -f "$dst_md" ]]; then
@@ -794,5 +822,5 @@ if [[ $errors -gt 0 ]]; then
 else
   echo "RESULT: OK — Claude Code pack installed to $TARGET"
   echo ""
-  echo "Next: restart Claude, then run /agents-init-project to configure project policies."
+  echo "Next: restart Claude, then run /agents-init-project to review/update project policies and the installed default .claude/.agents-mode."
 fi

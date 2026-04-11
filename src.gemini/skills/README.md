@@ -6,7 +6,7 @@ This directory is the stable Gemini expertise layer for the full shared role voc
 
 - every shared specialist role from the common Orchestrarium model
 - Gemini-line `$lead` as the orchestration skill
-- Gemini-line `init-project` as the overlay bootstrap helper
+- Gemini-line `init-project` as the overlay review/update helper for the installed default
 - Gemini-line `second-opinion`, `consultant`, and external adapter skills that honor the shared routing overlay, named priority profiles, and per-lane opinion counts
 - Gemini-line `external-brigade` as the bounded parallel external-helper orchestration utility
 
