@@ -76,10 +76,10 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | --- | --- | --- |
 | Global context file | `~/.gemini/GEMINI.md` | Official user-level Gemini context file |
 | Global shared-governance import | `~/.gemini/AGENTS.md` | Orchestrarium-installed markdown module imported by `GEMINI.md`; not a Gemini-native required filename |
-| Global user skills | `~/.gemini/skills/` | Official user-level skill location |
+| Global user skills | `~/.gemini/skills/` | Official user-level skill location; Orchestrarium leaves this tier for user overrides instead of mirroring the pack here |
 | Global user skills alias | `~/.agents/skills/` | Official alias; within the user tier, the alias takes precedence over `~/.gemini/skills/` |
-| Global user subagents | `~/.gemini/agents/` | Official preview user-level subagent location; Orchestrarium uses it for the specialist-team layer |
-| Global custom commands | `~/.gemini/commands/` | Official user-level Gemini custom commands |
+| Global user subagents | `~/.gemini/agents/` | Official preview user-level subagent location; Orchestrarium leaves this tier for deliberate user overrides |
+| Global custom commands | `~/.gemini/commands/` | Official user-level Gemini custom commands; Orchestrarium does not mirror its own commands here |
 | Global settings | `~/.gemini/settings.json` | Official CLI configuration, including optional `context.fileName` overrides |
 | Global operator overlay | `~/.gemini/.agents-mode` | Orchestrarium-owned shared-routing overlay seeded on first global install and preserved on reinstall; not a Gemini-native settings surface |
 | Global extensions | `~/.gemini/extensions/<extension>/` | Official runtime location for installed or linked extensions; Orchestrarium materializes `orchestrarium-gemini` here on global Gemini install |
@@ -93,16 +93,17 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Project shared-governance import | `<project>/AGENTS.md` | Orchestrarium-installed markdown module imported by `GEMINI.md`; not a Gemini-native required filename |
 | Parent-context hierarchy | `<project>/../GEMINI.md` up to project root | Gemini walks parent directories until the `.git` root |
 | Sub-directory context | `<project>/<subdir>/GEMINI.md` | Gemini also loads more specific context files below the current working directory |
-| Workspace skills | `<project>/.gemini/skills/` | Official workspace skill location |
+| Workspace skills | `<project>/.gemini/skills/` | Official workspace skill location; Orchestrarium leaves this tier for explicit repo-local overrides instead of mirroring the pack here |
 | Workspace skills alias | `<project>/.agents/skills/` | Official alias; within the workspace tier, the alias takes precedence over `.gemini/skills/` |
-| Workspace subagents | `<project>/.gemini/agents/` | Official preview project-level subagent location; Orchestrarium installs the specialist-team layer here |
-| Workspace custom commands | `<project>/.gemini/commands/` | Official project-local Gemini custom commands |
+| Workspace subagents | `<project>/.gemini/agents/` | Official preview project-level subagent location; Orchestrarium leaves this tier for deliberate repo-local overrides |
+| Workspace custom commands | `<project>/.gemini/commands/` | Official project-local Gemini custom commands; Orchestrarium does not mirror its own commands here |
 | Workspace extensions | `<project>/.gemini/extensions/<extension>/` | Official workspace extension location; Orchestrarium materializes `orchestrarium-gemini` here on project-local Gemini install |
 | Workspace settings | `<project>/.gemini/settings.json` | Official project-local Gemini settings |
 | Orchestrarium operator overlay | `<project>/.gemini/.agents-mode` | Repo-local shared routing overlay for consultant, delegation, MCP, external-provider preferences, named priority profiles, and opinion counts; local install seeds the default, Gemini `/init` still owns `GEMINI.md`, and the Orchestrarium Gemini init helper reviews or updates the overlay when project-specific choices are needed |
 | Optional context filename override | `context.fileName` in settings | `AGENTS.md` is not a default Gemini entrypoint; Orchestrarium uses `GEMINI.md` imports instead of taking over this settings-owned surface |
 | Extension-provided skills | installed extension content | Official third discovery tier after workspace and user skills |
 | Important overlap note | workspace `.agents/skills/` | If a repository already uses `.agents/skills/` for Codex, Gemini will also discover those skills because this alias is official Gemini behavior |
+| Conflict-avoidance note | user/workspace tiers vs extension | Gemini resolves precedence as `workspace > user > extension`, so Orchestrarium's Gemini installer keeps the pack in the extension tier and cleans legacy mirrored duplicates from top-level user/workspace tiers on reinstall |
 
 ## Quick comparison
 
