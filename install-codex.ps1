@@ -20,6 +20,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Source = Join-Path $ScriptDir "src.codex"
+$DefaultAgentsModeSource = Join-Path $ScriptDir "agents-mode.defaults.yaml"
 
 $script:PromptMode = $null
 
@@ -243,6 +244,26 @@ function Confirm-Removal {
 
 # Per-skill install preserves user-added skills — no destructive directory wipe needed.
 
+function Ensure-DefaultFile {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        Write-Host "  Preserving existing $Label..."
+        return
+    }
+
+    Write-Host "  Installing default $Label..."
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
 function Copy-RequiredDirectory {
     param(
         [string]$SourceDir,
@@ -313,20 +334,24 @@ if ($Global) {
 # Repo/target: skills go into .agents/skills/,
 #              AGENTS.md merges into project root AGENTS.md.
 if ($Mode -eq "global") {
+    $AgentsRoot = $TargetRoot
     $SkillsTarget = Join-Path $TargetRoot "skills"
     $LeadScriptsTarget = Join-Path $TargetRoot "skills\lead\scripts"
     $MdTarget = Join-Path $TargetRoot "AGENTS.md"
 } else {
     $ProjectRoot = Split-Path $TargetRoot -Parent
-    $SkillsTarget = Join-Path $ProjectRoot ".agents" "skills"
-    $LeadScriptsTarget = Join-Path $ProjectRoot ".agents" "skills\lead\scripts"
+    $AgentsRoot = Join-Path $ProjectRoot ".agents"
+    $SkillsTarget = Join-Path $AgentsRoot "skills"
+    $LeadScriptsTarget = Join-Path $AgentsRoot "skills\lead\scripts"
     $MdTarget = Join-Path $ProjectRoot "AGENTS.md"
 }
+$AgentsModeTarget = Join-Path $AgentsRoot ".agents-mode"
 
 Write-Host "=== Orchestrarium Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
 Write-Host "Skills target: $SkillsTarget"
 Write-Host "AGENTS.md target: $MdTarget"
+Write-Host "agents-mode: $AgentsModeTarget"
 Write-Host "Mode:   $Mode"
 if ($DryRun) {
     Write-Host "Mode:   dry-run" -ForegroundColor Yellow
@@ -337,6 +362,10 @@ Write-Host ""
 if (-not (Test-Path (Join-Path $Source "skills"))) {
     Write-Host "FAIL: Source directory $Source\skills not found." -ForegroundColor Red
     Write-Host "Run this script from the Orchestrarium repo root."
+    exit 1
+}
+if (-not (Test-Path -LiteralPath $DefaultAgentsModeSource)) {
+    Write-Host "FAIL: Missing default agents-mode template at $DefaultAgentsModeSource." -ForegroundColor Red
     exit 1
 }
 
@@ -488,6 +517,8 @@ if (Test-Path $dstMd) {
     }
 }
 
+Ensure-DefaultFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode"
+
 if ($DryRun) {
     Write-Host ""
     Write-Host "RESULT: DRY-RUN complete (no files modified)."
@@ -532,6 +563,7 @@ Test-InstalledFile (Join-Path $SkillsTarget "lead/subagent-contracts.md") "skill
 Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.sh") "skills/lead/scripts/check-publication-safety.sh"
 Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.ps1") "skills/lead/scripts/check-publication-safety.ps1"
 Test-InstalledFile (Join-Path $LeadScriptsTarget "validate-skill-pack.sh") "skills/lead/scripts/validate-skill-pack.sh"
+Test-InstalledFile $AgentsModeTarget ".agents-mode"
 
 if (Test-Path $dstMd) {
     $mdContent = Get-Content $dstMd -Raw
@@ -558,6 +590,8 @@ if ($errors -gt 0) {
     Write-Host "RESULT: OK - Orchestrarium installed" -ForegroundColor Green
     Write-Host "  Skills: $SkillsTarget"
     Write-Host "  AGENTS.md: $MdTarget"
+    Write-Host "  agents-mode: $AgentsModeTarget"
     Write-Host ""
-    Write-Host "Next: run 'bash $LeadScriptsTarget/validate-skill-pack.sh' to verify the installation."
+    Write-Host "Next: run '`$init-project' to review/update project policies and the installed default .agents/.agents-mode."
+    Write-Host "Then run 'bash $LeadScriptsTarget/validate-skill-pack.sh' to verify the installation."
 }

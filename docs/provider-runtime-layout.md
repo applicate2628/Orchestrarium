@@ -16,11 +16,11 @@ This file is the branch-local runtime-layout reference for the standalone Codex 
 
 | Mode | Installed paths |
 |---|---|
-| project-local | `<project>/AGENTS.md`, `<project>/.agents/skills/` |
-| global | `~/.codex/AGENTS.md`, `~/.codex/skills/` |
+| project-local | `<project>/AGENTS.md`, `<project>/.agents/skills/`, `<project>/.agents/.agents-mode` |
+| global | `~/.codex/AGENTS.md`, `~/.codex/skills/`, `~/.codex/.agents-mode` |
 
 ## Notes
 
 - `references-codex/` and `docs/` stay in the source branch; they are not copied into target projects.
-- Project-local operator state lives in `.agents/.agents-mode`.
+- Installs seed the operator file into the active target: `.agents/.agents-mode` for project installs and `~/.codex/.agents-mode` for global installs.
 - The installed governance entrypoint is the project root `AGENTS.md`.

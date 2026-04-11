@@ -63,9 +63,9 @@ bash install-codex.sh --global
 
 Important: multi-agent team workflows require explicit delegation permission from the user. Ask directly for delegation, name a role such as `$lead`, or clearly authorize subagents in the prompt; otherwise the assistant may stay in the main conversation instead of starting the team.
 
-For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, and operator state lives in `.agents/.agents-mode`. For global install, the pack mirrors into `~/.codex/`, but operator state remains project-local in `.agents/.agents-mode`. See [INSTALL.md](INSTALL.md) for details.
+For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, and install seeds `.agents/.agents-mode`. For global install, the pack mirrors into `~/.codex/` and seeds `~/.codex/.agents-mode`. See [INSTALL.md](INSTALL.md) for details.
 
-After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and initialize `.agents/.agents-mode`.
+After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode`.
 
 ## Operating model
 

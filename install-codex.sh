@@ -8,6 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE="$SCRIPT_DIR/src.codex"
+DEFAULT_AGENTS_MODE_SOURCE="$SCRIPT_DIR/agents-mode.defaults.yaml"
 
 # Directories to install (order doesn't matter)
 DIRS=(skills)
@@ -280,6 +281,22 @@ confirm_removal() {
 
 # Per-skill install preserves user-added skills — no destructive directory wipe needed.
 
+ensure_default_file() {
+  local src="$1" dst="$2" label="$3"
+
+  if [[ -f "$dst" ]]; then
+    echo "  Preserving existing $label..."
+    return
+  fi
+
+  echo "  Installing default $label..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp "$src" "$dst"
+  fi
+}
+
 prompt_install_mode() {
   if [ ! -t 0 ]; then
     echo "FAIL: No install target specified and not running interactively." >&2
@@ -405,19 +422,23 @@ fi
 # Repo/target: skills go into .agents/skills/,
 #              AGENTS.md merges into project root AGENTS.md.
 if [ "$MODE" = "global" ]; then
+  AGENTS_ROOT="$TARGET"
   SKILLS_TARGET="$TARGET/skills"
   MD_TARGET="$TARGET/AGENTS.md"
 else
   # Repo-level: TARGET is <root>/.codex but skills go into <root>/.agents/
   PROJECT_ROOT="$(dirname "$TARGET")"
-  SKILLS_TARGET="$PROJECT_ROOT/.agents/skills"
+  AGENTS_ROOT="$PROJECT_ROOT/.agents"
+  SKILLS_TARGET="$AGENTS_ROOT/skills"
   MD_TARGET="$PROJECT_ROOT/AGENTS.md"
 fi
+AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode"
 
 echo "=== Orchestrarium Installer ==="
 echo "Source: $SOURCE"
 echo "Skills target: $SKILLS_TARGET"
 echo "AGENTS.md target: $MD_TARGET"
+echo "agents-mode: $AGENTS_MODE_TARGET"
 echo "Mode:   $MODE"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "Mode:   dry-run"
@@ -428,6 +449,10 @@ echo
 if [[ ! -d "$SOURCE/skills" ]]; then
   echo "FAIL: Source directory $SOURCE/skills not found."
   echo "Run this script from the Orchestrarium repo root."
+  exit 1
+fi
+if [[ ! -f "$DEFAULT_AGENTS_MODE_SOURCE" ]]; then
+  echo "FAIL: missing default agents-mode template at $DEFAULT_AGENTS_MODE_SOURCE"
   exit 1
 fi
 
@@ -597,6 +622,8 @@ else
   fi
 fi
 
+ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode"
+
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
   echo "RESULT: DRY-RUN complete (no files modified)."
@@ -638,6 +665,7 @@ check_file "$SKILLS_TARGET/lead/subagent-contracts.md" "skills/lead/subagent-con
 check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.sh" "skills/lead/scripts/check-publication-safety.sh"
 check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.ps1" "skills/lead/scripts/check-publication-safety.ps1"
 check_file "$SKILLS_TARGET/lead/scripts/validate-skill-pack.sh" "skills/lead/scripts/validate-skill-pack.sh"
+check_file "$AGENTS_MODE_TARGET" ".agents-mode"
 
 if [[ -f "$dst_md" ]]; then
   line_count=$(wc -l < "$dst_md")
@@ -663,6 +691,8 @@ else
   echo "RESULT: OK — Orchestrarium installed"
   echo "  Skills: $SKILLS_TARGET"
   echo "  AGENTS.md: $MD_TARGET"
+  echo "  agents-mode: $AGENTS_MODE_TARGET"
   echo ""
-  echo "Next: run 'bash $SKILLS_TARGET/lead/scripts/validate-skill-pack.sh' to verify the installation."
+  echo "Next: run '\$init-project' to review/update project policies and the installed default .agents/.agents-mode."
+  echo "Then run 'bash $SKILLS_TARGET/lead/scripts/validate-skill-pack.sh' to verify the installation."
 fi
