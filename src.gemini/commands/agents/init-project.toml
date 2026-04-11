@@ -1,11 +1,11 @@
-description = "Initialize the Orchestrarium Gemini routing overlay after the official Gemini /init step."
+description = "Review or update the installed Orchestrarium Gemini routing overlay after the official Gemini /init step."
 prompt = """
 Read GEMINI.md and skills/init-project/SKILL.md.
 
 Then guide the user through Gemini project bootstrap in this order:
 - verify that GEMINI.md exists
 - if GEMINI.md is missing, stop and tell the user to run Gemini's built-in /init first
-- initialize or update .gemini/.agents-mode according to skills/init-project/SKILL.md
+- review or update the installed default .gemini/.agents-mode according to skills/init-project/SKILL.md
 - keep .gemini/settings.json untouched because it remains the official Gemini runtime config
 - keep `externalOpinionCounts` separate from helper multiplicity; bounded same-provider helper fan-out belongs to `external-brigade`
 """

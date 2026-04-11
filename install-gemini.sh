@@ -3,6 +3,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE="$SCRIPT_DIR/src.gemini"
+EXTENSION_SOURCE="$SOURCE/extension"
+EXTENSION_MANIFEST_SOURCE="$EXTENSION_SOURCE/gemini-extension.json"
+EXTENSION_README_SOURCE="$EXTENSION_SOURCE/README.md"
+DEFAULT_AGENTS_MODE_SOURCE="$SCRIPT_DIR/agents-mode.defaults.yaml"
 MANAGED_START='<!-- ORCHESTRARIUM_GEMINI_PACK:START -->'
 MANAGED_END='<!-- ORCHESTRARIUM_GEMINI_PACK:END -->'
 FORCE=0
@@ -28,6 +32,13 @@ EOF
 canonical_path() {
   local path="$1"
   path="${path/#\~/$HOME}"
+  case "$path" in
+    [A-Za-z]:/*|[A-Za-z]:\\*)
+      if command -v cygpath >/dev/null 2>&1; then
+        path="$(cygpath -u "$path")"
+      fi
+      ;;
+  esac
   if [[ -z "$path" ]]; then
     echo "" >&2
     return 1
@@ -72,6 +83,29 @@ resolve_project_root() {
   else
     printf "%s" "$resolved"
   fi
+}
+
+extension_name_from_manifest() {
+  local manifest="$1"
+  local py_bin="python"
+  if ! command -v "$py_bin" >/dev/null 2>&1; then
+    py_bin="python3"
+  fi
+  if ! command -v "$py_bin" >/dev/null 2>&1; then
+    echo "FAIL: python or python3 is required to read the Gemini extension manifest." >&2
+    return 1
+  fi
+  "$py_bin" - "$manifest" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+name = manifest.get("name", "").strip()
+if not name:
+    raise SystemExit("FAIL: Gemini extension manifest is missing a non-empty 'name' field.")
+print(name)
+PY
 }
 
 ensure_dir() {
@@ -246,7 +280,7 @@ write_merged_gemini_md() {
 merge_gemini_file() {
   local src="$1" dst="$2"
   local managed existing start_line end_line
-  managed="$(sed 's|@\\./AGENTS\\.shared\\.md|@./AGENTS.md|' "$src")"
+  managed="$(sed 's|^@\./AGENTS\.shared\.md$|@./AGENTS.md|' "$src")"
   if [[ ! -f "$dst" ]]; then
     echo "  Creating GEMINI.md..."
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -285,6 +319,27 @@ install_pack_file() {
       echo "  Preserving existing $label..."
       return
     fi
+    echo "  Replacing $label..."
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "    [dry-run] would replace $dst"
+    else
+      cp -f "$src" "$dst"
+    fi
+    return
+  fi
+
+  echo "  Installing $label..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp -f "$src" "$dst"
+  fi
+}
+
+install_pack_content_file() {
+  local src="$1" dst="$2" label="$3"
+  ensure_dir "$(dirname "$dst")"
+  if [[ -e "$dst" ]]; then
     echo "  Replacing $label..."
     if [[ "$DRY_RUN" -eq 1 ]]; then
       echo "    [dry-run] would replace $dst"
@@ -353,9 +408,22 @@ if [[ ! -d "$SOURCE/skills" || ! -d "$SOURCE/agents" || ! -d "$SOURCE/commands" 
   echo "FAIL: src.gemini is incomplete at $SOURCE" >&2
   exit 1
 fi
+if [[ ! -f "$EXTENSION_MANIFEST_SOURCE" || ! -f "$EXTENSION_README_SOURCE" ]]; then
+  echo "FAIL: src.gemini/extension is incomplete at $EXTENSION_SOURCE" >&2
+  exit 1
+fi
+if [[ ! -f "$DEFAULT_AGENTS_MODE_SOURCE" ]]; then
+  echo "FAIL: missing default agents-mode template at $DEFAULT_AGENTS_MODE_SOURCE" >&2
+  exit 1
+fi
+
+EXTENSION_NAME="$(extension_name_from_manifest "$EXTENSION_MANIFEST_SOURCE")"
 
 if [[ "$MODE" == "global" ]]; then
   INSTALL_ROOT="$(canonical_path "$HOME/.gemini")"
+  EXTENSIONS_TARGET="$INSTALL_ROOT/extensions"
+  EXTENSION_ROOT="$EXTENSIONS_TARGET/$EXTENSION_NAME"
+  AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode"
   GEMINI_TARGET="$INSTALL_ROOT/GEMINI.md"
   SHARED_TARGET="$INSTALL_ROOT/AGENTS.md"
   LEGACY_SHARED_TARGET="$INSTALL_ROOT/AGENTS.shared.md"
@@ -372,6 +440,9 @@ else
     fi
   fi
   INSTALL_ROOT="$PROJECT_ROOT/.gemini"
+  EXTENSIONS_TARGET="$INSTALL_ROOT/extensions"
+  EXTENSION_ROOT="$EXTENSIONS_TARGET/$EXTENSION_NAME"
+  AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode"
   GEMINI_TARGET="$PROJECT_ROOT/GEMINI.md"
   SHARED_TARGET="$PROJECT_ROOT/AGENTS.md"
   LEGACY_SHARED_TARGET="$PROJECT_ROOT/AGENTS.shared.md"
@@ -379,6 +450,13 @@ else
   AGENTS_TARGET="$INSTALL_ROOT/agents"
   COMMANDS_TARGET="$INSTALL_ROOT/commands"
 fi
+LEGACY_AGENTS_README_TARGET="$AGENTS_TARGET/README.md"
+EXTENSION_MANIFEST_TARGET="$EXTENSION_ROOT/gemini-extension.json"
+EXTENSION_README_TARGET="$EXTENSION_ROOT/README.md"
+EXTENSION_GEMINI_TARGET="$EXTENSION_ROOT/GEMINI.md"
+EXTENSION_AGENTS_TARGET="$EXTENSION_ROOT/AGENTS.md"
+LEGACY_EXTENSION_SHARED_TARGET="$EXTENSION_ROOT/AGENTS.shared.md"
+LEGACY_EXTENSION_AGENTS_README_TARGET="$EXTENSION_ROOT/agents/README.md"
 
 echo "=== Orchestrarium Gemini Installer ==="
 echo "Source: $SOURCE"
@@ -386,11 +464,13 @@ echo "Mode:   $MODE"
 echo "Runtime root: $INSTALL_ROOT"
 echo "GEMINI.md:    $GEMINI_TARGET"
 echo "AGENTS.md:    $SHARED_TARGET"
+echo "agents-mode:  $AGENTS_MODE_TARGET"
 echo "Agents:       $AGENTS_TARGET"
+echo "Extension:    $EXTENSION_ROOT"
 [[ "$DRY_RUN" -eq 1 ]] && echo "Mode:   dry-run"
 echo
 
-if [[ -e "$GEMINI_TARGET" || -e "$SHARED_TARGET" || -d "$SKILLS_TARGET" || -d "$AGENTS_TARGET" || -d "$COMMANDS_TARGET" ]]; then
+if [[ -e "$GEMINI_TARGET" || -e "$SHARED_TARGET" || -d "$SKILLS_TARGET" || -d "$AGENTS_TARGET" || -d "$COMMANDS_TARGET" || -d "$EXTENSION_ROOT" ]]; then
   if ! confirm_action "Proceed with reinstall/update of the Gemini pack?"; then
     echo "Install cancelled by user." >&2
     exit 1
@@ -401,13 +481,27 @@ ensure_dir "$INSTALL_ROOT"
 install_tree "$SOURCE/skills" "$SKILLS_TARGET" "skills"
 install_tree "$SOURCE/agents" "$AGENTS_TARGET" "agents"
 install_tree "$SOURCE/commands" "$COMMANDS_TARGET" "commands"
+install_tree "$SOURCE/skills" "$EXTENSION_ROOT/skills" "extension/skills"
+install_tree "$SOURCE/agents" "$EXTENSION_ROOT/agents" "extension/agents"
+install_tree "$SOURCE/commands" "$EXTENSION_ROOT/commands" "extension/commands"
 merge_gemini_file "$SOURCE/GEMINI.md" "$GEMINI_TARGET"
 if [[ "$MODE" == "global" ]]; then
   install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md"
 else
   install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md" 1
 fi
+install_pack_file "$EXTENSION_MANIFEST_SOURCE" "$EXTENSION_MANIFEST_TARGET" "extension manifest"
+install_pack_file "$EXTENSION_README_SOURCE" "$EXTENSION_README_TARGET" "extension README"
+extension_gemini_tmp="$(mktemp)"
+trap 'rm -f "$extension_gemini_tmp"' EXIT
+sed 's|@\./AGENTS\.shared\.md|@./AGENTS.md|' "$SOURCE/GEMINI.md" > "$extension_gemini_tmp"
+install_pack_content_file "$extension_gemini_tmp" "$EXTENSION_GEMINI_TARGET" "extension GEMINI.md"
+install_pack_file "$SOURCE/AGENTS.shared.md" "$EXTENSION_AGENTS_TARGET" "extension AGENTS.md"
+install_pack_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode" 1
 remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"
+remove_legacy_pack_file "$LEGACY_AGENTS_README_TARGET" "agents/README.md"
+remove_legacy_pack_file "$LEGACY_EXTENSION_SHARED_TARGET" "extension AGENTS.shared.md"
+remove_legacy_pack_file "$LEGACY_EXTENSION_AGENTS_README_TARGET" "extension agents/README.md"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo
@@ -421,14 +515,21 @@ errors=0
 for path in \
   "$GEMINI_TARGET" \
   "$SHARED_TARGET" \
+  "$AGENTS_MODE_TARGET" \
+  "$EXTENSION_MANIFEST_TARGET" \
+  "$EXTENSION_GEMINI_TARGET" \
+  "$EXTENSION_AGENTS_TARGET" \
   "$SKILLS_TARGET/README.md" \
   "$SKILLS_TARGET/lead/SKILL.md" \
   "$SKILLS_TARGET/init-project/SKILL.md" \
-  "$AGENTS_TARGET/README.md" \
   "$AGENTS_TARGET/lead.md" \
   "$AGENTS_TARGET/team-templates/full-delivery.json" \
   "$COMMANDS_TARGET/agents/help.toml" \
-  "$COMMANDS_TARGET/agents/init-project.toml"; do
+  "$COMMANDS_TARGET/agents/external-brigade.toml" \
+  "$COMMANDS_TARGET/agents/init-project.toml" \
+  "$EXTENSION_ROOT/skills/lead/SKILL.md" \
+  "$EXTENSION_ROOT/agents/lead.md" \
+  "$EXTENSION_ROOT/commands/agents/help.toml"; do
   if [[ -e "$path" ]]; then
     echo "  OK  $path"
   else

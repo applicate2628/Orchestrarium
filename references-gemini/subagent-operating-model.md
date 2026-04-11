@@ -9,7 +9,7 @@ This standalone branch keeps one Gemini-local operating-model reference instead 
 - `GEMINI.md` is the Gemini runtime entrypoint.
 - Gemini CLI's built-in `/init` is the canonical way to create or refresh project `GEMINI.md`.
 - `.gemini/settings.json` stays the Gemini-native runtime config surface.
-- `.gemini/.agents-mode` is an optional Orchestrarium overlay, not a replacement for `.gemini/settings.json`.
+- `.gemini/.agents-mode` is the Orchestrarium routing overlay seeded by install, not a replacement for `.gemini/settings.json`.
 - Skills live in `skills/<name>/SKILL.md`.
 - User-invoked command helpers live in `commands/**/*.toml`.
 - The current pack surface stays sequential and human-steered for native internal execution; do not assume native internal parallel dispatch. Independent external adapters may still run in parallel when the routing contract and selected provider runtimes allow it. If native internal slot or thread limits would otherwise block independent eligible lanes, prefer available external adapters over silent serialization or dropping a lane.

@@ -1,8 +1,8 @@
 ---
 name: init-project
 description: >
-  Bootstrap Orchestrarium's shared-routing overlay for Gemini after the official
-  Gemini /init step has created or refreshed GEMINI.md.
+  Review or update Orchestrarium's installed shared-routing overlay for Gemini
+  after the official Gemini /init step has created or refreshed GEMINI.md.
 ---
 
 # Init Project
