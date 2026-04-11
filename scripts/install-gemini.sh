@@ -380,6 +380,7 @@ else
   AGENTS_TARGET="$INSTALL_ROOT/agents"
   COMMANDS_TARGET="$INSTALL_ROOT/commands"
 fi
+LEGACY_AGENTS_README_TARGET="$AGENTS_TARGET/README.md"
 
 echo "=== Orchestrarium Gemini Installer ==="
 echo "Source: $SOURCE"
@@ -409,6 +410,7 @@ else
   install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md" 1
 fi
 remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"
+remove_legacy_pack_file "$LEGACY_AGENTS_README_TARGET" "agents/README.md"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo
@@ -425,10 +427,10 @@ for path in \
   "$SKILLS_TARGET/README.md" \
   "$SKILLS_TARGET/lead/SKILL.md" \
   "$SKILLS_TARGET/init-project/SKILL.md" \
-  "$AGENTS_TARGET/README.md" \
   "$AGENTS_TARGET/lead.md" \
   "$AGENTS_TARGET/team-templates/full-delivery.json" \
   "$COMMANDS_TARGET/agents/help.toml" \
+  "$COMMANDS_TARGET/agents/external-brigade.toml" \
   "$COMMANDS_TARGET/agents/init-project.toml"; do
   if [[ -e "$path" ]]; then
     echo "  OK  $path"

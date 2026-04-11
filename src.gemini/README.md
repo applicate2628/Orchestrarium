@@ -11,6 +11,7 @@ This branch keeps only Gemini-specific source, but it now ships the same full ro
 - Stable expertise lives in `src.gemini/skills/`.
 - Bounded parallel external-helper orchestration lives in `src.gemini/skills/external-brigade/` and the Gemini command wrapper under `commands/agents/external-brigade.toml`.
 - Preview specialist-team execution lives in `src.gemini/agents/`.
+- Every markdown file directly under `src.gemini/agents/` must be a real Gemini agent definition with YAML frontmatter; explanatory docs stay outside that loader-visible path.
 
 ## Repository layout
 
@@ -22,7 +23,7 @@ src.gemini/                 Gemini pack source tree
   GEMINI.md                 Native Gemini entrypoint
   AGENTS.shared.md          Source-side shared-governance module for installed AGENTS.md
   skills/<name>/SKILL.md    Gemini Agent Skills
-  agents/*.md               Gemini preview specialist subagents
+  agents/*.md               Gemini preview specialist subagents only
   agents/team-templates/    Repo-local team compositions
   commands/**/*.toml        Gemini custom commands
   extension/                Future extension and MCP boundary

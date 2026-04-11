@@ -349,6 +349,7 @@ if ($Mode -eq "global") {
     $GeminiTarget = Join-Path $InstallRoot "GEMINI.md"
     $SharedTarget = Join-Path $InstallRoot "AGENTS.md"
     $LegacySharedTarget = Join-Path $InstallRoot "AGENTS.shared.md"
+    $LegacyAgentsReadmeTarget = Join-Path $AgentsTarget "README.md"
 } else {
     $InstallRoot = Join-Path $ProjectRoot ".gemini"
     $SkillsTarget = Join-Path $InstallRoot "skills"
@@ -357,6 +358,7 @@ if ($Mode -eq "global") {
     $GeminiTarget = Join-Path $ProjectRoot "GEMINI.md"
     $SharedTarget = Join-Path $ProjectRoot "AGENTS.md"
     $LegacySharedTarget = Join-Path $ProjectRoot "AGENTS.shared.md"
+    $LegacyAgentsReadmeTarget = Join-Path $AgentsTarget "README.md"
 }
 
 Write-Host "=== Orchestrarium Gemini Installer ===" -ForegroundColor Cyan
@@ -393,6 +395,7 @@ if ($Mode -eq "global") {
     Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.md" -PreserveExisting
 }
 Remove-LegacyPackFile -TargetFile $LegacySharedTarget -Label "AGENTS.shared.md"
+Remove-LegacyPackFile -TargetFile $LegacyAgentsReadmeTarget -Label "agents/README.md"
 
 if ($DryRun) {
     Write-Host ""
@@ -409,10 +412,10 @@ foreach ($path in @(
     (Join-Path $SkillsTarget "README.md"),
     (Join-Path $SkillsTarget "lead\SKILL.md"),
     (Join-Path $SkillsTarget "init-project\SKILL.md"),
-    (Join-Path $AgentsTarget "README.md"),
     (Join-Path $AgentsTarget "lead.md"),
     (Join-Path $AgentsTarget "team-templates\full-delivery.json"),
     (Join-Path $CommandsTarget "agents\help.toml"),
+    (Join-Path $CommandsTarget "agents\external-brigade.toml"),
     (Join-Path $CommandsTarget "agents\init-project.toml")
 )) {
     if (Test-Path -LiteralPath $path) {

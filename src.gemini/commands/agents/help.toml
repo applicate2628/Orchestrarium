@@ -1,6 +1,6 @@
 description = "Summarize the Gemini provider-pack structure, role surface, and orchestration layers."
 prompt = """
-Read GEMINI.md, README.md, skills/README.md, skills/lead/SKILL.md, and agents/README.md.
+Read GEMINI.md, README.md, skills/README.md, skills/lead/SKILL.md, and agents/lead.md.
 
 Summarize:
 - the current Gemini provider-pack structure
