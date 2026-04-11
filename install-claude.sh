@@ -8,6 +8,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE="$SCRIPT_DIR/src.claude"
+DEFAULT_AGENTS_MODE_SOURCE="$SCRIPT_DIR/agents-mode.defaults.yaml"
 
 # Directories to install (order doesn't matter)
 DIRS=(agents skills)
@@ -286,6 +287,22 @@ confirm_removal() {
 
 # Per-item install preserves user-added files — no destructive directory wipe needed.
 
+ensure_default_file() {
+  local src="$1" dst="$2" label="$3"
+
+  if [[ -f "$dst" ]]; then
+    echo "  Preserving existing $label..."
+    return
+  fi
+
+  echo "  Installing default $label..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp "$src" "$dst"
+  fi
+}
+
 prompt_install_mode() {
   if [ ! -t 0 ]; then
     echo "FAIL: No install target specified and not running interactively." >&2
@@ -406,9 +423,12 @@ else
   usage
 fi
 
+AGENTS_MODE_TARGET="$TARGET/.agents-mode"
+
 echo "=== Claudestrator Installer ==="
 echo "Source: $SOURCE"
 echo "Target: $TARGET"
+echo "agents-mode: $AGENTS_MODE_TARGET"
 echo "Mode:   $MODE"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "Mode:   dry-run"
@@ -419,6 +439,10 @@ echo
 if [[ ! -d "$SOURCE/agents" ]]; then
   echo "FAIL: Source directory $SOURCE/agents not found."
   echo "Run this script from the Claudestrator repo root."
+  exit 1
+fi
+if [[ ! -f "$DEFAULT_AGENTS_MODE_SOURCE" ]]; then
+  echo "FAIL: missing default agents-mode template at $DEFAULT_AGENTS_MODE_SOURCE" >&2
   exit 1
 fi
 
@@ -659,6 +683,8 @@ if [[ -f "$src_agents" ]]; then
   fi
 fi
 
+ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode"
+
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
   echo "RESULT: DRY-RUN complete (no files modified)."
@@ -698,6 +724,7 @@ done
 check_file "$TARGET/agents/contracts/operating-model.md" "agents/contracts/operating-model.md"
 check_file "$TARGET/agents/contracts/subagent-contracts.md" "agents/contracts/subagent-contracts.md"
 check_file "$TARGET/agents/contracts/policies-catalog.md" "agents/contracts/policies-catalog.md"
+check_file "$AGENTS_MODE_TARGET" ".agents-mode"
 
 # Check CLAUDE.md (Claude-specific sections)
 if [[ -f "$dst_md" ]]; then
@@ -747,5 +774,5 @@ if [[ $errors -gt 0 ]]; then
 else
   echo "RESULT: OK — Claudestrator installed to $TARGET"
   echo ""
-  echo "Next: restart Claude, then run /agents-init-project to configure project policies."
+  echo "Next: restart Claude, then run /agents-init-project to review/update project policies and the installed default .claude/.agents-mode."
 fi

@@ -6,7 +6,7 @@ Canonical value-by-value operator reference for the standalone Claude Code pack.
 
 | Provider | Canonical file | Provider-specific note |
 |---|---|---|
-| Claude Code | `.claude/.agents-mode` | Shared provider universe: `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named priority profile and skips the current host provider. `claude-api` is a Claude transport, not a fourth provider. |
+| Claude Code | `.claude/.agents-mode` | Shared provider universe: `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named priority profile and skips the current host provider. `claude-api` is a Claude transport, not a fourth provider. Installs seed the default file into the active target and preserve existing overlays on reinstall. |
 
 Tooling should read and write only `.claude/.agents-mode`.
 
