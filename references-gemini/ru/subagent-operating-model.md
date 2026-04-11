@@ -9,7 +9,7 @@
 - `GEMINI.md` — Gemini runtime entrypoint.
 - Встроенная команда Gemini CLI `/init` — канонический способ создать или обновить project `GEMINI.md`.
 - `.gemini/settings.json` остаётся Gemini-native runtime config surface.
-- `.gemini/.agents-mode` — optional Orchestrarium overlay, а не замена `.gemini/settings.json`.
+- `.gemini/.agents-mode` — routing overlay Orchestrarium, который seedится при установке, а не замена `.gemini/settings.json`.
 - Skills живут в `skills/<name>/SKILL.md`.
 - Пользовательские command helpers живут в `commands/**/*.toml`.
 - Текущий pack surface остаётся последовательным и human-steered для native internal execution; не предполагайте native parallel dispatch. Независимые external adapters всё ещё могут идти параллельно, когда routing contract и выбранные provider runtimes это допускают.

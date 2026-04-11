@@ -10,13 +10,13 @@ Use this pack as a full Gemini-line runtime surface built on official Gemini ent
 - `GEMINI.md` is the native runtime instruction file.
 - Gemini CLI `/init` is the official way to create or refresh the project `GEMINI.md`.
 - `.gemini/settings.json` is the official Gemini runtime-state and configuration surface.
-- Orchestrarium `init-project` bootstraps `.gemini/.agents-mode` as the shared-routing overlay with named priority profiles and per-lane opinion counts.
+- Orchestrarium install seeds `.gemini/.agents-mode` as the shared-routing overlay with named priority profiles and per-lane opinion counts, and `init-project` reviews or updates that installed default.
 - `skills/` carries the full stable Gemini skill catalog for the shared role vocabulary.
 - `agents/` carries the Gemini preview specialist-team layer for explicit delegation.
 - `agents/team-templates/` carries the repo-local team compositions for the shared role principle.
 - `commands/agents/external-brigade.toml` and `skills/external-brigade/SKILL.md` carry the bounded parallel external-helper orchestration surface.
 - `commands/` carries Gemini TOML command entrypoints.
-- `extension/` remains the extension-manifest boundary for Gemini-native packaging and MCP.
+- `extension/` keeps the manifest and extension-local docs that installers materialize into `.gemini/extensions/orchestrarium-gemini/` or `~/.gemini/extensions/orchestrarium-gemini/` for official Gemini extension loading and MCP.
 
 Important distinctions:
 

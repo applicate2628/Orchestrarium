@@ -6,7 +6,7 @@ Canonical value-by-value operator reference for pack-local `agents-mode` files. 
 
 | Provider | Canonical file | Provider-specific note |
 |---|---|---|
-| Gemini CLI | `.gemini/.agents-mode` | Shared routing semantics for the Gemini line. Official Gemini runtime config still lives in `.gemini/settings.json`; the overlay is initialized after Gemini `/init`, not a replacement bootstrap. The shared provider universe is `auto | codex | claude | gemini`. `auto` resolves through the active named priority profile, then applies the self-provider filter, so same-provider work requires an explicit override. Gemini remains the preferred target for image, icon, and decorative visual lanes when that routing remains honest. Gemini may store `externalClaudeSecretMode` and `externalClaudeApiMode` because Claude is a valid resolved provider on this line. |
+| Gemini CLI | `.gemini/.agents-mode` | Shared routing semantics for the Gemini line. Official Gemini runtime config still lives in `.gemini/settings.json`; Orchestrarium install seeds the overlay, while Gemini `/init` still owns `GEMINI.md`. The shared provider universe is `auto | codex | claude | gemini`. `auto` resolves through the active named priority profile, then applies the self-provider filter, so same-provider work requires an explicit override. Gemini remains the preferred target for image, icon, and decorative visual lanes when that routing remains honest. Gemini may store `externalClaudeSecretMode` and `externalClaudeApiMode` because Claude is a valid resolved provider on this line. |
 
 ## Canonical maintenance
 

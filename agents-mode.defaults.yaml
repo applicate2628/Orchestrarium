@@ -1,0 +1,37 @@
+consultantMode: disabled  # allowed: external | internal | disabled
+delegationMode: manual  # allowed: manual | auto | force
+mcpMode: auto  # allowed: auto | force
+preferExternalWorker: false  # allowed: false | true
+preferExternalReviewer: false  # allowed: false | true
+externalProvider: auto  # allowed here: auto | codex | claude | gemini
+externalPriorityProfile: balanced  # allowed: balanced | gemini-crosscheck | <repo-local profile>
+externalPriorityProfiles:  # allowed: structured profile map
+  balanced:
+    advisory.repo-understanding: [claude, gemini, codex]
+    advisory.design-adr: [claude, codex, gemini]
+    review.pre-pr: [claude, codex, gemini]
+    worker.default-implementation: [codex, claude, gemini]
+    worker.long-autonomous: [claude, codex, gemini]
+    worker.visual-icon-decorative: [gemini, claude, codex]
+    review.visual: [gemini, claude, codex]
+  gemini-crosscheck:
+    advisory.repo-understanding: [claude, gemini, codex]
+    advisory.design-adr: [claude, gemini, codex]
+    review.pre-pr: [claude, gemini, codex]
+    worker.default-implementation: [codex, claude, gemini]
+    worker.long-autonomous: [claude, gemini, codex]
+    worker.visual-icon-decorative: [gemini, claude, codex]
+    review.visual: [gemini, claude, codex]
+externalOpinionCounts:  # allowed: structured lane-count map
+  advisory.repo-understanding: 1
+  advisory.design-adr: 1
+  review.pre-pr: 1
+  worker.default-implementation: 1
+  worker.long-autonomous: 1
+  worker.visual-icon-decorative: 1
+  review.visual: 1
+externalCodexWorkdirMode: neutral  # allowed: neutral | project
+externalClaudeWorkdirMode: neutral  # allowed: neutral | project
+externalGeminiWorkdirMode: neutral  # allowed: neutral | project
+externalClaudeSecretMode: auto  # allowed when Claude is selectable: auto | force
+externalClaudeApiMode: auto  # allowed when Claude is selectable: disabled | auto | force
