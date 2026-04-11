@@ -211,6 +211,18 @@ Notes:
 - If that wrapper surface is unavailable, `claude-api` itself must still be available on PATH for `auto` fallback or `force` primary mode to succeed.
 - This key selects transport, not provider. It does not authorize switching away from the resolved Claude provider.
 
+## Practical launch rules
+
+| Situation | Rule |
+|---|---|
+| Claude CLI is the chosen provider and is already authenticated | Use the plain Claude CLI path first. |
+| Claude CLI is not logged in, or auth is intentionally repo-local | Prefer the installed Claude API wrapper allowed by `externalClaudeApiMode` instead of repeatedly probing a plain `claude` command that cannot authenticate. |
+| PowerShell Claude API transport | Use `.claude/agents/scripts/invoke-claude-api.ps1`. The wrapper must work on Windows PowerShell 5.1 and PowerShell 7+, and it accepts both `-PrintSecretPath` and `--print-secret-path`. |
+| Bash / Git Bash Claude API transport | Use `.claude/agents/scripts/invoke-claude-api.sh`. The wrapper resolves `claude-api`, `claude-api.cmd`, or `claude-api.exe`; if the active shell still cannot see the binary, set `CLAUDE_API_BIN` explicitly. |
+| Codex commit review | Use `codex review --commit <sha>` without an extra free-form prompt. If custom review instructions are required, prefer a narrower `codex exec` run on the admitted scope instead of mixing text with `review --commit`. |
+| Wide release or parity audit | Split by admitted repo, file set, or lane. Do not default to one mega neutral-dir prompt over the whole pack family because Codex and Gemini are more likely to stall on ultra-wide review scopes. |
+| Neutral workdir mode | Keep `external<Provider>WorkdirMode: neutral` by default and pass the exact repo, commit, file, or artifact scope explicitly. Switch to `project` only when the external run truly needs in-place filesystem execution or repo-local instruction surfaces. |
+
 ## Codex-only key
 
 ### `externalClaudeProfile`
