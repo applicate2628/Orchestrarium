@@ -1,6 +1,6 @@
 ---
 name: external-reviewer
-description: External review-side adapter for Claude-line. Use when an eligible review or QA role should execute through Codex CLI instead of a local specialist.
+description: External review-side adapter for Claude-line. Use when an eligible review or QA role should execute through the selected external provider instead of a local specialist.
 ---
 
 # External Reviewer
@@ -20,9 +20,14 @@ description: External review-side adapter for Claude-line. Use when an eligible 
 
 ## Claude-line provider
 
-- Honor `.claude/.agents-mode` first, then legacy `.claude/.consultant-mode`, and apply the `preferExternalReviewer` routing preference.
-- `externalProvider: auto` keeps the Claude-line default external provider: Codex CLI.
-- `externalProvider: gemini` routes the same adapter through Gemini CLI instead.
+- Read and normalize `.claude/.agents-mode` to the current canonical format before trusting its flags.
+- Honor `.claude/.agents-mode`, including `preferExternalReviewer`, `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`.
+- `externalProvider: auto` resolves by the active named priority profile instead of a host-line default.
+- `externalProvider: codex`, `externalProvider: claude`, and `externalProvider: gemini` route the same adapter through the selected provider's CLI.
+- The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work.
+- When the resolved provider is Claude, `externalClaudeSecretMode` and `externalClaudeApiMode` are transport knobs; `externalClaudeProfile` remains Codex-line only.
+- `externalOpinionCounts` is a same-lane distinct-opinion contract, not a helper-multiplicity cap; use the brigade surface when you need bounded parallel same-provider reuse.
+- This adapter is a direct external launch contract. Do not spawn it as an internal Claude agent/helper host for another provider.
 - If the selected external CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work through another eligible path.
 
 ## Return exactly one artifact
@@ -34,5 +39,5 @@ description: External review-side adapter for Claude-line. Use when an eligible 
 
 - Do not take implementation ownership.
 - Do not fall back to an internal reviewer inside the role.
+- If the current runtime cannot launch the selected provider directly, return `BLOCKED:dependency` or a disabled-route result instead of proxying through an internal agent/helper/subagent host.
 - Keep QA on the reviewer side; the adapter may verify implementation behavior as part of review.
-- Mandatory internal gates in security-sensitive and performance-sensitive templates remain non-replaceable.

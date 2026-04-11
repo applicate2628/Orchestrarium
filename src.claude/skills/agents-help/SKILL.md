@@ -24,7 +24,8 @@ Display a comprehensive overview of the skill-pack for the user.
 | `/agents-research` | Investigate a question (analyst → architect) |
 | `/agents-design` | Full research-to-plan chain (analyst → architect → planner) |
 | `/agents-security` | Security review (security-engineer → security-reviewer) |
-| `/agents-second-opinion` | Get a second opinion via consultant (Codex) |
+| `/agents-second-opinion` | Get a second opinion via consultant (Codex; preserves routing prefs) |
+| `/agents-external-brigade` | Launch a bounded parallel external-helper brigade |
 | `/agents-implement` | Execute an approved plan phase by phase |
 | `/agents-perf` | Fix a performance issue (perf-engineer → impl → QA → perf-reviewer) |
 | `/agents-refactor` | Safe refactoring with blast-radius analysis |
@@ -47,12 +48,12 @@ Show the templates table from CLAUDE.md (8 templates with lead/no-lead and use c
 
 ### Roles by team
 
-Group the 31 roles from the role index into their teams:
+Group the 33 roles from the role index into their teams:
 
 - **Roadmap & orchestration:** product-manager, lead, consultant, knowledge-archivist
 - **Research & design:** product-analyst, analyst, architect, ux-designer, planner, algorithm-scientist, computational-scientist, security-engineer, performance-engineer, reliability-engineer
-- **Implementation:** backend-engineer, frontend-engineer, qt-ui-engineer, model-view-engineer, data-engineer, platform-engineer, toolchain-engineer, geometry-engineer, graphics-engineer, visualization-engineer
-- **Review & verification:** qa-engineer, architecture-reviewer, security-reviewer, performance-reviewer, accessibility-reviewer, ux-reviewer, ui-test-engineer
+- **Implementation:** backend-engineer, frontend-engineer, qt-ui-engineer, model-view-engineer, data-engineer, platform-engineer, toolchain-engineer, geometry-engineer, graphics-engineer, visualization-engineer, external-worker
+- **Review & verification:** qa-engineer, architecture-reviewer, security-reviewer, performance-reviewer, accessibility-reviewer, ux-reviewer, ui-test-engineer, external-reviewer
 
 ### Quick examples
 
@@ -60,6 +61,9 @@ Show 3-4 natural language examples of how to invoke agents:
 - "fix the null check in parser.ts" → quick-fix
 - "investigate why the cache hit rate dropped" → research
 - "build a new export feature for reports" → full-delivery
+- "$external-worker implement this approved phase through Codex CLI" → direct invocation
+- "$external-reviewer audit this change through Codex CLI" → direct invocation
+- "/agents-external-brigade run two external-reviewer lanes and one Gemini visual worker lane" → launch a bounded parallel external-helper brigade
 - "$consultant what do you think about this approach?" → direct invocation
 
 ### Project policies

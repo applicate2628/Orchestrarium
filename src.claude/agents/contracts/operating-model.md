@@ -8,6 +8,7 @@ Reference for routing, interaction types, periodic controls, and role aliases. R
 
 - This applies to both `requiresLead: false` chains (main conversation invokes Agent tool per stage) and `requiresLead: true` chains (lead invokes Agent tool per specialist).
 - Independent roles (e.g., `security-engineer` and `performance-engineer`) SHOULD be launched in parallel via multiple Agent tool calls in a single message.
+- If native internal slot limits would otherwise block independent eligible lanes, prefer available external adapters over silent serialization or dropping a lane.
 - Sequential dependencies (e.g., `architect` → `planner`) MUST wait for the previous agent to return its artifact before launching the next.
 
 ## Template-based routing
@@ -26,6 +27,59 @@ When lead coordinates, or when the main conversation needs to decide between rol
 2. **UX lane**: if user-facing interaction design is needed, add `ux-designer` in design and `ux-reviewer` after QA.
 3. **Parallel read-only**: research roles (analyst, product-analyst) can run in parallel. Write-heavy roles need explicit ownership boundaries.
 4. **Re-intake**: if the admitted item itself changed materially, route back to `product-manager`. Cap: 2 re-intakes; on the 3rd, escalate to user with all prior re-intake reasons and ask for a final decision (reduce scope, defer, or cancel).
+
+## Interrupted handoff recovery
+
+- A handoff interrupt or worker stall without an artifact is not a completed `REVISE` artifact.
+- Record the interruption in `status.md`, keep the stage open, and either re-dispatch the same role with a narrower slice or route to the proper factual role.
+- The lead must not synthesize the missing artifact or replace missing factual work inline.
+- On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
+
+## Primary-task lock
+
+- Maintain exactly one primary in-progress task at a time.
+- Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
+- After handling a side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
+- Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
+- Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
+- A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
+- Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification task remains open unless the user explicitly parks, cancels, or reprioritizes that task.
+
+## External adapter routing
+
+Claude-line keeps one shared local config file at `.claude/.agents-mode`.
+
+- `consultantMode` continues to govern `$consultant`.
+- `delegationMode: manual` keeps delegation explicit-by-request, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
+- `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
+- `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
+- `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
+- `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work.
+- The Claude-line canonical schema may include `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is Claude; `externalClaudeProfile` remains Codex-line only.
+- The team template JSON does not change; routing substitutions happen at execution time.
+- `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.
+- Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.
+- Unsupported external requests fail fast. There is no generic external adapter for owner roles such as `$product-manager` or `$lead` on the Claude line.
+- An explicit request for `external` on an unsupported role changes the disclosure, not the eligibility. The orchestrator must say the route is unsupported and reroute honestly.
+- If the external CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work to another eligible path.
+- The adapter itself must not silently fall back to an internal specialist.
+- Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support concurrent non-interactive execution.
+- If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
+- Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` is a same-lane distinct-opinion contract, not a helper-multiplicity cap.
+- When multiple independent external helper lanes should launch together, use `/agents-external-brigade` to define one bounded brigade plan and one aggregated result surface.
+
+## Batch-close consultant check
+
+For lead-managed work, every completed task-batch must satisfy the active lane policy's external consultant requirement before closure.
+
+- The check uses `$consultant` as an advisory-only closure sweep; it does not replace reviewers, QA, or human/CI gates.
+- Request the external execution path explicitly for this closure check.
+- If the external path is unavailable, disabled, or would downgrade to an internal-only run, do not mark the batch closed; record the miss and escalate to the user instead.
+- The memo must end with both:
+  - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
+  - The continuation prompt must begin with a direct imperative to continue and name the next concrete action.
+- Before closure after that memo, reconcile the requested outcome against remaining open obligations; if admitted-scope work remains, keep the batch open.
 
 ## Research admission filter
 
@@ -76,7 +130,7 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive and update index |
 | Governance alignment | `$knowledge-archivist` | Governance change | Propagate to all governance files in same commit |
 | Documentation sync | `$knowledge-archivist` | Skill, role, or template added/removed/renamed | Update README, INSTALL, install scripts per root CLAUDE.md checklists |
-| Completion reconciliation | `$lead` | Before closeout or user-facing completion | Keep the batch open until requested-scope coverage and open obligations are reconciled |
+| Batch-close consultant-check | `$lead` | Every completed lead-managed batch | Satisfy the active lane policy's external consultant requirement or keep the batch open and escalate |
 
 ## Non-obvious routing pairs
 
@@ -111,6 +165,8 @@ These pairings are not derivable from classification alone — lead must know th
 - `visualization engineer` = `$visualization-engineer`
 - `geometry engineer` = `$geometry-engineer`
 - `build engineer` or `toolchain engineer` = `$toolchain-engineer`
+- `external worker` = `$external-worker`
+- `external reviewer` = `$external-reviewer`
 
 ## Cross-domain escalation protocol
 
@@ -154,14 +210,6 @@ Any REVISE loop (QA, reviewer, or other gate returning REVISE) is capped at **3 
 3. The user decides: continue fixing, re-plan, or accept with known issues.
 4. The iteration count is tracked in `status.md` under the REVISE loop section.
 
-## Completion reconciliation protocol
-
-Before marking a batch, task, or user-facing answer complete:
-
-1. Reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any still-open required follow-up.
-2. If a concrete required next action is already known and still inside the admitted scope, keep the task open instead of stopping at a partial sub-batch.
-3. Record the durable resume point in `status.md`: current stage, last accepted artifact, next concrete action, and open obligations before switching away or closing.
-
 ## Parallel execution protocol
 
 Before launching agents in parallel:
@@ -173,6 +221,7 @@ Before launching agents in parallel:
    - Checks for unintended interactions (e.g., both agents modified a shared import file that wasn't in either change surface)
    - If conflicts exist, resolve before advancing to the next stage
 4. **If a parallel agent returns REVISE or BLOCKED**, handle it independently — other parallel agents are not affected unless the finding impacts their change surface.
+5. **Prefer external lanes under slot pressure.** If independent eligible lanes are still available but native internal slot limits would otherwise force serialization, route the extra lanes through the available external adapters instead of silently dropping or delaying one.
 
 ## Artifact persistence protocol
 
@@ -182,25 +231,27 @@ Every completed chain that produces an accepted artifact MUST persist it before 
 
 | Tier | Location | Purpose | Content |
 | --- | --- | --- | --- |
-| **Canonical** | `work-items/active/<slug>/` | Clean documentation for active work | `research.md`, `design.md`, `plan.md`, `review.md`, `report.md`, `status.md`, `brief.md` |
-| **Session log** | `.reports/YYYY-MM/` | What happened in each session | `report(<role>)-YYYY-MM-DD_HH-MM_topic.md` — intermediate results, session summaries |
-| **Plan log** | `.plans/YYYY-MM/` | Plan drafts and iterations | `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` — plan snapshots |
+| **Canonical** | `work-items/active/<slug>/` | Source of truth for active work | `research.md`, `design.md`, `plan.md`, `review.md`, `report.md`, `status.md`, `brief.md` |
+| **Session log** | `.reports/YYYY-MM/` | Brief record of what happened in each session | `report(<role>)-YYYY-MM-DD_HH-MM_topic.md` — summary, not a copy of the canonical artifact |
+| **Plan log** | `.plans/YYYY-MM/` | Plan snapshots when a plan is created or materially revised | `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` |
 
 `<role>` is the `subagent_type` that produced the artifact (e.g., `analyst`, `security-reviewer`, `planner`, `qa-engineer`).
 
 ### Where to save
 
-| Artifact type | Canonical (work-items) | Session log |
+| Artifact type | Canonical (work-items) | Session log (.reports/) |
 | --- | --- | --- |
-| Research memo | `work-items/active/<slug>/research.md` | `.reports/` copy for traceability |
-| Design artifact | `work-items/active/<slug>/design.md` | — |
-| Plan | `work-items/active/<slug>/plan.md` | `.plans/` copy for traceability |
-| Review report | `work-items/active/<slug>/review.md` | `.reports/` copy |
-| Security review | `work-items/active/<slug>/security-review.md` | `.reports/` copy |
-| Test report | `work-items/active/<slug>/test-report.md` | `.reports/` copy |
-| Advisory memo | `work-items/active/<slug>/advisory.md` | `.reports/` copy |
+| Research memo | `work-items/active/<slug>/research.md` | Session log entry summarizing findings |
+| Design artifact | `work-items/active/<slug>/design.md` | Session log entry if design session was non-trivial |
+| Plan | `work-items/active/<slug>/plan.md` | Plan snapshot in `.plans/YYYY-MM/` |
+| Review report | `work-items/active/<slug>/review.md` | Session log entry summarizing review outcome |
+| Security review | `work-items/active/<slug>/security-review.md` | Session log entry summarizing review outcome |
+| Test report | `work-items/active/<slug>/test-report.md` | Session log entry summarizing QA verdict |
+| Advisory memo | `work-items/active/<slug>/advisory.md` | Session log entry summarizing advisory |
 | Bug finding | `work-items/bugs/YYYY-MM-DD_slug.md` | — |
 | Performance issue | `work-items/performance/YYYY-MM-DD_slug.md` | — |
+
+Session logs are summaries pointing to canonical artifacts, not copies. See `AGENTS.md` § "Session logging rule" for the mandatory logging contract.
 
 **Standalone chains** (no active work-item): create a work-item folder if the result is worth preserving, or save to `.reports/` / `.plans/` only as a session log.
 

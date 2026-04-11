@@ -36,7 +36,7 @@ bash install-claude.sh
 
 The scripts handle clean removal of old files, copying, CLAUDE.md merging, and file-level verification. Re-running = reinstall. Memory is preserved across reinstalls.
 
-> **Note:** Global install makes agents and skills available everywhere. Project-specific policies (`## Project policies` in CLAUDE.md) and Claude-line operator state (`.claude/.agents-mode`) are still per-repo — run `/agents-init-project` in each repo where you want them.
+> **Note:** Global install makes agents and skills available everywhere. Project-specific policies (`## Project policies` in CLAUDE.md) and Claude-line operator state (`.claude/.agents-mode`) are still per-repo — run `/agents-init-project` in each repo where you want them. On the Claude line, `externalProvider: auto` resolves through the active named priority profile across `codex`, `claude`, and `gemini`; the canonical Claude-line config may include `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is `claude`, while `externalClaudeProfile` remains Codex-line only. The active profile or a documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. `externalOpinionCounts` is a same-lane distinct-opinion contract, not a cap on parallel helper multiplicity; use the brigade surface when you need bounded same-provider fan-out.
 
 ## Install into a target repository
 
@@ -46,7 +46,7 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 | --- | --- | --- |
 | `src.claude/agents/*.md` (33 files: 31 indexed roles + 2 external adapters) | `.claude/agents/*.md` | Role definitions |
 | `src.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff templates, routing reference |
-| `src.claude/agents/scripts/` | `.claude/agents/scripts/` | Utility scripts (publication-safety scan, validation) |
+| `src.claude/agents/scripts/` | `.claude/agents/scripts/` | Utility scripts (publication-safety scan, validation, Claude API wrapper) |
 | `src.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Pre-built team compositions (8 templates) |
 | `src.claude/skills/` | `.claude/skills/` | Preferred slash skills: `/agents-init-project`, `/agents-policies`, `/agents-check-policies` |
 | `src.claude/agents/contracts/policies-catalog.md` | `.claude/agents/contracts/policies-catalog.md` | Policy catalog |
@@ -80,9 +80,9 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 | --- | --- | --- |
 | `src.claude/agents/*.md` | 33 role-definition files: 31 indexed roles + 2 external adapters | Yes |
 | `src.claude/agents/contracts/` | Handoff templates, routing reference, and the external-dispatch contract | Yes |
-| `src.claude/agents/scripts/` | Utility scripts (publication-safety scan, validation) | Yes |
+| `src.claude/agents/scripts/` | Utility scripts (publication-safety scan, validation, Claude API wrapper) | Yes |
 | `src.claude/agents/team-templates/` | Pre-built team compositions | Yes |
-| `src.claude/skills/` | 19 slash skills (`/agents-help`, `/agents-second-opinion`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety`, ...) | Yes |
+| `src.claude/skills/` | 20 slash skills (`/agents-help`, `/agents-second-opinion`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety`, `/agents-external-brigade`, ...) | Yes |
 | `src.claude/agents/contracts/policies-catalog.md` | Policy catalog with options and defaults | Yes |
 | `src.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
 | `src.claude/memory/` | Feedback rules, populated over time | Optional |

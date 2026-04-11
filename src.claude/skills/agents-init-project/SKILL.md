@@ -20,7 +20,8 @@ You are guiding the user through project policy configuration for the Claudestra
 
 1. **Read current state.**
    - Read `.claude/CLAUDE.md` and check if a `## Project policies` section already exists.
-   - Read `.claude/.agents-mode` first; if it is missing, read legacy `.claude/.consultant-mode` only as migration input.
+   - Read `.claude/.agents-mode`.
+   - If `.claude/.agents-mode` already exists, normalize it to the current canonical format before presenting or trusting the current values.
    - If either surface already exists, show the current values and ask whether to keep them, review them, or start fresh.
 
 2. **Read the installed canonical sources.**
@@ -42,14 +43,32 @@ You are guiding the user through project policy configuration for the Claudestra
      - `mcpMode`
      - `preferExternalWorker`
      - `preferExternalReviewer`
-     - `externalProvider`
-   - Use the existing value when present; otherwise default to:
-     - `consultantMode: disabled`
-     - `delegationMode: manual`
-     - `mcpMode: auto`
-     - `preferExternalWorker: false`
-     - `preferExternalReviewer: false`
-     - `externalProvider: auto`
+      - `externalProvider`
+      - `externalPriorityProfile`
+      - `externalPriorityProfiles`
+      - `externalOpinionCounts`
+      - `externalCodexWorkdirMode`
+     - `externalClaudeWorkdirMode`
+     - `externalGeminiWorkdirMode`
+     - `externalClaudeSecretMode`
+     - `externalClaudeApiMode`
+    - Use the existing value when present; otherwise default to:
+      - `consultantMode: disabled`
+      - `delegationMode: manual`
+      - `mcpMode: auto`
+      - `preferExternalWorker: false`
+      - `preferExternalReviewer: false`
+      - `externalProvider: auto`
+   - `externalPriorityProfile: balanced`
+   - shipped `externalPriorityProfiles`
+   - `externalOpinionCounts` defaulting each documented lane to `1`
+   - `externalCodexWorkdirMode: neutral`
+   - `externalClaudeWorkdirMode: neutral`
+   - `externalGeminiWorkdirMode: neutral`
+   - `externalClaudeSecretMode: auto`
+   - `externalClaudeApiMode: auto`
+   - `externalProvider: auto` resolves by lane type through the active named priority profile rather than a Claude-line default provider. Explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible, and documented repo-local visual heuristics may rank Gemini first for image/icon/decorative visual work when that routing remains honest.
+   - `externalOpinionCounts` is a same-lane distinct-opinion requirement, not a concurrency cap; use the brigade surface when you need bounded parallel same-provider reuse.
    - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
 5. **Confirm choices.**
@@ -60,19 +79,28 @@ You are guiding the user through project policy configuration for the Claudestra
 6. **Write `.claude/.agents-mode`.**
    - Write the canonical file to `.claude/.agents-mode`.
    - Preserve unknown keys when updating an existing file.
-   - If only legacy `.claude/.consultant-mode` exists, use it as migration input but write the canonical file to `.claude/.agents-mode`.
+   - Treat comment-free, partial, or older-layout files as legacy input and rewrite them to the current canonical format instead of preserving stale layout.
    - Keep one key per line and include the inline allowed-values comment for every canonical key.
-   - Do not create a new legacy `.claude/.consultant-mode` file.
+   - Refresh the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks to the current pack version while preserving the effective values of known keys and any unknown keys.
+   - Do not recreate retired legacy operator-overlay files.
 
    Use this canonical shape:
 
    ```yaml
-   consultantMode: {value}  # allowed: external | auto | internal | disabled
+   consultantMode: {value}  # allowed: external | internal | disabled
    delegationMode: {value}  # allowed: manual | auto | force
    mcpMode: {value}  # allowed: auto | force
    preferExternalWorker: {value}  # allowed: false | true
    preferExternalReviewer: {value}  # allowed: false | true
-   externalProvider: {value}  # allowed here: auto | codex | gemini
+   externalProvider: {value}  # allowed here: auto | codex | claude | gemini
+   externalPriorityProfile: {value}  # allowed: balanced | gemini-crosscheck | <repo-local profile>
+   externalPriorityProfiles: {value}  # allowed: structured profile map
+   externalOpinionCounts: {value}  # allowed: structured lane-count map
+   externalCodexWorkdirMode: {value}  # allowed: neutral | project
+   externalClaudeWorkdirMode: {value}  # allowed: neutral | project
+   externalGeminiWorkdirMode: {value}  # allowed: neutral | project
+   externalClaudeSecretMode: {value}  # allowed when Claude is selected: auto | force
+   externalClaudeApiMode: {value}  # allowed when Claude is selected: disabled | auto | force
    ```
 
 7. **Write to CLAUDE.md.** Add or replace the `## Project policies` section in `.claude/CLAUDE.md`. Place it between `## Engineering hygiene` and `## Publication safety`. Use this format:
@@ -103,4 +131,5 @@ You are guiding the user through project policy configuration for the Claudestra
 - If the user gives a custom answer that doesn't match an option, record it as-is.
 - Do not invent extra `agents-mode` keys beyond the canonical Claude-line schema.
 - Preserve unknown keys in `.claude/.agents-mode` when updating.
+- Any read of `.claude/.agents-mode` that drives a decision should normalize the file to the current canonical format before trusting the flags.
 - Do not change any other section of CLAUDE.md.
