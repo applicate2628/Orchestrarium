@@ -10,6 +10,9 @@ If `## Project policies` or `.claude/.agents-mode` is missing for the current pr
 
 When subagent delegation is appropriate, classify the task and pick the matching team template from `.claude/agents/team-templates/`.
 
+External adapter preferences live in `.claude/.agents-mode`. The file keeps `consultantMode` for consultant behavior, adds `delegationMode` and `mcpMode` for operator-level routing/tooling preference, keeps `preferExternalWorker` / `preferExternalReviewer` for eligible implement and review-side substitutions, and uses `externalProvider: auto | codex | claude | gemini` when the operator wants to steer provider-backed execution through the active named priority profile without changing team template JSON. Claude-line canonical config may include the Claude transport knobs `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is `claude`, while `externalClaudeProfile` remains Codex-line only. `externalProvider: auto` is lane-driven, not host-default-driven; the active profile or documented repo-local visual heuristic may rank Gemini first for image generation, icon work, and decorative visual lanes. `externalOpinionCounts` is a same-lane distinct-opinion contract, not a helper-multiplicity cap; when multiple independent external helpers need to run together, use the brigade surface instead of treating the count as a concurrency limit.
+If `.claude/.agents-mode` exists but is stale, comment-free, or from an older pack version, decision-driving reads must normalize it to the current canonical format before trusting its flags.
+
 **Decision tree:**
 
 1. Does the task need parallel risk owners (security + performance + ...)? → `requiresLead: true` template
@@ -36,6 +39,10 @@ When subagent delegation is appropriate, classify the task and pick the matching
 - If the template says `requiresLead: false`, the main conversation manages the chain directly — invoke specialists via Agent tool in order, pass each accepted artifact to the next.
 - If the template says `requiresLead: true`, invoke `$lead` via Agent tool who coordinates work-items, risk owners, integration, and gates.
 - Independent roles (e.g., security-engineer and performance-engineer) SHOULD be launched in parallel via multiple Agent tool calls in a single message when their scopes do not overlap.
+- External adapter substitution is a routing decision, not a template change. When the preferences file favors external dispatch, eligible worker-side slots may route through `$external-worker` and eligible review/QA slots through `$external-reviewer`.
+- Independent external adapters may also run in parallel when their scopes are disjoint and the selected provider runtimes support concurrent non-interactive execution.
+- If native internal slot limits would otherwise block independent eligible lanes, prefer available external adapters over silent serialization or dropping a lane.
+- For image, icon, and decorative visual work, documented repo-local heuristics may prefer Gemini as the external provider when the route is eligible.
 
 **Recovery rule:**
 
@@ -52,3 +59,5 @@ Slash skills live in `.claude/skills/<skill-name>/SKILL.md`.
 ## Publication safety scan
 
 Pre-publication scan: run `/agents-check-safety`, or manually: `bash .claude/agents/scripts/check-publication-safety.sh` (Windows PowerShell: `powershell -ExecutionPolicy Bypass -File .claude/agents/scripts/check-publication-safety.ps1`).
+
+Claude API wrapper: `bash .claude/agents/scripts/invoke-claude-api.sh [args...]` or `powershell -ExecutionPolicy Bypass -File .claude/agents/scripts/invoke-claude-api.ps1 [args...]`. The wrapper prefers repo-local `.claude/SECRET.md` and then falls back to `~/.claude/SECRET.md`.

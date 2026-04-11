@@ -31,9 +31,12 @@ description: Coordinate complex multi-agent work requiring parallel risk owners,
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
 - Do not ask one subagent to deliver a feature end-to-end.
 - Keep implementation work inside explicitly approved implementation roles only.
+- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement and review-side slots, selected through `.claude/.agents-mode` preferences or an explicit request; the team templates themselves stay unchanged, and those routes must launch the selected provider directly instead of through an internal host helper.
+- When multiple independent external helper lanes should launch together, use `/agents-external-brigade` to define one bounded brigade plan instead of scattering ad hoc helper fan-out across separate notes.
+- Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-opinion requirements for one lane and is not a concurrency cap.
 - Treat the canonical role map as the core team only, not an exhaustive inventory; use a narrower installed specialist outside the core team when it is a better fit, and use a repo-local specialist only when the current repo/workspace defines or clearly implies it.
 - Detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers, and escalate one clear recommendation: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need.
-- Use `$consultant` only as an optional independent second opinion, never as a required pipeline stage. Consultant mode `external` requires user approval for fallback. Mode `auto` allows silent fallback with disclosure.
+- Use `$consultant` only as an optional independent second opinion, never as a required pipeline stage. Consultant mode `external` stays external-only; if that path is unavailable, fail closed and escalate honestly.
 - Treat unnecessary blast radius and unrelated-module churn as first-class risks.
 
 ## Canonical brief
@@ -86,16 +89,16 @@ The canonical brief should capture:
    - Role: `$planner`
    - Output: one gated phase plan.
 4. `Implement`
-   - Roles: `$backend-engineer`, `$frontend-engineer` for web/React UI, `$graphics-engineer`, `$visualization-engineer`, `$geometry-engineer`, `$qt-ui-engineer` for Qt desktop UI, `$model-view-engineer`, `$data-engineer`, `$toolchain-engineer`, `$platform-engineer`, or another explicitly approved implementation specialist
+   - Roles: `$backend-engineer`, `$frontend-engineer` for web/React UI, `$graphics-engineer`, `$visualization-engineer`, `$geometry-engineer`, `$qt-ui-engineer` for Qt desktop UI, `$model-view-engineer`, `$data-engineer`, `$toolchain-engineer`, `$platform-engineer`, `$external-worker`, or another explicitly approved implementation specialist
    - Output: one implementation package for one approved phase.
    - Cross-cutting hygiene (invoke explicitly, outside the feature phase): `$knowledge-archivist`
    - If an archivist patch changes repository-wide control-plane semantics, route it through `$architecture-reviewer` before lead acceptance.
    - If the approved work spans multiple implementation phases or specialists, assign one explicit integration owner before QA. That owner assembles one coherent integrated artifact and checks cross-phase compatibility before verification begins.
 5. `QA`
-   - Roles: `$qa-engineer`, `$ui-test-engineer` as needed
+   - Roles: `$qa-engineer`, `$ui-test-engineer`, `$external-reviewer` as needed for eligible reviewer-side QA slots
    - Output: one verification package per verification role, including basic performance acceptance when relevant.
 6. `Independent review`
-   - Roles: `$architecture-reviewer`, `$performance-reviewer`, `$security-reviewer`, `$ux-reviewer`, `$accessibility-reviewer` as needed
+   - Roles: `$architecture-reviewer`, `$performance-reviewer`, `$security-reviewer`, `$ux-reviewer`, `$accessibility-reviewer`, `$external-reviewer` as needed
    - Output: one review package per independent reviewer.
    - For each reviewer, choose the review strategy before delegating (see Review strategy rule below).
 7. Human or CI gate

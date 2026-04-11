@@ -11,4 +11,4 @@ Use it together with:
 - [agents-mode-reference.md](agents-mode-reference.md) for the Claude-line `.claude/.agents-mode` operator reference
 - [provider-runtime-layout.md](provider-runtime-layout.md) for the source-vs-installed Claude surface map
 
-This branch keeps a Claude-line `agents-mode` reference in `docs/`, but that local table intentionally omits the Claude-target keys because the canonical Claude-line config does not use `externalClaudeSecretMode` or `externalClaudeProfile`.
+This branch keeps a Claude-line `agents-mode` reference in `docs/`. The canonical Claude-line config may include the Claude transport keys `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is `claude`, while `externalClaudeProfile` remains Codex-line only.

@@ -37,6 +37,7 @@ You can talk to agents naturally — Claude reads the delegation rule and picks 
 | "build user registration feature" | Main conv picks `full-delivery` → `$lead` coordinates |
 | "$lead review" | Lead invoked directly, runs full review pipeline |
 | "$consultant" | Consultant invoked for advisory second opinion |
+| "/agents-external-brigade run two external-reviewer lanes and one Gemini visual worker lane" | Launch a bounded parallel external-helper brigade |
 | "$analyst investigate the auth module" | Analyst invoked directly, returns research memo |
 | "$product-manager what should we build next?" | PM invoked for roadmap/priority decisions |
 
@@ -104,6 +105,7 @@ The repository is built around a few stable rules:
 - prefer additive change through approved seams over cross-cutting edits
 - re-classify immediately if scope widens beyond the current template
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
+- treat `externalOpinionCounts` as same-lane distinct-opinion semantics, not a helper-multiplicity cap; use the brigade surface for bounded parallel same-provider reuse
 
 Runtime governance lives in [src.claude/CLAUDE.md](src.claude/CLAUDE.md) — delegation rule, engineering hygiene, publication safety, role index, project policies, and the external-dispatch entrypoint.
 Branch-local docs live in [docs/README.md](docs/README.md) — root surface index, Claude-line `.claude/.agents-mode` reference, and runtime-layout notes. The operator reference also records task continuity and continue-by-default execution expectations for initialized projects.
@@ -136,7 +138,7 @@ The current pack covers several sub-teams:
 | `src.claude/agents/lead.md` | Lead orchestrator — bootstrap, pipeline, delegation, gate semantics |
 | `src.claude/agents/scripts/` | Utility scripts: publication-safety scan, skill-pack validation |
 | `src.claude/agents/team-templates/` | 8 JSON presets for common team compositions (full-delivery, quick-fix, research, review, etc.) |
-| `src.claude/skills/` | 19 preferred slash skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety` |
+| `src.claude/skills/` | 20 preferred slash skills: `/agents-help`, `/agents-init-project`, `/agents-policies`, `/agents-check-policies`, `/agents-validate`, `/agents-check-safety`, `/agents-external-brigade` |
 | `src.claude/agents/contracts/policies-catalog.md` | Policy catalog — available project-level choices with options and defaults |
 | `src.claude/memory/` | Feedback rules from real usage — experience-based operating constraints |
 
@@ -178,7 +180,7 @@ Use the install scripts, or copy `src.claude/` contents into the target repo's `
 | `src.claude/agents/contracts/` | `.claude/agents/contracts/` | Handoff contracts, operating model, subagent coordination |
 | `src.claude/agents/scripts/` | `.claude/agents/scripts/` | Utility scripts (publication-safety scan, validation) |
 | `src.claude/agents/team-templates/` | `.claude/agents/team-templates/` | Team composition presets |
-| `src.claude/skills/` | `.claude/skills/` | 19 preferred slash skills |
+| `src.claude/skills/` | `.claude/skills/` | 20 preferred slash skills |
 | `src.claude/agents/contracts/policies-catalog.md` | `.claude/agents/contracts/policies-catalog.md` | Policy catalog with configurable options |
 | `src.claude/CLAUDE.md` | Merge into target `.claude/CLAUDE.md` | Governance entry point |
 | `src.claude/memory/` (optional) | `.claude/memory/` | Experience-based feedback rules |

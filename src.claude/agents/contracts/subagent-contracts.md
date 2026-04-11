@@ -4,7 +4,27 @@ Handoff templates and response format for lead-to-specialist delegation.
 
 ## Execution mechanism
 
-Every specialist invocation MUST use the **Agent tool** with the matching `subagent_type` parameter. The handoff template below becomes the agent's `prompt`. The orchestrator (main conversation or lead) MUST NOT role-play specialists inline — each role runs in an isolated agent context.
+Every specialist invocation MUST use the **Agent tool** with the matching `subagent_type` parameter, except provider-backed external adapter routes. `$external-worker` and `$external-reviewer` are direct external launch routes, not internal specialist-agent hosts. The handoff template below becomes the agent's `prompt` for ordinary specialists. The orchestrator (main conversation or lead) MUST NOT role-play specialists inline — each role runs in an isolated agent context.
+
+## External dispatch contract
+
+Use this contract when `subagent_type` is `external-worker` or `external-reviewer`.
+
+- These roles are routing adapters, not new business professions.
+- The `Assigned role` field names the internal role being replaced for provenance.
+- Read and normalize `.claude/.agents-mode` first. Honor `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalClaudeSecretMode`, and `externalClaudeApiMode` when they are present. Treat `externalProvider: auto` as active-profile routing, not a host-line default. The canonical Claude-line config may include the Claude transport knobs when the resolved provider is `claude`; `externalClaudeProfile` remains Codex-line only.
+- Resolve external routing in this order: `role eligibility -> provider selection -> CLI availability`.
+- Do not satisfy `$external-worker` or `$external-reviewer` by spawning an internal agent/helper/subagent host that merely relays to another CLI. If the current runtime cannot launch the selected external provider directly, the route is unavailable.
+- There is no generic external adapter for owner roles such as `$product-manager` or `$lead`. If a request lands in one of those lanes, fail fast with an unsupported-route explanation instead of probing providers.
+- Do not silently fall back to an internal specialist if the external CLI is unavailable; the adapter is disabled and the orchestrator may reroute.
+- `external-worker` covers the full worker-side lane.
+- `external-reviewer` covers review and QA-side work.
+- `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work.
+- `externalOpinionCounts` is a same-lane distinct-opinion contract, not a helper-multiplicity cap. It does not prevent repeated same-provider helper instances on different admitted artifacts or disjoint slices.
+- When the routing decision is "launch a bounded set of external helpers together", prefer `/agents-external-brigade` so the brigade has one explicit plan, one ownership table, and one aggregated result surface.
+- Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support concurrent non-interactive execution. If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
+
+For external adapters, include the provenance header from `external-dispatch.md` in the returned artifact.
 
 ## Handoff template
 
@@ -39,7 +59,7 @@ A lead MUST NOT delegate work until the work-item folder contains a verified `br
 
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
 - `status.md` must follow the format below and be updated after every stage transition, agent launch, or interruption, including any open obligations that still block closeout.
-- If either artifact is missing, stale, or incomplete, the lead restores them BEFORE delegating any specialist role.
+- If either artifact is missing, stale, or incomplete, the lead restores only the lead-owned task-memory state from persisted accepted artifacts BEFORE delegating any specialist role. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
 - The only exception is the additive fast lane where the lead records the decision in status.md instead.
 
 ### status.md format
@@ -54,6 +74,9 @@ updated: <YYYY-MM-DD HH:MM>
 
 ## Current state
 
+- **Primary task**: <one active objective, e.g. "full-impact review of current change set">
+- **Primary task status**: <active | side-interrupted | parked | closed>
+- **Interruption marker**: <none | INTERRUPTED(no-artifact)>
 - **Stage**: <current stage name or number>
 - **Main conv role**: <what main conversation is doing: orchestrating | waiting for agents | reviewing artifact | idle>
 - **Last accepted artifact**: <filename or "none">
@@ -88,6 +111,13 @@ updated: <YYYY-MM-DD HH:MM>
 
 The REVISE loop section is optional — include it only when a stage has returned REVISE and the loop is active. Remove it when the loop resolves (PASS or escalation).
 
+No-artifact interruption rule:
+- A handoff interrupt or worker stall without an artifact does not count as a substantive REVISE artifact.
+- Set `Primary task status: side-interrupted` and `Interruption marker: INTERRUPTED(no-artifact)` in `status.md` for orchestrator bookkeeping.
+- Keep the stage open, and either rerun the same role with a tighter slice or route to the proper factual role.
+- The lead must not synthesize the missing artifact or replace missing factual work inline.
+- If the interrupted stage belongs to a full-impact review or verification pass, keep that review as the primary task until a review artifact is emitted or the user explicitly parks/cancels it.
+
 ## Response format
 
 ```text
@@ -100,7 +130,9 @@ The REVISE loop section is optional — include it only when a stage has returne
 
 - When a role makes a decision, it should clearly distinguish confirmed facts, assumptions, and judgment.
 - If the main gap is missing evidence, recommend the appropriate factual role instead of escalating into opinion.
-- `$consultant` replaces the Gate line with `5. Advisory status: NON-BLOCKING`.
+- `$consultant` replaces the Gate line with `5. Advisory status: NON-BLOCKING` and appends `6. Continuation prompt: <ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action>`.
+- Consultant mode `external` stays external-only. If external execution is unavailable, batch closure stays open and the lead escalates to the user instead of downgrading to an internal-only run.
+- `external-worker` and `external-reviewer` keep the standard gate line, but their artifact must also carry the external provenance header from `external-dispatch.md`.
 
 ### BLOCKED classification
 
@@ -131,6 +163,10 @@ If no class is specified, treat as `BLOCKED:dependency` (conservative default).
 | Contract-change test updates | Implementer | When QA classifies a failure as `contract-change` — the implementer who changed the behavior updates the tests |
 
 If the plan specifies a different test ownership split, follow the plan. This table is the default when no plan-level override exists.
+
+## Session logging
+
+Every subagent MUST write a session log to `.reports/YYYY-MM/` before returning its final response when the session produced a result, made a routing decision, or completed a review. This rule applies equally to the main conversation and lead — see `AGENTS.md` § "Session logging rule" for the full contract and log format. Create the `YYYY-MM/` subdirectory if it does not exist. Session logs are summaries, not artifact copies.
 
 ## Structured completion report
 
