@@ -35,6 +35,7 @@ It must not replace Gemini's official runtime config in:
 
 2. **Read current overlay state.**
    - Read `.gemini/.agents-mode` if it exists.
+   - If the file exists, normalize it to the current canonical format before presenting or trusting any values.
    - If it is missing, start from the canonical defaults below.
    - Preserve unknown keys when updating an existing file.
 
@@ -50,16 +51,32 @@ It must not replace Gemini's official runtime config in:
      - `preferExternalWorker`
      - `preferExternalReviewer`
      - `externalProvider`
+     - `externalPriorityProfile`
+     - `externalPriorityProfiles`
+     - `externalOpinionCounts`
+     - `externalCodexWorkdirMode`
+     - `externalClaudeWorkdirMode`
+     - `externalGeminiWorkdirMode`
      - `externalClaudeSecretMode`
+     - `externalClaudeApiMode`
    - Use existing values when present; otherwise default to:
      - `consultantMode: disabled`
      - `delegationMode: manual`
      - `mcpMode: auto`
      - `preferExternalWorker: false`
      - `preferExternalReviewer: false`
-     - `externalProvider: auto`
+     - `externalProvider: auto`  (shared-universe default; lane-driven via active profile)
+     - `externalPriorityProfile: balanced`
+     - `externalPriorityProfiles.balanced`: current shared matrix
+     - `externalPriorityProfiles.gemini-crosscheck`: Gemini present in non-visual advisory and pre-PR review cross-check lanes
+     - `externalOpinionCounts`: `1` for ordinary lanes unless a repo-local policy explicitly asks for more
+     - `externalCodexWorkdirMode: neutral`
+     - `externalClaudeWorkdirMode: neutral`
+     - `externalGeminiWorkdirMode: neutral`
      - `externalClaudeSecretMode: auto`
-   - Accept shorthand such as `force`, `external reviewer only`, or `defaults for the rest`.
+     - `externalClaudeApiMode: auto`
+   - Accept shorthand such as `force`, `external reviewer only`, `balanced profile`, or `gemini crosscheck`.
+   - Keep `externalOpinionCounts` separate from helper multiplicity; bounded same-provider helper fan-out belongs to `external-brigade`.
 
 5. **Confirm before writing.**
    - Present one summary table for the final `.gemini/.agents-mode` values.
@@ -68,28 +85,62 @@ It must not replace Gemini's official runtime config in:
 
 6. **Write `.gemini/.agents-mode`.**
    - Keep one key per line.
-   - Keep inline allowed-values comments on every canonical key.
+   - Treat comment-free, partial, or older-layout files as legacy input and rewrite them to the current canonical format instead of preserving stale layout.
+   - Keep inline allowed-values comments on every canonical scalar key and preserve the multiline `externalPriorityProfiles` / `externalOpinionCounts` blocks verbatim.
+   - Refresh the shipped profile/count blocks to the current pack version while preserving effective known values and any unknown keys.
    - Use this canonical Gemini-line shape:
 
    ```yaml
-   consultantMode: {value}  # allowed: external | auto | internal | disabled
+   consultantMode: {value}  # allowed: external | internal | disabled
    delegationMode: {value}  # allowed: manual | auto | force
    mcpMode: {value}  # allowed: auto | force
    preferExternalWorker: {value}  # allowed: false | true
    preferExternalReviewer: {value}  # allowed: false | true
-   externalProvider: {value}  # allowed here: auto | codex | claude
+   externalProvider: {value}  # allowed here: auto | codex | claude | gemini
+   externalPriorityProfile: {value}  # allowed: balanced | gemini-crosscheck
+   externalPriorityProfiles:
+     balanced:
+       advisory.repo-understanding: [claude, gemini, codex]
+       advisory.design-adr: [claude, codex, gemini]
+       review.pre-pr: [claude, codex, gemini]
+       worker.default-implementation: [codex, claude, gemini]
+       worker.long-autonomous: [claude, codex, gemini]
+       worker.visual-icon-decorative: [gemini, claude, codex]
+       review.visual: [gemini, claude, codex]
+     gemini-crosscheck:
+       advisory.repo-understanding: [claude, gemini, codex]
+       advisory.design-adr: [claude, gemini, codex]
+       review.pre-pr: [claude, gemini, codex]
+       worker.default-implementation: [codex, claude, gemini]
+       worker.long-autonomous: [claude, codex, gemini]
+       worker.visual-icon-decorative: [gemini, claude, codex]
+       review.visual: [gemini, claude, codex]
+   externalOpinionCounts:
+     advisory.repo-understanding: 1
+     advisory.design-adr: 1
+     review.pre-pr: 1
+     worker.default-implementation: 1
+     worker.long-autonomous: 1
+     worker.visual-icon-decorative: 1
+     review.visual: 1
+   externalCodexWorkdirMode: {value}  # allowed: neutral | project
+   externalClaudeWorkdirMode: {value}  # allowed: neutral | project
+   externalGeminiWorkdirMode: {value}  # allowed: neutral | project
    externalClaudeSecretMode: {value}  # allowed when Claude is selected: auto | force
+   externalClaudeApiMode: {value}  # allowed when Claude is selected: disabled | auto | force
    ```
 
 7. **Confirm completion.**
    - Tell the user the Gemini official surfaces are split correctly:
      - `/init` owns `GEMINI.md`
      - `.gemini/settings.json` remains Gemini-native runtime config
-     - `.gemini/.agents-mode` now holds the Orchestrarium shared-routing overlay
+     - `.gemini/.agents-mode` now holds the Orchestrarium shared-routing overlay, including the named priority profiles and lane opinion counts
 
 ## Rules
 
 - Do not create or rewrite `.gemini/settings.json`.
 - Do not pretend `.gemini/.agents-mode` is a Gemini-native runtime setting.
 - Do not invent extra keys beyond the canonical overlay schema.
-- If the user asks for `externalProvider: gemini` on the Gemini line, treat it as a configuration error instead of writing a self-referential provider selection.
+- Any read of `.gemini/.agents-mode` that drives a decision should normalize the file to the current canonical format before trusting the flags.
+- If the user asks for `externalProvider: gemini` on the Gemini line, accept it only as an explicit self-provider override; ordinary `auto` routing must still avoid same-provider self-bounce.
+- If the user asks to launch multiple parallel external helpers for one bounded batch, keep that plan in `external-brigade` rather than inflating `externalOpinionCounts`.

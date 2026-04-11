@@ -12,7 +12,7 @@ This standalone branch keeps one Gemini-local operating-model reference instead 
 - `.gemini/.agents-mode` is an optional Orchestrarium overlay, not a replacement for `.gemini/settings.json`.
 - Skills live in `skills/<name>/SKILL.md`.
 - User-invoked command helpers live in `commands/**/*.toml`.
-- The current pack surface stays sequential and human-steered; do not assume native parallel dispatch.
+- The current pack surface stays sequential and human-steered for native internal execution; do not assume native internal parallel dispatch. Independent external adapters may still run in parallel when the routing contract and selected provider runtimes allow it. If native internal slot or thread limits would otherwise block independent eligible lanes, prefer available external adapters over silent serialization or dropping a lane.
 
 ## Delivery model
 
@@ -28,4 +28,6 @@ This standalone branch keeps one Gemini-local operating-model reference instead 
 - Task-memory root, recovery entry point, active-item directory, and archive location remain repository-defined when task memory is enabled.
 - Periodic controls live in [periodic-control-matrix.md](periodic-control-matrix.md).
 - Publication safety lives in [repository-publication-safety.md](repository-publication-safety.md).
-- If Gemini routes eligible external work to Claude CLI, `externalClaudeSecretMode` controls whether Claude secret env injection is automatic on limit fallback or forced for the primary call.
+- `externalProvider: auto` keeps the active named priority profile as the routing source, while documented repo-local visual-routing heuristics may still prefer Gemini itself for image, icon, decorative visual, and other clearly visual lanes.
+- `.gemini/.agents-mode` may also carry `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`, which lets the lead switch between `balanced` and `gemini-crosscheck` and ask for more than one external opinion when the lane requires it. Those counts are lane-local distinct-opinion requirements, not a cap on how many same-provider helper instances may run in parallel across disjoint slices; bounded helper batches use `external-brigade`.
+- If Gemini routes eligible external work to Claude CLI, honor both `externalClaudeSecretMode` and `externalClaudeApiMode`.

@@ -7,4 +7,5 @@ Then guide the user through Gemini project bootstrap in this order:
 - if GEMINI.md is missing, stop and tell the user to run Gemini's built-in /init first
 - initialize or update .gemini/.agents-mode according to skills/init-project/SKILL.md
 - keep .gemini/settings.json untouched because it remains the official Gemini runtime config
+- keep `externalOpinionCounts` separate from helper multiplicity; bounded same-provider helper fan-out belongs to `external-brigade`
 """

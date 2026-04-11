@@ -16,3 +16,4 @@ Because of that:
 - the main Gemini session is the orchestration owner
 - `skills/lead/SKILL.md` is the canonical lead contract
 - these specialist agents are the execution team, not a recursive orchestration framework
+- bounded parallel external-helper batches should use `external-brigade` rather than pretending to be a new specialist agent type

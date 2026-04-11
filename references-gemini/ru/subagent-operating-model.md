@@ -12,7 +12,7 @@
 - `.gemini/.agents-mode` — optional Orchestrarium overlay, а не замена `.gemini/settings.json`.
 - Skills живут в `skills/<name>/SKILL.md`.
 - Пользовательские command helpers живут в `commands/**/*.toml`.
-- Текущий pack surface остаётся последовательным и human-steered; не предполагайте native parallel dispatch.
+- Текущий pack surface остаётся последовательным и human-steered для native internal execution; не предполагайте native parallel dispatch. Независимые external adapters всё ещё могут идти параллельно, когда routing contract и выбранные provider runtimes это допускают.
 
 ## Delivery model
 
@@ -28,4 +28,6 @@
 - Task-memory root, recovery entry point, active-item directory и archive location остаются repository-defined, когда task memory включён.
 - Periodic controls живут в [periodic-control-matrix.md](periodic-control-matrix.md).
 - Publication safety живёт в [repository-publication-safety.md](repository-publication-safety.md).
-- Если Gemini маршрутизирует eligible external work в Claude CLI, `externalClaudeSecretMode` определяет, будет ли secret env injection автоматическим на limit fallback или принудительным уже для primary call.
+- `externalProvider: auto` использует active named priority profile, но documented repo-local visual heuristics всё ещё могут предпочесть сам Gemini для image, icon, decorative visual и других явно visual lanes.
+- `.gemini/.agents-mode` также может содержать `externalPriorityProfile`, `externalPriorityProfiles` и `externalOpinionCounts`, что позволяет lead переключаться между `balanced` и `gemini-crosscheck` и запрашивать более одной внешней opinion, когда lane policy этого требует. Эти counts задают same-lane distinct-opinion requirements, а не cap на количество same-provider helper instances; bounded helper batches используют `external-brigade`.
+- Если Gemini маршрутизирует eligible external work в Claude CLI, нужно уважать и `externalClaudeSecretMode`, и `externalClaudeApiMode`.
