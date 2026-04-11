@@ -22,6 +22,7 @@ Important distinctions:
 - installers materialize the shared-governance layer as adjacent runtime `AGENTS.md`, and this file imports it through standard Gemini markdown imports
 - the stable expertise layer is `skills/`
 - the explicit specialist team layer is `agents/`
+- every top-level `agents/*.md` file is loader-visible and must stay a real Gemini agent definition with YAML frontmatter; pack docs do not belong there
 - orchestration stays in the main Gemini session under `skills/lead/SKILL.md` because Gemini subagents cannot recursively call other subagents
 - MCP servers such as Serena, Fetch, or Context7 remain a `.gemini/settings.json` or `gemini-extension.json` concern rather than a markdown-import concern
 - `.gemini/.agents-mode` is an Orchestrarium routing overlay, not a replacement for official Gemini settings

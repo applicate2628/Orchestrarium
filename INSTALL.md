@@ -110,6 +110,7 @@ Notes:
 - User-side `@...` imports that live in the installed `GEMINI.md` import block alongside `@./AGENTS.md` are preserved across reinstalls.
 - Gemini installs materialize the shared-governance layer as `AGENTS.md`; `GEMINI.md` loads it through the official `@./AGENTS.md` import. Project installs preserve an existing root `AGENTS.md` instead of overwriting it.
 - Gemini installs materialize both the stable expertise catalog in `.gemini/skills/` and the preview specialist-team layer in `.gemini/agents/`.
+- In the Gemini specialist-team layer, every top-level `.gemini/agents/*.md` file must be a real agent definition with YAML frontmatter; plain README-style docs are invalid there and are removed on reinstall.
 - Gemini runtime config and MCP wiring remain owned by `.gemini/settings.json` and `gemini-extension.json`; servers such as Serena, Fetch, or Context7 do not belong inside `AGENTS.md`.
 - The optional Orchestrarium overlay file is `.gemini/.agents-mode`.
 - Decision-driving reads of an existing `.gemini/.agents-mode` overlay must normalize stale, comment-free, or older-layout files to the current canonical format before trusting the flags.
@@ -168,7 +169,7 @@ The monorepo still keeps the full Gemini line as a validated source tree in addi
 - branch-level docs entrypoint: `docs/README.md`
 - built-in initialization: Gemini CLI `/init` writes or tailors the project `GEMINI.md`
 - expertise layer: `src.gemini/skills/<name>/SKILL.md`
-- preview specialist-team layer: `src.gemini/agents/*.md`
+- preview specialist-team layer: `src.gemini/agents/*.md` (agent definitions only; YAML frontmatter required)
 - repo-local team templates: `src.gemini/agents/team-templates/*.json`
 - custom commands: `src.gemini/commands/**/*.toml`
 - official runtime config: project `.gemini/settings.json`
