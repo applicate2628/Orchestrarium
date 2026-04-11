@@ -62,6 +62,9 @@ Semantics:
 - `externalClaudeSecretMode` and `externalClaudeApiMode` are transport-only and apply only after the resolved provider is `claude`; `claude-api` is a secondary Claude transport, not a fourth provider.
 - When `externalClaudeApiMode` allows `claude-api`, prefer `.claude/agents/scripts/invoke-claude-api.sh` or `.claude/agents/scripts/invoke-claude-api.ps1` so the transport reads repo-local `.claude/SECRET.md` first and then `~/.claude/SECRET.md`. Fall back to a direct `claude-api` command only when the wrapper surface is unavailable.
 - If the wrapper or direct `claude-api` transport is requested but unavailable, disclose that as a dependency/config failure.
+- If the plain Claude CLI is selected but is clearly unauthenticated, prefer the allowed Claude API transport instead of repeatedly retrying a plain `claude` command that cannot log in.
+- Use `.claude/agents/scripts/invoke-claude-api.ps1` from PowerShell and `.claude/agents/scripts/invoke-claude-api.sh` from Bash or Git Bash. The PowerShell wrapper must stay compatible with Windows PowerShell 5.1 and PowerShell 7+, and the Bash wrapper must honor `CLAUDE_API_BIN` when the shell PATH differs from PowerShell PATH.
+- For wide release or parity audits, split the admitted scope by repo, file set, or lane instead of launching one mega neutral-dir prompt across the whole pack family.
 - Provider-backed consultant execution in `external` mode plus `$external-worker` and `$external-reviewer` must use direct external launch from the orchestrating runtime or an approved transport wrapper script. Do not proxy them through an internal agent/helper/subagent host.
 - The adapter does not change the team template JSON.
 - The adapter replaces an eligible internal role at routing time and keeps the replaced role label in provenance.

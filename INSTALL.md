@@ -38,6 +38,16 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 
 > **Note:** Global install makes agents and skills available everywhere and seeds `~/.claude/.agents-mode` with the current default overlay. Project-specific policies (`## Project policies` in CLAUDE.md) and project-local Claude-line overrides still belong in each repo where you run `/agents-init-project`. On the Claude line, `externalProvider: auto` resolves through the active named priority profile across `codex`, `claude`, and `gemini`; the canonical Claude-line config may include `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is `claude`, while `externalClaudeProfile` remains Codex-line only. The active profile or a documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. `externalOpinionCounts` is a same-lane distinct-opinion contract, not a cap on parallel helper multiplicity; use the brigade surface when you need bounded same-provider fan-out.
 
+### Practical external launch rules
+
+| Situation | Rule |
+| --- | --- |
+| PowerShell Claude API transport | Use `.claude/agents/scripts/invoke-claude-api.ps1`. It accepts both `-PrintSecretPath` and `--print-secret-path` and must remain compatible with Windows PowerShell 5.1 and PowerShell 7+. |
+| Bash or Git Bash Claude API transport | Use `.claude/agents/scripts/invoke-claude-api.sh`. It resolves `claude-api`, `claude-api.cmd`, or `claude-api.exe`; if the active shell still cannot see the transport, set `CLAUDE_API_BIN` explicitly. |
+| Plain Claude CLI is not logged in | Prefer the allowed Claude API transport instead of repeatedly retrying a plain `claude` command that cannot authenticate. |
+| Codex commit review from an external lane | Use `codex review --commit <sha>` without a free-form prompt. If custom review instructions are needed, prefer a narrower `codex exec` run on the admitted scope. |
+| Wide release or parity audits | Split the admitted scope by repo, file set, or lane instead of launching one mega neutral-dir prompt across the whole pack family. |
+
 ## Install into a target repository
 
 ### What to copy

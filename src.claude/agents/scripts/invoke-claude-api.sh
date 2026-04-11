@@ -16,7 +16,7 @@ Usage:
 
 Environment overrides:
   CLAUDE_SECRET_FILE   Explicit SECRET.md path to use
-  CLAUDE_API_BIN       Claude API executable to invoke (default: claude-api)
+  CLAUDE_API_BIN       Claude API executable or absolute path to invoke
 EOF
 }
 
@@ -27,6 +27,49 @@ add_candidate() {
     [[ "$existing" == "$path" ]] && return 0
   done
   SECRET_CANDIDATES+=("$path")
+}
+
+resolve_claude_api_bin() {
+  local requested="${CLAUDE_API_BIN:-}"
+  local candidate=""
+  local resolved=""
+
+  if [[ -n "$requested" ]]; then
+    if command -v "$requested" >/dev/null 2>&1; then
+      command -v "$requested"
+      return 0
+    fi
+    if [[ -f "$requested" ]]; then
+      printf '%s\n' "$requested"
+      return 0
+    fi
+    return 1
+  fi
+
+  for candidate in claude-api claude-api.cmd claude-api.exe; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      command -v "$candidate"
+      return 0
+    fi
+  done
+
+  if command -v powershell.exe >/dev/null 2>&1; then
+    resolved="$(powershell.exe -NoProfile -Command "(Get-Command claude-api,claude-api.cmd,claude-api.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)" 2>/dev/null | tr -d '\r')"
+    if [[ -n "$resolved" ]]; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+  fi
+
+  if command -v cmd.exe >/dev/null 2>&1; then
+    resolved="$(cmd.exe //c where claude-api 2>NUL | tr -d '\r' | head -n 1)"
+    if [[ -n "$resolved" ]]; then
+      printf '%s\n' "$resolved"
+      return 0
+    fi
+  fi
+
+  return 1
 }
 
 SECRET_CANDIDATES=()
@@ -57,6 +100,11 @@ if command -v powershell.exe >/dev/null 2>&1; then
   fi
 fi
 
+if [[ "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
 SECRET_FILE=""
 for candidate in "${SECRET_CANDIDATES[@]}"; do
   if [[ -f "$candidate" ]]; then
@@ -64,11 +112,6 @@ for candidate in "${SECRET_CANDIDATES[@]}"; do
     break
   fi
 done
-
-if [[ "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
 
 if [[ -z "$SECRET_FILE" ]]; then
   echo "FAIL: no Claude SECRET.md found. Checked: ${SECRET_CANDIDATES[*]}" >&2
@@ -90,9 +133,9 @@ else
   exit 1
 fi
 
-CLAUDE_API_BIN="${CLAUDE_API_BIN:-claude-api}"
-if ! command -v "$CLAUDE_API_BIN" >/dev/null 2>&1; then
-  echo "FAIL: Claude API transport '$CLAUDE_API_BIN' is not available on PATH." >&2
+if ! CLAUDE_API_CMD="$(resolve_claude_api_bin)"; then
+  CLAUDE_API_LABEL="${CLAUDE_API_BIN:-claude-api}"
+  echo "FAIL: Claude API transport '$CLAUDE_API_LABEL' is not available. Set CLAUDE_API_BIN to an executable or absolute path if it is not on the active shell PATH." >&2
   exit 1
 fi
 
@@ -105,12 +148,16 @@ import sys
 path = pathlib.Path(sys.argv[1])
 text = path.read_text(encoding="utf-8-sig")
 payload = text.strip()
-if payload.startswith("```"):
-    match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
-    if not match:
+match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+if match:
+    payload = match.group(1).strip()
+elif not payload.startswith(("{", "[")):
+    first = text.find("{")
+    last = text.rfind("}")
+    if first == -1 or last <= first:
         print(f"FAIL: could not extract JSON payload from {path}", file=sys.stderr)
         sys.exit(1)
-    payload = match.group(1).strip()
+    payload = text[first : last + 1].strip()
 
 try:
     data = json.loads(payload)
@@ -144,4 +191,4 @@ for assignment in "${SECRET_EXPORTS[@]}"; do
   export "$assignment"
 done
 
-exec "$CLAUDE_API_BIN" "$@"
+exec "$CLAUDE_API_CMD" "$@"
