@@ -371,6 +371,66 @@ remove_legacy_pack_file() {
   fi
 }
 
+remove_empty_dir_if_present() {
+  local dst="$1"
+  if [[ ! -d "$dst" ]]; then
+    return
+  fi
+  shopt -s nullglob dotglob
+  local items=("$dst"/*)
+  shopt -u nullglob dotglob
+  if (( ${#items[@]} > 0 )); then
+    return
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would remove empty directory $dst"
+  else
+    rmdir "$dst"
+  fi
+}
+
+remove_legacy_top_level_pack_entries() {
+  local src="$1" dst="$2" label="$3"
+  [[ -d "$dst" ]] || return
+  shopt -s nullglob
+  for item in "$src"/*; do
+    local item_name target_path
+    item_name="$(basename "$item")"
+    target_path="$dst/$item_name"
+    [[ -e "$target_path" ]] || continue
+    echo "  Removing legacy $label/$item_name..."
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "    [dry-run] would remove $target_path"
+    else
+      rm -rf "$target_path"
+    fi
+  done
+  shopt -u nullglob
+  remove_empty_dir_if_present "$dst"
+}
+
+remove_legacy_mirrored_files() {
+  local src="$1" dst="$2" label="$3"
+  [[ -d "$dst" ]] || return
+  while IFS= read -r -d '' file; do
+    local relative target_path
+    relative="${file#$src/}"
+    target_path="$dst/$relative"
+    [[ -f "$target_path" ]] || continue
+    echo "  Removing legacy $label/$relative..."
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "    [dry-run] would remove $target_path"
+    else
+      rm -f "$target_path"
+    fi
+  done < <(find "$src" -type f -print0)
+
+  while IFS= read -r -d '' dir; do
+    remove_empty_dir_if_present "$dir"
+  done < <(find "$dst" -depth -type d -print0)
+  remove_empty_dir_if_present "$dst"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --global)
@@ -466,8 +526,8 @@ echo "Runtime root: $INSTALL_ROOT"
 echo "GEMINI.md:    $GEMINI_TARGET"
 echo "AGENTS.md:    $SHARED_TARGET"
 echo "agents-mode:  $AGENTS_MODE_TARGET"
-echo "Agents:       $AGENTS_TARGET"
 echo "Extension:    $EXTENSION_ROOT"
+echo "Legacy user tier cleanup roots: $SKILLS_TARGET ; $AGENTS_TARGET ; $COMMANDS_TARGET"
 [[ "$DRY_RUN" -eq 1 ]] && echo "Mode:   dry-run"
 echo
 
@@ -479,9 +539,6 @@ if [[ -e "$GEMINI_TARGET" || -e "$SHARED_TARGET" || -d "$SKILLS_TARGET" || -d "$
 fi
 
 ensure_dir "$INSTALL_ROOT"
-install_tree "$SOURCE/skills" "$SKILLS_TARGET" "skills"
-install_tree "$SOURCE/agents" "$AGENTS_TARGET" "agents"
-install_tree "$SOURCE/commands" "$COMMANDS_TARGET" "commands"
 install_tree "$SOURCE/skills" "$EXTENSION_ROOT/skills" "extension/skills"
 install_tree "$SOURCE/agents" "$EXTENSION_ROOT/agents" "extension/agents"
 install_tree "$SOURCE/commands" "$EXTENSION_ROOT/commands" "extension/commands"
@@ -503,6 +560,9 @@ remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"
 remove_legacy_pack_file "$LEGACY_AGENTS_README_TARGET" "agents/README.md"
 remove_legacy_pack_file "$LEGACY_EXTENSION_SHARED_TARGET" "extension AGENTS.shared.md"
 remove_legacy_pack_file "$LEGACY_EXTENSION_AGENTS_README_TARGET" "extension agents/README.md"
+remove_legacy_top_level_pack_entries "$SOURCE/skills" "$SKILLS_TARGET" "skills"
+remove_legacy_mirrored_files "$SOURCE/agents" "$AGENTS_TARGET" "agents"
+remove_legacy_mirrored_files "$SOURCE/commands" "$COMMANDS_TARGET" "commands"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   echo
@@ -520,22 +580,31 @@ for path in \
   "$EXTENSION_MANIFEST_TARGET" \
   "$EXTENSION_GEMINI_TARGET" \
   "$EXTENSION_AGENTS_TARGET" \
-  "$SKILLS_TARGET/README.md" \
-  "$SKILLS_TARGET/lead/SKILL.md" \
-  "$SKILLS_TARGET/init-project/SKILL.md" \
-  "$AGENTS_TARGET/lead.md" \
-  "$AGENTS_TARGET/team-templates/full-delivery.json" \
-  "$COMMANDS_TARGET/agents/help.toml" \
-  "$COMMANDS_TARGET/agents/external-brigade.toml" \
-  "$COMMANDS_TARGET/agents/init-project.toml" \
   "$EXTENSION_ROOT/skills/lead/SKILL.md" \
+  "$EXTENSION_ROOT/skills/init-project/SKILL.md" \
   "$EXTENSION_ROOT/agents/lead.md" \
+  "$EXTENSION_ROOT/agents/team-templates/full-delivery.json" \
   "$EXTENSION_ROOT/commands/agents/help.toml"; do
   if [[ -e "$path" ]]; then
     echo "  OK  $path"
   else
     echo "  FAIL  $path"
     errors=$((errors+1))
+  fi
+done
+
+for legacy_path in \
+  "$SKILLS_TARGET/lead/SKILL.md" \
+  "$AGENTS_TARGET/lead.md" \
+  "$AGENTS_TARGET/team-templates/full-delivery.json" \
+  "$COMMANDS_TARGET/agents/help.toml" \
+  "$COMMANDS_TARGET/agents/external-brigade.toml" \
+  "$COMMANDS_TARGET/agents/init-project.toml"; do
+  if [[ -e "$legacy_path" ]]; then
+    echo "  FAIL  legacy duplicate still present: $legacy_path"
+    errors=$((errors+1))
+  else
+    echo "  OK  no legacy duplicate at $legacy_path"
   fi
 done
 
