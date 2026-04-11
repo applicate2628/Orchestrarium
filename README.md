@@ -40,7 +40,7 @@ Shared design references now live in `shared/references/`. Provider-local `refer
 
 Cross-provider execution is available through two routing adapters:
 
-- `$external-worker` is the external execution adapter for eligible implementer roles.
+- `$external-worker` is the external execution adapter for eligible worker-side roles.
 - `$external-reviewer` is the external execution adapter for eligible review and QA roles.
 - `$consultant` remains advisory-only and is not reused for implementation or review gates.
 
@@ -68,7 +68,7 @@ What to install?
 
 Then it forwards the same arguments to the provider-specific installer in `scripts/`. Use `scripts/install-codex.*`, `scripts/install-claude.*`, or `scripts/install-gemini.*` directly when you want deterministic single-provider automation.
 
-Important: operator preferences now live in pack-local `agents-mode` files; legacy `consultant-mode` files remain fallback-only during migration.
+Important: operator preferences now live only in pack-local `agents-mode` files.
 
 - Codex reads `.agents/.agents-mode`.
 - Claude Code reads `.claude/.agents-mode`.
@@ -76,15 +76,39 @@ Important: operator preferences now live in pack-local `agents-mode` files; lega
 - `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` lets the agent decide when MCP is appropriate; `force` means the config itself is an explicit instruction to use relevant available MCP tools instead of treating MCP usage as optional.
 - `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
-- `externalProvider: auto` keeps the line default external CLI, while explicit values such as `gemini` or `claude` on non-Claude-native lines can route provider-backed consultant or external-adapter work through a different installed external CLI.
-- Codex and Gemini may additionally use `externalClaudeSecretMode: auto | force` when the selected external provider is Claude. `auto` keeps the first Claude call plain and retries with `ANTHROPIC_*` from the local Claude `SECRET.md` only after quota, limit, or reset errors; `force` applies the same environment override to the primary Claude call.
+- `externalProvider` now uses one shared provider universe across all three lines: `auto | codex | claude | gemini`.
+- `externalProvider: auto` is lane-driven, not host-pack-driven. It resolves through the active `externalPriorityProfile` and must not silently self-bounce into the same provider line.
+- `externalPriorityProfile` selects the active named provider-order profile, `externalPriorityProfiles` stores the switchable per-lane provider orders, and `externalOpinionCounts` raises specific lanes above the default single-opinion behavior when one external opinion is not enough. Those counts are lane-local distinct-opinion requirements, not a cap on how many parallel external helper instances may run overall; bounded same-provider helper fan-out now lives under the dedicated brigade surfaces.
+- Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun.
+- `externalClaudeSecretMode: auto | force` and `externalClaudeApiMode: disabled | auto | force` stay under the `claude` provider. `claude-api` is a secondary Claude transport, not a fourth provider.
 - Codex may additionally use `externalClaudeProfile` to select the Claude CLI execution profile: `sonnet-high` or `opus-max`.
-- Claude Code does not use the Claude-target keys `externalClaudeSecretMode` or `externalClaudeProfile` in its canonical config because Claude-line external dispatch goes to Codex CLI.
+- Provider-specific workdir keys stay separate and default to `neutral`: `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`.
 - For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and create `.agents/.agents-mode`.
 - For first-time Claude Code project setup, run `/agents-init-project` to write `## Project policies` in `.claude/CLAUDE.md` and initialize `.claude/.agents-mode`.
 - For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config and MCP wiring stay in `.gemini/settings.json` or extension manifests, while Orchestrarium-specific shared governance is brought in through `GEMINI.md` importing project-root `AGENTS.md`, the stable role catalog lives in `.gemini/skills/`, the preview specialist-team layer lives in `.gemini/agents/`, and shared routing semantics may additionally live in `.gemini/.agents-mode`, which the Gemini `init-project` helper bootstraps separately after `/init`.
 - Explicit user role requests still override the toggle state in either direction.
 - Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity and continue-by-default execution expectations for initialized projects.
+
+Shipped named profiles:
+
+| Profile | Lane | Priority |
+|---|---|---|
+| `balanced` | `advisory.repo-understanding` | `claude > gemini > codex` |
+|  | `advisory.design-adr` | `claude > codex > gemini` |
+|  | `review.pre-pr` | `claude > codex > gemini` |
+|  | `worker.default-implementation` | `codex > claude > gemini` |
+|  | `worker.long-autonomous` | `claude > codex > gemini` |
+|  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
+|  | `review.visual` | `gemini > claude > codex` |
+| `gemini-crosscheck` | `advisory.repo-understanding` | `claude > gemini > codex` |
+|  | `advisory.design-adr` | `claude > gemini > codex` |
+|  | `review.pre-pr` | `claude > gemini > codex` |
+|  | `worker.default-implementation` | `codex > claude > gemini` |
+|  | `worker.long-autonomous` | `claude > gemini > codex` |
+|  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
+|  | `review.visual` | `gemini > claude > codex` |
+
+The default closeout path follows the active lane policy's external consultant-check count. `externalOpinionCounts` may raise advisory or review lanes above `1` when the active policy wants multiple independent external opinions before advancing, but it does not prevent the lead from launching multiple same-provider external helpers in parallel on different disjoint brigade items.
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 

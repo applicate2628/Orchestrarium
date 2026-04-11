@@ -1,4 +1,4 @@
 interface:
   display_name: "External Worker"
   short_description: "Implement approved work through an external provider"
-  default_prompt: "Use $external-worker as the universal external implementation adapter for the eligible implementer role selected by routing. Treat the assigned implementer role as provenance only, keep the diff inside the approved surface, use the shared dispatch contract, and fail fast if the provider is unavailable."
+  default_prompt: "Use $external-worker as the universal external worker-side adapter for the eligible non-owner, non-review role selected by routing. Treat the assigned worker role as provenance only, keep the output inside the approved role contract and change surface, honor externalPriorityProfile/externalPriorityProfiles/externalOpinionCounts when externalProvider is auto, use the shared dispatch contract, and fail fast if the provider is unavailable."

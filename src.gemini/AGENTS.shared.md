@@ -27,12 +27,15 @@ This file contains platform-neutral governance rules shared across skill packs. 
 - give each delegated task only approved inputs, minimal context, limited tools, one expected artifact, explicit acceptance criteria, and an explicit gate to the next stage
 - stop progression when a quality gate fails
 - treat `$consultant` as an independent advisory team member only: ordinary consultant use stays optional, it never becomes a blocking reviewer or approver, and any repo-local required consultant-check remains advisory-only rather than a substitute for review or human gates
-- treat `$external-worker` as the external execution adapter for eligible `Implement` roles; it inherits the assigned internal implementer role for provenance and scope, but remains eligible across the whole implement lane
+- treat `$external-worker` as the external execution adapter for eligible worker-side roles; it inherits the assigned internal worker role for provenance and scope, and may replace any non-owner, non-review role that produces an admitted artifact
 - treat `$external-reviewer` as the external execution adapter for eligible `Review` and `QA` roles; it inherits the assigned internal reviewer or QA role for provenance and scope
-- keep `$external-worker` out of planning, QA, review, and orchestration work
-- keep `$external-reviewer` out of implementation and orchestration work
+- before checking provider preferences, thread limits, CLI availability, or retry paths for an external request, classify the requested work as one of four buckets: advisory consultant, worker-side adapter, review-or-QA-side adapter, or unsupported-owner-route
+- keep `$external-worker` out of review, QA, and owner-orchestration work
+- keep `$external-reviewer` out of worker-side execution and owner-orchestration work
+- if native internal thread or slot limits would otherwise block additional independent eligible lanes, prefer routing those lanes through available external adapters instead of silently serializing or dropping them
+- external adapters may run in parallel with one another when their scopes are independent, their artifacts do not overlap, the selected provider runtimes support concurrent non-interactive execution, and the active profile or lane opinion count asks for more than one external opinion
 - when an external role is selected, the role itself does not fall back to an internal specialist; if the external CLI is unavailable, treat that role choice as disabled and reroute through normal routing rules instead of pretending the same external role succeeded internally
-- keep mandatory internal reviewers in risk-sensitive templates non-replaceable even when external-reviewer is otherwise eligible
+- provider-backed `$consultant` execution in `external` mode, `$external-worker`, and `$external-reviewer` must use direct external launch from the orchestrating runtime or an approved transport wrapper script; do not insert an internal agent, helper, or subagent as a host layer, and if direct external launch is unavailable, fail closed or reroute honestly
 - keep `security-engineer` separate from `security-reviewer`, and keep dedicated performance optimization separate from the QA gate
 - require human review before `git push`, release, or equivalent publication
 
@@ -215,6 +218,7 @@ If the plan itself was produced or materially revised through a provider-backed 
 - Do not persist raw session transcripts or debug logs in canonical storage.
 - Do not duplicate an artifact across tiers — the canonical artifact lives in `work-items/`; the session log in `.reports/` is a summary, not a copy.
 - Do not collapse actual execution role and provenance role into one ambiguous field such as `external-reviewer (qa-engineer provenance)`; record them as separate fields.
+- Do not route provider-backed `$consultant` execution in `external` mode, `$external-worker`, or `$external-reviewer` through an internal agent, helper, or subagent that merely relays to an external CLI. If the host runtime cannot launch the selected external provider directly, record `Actual execution path: role disabled` and reroute or escalate honestly.
 
 ## Publication safety
 

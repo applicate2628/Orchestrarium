@@ -11,8 +11,8 @@
 ## Claude-specific runtime notes
 
 - Claude runtime использует template-based routing и Agent tool. Считайте этот файл локальным runtime addendum к shared blueprint, а не канонической полной копией методологии.
-- Consultant config живёт в `.claude/.agents-mode`; legacy `.claude/.consultant-mode` остаётся fallback-only на время миграции.
-- Claude-line canonical config не включает `externalClaudeProfile`, потому что Claude-side external dispatch идёт в Codex CLI.
+- Consultant config живёт в `.claude/.agents-mode`.
+- Claude-line canonical config не включает `externalClaudeProfile`; Claude-side `externalProvider: auto` разрешается через active named priority profile, а не через жёсткий Codex-only default.
 - `$external-worker` и `$external-reviewer` dispatch'ят из Claude Code в Codex CLI.
 
 ## Claude-side repository concretization

@@ -13,6 +13,7 @@ Display a comprehensive overview of the skill-pack for the user.
 | Command | Purpose |
 | --- | --- |
 | `/agents-help` | This overview |
+| `/agents-external-brigade` | Launch a bounded parallel set of external helpers |
 | `/agents-review` | Full repo-impact review from current changes or a specified target (analyst → QA → reviewer) |
 | `/agents-bugfix` | Fix a bug (analyst → implementer → QA) |
 | `/agents-test` | Write or verify tests for specified code |
@@ -57,6 +58,7 @@ Show 3-4 natural language examples of how to invoke agents:
 - "build a new export feature for reports" → full-delivery
 - "$external-worker implement this approved phase through Codex CLI" → direct invocation
 - "$external-reviewer audit this change through Codex CLI" → direct invocation
+- "/agents-external-brigade run two external-reviewer lanes plus one Gemini visual worker lane" → direct invocation
 - "$consultant what do you think about this approach?" → direct invocation
 
 ### Project policies

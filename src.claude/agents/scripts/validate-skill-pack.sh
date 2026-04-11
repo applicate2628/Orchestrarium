@@ -226,10 +226,12 @@ echo ""
 echo "[Core files]"
 for f in "$PACK/CLAUDE.md" "$AGENTS_FILE" "$PACK/agents/lead.md" "$PACK/agents/consultant.md" \
          "$PACK/agents/external-worker.md" "$PACK/agents/external-reviewer.md" \
+         "$PACK/agents/scripts/invoke-claude-api.sh" "$PACK/agents/scripts/invoke-claude-api.ps1" \
          $PACK/agents/contracts/operating-model.md \
          $PACK/agents/contracts/external-dispatch.md \
          $PACK/agents/contracts/subagent-contracts.md \
          $PACK/agents/contracts/policies-catalog.md \
+         $PACK/commands/agents-external-brigade.md \
          $PACK/commands/agents-second-opinion.md; do
   if [[ -f "$f" ]]; then pass "$f exists"; else fail "$f missing"; fi
 done
@@ -331,8 +333,8 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Claude runtime-notes section documents that externalClaudeProfile is not canonical on the Claude line"
   check_h2_section_contains "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "## Claude-specific runtime notes" \
-    "defaults to Codex CLI" \
-    "Claude runtime-notes section documents Claude-to-Codex external dispatch"
+    "resolves by lane type through the active named priority profile" \
+    "Claude runtime-notes section documents profile-based Claude external dispatch"
   check_h2_section_contains "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "## Claude-side repository concretization" \
     '`work-items/index.md`' \
@@ -373,10 +375,10 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CLAUDE_REF_DIR/subagent-operating-model.md" 120 \
     "Claude addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "0adc0ebf76426eeede77e86b941651835170dc2cfc7bf3d1ae1342d9ca1ec1a0" \
+    "3e1220bda44c01d8cf3bcbfdd5ce06f36e353feb9b9032d41f0f913f29d5c44d" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
-    "d69c3314c6da69618c00f277f69a15ccee43df36208d5fbe85ffa471c17aaa38" \
+    "f5dc80b94320e5215028e36c043eff03f7c07edb3846f5fefe26d0d04f0e9c3e" \
     "Claude addendum matches the current canonical normalized fingerprint"
   echo ""
 fi
@@ -466,6 +468,83 @@ for section in "Role index" "Engineering hygiene" "Publication safety" "Core del
     fail "## $section missing from AGENTS.md"
   fi
 done
+echo ""
+
+# 6c. Consultant no-fallback canon
+echo "[Consultant no-fallback canon]"
+check_absent "$PACK/agents/consultant.md" "consultantMode: auto" \
+  "consultant doc does not document consultantMode auto"
+check_absent "$PACK/agents/consultant.md" "fallback approved by user" \
+  "consultant doc does not reserve consultant fallback deviations"
+check_absent "$PACK/commands/agents-second-opinion.md" "consultantMode: auto" \
+  "agents-second-opinion command does not expose consultantMode auto"
+check_absent "$PACK/commands/agents-init-project.md" "allowed: external | auto | internal | disabled" \
+  "agents-init-project restricts consultantMode to external/internal/disabled"
+check_absent "$PACK/agents/contracts/external-dispatch.md" "allowed: external | auto | internal | disabled" \
+  "external-dispatch schema restricts consultantMode to external/internal/disabled"
+check_absent "$PACK/agents/contracts/external-dispatch.md" "fallback approved by user" \
+  "external-dispatch does not record consultant fallback approvals"
+check_contains "$PACK/agents/contracts/subagent-contracts.md" "Read and normalize \`.claude/.agents-mode\` first." \
+  "subagent-contracts require read-time agents-mode normalization"
+check_contains "$PACK/commands/agents-init-project.md" "normalize it to the current canonical format before presenting or trusting the current values." \
+  "agents-init-project normalizes existing agents-mode before reading values"
+check_contains "$PACK/commands/agents-init-project.md" "Any read of \`.claude/.agents-mode\` that drives a decision should normalize the file to the current canonical format before trusting the flags." \
+  "agents-init-project requires read-time agents-mode normalization"
+check_contains "$PACK/commands/agents-second-opinion.md" "read and normalize \`.claude/.agents-mode\`." \
+  "agents-second-opinion normalizes agents-mode before reporting status"
+check_absent "$AGENTS_FILE" "Adapter host runtime" \
+  "shared governance no longer allows adapter-host metadata for external execution"
+check_contains "$AGENTS_FILE" "must use direct external launch" \
+  "shared governance requires direct external launch"
+check_contains "$PACK/agents/external-worker.md" "Read and normalize \`.claude/.agents-mode\` to the current canonical format before trusting its flags." \
+  "external-worker normalizes agents-mode before routing"
+check_contains "$PACK/agents/external-reviewer.md" "Read and normalize \`.claude/.agents-mode\` to the current canonical format before trusting its flags." \
+  "external-reviewer normalizes agents-mode before routing"
+check_absent "$PACK/agents/contracts/external-dispatch.md" "Adapter host runtime:" \
+  "external-dispatch no longer records adapter host runtime"
+check_contains "$PACK/agents/contracts/external-dispatch.md" "must use direct external launch" \
+  "external-dispatch requires direct external launch"
+check_absent "$PACK/agents/consultant.md" "Adapter host runtime:" \
+  "consultant no longer records adapter host runtime"
+check_contains "$PACK/agents/consultant.md" "must use direct external launch" \
+  "consultant requires direct external launch when external"
+check_absent "$PACK/agents/consultant.md" "Requested provider: <auto" \
+  "consultant provenance no longer emits auto as a requested provider"
+check_absent "$PACK/agents/contracts/external-dispatch.md" "Requested provider: <auto" \
+  "external-dispatch provenance no longer emits auto as a requested provider"
+check_absent "$PACK/agents/consultant.md" "Actual execution path:** <external CLI (provider name) | internal subagent" \
+  "consultant does not mislabel internal subagent as actual execution path"
+check_contains "$PACK/agents/external-worker.md" "externalPriorityProfile" \
+  "external-worker honors structured profile keys"
+check_contains "$PACK/agents/external-reviewer.md" "externalPriorityProfile" \
+  "external-reviewer honors structured profile keys"
+check_contains "$PACK/agents/external-worker.md" "direct external launch contract" \
+  "external-worker requires direct external launch"
+check_contains "$PACK/agents/external-reviewer.md" "direct external launch contract" \
+  "external-reviewer requires direct external launch"
+check_contains "$PACK/agents/scripts/invoke-claude-api.sh" "SECRET.md" \
+  "Claude API wrapper reads SECRET.md"
+check_contains "$PACK/agents/scripts/invoke-claude-api.sh" "claude-api" \
+  "Claude API wrapper invokes claude-api"
+check_contains "$PACK/agents/scripts/invoke-claude-api.ps1" "SECRET.md" \
+  "PowerShell Claude API wrapper reads SECRET.md"
+check_contains "$PACK/agents/scripts/invoke-claude-api.ps1" "claude-api" \
+  "PowerShell Claude API wrapper invokes claude-api"
+check_contains "$PACK/agents/contracts/external-dispatch.md" "one instance per helper or provider" \
+  "external-dispatch documents same-provider brigade reuse"
+check_contains "$PACK/commands/agents-external-brigade.md" "same-provider helper instances" \
+  "agents-external-brigade command documents same-provider helper fan-out"
+check_contains "$PACK/commands/agents-help.md" "/agents-external-brigade" \
+  "agents-help lists the external-brigade command"
+check_contains "$PACK/agents/lead.md" "/agents-external-brigade" \
+  "lead guide mentions the external-brigade command"
+
+if [[ $DEV_REPO -eq 1 ]]; then
+  check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "## Canonical maintenance" \
+    "agents-mode reference defines canonical maintenance"
+  check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "Read-time normalization preserves the effective values of known keys" \
+    "agents-mode reference documents read-time normalization semantics"
+fi
 echo ""
 
 # Summary

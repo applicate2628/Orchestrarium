@@ -123,19 +123,29 @@ Fact-first note:
 
 Consultant exception:
 - `$consultant` returns the same first four sections, but ends with `5. Advisory status: NON-BLOCKING` and `6. Continuation prompt: <ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action>`.
-- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.agents-mode` must preserve any existing `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalClaudeSecretMode`, and `externalClaudeProfile` values.
-- If the external provider is unavailable or fails, the lead may use an independent internal subagent as `$consultant` with the same advisory-only contract and the same response format for ordinary optional consultant usage. The mandatory batch-close external consultant-check does not use that fallback; if external execution is unavailable, batch closure stays open and the lead escalates to the user.
+- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.agents-mode` must preserve any existing `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalClaudeSecretMode`, `externalClaudeApiMode`, and `externalClaudeProfile` values.
+- If the selected external consultant path is unavailable or fails, the lead must report that honestly and reroute; do not auto-downgrade into an internal consultant. An internal consultant remains valid only when `consultantMode: internal` was selected explicitly before dispatch. Mandatory batch-close external consultant checks stay open until an eligible external run succeeds or the user reprioritizes.
 
 ## Shared external dispatch contract
 
 Use `external-dispatch.md` when the routing decision prefers or explicitly selects an external adapter.
 
-- The canonical config file is `.agents/.agents-mode`; legacy `.agents/.consultant-mode` is fallback-only.
-- The extended schema contains `consultantMode`, `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalClaudeSecretMode`, and an optional `externalClaudeProfile` used for Codex-line Claude CLI profile selection.
+- The canonical config file is `.agents/.agents-mode`.
+- Read and normalize `.agents/.agents-mode` before trusting its flags. Comment-free, partial, or older-layout files are valid legacy input, not valid runtime output.
+- The extended schema contains `consultantMode`, `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalClaudeSecretMode`, `externalClaudeApiMode`, and an optional `externalClaudeProfile` used for Codex-line Claude CLI profile selection.
 - `consultantMode` governs `$consultant` behavior only.
 - The preference flags govern whether eligible implement or review/QA slots route to the external adapters by default.
 - The assigned role in the external handoff is a provenance/routing label, not a restriction on universality.
+- Resolve external routing in this order: `role eligibility -> provider selection -> CLI availability`.
+- There is no generic external adapter for owner roles such as `$product-manager` or `$lead`. If a request lands in one of those lanes, fail fast with an unsupported-route explanation instead of probing providers.
 - If the external CLI is unavailable, the role is disabled at the role level and the orchestrator may reroute to another eligible internal specialist.
+- `$external-worker` and `$external-reviewer` are direct external launch routes, not internal specialist subagents. Do not satisfy these roles by spawning an internal helper/agent host that then relays to another CLI.
+- Wherever Claude is the resolved external provider, `externalClaudeApiMode` governs whether Claude may use the repo-local `claude-api` transport after or instead of the allowed Claude CLI path.
+- `externalProvider: auto` resolves through the active priority profile, then applies explicit-only self-provider exclusion and CLI availability. Explicit user override or repo-local visual-routing heuristics may still prefer Gemini for image/icon/decorative visual lanes when that routing remains honest.
+- Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support concurrent non-interactive execution. If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
+- Same-provider reuse is allowed for independent external fan-out. Do not impose a one-instance-per-provider cap when multiple admitted artifacts or disjoint slices need the same helper/provider combination.
+- `externalOpinionCounts` still governs distinct-provider opinion requirements for one lane; it does not limit brigade-style parallel launches across different independent lanes or slices.
+- When the routing decision is "launch a bounded set of external helpers together", prefer the utility skill `$external-brigade` so the brigade has one explicit plan, one ownership table, and one aggregated result surface.
 
 ## Role map
 
@@ -339,17 +349,17 @@ Acceptance criteria:
 
 ## External Worker
 
-Use when approved implementation work should run through the external adapter for an eligible implementer role and the handoff names `$external-worker`.
+Use when approved worker-side role work should run through the external adapter for an eligible non-owner, non-review role and the handoff names `$external-worker`.
 
 Return exactly:
 - one external implementation package
 
 Acceptance criteria:
-- the handoff includes the internal implementer role label being replaced; that label is provenance/routing metadata only and does not narrow the adapter
-- the requested change stays inside the approved implementation surface
-- the execution path is external and explicit or preference-driven; no silent fallback to `$consultant` or an internal subagent
+- the handoff includes the internal worker role label being replaced; that label is provenance/routing metadata only and does not narrow the adapter
+- the requested work stays inside the approved worker-side artifact contract and change surface
+- the execution path is a direct external transport path; no silent fallback to `$consultant`, no internal subagent fallback, and no internal host layer pretending to be external
 - external-provider unavailability is reported as `BLOCKED:dependency` with the provider reason, and the orchestrator may reroute
-- the package reports changed files, tests or checks, explicit assumptions or risks, and provenance
+- the package reports the role-appropriate artifact, explicit assumptions or risks, any relevant verification evidence, and provenance
 
 ## Toolchain Engineer
 
@@ -522,7 +532,6 @@ Acceptance criteria:
 - the execution path is external and explicit or preference-driven; no silent fallback to `$consultant` or an internal reviewer
 - external-provider unavailability is reported as `BLOCKED:dependency` with the provider reason, and the orchestrator may reroute
 - the report includes findings, risk surfaces, and an explicit gate decision
-- the role does not satisfy any mandatory internal reviewer requirement in v1
 
 ## Consultant
 
@@ -537,8 +546,8 @@ Acceptance criteria:
 - if it finds a real blocker, it points back to the proper specialist role
 
 Invocation note:
-- `$consultant` usage rules, toggle check, execution paths, and fallback behavior are in `$CODEX_HOME/skills/consultant/SKILL.md`
-- if the external provider fails or is unavailable, ordinary optional consultant usage may fall back to an independent internal subagent consultant with the same advisory-only contract, but the mandatory batch-close external consultant-check may not silently downgrade
+- `$consultant` usage rules, toggle check, and execution paths are in `$CODEX_HOME/skills/consultant/SKILL.md`
+- if the selected external consultant path fails or is unavailable, report that honestly and reroute; use an internal consultant only when `consultantMode: internal` was selected explicitly before dispatch
 - `external-dispatch.md` is the shared contract for the new external adapters and the consultant config fields they share
 
 ## Role Map Notes
@@ -547,6 +556,7 @@ Invocation note:
 - external review or QA through a provider maps to `$external-reviewer`
 - the assigned role in either external handoff is a provenance/routing label, not a constraint on universality
 - `$consultant` remains advisory-only and is not a substitute for either external execution role
+- `$external-brigade` is a utility orchestration surface for launching and aggregating a bounded parallel bundle of eligible external helpers; it is not a new specialist role in the core team map
 
 ## Interaction rules
 
@@ -558,7 +568,7 @@ Invocation note:
 - A role may request clarification, but it should route the request through the orchestrating owner unless a direct collaboration edge was explicitly approved.
 - Reviewers report findings and gate outcomes; they do not directly manage implementation.
 - When an upstream artifact is insufficient, return `REVISE` or `BLOCKED` instead of silently redefining the stage contract.
-- External execution roles are routing adapters; they do not replace the consultant. They may replace eligible internal implement/review roles when config preference or explicit override selects them, but mandatory internal reviewers in risk-sensitive templates remain non-replaceable.
+- External execution roles are routing adapters; they do not replace the consultant. They may replace eligible internal worker/review roles when config preference or explicit override selects them.
 
 ## Session logging
 

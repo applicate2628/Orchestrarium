@@ -34,10 +34,11 @@ description: Coordinate complex multi-agent work requiring parallel risk owners,
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
 - Do not ask one subagent to deliver a feature end-to-end.
 - Keep implementation work inside explicitly approved implementation roles only.
-- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement and review-side slots, selected through `.claude/.agents-mode` preferences or an explicit request; the team templates themselves stay unchanged.
+- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement and review-side slots, selected through `.claude/.agents-mode` preferences or an explicit request; the team templates themselves stay unchanged, and those routes must launch the selected provider directly instead of through an internal host helper.
+- When multiple independent external helper lanes should launch together, use `/agents-external-brigade` to define one bounded brigade plan instead of scattering ad hoc helper fan-out across separate notes.
 - Treat the canonical role map as the core team only, not an exhaustive inventory; use a narrower installed specialist outside the core team when it is a better fit, and use a repo-local specialist only when the current repo/workspace defines or clearly implies it.
 - Detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers, and escalate one clear recommendation: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need.
-- Keep `$consultant` advisory-only and non-approving. Every completed lead-managed task-batch must still end with one external consultant-check before the lead marks the batch closed. Consultant mode `external` requires user approval for fallback. Mode `auto` allows silent fallback with disclosure for ordinary optional consultation.
+- Keep `$consultant` advisory-only and non-approving. Every completed lead-managed task-batch must satisfy the active lane policy's external consultant requirement before the lead marks the batch closed. Consultant mode `external` stays external-only; if that path is unavailable, fail closed and escalate honestly.
 - Keep `.claude/.agents-mode` intact when updating consultant settings; it also carries delegation, MCP, and external adapter preferences.
 - Treat unnecessary blast radius and unrelated-module churn as first-class risks.
 
@@ -108,9 +109,9 @@ The canonical brief should capture:
 7. Human or CI gate
    - Output: explicit human approval, CI status, or documented external blocker.
    - For publication, `$lead` runs the publication-safety scan and `$knowledge-archivist` is the default publication-gate approver; the approver must be a different role than the role that accepted the artifact into the pipeline.
-8. Batch-close external consultant-check
+8. Batch-close external consultant sweep
    - Role: `$consultant`
-   - Output: one non-binding advisory memo that performs a final missed-change and residual-risk sweep, then ends with an explicit reusable second prompt for continuing the work.
+   - Output: one or more non-binding advisory memos, as required by lane policy, that perform a final missed-change and residual-risk sweep and end with explicit reusable second prompts for continuing the work.
 
 Roadmap ownership stays upstream of the lead lane. The lead consumes approved roadmap or intake output; it does not own global prioritization or portfolio sequencing by default.
 
@@ -163,7 +164,7 @@ Require every pipeline subagent to end with exactly one gate status:
 
 Do not advance work on optimism or partial acceptance.
 
-`$consultant` is the explicit exception: it returns advisory input, not a pipeline gate. A completed lead-managed batch is not considered closed until its external consultant-check memo is recorded.
+`$consultant` is the explicit exception: it returns advisory input, not a pipeline gate. A completed lead-managed batch is not considered closed until its required external consultant memo set is recorded.
 `PASS` advances the pipeline, but it does not by itself close the batch. Batch closure requires requested-scope reconciliation and no remaining open obligations unless the user explicitly parks or reprioritizes them.
 
 ## Flow rules
@@ -171,7 +172,7 @@ Do not advance work on optimism or partial acceptance.
 - The system operates as a rolling loop: `PASS` immediately advances, `REVISE` stays in the same role, `BLOCKED` waits for external resolution.
 - Do not pause between accepted artifacts unless a gate failure or human/CI check requires it.
 - Close specialist sessions once their artifact is accepted. Keep open only for bounded `REVISE`.
-- After the final reviewer or human/CI gate completes, run the external consultant-check before marking the batch closed.
+- After the final reviewer or human/CI gate completes, run the required external consultant sweep before marking the batch closed.
 - After any side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
 - Do not stop at one completed sub-batch when a known admitted-scope next action already exists; keep the task open and continue until a real gate or explicit user reprioritization intervenes.
 
@@ -182,6 +183,7 @@ Do not advance work on optimism or partial acceptance.
 - **Risk owners**: assign explicit owners for risks that can independently fail the result. Keep builder and reviewer roles separate. A role that defines constraints does not approve its own work.
 - **Change isolation**: prefer additive change through approved seams. If a local feature requires cross-cutting edits, route back to `$architect` or `$architecture-reviewer`.
 - **Parallelism**: parallelize read-heavy work (research, triage) when scopes are independent. Write-heavy work needs explicit ownership boundaries.
+- **Parallel external reuse**: same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane.
 - **Capability gaps**: if approved work cannot be routed cleanly, escalate one recommendation: use installed specialist, define repo-local specialist, create new skill, or escalate hiring need.
 - **Governance**: when an accepted upstream artifact is materially revised, mark dependent downstream artifacts for re-review. Require human/CI gates when team policy demands them.
 
@@ -195,15 +197,15 @@ These gates are mandatory. Do not advance work past a gate without meeting the c
 - `plan.md` and required upstream artifacts before implementation or review begins
 - Independent reviewer approval for security, architecture, performance, UX, accessibility, and QA gates when triggered by risk classification
 - Human review before `git push`, release, or equivalent publication
-- One external consultant-check memo, ending with a reusable second prompt that begins with a direct imperative to continue and names the next concrete action, before a completed lead-managed batch is marked closed
+- The lane policy's required external consultant memo set, with each memo ending in a reusable second prompt that begins with a direct imperative to continue and names the next concrete action, before a completed lead-managed batch is marked closed
 
 Periodic controls (drift detection between gates) are in [operating-model.md](contracts/operating-model.md).
 
 ## Consultant-check rule
 
-- Every completed lead-managed task-batch ends with one external consultant-check through `$consultant`.
+- Every completed lead-managed task-batch satisfies the active lane policy's external consultant requirement through `$consultant`.
 - The check is advisory-only: it does not replace reviewers, QA, or human/CI gates, and it does not become an approver.
-- Request the external execution path explicitly for this closure check.
+- Request the external execution path explicitly for each required closure check.
 - If the external path is unavailable, disabled, or would downgrade to an internal-only run, do not mark the batch closed; record the miss and escalate to the user instead.
 - Require the memo to end with a ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action.
 
