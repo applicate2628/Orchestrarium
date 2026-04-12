@@ -16,6 +16,24 @@ Canonical value-by-value operator reference for pack-local `agents-mode` files. 
 - This maintenance rewrite happens on read, not only on explicit toggle or init writes. A status-style read is still expected to leave the file in current canonical form after parsing.
 - `externalOpinionCounts` is a same-lane distinct-opinion contract, not a generic concurrency cap. The lead may still launch repeated same-provider external helpers in parallel across disjoint slices through the dedicated `external-brigade` surface.
 
+## Init-time presets
+
+Presets are init-time shortcuts only. They expand into canonical `agents-mode` keys. The preset name is NOT persisted in the file — only the resolved key values are written.
+
+| Preset | Role | When to use |
+|---|---|---|
+| `default` | safe-init only | First-time bootstrap; quiet shared baseline with no standing external preference |
+| `absolute-balance` | true everyday center | Daily operation with moderate delegation, internal consultant availability, and external review preference |
+| `external-aggressive` | aggressive external use | Maximize external execution on preferred lanes while keeping the stored file canonical |
+| `correctness-first` | no-time-limit correctness | Favor deeper validation, forced delegation, forced MCP use, and multi-opinion advisory or review lanes |
+| `max-speed` | lowest-friction throughput | Minimize latency and ceremony; prefer project workdirs and no extra opinion overhead |
+
+Routing conventions (not persisted as keys):
+- **same-host fast-path**: under `external-aggressive` and `max-speed`, when neutral isolation is not required, allow per-invocation explicit self-provider override.
+- **overflow means spill, not serialize**: under `external-aggressive`, internal slot saturation pushes independent eligible lanes into `$external-worker`, `$external-reviewer`, or `$external-brigade` by default.
+
+See `Orchestrarium/docs/agents-mode-reference.md` for the full preset expansion table.
+
 ## Shared keys
 
 ### `consultantMode`
@@ -101,21 +119,32 @@ Current canonical profiles:
 | `balanced` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > codex > gemini` |
 |  | `review.pre-pr` | `claude > codex > gemini` |
+|  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
+|  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 |  | `worker.long-autonomous` | `claude > codex > gemini` |
+|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
+|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
 |  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
 |  | `review.visual` | `gemini > claude > codex` |
 | `gemini-crosscheck` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > gemini > codex` |
 |  | `review.pre-pr` | `claude > gemini > codex` |
+|  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
-|  | `worker.long-autonomous` | `claude > codex > gemini` |
+|  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
+|  | `worker.long-autonomous` | `claude > gemini > codex` |
+|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
+|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
 |  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
 |  | `review.visual` | `gemini > claude > codex` |
 
 Notes:
 - The `balanced` profile is the ordinary shared matrix.
 - The `gemini-crosscheck` profile is the explicit cross-check profile for cases where one independent external opinion is not enough and Gemini should be part of the non-visual advisory/review set.
+- Use `worker.systems-performance-implementation` for Rust hot paths, systems/perf-sensitive implementation, and media-pipeline work; keep `worker.default-implementation` for ordinary worker-side implementation.
+- Use `worker.ui-structural-modernization` for broad UI scaffold, layout rewrite, and modernization work; use `worker.ui-surgical-patch-cleanup` for exact patch, cleanup, and partial-edit correction work.
+- Use `review.performance-architecture` for performance/architecture review and hot-path cross-checks instead of overloading `review.pre-pr`.
 - Keep the nesting capped at `profile -> lane -> ordered provider list`; do not introduce deeper role-level nesting.
 
 ### `externalOpinionCounts`

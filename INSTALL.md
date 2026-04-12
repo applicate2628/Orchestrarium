@@ -40,6 +40,18 @@ bash install-gemini.sh --global
 bash install-gemini.sh --target /path/to/my-repo
 ```
 
+## Init-time preset shortcuts
+
+After Gemini `/init`, the Orchestrarium Gemini `init-project` helper can start from one of these preset shortcuts before writing canonical `.gemini/.agents-mode` keys:
+
+- `default`
+- `absolute-balance`
+- `external-aggressive`
+- `correctness-first`
+- `max-speed`
+
+The preset name is not persisted; the helper writes the resolved canonical key values instead. Full preset expansion tables and the current lane matrix, including `worker.systems-performance-implementation`, live in [docs/agents-mode-reference.md](docs/agents-mode-reference.md).
+
 ## Current usage model
 
 1. Install the pack into the target project or globally.
@@ -78,7 +90,7 @@ bash src.gemini/scripts/validate-pack.sh .
 
 ## Operator overlay reference
 
-The canonical value-by-value reference for the installed `.gemini/.agents-mode` overlay lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md). That reference also records task continuity, continue-by-default execution expectations, the named priority profiles, `externalClaudeApiMode`, the repo-local visual-routing heuristic for initialized projects, and the distinction between lane-local opinion counts and brigade-style helper fan-out.
+The canonical value-by-value reference for the installed `.gemini/.agents-mode` overlay lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md). That reference also records task continuity, continue-by-default execution expectations, the init-time preset family, the named priority profiles, `externalClaudeApiMode`, the explicit `worker.systems-performance-implementation` lane, the repo-local visual-routing heuristic for initialized projects, and the distinction between lane-local opinion counts and brigade-style helper fan-out.
 
 The branch-level docs index and runtime-layout map live in [docs/README.md](docs/README.md) and [docs/provider-runtime-layout.md](docs/provider-runtime-layout.md).
 
