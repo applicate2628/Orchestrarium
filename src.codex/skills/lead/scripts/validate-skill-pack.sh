@@ -10,6 +10,7 @@ set -euo pipefail
 # Auto-detect layout.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 DEV_REPO=0
+CODEX_RUNTIME_ROOT=""
 if [[ -d "src.codex/skills" && -f "shared/AGENTS.shared.md" && -f "src.codex/AGENTS.codex.md" ]]; then
   # Dev repo: assemble AGENTS.md from split source files for validation
   SKILLS_DIR="$(cd "src.codex/skills" && pwd -P)"
@@ -23,18 +24,22 @@ elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DI
   SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
   SCRIPTS_DIR="$SCRIPT_DIR"
   AGENTS_FILE="$(cd "$SCRIPT_DIR/../../.." && pwd -P)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
 elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DIR/../../../../AGENTS.md" ]]; then
   SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
   SCRIPTS_DIR="$SCRIPT_DIR"
   AGENTS_FILE="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)/.codex"
 elif [[ -d ".codex/skills" && -f ".codex/AGENTS.md" ]]; then
   SKILLS_DIR="$(cd ".codex/skills" && pwd -P)"
   SCRIPTS_DIR="$(cd ".codex/skills/lead/scripts" && pwd -P)"
   AGENTS_FILE="$(cd ".codex" && pwd -P)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd ".codex" && pwd -P)"
 elif [[ -d ".agents/skills" && -f "AGENTS.md" ]]; then
   SKILLS_DIR="$(cd ".agents/skills" && pwd -P)"
   SCRIPTS_DIR="$(cd ".agents/skills/lead/scripts" && pwd -P)"
   AGENTS_FILE="$(cd "." && pwd -P)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd "." && pwd -P)/.codex"
 else
   echo "FAIL: Could not detect Orchestrarium layout. Expected one of: src.codex/, .codex/, or .agents/ with root AGENTS.md." >&2
   exit 1
@@ -287,6 +292,9 @@ if [[ $DEV_REPO -eq 1 ]]; then
   echo "=== Common branch-level surface ==="
 
   for f in \
+    "$REPO_ROOT/src.codex/agents/default.toml" \
+    "$REPO_ROOT/src.codex/agents/worker.toml" \
+    "$REPO_ROOT/src.codex/agents/explorer.toml" \
     "$REPO_ROOT/src.codex/README.md" \
     "$REPO_ROOT/src.claude/README.md" \
     "$REPO_ROOT/src.gemini/README.md" \
@@ -591,6 +599,20 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_file "$REPO_ROOT/shared/agents-mode.defaults.yaml" "shared/agents-mode.defaults.yaml"
   check_not_exists "$REPO_ROOT/src.codex/agents-mode.defaults.yaml" \
     "src.codex/agents-mode.defaults.yaml removed from the monorepo"
+  check_contains "$REPO_ROOT/INSTALL.md" ".codex/agents/default.toml" \
+    "INSTALL.md documents Codex built-in agent override seeding"
+  check_contains "$DOCS_DIR/provider-runtime-layouts.md" "~/.codex/agents/default.toml" \
+    "provider runtime layouts document global Codex built-in agent overrides"
+  check_contains "$REPO_ROOT/src.codex/README.md" "agents/default.toml" \
+    "src.codex/README.md documents the built-in agent override payload"
+fi
+
+if [[ -n "$CODEX_RUNTIME_ROOT" ]]; then
+  echo ""
+  echo "=== Codex built-in agent overrides ==="
+  check_file "$CODEX_RUNTIME_ROOT/agents/default.toml" "agents/default.toml installed"
+  check_file "$CODEX_RUNTIME_ROOT/agents/worker.toml" "agents/worker.toml installed"
+  check_file "$CODEX_RUNTIME_ROOT/agents/explorer.toml" "agents/explorer.toml installed"
 fi
 
 echo ""

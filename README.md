@@ -82,29 +82,40 @@ Important: operator preferences now live only in pack-local `agents-mode` files.
 - Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun.
 - `externalClaudeSecretMode: auto | force` and `externalClaudeApiMode: disabled | auto | force` stay under the `claude` provider. `claude-api` is a secondary Claude transport, not a fourth provider.
 - Codex may additionally use `externalClaudeProfile` to select the Claude CLI execution profile: `sonnet-high` or `opus-max`.
+- Codex install also seeds `.codex/agents/default.toml`, `worker.toml`, and `explorer.toml` so the built-in Codex subagents run as `gpt-5.4` with `xhigh` by default unless the user has already customized those files.
 - Provider-specific workdir keys stay separate and default to `neutral`: `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`.
 - For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode`.
 - For first-time Claude Code project setup, run `/agents-init-project` to write `## Project policies` in `.claude/CLAUDE.md` and review or update the installed default `.claude/.agents-mode`.
 - For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config and MCP wiring stay in `.gemini/settings.json` or extension manifests, while Orchestrarium-specific shared governance is brought in through `GEMINI.md` importing project-root `AGENTS.md`, the canonical installed Gemini payload lives under `.gemini/extensions/orchestrarium-gemini/`, and shared routing semantics live in the Orchestrarium overlay `.gemini/.agents-mode`, which install seeds by default and the Gemini `init-project` helper reviews or updates after `/init`. Top-level `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` stay available for deliberate user overrides instead of carrying a second mirrored Orchestrarium install, because Gemini gives those tiers precedence over extension content.
 - Explicit user role requests still override the toggle state in either direction.
-- Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity and continue-by-default execution expectations for initialized projects.
+- Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity, continue-by-default execution expectations for initialized projects, and the current init-time preset family: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, and `max-speed`.
 
-Shipped named profiles:
+Shipped named provider-order profiles:
+
+These are persisted `externalPriorityProfile` choices, not the init-time preset shortcuts.
 
 | Profile | Lane | Priority |
 |---|---|---|
 | `balanced` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > codex > gemini` |
 |  | `review.pre-pr` | `claude > codex > gemini` |
+|  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
+|  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 |  | `worker.long-autonomous` | `claude > codex > gemini` |
+|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
+|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
 |  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
 |  | `review.visual` | `gemini > claude > codex` |
 | `gemini-crosscheck` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > gemini > codex` |
 |  | `review.pre-pr` | `claude > gemini > codex` |
+|  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
+|  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 |  | `worker.long-autonomous` | `claude > gemini > codex` |
+|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
+|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
 |  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
 |  | `review.visual` | `gemini > claude > codex` |
 

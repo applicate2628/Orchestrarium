@@ -85,24 +85,36 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
        advisory.repo-understanding: [claude, gemini, codex]
        advisory.design-adr: [claude, codex, gemini]
        review.pre-pr: [claude, codex, gemini]
+       review.performance-architecture: [claude, codex, gemini]
        worker.default-implementation: [codex, claude, gemini]
+       worker.systems-performance-implementation: [codex, claude, gemini]
        worker.long-autonomous: [claude, codex, gemini]
+       worker.ui-structural-modernization: [gemini, claude, codex]
+       worker.ui-surgical-patch-cleanup: [claude, codex, gemini]
        worker.visual-icon-decorative: [gemini, claude, codex]
        review.visual: [gemini, claude, codex]
      gemini-crosscheck:
        advisory.repo-understanding: [claude, gemini, codex]
        advisory.design-adr: [claude, gemini, codex]
        review.pre-pr: [claude, gemini, codex]
+       review.performance-architecture: [claude, codex, gemini]
        worker.default-implementation: [codex, claude, gemini]
+       worker.systems-performance-implementation: [codex, claude, gemini]
        worker.long-autonomous: [claude, gemini, codex]
+       worker.ui-structural-modernization: [gemini, claude, codex]
+       worker.ui-surgical-patch-cleanup: [claude, codex, gemini]
        worker.visual-icon-decorative: [gemini, claude, codex]
        review.visual: [gemini, claude, codex]
    externalOpinionCounts:
      advisory.repo-understanding: 1
      advisory.design-adr: 1
      review.pre-pr: 1
+     review.performance-architecture: 1
      worker.default-implementation: 1
+     worker.systems-performance-implementation: 1
      worker.long-autonomous: 1
+     worker.ui-structural-modernization: 1
+     worker.ui-surgical-patch-cleanup: 1
      worker.visual-icon-decorative: 1
      review.visual: 1
    externalClaudeSecretMode: auto
@@ -132,15 +144,23 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 | `balanced` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > codex > gemini` |
 |  | `review.pre-pr` | `claude > codex > gemini` |
+|  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
+|  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 |  | `worker.long-autonomous` | `claude > codex > gemini` |
+|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
+|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
 |  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
 |  | `review.visual` | `gemini > claude > codex` |
 | `gemini-crosscheck` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > gemini > codex` |
 |  | `review.pre-pr` | `claude > gemini > codex` |
+|  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
+|  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 |  | `worker.long-autonomous` | `claude > gemini > codex` |
+|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
+|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
 |  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
 |  | `review.visual` | `gemini > claude > codex` |
 

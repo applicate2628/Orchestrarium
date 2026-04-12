@@ -10,6 +10,15 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-04-12
+
+### Changed
+
+- `agents-mode` init now exposes one explicit safe-start preset plus a small family of operator postures instead of implying that one default should cover every workflow. `default` stays the quiet safe-init path, `absolute-balance` is the everyday center, and the more aggressive `external-aggressive`, `correctness-first`, and `max-speed` shortcuts now let operators choose external saturation, verification density, or throughput deliberately without confusing that choice with the persisted provider-order profile name `balanced`.
+- External lane routing is now more explicit about what each provider is actually good at. The canonical lane matrix now separates broad UI modernization from surgical UI cleanup, keeps performance and architecture review as a distinct reviewer lane, and adds `worker.systems-performance-implementation` so Rust hot paths, media-pipeline work, and other systems/perf-sensitive implementation can route to `codex > claude > gemini` without overloading the ordinary implementation lane. Shared scalar defaults, the provider universe `auto | codex | claude | gemini`, and the rule that `claude-api` is transport-only under the Claude provider all stay unchanged.
+- The install surfaces, root manuals, and provider references now describe the same current routing contract instead of forcing operators to reconstruct it from mixed older prose. README, INSTALL, the canonical `agents-mode` reference, and the provider addenda now agree that `externalProvider: auto` is lane/profile-driven, that `claude-api` is a secondary Claude transport rather than a fourth provider, and that provider-local references are addenda to the live canon rather than a second hidden source of truth.
+- Standalone Codex, Claude, and Gemini entry docs now expose the same release-relevant operator cues as the monorepo entry surfaces. Their README and INSTALL front doors now call out the current init-time preset family and point operators directly at the explicit systems/perf lane in the canonical `agents-mode` reference, while `docs/provider-runtime-layouts.md` now names the Gemini and root-router install surfaces among its authoritative inputs so release audits do not rely on an incomplete source list.
+
 ## 2026-04-11
 
 ### Changed

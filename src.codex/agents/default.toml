@@ -1,0 +1,9 @@
+name = "default"
+description = "General-purpose fallback agent."
+model = "gpt-5.4"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+General-purpose fallback agent.
+Inherit the parent session's task context and focus on the assigned subtask.
+Stay within the requested scope and return a concise, usable result.
+"""

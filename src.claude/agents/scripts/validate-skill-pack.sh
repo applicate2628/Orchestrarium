@@ -398,7 +398,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "3e1220bda44c01d8cf3bcbfdd5ce06f36e353feb9b9032d41f0f913f29d5c44d" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
-    "f5dc80b94320e5215028e36c043eff03f7c07edb3846f5fefe26d0d04f0e9c3e" \
+    "1bfce3650a7ff93b7751db096b28218a745e98b4db52b6f15619deaedebff7b2" \
     "Claude addendum matches the current canonical normalized fingerprint"
   echo ""
 fi

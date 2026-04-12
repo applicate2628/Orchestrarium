@@ -14,13 +14,66 @@ Canonical value-by-value operator reference for pack-local `agents-mode` files. 
 
 The exemplar shared default lives in `shared/agents-mode.defaults.yaml`. In the monorepo, installers seed project-local and global `agents-mode` files directly from that shared exemplar while preserving existing files on reinstall; any provider-only additions are applied at install time instead of living in separate `src.<provider>/agents-mode.defaults.yaml` files. Standalone pack roots still ship one canonical pack-root seed file so those repositories remain self-contained outside the monorepo.
 
+The shipped shared exemplar is intentionally a quiet baseline for first install:
+- consultant disabled by default
+- delegation manual by default
+- MCP automatic by default
+- no standing preference for external worker or reviewer lanes
+- `balanced` as the default named external priority profile
+- neutral workdirs and automatic Claude secondary-transport behavior by default
+
 ## Canonical maintenance
 
 - Any tool or skill that reads an existing `agents-mode` file to make a routing or operator-mode decision must normalize that file to the current canonical format before trusting the flags.
 - In the monorepo, edit only `shared/agents-mode.defaults.yaml`; do not reintroduce provider-local `src.<provider>/agents-mode.defaults.yaml` duplicates.
 - Treat comment-free files, partially populated files, older layouts, and stale shipped profile blocks as legacy input that must be rewritten rather than preserved verbatim.
-- Read-time normalization preserves the effective values of known keys, preserves unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline allowed-value comments, rewrites the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks to the current pack version, and restores canonical key order.
+- Read-time normalization preserves the effective values of known keys, preserves unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments on every canonical scalar key plus every shipped profile/count entry, rewrites the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks to the current pack version, and restores canonical key order.
 - This maintenance rewrite happens on read, not only on explicit toggle or init writes. A status-style read is still expected to leave the file in current canonical form after parsing.
+
+## Init-time presets
+
+Presets are init-time shortcuts only. They expand into canonical `agents-mode` keys. The preset name is NOT persisted in the file — only the resolved key values are written.
+
+### Available presets
+
+| Preset | Role | When to use |
+|---|---|---|
+| `default` | safe-init only | First-time bootstrap; quiet shared baseline with no standing external preference |
+| `absolute-balance` | true everyday center | Daily operation with moderate delegation, internal consultant availability, and external review preference |
+| `external-aggressive` | aggressive external use | Maximize external execution on preferred lanes while keeping the stored file canonical |
+| `correctness-first` | no-time-limit correctness | Favor deeper validation, forced delegation, forced MCP use, and multi-opinion advisory or review lanes |
+| `max-speed` | lowest-friction throughput | Minimize latency and ceremony; prefer project workdirs and no extra opinion overhead |
+
+`absolute-balance` is intentionally named differently from `externalPriorityProfile: balanced` so the init-time preset and the persisted provider-order profile do not get conflated.
+
+### Preset expansion table
+
+| Key | `default` | `absolute-balance` | `external-aggressive` | `correctness-first` | `max-speed` |
+|---|---|---|---|---|---|
+| `consultantMode` | `disabled` | `internal` | `external` | `external` | `disabled` |
+| `delegationMode` | `manual` | `auto` | `force` | `force` | `auto` |
+| `mcpMode` | `auto` | `auto` | `auto` | `force` | `auto` |
+| `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
+| `preferExternalReviewer` | `false` | `true` | `true` | `true` | `false` |
+| `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` |
+| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `gemini-crosscheck` | `balanced` |
+| `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review `2`, others `1` | all `1` |
+| workdir modes | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `project` |
+| `externalClaudeSecretMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
+| `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
+| `externalClaudeProfile` (Codex-line only) | `sonnet-high` | `sonnet-high` | `sonnet-high` | `opus-max` | `sonnet-high` |
+
+`correctness-first` lane-specific opinion counts:
+- `advisory.repo-understanding: 2`
+- `advisory.design-adr: 2`
+- `review.pre-pr: 2`
+- `review.performance-architecture: 2`
+- all other lanes: `1`
+
+### Routing conventions (not persisted)
+
+- **same-host fast-path**: under `external-aggressive` and `max-speed`, when neutral isolation is not required, allow per-invocation explicit self-provider override. The stored file stays canonical; this is a routing rule, not a persisted key.
+- **overflow means spill, not serialize**: under `external-aggressive`, internal slot saturation pushes independent eligible lanes into `$external-worker`, `$external-reviewer`, or `$external-brigade` by default. Current rules already allow this; the preset makes it the expected interpretation.
 
 ## Shared keys
 
@@ -118,21 +171,32 @@ Recommended shipped profiles:
 | `balanced` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > codex > gemini` |
 |  | `review.pre-pr` | `claude > codex > gemini` |
+|  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
+|  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 |  | `worker.long-autonomous` | `claude > codex > gemini` |
+|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
+|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
 |  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
 |  | `review.visual` | `gemini > claude > codex` |
 | `gemini-crosscheck` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > gemini > codex` |
 |  | `review.pre-pr` | `claude > gemini > codex` |
+|  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
+|  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 |  | `worker.long-autonomous` | `claude > gemini > codex` |
+|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
+|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
 |  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
 |  | `review.visual` | `gemini > claude > codex` |
 
 Notes:
 - `balanced` is the implicit default profile and should always be available.
 - Repo-local heuristics may refine lane classification, but they must not invent a different provider universe.
+- Use `worker.systems-performance-implementation` for Rust hot paths, systems/perf-sensitive implementation, and media-pipeline work; keep `worker.default-implementation` for ordinary worker-side implementation.
+- Use `worker.ui-structural-modernization` for broad UI scaffold, layout rewrite, and modernization work; use `worker.ui-surgical-patch-cleanup` for exact patch, cleanup, and partial-edit correction work.
+- Use `review.performance-architecture` for performance/architecture review and hot-path cross-checks instead of overloading `review.pre-pr`.
 - Visual and decorative lanes may honestly prefer Gemini first when the task is image, icon, or decorative visual work.
 
 ### `externalOpinionCounts`
@@ -251,6 +315,10 @@ Structured defaults written alongside the scalar keys:
 | `externalPriorityProfile` | `balanced` |
 | `externalPriorityProfiles` | ship `balanced` and `gemini-crosscheck` |
 | `externalOpinionCounts` | all documented lanes default to `1` unless repo-local policy explicitly raises a lane |
+
+Default-comment guidance:
+- In the canonical exemplar, every shipped scalar default should say `default shared baseline` in the inline comment so the first-write value is visible directly in the file.
+- `balanced` should stay marked as the default shared routing profile inside the `externalPriorityProfiles` block.
 
 ## Task continuity
 
