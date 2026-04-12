@@ -12,7 +12,7 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 - The repository-defined recovery entry point is the first stop after interruption or context loss.
 - Active admitted items live in the configured active-item directory.
 - Completed, cancelled, or superseded items move to the configured archive location.
-- The older ignored `.plans/` directory is legacy local history. Keep it only as scratch or traceability material; do not use it as the canonical tracked source of truth for new items.
+- The older ignored `.plans/` directory is legacy local history. Keep it only as scratch or traceability material; dated plan logs belong in `.plans/YYYY-MM/`.
 
 `references-codex/` remains the home for stable repository-wide methodology. The configured task-memory directory, when used, is the home for item-specific execution memory.
 

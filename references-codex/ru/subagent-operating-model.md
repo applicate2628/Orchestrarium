@@ -154,7 +154,7 @@ AI gates не заменяют внешнюю engineering policy.
 - Если роль не согласна с upstream artifact, она возвращает `REVISE` или `BLOCKED` orchestrating owner'у вместо приватного переписывания scope.
 - Reviewer'ы остаются независимыми и возвращают findings orchestrating owner'у, а не начинают напрямую управлять implementation.
 - Прямая specialist-to-specialist collaboration допустима только когда orchestrating owner явно одобряет edge, scope и границу артефакта.
-- `$consultant` — опциональная независимая advisory-роль; она может исполняться внешним провайдером или внутренним независимым subagent, но никогда не становится delivery gate. Consultant включается через toggle file. Нет toggle file = disabled. Режимы: `external` (cross-provider CLI), `internal` (same-platform subagent), `disabled`. Skill `/second-opinion` (Codex) или команда `/agents-second-opinion` (Claude Code) управляет toggle и вызывает consultant.
+- `$consultant` — опциональная независимая advisory-роль; она может исполняться внешним провайдером или внутренним независимым subagent, но никогда не становится delivery gate. Текущий режим задаётся через `.agents/.agents-mode` ключом `consultantMode`; выбор провайдера и Claude-specific transport/profile behavior следуют из `externalProvider`, `externalClaudeSecretMode`, `externalClaudeApiMode` и `externalClaudeProfile` в том же файле. Init-time presets — это только shortcuts и они не сохраняются как имя preset'а.
 
 ### 3.9 Rolling-loop execution
 

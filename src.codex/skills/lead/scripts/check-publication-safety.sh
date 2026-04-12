@@ -88,11 +88,19 @@ if [[ "$script_path" == "$repo_root/"* ]]; then
 fi
 
 if [[ "$scan_mode" == "tracked" ]]; then
-  if [[ -n "$script_rel" ]]; then
-    cmd+=(--cached -- . ":!$script_rel")
-  else
-    cmd+=(--cached -- .)
+  staged_paths=()
+  while IFS= read -r -d '' staged_path; do
+    if [[ "$staged_path" == *"/check-publication-safety.sh" ]]; then
+      continue
+    fi
+    staged_paths+=("$staged_path")
+  done < <(git diff --cached --name-only --diff-filter=ACMRTUXB -z --)
+
+  if [[ ${#staged_paths[@]} -eq 0 ]]; then
+    exit 0
   fi
+
+  cmd+=(--cached -- "${staged_paths[@]}")
 else
   cmd+=(--no-index -- "$scan_path")
 fi

@@ -10,6 +10,7 @@ set -euo pipefail
 # Auto-detect layout.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 DEV_REPO=0
+CODEX_RUNTIME_ROOT=""
 if [[ -d "src.codex/skills" && -f "src.codex/AGENTS.shared.md" ]]; then
   # Dev repo: assemble AGENTS.md from split source files for validation
   SKILLS_DIR="$(cd "src.codex/skills" && pwd -P)"
@@ -23,18 +24,22 @@ elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DI
   SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
   SCRIPTS_DIR="$SCRIPT_DIR"
   AGENTS_FILE="$(cd "$SCRIPT_DIR/../../.." && pwd -P)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd -P)"
 elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DIR/../../../../AGENTS.md" ]]; then
   SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
   SCRIPTS_DIR="$SCRIPT_DIR"
   AGENTS_FILE="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)/.codex"
 elif [[ -d ".codex/skills" && -f ".codex/AGENTS.md" ]]; then
   SKILLS_DIR="$(cd ".codex/skills" && pwd -P)"
   SCRIPTS_DIR="$(cd ".codex/skills/lead/scripts" && pwd -P)"
   AGENTS_FILE="$(cd ".codex" && pwd -P)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd ".codex" && pwd -P)"
 elif [[ -d ".agents/skills" && -f "AGENTS.md" ]]; then
   SKILLS_DIR="$(cd ".agents/skills" && pwd -P)"
   SCRIPTS_DIR="$(cd ".agents/skills/lead/scripts" && pwd -P)"
   AGENTS_FILE="$(cd "." && pwd -P)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd "." && pwd -P)/.codex"
 else
   echo "FAIL: Could not detect Orchestrarium layout. Expected one of: src.codex/, .codex/, or .agents/ with root AGENTS.md." >&2
   exit 1
@@ -77,6 +82,9 @@ if [[ -d "src.codex/skills" && -f "src.codex/AGENTS.shared.md" ]]; then
   echo ""
   echo "=== Branch-level docs surface ==="
   for f in \
+    src.codex/agents/default.toml \
+    src.codex/agents/worker.toml \
+    src.codex/agents/explorer.toml \
     src.codex/README.md \
     docs/README.md \
     docs/provider-runtime-layout.md \
@@ -279,6 +287,41 @@ if [[ $DEV_REPO -eq 1 ]]; then
     pass "agents-mode reference documents read-time normalization semantics"
   else
     fail "agents-mode reference documents read-time normalization semantics"
+  fi
+  if grep -Fq ".codex/agents/default.toml" "INSTALL.md"; then
+    pass "INSTALL.md documents Codex built-in agent override seeding"
+  else
+    fail "INSTALL.md documents Codex built-in agent override seeding"
+  fi
+  if grep -Fq "~/.codex/agents/" "docs/provider-runtime-layout.md"; then
+    pass "provider runtime layout documents global Codex built-in agent overrides"
+  else
+    fail "provider runtime layout documents global Codex built-in agent overrides"
+  fi
+  if grep -Fq "agents/default.toml" "src.codex/README.md"; then
+    pass "src.codex/README.md documents the built-in agent override payload"
+  else
+    fail "src.codex/README.md documents the built-in agent override payload"
+  fi
+fi
+
+if [[ -n "$CODEX_RUNTIME_ROOT" ]]; then
+  echo ""
+  echo "=== Codex built-in agent overrides ==="
+  if [[ -f "$CODEX_RUNTIME_ROOT/agents/default.toml" ]]; then
+    pass "agents/default.toml installed"
+  else
+    fail "agents/default.toml installed"
+  fi
+  if [[ -f "$CODEX_RUNTIME_ROOT/agents/worker.toml" ]]; then
+    pass "agents/worker.toml installed"
+  else
+    fail "agents/worker.toml installed"
+  fi
+  if [[ -f "$CODEX_RUNTIME_ROOT/agents/explorer.toml" ]]; then
+    pass "agents/explorer.toml installed"
+  else
+    fail "agents/explorer.toml installed"
   fi
 fi
 

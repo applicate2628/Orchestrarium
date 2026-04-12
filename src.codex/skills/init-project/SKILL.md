@@ -16,6 +16,39 @@ Guide the user through first-time Codex project bootstrap for project policies a
 - Before claiming completion, reconcile the current result against the original request and any still-open required follow-up inside the same task.
 - If a required next action is already known and still inside the current task, keep the task open instead of stopping at a partial batch.
 
+## Preset expansion table
+
+Presets are init-time shortcuts only. They expand into canonical `agents-mode` keys. The preset name is NOT persisted in the file.
+
+| Key | `default` (safe-init) | `absolute-balance` (everyday center) | `external-aggressive` (aggressive external use) | `correctness-first` (no-time-limit correctness) | `max-speed` (speed-first) |
+|---|---|---|---|---|---|
+| `consultantMode` | `disabled` | `internal` | `external` | `external` | `disabled` |
+| `delegationMode` | `manual` | `auto` | `force` | `force` | `auto` |
+| `mcpMode` | `auto` | `auto` | `auto` | `force` | `auto` |
+| `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
+| `preferExternalReviewer` | `false` | `true` | `true` | `true` | `false` |
+| `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` |
+| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `gemini-crosscheck` | `balanced` |
+| `externalPriorityProfiles` | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is |
+| `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review lanes `2`, others `1` | all `1` |
+| `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalGeminiWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalClaudeSecretMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
+| `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
+| `externalClaudeProfile` | `sonnet-high` | `sonnet-high` | `sonnet-high` | `opus-max` | `sonnet-high` |
+
+`correctness-first` lane-specific opinion counts:
+- `advisory.repo-understanding: 2`
+- `advisory.design-adr: 2`
+- `review.pre-pr: 2`
+- `review.performance-architecture: 2`
+- all other lanes: `1`
+
+Routing conventions (not persisted as keys):
+- **same-host fast-path**: under `external-aggressive` and `max-speed`, when neutral isolation is not required, allow per-invocation explicit self-provider override. Keep the stored file canonical; this is a routing rule, not a persisted key.
+- **overflow means spill, not serialize**: under `external-aggressive`, internal slot saturation pushes independent eligible lanes into `$external-worker`, `$external-reviewer`, or `$external-brigade` by default.
+
 ## Steps
 
 1. **Read current state.**
@@ -38,7 +71,14 @@ Guide the user through first-time Codex project bootstrap for project policies a
      - accept shorthand answers or the default
    - If the user says "defaults for the rest" or similar, apply defaults to all remaining policy areas.
 
-4. **Configure operator modes.**
+4. **Select a preset (optional).**
+   - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, or `max-speed`.
+   - If the user picks a preset, apply its full key expansion from the table above as the starting values.
+   - If the user says "custom" or skips this step, start from the `default` baseline.
+   - After applying a preset, still walk through each key so the user can fine-tune individual values.
+   - The preset name is NOT persisted — only the expanded canonical keys are written.
+
+5. **Configure operator modes.**
    - Walk through the canonical `agents-mode` keys one at a time:
      - `consultantMode`
      - `delegationMode`
@@ -52,7 +92,7 @@ Guide the user through first-time Codex project bootstrap for project policies a
      - `externalClaudeSecretMode`
      - `externalClaudeApiMode`
      - `externalClaudeProfile`
-   - Use the existing value when present; otherwise default to:
+   - Use the existing value when present, the preset-expanded value if one was selected, or otherwise default to:
      - `consultantMode: disabled`
      - `delegationMode: manual`
      - `mcpMode: auto`
@@ -70,12 +110,12 @@ Guide the user through first-time Codex project bootstrap for project policies a
    - `externalClaudeProfile: sonnet-high`
    - Accept shorthand answers such as `force`, `external reviewer only`, `opus`, or `defaults for the rest`.
 
-5. **Confirm the final choices.**
+6. **Confirm the final choices.**
    - Present one summary table for `## Project policies`.
    - Present one summary table for `.agents/.agents-mode`.
    - Ask for confirmation before writing.
 
-6. **Write `.agents/.agents-mode`.**
+7. **Write `.agents/.agents-mode`.**
    - Write the canonical file to `.agents/.agents-mode`.
    - Preserve unknown keys when updating an existing file.
    - Treat comment-free, partial, or older-layout files as legacy input and rewrite them to the current canonical format instead of preserving stale layout.
@@ -102,7 +142,7 @@ Guide the user through first-time Codex project bootstrap for project policies a
    externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max
    ```
 
-7. **Write `## Project policies` to `AGENTS.md`.**
+8. **Write `## Project policies` to `AGENTS.md`.**
    - Add or replace only the `## Project policies` section in the project's root `AGENTS.md`.
    - If the section already exists, update it in place.
    - If it does not exist, append it at the end of the file so it stays user-managed outside the installed pack content.
@@ -122,7 +162,7 @@ Guide the user through first-time Codex project bootstrap for project policies a
    - **Dependencies:** {policy description}
    ```
 
-8. **Confirm completion.**
+9. **Confirm completion.**
    - Tell the user the project policies and operator mode file are saved.
    - Mention `$second-opinion` for later consultant toggle changes.
 

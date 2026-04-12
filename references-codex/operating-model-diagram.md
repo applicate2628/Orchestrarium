@@ -171,5 +171,5 @@ Lifecycle of `constraints/claims.md` in the work-item folder:
 - Reviewers stay independent and report to the orchestrating owner.
 - Interaction types: `LEAD_MED` (default), `DIRECT` (sequential, lead-authorized), `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`. Note: `PARALLEL` is not natively supported in Codex — independent scopes are handled sequentially.
 - Reviewers tag cross-domain findings with `[CROSS-DOMAIN: <target-domain>]`; the orchestrator routes them to the appropriate specialist.
-- Any role files adjacent findings in `work-items/bugs/` without expanding scope.
+- Any role files adjacent findings in the configured bug registry path, if the repository uses one, without expanding scope.
 - Every completed chain persists artifacts: canonical docs in `work-items/`, session logs in `.reports/`, plan logs in `.plans/`.
