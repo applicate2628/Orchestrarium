@@ -43,10 +43,13 @@ Use these roles first for skill-pack support and maintenance:
 
 ## Repository task memory
 
-Tracked task memory is optional and repository-defined. When the repository uses it, keep admitted work in the configured task-memory directory, resume from the repository-defined recovery entry point, and archive closed items in the configured archive location.
+This monorepo keeps `work-items/` as repo-local task memory for interruption recovery, but `work-items/` is intentionally local-only and must stay out of tracked git.
 
-- New admitted work routed through `$lead` belongs in the configured task-memory directory when the repository uses tracked task memory. Completed, cancelled, or superseded work moves to the configured archive location.
-- For lead-routed non-trivial work, `roadmap.md`, `brief.md`, and `status.md` are mandatory when tracked task memory is enabled.
+- `work-items/` remains the repo-local recovery directory for admitted work and archive history on the operator machine, but it is not publication-facing tracked canon for this repository.
+- When information from local task memory needs to become tracked source of truth, promote the accepted result into the owning canonical surface such as `docs/`, `shared/references/`, pack references, `README.md`, `INSTALL.md`, or `RELEASE_NOTES.md` instead of committing `work-items/` directly.
+- New admitted work routed through `$lead` may still use `work-items/` locally for recovery, resume, and archive hygiene; completed, cancelled, or superseded work stays in the configured local archive location unless a human explicitly asks to publish a distilled artifact elsewhere.
+
+- For lead-routed non-trivial work, `roadmap.md`, `brief.md`, and `status.md` are mandatory when the local task-memory workflow is enabled.
 - `plan.md` becomes mandatory before implementation or review starts.
 - `closure.md` becomes mandatory before moving an item to the configured archive location.
 - Missing required upstream artifacts are a hard gate. If the current stage needs `roadmap`, `research`, `design`, `plan`, specialist constraints, or review artifacts and they are missing or stale, stop and restore them or route the item back to the required upstream stage before continuing delivery.
@@ -60,7 +63,7 @@ Tracked task memory is optional and repository-defined. When the repository uses
 
 - [shared/references/repository-publication-safety.md](shared/references/repository-publication-safety.md) is the repo-wide source of truth for what may be committed to tracked git.
 - `RELEASE_NOTES.md` is the canonical tracked release log for this repository.
-- Root `.gitignore` defines the local-only scratch boundary at `/.scratch/`; keep raw logs, transcripts, temp outputs, and pre-redaction material there.
+- Root `.gitignore` defines the local-only boundary at `/.scratch/`, `/.plans/`, `/.reports/`, and `/work-items/`; keep raw logs, transcripts, temp outputs, and repo-local task-memory artifacts there.
 - Never hardcode workstation-specific paths, usernames, drive letters, or local tool details into tracked content unless they are intentionally public and synthetic.
 - Human review before `git push`, release, or equivalent publication must include a leak-check of staged changes.
 - Run `bash scripts/check-publication-gate.sh` or `.\scripts\check-publication-gate.ps1` as the repo-local publication gate before publication review; it combines the staged leak scan with the `RELEASE_NOTES.md` requirement for release-relevant tracked changes.

@@ -274,32 +274,48 @@ function Copy-RequiredDirectory {
     }
 }
 
-function Ensure-ReportsGitignore {
+function Ensure-LocalOnlyGitignoreEntries {
     param([string]$ProjectRoot)
 
     $gitignore = Join-Path $ProjectRoot ".gitignore"
+    $entries = @("/.reports/", "/work-items/")
+    $existingLines = @()
     if (Test-Path -LiteralPath $gitignore) {
         $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
-        if ($existingLines -contains "/.reports/" -or $existingLines -contains ".reports/") {
-            Write-Host "  .gitignore: /.reports/ already present"
-            return
+    }
+
+    $missing = @()
+    foreach ($entry in $entries) {
+        $alternate = $entry.TrimStart("/")
+        if ($existingLines -notcontains $entry -and $existingLines -notcontains $alternate) {
+            $missing += $entry
         }
     }
 
-    Write-Host "  Ensuring .gitignore ignores /.reports/..."
+    if ($missing.Count -eq 0) {
+        Write-Host "  .gitignore: local-only entries already present"
+        return
+    }
+
+    Write-Host "  Ensuring .gitignore ignores local-only task-memory paths..."
     if ($DryRun) {
-        if (Test-Path -LiteralPath $gitignore) {
-            Write-Host "    [dry-run] would append '/.reports/' to $gitignore"
-        } else {
-            Write-Host "    [dry-run] would create $gitignore with '/.reports/'"
+        foreach ($entry in $missing) {
+            if (Test-Path -LiteralPath $gitignore) {
+                Write-Host "    [dry-run] would append '$entry' to $gitignore"
+            } else {
+                Write-Host "    [dry-run] would create $gitignore with '$entry'"
+            }
         }
         return
     }
 
-    if (Test-Path -LiteralPath $gitignore) {
-        Add-Content -LiteralPath $gitignore -Value "`r`n/.reports/"
-    } else {
-        Set-Content -LiteralPath $gitignore -Value "/.reports/"
+    if (-not (Test-Path -LiteralPath $gitignore)) {
+        Set-Content -LiteralPath $gitignore -Value ($missing -join "`r`n")
+        return
+    }
+
+    foreach ($entry in $missing) {
+        Add-Content -LiteralPath $gitignore -Value "`r`n$entry"
     }
 }
 
@@ -694,7 +710,7 @@ if (Test-Path $srcAgents) {
 }
 
 if ($Mode -ne "global") {
-    Ensure-ReportsGitignore -ProjectRoot $ProjectRoot
+    Ensure-LocalOnlyGitignoreEntries -ProjectRoot $ProjectRoot
 }
 
 Ensure-DefaultFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode"

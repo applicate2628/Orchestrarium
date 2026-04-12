@@ -149,6 +149,51 @@ function Install-Tree {
     }
 }
 
+function Ensure-LocalOnlyGitignoreEntries {
+    param([string]$ProjectRoot)
+
+    $gitignore = Join-Path $ProjectRoot ".gitignore"
+    $entries = @("/.reports/", "/work-items/")
+    $existingLines = @()
+    if (Test-Path -LiteralPath $gitignore) {
+        $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
+    }
+
+    $missing = @()
+    foreach ($entry in $entries) {
+        $alternate = $entry.TrimStart("/")
+        if ($existingLines -notcontains $entry -and $existingLines -notcontains $alternate) {
+            $missing += $entry
+        }
+    }
+
+    if ($missing.Count -eq 0) {
+        Write-Host "  .gitignore: local-only entries already present"
+        return
+    }
+
+    Write-Host "  Ensuring .gitignore ignores local-only task-memory paths..."
+    if ($DryRun) {
+        foreach ($entry in $missing) {
+            if (Test-Path -LiteralPath $gitignore) {
+                Write-Host "    [dry-run] would append '$entry' to $gitignore"
+            } else {
+                Write-Host "    [dry-run] would create $gitignore with '$entry'"
+            }
+        }
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $gitignore)) {
+        Set-Content -LiteralPath $gitignore -Value ($missing -join "`r`n")
+        return
+    }
+
+    foreach ($entry in $missing) {
+        Add-Content -LiteralPath $gitignore -Value "`r`n$entry"
+    }
+}
+
 function Get-PreservedGeminiImports {
     param(
         [string[]]$Lines,
@@ -540,6 +585,7 @@ if ($Mode -eq "global") {
     Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.md"
 } else {
     Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.md" -PreserveExisting
+    Ensure-LocalOnlyGitignoreEntries -ProjectRoot $ProjectRoot
 }
 Install-PackFile -SourceFile $ExtensionManifestSource -TargetFile $ExtensionManifestTarget -Label "extension manifest"
 Install-PackFile -SourceFile $ExtensionReadmeSource -TargetFile $ExtensionReadmeTarget -Label "extension README"

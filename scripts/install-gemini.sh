@@ -176,6 +176,46 @@ install_tree() {
   shopt -u nullglob
 }
 
+ensure_local_only_gitignore_entries() {
+  local project_root="$1"
+  local gitignore="$project_root/.gitignore"
+  local entries=("/.reports/" "/work-items/")
+  local missing=()
+
+  for entry in "${entries[@]}"; do
+    local alternate="${entry#/}"
+    if [[ -f "$gitignore" ]] && { grep -Fxq "$entry" "$gitignore" || grep -Fxq "$alternate" "$gitignore"; }; then
+      continue
+    fi
+    missing+=("$entry")
+  done
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    echo "  .gitignore: local-only entries already present"
+    return
+  fi
+
+  echo "  Ensuring .gitignore ignores local-only task-memory paths..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    for entry in "${missing[@]}"; do
+      if [[ -f "$gitignore" ]]; then
+        echo "    [dry-run] would append '$entry' to $gitignore"
+      else
+        echo "    [dry-run] would create $gitignore with '$entry'"
+      fi
+    done
+    return
+  fi
+
+  if [[ ! -f "$gitignore" ]]; then
+    printf '%s\n' "${missing[@]}" > "$gitignore"
+  else
+    for entry in "${missing[@]}"; do
+      printf '\n%s\n' "$entry" >> "$gitignore"
+    done
+  fi
+}
+
 collect_preserved_gemini_imports() {
   local existing="$1" start_line="$2" end_line="$3"
   awk -v start="$start_line" -v end="$end_line" '
@@ -547,6 +587,7 @@ if [[ "$MODE" == "global" ]]; then
   install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md"
 else
   install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md" 1
+  ensure_local_only_gitignore_entries "$PROJECT_ROOT"
 fi
 install_pack_file "$EXTENSION_MANIFEST_SOURCE" "$EXTENSION_MANIFEST_TARGET" "extension manifest"
 install_pack_file "$EXTENSION_README_SOURCE" "$EXTENSION_README_TARGET" "extension README"
