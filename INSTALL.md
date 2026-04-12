@@ -64,7 +64,7 @@ Notes:
 - Project-level Codex installs use `.agents/skills/` plus the project root `AGENTS.md`.
 - Codex installs also seed built-in subagent overrides into `.codex/agents/default.toml`, `.codex/agents/worker.toml`, and `.codex/agents/explorer.toml` for project installs, or `~/.codex/agents/` for global installs.
 - Those shipped override files pin the built-in `default`, `worker`, and `explorer` subagents to `gpt-5.4` with `xhigh` reasoning effort; reinstall preserves any existing custom files at those paths instead of overwriting them.
-- Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
+- Project-level installs ensure `/.reports/` and `/work-items/` are present in the target repo `.gitignore` if they are missing, because session logs and repo-local task memory are local-only runtime output.
 - The canonical Codex-line operator file is `.agents/.agents-mode` for project installs and `~/.codex/.agents-mode` for global installs.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
 - Decision-driving reads of an existing `.agents/.agents-mode` file must also normalize stale, comment-free, or older-layout overlays to the current canonical format before trusting the flags.
@@ -93,7 +93,7 @@ Use `scripts/install-claude.sh` or `scripts/install-claude.ps1` when you want th
 Notes:
 
 - Project-level Claude installs create or update `.claude/AGENTS.md` and `.claude/CLAUDE.md`.
-- Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
+- Project-level installs ensure `/.reports/` and `/work-items/` are present in the target repo `.gitignore` if they are missing, because session logs and repo-local task memory are local-only runtime output.
 - Claude memory is shipped in `src.claude/memory/` and preserved across reinstalls by the existing installer behavior.
 - User-side Claude imports such as `@memory/...` are preserved across reinstalls when they live in the installed `.claude/CLAUDE.md` import block alongside `@AGENTS.md`.
 - The canonical Claude-line operator file is `.claude/.agents-mode` for project installs and `~/.claude/.agents-mode` for global installs.
@@ -127,6 +127,7 @@ Notes:
 - Project-level Gemini installs preserve any user-owned content outside the managed Orchestrarium block inside `GEMINI.md`.
 - User-side `@...` imports that live in the installed `GEMINI.md` import block alongside `@./AGENTS.md` are preserved across reinstalls.
 - Gemini installs materialize the shared-governance layer as `AGENTS.md`; `GEMINI.md` loads it through the official `@./AGENTS.md` import. Project installs preserve an existing root `AGENTS.md` instead of overwriting it.
+- Project-level Gemini installs ensure `/.reports/` and `/work-items/` are present in the target repo `.gitignore` if they are missing, because session logs and repo-local task memory are local-only runtime output.
 - Gemini installs materialize the official Gemini extension package under `.gemini/extensions/orchestrarium-gemini/` for project installs and `~/.gemini/extensions/orchestrarium-gemini/` for global installs. That extension is the canonical installed Gemini payload and carries `gemini-extension.json`, `README.md`, `GEMINI.md`, `AGENTS.md`, `skills/`, `agents/`, and `commands/`.
 - To avoid precedence conflicts and noisy loader warnings, Orchestrarium does not mirror the same pack into top-level `.gemini/skills/`, `.gemini/agents/`, or `.gemini/commands/`. Those Gemini-native user/workspace tiers remain available for deliberate user overrides only.
 - Reinstall cleans legacy Orchestrarium-owned duplicates from `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` when they would shadow the installed extension payload.

@@ -66,7 +66,11 @@ for staged_path in "${staged_paths[@]}"; do
   fi
 
   case "$staged_path" in
-    .reports/*|.plans/*|.scratch/*|work-items/*)
+    work-items/*)
+      echo "FAIL: work-items/ is local-only task memory and must not be staged for publication" >&2
+      exit 1
+      ;;
+    .reports/*|.plans/*|.scratch/*)
       continue
       ;;
   esac

@@ -496,31 +496,43 @@ install_skill() {
   fi
 }
 
-ensure_reports_gitignore() {
+ensure_local_only_gitignore_entries() {
   local project_root="$1"
   local gitignore="$project_root/.gitignore"
+  local entries=("/.reports/" "/work-items/")
+  local missing=()
 
-  if [[ -f "$gitignore" ]]; then
-    if grep -Fxq "/.reports/" "$gitignore" || grep -Fxq ".reports/" "$gitignore"; then
-      echo "  .gitignore: /.reports/ already present"
-      return
+  for entry in "${entries[@]}"; do
+    local alternate="${entry#/}"
+    if [[ -f "$gitignore" ]] && { grep -Fxq "$entry" "$gitignore" || grep -Fxq "$alternate" "$gitignore"; }; then
+      continue
     fi
-  fi
+    missing+=("$entry")
+  done
 
-  echo "  Ensuring .gitignore ignores /.reports/..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    if [[ -f "$gitignore" ]]; then
-      echo "    [dry-run] would append '/.reports/' to $gitignore"
-    else
-      echo "    [dry-run] would create $gitignore with '/.reports/'"
-    fi
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    echo "  .gitignore: local-only entries already present"
     return
   fi
 
-  if [[ -f "$gitignore" ]] && [[ -s "$gitignore" ]]; then
-    printf '\n/.reports/\n' >> "$gitignore"
+  echo "  Ensuring .gitignore ignores local-only task-memory paths..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    for entry in "${missing[@]}"; do
+      if [[ -f "$gitignore" ]]; then
+        echo "    [dry-run] would append '$entry' to $gitignore"
+      else
+        echo "    [dry-run] would create $gitignore with '$entry'"
+      fi
+    done
+    return
+  fi
+
+  if [[ ! -f "$gitignore" ]]; then
+    printf '%s\n' "${missing[@]}" > "$gitignore"
   else
-    printf '/.reports/\n' > "$gitignore"
+    for entry in "${missing[@]}"; do
+      printf '\n%s\n' "$entry" >> "$gitignore"
+    done
   fi
 }
 
@@ -774,7 +786,7 @@ else
 fi
 
 if [ "$MODE" != "global" ]; then
-  ensure_reports_gitignore "$PROJECT_ROOT"
+  ensure_local_only_gitignore_entries "$PROJECT_ROOT"
 fi
 
 ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode"

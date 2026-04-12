@@ -6,15 +6,15 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 
 ## Canonical location
 
-- `work-items/` is the canonical tracked task-memory root for this repository.
+- `work-items/` is the canonical repo-local task-memory root for this repository, but it is intentionally local-only and untracked in git.
 - `work-items/index.md` is the recovery entry point.
 - Active admitted items live in `work-items/active/<date>-<slug>/`.
 - Completed, cancelled, or superseded items move to `work-items/archive/<date>-<slug>/`.
 - `.reports/YYYY-MM/` stores session logs — brief summaries of what happened in a session, not copies of canonical artifacts. Named `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
 - `.plans/YYYY-MM/` stores plan logs — plan drafts and iterations. Named `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md`.
-- `.reports/` and `.plans/` are traceability logs, not canonical sources. The canonical documentation lives in `work-items/`.
+- `.reports/` and `.plans/` are traceability logs, not canonical tracked sources. `work-items/` remains the local recovery source of truth for item-specific execution memory on the operator machine.
 
-`shared/references/` is the canonical home for stable repository-wide design methodology. `references-claude/` keeps Claude-specific reference material plus compatibility pointers. `work-items/` is the home for item-specific execution memory. `.reports/` and `.plans/` are session-level audit trails.
+`shared/references/` is the canonical home for stable repository-wide design methodology. `references-claude/` keeps Claude-specific reference material plus compatibility pointers. `work-items/` is the home for local item-specific execution memory. `.reports/` and `.plans/` are session-level audit trails.
 `docs/agents-mode-reference.md` is the shared operator reference when `.claude/.agents-mode` behavior matters.
 
 ## Mandatory artifact set
@@ -73,11 +73,12 @@ Additional artifacts are required when the workflow calls for them:
 
 ## Public-git safety
 
-- `work-items/` is tracked repository documentation and must be safe for publication.
+- `work-items/` is local-only task memory and must stay out of tracked git.
 - The repo-wide policy for all tracked content lives in [`shared/references/repository-publication-safety.md`](../shared/references/repository-publication-safety.md).
-- Do not place secrets, tokens, credentials, customer data, private identifiers, raw logs, full command transcripts, or machine-specific absolute paths into tracked work-item artifacts.
+- Do not force-add or stage `work-items/` content for publication. Promote accepted conclusions into tracked canonical docs instead.
+- Keep secrets, tokens, credentials, customer data, private identifiers, raw logs, full command transcripts, and machine-specific absolute paths out of any distilled tracked artifact derived from local task memory.
 - Prefer redacted summaries over verbatim operational detail when traceability does not require the raw value.
-- Keep local-only scratch notes and raw artifacts outside tracked `work-items/`.
+- Keep scratch notes, raw artifacts, and evolving recovery state inside local-only `work-items/`, `.reports/`, `.plans/`, or `/.scratch/` instead of tracked docs.
 
 ## Minimal operating rule
 
