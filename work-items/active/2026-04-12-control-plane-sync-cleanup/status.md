@@ -3,11 +3,11 @@
 - Template: full-delivery
 - Orchestrator: `$lead`
 - Change class: behavioral
-- Current state: active
+- Current state: ready-for-post-commit-review
 - Current stage: `Closeout`
 - Last accepted artifact: deep brigade-driven truth-sync wave plus one bounded follow-on systems/perf routing extension that adds `worker.systems-performance-implementation` with Codex first across the canonical matrices, mirrored docs, and validation surfaces, all with fresh verification
-- Next concrete action: run human review on the widened dirty batch using the recorded release commit plan, stage Commit A, rerun the publication-safety gate on that staged snapshot, and only then decide whether to commit
-- Primary task status: completed within the widened admitted scope, including the explicitly admitted Codex-first systems/perf lane extension
+- Next concrete action: review the committed changes and the installed global runtimes, then decide whether to push or publish; no push or publication step has been taken yet
+- Primary task status: completed within the widened admitted scope, including the explicitly admitted Codex-first systems/perf lane extension, commit packaging, and global install refresh
 - Active agents:
   - `$lead` main session
 - Completed agents:
@@ -43,3 +43,6 @@
   - Fresh post-polish verification passed `git diff --check` on the touched entry-doc files plus the monorepo and standalone validators for Codex, Claude, and Gemini.
   - A final pre-release pass confirmed the dirty batch is still intentionally unstaged and spans 26 tracked monorepo files plus the new tracked `work-items/` tree and `src.codex/agents/` payload. The publication-safety script returned clean on the current state, but that run is only advisory until a human-reviewed staged snapshot exists.
   - A release commit-boundary plan now exists at `.plans/2026-04/plan(lead)-2026-04-12_16-58_release-commit-boundaries.md`, splitting the monorepo into Commit A (routing/install/release-surface canon) and Commit B (tracked task-memory plus provider addendum truth-sync), with separate standalone mirror commit scopes recorded for `codex`, `claude`, and `gemini`.
+  - Commit packaging is complete. Monorepo commits: `6a18ab0` (`Sync agents-mode routing canon and install surfaces`) and `34992e0` (`Track task memory and sync provider addenda`). Standalone mirror commits: `bfa7a1b` for `codex`, `d779d46` for `claude`, and `df4f553` for `gemini`.
+  - Global install refresh completed from the monorepo source tree with `scripts/install-codex.ps1 -Global`, `scripts/install-claude.ps1 -Global`, and `scripts/install-gemini.ps1 -Global`. Verified targets: `~/.codex`, `~/.claude`, and `~/.gemini`.
+  - During standalone Codex packaging, the PowerShell publication gate passed but the bash publication gate exposed a worktree-path false-positive / path-resolution quirk. The standalone Codex publication checker was synced to the staged-path-scanning logic already used in the monorepo before commit.
