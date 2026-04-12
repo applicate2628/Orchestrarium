@@ -41,7 +41,7 @@ flowchart TB
 
 ## 3. Direct peer edges (optimizations)
 
-These edges complement hub-and-spoke. Lead remains orchestrating owner; direct edges require lead authorization.
+These edges complement hub-and-spoke. Lead remains orchestrating owner; direct edges require lead approval of the edge, scope, and artifact boundary.
 
 ```mermaid
 flowchart LR
@@ -102,7 +102,7 @@ flowchart TB
 | Situation | Strategy | Key roles |
 | --- | --- | --- |
 | What should enter delivery next? | Roadmap / Intake loop | `$product-manager`, `$product-analyst` |
-| Approved item needs execution | Delivery loop | `$lead` -> research -> design -> plan -> implement -> QA/review |
+| Approved item needs execution | Delivery loop | `$lead` -> research -> design -> plan -> implement -> QA/review -> lead |
 | Next decision blocked by missing facts | Fact-first routing | `$analyst`, `$product-analyst`, specialist evidence lane |
 | Domain risk can independently fail result | Risk-owner routing | Relevant constraint role + corresponding reviewer |
 | Admitted item changed mid-delivery | Re-intake loop | `$lead` -> `$product-manager` -> `$lead` |

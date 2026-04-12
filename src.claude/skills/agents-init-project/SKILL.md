@@ -16,6 +16,38 @@ You are guiding the user through project policy configuration for the Claudestra
 - Before claiming completion, reconcile the current result against the original request and any still-open required follow-up inside the same task.
 - If a required next action is already known and still inside the current task, keep the task open instead of stopping at a partial batch.
 
+## Preset expansion table
+
+Presets are init-time shortcuts only. They expand into canonical `agents-mode` keys. The preset name is NOT persisted in the file.
+
+| Key | `default` (safe-init) | `absolute-balance` (everyday center) | `external-aggressive` (aggressive external use) | `correctness-first` (no-time-limit correctness) | `max-speed` (speed-first) |
+|---|---|---|---|---|---|
+| `consultantMode` | `disabled` | `internal` | `external` | `external` | `disabled` |
+| `delegationMode` | `manual` | `auto` | `force` | `force` | `auto` |
+| `mcpMode` | `auto` | `auto` | `auto` | `force` | `auto` |
+| `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
+| `preferExternalReviewer` | `false` | `true` | `true` | `true` | `false` |
+| `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` |
+| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `gemini-crosscheck` | `balanced` |
+| `externalPriorityProfiles` | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is |
+| `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review lanes `2`, others `1` | all `1` |
+| `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalGeminiWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalClaudeSecretMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
+| `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
+
+`correctness-first` lane-specific opinion counts:
+- `advisory.repo-understanding: 2`
+- `advisory.design-adr: 2`
+- `review.pre-pr: 2`
+- `review.performance-architecture: 2`
+- all other lanes: `1`
+
+Routing conventions (not persisted as keys):
+- **same-host fast-path**: under `external-aggressive` and `max-speed`, when neutral isolation is not required, allow per-invocation explicit self-provider override. Keep the stored file canonical; this is a routing rule, not a persisted key.
+- **overflow means spill, not serialize**: under `external-aggressive`, internal slot saturation pushes independent eligible lanes into `$external-worker`, `$external-reviewer`, or `$external-brigade` by default.
+
 ## Steps
 
 1. **Read current state.**
@@ -36,7 +68,14 @@ You are guiding the user through project policy configuration for the Claudestra
    - Ask the user to pick (or accept default)
    - If the user says "defaults for the rest" or similar, apply defaults to all remaining policies
 
-4. **Configure operator modes.**
+4. **Select a preset (optional).**
+   - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, or `max-speed`.
+   - If the user picks a preset, apply its full key expansion from the table above as the starting values.
+   - If the user says "custom" or skips this step, start from the `default` baseline.
+   - After applying a preset, still walk through each key so the user can fine-tune individual values.
+   - The preset name is NOT persisted — only the expanded canonical keys are written.
+
+5. **Configure operator modes.**
    - Walk through the canonical Claude-line `agents-mode` keys one at a time:
      - `consultantMode`
      - `delegationMode`
@@ -52,7 +91,7 @@ You are guiding the user through project policy configuration for the Claudestra
      - `externalGeminiWorkdirMode`
      - `externalClaudeSecretMode`
      - `externalClaudeApiMode`
-    - Use the existing value when present; otherwise default to:
+    - Use the existing value when present, the preset-expanded value if one was selected, or otherwise default to:
       - `consultantMode: disabled`
       - `delegationMode: manual`
       - `mcpMode: auto`
@@ -71,12 +110,12 @@ You are guiding the user through project policy configuration for the Claudestra
    - `externalOpinionCounts` is a same-lane distinct-opinion requirement, not a concurrency cap; use the brigade surface when you need bounded parallel same-provider reuse.
    - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
-5. **Confirm choices.**
+6. **Confirm choices.**
    - Present one summary table for `## Project policies`.
    - Present one summary table for `.claude/.agents-mode`.
    - Ask for confirmation before writing.
 
-6. **Write `.claude/.agents-mode`.**
+7. **Write `.claude/.agents-mode`.**
    - Write the canonical file to `.claude/.agents-mode`.
    - Preserve unknown keys when updating an existing file.
    - Treat comment-free, partial, or older-layout files as legacy input and rewrite them to the current canonical format instead of preserving stale layout.
@@ -103,7 +142,7 @@ You are guiding the user through project policy configuration for the Claudestra
    externalClaudeApiMode: {value}  # allowed when Claude is selected: disabled | auto | force
    ```
 
-7. **Write to CLAUDE.md.** Add or replace the `## Project policies` section in `.claude/CLAUDE.md`. Place it between `## Engineering hygiene` and `## Publication safety`. Use this format:
+8. **Write to CLAUDE.md.** Add or replace the `## Project policies` section in `.claude/CLAUDE.md`. Place it between `## Engineering hygiene` and `## Publication safety`. Use this format:
 
 ```markdown
 ## Project policies
@@ -119,7 +158,7 @@ You are guiding the user through project policy configuration for the Claudestra
 - **Dependencies:** {policy description}
 ```
 
-8. **Confirm completion.**
+9. **Confirm completion.**
    - Tell the user the policies and operator mode file are saved.
    - Mention `/agents-policies` to view project policies later.
    - Mention `.claude/.agents-mode` for future operator-mode changes.

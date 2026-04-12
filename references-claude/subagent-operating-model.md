@@ -1,6 +1,6 @@
 # Subagent Operating Model — v2
 
-> **Note**: this document describes the original architecture (blueprint). The current runtime model uses template-based routing — see `.claude/CLAUDE.md` and `.claude/agents/team-templates/`.
+> **Note**: this file is a standalone reference/addendum, not the authoritative operator blueprint. Canonical operator truth for `.claude/.agents-mode`, the accepted init-time preset family, the shared lane matrix, and Claude transport semantics lives in [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md). Use `.claude/CLAUDE.md` for runtime entry behavior.
 
 Visual companion: [operating-model-diagram.md](operating-model-diagram.md)
 
@@ -156,7 +156,7 @@ AI gates do not replace external engineering policy.
 - If a role disagrees with an upstream artifact, it returns `REVISE` or `BLOCKED` to the orchestrating owner instead of renegotiating scope privately.
 - Reviewers stay independent and return findings to the orchestrating owner instead of driving implementation directly.
 - Direct specialist-to-specialist collaboration is allowed only when the orchestrating owner explicitly approves the edge, scope, and artifact boundary.
-- `$consultant` is an optional independent advisory role; it may be fulfilled by an external provider or an internal independent subagent, but it never becomes a delivery gate. Consultant is opt-in via toggle file. No toggle file = disabled. Modes: `external` (cross-provider CLI), `internal` (same-platform subagent), `disabled`. The `/agents-second-opinion` command manages the toggle and invokes the consultant.
+- `$consultant` is an optional independent advisory role; it may be fulfilled by an external provider or an internal independent subagent, but it never becomes a delivery gate. Its current mode is controlled through `.claude/.agents-mode` via `consultantMode`; provider selection and Claude transport behavior follow the same file's `externalProvider`, `externalClaudeSecretMode`, and `externalClaudeApiMode` keys. Init-time presets are shortcuts only and are not persisted as a preset name.
 
 ### 3.9 Rolling-loop execution
 

@@ -85,6 +85,7 @@ All chains with 2+ stages save state in `work-items/active/` — both the status
 | `/agents-check-safety` | Scan staged files for secrets before commit |
 
 Run `/agents-init-project` after installing to configure project-level choices. It writes or updates both the `## Project policies` section in `.claude/CLAUDE.md` and the canonical `.claude/.agents-mode` operator file for the Claude line.
+The Claude-line operator reference in [docs/agents-mode-reference.md](docs/agents-mode-reference.md) also records the current init-time preset family (`default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `max-speed`) and the explicit `worker.systems-performance-implementation` lane.
 
 ## Core principles
 
