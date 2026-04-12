@@ -41,7 +41,7 @@ flowchart TB
 
 ## 3. Прямые peer-рёбра (оптимизации)
 
-Дополняют hub-and-spoke. Lead остаётся оркестрирующим владельцем; прямые рёбра требуют авторизации lead.
+Дополняют hub-and-spoke. Lead остаётся оркестрирующим владельцем; прямые рёбра требуют утверждения lead по самому ребру, scope и границе артефакта.
 
 ```mermaid
 flowchart LR
@@ -102,7 +102,7 @@ flowchart TB
 | Ситуация | Стратегия | Ключевые роли |
 | --- | --- | --- |
 | Что должно войти в delivery? | Roadmap / Intake loop | `$product-manager`, `$product-analyst` |
-| Утверждённый item требует исполнения | Delivery loop | `$lead` -> research -> design -> plan -> implement -> QA/review |
+| Утверждённый item требует исполнения | Delivery loop | `$lead` -> research -> design -> plan -> implement -> QA/review -> lead |
 | Решение блокировано нехваткой фактов | Fact-first routing | `$analyst`, `$product-analyst`, specialist evidence lane |
 | Domain risk может независимо провалить результат | Risk-owner routing | Релевантная constraint role + reviewer |
 | Admitted item изменился mid-delivery | Re-intake loop | `$lead` -> `$product-manager` -> `$lead` |

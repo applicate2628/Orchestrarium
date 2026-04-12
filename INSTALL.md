@@ -38,6 +38,18 @@ The scripts handle clean removal of old files, copying, CLAUDE.md merging, and f
 
 > **Note:** Global install makes agents and skills available everywhere and seeds `~/.claude/.agents-mode` with the current default overlay. Project-specific policies (`## Project policies` in CLAUDE.md) and project-local Claude-line overrides still belong in each repo where you run `/agents-init-project`. On the Claude line, `externalProvider: auto` resolves through the active named priority profile across `codex`, `claude`, and `gemini`; the canonical Claude-line config may include `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is `claude`, while `externalClaudeProfile` remains Codex-line only. The active profile or a documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. `externalOpinionCounts` is a same-lane distinct-opinion contract, not a cap on parallel helper multiplicity; use the brigade surface when you need bounded same-provider fan-out.
 
+## Init-time preset shortcuts
+
+After first-time project bootstrap, `/agents-init-project` can start from one of these preset shortcuts before writing canonical `.claude/.agents-mode` keys:
+
+- `default`
+- `absolute-balance`
+- `external-aggressive`
+- `correctness-first`
+- `max-speed`
+
+The preset name is not persisted; the helper writes the resolved canonical key values instead. Full preset expansion tables and the current lane matrix, including `worker.systems-performance-implementation`, live in [docs/agents-mode-reference.md](docs/agents-mode-reference.md).
+
 ### Practical external launch rules
 
 | Situation | Rule |
