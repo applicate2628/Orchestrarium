@@ -1,0 +1,29 @@
+# Status
+
+- Template: full-delivery
+- Orchestrator: `$lead`
+- Change class: breaking-or-cross-cutting
+- Current state: active
+- Current stage: `Closeout`
+- Last accepted artifact: `consultant no-fallback canon cleanup`
+- Next concrete action: resume the broader external-role-priority-switching closeout from a clean consultant contract baseline and decide commit boundaries for the accumulated routing/governance batch.
+- Primary task status: in-progress
+- Active agents:
+  - `$lead` main session
+  - Codex mirror family worker
+  - Claude mirror family worker
+  - Gemini mirror family worker
+- Completed agents:
+  - `$knowledge-archivist` task-memory completeness audit (`PASS`)
+  - `$analyst` shared/main routing audit (`PASS`)
+  - `$analyst` pack-local mirror audit (`PASS`)
+  - `$architect` routing-model design package (`PASS`)
+  - `$planner` phased implementation plan (`PASS`)
+- Open obligations before closeout:
+  - commit packaging for the broader routing/governance batch
+- Notes:
+  - Previous item `2026-04-11-external-routing-symmetry-revise` remains closure-ready and separate.
+  - This item exists to avoid scope bleed while extending the external-routing control plane.
+  - Two independent external opinions were collected during design review: Claude transport supported the nested profile-map with stronger guards; Gemini argued for a flatter line-oriented schema. The accepted design keeps the profile map and absorbs the guardrails explicitly.
+  - Phase 1 shared/main canonical freeze is complete, and the live project/global `agents-mode` overlays were updated to expose `balanced`, `gemini-crosscheck`, and per-lane opinion counts immediately.
+  - Consultant fallback cleanup is complete: `consultantMode` now uses `external | internal | disabled`, `external` is external-only, the `auto` toggle was removed from all live pack surfaces, and validators now reject reintroduction of the retired semantics.

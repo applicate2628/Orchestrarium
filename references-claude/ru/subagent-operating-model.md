@@ -1,6 +1,6 @@
 # Модель работы субагентов — Claude Addendum
 
-> **Примечание**: этот файл хранит Claude-specific addendum к shared blueprint. Актуальная runtime-модель закреплена в этом addendum и `.claude/CLAUDE.md`.
+> **Примечание**: этот файл хранит Claude-specific addendum к shared blueprint. Канонические routing и operator semantics живут в shared core и в текущих Claude operator reference surfaces.
 
 Канонический shared core: [shared/references/ru/subagent-operating-model.md](../../shared/references/ru/subagent-operating-model.md)
 
@@ -10,10 +10,10 @@
 
 ## Claude-specific runtime notes
 
-- Claude runtime использует template-based routing и Agent tool. Считайте этот файл локальным runtime addendum к shared blueprint, а не канонической полной копией методологии.
+- Claude runtime использует Agent tool и текущие Claude operator reference surfaces. Считайте этот файл локальным runtime addendum к shared blueprint, а не канонической полной копией методологии.
 - Consultant config живёт в `.claude/.agents-mode`.
-- Claude-line canonical config не включает `externalClaudeProfile`; Claude-side `externalProvider: auto` разрешается через active named priority profile, а не через жёсткий Codex-only default.
-- `$external-worker` и `$external-reviewer` dispatch'ят из Claude Code в Codex CLI.
+- Claude-line canonical config не включает `externalClaudeProfile`; Claude-side `externalProvider: auto` разрешается через active named priority profile, а не через жёсткий Codex-only default, а explicit provider selection может честно отправить eligible external work в Codex CLI, Claude CLI или Gemini CLI.
+- `$external-worker` и `$external-reviewer` dispatch'ят из Claude Code в провайдера, выбранного `.claude/.agents-mode`.
 
 ## Claude-side repository concretization
 
