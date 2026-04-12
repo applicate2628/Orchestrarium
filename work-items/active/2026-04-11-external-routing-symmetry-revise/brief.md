@@ -1,0 +1,54 @@
+# Canonical Brief
+
+- Primary in-progress task: Deep revise and rewrite the cross-pack external-routing symmetry model, then align `main`, `codex`, `claude`, and `gemini`.
+- Current interruption state: none
+- User goal: make the three packs work under one honest role principle and one external-routing model, with deep factual audit instead of piecemeal fixes.
+- Scope:
+  - audit remaining symmetry drift across `Orchestrarium/main`, `codex`, `claude`, and `gemini`
+  - verify external-provider universe, routing defaults, role eligibility, workdir semantics, and provider-specific exceptions
+  - rewrite canonical docs and source contracts where the current model is incomplete or contradictory
+  - keep install/runtime/operator docs truthful to actual behavior
+- Out of scope for this item unless discovered as a hard blocker:
+  - unrelated feature work outside routing/symmetry/control-plane semantics
+  - publication, commit packaging, or push
+  - rewriting archived work-items
+- Accepted constraints and assumptions:
+  - repo uses tracked task memory in `work-items/`
+  - active item was admitted directly by the user, not by a separate `$product-manager` artifact
+  - external comparative evidence should prefer neutral empty-directory runs by default
+- Expected change boundary:
+  - `docs/agents-mode-reference.md`
+  - external-dispatch, operating-model, subagent-contracts, init/help surfaces
+  - shared governance or references only when needed to keep one common canon
+  - standalone mirrors must stay aligned with `main`
+- Must-not-break surfaces:
+  - existing valid install flows
+  - current `.agents-mode` file readability and migration semantics
+  - documented provider-specific exceptions that are already intentionally canonical
+- Acceptance criteria:
+  - remaining symmetry drift is enumerated with evidence
+  - one coherent rewrite decision package exists for the external-routing model
+  - canonical docs and mirrored pack surfaces agree on the selected model
+  - validations for touched packs pass
+- Critical risks and owners:
+  - architecture/control-plane drift: `$architecture-reviewer`
+  - canonical-source/doc truthfulness: `$knowledge-archivist`
+  - factual drift across four trees: `$analyst`
+  - verification of rewritten control-plane behavior: `$qa-engineer`
+- Required roles:
+  - `$lead`
+  - `$analyst`
+  - `$knowledge-archivist`
+  - `$architecture-reviewer`
+  - `$qa-engineer`
+  - optional `$consultant` at closeout
+- Integration owner: `$lead`
+- Batch-close consultant-check status: pending
+- Open obligations before closeout:
+  - produce factual gap map
+  - choose final routing model
+  - align `main` and all three pack mirrors
+  - run validations
+- Current stage: `Closeout`
+- Next stage: `Complete or archive after closeout summary`
+- Open blockers: none

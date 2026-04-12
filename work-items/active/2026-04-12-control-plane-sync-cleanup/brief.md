@@ -1,0 +1,35 @@
+# Brief
+
+- Primary task: reopen the control-plane hygiene batch as a deeper roadmap-injected truth-sync wave, then land one bounded follow-on routing-canon extension that explicitly marks Codex-first systems/perf implementation without disturbing the accepted defaults or provider universe
+- Business or user goal: make the operator surface trustworthy enough that future work can resume safely, choose presets honestly, read the right source of truth without hidden drift, and encode the now-stable provider-role split for systems/perf implementation alongside the already accepted UI and review lanes
+- Scope:
+  - `work-items/` recovery entrypoint and lead-owned active-item hygiene
+  - canonical operator docs affected by the recent preset and routing changes
+  - monorepo reference addenda that still drift from the accepted canon
+  - standalone `references-{claude,codex,gemini}` surfaces still carrying legacy or partial-truth framing
+  - mirror-facing init/install or provider-runtime guidance implicated by the current dirty batch
+  - one bounded systems/perf worker-lane addition across the canonical routing matrices and their mirrored help surfaces
+- Out of scope:
+  - unrelated feature work
+  - provider behavior redesign beyond the already accepted canon
+  - commit packaging, push, or global install validation
+  - any new provider, any change to the shared scalar defaults, and any widening of the provider universe beyond `auto | codex | claude | gemini`
+  - broad semantic redesign beyond the bounded systems/perf lane extension now explicitly admitted by the user
+- Constraints and assumptions:
+  - preserve the accepted shared defaults as the safe-init baseline
+  - keep preset names and semantics already accepted in the current batch
+  - treat `claude-api` as a Claude transport, not a fourth provider
+  - keep `Codex / gpt-5.4 xhigh` as the first pick only for the new systems/perf implementation lane, not as a new provider or a fake separate worker identity
+  - prefer the smallest truth-sync or routing patch that still removes real split-brain and avoid inventing broader governance semantics
+  - do not overwrite unrelated dirty worktree changes outside this batch
+- Critical risks and owners:
+  - task-memory recovery integrity -> `$knowledge-archivist`
+  - canonical docs and mirror coherence -> `$knowledge-archivist`
+  - residual semantic control-plane drift -> `$architecture-reviewer` only if the hygiene patch crosses into semantics
+  - change-surface completeness and residual legacy drift inventory -> `$analyst`
+- Current stage: `Verification / Closeout`
+- Next stage: `human review -> optional commit packaging if requested`
+- Open obligations before closeout:
+  - turn the newly admitted wider sweep into one explicit route and plan
+  - record any residual drift honestly after the deeper sweep and the systems/perf routing extension, not before it
+  - package commits only if explicitly requested

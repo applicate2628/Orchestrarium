@@ -1,6 +1,6 @@
 # Subagent Operating Model — Claude Addendum
 
-> **Note**: this document keeps the Claude-specific addendum to the shared blueprint. The current runtime model uses template-based routing — see `.claude/CLAUDE.md` and `.claude/agents/team-templates/`.
+> **Note**: this document keeps the Claude-specific addendum to the shared blueprint. Canonical routing and operator semantics live in the shared core and the current Claude operator reference surfaces.
 
 Canonical shared core: [shared/references/subagent-operating-model.md](../shared/references/subagent-operating-model.md)
 
@@ -10,7 +10,7 @@ This file keeps only Claude-specific runtime and repository concretization for t
 
 ## Claude-specific runtime notes
 
-- Claude runtime uses template-based routing and the Agent tool. Treat this file as a local runtime addendum to the shared blueprint, not as the canonical full methodology copy.
+- Claude runtime uses the Agent tool and the current Claude operator reference surfaces. Treat this file as a local runtime addendum to the shared blueprint, not as the canonical full methodology copy.
 - Consultant config lives in `.claude/.agents-mode`.
 - Claude-line canonical config does not include `externalClaudeProfile`; Claude-side `externalProvider: auto` resolves by lane type through the active named priority profile, and explicit provider selection may route eligible external work to Codex CLI, Claude CLI, or Gemini CLI when that route is honest.
 - `$external-worker` and `$external-reviewer` dispatch from Claude Code to the provider selected by `.claude/.agents-mode`.
