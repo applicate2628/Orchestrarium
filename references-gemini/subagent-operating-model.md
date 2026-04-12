@@ -2,7 +2,7 @@
 
 Visual companion: [operating-model-diagram.md](operating-model-diagram.md)
 
-This standalone branch keeps one Gemini-local operating-model reference instead of splitting methodology across shared and provider-local layers.
+This standalone branch keeps one Gemini-local operating-model reference as an addendum. Canonical operator truth for `.gemini/.agents-mode`, the accepted init-time preset family, the shared lane matrix, and Claude transport semantics lives in [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md).
 
 ## Gemini runtime notes
 
@@ -10,6 +10,7 @@ This standalone branch keeps one Gemini-local operating-model reference instead 
 - Gemini CLI's built-in `/init` is the canonical way to create or refresh project `GEMINI.md`.
 - `.gemini/settings.json` stays the Gemini-native runtime config surface.
 - `.gemini/.agents-mode` is the Orchestrarium routing overlay seeded by install, not a replacement for `.gemini/settings.json`.
+- The accepted init-time preset family is `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, and `max-speed`. These are init shortcuts only; the preset name is not persisted after expansion into canonical keys.
 - Skills live in `skills/<name>/SKILL.md`.
 - User-invoked command helpers live in `commands/**/*.toml`.
 - The current pack surface stays sequential and human-steered for native internal execution; do not assume native internal parallel dispatch. Independent external adapters may still run in parallel when the routing contract and selected provider runtimes allow it. If native internal slot or thread limits would otherwise block independent eligible lanes, prefer available external adapters over silent serialization or dropping a lane.
@@ -29,5 +30,7 @@ This standalone branch keeps one Gemini-local operating-model reference instead 
 - Periodic controls live in [periodic-control-matrix.md](periodic-control-matrix.md).
 - Publication safety lives in [repository-publication-safety.md](repository-publication-safety.md).
 - `externalProvider: auto` keeps the active named priority profile as the routing source, while documented repo-local visual-routing heuristics may still prefer Gemini itself for image, icon, decorative visual, and other clearly visual lanes.
-- `.gemini/.agents-mode` may also carry `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`, which lets the lead switch between `balanced` and `gemini-crosscheck` and ask for more than one external opinion when the lane requires it. Those counts are lane-local distinct-opinion requirements, not a cap on how many same-provider helper instances may run in parallel across disjoint slices; bounded helper batches use `external-brigade`.
-- If Gemini routes eligible external work to Claude CLI, honor both `externalClaudeSecretMode` and `externalClaudeApiMode`.
+- `.gemini/.agents-mode` may carry `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`; the shipped profiles are `balanced` and `gemini-crosscheck`.
+- The current shared lane taxonomy includes `review.performance-architecture`, `worker.systems-performance-implementation`, `worker.ui-structural-modernization`, and `worker.ui-surgical-patch-cleanup` alongside the older advisory, review, implementation, long-autonomous, visual, and decorative lanes.
+- `externalOpinionCounts` are lane-local distinct-opinion requirements, not a cap on how many same-provider helper instances may run in parallel across disjoint slices; bounded helper batches use `external-brigade`.
+- If Gemini routes eligible external work to Claude, honor both `externalClaudeSecretMode` and `externalClaudeApiMode`; `claude-api` remains a Claude transport, not a separate provider.
