@@ -21,6 +21,7 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoDir = Split-Path -Parent $ScriptDir
 $Source = Join-Path $RepoDir "src.codex"
+$AgentsSource = Join-Path $Source "agents"
 $SharedAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
 $script:DefaultAgentsModeTemp = $null
 $script:CodexPackBeginMarker = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
@@ -491,12 +492,14 @@ if ($Global) {
 if ($Mode -eq "global") {
     $AgentsRoot = $TargetRoot
     $SkillsTarget = Join-Path $TargetRoot "skills"
+    $AgentOverridesTarget = Join-Path $TargetRoot "agents"
     $LeadScriptsTarget = Join-Path $TargetRoot "skills\lead\scripts"
     $MdTarget = Join-Path $TargetRoot "AGENTS.md"
 } else {
     $ProjectRoot = Split-Path $TargetRoot -Parent
     $AgentsRoot = Join-Path $ProjectRoot ".agents"
     $SkillsTarget = Join-Path $AgentsRoot "skills"
+    $AgentOverridesTarget = Join-Path $TargetRoot "agents"
     $LeadScriptsTarget = Join-Path $SkillsTarget "lead\scripts"
     $MdTarget = Join-Path $ProjectRoot "AGENTS.md"
 }
@@ -505,6 +508,7 @@ $AgentsModeTarget = Join-Path $AgentsRoot ".agents-mode"
 Write-Host "=== Codex Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
 Write-Host "Skills target: $SkillsTarget"
+Write-Host "Built-in agent overrides: $AgentOverridesTarget"
 Write-Host "AGENTS.md target: $MdTarget"
 Write-Host "agents-mode: $AgentsModeTarget"
 Write-Host "Mode:   $Mode"
@@ -519,10 +523,15 @@ if (-not (Test-Path (Join-Path $Source "skills"))) {
     Write-Host "Run this script from the Orchestrarium repo root."
     exit 1
 }
+if (-not (Test-Path -LiteralPath $AgentsSource)) {
+    Write-Host "FAIL: Source directory $AgentsSource not found." -ForegroundColor Red
+    Write-Host "Run this script from the Orchestrarium repo root."
+    exit 1
+}
 $DefaultAgentsModeSource = Get-DefaultAgentsModeSource
 
 # Create parent directories as needed
-foreach ($tdir in @($SkillsTarget)) {
+foreach ($tdir in @($SkillsTarget, $AgentOverridesTarget)) {
     $parent = Split-Path $tdir -Parent
     if (-not (Test-Path -LiteralPath $parent)) {
         if (-not $DryRun) {
@@ -598,6 +607,19 @@ if (Test-Path -LiteralPath $SkillsTarget) {
 }
 
 # Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
+
+Write-Host "  Installing built-in agent overrides (preserving existing custom files)..."
+if (-not (Test-Path -LiteralPath $AgentOverridesTarget)) {
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Path $AgentOverridesTarget -Force | Out-Null
+    } else {
+        Write-Host "    [dry-run] would create $AgentOverridesTarget"
+    }
+}
+foreach ($agentFile in Get-ChildItem -LiteralPath $AgentsSource -File) {
+    $targetFile = Join-Path $AgentOverridesTarget $agentFile.Name
+    Ensure-DefaultFile -SourceFile $agentFile.FullName -TargetFile $targetFile -Label ("built-in agent override {0}" -f $agentFile.Name)
+}
 
 # AGENTS.md: assemble from shared + codex-specific, then merge or create
 $srcShared = Join-Path (Join-Path $RepoDir "shared") "AGENTS.shared.md"
@@ -708,6 +730,12 @@ foreach ($relative in Get-SourceFiles "skills") {
     Test-InstalledFile (Join-Path $SkillsTarget $relFile) $relative
 }
 
+Write-Host "Verifying agents/ files..."
+foreach ($relative in Get-SourceFiles "agents") {
+    $relFile = $relative.Substring("agents\".Length)
+    Test-InstalledFile (Join-Path $AgentOverridesTarget $relFile) $relative
+}
+
 # Explicit contract requirements
 Test-InstalledFile (Join-Path $SkillsTarget "lead/operating-model.md") "skills/lead/operating-model.md"
 Test-InstalledFile (Join-Path $SkillsTarget "lead/subagent-contracts.md") "skills/lead/subagent-contracts.md"
@@ -715,6 +743,9 @@ Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.sh") 
 Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.ps1") "skills/lead/scripts/check-publication-safety.ps1"
 Test-InstalledFile (Join-Path $LeadScriptsTarget "validate-skill-pack.sh") "skills/lead/scripts/validate-skill-pack.sh"
 Test-InstalledFile $AgentsModeTarget ".agents-mode"
+Test-InstalledFile (Join-Path $AgentOverridesTarget "default.toml") "agents/default.toml"
+Test-InstalledFile (Join-Path $AgentOverridesTarget "worker.toml") "agents/worker.toml"
+Test-InstalledFile (Join-Path $AgentOverridesTarget "explorer.toml") "agents/explorer.toml"
 
 if (Test-Path $dstMd) {
     $mdContent = Get-Content $dstMd -Raw
@@ -740,6 +771,7 @@ if ($errors -gt 0) {
 } else {
     Write-Host "RESULT: OK - Codex pack installed" -ForegroundColor Green
     Write-Host "  Skills: $SkillsTarget"
+    Write-Host "  Built-in agent overrides: $AgentOverridesTarget"
     Write-Host "  AGENTS.md: $MdTarget"
     Write-Host "  agents-mode: $AgentsModeTarget"
     Write-Host ""

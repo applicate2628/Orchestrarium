@@ -36,6 +36,18 @@ What to install?
 
 For `All three`, the router reuses the same forwarded arguments for all three pack-specific installers.
 
+## Init-time preset shortcuts
+
+After first-time project bootstrap, the provider init helpers can start from one of these preset shortcuts before writing canonical `agents-mode` keys:
+
+- `default`
+- `absolute-balance`
+- `external-aggressive`
+- `correctness-first`
+- `max-speed`
+
+The preset name itself is not persisted; the helper writes the resolved canonical key values instead. Full preset expansion tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
+
 ## Codex install details
 
 Use `scripts/install-codex.sh` or `scripts/install-codex.ps1` when you want the Codex pack directly.
@@ -50,6 +62,8 @@ Use `scripts/install-codex.sh` or `scripts/install-codex.ps1` when you want the 
 Notes:
 
 - Project-level Codex installs use `.agents/skills/` plus the project root `AGENTS.md`.
+- Codex installs also seed built-in subagent overrides into `.codex/agents/default.toml`, `.codex/agents/worker.toml`, and `.codex/agents/explorer.toml` for project installs, or `~/.codex/agents/` for global installs.
+- Those shipped override files pin the built-in `default`, `worker`, and `explorer` subagents to `gpt-5.4` with `xhigh` reasoning effort; reinstall preserves any existing custom files at those paths instead of overwriting them.
 - Project-level installs ensure `/.reports/` is present in the target repo `.gitignore` if it is missing, because session logs are local-only runtime output.
 - The canonical Codex-line operator file is `.agents/.agents-mode` for project installs and `~/.codex/.agents-mode` for global installs.
 - First-time creation should write the full default shape with inline comments listing allowed values for each key.
@@ -131,6 +145,8 @@ Expected project-level result:
 ```text
 project/
   AGENTS.md
+  .codex/
+    agents/
   GEMINI.md
   .agents/
     skills/

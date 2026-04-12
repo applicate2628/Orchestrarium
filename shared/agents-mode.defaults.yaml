@@ -1,37 +1,49 @@
-consultantMode: disabled  # allowed: external | internal | disabled
-delegationMode: manual  # allowed: manual | auto | force
-mcpMode: auto  # allowed: auto | force
-preferExternalWorker: false  # allowed: false | true
-preferExternalReviewer: false  # allowed: false | true
-externalProvider: auto  # allowed here: auto | codex | claude | gemini
-externalPriorityProfile: balanced  # allowed: balanced | gemini-crosscheck | <repo-local profile>
-externalPriorityProfiles:  # allowed: structured profile map
-  balanced:
-    advisory.repo-understanding: [claude, gemini, codex]
-    advisory.design-adr: [claude, codex, gemini]
-    review.pre-pr: [claude, codex, gemini]
-    worker.default-implementation: [codex, claude, gemini]
-    worker.long-autonomous: [claude, codex, gemini]
-    worker.visual-icon-decorative: [gemini, claude, codex]
-    review.visual: [gemini, claude, codex]
-  gemini-crosscheck:
-    advisory.repo-understanding: [claude, gemini, codex]
-    advisory.design-adr: [claude, gemini, codex]
-    review.pre-pr: [claude, gemini, codex]
-    worker.default-implementation: [codex, claude, gemini]
-    worker.long-autonomous: [claude, gemini, codex]
-    worker.visual-icon-decorative: [gemini, claude, codex]
-    review.visual: [gemini, claude, codex]
-externalOpinionCounts:  # allowed: structured lane-count map
-  advisory.repo-understanding: 1
-  advisory.design-adr: 1
-  review.pre-pr: 1
-  worker.default-implementation: 1
-  worker.long-autonomous: 1
-  worker.visual-icon-decorative: 1
-  review.visual: 1
-externalCodexWorkdirMode: neutral  # allowed: neutral | project
-externalClaudeWorkdirMode: neutral  # allowed: neutral | project
-externalGeminiWorkdirMode: neutral  # allowed: neutral | project
-externalClaudeSecretMode: auto  # allowed when Claude is selectable: auto | force
-externalClaudeApiMode: auto  # allowed when Claude is selectable: disabled | auto | force
+consultantMode: disabled  # default shared baseline; allowed: external | internal | disabled
+delegationMode: manual  # default shared baseline; allowed: manual | auto | force
+mcpMode: auto  # default shared baseline; allowed: auto | force
+preferExternalWorker: false  # default shared baseline; allowed: false | true
+preferExternalReviewer: false  # default shared baseline; allowed: false | true
+externalProvider: auto  # default shared baseline; allowed here: auto | codex | claude | gemini
+externalPriorityProfile: balanced  # default shared baseline; allowed: balanced | gemini-crosscheck | <repo-local profile>
+externalPriorityProfiles:  # allowed: profile -> lane -> ordered provider priority used when externalProvider=auto
+  balanced:  # default shared routing profile
+    advisory.repo-understanding: [claude, gemini, codex]  # repo/codebase understanding advisory
+    advisory.design-adr: [claude, codex, gemini]  # design/ADR tradeoff advisory
+    review.pre-pr: [claude, codex, gemini]  # pre-PR review and review-side QA
+    review.performance-architecture: [claude, codex, gemini]  # performance/architecture review and hot-path cross-check
+    worker.default-implementation: [codex, claude, gemini]  # ordinary worker-side implementation
+    worker.systems-performance-implementation: [codex, claude, gemini]  # Rust hot path, systems/perf implementation, and media pipeline lane
+    worker.long-autonomous: [claude, codex, gemini]  # long-running autonomous worker lane
+    worker.ui-structural-modernization: [gemini, claude, codex]  # broad UI scaffold, layout rewrite, and modernization lane
+    worker.ui-surgical-patch-cleanup: [claude, codex, gemini]  # exact UI patch, cleanup, and partial-edit correction lane
+    worker.visual-icon-decorative: [gemini, claude, codex]  # visual, icon, decorative worker lane
+    review.visual: [gemini, claude, codex]  # visual review and UX-style cross-check
+  gemini-crosscheck:  # broader Gemini participation in advisory/review routing
+    advisory.repo-understanding: [claude, gemini, codex]  # repo/codebase understanding advisory
+    advisory.design-adr: [claude, gemini, codex]  # design/ADR tradeoff advisory with Gemini earlier
+    review.pre-pr: [claude, gemini, codex]  # pre-PR review with Gemini cross-check earlier
+    review.performance-architecture: [claude, codex, gemini]  # performance/architecture review keeps Claude first
+    worker.default-implementation: [codex, claude, gemini]  # ordinary worker-side implementation
+    worker.systems-performance-implementation: [codex, claude, gemini]  # systems/perf implementation keeps Codex first
+    worker.long-autonomous: [claude, gemini, codex]  # long-running autonomous worker lane with Gemini earlier
+    worker.ui-structural-modernization: [gemini, claude, codex]  # broad UI scaffold, layout rewrite, and modernization lane
+    worker.ui-surgical-patch-cleanup: [claude, codex, gemini]  # exact UI patch, cleanup, and partial-edit correction lane
+    worker.visual-icon-decorative: [gemini, claude, codex]  # visual, icon, decorative worker lane
+    review.visual: [gemini, claude, codex]  # visual review and UX-style cross-check
+externalOpinionCounts:  # allowed: lane -> minimum distinct external opinions required before closure
+  advisory.repo-understanding: 1  # repo-understanding advisory opinions
+  advisory.design-adr: 1  # design/ADR advisory opinions
+  review.pre-pr: 1  # pre-PR review opinions
+  review.performance-architecture: 1  # performance/architecture review opinions
+  worker.default-implementation: 1  # worker implementation opinions
+  worker.systems-performance-implementation: 1  # systems/perf worker opinions
+  worker.long-autonomous: 1  # long-autonomous worker opinions
+  worker.ui-structural-modernization: 1  # broad UI modernization worker opinions
+  worker.ui-surgical-patch-cleanup: 1  # surgical UI patch/cleanup worker opinions
+  worker.visual-icon-decorative: 1  # visual/icon/decorative worker opinions
+  review.visual: 1  # visual review opinions
+externalCodexWorkdirMode: neutral  # default shared baseline; allowed: neutral | project
+externalClaudeWorkdirMode: neutral  # default shared baseline; allowed: neutral | project
+externalGeminiWorkdirMode: neutral  # default shared baseline; allowed: neutral | project
+externalClaudeSecretMode: auto  # default shared baseline when Claude is selectable; allowed: auto | force
+externalClaudeApiMode: auto  # default shared baseline when Claude is selectable; allowed: disabled | auto | force

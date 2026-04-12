@@ -28,6 +28,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Installed pack root | `~/.codex/` | Global Codex pack install target |
 | Governance entrypoint | `~/.codex/AGENTS.md` | Installed Codex runtime entrypoint |
 | Skill tree | `~/.codex/skills/<role>/SKILL.md` | Orchestrarium Codex runtime organizes each role as a skill directory |
+| Built-in subagent overrides | `~/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Orchestrarium-installed custom agents that override Codex built-ins and pin them to `gpt-5.4` + `xhigh`; preserved on reinstall |
 | Validation script | `~/.codex/skills/lead/scripts/validate-skill-pack.sh` | Same lead script tree as the repo source |
 | Publication-safety scan | `~/.codex/skills/lead/scripts/check-publication-safety.sh` | PowerShell wrapper exists alongside the shell script |
 | Global operator overlay | `~/.codex/.agents-mode` | Orchestrarium-owned default operator file seeded on first global install and preserved on reinstall |
@@ -39,6 +40,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Installed pack root | `<project>/.agents/skills/` | Role skills are copied here |
 | Governance entrypoint | `<project>/AGENTS.md` | Codex pack section is merged into the project-root `AGENTS.md` |
 | Skill tree | `<project>/.agents/skills/<role>/SKILL.md` | Mirrors the global `skills/` structure |
+| Built-in subagent overrides | `<project>/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Project-level custom agents that override Codex built-ins and pin them to `gpt-5.4` + `xhigh`; seeded on first install and preserved on reinstall |
 | Local config | `<project>/.agents/.agents-mode` | Canonical Orchestrarium local state file; local install seeds the default and `$init-project` reviews or updates it |
 | Validation script | `<project>/.agents/skills/lead/scripts/validate-skill-pack.sh` | Run from the target project root after install |
 | Publication-safety scan | `<project>/.agents/skills/lead/scripts/check-publication-safety.sh` | PowerShell wrapper exists alongside the shell script |
@@ -115,7 +117,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 
 ## Sources
 
-- Orchestrarium install and runtime contracts: `INSTALL.md`, `src.codex/AGENTS.codex.md`, `src.codex/skills/consultant/SKILL.md`, `src.claude/CLAUDE.md`, `src.claude/agents/consultant.md`, `scripts/install-codex.sh`, `scripts/install-codex.ps1`, `scripts/install-claude.sh`, `scripts/install-claude.ps1`
+- Orchestrarium install and runtime contracts: `INSTALL.md`, `docs/agents-mode-reference.md`, `install.sh`, `install.ps1`, `src.codex/AGENTS.codex.md`, `src.codex/skills/consultant/SKILL.md`, `src.claude/CLAUDE.md`, `src.claude/agents/consultant.md`, `src.gemini/GEMINI.md`, `src.gemini/skills/init-project/SKILL.md`, `scripts/install-codex.sh`, `scripts/install-codex.ps1`, `scripts/install-claude.sh`, `scripts/install-claude.ps1`, `scripts/install-gemini.sh`, `scripts/install-gemini.ps1`
 - Claude Code documentation:
   - Memory and `CLAUDE.md` locations: <https://code.claude.com/docs/en/memory>
   - Skills and legacy commands: <https://code.claude.com/docs/en/slash-commands>

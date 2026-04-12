@@ -9,6 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE="$REPO_DIR/src.codex"
+AGENTS_SOURCE="$SOURCE/agents"
 SHARED_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 CODEX_PACK_BEGIN_MARKER='<!-- BEGIN ORCHESTRARIUM CODEX PACK -->'
 CODEX_PACK_END_MARKER='<!-- END ORCHESTRARIUM CODEX PACK -->'
@@ -426,12 +427,14 @@ fi
 if [ "$MODE" = "global" ]; then
   AGENTS_ROOT="$TARGET"
   SKILLS_TARGET="$TARGET/skills"
+  AGENT_OVERRIDES_TARGET="$TARGET/agents"
   MD_TARGET="$TARGET/AGENTS.md"
 else
   # Repo-level: TARGET is <root>/.codex but skills go into <root>/.agents/
   PROJECT_ROOT="$(dirname "$TARGET")"
   AGENTS_ROOT="$PROJECT_ROOT/.agents"
   SKILLS_TARGET="$AGENTS_ROOT/skills"
+  AGENT_OVERRIDES_TARGET="$TARGET/agents"
   MD_TARGET="$PROJECT_ROOT/AGENTS.md"
 fi
 AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode"
@@ -439,6 +442,7 @@ AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode"
 echo "=== Codex Installer ==="
 echo "Source: $SOURCE"
 echo "Skills target: $SKILLS_TARGET"
+echo "Built-in agent overrides: $AGENT_OVERRIDES_TARGET"
 echo "AGENTS.md target: $MD_TARGET"
 echo "agents-mode: $AGENTS_MODE_TARGET"
 echo "Mode:   $MODE"
@@ -453,11 +457,16 @@ if [[ ! -d "$SOURCE/skills" ]]; then
   echo "Run this script from the Orchestrarium repo root."
   exit 1
 fi
+if [[ ! -d "$AGENTS_SOURCE" ]]; then
+  echo "FAIL: Source directory $AGENTS_SOURCE not found."
+  echo "Run this script from the Orchestrarium repo root."
+  exit 1
+fi
 DEFAULT_AGENTS_MODE_SOURCE="$(default_agents_mode_template)"
 trap '[[ -n "${DEFAULT_AGENTS_MODE_SOURCE:-}" && -f "${DEFAULT_AGENTS_MODE_SOURCE:-}" ]] && rm -f "${DEFAULT_AGENTS_MODE_SOURCE:-}"' EXIT
 
 # Create target parent directories as needed
-for tdir in "$SKILLS_TARGET"; do
+for tdir in "$SKILLS_TARGET" "$AGENT_OVERRIDES_TARGET"; do
   parent="$(dirname "$tdir")"
   if [[ ! -d "$parent" ]]; then
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -689,6 +698,19 @@ fi
 
 # Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
 
+echo "  Installing built-in agent overrides (preserving existing custom files)..."
+if [[ ! -d "$AGENT_OVERRIDES_TARGET" ]]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $AGENT_OVERRIDES_TARGET"
+  else
+    mkdir -p "$AGENT_OVERRIDES_TARGET"
+  fi
+fi
+for agent_file in "$AGENTS_SOURCE"/*.toml; do
+  [[ -f "$agent_file" ]] || continue
+  ensure_default_file "$agent_file" "$AGENT_OVERRIDES_TARGET/$(basename "$agent_file")" "built-in agent override $(basename "$agent_file")"
+done
+
 # AGENTS.md: assemble from shared + codex-specific, then merge or create
 src_shared="$REPO_DIR/shared/AGENTS.shared.md"
 src_platform="$SOURCE/AGENTS.codex.md"
@@ -792,6 +814,7 @@ check_installed_manifest() {
 }
 
 check_installed_manifest "$SOURCE/skills" "$SKILLS_TARGET" "$SOURCE/skills"
+check_installed_manifest "$AGENTS_SOURCE" "$AGENT_OVERRIDES_TARGET" "$AGENTS_SOURCE"
 
 check_file "$SKILLS_TARGET/lead/operating-model.md" "skills/lead/operating-model.md"
 check_file "$SKILLS_TARGET/lead/subagent-contracts.md" "skills/lead/subagent-contracts.md"
@@ -799,6 +822,9 @@ check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.sh" "skills/lea
 check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.ps1" "skills/lead/scripts/check-publication-safety.ps1"
 check_file "$SKILLS_TARGET/lead/scripts/validate-skill-pack.sh" "skills/lead/scripts/validate-skill-pack.sh"
 check_file "$AGENTS_MODE_TARGET" ".agents-mode"
+check_file "$AGENT_OVERRIDES_TARGET/default.toml" "agents/default.toml"
+check_file "$AGENT_OVERRIDES_TARGET/worker.toml" "agents/worker.toml"
+check_file "$AGENT_OVERRIDES_TARGET/explorer.toml" "agents/explorer.toml"
 
 if [[ -f "$dst_md" ]]; then
   line_count=$(wc -l < "$dst_md")
@@ -823,6 +849,7 @@ if [[ $errors -gt 0 ]]; then
 else
   echo "RESULT: OK — Codex pack installed"
   echo "  Skills: $SKILLS_TARGET"
+  echo "  Built-in agent overrides: $AGENT_OVERRIDES_TARGET"
   echo "  AGENTS.md: $MD_TARGET"
   echo "  agents-mode: $AGENTS_MODE_TARGET"
   echo ""
