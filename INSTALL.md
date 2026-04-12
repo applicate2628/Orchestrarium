@@ -27,6 +27,7 @@ bash install-codex.sh --target /path/to/repo
 ```
 
 Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and seeds the default operator file at `.agents/.agents-mode`.
+It also seeds Codex built-in subagent overrides into `.codex/agents/default.toml`, `.codex/agents/worker.toml`, and `.codex/agents/explorer.toml` for project installs, or `~/.codex/agents/` for global installs.
 
 ## Install into current repo (default)
 
@@ -43,12 +44,26 @@ bash install-codex.sh
 | Source | Global (`--global`) | Repo-level (default / `--target`) |
 | --- | --- | --- |
 | `src.codex/skills/` | `~/.codex/skills/` | `.agents/skills/` |
+| `src.codex/agents/` | `~/.codex/agents/` | `.codex/agents/` |
 | `src.codex/skills/lead/scripts/` | `~/.codex/skills/lead/scripts/` | `.agents/skills/lead/scripts/` |
 | `src.codex/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | Merge into `~/.codex/AGENTS.md` | Merge into root `AGENTS.md` |
 
 The scripts handle clean removal of old files, copying, AGENTS.md merging, and file-level verification. Re-running = reinstall.
 
 Operator state lives in the installed target: repo installs seed `.agents/.agents-mode`, while global installs seed `~/.codex/.agents-mode`.
+Built-in Codex subagent overrides also live in the installed target: repo installs seed `.codex/agents/`, while global installs seed `~/.codex/agents/`. The shipped `default.toml`, `worker.toml`, and `explorer.toml` pin those built-in subagents to `gpt-5.4` with `xhigh` unless the user already has custom files there.
+
+## Init-time preset shortcuts
+
+After first-time project bootstrap, `$init-project` can start from one of these preset shortcuts before writing canonical `.agents/.agents-mode` keys:
+
+- `default`
+- `absolute-balance`
+- `external-aggressive`
+- `correctness-first`
+- `max-speed`
+
+The preset name is not persisted; the helper writes the resolved canonical key values instead. Full preset expansion tables and the current lane matrix, including `worker.systems-performance-implementation`, live in [docs/agents-mode-reference.md](docs/agents-mode-reference.md).
 
 The canonical Codex-line operator shape is:
 - `consultantMode`

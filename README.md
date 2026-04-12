@@ -26,6 +26,7 @@ This repository has two distinct layers:
 Everything a user installs into their target project. Self-contained, no external dependencies.
 
 - `src.codex/AGENTS.shared.md` + `src.codex/AGENTS.codex.md`: installed delegation rules, engineering hygiene, and role index — merged into the installed `AGENTS.md` that Codex loads as main conversation context
+- `src.codex/agents/`: shipped built-in Codex subagent overrides for `default`, `worker`, and `explorer`
 - `src.codex/skills/<role>/SKILL.md`: instructions for one role (33 role definitions: 31 indexed roles + 2 external adapters, plus 2 utility skills)
 - `src.codex/skills/<role>/agents/openai.yaml`: display metadata and default prompt for the role
 - `src.codex/skills/lead/`: includes operating-model notes and handoff contracts alongside SKILL.md
@@ -63,7 +64,7 @@ bash install-codex.sh --global
 
 Important: multi-agent team workflows require explicit delegation permission from the user. Ask directly for delegation, name a role such as `$lead`, or clearly authorize subagents in the prompt; otherwise the assistant may stay in the main conversation instead of starting the team.
 
-For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, and install seeds `.agents/.agents-mode`. For global install, the pack mirrors into `~/.codex/` and seeds `~/.codex/.agents-mode`. See [INSTALL.md](INSTALL.md) for details.
+For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, install seeds `.agents/.agents-mode`, and Codex built-in custom-agent overrides land in `.codex/agents/`. For global install, the pack mirrors into `~/.codex/`, seeds `~/.codex/.agents-mode`, and installs the same built-in overrides into `~/.codex/agents/`. See [INSTALL.md](INSTALL.md) for details.
 
 After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode`.
 
@@ -79,14 +80,14 @@ The repository is built around a few stable rules:
 - protect blast radius and require smoke coverage for nearby but nominally unrelated surfaces
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
-Repository-wide operating-model source of truth lives in [references-codex/subagent-operating-model.md](references-codex/subagent-operating-model.md). The branch-local operator reference also now carries switchable external priority profiles and opinion counts, so `.agents/.agents-mode` can ask for more than one independent external opinion when the workflow needs it.
+Repository operating-model guidance is split: [docs/agents-mode-reference.md](docs/agents-mode-reference.md) is the operator-mode truth surface, while [references-codex/subagent-operating-model.md](references-codex/subagent-operating-model.md) is companion/addendum reference documentation. The branch-local operator reference also now carries switchable external priority profiles and opinion counts, so `.agents/.agents-mode` can ask for more than one independent external opinion when the workflow needs it.
 Repository task-memory policy and storage model live in [references-codex/repository-task-memory.md](references-codex/repository-task-memory.md). The live task-memory directory, if used, is repository-defined.
 Repository publication-safety policy for all tracked content lives in [references-codex/repository-publication-safety.md](references-codex/repository-publication-safety.md).
 Repository periodic-control matrix lives in [references-codex/periodic-control-matrix.md](references-codex/periodic-control-matrix.md).
 Repository-level delegation and role definitions live in [AGENTS.md](AGENTS.md) (dev overlay) and in the installed-pack source files [src.codex/AGENTS.shared.md](src.codex/AGENTS.shared.md) + [src.codex/AGENTS.codex.md](src.codex/AGENTS.codex.md), which merge into the installed `AGENTS.md`.
 The visual companion to the workflow lives in [references-codex/operating-model-diagram.md](references-codex/operating-model-diagram.md).
 Evidence-based answer pipeline for high-stakes domains lives in [references-codex/evidence-based-answer-pipeline.md](references-codex/evidence-based-answer-pipeline.md).
-The standalone branch-level docs index lives in [docs/README.md](docs/README.md), and the Codex operator-mode reference lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md). That operator reference also records task continuity and continue-by-default execution expectations for initialized projects.
+The standalone branch-level docs index lives in [docs/README.md](docs/README.md), and the Codex operator-mode reference lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md). That operator reference also records task continuity, continue-by-default execution expectations for initialized projects, the current init-time preset family (`default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `max-speed`), and the explicit `worker.systems-performance-implementation` lane.
 
 ## Team structure
 

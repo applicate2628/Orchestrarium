@@ -10,6 +10,7 @@ Use it together with:
 Source surface:
 
 - `AGENTS.shared.md` + `AGENTS.codex.md` are merged into the installed `AGENTS.md`
+- `agents/default.toml`, `agents/worker.toml`, and `agents/explorer.toml` seed the Codex built-in custom-agent overrides installed under `.codex/agents/`
 - `skills/<role>/SKILL.md` and `skills/<role>/agents/openai.yaml` define the role catalog
 - `skills/lead/` carries operating-model notes, handoff contracts, and validation/publication-safety scripts
 - `skills/consultant/` and `skills/second-opinion/` carry the advisory and explicit consultant routing surfaces
