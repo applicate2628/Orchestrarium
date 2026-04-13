@@ -34,6 +34,8 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalGeminiWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `runtime-default` |
+| `externalGeminiFallbackMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `externalClaudeSecretMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `externalClaudeProfile` | `sonnet-high` | `sonnet-high` | `sonnet-high` | `opus-max` | `sonnet-high` |
@@ -89,6 +91,8 @@ Routing conventions (not persisted as keys):
      - `externalCodexWorkdirMode`
      - `externalClaudeWorkdirMode`
      - `externalGeminiWorkdirMode`
+     - `externalModelMode`
+     - `externalGeminiFallbackMode`
      - `externalClaudeSecretMode`
      - `externalClaudeApiMode`
      - `externalClaudeProfile`
@@ -105,6 +109,8 @@ Routing conventions (not persisted as keys):
    - `externalCodexWorkdirMode: neutral`
    - `externalClaudeWorkdirMode: neutral`
    - `externalGeminiWorkdirMode: neutral`
+   - `externalModelMode: runtime-default`
+   - `externalGeminiFallbackMode: auto`
    - `externalClaudeSecretMode: auto`
    - `externalClaudeApiMode: auto`
    - `externalClaudeProfile: sonnet-high`
@@ -137,6 +143,8 @@ Routing conventions (not persisted as keys):
    externalCodexWorkdirMode: {value}  # allowed: neutral | project
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project
    externalGeminiWorkdirMode: {value}  # allowed: neutral | project
+   externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro
+   externalGeminiFallbackMode: {value}  # allowed when Gemini is selected: disabled | auto | force
    externalClaudeSecretMode: {value}  # allowed when Claude is selectable: auto | force
    externalClaudeApiMode: {value}  # allowed when Claude is selectable: disabled | auto | force
    externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max

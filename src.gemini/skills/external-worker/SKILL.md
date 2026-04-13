@@ -23,10 +23,13 @@ Use the shared Gemini dispatch contract in [../lead/external-dispatch.md](../lea
 - `externalPriorityProfile` defaults to `balanced`; `gemini-crosscheck` is a valid profile when the lane policy wants Gemini to appear in a non-visual cross-check set.
 - `externalProvider: codex` resolves to Codex CLI explicitly.
 - `externalProvider: claude` resolves to Claude CLI explicitly.
-- If Claude is selected, honor `externalClaudeSecretMode`.
+- Honor `externalModelMode` first when Gemini is selected: `runtime-default` keeps Gemini on its runtime default model/profile. Under `pinned-top-pro`, `externalGeminiFallbackMode` controls the explicit Gemini path: `disabled` keeps `gemini-3.1-pro` only, `auto` starts on `gemini-3.1-pro` and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures, and `force` starts on `gemini-3-flash` immediately.
+- Treat `gemini-3-flash` as a bounded mechanical overflow path only. `externalGeminiFallbackMode: force` is for tightly scoped low-reasoning work, not for broad reasoning or cleanup just to save tokens.
+  - If Claude is selected, honor `externalClaudeSecretMode`.
 - If Claude is selected, honor `externalClaudeApiMode`.
-- This adapter is a direct external launch contract. Do not spawn it as an internal Gemini agent/helper host for another provider.
-- `externalProvider: gemini` is allowed only as an explicit self-provider override.
+- Treat `claude-api` as the approved economical near-full-strength Claude transport. `externalClaudeApiMode: force` is an explicit budget choice as well as a limit fallback.
+  - This adapter is a direct external launch contract. Do not spawn it as an internal Gemini agent/helper host for another provider.
+  - `externalProvider: gemini` is allowed only as an explicit self-provider override.
 - Image generation, icon work, decorative visual polish, and other clearly visual worker-side lanes are the shared-matrix cases where Gemini should be preferred when that routing remains honest.
 - Same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce.
 - If the active lane policy requests more than one external worker-side opinion, the lead may launch more than one eligible external worker in parallel and aggregate the returned worker artifacts fail closed.

@@ -50,6 +50,8 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
    - `externalCodexWorkdirMode`
    - `externalClaudeWorkdirMode`
    - `externalGeminiWorkdirMode`
+   - `externalModelMode`
+   - `externalGeminiFallbackMode`
    - `externalClaudeSecretMode`
    - `externalClaudeApiMode`
    - `externalClaudeProfile`

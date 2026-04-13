@@ -29,6 +29,8 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalGeminiWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `runtime-default` |
+| `externalGeminiFallbackMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `externalClaudeSecretMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 
@@ -84,6 +86,7 @@ Routing conventions (not persisted as keys):
       - `externalCodexWorkdirMode`
       - `externalClaudeWorkdirMode`
       - `externalGeminiWorkdirMode`
+      - `externalGeminiFallbackMode`
       - `externalClaudeSecretMode`
       - `externalClaudeApiMode`
     - Use the existing value when present, the preset-expanded value if one was selected, or otherwise default to:
@@ -99,6 +102,7 @@ Routing conventions (not persisted as keys):
       - `externalCodexWorkdirMode: neutral`
       - `externalClaudeWorkdirMode: neutral`
       - `externalGeminiWorkdirMode: neutral`
+      - `externalGeminiFallbackMode: auto`
       - `externalClaudeSecretMode: auto`
       - `externalClaudeApiMode: auto`
     - `externalProvider: auto` resolves by lane type through the active named priority profile rather than a Claude-line default provider. Explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible, and documented repo-local visual heuristics may rank Gemini first for image/icon/decorative visual work when that routing remains honest.
@@ -132,6 +136,8 @@ Routing conventions (not persisted as keys):
    externalCodexWorkdirMode: {value}  # allowed: neutral | project
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project
    externalGeminiWorkdirMode: {value}  # allowed: neutral | project
+   externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro
+   externalGeminiFallbackMode: {value}  # allowed when Gemini is selected: disabled | auto | force
    externalClaudeSecretMode: {value}  # allowed when Claude is selected: auto | force
    externalClaudeApiMode: {value}  # allowed when Claude is selected: disabled | auto | force
    ```

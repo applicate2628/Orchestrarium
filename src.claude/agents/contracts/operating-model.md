@@ -55,7 +55,7 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode`.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
 - `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work.
-- The Claude-line canonical schema may include `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is Claude; `externalClaudeProfile` remains Codex-line only.
+- The Claude-line canonical schema may include the shared `externalModelMode`, `externalGeminiFallbackMode` when the resolved provider is Gemini, and `externalClaudeSecretMode` plus `externalClaudeApiMode` when the resolved provider is Claude; `externalClaudeProfile` remains Codex-line only.
 - The team template JSON does not change; routing substitutions happen at execution time.
 - `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.
 - Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.

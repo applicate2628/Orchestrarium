@@ -45,5 +45,7 @@ externalOpinionCounts:  # allowed: lane -> minimum distinct external opinions re
 externalCodexWorkdirMode: neutral  # default shared baseline; allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # default shared baseline; allowed: neutral | project
 externalGeminiWorkdirMode: neutral  # default shared baseline; allowed: neutral | project
+externalModelMode: runtime-default  # default shared baseline; allowed: runtime-default | pinned-top-pro
+externalGeminiFallbackMode: auto  # default shared baseline when Gemini is selectable; only affects pinned-top-pro: disabled | auto | force
 externalClaudeSecretMode: auto  # default shared baseline when Claude is selectable; allowed: auto | force
 externalClaudeApiMode: auto  # default shared baseline when Claude is selectable; allowed: disabled | auto | force
