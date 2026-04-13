@@ -47,7 +47,7 @@ When lead coordinates, or when the main conversation needs to decide between rol
 
 ## External adapter routing
 
-Claude-line keeps one shared local config file at `.claude/.agents-mode`.
+Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 
 - `consultantMode` continues to govern `$consultant`.
 - `delegationMode: manual` keeps delegation explicit-by-request, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.

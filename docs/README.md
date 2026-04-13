@@ -8,7 +8,7 @@ Use it together with:
 - [../INSTALL.md](../INSTALL.md) for install and runtime rules
 - [../src.claude/README.md](../src.claude/README.md) for the installable source subtree
 - [../references-claude/README.md](../references-claude/README.md) for the provider-local reference tree
-- [agents-mode-reference.md](agents-mode-reference.md) for the Claude-line `.claude/.agents-mode` operator reference
+- [agents-mode-reference.md](agents-mode-reference.md) for the Claude-line `.claude/.agents-mode.yaml` operator reference
 - [provider-runtime-layout.md](provider-runtime-layout.md) for the source-vs-installed Claude surface map
 
 This branch keeps a Claude-line `agents-mode` reference in `docs/`. The canonical Claude-line config may include the Claude transport keys `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is `claude`, while `externalClaudeProfile` remains Codex-line only.

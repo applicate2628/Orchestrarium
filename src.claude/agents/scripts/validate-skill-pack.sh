@@ -224,7 +224,7 @@ if grep -Fq "fallback approved by user" "$PACK/agents/contracts/external-dispatc
 else
   pass "external-dispatch does not record consultant fallback approvals"
 fi
-if grep -Fq 'Read and normalize `.claude/.agents-mode` first.' "$PACK/agents/contracts/subagent-contracts.md"; then
+if grep -Fq 'Read and normalize `.claude/.agents-mode.yaml` first.' "$PACK/agents/contracts/subagent-contracts.md"; then
   pass "subagent-contracts require read-time agents-mode normalization"
 else
   fail "subagent-contracts require read-time agents-mode normalization"
@@ -234,12 +234,12 @@ if grep -Fq "normalize it to the current canonical format before presenting or t
 else
   fail "agents-init-project normalizes existing agents-mode before reading values"
 fi
-if grep -Fq 'Any read of `.claude/.agents-mode` that drives a decision should normalize the file to the current canonical format before trusting the flags.' "$PACK/skills/agents-init-project/SKILL.md"; then
+if grep -Fq 'Any read of `.claude/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.' "$PACK/skills/agents-init-project/SKILL.md"; then
   pass "agents-init-project requires read-time agents-mode normalization"
 else
   fail "agents-init-project requires read-time agents-mode normalization"
 fi
-if grep -Fq 'read and normalize `.claude/.agents-mode`.' "$PACK/skills/agents-second-opinion/SKILL.md"; then
+if grep -Fq 'read and normalize `.claude/.agents-mode.yaml`.' "$PACK/skills/agents-second-opinion/SKILL.md"; then
   pass "agents-second-opinion normalizes agents-mode before reporting status"
 else
   fail "agents-second-opinion normalizes agents-mode before reporting status"
@@ -258,12 +258,12 @@ if grep -Fq 'must use direct external launch' "$PACK/AGENTS.shared.md"; then
 else
   fail "shared governance requires direct external launch"
 fi
-if grep -Fq 'Read and normalize `.claude/.agents-mode` to the current canonical format before trusting its flags.' "$PACK/agents/external-worker.md"; then
+if grep -Fq 'Read and normalize `.claude/.agents-mode.yaml` to the current canonical format before trusting its flags.' "$PACK/agents/external-worker.md"; then
   pass "external-worker normalizes agents-mode before routing"
 else
   fail "external-worker normalizes agents-mode before routing"
 fi
-if grep -Fq 'Read and normalize `.claude/.agents-mode` to the current canonical format before trusting its flags.' "$PACK/agents/external-reviewer.md"; then
+if grep -Fq 'Read and normalize `.claude/.agents-mode.yaml` to the current canonical format before trusting its flags.' "$PACK/agents/external-reviewer.md"; then
   pass "external-reviewer normalizes agents-mode before routing"
 else
   fail "external-reviewer normalizes agents-mode before routing"

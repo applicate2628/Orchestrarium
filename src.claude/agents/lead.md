@@ -31,7 +31,7 @@ description: Coordinate complex multi-agent work requiring parallel risk owners,
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
 - Do not ask one subagent to deliver a feature end-to-end.
 - Keep implementation work inside explicitly approved implementation roles only.
-- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement and review-side slots, selected through `.claude/.agents-mode` preferences or an explicit request; the team templates themselves stay unchanged, and those routes must launch the selected provider directly instead of through an internal host helper.
+- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement and review-side slots, selected through `.claude/.agents-mode.yaml` preferences or an explicit request; the team templates themselves stay unchanged, and those routes must launch the selected provider directly instead of through an internal host helper.
 - When multiple independent external helper lanes should launch together, use `/agents-external-brigade` to define one bounded brigade plan instead of scattering ad hoc helper fan-out across separate notes.
 - Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-opinion requirements for one lane and is not a concurrency cap.
 - Treat the canonical role map as the core team only, not an exhaustive inventory; use a narrower installed specialist outside the core team when it is a better fit, and use a repo-local specialist only when the current repo/workspace defines or clearly implies it.
