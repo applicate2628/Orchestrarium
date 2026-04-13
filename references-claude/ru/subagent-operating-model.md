@@ -1,6 +1,6 @@
 # Модель работы субагентов — v2
 
-> **Примечание**: этот файл теперь является standalone reference/addendum, а не authoritative operator blueprint. Каноническая operator truth для `.claude/.agents-mode`, принятого init-time preset family, общей lane matrix и Claude transport semantics живёт в [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md). Для runtime entry behavior используйте `.claude/CLAUDE.md`.
+> **Примечание**: этот файл теперь является standalone reference/addendum, а не authoritative operator blueprint. Каноническая operator truth для `.claude/.agents-mode.yaml`, принятого init-time preset family, общей lane matrix и Claude transport semantics живёт в [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md). Для runtime entry behavior используйте `.claude/CLAUDE.md`.
 
 Визуальное дополнение: [operating-model-diagram.md](operating-model-diagram.md)
 
@@ -156,7 +156,7 @@ AI gates не заменяют внешнюю engineering policy.
 - Если роль не согласна с upstream artifact, она возвращает `REVISE` или `BLOCKED` orchestrating owner'у вместо приватного переписывания scope.
 - Reviewer'ы остаются независимыми и возвращают findings orchestrating owner'у, а не начинают напрямую управлять implementation.
 - Прямая specialist-to-specialist collaboration допустима только когда orchestrating owner явно одобряет edge, scope и границу артефакта.
-- `$consultant` — опциональная независимая advisory-роль; она может исполняться внешним провайдером или внутренним независимым subagent, но никогда не становится delivery gate. Текущий режим задаётся через `.claude/.agents-mode` ключом `consultantMode`; выбор провайдера и Claude transport behavior следуют из `externalProvider`, `externalClaudeSecretMode` и `externalClaudeApiMode` в том же файле. Init-time presets — это только shortcuts и они не сохраняются как имя preset'а.
+- `$consultant` — опциональная независимая advisory-роль; она может исполняться внешним провайдером или внутренним независимым subagent, но никогда не становится delivery gate. Текущий режим задаётся через `.claude/.agents-mode.yaml` ключом `consultantMode`; выбор провайдера и Claude transport behavior следуют из `externalProvider`, `externalClaudeSecretMode` и `externalClaudeApiMode` в том же файле. Init-time presets — это только shortcuts и они не сохраняются как имя preset'а.
 
 ### 3.9 Rolling-loop execution
 

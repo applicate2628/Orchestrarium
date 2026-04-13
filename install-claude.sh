@@ -303,6 +303,31 @@ ensure_default_file() {
   fi
 }
 
+migrate_legacy_agents_mode_file() {
+  local legacy="$1" dst="$2" label="$3"
+
+  remove_dangling_symlink "$legacy" "legacy $label"
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    if [[ -f "$legacy" ]]; then
+      echo "  Canonical $label already exists; leaving legacy file untouched: $legacy"
+    fi
+    return
+  fi
+
+  if [[ ! -f "$legacy" ]]; then
+    return
+  fi
+
+  echo "  Migrating legacy $label to $dst..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would move $legacy -> $dst"
+  else
+    mv "$legacy" "$dst"
+  fi
+}
+
 prompt_install_mode() {
   if [ ! -t 0 ]; then
     echo "FAIL: No install target specified and not running interactively." >&2
@@ -423,7 +448,8 @@ else
   usage
 fi
 
-AGENTS_MODE_TARGET="$TARGET/.agents-mode"
+AGENTS_MODE_TARGET="$TARGET/.agents-mode.yaml"
+LEGACY_AGENTS_MODE_TARGET="$TARGET/.agents-mode.yaml"
 
 echo "=== Claudestrator Installer ==="
 echo "Source: $SOURCE"
@@ -683,7 +709,8 @@ if [[ -f "$src_agents" ]]; then
   fi
 fi
 
-ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode"
+migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
@@ -724,7 +751,7 @@ done
 check_file "$TARGET/agents/contracts/operating-model.md" "agents/contracts/operating-model.md"
 check_file "$TARGET/agents/contracts/subagent-contracts.md" "agents/contracts/subagent-contracts.md"
 check_file "$TARGET/agents/contracts/policies-catalog.md" "agents/contracts/policies-catalog.md"
-check_file "$AGENTS_MODE_TARGET" ".agents-mode"
+check_file "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 
 # Check CLAUDE.md (Claude-specific sections)
 if [[ -f "$dst_md" ]]; then
@@ -774,5 +801,5 @@ if [[ $errors -gt 0 ]]; then
 else
   echo "RESULT: OK — Claudestrator installed to $TARGET"
   echo ""
-  echo "Next: restart Claude, then run /agents-init-project to review/update project policies and the installed default .claude/.agents-mode."
+  echo "Next: restart Claude, then run /agents-init-project to review/update project policies and the installed default .claude/.agents-mode.yaml."
 fi

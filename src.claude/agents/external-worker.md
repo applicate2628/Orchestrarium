@@ -20,9 +20,10 @@ description: External worker-side adapter for Claude-line. Use when an eligible 
 
 ## Claude-line provider
 
-- Read and normalize `.claude/.agents-mode` to the current canonical format before trusting its flags.
-- Honor `.claude/.agents-mode`, including `preferExternalWorker`, `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`.
-- `externalOpinionCounts` is a same-lane distinct-opinion contract; it does not cap how many same-provider worker instances may run in parallel for different disjoint lanes or slices.
+- Read and normalize `.claude/.agents-mode.yaml` to the current canonical format before trusting its flags.
+- If the canonical file is missing, read legacy `.claude/.agents-mode` as compatibility input only, normalize it forward into `.claude/.agents-mode.yaml`, and do not recreate the legacy file.
+- Honor `.claude/.agents-mode.yaml`, including `preferExternalWorker`, `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`.
+- `externalOpinionCounts` is a same-lane distinct-opinion contract; it governs distinct-provider opinions for one lane and does not cap how many same-provider worker instances may run in parallel for different disjoint lanes or slices.
 - `externalProvider: auto` resolves by the active named priority profile instead of a host-line default.
 - `externalProvider: codex`, `externalProvider: claude`, and `externalProvider: gemini` route the same adapter through the selected provider's CLI.
 - The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work.

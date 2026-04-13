@@ -22,5 +22,5 @@ This file is the branch-local runtime-layout reference for the standalone Claude
 ## Notes
 
 - `references-claude/` and `docs/` stay in the source branch; they are not copied into target projects.
-- Project-local operator state lives in `.claude/.agents-mode`.
+- Project-local operator state lives in `.claude/.agents-mode.yaml`.
 - The installed governance entrypoint is `.claude/CLAUDE.md`, which imports `.claude/AGENTS.md`.

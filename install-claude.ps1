@@ -345,6 +345,35 @@ function Ensure-DefaultFile {
     }
 }
 
+function Migrate-LegacyAgentsModeFile {
+    param(
+        [string]$LegacyFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    Remove-DanglingLink -Path $LegacyFile -Label ("legacy {0}" -f $Label)
+    Remove-DanglingLink -Path $TargetFile -Label $Label
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        if (Test-Path -LiteralPath $LegacyFile) {
+            Write-Host "  Canonical $Label already exists; leaving legacy file untouched: $LegacyFile"
+        }
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $LegacyFile)) {
+        return
+    }
+
+    Write-Host "  Migrating legacy $Label to $TargetFile..."
+    if (-not $DryRun) {
+        Move-Item -LiteralPath $LegacyFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would move $LegacyFile -> $TargetFile"
+    }
+}
+
 # Determine target
 if ($Global) {
     $repoRoot = Get-GitRepoRoot
@@ -386,7 +415,8 @@ if ($Global) {
 Write-Host "=== Claudestrator Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
 Write-Host "Target: $TargetRoot"
-$AgentsModeTarget = Join-Path $TargetRoot ".agents-mode"
+$AgentsModeTarget = Join-Path $TargetRoot ".agents-mode.yaml"
+$LegacyAgentsModeTarget = Join-Path $TargetRoot ".agents-mode.yaml"
 Write-Host "agents-mode: $AgentsModeTarget"
 Write-Host "Mode:   $Mode"
 if ($DryRun) {
@@ -602,7 +632,8 @@ if (Test-Path $srcAgents) {
     }
 }
 
-Ensure-DefaultFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode"
+Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
+Ensure-DefaultFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
 
 if ($DryRun) {
     Write-Host ""
@@ -646,7 +677,7 @@ foreach ($dir in $Dirs) {
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/operating-model.md") "agents/contracts/operating-model.md"
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/subagent-contracts.md") "agents/contracts/subagent-contracts.md"
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/policies-catalog.md") "agents/contracts/policies-catalog.md"
-Test-InstalledFile $AgentsModeTarget ".agents-mode"
+Test-InstalledFile $AgentsModeTarget ".agents-mode.yaml"
 
 # Check CLAUDE.md (Claude-specific sections)
 if (Test-Path $dstMd) {
@@ -697,5 +728,5 @@ if ($errors -gt 0) {
 } else {
     Write-Host "RESULT: OK - Claudestrator installed to $TargetRoot" -ForegroundColor Green
     Write-Host ""
-    Write-Host "Next: restart Claude, then run /agents-init-project to review/update project policies and the installed default .claude/.agents-mode."
+    Write-Host "Next: restart Claude, then run /agents-init-project to review/update project policies and the installed default .claude/.agents-mode.yaml."
 }

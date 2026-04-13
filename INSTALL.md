@@ -36,11 +36,11 @@ bash install-claude.sh
 
 The scripts handle clean removal of old files, copying, CLAUDE.md merging, and file-level verification. Re-running = reinstall. Memory is preserved across reinstalls.
 
-> **Note:** Global install makes agents and skills available everywhere and seeds `~/.claude/.agents-mode` with the current default overlay. Project-specific policies (`## Project policies` in CLAUDE.md) and project-local Claude-line overrides still belong in each repo where you run `/agents-init-project`. On the Claude line, `externalProvider: auto` resolves through the active named priority profile across `codex`, `claude`, and `gemini`; the canonical Claude-line config may include the shared `externalModelMode`, `externalGeminiFallbackMode` when the resolved provider is `gemini`, plus `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is `claude`, while `externalClaudeProfile` remains Codex-line only. The active profile or a documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. `externalOpinionCounts` is a same-lane distinct-opinion contract, not a cap on parallel helper multiplicity; use the brigade surface when you need bounded same-provider fan-out.
+> **Note:** Global install makes agents and skills available everywhere and seeds `~/.claude/.agents-mode.yaml` with the current default overlay. Project-specific policies (`## Project policies` in CLAUDE.md) and project-local Claude-line overrides still belong in each repo where you run `/agents-init-project`. On the Claude line, `externalProvider: auto` resolves through the active named priority profile across `codex`, `claude`, and `gemini`; the canonical Claude-line config may include the shared `externalModelMode`, `externalGeminiFallbackMode` when the resolved provider is `gemini`, plus `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is `claude`, while `externalClaudeProfile` remains Codex-line only. The active profile or a documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. `externalOpinionCounts` is a same-lane distinct-opinion contract, not a cap on parallel helper multiplicity; use the brigade surface when you need bounded same-provider fan-out. Legacy extensionless `.claude/.agents-mode` and `~/.claude/.agents-mode` remain compatibility input only and must be normalized forward into the canonical `.yaml` file.
 
 ## Init-time preset shortcuts
 
-After first-time project bootstrap, `/agents-init-project` can start from one of these preset shortcuts before writing canonical `.claude/.agents-mode` keys:
+After first-time project bootstrap, `/agents-init-project` can start from one of these preset shortcuts before writing canonical `.claude/.agents-mode.yaml` keys:
 
 - `default`
 - `absolute-balance`
@@ -94,7 +94,8 @@ The preset name is not persisted; the helper writes the resolved canonical key v
 2. Merge `src.claude/CLAUDE.md` content at the TOP of target's `.claude/CLAUDE.md` (prepend). Original user content stays below intact.
 3. Optionally copy `src.claude/memory/`
 4. Restart Claude
-5. Run `/agents-init-project` to configure project policies and review or update the installed default `.claude/.agents-mode`
+5. Run `/agents-init-project` to configure project policies and review or update the installed default `.claude/.agents-mode.yaml`
+   Legacy `.claude/.agents-mode` is compatibility input only; if it is the only file present, normalize it forward into `.claude/.agents-mode.yaml`.
 
 ## File separation
 
@@ -108,7 +109,7 @@ The preset name is not persisted; the helper writes the resolved canonical key v
 | `src.claude/agents/contracts/policies-catalog.md` | Policy catalog with options and defaults | Yes |
 | `src.claude/CLAUDE.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
 | `src.claude/memory/` | Feedback rules, populated over time | Optional |
-| `docs/` | Branch-local docs index, Claude-line `.claude/.agents-mode` reference, and runtime-layout notes | No — maintainer-facing source docs |
+| `docs/` | Branch-local docs index, Claude-line `.claude/.agents-mode.yaml` reference, and runtime-layout notes | No — maintainer-facing source docs |
 | `references-claude/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
 | `work-items/` | This repo's task memory | No — skill-pack internal |
 
