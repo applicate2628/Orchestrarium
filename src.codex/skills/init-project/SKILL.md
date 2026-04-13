@@ -34,6 +34,8 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalGeminiWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `runtime-default` |
+| `externalGeminiFallbackMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `externalClaudeSecretMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `externalClaudeProfile` | `sonnet-high` | `sonnet-high` | `sonnet-high` | `opus-max` | `sonnet-high` |
@@ -72,11 +74,11 @@ Routing conventions (not persisted as keys):
    - If the user says "defaults for the rest" or similar, apply defaults to all remaining policy areas.
 
 4. **Select a preset (optional).**
-   - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, or `max-speed`.
-   - If the user picks a preset, apply its full key expansion from the table above as the starting values.
-   - If the user says "custom" or skips this step, start from the `default` baseline.
-   - After applying a preset, still walk through each key so the user can fine-tune individual values.
-   - The preset name is NOT persisted — only the expanded canonical keys are written.
+    - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, or `max-speed`.
+    - If the user picks a preset, apply its full key expansion from the table above as the starting values.
+    - If the user says "custom" or skips this step, start from the `default` baseline.
+    - After applying a preset, still walk through each key so the user can fine-tune individual values.
+    - The preset name is NOT persisted — only the expanded canonical keys are written.
 
 5. **Configure operator modes.**
    - Walk through the canonical `agents-mode` keys one at a time:
@@ -89,6 +91,8 @@ Routing conventions (not persisted as keys):
      - `externalCodexWorkdirMode`
      - `externalClaudeWorkdirMode`
      - `externalGeminiWorkdirMode`
+     - `externalModelMode`
+     - `externalGeminiFallbackMode`
      - `externalClaudeSecretMode`
      - `externalClaudeApiMode`
      - `externalClaudeProfile`
@@ -105,6 +109,8 @@ Routing conventions (not persisted as keys):
    - `externalCodexWorkdirMode: neutral`
    - `externalClaudeWorkdirMode: neutral`
    - `externalGeminiWorkdirMode: neutral`
+   - `externalModelMode: runtime-default`
+   - `externalGeminiFallbackMode: auto`
    - `externalClaudeSecretMode: auto`
    - `externalClaudeApiMode: auto`
    - `externalClaudeProfile: sonnet-high`
@@ -119,7 +125,7 @@ Routing conventions (not persisted as keys):
    - Write the canonical file to `.agents/.agents-mode`.
    - Preserve unknown keys when updating an existing file.
    - Treat comment-free, partial, or older-layout files as legacy input and rewrite them to the current canonical format instead of preserving stale layout.
-   - Keep one key per line and include the inline allowed-values comment for every canonical key.
+   - Keep one key per line and include inline comments for every canonical scalar key plus every shipped `externalPriorityProfiles` / `externalOpinionCounts` entry.
    - Refresh the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks to the current pack version while preserving the effective values of known keys and any unknown keys.
 
    Use this canonical shape:
@@ -137,6 +143,8 @@ Routing conventions (not persisted as keys):
    externalCodexWorkdirMode: {value}  # allowed: neutral | project
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project
    externalGeminiWorkdirMode: {value}  # allowed: neutral | project
+   externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro
+   externalGeminiFallbackMode: {value}  # allowed when Gemini is selected: disabled | auto | force
    externalClaudeSecretMode: {value}  # allowed when Claude is selectable: auto | force
    externalClaudeApiMode: {value}  # allowed when Claude is selectable: disabled | auto | force
    externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max

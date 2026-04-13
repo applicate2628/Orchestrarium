@@ -33,19 +33,24 @@ description: Review approved Codex work through an external provider when the ro
   - Codex path: `codex`
   - Claude path: `claude`, `claude.exe`, or `claude.cmd`
   - Gemini path: `gemini`
-- Honor `externalClaudeProfile` only when the selected provider is Claude: `sonnet-high` maps to `--model sonnet --effort high`; `opus-max` maps to `--model opus --effort max`.
+- Honor `externalClaudeProfile` only when the selected provider is Claude. On the Codex line, this is a narrower override than the shared `externalModelMode`: `sonnet-high` maps to `--model sonnet --effort high`; `opus-max` maps to `--model opus --effort max`.
 - Honor `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts` when `externalProvider: auto` is in effect. Multi-opinion lanes collect fail-closed rather than silently dropping shortfalls, and Gemini can be selected outside visual lanes when the active profile ranks it there.
+- `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not cap how many same-provider review instances may run in parallel for different disjoint lanes or slices.
+- Honor `externalModelMode` before provider-specific model fallbacks: `runtime-default` keeps the selected provider on its runtime default model/profile; `pinned-top-pro` uses the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion.
+- When `externalModelMode: pinned-top-pro` and the selected provider is Gemini, `externalGeminiFallbackMode` controls the explicit Gemini path: `disabled` keeps `gemini-3.1-pro` only; `auto` starts on `gemini-3.1-pro` and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures; `force` starts on `gemini-3-flash` immediately.
+- Treat `gemini-3-flash` as a bounded mechanical overflow path only. `externalGeminiFallbackMode: force` is for tightly scoped low-reasoning work, not for broad reasoning or cleanup just to save tokens.
 - Honor `externalClaudeSecretMode` when the selected provider is Claude: `auto` keeps the first Claude call plain and allows one SECRET-backed retry only for quota, limit, or reset errors; `force` applies the same `ANTHROPIC_*` environment from the local Claude `SECRET.md` to the primary Claude call.
 - Honor `externalClaudeApiMode` when the selected provider is Claude: `auto` keeps `claude-api` as the named fallback after the allowed Claude CLI path is exhausted; `force` uses `claude-api` as the primary Claude transport immediately.
-- `externalOpinionCounts` is a same-lane distinct-opinion policy, not a limit on how many same-provider external review items may run in parallel when the slices are disjoint.
+- Treat `claude-api` as the approved economical near-full-strength Claude transport. `force` is an explicit budget choice as well as a limit fallback.
 - If `externalClaudeSecretMode: force` is selected and the local Claude `SECRET.md` cannot supply all three `ANTHROPIC_*` values, stop and return `BLOCKED:dependency` with that reason.
 - Use stdin or a file for the prompt; do not pass multiline prompts as direct command-line arguments.
 - If the selected Claude CLI path fails after its allowed retries and `externalClaudeApiMode` permits `claude-api`, try `claude-api` before treating Claude as unavailable.
 - If the provider is missing, unauthenticated, or errors after the allowed Claude path and any permitted `claude-api` transport, stop and return `BLOCKED:dependency` with the reason.
+- Where Codex is the selected provider, do not treat `gpt-5.3-codex-spark` as the ordinary cheaper mode. It remains a bounded mechanical overflow path for fully autonomous low-reasoning work only.
 - This adapter is a direct external launch contract. Do not spawn it as an internal specialist or helper; the orchestrator must launch the selected external provider directly or fail closed.
 - Do not silently fall back to an internal reviewer or to `$consultant`.
 - If the provider is unavailable, the role is disabled and the orchestrator may reroute to another eligible internal specialist.
-- If several independent external helper items need to run together, the orchestrator should route them through `$external-brigade` rather than trying to compress them into one review artifact.
+- Multiple simultaneous instances of this adapter may target the same provider when each instance owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
 
 ## Return exactly one artifact
 

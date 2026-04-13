@@ -36,13 +36,15 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 - `externalCodexWorkdirMode`
 - `externalClaudeWorkdirMode`
 - `externalGeminiWorkdirMode`
+- `externalModelMode`
+- `externalGeminiFallbackMode`
 - `externalClaudeSecretMode`
 - `externalClaudeApiMode`
 - `externalClaudeProfile`
 
 Read and normalize `.agents/.agents-mode` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 
-When changing `consultantMode`, preserve the other keys, including the profile, opinion-count, workdir, transport, and Claude-profile fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `delegationMode` to `manual`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` / `externalGeminiWorkdirMode` to `neutral`, `externalClaudeSecretMode` to `auto`, `externalClaudeApiMode` to `auto`, and `externalClaudeProfile` to `sonnet-high` unless the user explicitly requested a different Claude profile override.
+When changing `consultantMode`, preserve the other keys, including the profile, opinion-count, workdir, model-policy, Gemini-fallback, transport, and Claude-profile fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `delegationMode` to `manual`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` / `externalGeminiWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, `externalGeminiFallbackMode` to `auto`, `externalClaudeSecretMode` to `auto`, `externalClaudeApiMode` to `auto`, and `externalClaudeProfile` to `sonnet-high` unless the user explicitly requested a different Claude profile override.
 Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 
 ## When to invoke
@@ -53,7 +55,6 @@ Use `$consultant` when the lead wants a second opinion for:
 - cross-cutting tradeoffs spanning multiple specialist roles
 - ambiguity where the strongest factual slice is already available
 - comparing options before choosing a route
-- if several independent advisory opinions are needed at once, the orchestrator should launch them as separate brigade items through `$external-brigade` rather than trying to merge them into one memo request
 
 Do not invoke for:
 
@@ -108,14 +109,24 @@ If `.agents/.agents-mode` selects Claude and contains `externalClaudeProfile`, m
 
 - `sonnet-high` → `--model sonnet --effort high`
 - `opus-max` → `--model opus --effort max`
-- key missing → use the current default Claude CLI invocation for this pack
+- key missing → use the current default Claude CLI invocation for this pack unless `externalModelMode: pinned-top-pro` requests the stronger Claude path
 
-If `.agents/.agents-mode` selects Gemini (`externalProvider: gemini`), use Gemini CLI in non-interactive mode. Example:
+If `.agents/.agents-mode` selects Gemini (`externalProvider: gemini`), honor `externalModelMode` first.
+
+- `runtime-default` → use Gemini CLI without forcing an explicit model/profile override.
+- `pinned-top-pro` → use Gemini CLI in non-interactive mode starting from the explicit Pro path below.
+
+Pinned Gemini example:
 
 **Windows / macOS / Linux:**
 ```bash
-printf '%s' "$PROMPT" | gemini -p "" --model gemini-2.5-pro --approval-mode yolo
+printf '%s' "$PROMPT" | gemini -p "" --model gemini-3.1-pro --approval-mode yolo
 ```
+
+Gemini fallback mode under `externalModelMode: pinned-top-pro`:
+- If `externalGeminiFallbackMode: disabled`, use `gemini-3.1-pro` only. If that call fails, disclose Gemini unavailability instead of switching models or providers silently.
+- If `externalGeminiFallbackMode: auto`, run the first Gemini call with `gemini-3.1-pro`. If that call fails with quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures, rerun the same one-line Gemini command once with `--model gemini-3-flash`.
+- If `externalGeminiFallbackMode: force`, use `gemini-3-flash` as the primary Gemini model immediately instead of spending time on a preceding `gemini-3.1-pro` attempt.
 
 Examples:
 
@@ -145,10 +156,11 @@ Claude API transport:
 **Rules:**
 - If `externalClaudeProfile` is present, use it instead of improvising a different Claude model or effort level.
 - If `externalClaudeSecretMode: force` is selected and the local Claude `SECRET.md` cannot supply all three `ANTHROPIC_*` values, treat that as external-provider unavailability instead of silently dropping back to a plain Claude call.
-- If `externalProvider: gemini` is selected, do not silently reroute to Claude; disclose provider failure explicitly and return an unavailable memo.
+- If `externalProvider: gemini` is selected, do not silently reroute to Claude; honor `externalModelMode` first, then any allowed Gemini same-provider fallback, and disclose provider failure explicitly if the route still fails.
 - If the requested Claude profile is unavailable because of auth, client support, or non-limit CLI failures, treat that as external-provider unavailability and return an unavailable memo.
 - If the requested Claude profile fails because of plan limits, quota, or reset errors, honor `externalClaudeSecretMode`: `auto` tries the single SECRET-backed one-line retry first, while `force` treats the already-SECRET-backed primary call as the full allowed Claude path. If that allowed Claude CLI path still fails and `externalClaudeApiMode` permits `claude-api`, try `claude-api` before declaring Claude unavailable. Do not silently downgrade to another Claude profile.
 - If `externalClaudeApiMode` requires `claude-api` and that command is unavailable, disclose a dependency/config failure instead of pretending the Claude path was complete.
+- If Gemini returns quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style errors, honor `externalGeminiFallbackMode`: `auto` allows one retry on `gemini-3-flash`, while `force` treats the already-flash primary call as the full allowed Gemini path. Do not silently downgrade below Gemini 3 or switch providers.
 - Do not pass multiline prompts as direct command-line arguments — use `stdin` or a file.
 - Do not use TTY when a non-interactive invocation is available.
 - On Windows, keep command-line prompts short enough to avoid `cmd.exe` truncation.

@@ -32,7 +32,8 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 - Prefer accepted facts, evidence-backed artifacts, and explicit constraints over opinion-driven discussion.
 - Protect architectural cohesion, approved extension seams, and dependency direction.
 - Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible worker/review roles; prefer them when `.agents/.agents-mode` says so or when the user explicitly requests external dispatch, do not route worker-side or review work through `$consultant`, and launch those external routes directly instead of spawning an internal host helper.
-- Use `$external-brigade` when several independent external helper items need to launch or aggregate together as one bounded batch.
+- Any spawned internal subagent is internal by definition even if the prompt assigns it a provider label or model such as Gemini Pro. Do not satisfy an external route with an internal subagent impersonating that provider.
+- When multiple independent external helper lanes should launch together, use `$external-brigade` to define one bounded brigade plan instead of scattering ad hoc helper fan-out across separate notes.
 - One subagent equals one profession, one artifact, and one gate.
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
 - Do not ask one subagent to deliver a feature end-to-end.
@@ -97,7 +98,6 @@ The canonical brief should capture:
    - Roles: `$backend-engineer`, `$frontend-engineer` for web/React UI, `$graphics-engineer`, `$visualization-engineer`, `$geometry-engineer`, `$qt-ui-engineer` for Qt desktop UI, `$model-view-engineer`, `$data-engineer`, `$toolchain-engineer`, `$platform-engineer`, `$external-worker`, or another explicitly approved implementation specialist
    - Output: one implementation package for one approved phase.
    - Cross-cutting hygiene (invoke explicitly, outside the feature phase): `$knowledge-archivist`
-   - When several independent external helper items must run together, use `$external-brigade` to launch and aggregate the bounded batch.
    - If an archivist patch changes repository-wide control-plane semantics, route it through `$architecture-reviewer` before lead acceptance.
    - If the approved work spans multiple implementation phases or specialists, assign one explicit integration owner before QA. That owner assembles one coherent integrated artifact and checks cross-phase compatibility before verification begins.
 5. `QA`
@@ -260,6 +260,7 @@ Do not advance work on optimism or partial acceptance.
 
 - Parallelize read-heavy work such as research, triage, summarization, and test analysis when the scopes are independent.
 - Be conservative with write-heavy work. Parallel edits are acceptable only when write scopes and contracts are already fixed.
+- Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane.
 - If merge or coordination cost is likely to exceed the benefit, do not parallelize.
 
 ## Governance rule
