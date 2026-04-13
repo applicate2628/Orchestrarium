@@ -6,7 +6,7 @@ Use it together with:
 
 - [subagent-operating-model.md](subagent-operating-model.md)
 - [operating-model-diagram.md](operating-model-diagram.md)
-- [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) when `.gemini/.agents-mode` behavior matters
+- [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) when `.gemini/.agents-mode.yaml` behavior matters
 
 ## Strategy families
 

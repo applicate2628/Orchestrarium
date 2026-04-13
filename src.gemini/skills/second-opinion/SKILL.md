@@ -9,7 +9,9 @@ Use this skill to invoke `$consultant` or to change Gemini-line consultant mode.
 
 ## Toggle keys
 
-Manage these keys in `.gemini/.agents-mode`:
+Manage these keys in `.gemini/.agents-mode.yaml`:
+
+- Legacy `.gemini/.agents-mode` is compatibility input only. Prefer `.gemini/.agents-mode.yaml`, fall back only if it is missing, normalize forward into `.gemini/.agents-mode.yaml`, and do not recreate the legacy file.
 
 - `consultantMode`
 - `delegationMode`
@@ -46,9 +48,10 @@ Gemini-line rules:
 - `enable` -> `consultantMode: external`
 - `internal` -> `consultantMode: internal`
 - `disable` -> `consultantMode: disabled`
-- `status` -> read and normalize `.gemini/.agents-mode`, then print the current resolved values
+- `status` -> read and normalize `.gemini/.agents-mode.yaml`, then print the current resolved values
+- If the canonical file is missing, read legacy `.gemini/.agents-mode` as compatibility input only and normalize it forward into `.gemini/.agents-mode.yaml` before reporting status
 
-Preserve unknown keys on write and normalize comment-free, partial, or older-layout files to the current canonical format on read. Keep one key per line with inline allowed-value comments.
+Preserve unknown keys on write and normalize comment-free, partial, or older-layout files to the current canonical format on read. Keep one key per line with inline allowed-value comments. Legacy `.gemini/.agents-mode` is compatibility input only and must not be recreated.
 
 ## Advisory run
 

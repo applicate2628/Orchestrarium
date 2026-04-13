@@ -4,7 +4,7 @@
 
 Tracked task memory опционален и задаётся самим репозиторием. Когда репозиторий решает его использовать, task-memory directory, recovery entry point, active-item directory и archive location задаются конфигурацией репозитория.
 
-`references-gemini/` — канонический дом для стабильной Gemini-side governance и methodology references в этой standalone ветке. `docs/agents-mode-reference.md` — канонический operator reference для optional `.gemini/.agents-mode` overlay. Когда task memory включён, конфигурируемая task-memory directory остаётся домом для item-specific execution memory.
+`references-gemini/` — канонический дом для стабильной Gemini-side governance и methodology references в этой standalone ветке. `docs/agents-mode-reference.md` — канонический operator reference для optional `.gemini/.agents-mode.yaml` overlay. Когда task memory включён, конфигурируемая task-memory directory остаётся домом для item-specific execution memory.
 
 ## Обязательный набор артефактов
 

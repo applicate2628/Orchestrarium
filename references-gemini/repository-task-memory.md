@@ -4,7 +4,7 @@ This repository uses durable repo-local artifacts, not chat memory, as the sourc
 
 Tracked task memory is optional and repository-defined. When the repository chooses to use it, the task-memory directory, recovery entry point, active-item directory, and archive location are all configured by the repository.
 
-`references-gemini/` is the canonical home for stable repository-wide Gemini-side governance and methodology references in this standalone branch. `docs/agents-mode-reference.md` is the canonical operator reference for the optional `.gemini/.agents-mode` overlay. When enabled, the configured task-memory directory is still the home for item-specific execution memory.
+`references-gemini/` is the canonical home for stable repository-wide Gemini-side governance and methodology references in this standalone branch. `docs/agents-mode-reference.md` is the canonical operator reference for the optional `.gemini/.agents-mode.yaml` overlay. When enabled, the configured task-memory directory is still the home for item-specific execution memory.
 
 ## Mandatory artifact set
 

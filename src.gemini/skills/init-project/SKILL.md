@@ -11,7 +11,7 @@ Use this helper after Gemini's built-in `/init` has already created or refreshed
 
 This helper owns only the Orchestrarium overlay file:
 
-- `.gemini/.agents-mode`
+- `.gemini/.agents-mode.yaml`
 
 It must not replace Gemini's official runtime config in:
 
@@ -68,8 +68,10 @@ Routing conventions (not persisted as keys):
    - Treat `/init` as the canonical owner for creating or refreshing `GEMINI.md`.
 
 2. **Read current overlay state.**
-   - Read `.gemini/.agents-mode` if it exists.
-   - If the file exists, normalize it to the current canonical format before presenting or trusting any values.
+   - Read `.gemini/.agents-mode.yaml` first.
+   - If it is missing, read legacy `.gemini/.agents-mode` as compatibility input only.
+   - If either file exists, normalize it to the current canonical format before presenting or trusting any values.
+   - Any read of `.gemini/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
    - If it is missing, start from the canonical defaults below.
    - Preserve unknown keys when updating an existing file.
 
@@ -122,13 +124,14 @@ Routing conventions (not persisted as keys):
    - Accept shorthand such as `force`, `external reviewer only`, `balanced profile`, or `gemini crosscheck`.
 
 6. **Confirm before writing.**
-   - Present one summary table for the final `.gemini/.agents-mode` values.
+   - Present one summary table for the final `.gemini/.agents-mode.yaml` values.
    - Tell the user explicitly that `.gemini/settings.json` stays untouched by this helper.
    - Ask for confirmation before writing.
 
-7. **Write `.gemini/.agents-mode`.**
+7. **Write `.gemini/.agents-mode.yaml`.**
    - Keep one key per line.
    - Treat comment-free, partial, or older-layout files as legacy input and rewrite them to the current canonical format instead of preserving stale layout.
+   - Do not recreate legacy `.gemini/.agents-mode`; write the canonical output only to `.gemini/.agents-mode.yaml`.
    - Keep inline comments on every canonical scalar key plus every shipped `externalPriorityProfiles` / `externalOpinionCounts` entry, and preserve the multiline blocks verbatim.
    - Refresh the shipped profile/count blocks to the current pack version while preserving effective known values and any unknown keys.
    - Use this canonical Gemini-line shape:
@@ -191,12 +194,12 @@ Routing conventions (not persisted as keys):
    - Tell the user the Gemini official surfaces are split correctly:
      - `/init` owns `GEMINI.md`
      - `.gemini/settings.json` remains Gemini-native runtime config
-     - `.gemini/.agents-mode` now holds the Orchestrarium shared-routing overlay, including the named priority profiles and lane opinion counts
+     - `.gemini/.agents-mode.yaml` now holds the Orchestrarium shared-routing overlay, including the named priority profiles and lane opinion counts
 
 ## Rules
 
 - Do not create or rewrite `.gemini/settings.json`.
-- Do not pretend `.gemini/.agents-mode` is a Gemini-native runtime setting.
+- Do not pretend `.gemini/.agents-mode.yaml` is a Gemini-native runtime setting.
 - Do not invent extra keys beyond the canonical overlay schema.
-- Any read of `.gemini/.agents-mode` that drives a decision should normalize the file to the current canonical format before trusting the flags.
+- Any read that drives a decision should prefer `.gemini/.agents-mode.yaml`, fall back to legacy `.gemini/.agents-mode` only if the canonical file is missing, normalize either input forward into `.gemini/.agents-mode.yaml`, and not recreate the legacy file.
 - If the user asks for `externalProvider: gemini` on the Gemini line, accept it only as an explicit self-provider override; ordinary `auto` routing must still avoid same-provider self-bounce.

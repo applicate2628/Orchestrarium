@@ -4,7 +4,8 @@ Shared Gemini-line dispatch contract for `$consultant`, `$external-worker`, and 
 
 ## Canonical config
 
-- Canonical file: `.gemini/.agents-mode`
+- Canonical file: `.gemini/.agents-mode.yaml`
+- Legacy `.gemini/.agents-mode` is compatibility input only. Prefer `.gemini/.agents-mode.yaml`, fall back only if it is missing, normalize forward into `.gemini/.agents-mode.yaml`, and do not recreate the legacy file.
 - Full operator tables: [../../../docs/agents-mode-reference.md](../../../docs/agents-mode-reference.md)
 
 Canonical Gemini-line schema:
@@ -43,7 +44,8 @@ Rules:
 - `claude-api` remains a Claude transport, not a fourth provider.
 - `externalClaudeProfile` is not part of canonical Gemini-line config.
 - Preserve unknown keys on write.
-- Any read of `.gemini/.agents-mode` that influences routing must normalize an existing file to the current canonical format before trusting the flags. Comment-free or older-layout files are valid input, not valid output.
+- Any read of `.gemini/.agents-mode.yaml` that influences routing must normalize an existing file to the current canonical format before trusting the flags. Comment-free or older-layout files are valid input, not valid output.
+- If `.gemini/.agents-mode.yaml` is missing, read legacy `.gemini/.agents-mode` as compatibility input only, then normalize either input forward into `.gemini/.agents-mode.yaml` before trusting the flags.
 - Keep one key per line with inline allowed-value comments.
 - Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 - Gemini remains the preferred target for image, icon, decorative visual, and other clearly visual worker or review lanes when the active profile or repo-local heuristic ranks it first, but ordinary `auto` still respects the self-provider filter.
