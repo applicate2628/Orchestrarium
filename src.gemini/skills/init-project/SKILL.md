@@ -82,11 +82,13 @@ Routing conventions (not persisted as keys):
 4. **Select a preset (optional).**
     - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, or `max-speed`.
     - If the user picks a preset, apply its full key expansion from the table above as the starting values.
+    - After applying a preset, ask whether to write that preset as-is or fine-tune individual keys first.
+    - If the user says `use the preset`, `preset only`, `apply as-is`, or otherwise declines manual tweaking, skip the key-by-key overlay walkthrough and carry the preset-expanded values straight to confirmation.
     - If the user says "custom" or skips this step, start from the `default` baseline.
-    - After applying a preset, still walk through each key so the user can fine-tune individual values.
     - The preset name is NOT persisted — only the expanded canonical keys are written.
 
 5. **Configure the shared routing overlay.**
+   - Run this step only when the user started from `custom`, skipped preset selection, or explicitly asked to fine-tune after selecting a preset.
    - Walk through these keys one at a time:
      - `consultantMode`
      - `delegationMode`
