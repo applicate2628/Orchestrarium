@@ -244,6 +244,10 @@ if grep -Fq 'read and normalize `.claude/.agents-mode`.' "$PACK/skills/agents-se
 else
   fail "agents-second-opinion normalizes agents-mode before reporting status"
 fi
+check_contains "docs/agents-mode-reference.md" '### `externalModelMode`' \
+  "agents-mode reference defines externalModelMode"
+check_contains "docs/agents-mode-reference.md" '### `externalGeminiFallbackMode`' \
+  "agents-mode reference defines externalGeminiFallbackMode"
 if grep -Fq 'Adapter host runtime' "$PACK/AGENTS.shared.md"; then
   fail "shared governance no longer allows adapter-host metadata for external execution"
 else

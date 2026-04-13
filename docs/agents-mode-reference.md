@@ -6,7 +6,7 @@ Canonical value-by-value operator reference for the standalone Claude Code pack.
 
 | Provider | Canonical file | Provider-specific note |
 |---|---|---|
-| Claude Code | `.claude/.agents-mode` | Shared provider universe: `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named priority profile and skips the current host provider. `claude-api` is a Claude transport, not a fourth provider. Installs seed the default file into the active target and preserve existing overlays on reinstall. |
+| Claude Code | `.claude/.agents-mode` | Shared provider universe: `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named priority profile and skips the current host provider. `claude-api` is a Claude transport, not a fourth provider. The shared `externalModelMode` distinguishes runtime-default provider selection from pinned top-model execution. When Gemini is selected, honor `externalModelMode` first and then `externalGeminiFallbackMode` for pinned Gemini fallback. Installs seed the default file into the active target and preserve existing overlays on reinstall. |
 
 Tooling should read and write only `.claude/.agents-mode`.
 
@@ -81,7 +81,7 @@ See `Orchestrarium/docs/agents-mode-reference.md` for the full preset expansion 
 | `auto` | Resolve by lane type using the active named priority profile, then skip the current host provider | This keeps routing host-neutral and avoids silent self-bounce. |
 | `codex` | Route provider-backed external work to Codex CLI | Valid wherever Codex CLI is installed. |
 | `claude` | Route provider-backed external work to Claude CLI | Valid wherever Claude CLI is installed and the user explicitly asked for a Claude target. |
-| `gemini` | Route provider-backed external work to Gemini CLI | Valid wherever Gemini CLI is installed. |
+| `gemini` | Route provider-backed external work to Gemini CLI | Valid wherever Gemini CLI is installed. When this value is selected or `auto` resolves to Gemini, honor `externalModelMode`; if the model policy is pinned, also honor `externalGeminiFallbackMode`. |
 
 Notes:
 - `auto` is lane-driven, not host-default-driven.
@@ -147,6 +147,41 @@ Notes:
 - The ordinary default should be a neutral empty directory so comparative or external runs do not accidentally inherit repo-local instruction overlays by cwd alone.
 - When the resolved provider is `codex`, honor `externalCodexWorkdirMode`; when it is `claude`, honor `externalClaudeWorkdirMode`; when it is `gemini`, honor `externalGeminiWorkdirMode`.
 
+### `externalModelMode`
+
+| Value | Meaning | Effective model behavior |
+|---|---|---|
+| `runtime-default` | Keep the resolved provider on its runtime default model/profile | Do not inject a stronger pinned model path just because external routing picked that provider. |
+| `pinned-top-pro` | Use the strongest documented provider-native model/profile path | Start on the strongest documented provider-native model/profile and allow only the bounded same-provider fallback used for usage-limit or quota exhaustion while staying inside the approved version floor and lane policy for that provider. |
+
+Notes:
+- `runtime-default` is the first-write default.
+- Under `pinned-top-pro`, Codex uses `gpt-5.4 --reasoning-effort xhigh`; only `worker.long-autonomous` and similarly fully autonomous low-reasoning worker lanes may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path.
+- Under `pinned-top-pro`, Claude uses `opus-max`; if the allowed Claude CLI path hits usage-limit or quota exhaustion and `externalClaudeApiMode: auto` permits it, retry once through `claude-api`, or start there immediately when the user explicitly sets `externalClaudeApiMode: force`, while preserving the strongest Claude intent instead of dropping to `sonnet-high`.
+- Under `pinned-top-pro`, Gemini uses `gemini-3.1-pro` then follows `externalGeminiFallbackMode` for the allowed same-provider retry.
+- Do not silently downgrade below `gpt-5.3-codex-spark` on the Codex line or below Gemini 3 on the Gemini line.
+- Repo-local policy treats these named fallback paths as alternate limit or budget pools when runtime observation shows that they exhaust independently. They are not quality-equivalent substitutes for the primary path.
+- Treat `gpt-5.3-codex-spark` and `gemini-3-flash` as bounded mechanical overflow paths only. Reserve them for strictly scoped, low-reasoning, autonomous work instead of using them as the ordinary cheaper mode for broad reasoning or cleanup.
+- Treat `claude-api` differently: repo-local policy accepts it as the economical near-full-strength Claude transport with slightly weaker settings than the strongest Claude CLI profile, so `externalClaudeApiMode: force` is an explicit budget choice as well as a limit fallback.
+- On the Codex line, `externalClaudeProfile` remains a narrower Claude override than the shared model policy where that override exists.
+- This key does not authorize a provider switch by itself.
+
+### `externalGeminiFallbackMode`
+
+| Value | Meaning | Effective Gemini model behavior |
+|---|---|---|
+| `disabled` | Pro-only Gemini path | Use `gemini-3.1-pro` only. If that path fails, Gemini is unavailable. |
+| `auto` | Gemini 3.1 Pro first, then Gemini 3 Flash fallback | Start with `gemini-3.1-pro`. If Gemini fails on quota, limit, capacity, HTTP `429`, `RESOURCE_EXHAUSTED`, or similar retryable provider-capacity errors, rerun the same Gemini call once with `gemini-3-flash`. |
+| `force` | Flash-first Gemini path | Use `gemini-3-flash` as the primary Gemini model immediately and do not spend time on a preceding `gemini-3.1-pro` attempt. |
+
+Notes:
+- This key is valid on the Claude line when `externalProvider` resolves to `gemini` and the shared model policy is pinned rather than runtime-default.
+- `auto` is the first-write default.
+- The accepted Gemini baseline is Gemini 3 only: `gemini-3.1-pro` first, `gemini-3-flash` as the named fallback. Do not silently downgrade below Gemini 3.
+- `force` is a deliberate budget or alternate-limit path for tightly bounded mechanical work only. Do not default reasoning-heavy, ambiguous, or cleanup-heavy work to Flash just to save tokens.
+- Under `externalModelMode: runtime-default`, do not inject an extra explicit Gemini model hop or fallback retry through this key.
+- This key selects Gemini model path only. It does not authorize a provider switch.
+
 ### Claude transport
 
 #### `externalClaudeSecretMode`
@@ -168,6 +203,8 @@ Notes:
 - These keys are transport-only and apply only after the resolved provider is `claude`.
 - The preferred Claude API transport surface is `.claude/agents/scripts/invoke-claude-api.sh` or `.ps1`, which reads repo-local `.claude/SECRET.md` first and then `~/.claude/SECRET.md`.
 - `claude-api` remains the named secondary Claude transport behind that wrapper, not a fourth provider.
+- Repo-local policy allows `externalClaudeApiMode: force` as an explicit economy choice because `claude-api` remains close enough to full Claude behavior for ordinary admitted lanes, even though its settings are not identical to the strongest plain Claude CLI profile.
+- When the plain Claude CLI path and the Claude API transport consume different limits in practice, prefer describing that as observed runtime behavior or repo-local operator policy rather than as an official provider guarantee.
 
 ## Practical launch rules
 
@@ -177,6 +214,8 @@ Notes:
 | Claude CLI is not logged in, or auth is intentionally repo-local | Prefer the installed Claude API wrapper allowed by `externalClaudeApiMode` instead of repeatedly probing a plain `claude` command that cannot authenticate. |
 | PowerShell Claude API transport | Use `.claude/agents/scripts/invoke-claude-api.ps1`. The wrapper must work on Windows PowerShell 5.1 and PowerShell 7+, and it accepts both `-PrintSecretPath` and `--print-secret-path`. |
 | Bash / Git Bash Claude API transport | Use `.claude/agents/scripts/invoke-claude-api.sh`. The wrapper resolves `claude-api`, `claude-api.cmd`, or `claude-api.exe`; if the active shell still cannot see the binary, set `CLAUDE_API_BIN` explicitly. |
+| Gemini is the chosen provider under `externalModelMode: runtime-default` | Leave Gemini on its runtime default model/profile. |
+| Gemini is the chosen provider and `externalModelMode: pinned-top-pro` with `externalGeminiFallbackMode: auto` | Try `gemini-3.1-pro` first. If Gemini returns quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style errors, retry once with `gemini-3-flash`. |
 | Codex commit review | Use `codex review --commit <sha>` without an extra free-form prompt. If custom review instructions are required, prefer a narrower `codex exec` run on the admitted scope instead of mixing text with `review --commit`. |
 | Wide release or parity audit | Split by admitted repo, file set, or lane. Do not default to one mega neutral-dir prompt over the whole pack family because Codex and Gemini are more likely to stall on ultra-wide review scopes. |
 | Neutral workdir mode | Keep `external<Provider>WorkdirMode: neutral` by default and pass the exact repo, commit, file, or artifact scope explicitly. Switch to `project` only when the external run truly needs in-place filesystem execution or repo-local instruction surfaces. |
@@ -224,9 +263,9 @@ Notes:
 
 ## First-write defaults
 
-| Provider | `consultantMode` | `delegationMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `externalPriorityProfile` | `externalPriorityProfiles` | `externalOpinionCounts` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalGeminiWorkdirMode` | `externalClaudeSecretMode` | `externalClaudeApiMode` |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Claude Code | requested value | `manual` | `auto` | `false` | `false` | `auto` | `balanced` | shipped `balanced` + `gemini-crosscheck` | all documented lanes default to `1` | `neutral` | `neutral` | `neutral` | `auto` | `auto` |
+| Provider | `consultantMode` | `delegationMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `externalPriorityProfile` | `externalPriorityProfiles` | `externalOpinionCounts` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalGeminiWorkdirMode` | `externalModelMode` | `externalGeminiFallbackMode` | `externalClaudeSecretMode` | `externalClaudeApiMode` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Claude Code | requested value | `manual` | `auto` | `false` | `false` | `auto` | `balanced` | shipped `balanced` + `gemini-crosscheck` | all documented lanes default to `1` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | `auto` | `auto` |
 
 ## Task continuity
 
@@ -263,6 +302,8 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 | Direct external launch | Provider-backed consultant execution in `external` mode and both external adapter roles must launch the selected external transport directly. If the host runtime cannot do that, the route is disabled rather than proxied through an internal helper. |
 | External workdir mode | `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, and `externalGeminiWorkdirMode` choose whether each external provider runs in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`. |
 | Active priority profile | `externalProvider: auto` resolves by lane type through the active named priority profile and skips the current host provider. On this line that means image/icon/decorative lanes may still prefer Gemini, but only when the active profile or an honest repo-local heuristic ranks it first. |
+| Shared external model policy | `externalModelMode: runtime-default` keeps provider runtime model selection; `pinned-top-pro` pins the strongest documented model/profile for the resolved provider and allows one named same-provider fallback on retryable provider exhaustion. |
+| Gemini fallback mode | `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for limit, quota, or capacity-style Gemini failures when the model policy is pinned; `force` starts on `gemini-3-flash` immediately. |
 | Claude transport | `externalClaudeSecretMode` and `externalClaudeApiMode` are transport-only and apply only after the resolved provider is `claude`; `claude-api` is a secondary transport, not a provider. |
 | Unknown keys | Tools that update `.claude/.agents-mode` should preserve unknown keys and keep the file in expanded multi-key form rather than collapsing it back to a consultant-only shape. |
 | Read-time normalization | Readers must normalize an existing `.claude/.agents-mode` file to the current canonical format before trusting its flags. |
