@@ -36,8 +36,8 @@ Use these roles first for skill-pack support and maintenance:
 - `$toolchain-engineer`: build, packaging, installation, reproducibility, and developer ergonomics for the skill pack
 - `$qa-engineer`: verification of maintenance changes against accepted behavior and likely regressions
 - `$architecture-reviewer`: maintainability and cohesion gate for structural or semantic control-plane changes to the pack
-- `$external-worker`: cross-provider worker-side adapter for eligible non-owner, non-review roles; preference comes from `.agents/.agents-mode` or explicit user routing
-- `$external-reviewer`: cross-provider review and QA adapter for eligible review-side roles; preference comes from `.agents/.agents-mode` or explicit user routing
+- `$external-worker`: cross-provider worker-side adapter for eligible non-owner, non-review roles; preference comes from `.agents/.agents-mode.yaml` or explicit user routing
+- `$external-reviewer`: cross-provider review and QA adapter for eligible review-side roles; preference comes from `.agents/.agents-mode.yaml` or explicit user routing
 - `$consultant`: independent advisory second opinion for ambiguous workflow or policy changes; ordinary use is optional, and completed lead-managed batches end with one or more external consultant-checks before closure as required by the active lane policy
 - `$product-manager`: roadmap, sequencing, and admission decisions for the skill pack itself
 

@@ -4,8 +4,8 @@ This contract defines the shared Claude-line routing semantics for the consultan
 
 ## Shared config file
 
-- Canonical path: `.claude/.agents-mode`
-- `agents-mode` is the only supported operator overlay surface on the Claude line.
+- Canonical path: `.claude/.agents-mode.yaml`
+- Legacy `.claude/.agents-mode` is compatibility input only. Prefer `.claude/.agents-mode.yaml`, fall back only if it is missing, normalize forward into `.claude/.agents-mode.yaml`, and do not recreate the legacy file.
 - Full value-by-value operator semantics live in [../../../docs/agents-mode-reference.md](../../../docs/agents-mode-reference.md).
 
 Supported canonical keys:
@@ -46,10 +46,11 @@ Semantics:
 - `externalClaudeSecretMode` applies whenever the resolved provider is Claude. `auto` keeps the first call plain and allows one limit-triggered retry; `force` applies the same environment override to the primary call.
 - `externalClaudeApiMode` applies whenever the resolved provider is Claude. `disabled` forbids the repo-local `claude-api` transport, `auto` uses it after the allowed Claude CLI path is exhausted, and `force` uses `claude-api` as the primary Claude transport. `claude-api` remains a Claude transport, not a fourth provider.
 - Treat named fallback paths as alternate limit or budget pools only when runtime observation shows they exhaust independently. That remains repo-local operator policy rather than an official provider guarantee.
-- Claude-line does not use `externalClaudeProfile` as part of the canonical schema and should not write it into `.agents-mode`.
+- Claude-line does not use `externalClaudeProfile` as part of the canonical schema and should not write it into `.agents-mode.yaml`.
 - Any tool that updates the file must preserve unknown keys in place and must not rewrite the file back to a consultant-only shape.
-- Any read of `.claude/.agents-mode` that influences routing must normalize an existing file to the current canonical format before trusting the flags. Comment-free or older-layout files are valid input, not valid output.
-- When writing `.claude/.agents-mode`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
+- Any read of `.claude/.agents-mode.yaml` that influences routing must normalize an existing file to the current canonical format before trusting the flags. Comment-free or older-layout files are valid input, not valid output.
+- If `.claude/.agents-mode.yaml` is missing, read legacy `.claude/.agents-mode` as compatibility input only, then normalize either input forward into `.claude/.agents-mode.yaml` before trusting the flags.
+- When writing `.claude/.agents-mode.yaml`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
 - Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 - Explicit user override or documented repo-local task-domain heuristics may still rank Gemini first for image, icon, or decorative visual work over the ordinary `auto` result.
 
@@ -77,8 +78,9 @@ Semantics:
 - Multiple external adapters may run in parallel when their scopes are independent and the selected provider runtimes support concurrent non-interactive execution.
 - Do not cap that fan-out at one instance per helper or provider: the same external helper and the same resolved provider may be launched multiple times concurrently when each run owns a different admitted artifact or disjoint slice.
 - `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not forbid brigade-style reuse of the same provider across different independent lanes or slices.
+- Same-provider external helper reuse is allowed when each run owns a different admitted artifact or disjoint slice.
 - If internal native slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
-- When multiple independent external lanes should launch together, prefer the operator surface `/agents-external-brigade` so the batch has one explicit brigade plan and one aggregated result surface.
+- When multiple independent external lanes should launch together, prefer the operator surface `/agents-external-brigade` so the batch has one explicit brigade plan and one aggregated result surface. This is the dedicated brigade surface.
 
 ## External worker
 

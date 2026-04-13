@@ -1,6 +1,6 @@
 ---
 name: init-project
-description: Configure project policies in the root AGENTS.md and initialize or update .agents/.agents-mode for the current project.
+description: Configure project policies in the root AGENTS.md and initialize or update .agents/.agents-mode.yaml for the current project.
 ---
 
 # Init Project
@@ -55,8 +55,10 @@ Routing conventions (not persisted as keys):
 
 1. **Read current state.**
    - Read the project's root `AGENTS.md` and check whether a `## Project policies` section already exists.
-   - Read `.agents/.agents-mode` first.
-   - If `.agents/.agents-mode` already exists, normalize it to the current canonical format before presenting or trusting the current values.
+   - Read `.agents/.agents-mode.yaml` first.
+   - If it is missing, read legacy `.agents/.agents-mode` as compatibility input only.
+   - If either file exists, normalize it to the current canonical format before presenting or trusting the current values.
+   - Normalize either input forward into `.agents/.agents-mode.yaml` and do not recreate legacy `.agents/.agents-mode`.
    - If either surface already exists, show the current values and ask whether to keep them, review them, or start fresh.
 
 2. **Read the installed canonical sources.**
@@ -118,13 +120,14 @@ Routing conventions (not persisted as keys):
 
 6. **Confirm the final choices.**
    - Present one summary table for `## Project policies`.
-   - Present one summary table for `.agents/.agents-mode`.
+   - Present one summary table for `.agents/.agents-mode.yaml`.
    - Ask for confirmation before writing.
 
-7. **Write `.agents/.agents-mode`.**
-   - Write the canonical file to `.agents/.agents-mode`.
+7. **Write `.agents/.agents-mode.yaml`.**
+   - Write the canonical file to `.agents/.agents-mode.yaml`.
    - Preserve unknown keys when updating an existing file.
    - Treat comment-free, partial, or older-layout files as legacy input and rewrite them to the current canonical format instead of preserving stale layout.
+   - Do not recreate legacy `.agents/.agents-mode`; write the canonical output only to `.agents/.agents-mode.yaml`.
    - Keep one key per line and include inline comments for every canonical scalar key plus every shipped `externalPriorityProfiles` / `externalOpinionCounts` entry.
    - Refresh the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks to the current pack version while preserving the effective values of known keys and any unknown keys.
 
@@ -178,7 +181,8 @@ Routing conventions (not persisted as keys):
 
 - Be concise; the catalog and dispatch contract hold the details.
 - Do not invent extra policy keys or extra `agents-mode` keys.
-- Preserve unknown keys in `.agents/.agents-mode` when updating.
-- Any read of `.agents/.agents-mode` that drives a decision should normalize the file to the current canonical format before trusting the flags.
+- Preserve unknown keys in `.agents/.agents-mode.yaml` when updating.
+- Any read of `.agents/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
+- Any read that drives a decision should prefer `.agents/.agents-mode.yaml`, fall back to legacy `.agents/.agents-mode` only if the canonical file is missing, normalize either input forward into `.agents/.agents-mode.yaml`, and not recreate the legacy file.
 - Do not modify any other section of `AGENTS.md`.
 - Treat root `AGENTS.md` as the project-runtime target, not the Orchestrarium monorepo maintenance overlay.

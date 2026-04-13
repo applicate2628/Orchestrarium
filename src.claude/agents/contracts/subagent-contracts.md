@@ -12,7 +12,8 @@ Use this contract when `subagent_type` is `external-worker` or `external-reviewe
 
 - These roles are routing adapters, not new business professions.
 - The `Assigned role` field names the internal role being replaced for provenance.
-- Read and normalize `.claude/.agents-mode` first. Honor `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalModelMode`, `externalGeminiFallbackMode`, `externalClaudeSecretMode`, and `externalClaudeApiMode` when they are present. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode` file; it remains Codex-line only.
+- Read and normalize `.claude/.agents-mode.yaml` first. Honor `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalModelMode`, `externalGeminiFallbackMode`, `externalClaudeSecretMode`, and `externalClaudeApiMode` when they are present. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode.yaml` file; it remains Codex-line only.
+- If the canonical file is missing, read legacy `.claude/.agents-mode` as compatibility input only, normalize it forward into `.claude/.agents-mode.yaml`, and do not recreate the legacy file.
 - Resolve external routing in this order: `role eligibility -> provider selection -> CLI availability`.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`. If a request lands in one of those lanes, fail fast with an unsupported-route explanation instead of probing providers.
 - Do not silently fall back to an internal specialist if the external CLI is unavailable; the adapter is disabled and the orchestrator may reroute.

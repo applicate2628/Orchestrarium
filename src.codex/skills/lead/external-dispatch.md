@@ -6,7 +6,8 @@ Shared dispatch contract for `$consultant`, `$external-worker`, and `$external-r
 
 The project-local config file is:
 
-- `.agents/.agents-mode`
+- `.agents/.agents-mode.yaml`
+- Legacy `.agents/.agents-mode` is compatibility input only. Prefer `.agents/.agents-mode.yaml`, fall back only if it is missing, normalize forward into `.agents/.agents-mode.yaml`, and do not recreate the legacy file.
 
 Full value-by-value operator semantics live in [../../../docs/agents-mode-reference.md](../../../docs/agents-mode-reference.md).
 
@@ -50,9 +51,10 @@ externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max
 - `externalClaudeProfile` is Codex-line only and selects or overrides the Claude CLI execution profile when `externalProvider` resolves to Claude. Supported values: `sonnet-high` (`--model sonnet --effort high`) and `opus-max` (`--model opus --effort max`).
 - The preference flags are independent.
 - Any write to this file must preserve unknown keys and the other known keys.
-- Any read of this file for routing must normalize an existing `.agents/.agents-mode` file to the current canonical format before trusting its flags. Comment-free or older-layout files are valid input, not valid output.
-- When writing `.agents/.agents-mode`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
-- Writes go to `.agents/.agents-mode`; preserve unknown keys and the other known keys when updating.
+- Any read of this file for routing must normalize an existing `.agents/.agents-mode.yaml` file to the current canonical format before trusting its flags. Comment-free or older-layout files are valid input, not valid output.
+- If `.agents/.agents-mode.yaml` is missing, read legacy `.agents/.agents-mode` as compatibility input only, then normalize either input forward into `.agents/.agents-mode.yaml` before trusting the flags.
+- When writing `.agents/.agents-mode.yaml`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
+- Writes go to `.agents/.agents-mode.yaml`; preserve unknown keys and the other known keys when updating.
 - If the file is created from scratch, write the full default shape: the requested `consultantMode`, `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `externalPriorityProfiles` with shipped `balanced` and `gemini-crosscheck` blocks, `externalOpinionCounts` with documented lanes defaulting to `1`, `externalCodexWorkdirMode: neutral`, `externalClaudeWorkdirMode: neutral`, `externalGeminiWorkdirMode: neutral`, `externalModelMode: runtime-default`, `externalGeminiFallbackMode: auto`, `externalClaudeSecretMode: auto`, `externalClaudeApiMode: auto`, and `externalClaudeProfile: sonnet-high` unless the user explicitly requested a different Claude profile.
 - Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 

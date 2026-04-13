@@ -4,7 +4,7 @@
 
 Tracked task memory опционален и задаётся самим репозиторием. Когда репозиторий решает использовать его, `task-memory directory`, `recovery entry point`, `active-item directory` и `archive location` задаются конфигурацией репозитория.
 
-`shared/references/` — канонический дом для стабильной общерепозиторной design-методологии. `references-gemini/` хранит Gemini-specific reference material и compatibility pointers. `docs/agents-mode-reference.md` — общий operator reference, когда важно поведение `.gemini/.agents-mode`.
+`shared/references/` — канонический дом для стабильной общерепозиторной design-методологии. `references-gemini/` хранит Gemini-specific reference material и compatibility pointers. `docs/agents-mode-reference.md` — общий operator reference, когда важно поведение `.gemini/.agents-mode.yaml`.
 
 ## Обязательный набор артефактов
 

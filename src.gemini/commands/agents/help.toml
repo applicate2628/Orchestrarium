@@ -19,6 +19,6 @@ Summarize:
 - how the shared `externalModelMode` distinguishes runtime-default provider selection from pinned top-model execution
 - how `externalGeminiFallbackMode` only applies under pinned Gemini runs, keeping Gemini on `gemini-3.1-pro` or allowing a single retry on `gemini-3-flash` without dropping below Gemini 3
 - how `externalClaudeApiMode` changes Claude transport behavior when Gemini routes external work to Claude
-- the role of Gemini CLI /init, .gemini/settings.json, and .gemini/.agents-mode
+- the role of Gemini CLI /init, .gemini/settings.json, and .gemini/.agents-mode.yaml
 - the local command namespace
 """

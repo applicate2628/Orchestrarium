@@ -70,8 +70,10 @@ Then it forwards the same arguments to the provider-specific installer in `scrip
 
 Important: operator preferences now live only in pack-local `agents-mode` files.
 
-- Codex reads `.agents/.agents-mode`.
-- Claude Code reads `.claude/.agents-mode`.
+- Codex reads `.agents/.agents-mode.yaml`.
+- Claude Code reads `.claude/.agents-mode.yaml`.
+- Gemini reads `.gemini/.agents-mode.yaml`.
+- Legacy extensionless `.agents-mode` files remain compatibility input only. Reads should prefer `.agents-mode.yaml`, fall back to the sibling extensionless file only if the canonical file is missing, then normalize forward into `.agents-mode.yaml` without recreating the legacy path.
 - `consultantMode` controls `$consultant`.
 - `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` lets the agent decide when MCP is appropriate; `force` means the config itself is an explicit instruction to use relevant available MCP tools instead of treating MCP usage as optional.
@@ -86,9 +88,9 @@ Important: operator preferences now live only in pack-local `agents-mode` files.
 - Codex may additionally use `externalClaudeProfile` to select or override the Claude CLI execution profile: `sonnet-high` or `opus-max`.
 - Codex install also seeds `.codex/agents/default.toml`, `worker.toml`, and `explorer.toml` so the built-in Codex subagents run as `gpt-5.4` with `xhigh` by default unless the user has already customized those files.
 - Provider-specific workdir keys stay separate and default to `neutral`: `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`.
-- For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode`.
-- For first-time Claude Code project setup, run `/agents-init-project` to write `## Project policies` in `.claude/CLAUDE.md` and review or update the installed default `.claude/.agents-mode`.
-- For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config and MCP wiring stay in `.gemini/settings.json` or extension manifests, while Orchestrarium-specific shared governance is brought in through `GEMINI.md` importing project-root `AGENTS.md`, the canonical installed Gemini payload lives under `.gemini/extensions/orchestrarium-gemini/`, and shared routing semantics live in the Orchestrarium overlay `.gemini/.agents-mode`, which install seeds by default and the Gemini `init-project` helper reviews or updates after `/init`. Top-level `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` stay available for deliberate user overrides instead of carrying a second mirrored Orchestrarium install, because Gemini gives those tiers precedence over extension content.
+- For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode.yaml`. If only legacy `.agents/.agents-mode` exists, normalize it forward into the canonical `.yaml` file.
+- For first-time Claude Code project setup, run `/agents-init-project` to write `## Project policies` in `.claude/CLAUDE.md` and review or update the installed default `.claude/.agents-mode.yaml`. If only legacy `.claude/.agents-mode` exists, normalize it forward into the canonical `.yaml` file.
+- For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config and MCP wiring stay in `.gemini/settings.json` or extension manifests, while Orchestrarium-specific shared governance is brought in through `GEMINI.md` importing project-root `AGENTS.md`, the canonical installed Gemini payload lives under `.gemini/extensions/orchestrarium-gemini/`, and shared routing semantics live in the Orchestrarium overlay `.gemini/.agents-mode.yaml`, which install seeds by default and the Gemini `init-project` helper reviews or updates after `/init`. If only legacy `.gemini/.agents-mode` exists, normalize it forward into the canonical `.yaml` file. Top-level `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` stay available for deliberate user overrides instead of carrying a second mirrored Orchestrarium install, because Gemini gives those tiers precedence over extension content.
 - Explicit user role requests still override the toggle state in either direction.
 - Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity, continue-by-default execution expectations for initialized projects, and the current init-time preset family: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, and `max-speed`.
 

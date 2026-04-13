@@ -37,7 +37,7 @@ Do not invoke for:
 
 ## Shared config format
 
-The local config file is `.claude/.agents-mode`. The canonical file may contain:
+The local config file is `.claude/.agents-mode.yaml`. The canonical file may contain:
 
 - `consultantMode: external | internal | disabled`
 - `delegationMode: manual | auto | force`
@@ -55,7 +55,8 @@ The local config file is `.claude/.agents-mode`. The canonical file may contain:
 
 `consultantMode` continues to govern consultant behavior. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. When the resolved provider is `gemini`, `externalModelMode` is the shared model-selection knob and `externalGeminiFallbackMode` controls the explicit pinned Gemini path. When the resolved provider is `claude`, `externalModelMode` may request the stronger Claude path while `externalClaudeSecretMode` and `externalClaudeApiMode` remain transport knobs; `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
 
-Read and normalize `.claude/.agents-mode` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
+Read and normalize `.claude/.agents-mode.yaml` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
+If the canonical file is missing, read legacy `.claude/.agents-mode` as compatibility input only, normalize it forward into `.claude/.agents-mode.yaml`, and do not recreate the legacy file.
 
 For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md).
 
@@ -86,7 +87,7 @@ For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md]
 
 ## Toggle file check
 
-Before any invocation, read `.claude/.agents-mode`:
+Before any invocation, read `.claude/.agents-mode.yaml`:
 
 - If the file exists, normalize it to the current canonical format before interpreting the flags.
 
@@ -147,7 +148,7 @@ printf '%s' "$PROMPT" | gemini -p "" --model gemini-3.1-pro --approval-mode yolo
 ### No implicit fallback
 
 - `consultantMode: external` is external-only. If the selected external provider is unavailable or fails, return an unavailable memo and let the lead reroute honestly.
-- `consultantMode: internal` is the only supported internal consultant path. It must be selected explicitly in `.claude/.agents-mode`; do not downgrade into it automatically after an external failure.
+- `consultantMode: internal` is the only supported internal consultant path. It must be selected explicitly in `.claude/.agents-mode.yaml`; do not downgrade into it automatically after an external failure.
 - Provider-backed consultant execution in `external` mode must use direct external launch from the orchestrating runtime or an approved transport wrapper script. If the current runtime cannot do that, disclose the dependency failure instead of proxying through an internal agent/helper/subagent host.
 - Never turn a failed external consultant run into a hidden internal substitute.
 

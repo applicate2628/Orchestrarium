@@ -15,7 +15,7 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 - `.reports/` and `.plans/` are traceability logs, not canonical tracked sources. `work-items/` remains the local recovery source of truth for item-specific execution memory on the operator machine.
 
 `shared/references/` is the canonical home for stable repository-wide design methodology. `references-claude/` keeps Claude-specific reference material plus compatibility pointers. `work-items/` is the home for local item-specific execution memory. `.reports/` and `.plans/` are session-level audit trails.
-`docs/agents-mode-reference.md` is the shared operator reference when `.claude/.agents-mode` behavior matters.
+`docs/agents-mode-reference.md` is the shared operator reference when `.claude/.agents-mode.yaml` behavior matters.
 
 ## Mandatory artifact set
 

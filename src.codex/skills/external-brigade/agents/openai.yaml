@@ -1,4 +1,4 @@
 interface:
   display_name: "External Brigade"
   short_description: "Launch a bounded parallel set of external helpers"
-  default_prompt: "Use $external-brigade to launch and aggregate a bounded brigade of parallel external helpers. Read and normalize .agents/.agents-mode first, keep externalOpinionCounts scoped to same-lane distinct-opinion requirements, allow repeated same-provider helper instances for disjoint brigade items when runtimes support it, reject unsupported owner routes, and return one brigade report with a launch table and aggregated gate."
+  default_prompt: "Use $external-brigade to launch and aggregate a bounded brigade of parallel external helpers. Read and normalize .agents/.agents-mode.yaml first, keep externalOpinionCounts scoped to same-lane distinct-opinion requirements, allow repeated same-provider helper instances for disjoint brigade items when runtimes support it, reject unsupported owner routes, and return one brigade report with a launch table and aggregated gate."

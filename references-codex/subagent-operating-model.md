@@ -9,7 +9,7 @@ This file keeps only Codex-specific runtime and repository concretization for th
 ## Codex-specific runtime notes
 
 - Codex uses sequential skill invocation for native skills. There is no native internal parallel skill dispatch, so internal Codex-role work is still orchestrated sequentially on the Codex line. Independent external adapters may still run in parallel when the routing contract and selected provider runtimes allow it.
-- Consultant config lives in `.agents/.agents-mode`.
+- Consultant config lives in `.agents/.agents-mode.yaml`.
 - Codex may extend the shared `agents-mode` schema with `externalClaudeProfile` to select the Claude CLI execution profile (`sonnet-high` or `opus-max`) when `externalProvider` resolves to Claude.
 - `externalProvider: auto` resolves by lane type through the active named priority profile rather than by Codex-line default. Explicit provider selection may still route eligible external work to Claude CLI or Gemini CLI, and documented repo-local visual-routing heuristics may rank Gemini first for image/icon/decorative lanes.
 

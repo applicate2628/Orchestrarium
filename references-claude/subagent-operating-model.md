@@ -11,9 +11,9 @@ This file keeps only Claude-specific runtime and repository concretization for t
 ## Claude-specific runtime notes
 
 - Claude runtime uses the Agent tool and the current Claude operator reference surfaces. Treat this file as a local runtime addendum to the shared blueprint, not as the canonical full methodology copy.
-- Consultant config lives in `.claude/.agents-mode`.
+- Consultant config lives in `.claude/.agents-mode.yaml`.
 - Claude-line canonical config does not include `externalClaudeProfile`; Claude-side `externalProvider: auto` resolves by lane type through the active named priority profile, and explicit provider selection may route eligible external work to Codex CLI, Claude CLI, or Gemini CLI when that route is honest.
-- `$external-worker` and `$external-reviewer` dispatch from Claude Code to the provider selected by `.claude/.agents-mode`.
+- `$external-worker` and `$external-reviewer` dispatch from Claude Code to the provider selected by `.claude/.agents-mode.yaml`.
 
 ## Claude-side repository concretization
 

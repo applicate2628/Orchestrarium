@@ -437,7 +437,8 @@ else
   AGENT_OVERRIDES_TARGET="$TARGET/agents"
   MD_TARGET="$PROJECT_ROOT/AGENTS.md"
 fi
-AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode"
+AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode.yaml"
+LEGACY_AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode"
 
 echo "=== Codex Installer ==="
 echo "Source: $SOURCE"
@@ -565,6 +566,31 @@ ensure_default_file() {
     echo "    [dry-run] would create $dst"
   else
     cp "$src" "$dst"
+  fi
+}
+
+migrate_legacy_agents_mode_file() {
+  local legacy="$1" dst="$2" label="$3"
+
+  remove_dangling_symlink "$legacy" "legacy $label"
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    if [[ -f "$legacy" ]]; then
+      echo "  Canonical $label already exists; leaving legacy file untouched: $legacy"
+    fi
+    return
+  fi
+
+  if [[ ! -f "$legacy" ]]; then
+    return
+  fi
+
+  echo "  Migrating legacy $label to $dst..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would move $legacy -> $dst"
+  else
+    mv "$legacy" "$dst"
   fi
 }
 
@@ -789,7 +815,8 @@ if [ "$MODE" != "global" ]; then
   ensure_local_only_gitignore_entries "$PROJECT_ROOT"
 fi
 
-ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode"
+migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
@@ -833,7 +860,7 @@ check_file "$SKILLS_TARGET/lead/subagent-contracts.md" "skills/lead/subagent-con
 check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.sh" "skills/lead/scripts/check-publication-safety.sh"
 check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.ps1" "skills/lead/scripts/check-publication-safety.ps1"
 check_file "$SKILLS_TARGET/lead/scripts/validate-skill-pack.sh" "skills/lead/scripts/validate-skill-pack.sh"
-check_file "$AGENTS_MODE_TARGET" ".agents-mode"
+check_file "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 check_file "$AGENT_OVERRIDES_TARGET/default.toml" "agents/default.toml"
 check_file "$AGENT_OVERRIDES_TARGET/worker.toml" "agents/worker.toml"
 check_file "$AGENT_OVERRIDES_TARGET/explorer.toml" "agents/explorer.toml"
@@ -865,6 +892,6 @@ else
   echo "  AGENTS.md: $MD_TARGET"
   echo "  agents-mode: $AGENTS_MODE_TARGET"
   echo ""
-  echo "Next: open Codex in the target project and run '\$init-project' to review/update project policies and the installed default .agents/.agents-mode."
+  echo "Next: open Codex in the target project and run '\$init-project' to review/update project policies and the installed default .agents/.agents-mode.yaml."
   echo "Then run 'bash $SKILLS_TARGET/lead/scripts/validate-skill-pack.sh' if you are validating the installation from a maintainer shell."
 fi

@@ -67,8 +67,8 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 
    | Platform | Path |
    |----------|------|
-   | Claude Code | `.claude/.agents-mode` |
-   | Codex | `.agents/.agents-mode` |
+   | Claude Code | `.claude/.agents-mode.yaml` |
+   | Codex | `.agents/.agents-mode.yaml` |
 
 2. **Extended config format**
 

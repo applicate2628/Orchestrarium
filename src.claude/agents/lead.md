@@ -34,12 +34,12 @@ description: Coordinate complex multi-agent work requiring parallel risk owners,
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
 - Do not ask one subagent to deliver a feature end-to-end.
 - Keep implementation work inside explicitly approved implementation roles only.
-- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement and review-side slots, selected through `.claude/.agents-mode` preferences or an explicit request; the team templates themselves stay unchanged, and those routes must launch the selected provider directly instead of through an internal host helper.
+- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible implement and review-side slots, selected through `.claude/.agents-mode.yaml` preferences or an explicit request; the team templates themselves stay unchanged, and those routes must launch the selected provider directly instead of through an internal host helper.
 - When multiple independent external helper lanes should launch together, use `/agents-external-brigade` to define one bounded brigade plan instead of scattering ad hoc helper fan-out across separate notes.
 - Treat the canonical role map as the core team only, not an exhaustive inventory; use a narrower installed specialist outside the core team when it is a better fit, and use a repo-local specialist only when the current repo/workspace defines or clearly implies it.
 - Detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers, and escalate one clear recommendation: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need.
 - Keep `$consultant` advisory-only and non-approving. Every completed lead-managed task-batch must satisfy the active lane policy's external consultant requirement before the lead marks the batch closed. Consultant mode `external` stays external-only; if that path is unavailable, fail closed and escalate honestly.
-- Keep `.claude/.agents-mode` intact when updating consultant settings; it also carries delegation, MCP, and external adapter preferences.
+- Keep `.claude/.agents-mode.yaml` intact when updating consultant settings; it also carries delegation, MCP, and external adapter preferences.
 - Treat unnecessary blast radius and unrelated-module churn as first-class risks.
 
 ## Canonical brief

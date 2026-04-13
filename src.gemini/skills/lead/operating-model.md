@@ -59,7 +59,7 @@ When the active external-routing profile asks for more than one external opinion
 
 ## External adapters
 
-Gemini-line external adapters use `.gemini/.agents-mode`.
+Gemini-line external adapters use `.gemini/.agents-mode.yaml`.
 
 Canonical provider semantics:
 
