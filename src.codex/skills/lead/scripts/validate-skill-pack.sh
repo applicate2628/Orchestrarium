@@ -288,6 +288,16 @@ if [[ $DEV_REPO -eq 1 ]]; then
   else
     fail "agents-mode reference documents read-time normalization semantics"
   fi
+  if grep -Fq '### `externalModelMode`' "$DOCS_DIR/agents-mode-reference.md"; then
+    pass "agents-mode reference defines externalModelMode"
+  else
+    fail "agents-mode reference defines externalModelMode"
+  fi
+  if grep -Fq '### `externalGeminiFallbackMode`' "$DOCS_DIR/agents-mode-reference.md"; then
+    pass "agents-mode reference defines externalGeminiFallbackMode"
+  else
+    fail "agents-mode reference defines externalGeminiFallbackMode"
+  fi
   if grep -Fq ".codex/agents/default.toml" "INSTALL.md"; then
     pass "INSTALL.md documents Codex built-in agent override seeding"
   else
@@ -303,6 +313,17 @@ if [[ $DEV_REPO -eq 1 ]]; then
   else
     fail "src.codex/README.md documents the built-in agent override payload"
   fi
+  for f in \
+    "src.codex/agents/default.toml" \
+    "src.codex/agents/worker.toml" \
+    "src.codex/agents/explorer.toml"
+  do
+    if grep -Fq 'model = "gpt-5.4"' "$f" && grep -Fq 'model_reasoning_effort = "xhigh"' "$f"; then
+      pass "$f pins Codex built-in model to gpt-5.4 xhigh"
+    else
+      fail "$f pins Codex built-in model to gpt-5.4 xhigh"
+    fi
+  done
 fi
 
 if [[ -n "$CODEX_RUNTIME_ROOT" ]]; then
@@ -323,6 +344,17 @@ if [[ -n "$CODEX_RUNTIME_ROOT" ]]; then
   else
     fail "agents/explorer.toml installed"
   fi
+  for f in \
+    "$CODEX_RUNTIME_ROOT/agents/default.toml" \
+    "$CODEX_RUNTIME_ROOT/agents/worker.toml" \
+    "$CODEX_RUNTIME_ROOT/agents/explorer.toml"
+  do
+    if [[ -f "$f" ]] && grep -Fq 'model = "gpt-5.4"' "$f" && grep -Fq 'model_reasoning_effort = "xhigh"' "$f"; then
+      pass "${f#$CODEX_RUNTIME_ROOT/} pins Codex built-in model to gpt-5.4 xhigh"
+    else
+      fail "${f#$CODEX_RUNTIME_ROOT/} pins Codex built-in model to gpt-5.4 xhigh"
+    fi
+  done
 fi
 
 echo ""

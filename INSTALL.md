@@ -78,13 +78,15 @@ The canonical Codex-line operator shape is:
 - `externalCodexWorkdirMode`
 - `externalClaudeWorkdirMode`
 - `externalGeminiWorkdirMode`
+- `externalModelMode`
+- `externalGeminiFallbackMode`
 - `externalClaudeSecretMode`
 - `externalClaudeApiMode`
 - `externalClaudeProfile`
 
 `externalPriorityProfile` selects the active named routing profile, with `balanced` as the ordinary default and `gemini-crosscheck` as the named profile that promotes Gemini into cross-check work when more than one independent external opinion is requested. `externalPriorityProfiles` stores the profile-specific lane ordering data; missing `balanced` means the current shared lane matrix. `externalOpinionCounts` stores how many distinct external opinions each lane should collect; missing counts default to `1`.
 
-`externalProvider: auto` resolves through the active priority profile and requested opinion count, not by host pack. Provider-specific workdir keys default to neutral so comparative or external runs do not inherit repo-local instruction overlays by cwd alone. Explicit `codex`, `claude`, or `gemini` may be selected when routing asks for them, and documented repo-local visual heuristics may still prefer Gemini for image generation, icon work, and decorative visual lanes when that routing remains honest. `externalClaudeApiMode` is the named Claude secondary-transport toggle: `disabled` forbids `claude-api`, `auto` keeps `claude-api` as the fallback after the allowed Claude CLI path is exhausted, and `force` uses `claude-api` as the primary Claude transport immediately.
+`externalProvider: auto` resolves through the active priority profile and requested opinion count, not by host pack. Provider-specific workdir keys default to neutral so comparative or external runs do not inherit repo-local instruction overlays by cwd alone. Explicit `codex`, `claude`, or `gemini` may be selected when routing asks for them, and documented repo-local visual heuristics may still prefer Gemini for image generation, icon work, and decorative visual lanes when that routing remains honest. `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` asks each provider for its strongest documented native path plus one named same-provider fallback on retryable exhaustion. Under that pinned policy, `externalGeminiFallbackMode` stays inside the Gemini provider path: `disabled` keeps `gemini-3.1-pro` only, `auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures, and `force` starts on `gemini-3-flash` immediately. `externalClaudeApiMode` is the named Claude secondary-transport toggle: `disabled` forbids `claude-api`, `auto` keeps `claude-api` as the fallback after the allowed Claude CLI path is exhausted, and `force` uses `claude-api` as the primary Claude transport immediately.
 
 Project policies are configured as a `## Project policies` section in the target `AGENTS.md`, not as a separate directory. See `skills/lead/policies-catalog.md` for available policy options.
 

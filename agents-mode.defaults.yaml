@@ -45,6 +45,8 @@ externalOpinionCounts:  # allowed: structured lane-count map
 externalCodexWorkdirMode: neutral  # allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project
 externalGeminiWorkdirMode: neutral  # allowed: neutral | project
+externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro
+externalGeminiFallbackMode: auto  # allowed when Gemini is selectable; only affects pinned-top-pro: disabled | auto | force
 externalClaudeSecretMode: auto  # allowed when Claude is selectable: auto | force
 externalClaudeApiMode: auto  # allowed when Claude is selectable: disabled | auto | force
 externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max

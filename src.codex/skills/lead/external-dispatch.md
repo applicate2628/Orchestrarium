@@ -25,6 +25,7 @@ externalOpinionCounts: {}  # allowed: structured lane-count map
 externalCodexWorkdirMode: neutral  # allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project
 externalGeminiWorkdirMode: neutral  # allowed: neutral | project
+externalGeminiFallbackMode: auto  # allowed when Gemini is selectable: disabled | auto | force
 externalClaudeSecretMode: auto  # allowed when Claude is selectable: auto | force
 externalClaudeApiMode: auto  # allowed when Claude is selectable: disabled | auto | force
 externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max
@@ -35,43 +36,58 @@ externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max
 - `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` routes eligible worker-side roles through `$external-worker` by default.
 - `preferExternalReviewer` routes eligible reviewer/QA roles through `$external-reviewer` by default.
-- `externalProvider: auto` resolves by the active priority profile and opinion-count policy below instead of by host-pack identity.
+- `externalProvider` uses the shared provider universe `auto | codex | claude | gemini`.
+- `externalProvider: auto` resolves by lane type through the active priority profile and opinion-count policy below instead of by host-pack identity.
 - `externalPriorityProfile` chooses which named routing profile to apply when `externalProvider: auto` is in effect. `balanced` is the quiet default. `gemini-crosscheck` broadens Gemini participation into non-visual advisory and review lanes when multiple independent opinions are requested.
 - `externalPriorityProfiles` stores the ordered provider lists for each named profile. The shipped profiles live in the structured block below.
 - `externalOpinionCounts` stores how many distinct external opinions each lane should collect. Missing lane entries default to `1`.
-- `externalOpinionCounts` is a same-lane distinct-opinion policy, not a concurrency cap. It does not limit how many same-provider brigade items may run in parallel across disjoint lanes or slices.
 - `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, and `externalGeminiWorkdirMode` choose whether each provider-backed external run starts in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`.
-- `externalClaudeSecretMode` controls how Claude receives `ANTHROPIC_*` from the local Claude `SECRET.md` when external work resolves to Claude CLI. `auto` keeps the first call plain and allows one limit-triggered retry; `force` applies the same environment override to the primary call.
-- `externalClaudeApiMode` controls whether Claude may use the repo-local `claude-api` transport. `disabled` forbids it, `auto` uses it after the allowed Claude CLI path is exhausted, and `force` uses `claude-api` as the first Claude transport.
-- `externalClaudeProfile` is Codex-line only and selects the Claude CLI execution profile when `externalProvider` resolves to Claude. Supported values: `sonnet-high` (`--model sonnet --effort high`) and `opus-max` (`--model opus --effort max`).
+- `externalModelMode` is the shared cross-provider model-selection policy. `runtime-default` leaves the resolved provider on its runtime default model/profile. `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows only the bounded same-provider fallback used for usage-limit or quota exhaustion while staying inside that provider's approved version floor and lane policy.
+- `externalGeminiFallbackMode` controls the explicit Gemini model path only when the resolved provider is Gemini and `externalModelMode: pinned-top-pro` is in effect. `disabled` keeps `gemini-3.1-pro` only, `auto` starts with `gemini-3.1-pro` and allows one limit-triggered retry on `gemini-3-flash`, and `force` starts on `gemini-3-flash` immediately.
+- `externalClaudeSecretMode` controls how Claude receives `ANTHROPIC_*` from the local Claude `SECRET.md` when the resolved provider is Claude. `auto` keeps the first call plain and allows one limit-triggered retry; `force` applies the same environment override to the primary call.
+- `externalClaudeApiMode` controls whether Claude may use the repo-local `claude-api` transport. `disabled` forbids it, `auto` uses it after the allowed Claude CLI path is exhausted, and `force` uses `claude-api` as the first Claude transport. `claude-api` remains a Claude transport, not a fourth provider.
+- Treat named fallback paths as alternate limit or budget pools only when runtime observation shows they exhaust independently. That is repo-local operator policy, not an official provider guarantee.
+- `externalClaudeProfile` is Codex-line only and selects or overrides the Claude CLI execution profile when `externalProvider` resolves to Claude. Supported values: `sonnet-high` (`--model sonnet --effort high`) and `opus-max` (`--model opus --effort max`).
 - The preference flags are independent.
 - Any write to this file must preserve unknown keys and the other known keys.
 - Any read of this file for routing must normalize an existing `.agents/.agents-mode` file to the current canonical format before trusting its flags. Comment-free or older-layout files are valid input, not valid output.
 - When writing `.agents/.agents-mode`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
 - Writes go to `.agents/.agents-mode`; preserve unknown keys and the other known keys when updating.
-- If the file is created from scratch, write the full default shape: the requested `consultantMode`, `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `externalPriorityProfiles` with shipped `balanced` and `gemini-crosscheck` blocks, `externalOpinionCounts` with documented lanes defaulting to `1`, `externalCodexWorkdirMode: neutral`, `externalClaudeWorkdirMode: neutral`, `externalGeminiWorkdirMode: neutral`, `externalClaudeSecretMode: auto`, `externalClaudeApiMode: auto`, and `externalClaudeProfile: sonnet-high` unless the user explicitly requested a different Claude profile.
+- If the file is created from scratch, write the full default shape: the requested `consultantMode`, `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `externalPriorityProfiles` with shipped `balanced` and `gemini-crosscheck` blocks, `externalOpinionCounts` with documented lanes defaulting to `1`, `externalCodexWorkdirMode: neutral`, `externalClaudeWorkdirMode: neutral`, `externalGeminiWorkdirMode: neutral`, `externalModelMode: runtime-default`, `externalGeminiFallbackMode: auto`, `externalClaudeSecretMode: auto`, `externalClaudeApiMode: auto`, and `externalClaudeProfile: sonnet-high` unless the user explicitly requested a different Claude profile.
 - Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 
 ## Routing model
 
 - `$external-worker` and `$external-reviewer` are bidirectional external adapters, not new narrow professions.
-- On the Codex pack, `externalProvider: auto` resolves through the active priority profile and opinion-count policy, then applies the explicit-only self-provider rule and CLI availability.
+- `externalProvider: auto` resolves by lane type through the active profile and opinion-count policy below instead of by host-pack identity.
 - When the resolved provider is Codex, honor `externalCodexWorkdirMode`; when it is Claude, honor `externalClaudeWorkdirMode`; when it is Gemini, honor `externalGeminiWorkdirMode`.
 - Explicit user override or repo-local visual-routing heuristics may still choose Gemini over the ordinary `auto` result when the active profile or task domain makes image, icon, or decorative visual work Gemini-first.
 - Active profiles may ask for Gemini in non-visual advisory and review lanes when a second or third independent opinion is part of the requested lane policy.
-- Codex may also select Codex, Claude, or Gemini CLI explicitly via `externalProvider: codex`, `externalProvider: claude`, or `externalProvider: gemini`.
+- Explicit `externalProvider: codex` is a self-provider override only. Ordinary `auto` must not silently self-bounce into Codex from the Codex line.
 - `externalClaudeSecretMode: auto` keeps the first Claude call plain and allows one SECRET-backed one-line retry only for limit, quota, or reset failures on the selected Claude provider. Do not use it to mask auth failures, bad prompts, or unrelated CLI errors.
 - `externalClaudeSecretMode: force` applies `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_AUTH_TOKEN` from the local Claude `SECRET.md` to the primary Claude call immediately. If those values cannot be read, disclose a dependency/config failure instead of silently dropping back to a plain Claude call.
+- `externalModelMode: pinned-top-pro` maps the strongest documented provider path as follows: Codex uses `gpt-5.4 --reasoning-effort xhigh`; only `worker.long-autonomous` or another explicitly fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path; Claude uses `opus-max` and then, under `externalClaudeApiMode: auto`, retries through `claude-api` for usage-limit or quota exhaustion, or starts there immediately when the user explicitly sets `externalClaudeApiMode: force`, instead of downgrading to `sonnet-high`; Gemini uses `gemini-3.1-pro` then follows `externalGeminiFallbackMode` for the allowed same-provider retry.
+- Do not silently downgrade below `gpt-5.3-codex-spark` on the Codex line or below Gemini 3 on the Gemini line.
+- Treat `gpt-5.3-codex-spark` and `gemini-3-flash` as bounded mechanical overflow paths only. They are acceptable for tightly scoped, low-reasoning, autonomous work, not as the ordinary cheaper mode for broad reasoning or cleanup.
+- Treat `claude-api` differently: repo-local policy accepts it as the economical near-full-strength Claude transport, so `externalClaudeApiMode: force` is an explicit budget choice as well as a limit fallback.
+- `externalGeminiFallbackMode: disabled` keeps the Gemini route on `gemini-3.1-pro` only. `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one fallback retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures. `externalGeminiFallbackMode: force` starts on `gemini-3-flash` immediately and skips the preceding `gemini-3.1-pro` attempt.
+- Reserve `externalGeminiFallbackMode: force` for tightly bounded mechanical work. Do not use it as the default path for reasoning-heavy or ambiguous Gemini tasks just to save tokens.
 - `externalClaudeApiMode: auto` keeps `claude-api` as the named secondary Claude transport after the allowed Claude CLI path is exhausted. `externalClaudeApiMode: force` starts on `claude-api` immediately and skips the preceding Claude CLI attempt.
 - When `externalClaudeApiMode` allows `claude-api`, use the local `claude-api` command if it is available on PATH. If the transport is requested but unavailable, disclose that as a dependency/config failure.
-- The Claude pack mirrors this contract with Codex CLI.
+- If the plain Claude CLI path is selected but is clearly unauthenticated, prefer the allowed Claude API transport instead of repeatedly retrying a plain `claude` command that cannot log in.
+- From PowerShell, prefer `.claude/agents/scripts/invoke-claude-api.ps1` when that wrapper surface exists. From Bash or Git Bash, prefer `.claude/agents/scripts/invoke-claude-api.sh`, and set `CLAUDE_API_BIN` explicitly when the active shell PATH differs from the PowerShell PATH.
+- For wide release or parity audits, split the admitted scope by repo, file set, or lane instead of launching one mega neutral-dir prompt across the whole pack family.
+- When the resolved provider is Claude and `externalClaudeProfile` is present, honor that profile instead of the shared model policy.
+- When the resolved provider is Gemini and the model policy is pinned, honor `externalGeminiFallbackMode`.
 - Provider-backed consultant execution in `external` mode plus `$external-worker` and `$external-reviewer` must use direct external launch from the orchestrating runtime or an approved transport wrapper script. Do not proxy them through an internal agent/helper/subagent host.
+- A spawned internal subagent is still an internal execution path even if the prompt assigns it a provider label such as Gemini Pro. That shape does not satisfy `$external-worker` or `$external-reviewer`.
 - The external adapter may be selected by the preference flags or by explicit user / lead override.
 - Multiple external adapters may run in parallel when their scopes are independent and the selected provider runtimes support concurrent non-interactive execution.
+- Do not cap that fan-out at one instance per helper or provider: the same external helper and the same resolved provider may be launched multiple times concurrently when each run owns a different admitted artifact or disjoint slice.
+- `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not forbid brigade-style reuse of the same provider across different independent lanes or slices.
 - If the active priority profile requests multiple opinions for a lane, collect them fail-closed: partial collection is evidence, not success, and the lane stays blocked until the requested opinion count is satisfied.
 - If internal native slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping those lanes.
-- Same-provider fan-out is allowed for disjoint admitted artifacts and slices; multiple parallel helper items may target the same provider when they are genuinely independent.
-- When a bounded batch of helper items needs to be launched and aggregated together, prefer the repo-local external-brigade utility over ad hoc fan-out in chat notes.
+- When multiple independent external lanes should launch together, prefer the pack-local `external-brigade` surface so the lead records one bounded brigade plan instead of scattering ad hoc parallel helper launches.
 - User override is available in both directions regardless of toggle state.
 - Any eligible internal implementer role may be replaced by the best-fit external worker adapter.
 - Any eligible reviewer or QA role may be replaced by the best-fit external reviewer adapter.
@@ -112,6 +128,11 @@ externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max
 | omitted or `1` | Single external opinion |
 | `2+` | Collect that many distinct external opinions, fail closed if the active profile and available providers cannot satisfy the count |
 
+Rules:
+
+- These counts apply to one lane's opinion requirement, not to general external concurrency.
+- The lead may still run multiple same-provider helper instances in parallel for different disjoint brigade items even when the opinion count for each lane is `1`.
+
 ## Role behavior
 
 - `$consultant` stays advisory-only and continues to use the `consultantMode` field.
@@ -137,7 +158,7 @@ Rules:
 - Unsupported external role requests must stop with an unsupported-route explanation and an honest reroute suggestion instead of probing Claude or Gemini availability as if a missing adapter might exist.
 - Worker-side specialist lanes such as `analyst`, `architect`, `planner`, `knowledge-archivist`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, and `reliability-engineer` remain eligible for `$external-worker` when routing selects external substitution.
 
-## Named priority profiles
+## Shared lane-priority matrix
 
 | Lane | Priority |
 | --- | --- |
@@ -153,6 +174,12 @@ Rules:
 | `worker.visual-icon-decorative` | `gemini > claude > codex` |
 | `review.visual` | `gemini > claude > codex` |
 
+Rules:
+
+- `auto` resolves against this matrix, not against the host-pack name.
+- Repo-local heuristics may refine the lane choice, but they must not invent a different provider universe.
+- Ordinary `auto` must not resolve to the same provider as the current host line.
+
 ## Provenance header
 
 Every external or consultant memo/report should record one explicit execution record with these separate fields:
@@ -162,7 +189,7 @@ Every external or consultant memo/report should record one explicit execution re
 - `Requested provider: <internal | codex | claude | gemini>`
 - `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | none>`
 - `Requested consultant mode: <external | internal | disabled>` when consultant routing is relevant; otherwise `not-applicable`
-- `Actual execution path: <internal consultant | external CLI (Claude CLI) | external CLI (Gemini CLI) | role disabled>`
+- `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | role disabled>`
 - `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
 - `Deviation reason: <none | external unavailable: [reason] | explicit override>`
 
@@ -172,6 +199,6 @@ Rules:
 - `Requested provider: internal` means no explicit external provider was requested by the caller and routing/default resolution picked the provider. It must not be rendered as `auto` in the artifact.
 - `internal consultant` is valid only for the consultant role when `consultantMode: internal`.
 - Provider-backed consultant execution in `external` mode plus `$external-worker` and `$external-reviewer` must show a direct external transport path. An internal agent/helper/subagent host means the route failed the contract and must be reported as disabled or rerouted.
-- `auto` resolves by lane type through the active priority profile, then applies the explicit-only self-provider rule and CLI availability. The host pack does not redefine the provider universe.
 - For `$external-worker` and `$external-reviewer`, the only valid execution path is the external CLI or a disabled-role outcome.
+- `Actual execution path: internal subagent (provider-labeled)` is always invalid for external adapter roles and must be treated as a routing violation, not as partial success.
 - If a run is blocked because the provider is unavailable, report that explicitly and let the orchestrator reroute.
