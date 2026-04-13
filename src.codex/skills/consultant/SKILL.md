@@ -164,6 +164,7 @@ Claude API transport:
 - Do not pass multiline prompts as direct command-line arguments — use `stdin` or a file.
 - Do not use TTY when a non-interactive invocation is available.
 - On Windows, keep command-line prompts short enough to avoid `cmd.exe` truncation.
+- On Windows, keep the ordinary shell path unchanged and try the native Windows shell first. If that shell path fails because of shell bootstrap, execution-policy, or environment-policy problems, retry once through Git-for-Windows Bash / MSYS when available. Do not use the WSL `bash.exe` stub as a fallback, and do not reinterpret ordinary provider auth, quota, or model failures as shell-fallback triggers.
 - Wait 5–15 minutes before treating a single advisory run as stalled. Do not launch a duplicate advisory call for the same memo while the first may still be running; independent external lanes may still run in parallel when their scopes are disjoint and the routing contract allows it.
 - If Claude returns quota, auth, or limit errors, record that in the relevant plan or note, including the resolved `externalClaudeSecretMode`, whether a SECRET-backed Claude path was attempted, and how it ended. Do not silently fall back; return an unavailable memo and require the lead to keep routing honest.
 
