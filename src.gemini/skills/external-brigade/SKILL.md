@@ -49,13 +49,16 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
    - `externalCodexWorkdirMode`
    - `externalClaudeWorkdirMode`
    - `externalGeminiWorkdirMode`
+   - `externalModelMode`
+   - `externalGeminiFallbackMode`
    - `externalClaudeSecretMode`
    - `externalClaudeApiMode`
 3. Reject unsupported owner routes before provider resolution.
 4. Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. It does not cap how many same-provider brigade items may run in parallel across different disjoint lanes or slices.
 5. Allow repeated same-provider fan-out when each brigade item owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
 6. If a brigade item itself requires `2+` same-lane opinions, satisfy that distinct-provider requirement first or fail that item closed.
-7. Do not silently downgrade external items to internal execution inside the brigade.
+7. Honor `externalModelMode` before provider-specific fallback knobs. If the resolved provider is Gemini and the model policy is pinned, honor `externalGeminiFallbackMode` inside the Gemini provider path only.
+8. Do not silently downgrade external items to internal execution inside the brigade.
 
 ## Return exactly one artifact
 

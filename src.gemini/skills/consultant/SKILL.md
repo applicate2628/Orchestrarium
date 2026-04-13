@@ -22,6 +22,7 @@ Relevant keys:
 - `externalPriorityProfile`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
+- `externalGeminiFallbackMode`
 - `externalClaudeSecretMode`
 - `externalClaudeApiMode`
 
@@ -33,12 +34,14 @@ Gemini-line provider rules:
 - `externalProvider: codex` means Codex CLI explicitly
 - `externalProvider: claude` means Claude CLI explicitly
 - `externalProvider: gemini` is allowed only as an explicit self-provider override
+- `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion
+- `externalGeminiFallbackMode` matters only when the resolved provider is Gemini and the model policy is pinned
+- Under `externalModelMode: pinned-top-pro`, `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures
 - `externalClaudeSecretMode` matters only when the resolved provider is Claude
 - `externalClaudeApiMode` matters only when the resolved provider is Claude
 - The shared lane matrix still prefers Gemini for image/icon/decorative advisory work when that routing remains honest
 - Same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce
 - When the active lane policy asks for more than one external opinion, the lead may invoke this skill more than once and aggregate the returned memos
-- When the work is a bounded helper batch rather than a single memo, the lead should route it through `external-brigade` instead of scattering separate consultant notes
 
 ## Return
 

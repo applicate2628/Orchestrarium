@@ -22,6 +22,8 @@ externalOpinionCounts: {}  # lane -> integer
 externalCodexWorkdirMode: neutral  # allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project
 externalGeminiWorkdirMode: neutral  # allowed: neutral | project
+externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro
+externalGeminiFallbackMode: auto  # allowed when Gemini is selected: disabled | auto | force
 externalClaudeSecretMode: auto  # allowed when Claude is selected: auto | force
 externalClaudeApiMode: auto  # allowed when Claude is selected: disabled | auto | force
 ```
@@ -34,6 +36,8 @@ Rules:
 - `externalPriorityProfiles` stores the ordered provider lists per lane for each named profile; missing `balanced` means the current shared matrix.
 - `externalOpinionCounts` stores how many distinct external opinions to collect per lane; missing entries mean `1`.
 - `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, and `externalGeminiWorkdirMode` choose whether each provider-backed external run starts in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`.
+- `externalModelMode` is the shared cross-provider model-selection policy. `runtime-default` leaves the resolved provider on its runtime default model/profile. `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows only the bounded same-provider fallback used for usage-limit or quota exhaustion while staying inside that provider's approved version floor and lane policy.
+- `externalGeminiFallbackMode` is valid only when the resolved provider is Gemini and `externalModelMode: pinned-top-pro` is in effect.
 - `externalClaudeSecretMode` is valid only when the resolved provider is Claude.
 - `externalClaudeApiMode` is valid only when the resolved provider is Claude.
 - `claude-api` remains a Claude transport, not a fourth provider.
@@ -45,6 +49,13 @@ Rules:
 - Gemini remains the preferred target for image, icon, decorative visual, and other clearly visual worker or review lanes when the active profile or repo-local heuristic ranks it first, but ordinary `auto` still respects the self-provider filter.
 - `externalProvider: gemini` is an explicit self-provider override only. Ordinary `auto` must not silently self-bounce.
 - When the resolved provider is Codex, honor `externalCodexWorkdirMode`; when it is Claude, honor `externalClaudeWorkdirMode`; when it is Gemini, honor `externalGeminiWorkdirMode`.
+- `externalModelMode: pinned-top-pro` maps the strongest documented provider path as follows: Codex uses `gpt-5.4 --reasoning-effort xhigh`; only `worker.long-autonomous` or another explicitly fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path; Claude uses `opus-max` and then, under `externalClaudeApiMode: auto`, retries through `claude-api` for usage-limit or quota exhaustion, or starts there immediately when the user explicitly sets `externalClaudeApiMode: force`, instead of downgrading to `sonnet-high`; Gemini uses `gemini-3.1-pro` then follows `externalGeminiFallbackMode` for the allowed same-provider retry.
+- Do not silently downgrade below `gpt-5.3-codex-spark` on the Codex line or below Gemini 3 on the Gemini line.
+- Treat named fallback paths as alternate limit or budget pools only when runtime observation shows they exhaust independently. That is repo-local operator policy, not an official provider guarantee.
+- Treat `gpt-5.3-codex-spark` and `gemini-3-flash` as bounded mechanical overflow paths only. They are acceptable for tightly scoped, low-reasoning, autonomous work, not as the ordinary cheaper mode for broad reasoning or cleanup.
+- Treat `claude-api` differently: repo-local policy accepts it as the economical near-full-strength Claude transport, so `externalClaudeApiMode: force` is an explicit budget choice as well as a limit fallback.
+- `externalGeminiFallbackMode: disabled` keeps the Gemini route on `gemini-3.1-pro` only. `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one fallback retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures. `externalGeminiFallbackMode: force` starts on `gemini-3-flash` immediately and skips the preceding `gemini-3.1-pro` attempt.
+- Reserve `externalGeminiFallbackMode: force` for tightly bounded mechanical work. Do not use it as the default path for reasoning-heavy or ambiguous Gemini tasks just to save tokens.
 - Provider-backed consultant execution in `external` mode plus `$external-worker` and `$external-reviewer` must use direct external launch from the orchestrating runtime or an approved transport wrapper script. Do not proxy them through an internal agent/helper/subagent host.
 
 ## Named profiles
@@ -55,20 +66,6 @@ Rules:
 - Mirrors the current shared lane matrix.
 - Keeps the ordinary first-opinion routing unchanged.
 - Uses `externalOpinionCounts: 1` unless a repo-local policy explicitly asks for more.
-
-| Lane | Priority in `balanced` |
-|---|---|
-| `advisory.repo-understanding` | `claude > gemini > codex` |
-| `advisory.design-adr` | `claude > codex > gemini` |
-| `review.pre-pr` | `claude > codex > gemini` |
-| `review.performance-architecture` | `claude > codex > gemini` |
-| `worker.default-implementation` | `codex > claude > gemini` |
-| `worker.systems-performance-implementation` | `codex > claude > gemini` |
-| `worker.long-autonomous` | `claude > codex > gemini` |
-| `worker.ui-structural-modernization` | `gemini > claude > codex` |
-| `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
-| `worker.visual-icon-decorative` | `gemini > claude > codex` |
-| `review.visual` | `gemini > claude > codex` |
 
 ### `gemini-crosscheck`
 
@@ -117,9 +114,15 @@ Rules:
 - If the selected external CLI is unavailable, the adapter is disabled and the main session reroutes explicitly.
 - External adapters do not silently fall back inside the role.
 - Independent external adapters may run in parallel when their scopes are independent, the selected provider runtimes support concurrent non-interactive execution, and the requested opinion counts still need more than one provider.
+- Do not cap that fan-out at one instance per helper or provider: the same external helper and the same resolved provider may be launched multiple times concurrently when each run owns a different admitted artifact or disjoint slice.
+- `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not forbid brigade-style reuse of the same provider across different independent lanes or slices.
 - If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
-- When the main Gemini session needs a bounded batch of multiple external helpers, prefer the `external-brigade` utility so the batch has one explicit plan, one ownership table, and one aggregated result surface.
+- When multiple independent external lanes should launch together, prefer the pack-local `external-brigade` surface so the main Gemini session records one bounded brigade plan instead of scattering ad hoc parallel helper launches.
+- If Gemini is the resolved provider and the model policy is pinned, honor `externalGeminiFallbackMode`.
 - `externalClaudeApiMode: auto` keeps `claude-api` as the named secondary Claude transport after the allowed Claude CLI path is exhausted. `force` starts on `claude-api` immediately.
+- If the plain Claude CLI path is selected but is clearly unauthenticated, prefer the allowed Claude API transport instead of repeatedly retrying a plain `claude` command that cannot log in.
+- From PowerShell, prefer `.claude/agents/scripts/invoke-claude-api.ps1` when that wrapper surface exists. From Bash or Git Bash, prefer `.claude/agents/scripts/invoke-claude-api.sh`, and set `CLAUDE_API_BIN` explicitly when the active shell PATH differs from the PowerShell PATH.
+- For wide release or parity audits, split the admitted scope by repo, file set, or lane instead of launching one mega neutral-dir prompt across the whole pack family.
 
 ## Eligibility gate
 

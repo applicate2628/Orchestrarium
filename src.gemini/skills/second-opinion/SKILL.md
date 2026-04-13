@@ -20,6 +20,7 @@ Manage these keys in `.gemini/.agents-mode`:
 - `externalPriorityProfile`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
+- `externalGeminiFallbackMode`
 - `externalClaudeSecretMode`
 - `externalClaudeApiMode`
 
@@ -30,13 +31,15 @@ Gemini-line rules:
 - `balanced` is the ordinary profile; `gemini-crosscheck` is the profile that intentionally keeps Gemini in the non-visual advisory and review cross-check set
 - explicit providers are `codex`, `claude`, and `gemini`
 - `externalProvider: gemini` is allowed only as an explicit self-provider override
+- `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion
+- `externalGeminiFallbackMode` matters only when provider resolves to Gemini and the model policy is pinned
+- Under `externalModelMode: pinned-top-pro`, `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures
 - `externalClaudeSecretMode` matters only when provider resolves to Claude
 - `externalClaudeApiMode` matters only when provider resolves to Claude
 - documented repo-local visual heuristics may still keep eligible image/icon/decorative visual lanes on Gemini itself when that routing remains honest
 - same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce
 - preserve unknown keys and keep the three new profile/count keys in expanded multi-key form rather than collapsing them into a consultant-only shape
 - `externalOpinionCounts` is lane-specific; when a lane asks for more than one opinion, the lead may invoke the matching external skill repeatedly and aggregate fail closed
-- `externalOpinionCounts` does not cap helper multiplicity; bounded same-provider fan-out belongs to `external-brigade`
 
 ## Toggle actions
 
