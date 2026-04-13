@@ -36,6 +36,8 @@ The shipped shared exemplar is intentionally a quiet baseline for first install:
 
 Presets are init-time shortcuts only. They expand into canonical `agents-mode` keys. The preset name is NOT persisted in the file — only the resolved key values are written.
 
+At init time, the helper may either write the selected preset immediately or enter a manual fine-tune pass. If the user says to use the preset as-is, the helper should skip the key-by-key walkthrough and write the preset-expanded canonical values directly.
+
 ### Available presets
 
 | Preset | Role | When to use |

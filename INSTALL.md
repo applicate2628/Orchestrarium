@@ -47,6 +47,7 @@ After first-time project bootstrap, the provider init helpers can start from one
 - `max-speed`
 
 The preset name itself is not persisted; the helper writes the resolved canonical key values instead. Full preset expansion tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
+If the user wants the preset unchanged, the helper should write the preset-expanded `.agents-mode.yaml` directly; key-by-key fine-tuning is optional rather than mandatory.
 
 Canonical operator-overlay output now uses `.agents-mode.yaml` on every provider line. Legacy extensionless `.agents-mode` files remain compatibility input only: reads should prefer `.agents-mode.yaml`, fall back to the sibling extensionless file only when the canonical file is missing, normalize forward into `.agents-mode.yaml`, and not recreate the legacy path.
 
