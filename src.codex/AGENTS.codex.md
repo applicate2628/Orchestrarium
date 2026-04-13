@@ -52,7 +52,7 @@ A bugfix with a known file or function maps to the `quick-fix` template by defau
 
 Role definitions live in the installed skills tree: `.agents/skills/<role>/SKILL.md` for repo-local installs, or `$CODEX_HOME/skills/<role>/SKILL.md` / `~/.codex/skills/<role>/SKILL.md` for global installs.
 
-Utility skills live in the same installed skills tree and may be invoked directly when their workflow fits. In particular, use `$init-project` to initialize project policies in the root `AGENTS.md` and bootstrap `.agents/.agents-mode` for a new Codex project, and use `$external-brigade` when a bounded set of independent external helpers should launch together instead of being orchestrated ad hoc.
+Utility skills live in the same installed skills tree and may be invoked directly when their workflow fits. In particular, use `$init-project` to initialize project policies in the root `AGENTS.md` and bootstrap `.agents/.agents-mode.yaml` for a new Codex project, and use `$external-brigade` when a bounded set of independent external helpers should launch together instead of being orchestrated ad hoc.
 
 Use these global anchor roles:
 
@@ -73,7 +73,7 @@ Repository-specific `AGENTS.md` files should add local priorities, canonical pat
 
 ## Project bootstrap
 
-If the project root `AGENTS.md` lacks `## Project policies` or `.agents/.agents-mode` is missing, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred.
+If the project root `AGENTS.md` lacks `## Project policies` or `.agents/.agents-mode.yaml` is missing, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred.
 
 ## Publication safety scan
 

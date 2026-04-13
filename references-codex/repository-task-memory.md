@@ -14,7 +14,7 @@ The immediate failure mode this policy addresses is simple: a lead can plan well
 - Completed, cancelled, or superseded items move to the configured archive location.
 - The older ignored `.plans/` directory is legacy local history. Keep it only as scratch or traceability material; do not use it as the canonical tracked source of truth for new items.
 
-`shared/references/` is the canonical home for stable repository-wide design methodology. `references-codex/` keeps Codex-specific reference material plus compatibility pointers. `docs/agents-mode-reference.md` is the shared operator reference when `.agents/.agents-mode` behavior matters. The configured task-memory directory, when used, is the home for item-specific execution memory.
+`shared/references/` is the canonical home for stable repository-wide design methodology. `references-codex/` keeps Codex-specific reference material plus compatibility pointers. `docs/agents-mode-reference.md` is the shared operator reference when `.agents/.agents-mode.yaml` behavior matters. The configured task-memory directory, when used, is the home for item-specific execution memory.
 
 ## Mandatory artifact set
 

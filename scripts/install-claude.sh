@@ -392,7 +392,8 @@ if [ "$MODE" = "global" ]; then
 else
   PROJECT_ROOT="$(dirname "$TARGET")"
 fi
-AGENTS_MODE_TARGET="$TARGET/.agents-mode"
+AGENTS_MODE_TARGET="$TARGET/.agents-mode.yaml"
+LEGACY_AGENTS_MODE_TARGET="$TARGET/.agents-mode"
 
 echo "=== Claude Code Installer ==="
 echo "Source: $SOURCE"
@@ -511,6 +512,31 @@ ensure_default_file() {
     echo "    [dry-run] would create $dst"
   else
     cp "$src" "$dst"
+  fi
+}
+
+migrate_legacy_agents_mode_file() {
+  local legacy="$1" dst="$2" label="$3"
+
+  remove_dangling_symlink "$legacy" "legacy $label"
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    if [[ -f "$legacy" ]]; then
+      echo "  Canonical $label already exists; leaving legacy file untouched: $legacy"
+    fi
+    return
+  fi
+
+  if [[ ! -f "$legacy" ]]; then
+    return
+  fi
+
+  echo "  Migrating legacy $label to $dst..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would move $legacy -> $dst"
+  else
+    mv "$legacy" "$dst"
   fi
 }
 
@@ -743,7 +769,8 @@ if [ "$MODE" != "global" ]; then
   ensure_local_only_gitignore_entries "$PROJECT_ROOT"
 fi
 
-ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode"
+migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
@@ -784,7 +811,7 @@ done
 check_file "$TARGET/agents/contracts/operating-model.md" "agents/contracts/operating-model.md"
 check_file "$TARGET/agents/contracts/subagent-contracts.md" "agents/contracts/subagent-contracts.md"
 check_file "$TARGET/agents/contracts/policies-catalog.md" "agents/contracts/policies-catalog.md"
-check_file "$AGENTS_MODE_TARGET" ".agents-mode"
+check_file "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 
 # Check CLAUDE.md (Claude-specific sections)
 if [[ -f "$dst_md" ]]; then
@@ -834,5 +861,5 @@ if [[ $errors -gt 0 ]]; then
 else
   echo "RESULT: OK — Claude Code pack installed to $TARGET"
   echo ""
-  echo "Next: restart Claude, then run /agents-init-project to review/update project policies and the installed default .claude/.agents-mode."
+  echo "Next: restart Claude, then run /agents-init-project to review/update project policies and the installed default .claude/.agents-mode.yaml."
 fi

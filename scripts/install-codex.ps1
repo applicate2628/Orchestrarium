@@ -360,6 +360,35 @@ function Ensure-DefaultFile {
     }
 }
 
+function Migrate-LegacyAgentsModeFile {
+    param(
+        [string]$LegacyFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    Remove-DanglingLink -Path $LegacyFile -Label ("legacy {0}" -f $Label)
+    Remove-DanglingLink -Path $TargetFile -Label $Label
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        if (Test-Path -LiteralPath $LegacyFile) {
+            Write-Host "  Canonical $Label already exists; leaving legacy file untouched: $LegacyFile"
+        }
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $LegacyFile)) {
+        return
+    }
+
+    Write-Host "  Migrating legacy $Label to $TargetFile..."
+    if (-not $DryRun) {
+        Move-Item -LiteralPath $LegacyFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would move $LegacyFile -> $TargetFile"
+    }
+}
+
 function Get-DefaultAgentsModeSource {
     if (-not (Test-Path -LiteralPath $SharedAgentsModeSource)) {
         throw "Missing shared agents-mode template at $SharedAgentsModeSource."
@@ -519,7 +548,8 @@ if ($Mode -eq "global") {
     $LeadScriptsTarget = Join-Path $SkillsTarget "lead\scripts"
     $MdTarget = Join-Path $ProjectRoot "AGENTS.md"
 }
-$AgentsModeTarget = Join-Path $AgentsRoot ".agents-mode"
+$AgentsModeTarget = Join-Path $AgentsRoot ".agents-mode.yaml"
+$LegacyAgentsModeTarget = Join-Path $AgentsRoot ".agents-mode"
 
 Write-Host "=== Codex Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
@@ -706,7 +736,8 @@ if ($Mode -ne "global") {
     Ensure-LocalOnlyGitignoreEntries -ProjectRoot $ProjectRoot
 }
 
-Ensure-DefaultFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode"
+Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
+Ensure-DefaultFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
 
 if ($DryRun) {
     Write-Host ""
@@ -758,7 +789,7 @@ Test-InstalledFile (Join-Path $SkillsTarget "lead/subagent-contracts.md") "skill
 Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.sh") "skills/lead/scripts/check-publication-safety.sh"
 Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.ps1") "skills/lead/scripts/check-publication-safety.ps1"
 Test-InstalledFile (Join-Path $LeadScriptsTarget "validate-skill-pack.sh") "skills/lead/scripts/validate-skill-pack.sh"
-Test-InstalledFile $AgentsModeTarget ".agents-mode"
+Test-InstalledFile $AgentsModeTarget ".agents-mode.yaml"
 Test-InstalledFile (Join-Path $AgentOverridesTarget "default.toml") "agents/default.toml"
 Test-InstalledFile (Join-Path $AgentOverridesTarget "worker.toml") "agents/worker.toml"
 Test-InstalledFile (Join-Path $AgentOverridesTarget "explorer.toml") "agents/explorer.toml"
@@ -791,7 +822,7 @@ if ($errors -gt 0) {
     Write-Host "  AGENTS.md: $MdTarget"
     Write-Host "  agents-mode: $AgentsModeTarget"
     Write-Host ""
-    Write-Host "Next: open Codex in the target project and run '`$init-project' to review/update project policies and the installed default .agents/.agents-mode."
+    Write-Host "Next: open Codex in the target project and run '`$init-project' to review/update project policies and the installed default .agents/.agents-mode.yaml."
     Write-Host "Then run 'bash $LeadScriptsTarget/validate-skill-pack.sh' if you are validating the installation from a maintainer shell."
 }
 

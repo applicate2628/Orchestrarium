@@ -353,9 +353,9 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
     "pack-local addenda may extend it with provider-specific fields" \
     "shared subagent-operating-model allows provider-specific addendum fields"
-  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode" \
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode.yaml" \
     "shared subagent-operating-model stays free of Codex-specific agents-mode paths"
-  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".claude/.agents-mode" \
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".claude/.agents-mode.yaml" \
     "shared subagent-operating-model stays free of Claude-specific agents-mode paths"
   check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "work-items/index.md" \
     "shared subagent-operating-model stays free of Claude task-memory concretization"
@@ -403,7 +403,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
 
   check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
     "## Codex-specific runtime notes" \
-    'Consultant config lives in `.agents/.agents-mode`' \
+    'Consultant config lives in `.agents/.agents-mode.yaml`' \
     "Codex runtime-notes section documents the Codex agents-mode path"
   check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
     "## Codex-specific runtime notes" \
@@ -419,7 +419,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex runtime-notes section keeps the sequential-execution runtime note"
   check_h2_section_absent "$CODEX_REF_DIR/subagent-operating-model.md" \
     "## Codex-specific runtime notes" \
-    ".claude/.agents-mode" \
+    ".claude/.agents-mode.yaml" \
     "Codex runtime-notes section does not accidentally carry Claude agents-mode paths"
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Codex-specific runtime notes" \
     "Codex addendum keeps the Codex runtime-notes section"
@@ -427,7 +427,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Gemini addendum keeps the Gemini runtime-notes section"
   check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
     "## Gemini-specific runtime notes" \
-    ".gemini/.agents-mode" \
+    ".gemini/.agents-mode.yaml" \
     "Gemini runtime-notes section documents the Gemini agents-mode overlay"
   check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
     "## Gemini-specific runtime notes" \
@@ -470,7 +470,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "3e1220bda44c01d8cf3bcbfdd5ce06f36e353feb9b9032d41f0f913f29d5c44d" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
-    "9b0d5781035a7016eb38ddb94d80ed752ced13af784f4689864ad01d544c2611" \
+    "8ec836925b0f41efb00a6c6442333c5c26601aee296ccf91d7817b80ea143a58" \
     "Codex addendum matches the current canonical normalized fingerprint"
 fi
 
@@ -549,13 +549,13 @@ check_absent "$SKILLS_DIR/lead/external-dispatch.md" "allowed: external | auto |
   "external-dispatch schema restricts consultantMode to external/internal/disabled"
 check_absent "$SKILLS_DIR/lead/external-dispatch.md" "fallback approved by user" \
   "external-dispatch does not record consultant fallback approvals"
-check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "Read and normalize \`.agents/.agents-mode\` before trusting its flags." \
+check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "Read and normalize \`.agents/.agents-mode.yaml\` before trusting its flags." \
   "subagent-contracts require read-time agents-mode normalization"
 check_contains "$SKILLS_DIR/init-project/SKILL.md" "normalize it to the current canonical format before presenting or trusting the current values." \
   "init-project normalizes existing agents-mode before reading values"
-check_contains "$SKILLS_DIR/init-project/SKILL.md" "Any read of \`.agents/.agents-mode\` that drives a decision should normalize the file to the current canonical format before trusting the flags." \
+check_contains "$SKILLS_DIR/init-project/SKILL.md" "Any read of \`.agents/.agents-mode.yaml\` that drives a decision should normalize the file to the current canonical format before trusting the flags." \
   "init-project requires read-time agents-mode normalization"
-check_contains "$SKILLS_DIR/second-opinion/SKILL.md" "read and normalize \`.agents/.agents-mode\` first." \
+check_contains "$SKILLS_DIR/second-opinion/SKILL.md" "read and normalize \`.agents/.agents-mode.yaml\` first." \
   "second-opinion normalizes agents-mode before reporting status"
 check_absent "$AGENTS_FILE" "Adapter host runtime" \
   "shared governance no longer allows adapter-host metadata for external execution"

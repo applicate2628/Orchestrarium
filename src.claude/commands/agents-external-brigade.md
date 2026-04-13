@@ -7,7 +7,7 @@ Plan or launch a bounded parallel set of external helpers for independent admitt
 1. **Read the current contract.**
    - Read `.claude/CLAUDE.md`.
    - Read `.claude/agents/contracts/external-dispatch.md`.
-   - If `.claude/.agents-mode` exists, read and normalize it before trusting any routing flags.
+   - If `.claude/.agents-mode.yaml` exists, read and normalize it before trusting any routing flags.
 
 2. **Build the brigade table.**
    - Identify each brigade item separately.
@@ -26,7 +26,7 @@ Plan or launch a bounded parallel set of external helpers for independent admitt
    - Do not turn one vague request into an implicit brigade.
 
 4. **Route the brigade honestly.**
-   - Use `.claude/.agents-mode` for `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalClaudeSecretMode`, and `externalClaudeApiMode`.
+   - Use `.claude/.agents-mode.yaml` for `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalClaudeSecretMode`, and `externalClaudeApiMode`.
    - Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. Do not misuse it as a concurrency cap.
    - Allow repeated same-provider helper instances when different brigade items own different admitted artifacts or disjoint slices and the runtime supports concurrent non-interactive execution.
    - If one brigade item requires multiple same-lane opinions, satisfy that distinct-provider requirement fail closed before declaring that item complete.

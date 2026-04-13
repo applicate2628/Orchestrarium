@@ -123,15 +123,16 @@ Fact-first note:
 
 Consultant exception:
 - `$consultant` returns the same first four sections, but ends with `5. Advisory status: NON-BLOCKING` and `6. Continuation prompt: <ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action>`.
-- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.agents-mode` must preserve any existing `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalModelMode`, `externalGeminiFallbackMode`, `externalClaudeSecretMode`, `externalClaudeApiMode`, and `externalClaudeProfile` values.
+- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.agents-mode.yaml` must preserve any existing `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalModelMode`, `externalGeminiFallbackMode`, `externalClaudeSecretMode`, `externalClaudeApiMode`, and `externalClaudeProfile` values.
 - If the selected external consultant path is unavailable or fails, the lead must report that honestly and reroute; do not auto-downgrade into an internal consultant. An internal consultant remains valid only when `consultantMode: internal` was selected explicitly before dispatch. Mandatory batch-close external consultant checks stay open until an eligible external run succeeds or the user reprioritizes.
 
 ## Shared external dispatch contract
 
 Use `external-dispatch.md` when the routing decision prefers or explicitly selects an external adapter.
 
-- The canonical config file is `.agents/.agents-mode`.
-- Read and normalize `.agents/.agents-mode` before trusting its flags. Comment-free, partial, or older-layout files are valid legacy input, not valid runtime output.
+- The canonical config file is `.agents/.agents-mode.yaml`.
+- Read and normalize `.agents/.agents-mode.yaml` before trusting its flags. Comment-free, partial, or older-layout files are valid legacy input, not valid runtime output.
+- If the canonical file is missing, read legacy `.agents/.agents-mode` as compatibility input only, normalize it forward into `.agents/.agents-mode.yaml`, and do not recreate the legacy file.
 - The extended schema contains `consultantMode`, `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalModelMode`, `externalGeminiFallbackMode`, `externalClaudeSecretMode`, `externalClaudeApiMode`, and an optional `externalClaudeProfile` used for Codex-line Claude CLI profile selection.
 - `consultantMode` governs `$consultant` behavior only.
 - The preference flags govern whether eligible implement or review/QA slots route to the external adapters by default.

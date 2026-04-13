@@ -11,7 +11,7 @@
 - `src.gemini/GEMINI.md` — Gemini runtime entrypoint в этом монорепозитории.
 - Встроенный Gemini CLI `/init` — канонический способ создать или обновить project `GEMINI.md`.
 - `.gemini/settings.json` остаётся Gemini-native runtime config surface.
-- `.gemini/.agents-mode` — routing overlay Orchestrarium, который seedится при установке, а не замена `.gemini/settings.json`.
+- `.gemini/.agents-mode.yaml` — routing overlay Orchestrarium, который seedится при установке, а не замена `.gemini/settings.json`.
 - Gemini runtime assets живут в `src.gemini/skills/`, `src.gemini/commands/` и `src.gemini/extension/`.
 - Текущее Gemini source tree остаётся sequential и human-steered; не предполагайте native parallel dispatch.
 - На Gemini-линии `externalProvider: auto` разрешается по lane type через active named priority profile, а не через один жёсткий Gemini-line default. Документированные repo-local visual heuristics всё ещё могут честно предпочесть Gemini для image, icon, decorative и других явно visual lanes. Если Gemini резолвится в Claude, нужно уважать и `externalClaudeSecretMode`, и `externalClaudeApiMode`.
@@ -19,7 +19,7 @@
 ## Gemini-side repository concretization
 
 - `references-gemini/` хранит Gemini-specific addenda и compatibility pointers для common layer монорепозитория.
-- [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md) — канонический operator reference, когда важно поведение Gemini-line `.gemini/.agents-mode`.
+- [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md) — канонический operator reference, когда важно поведение Gemini-line `.gemini/.agents-mode.yaml`.
 - Task-memory root, recovery entry point, active-item directory и archive location остаются repository-defined, когда tracked task memory включён.
 - Периодические проверки остаются pack-local в [periodic-control-matrix.md](periodic-control-matrix.md).
 

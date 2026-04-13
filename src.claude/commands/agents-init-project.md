@@ -49,8 +49,10 @@ Routing conventions (not persisted as keys):
 
 1. **Read current state.**
    - Read `.claude/CLAUDE.md` and check if a `## Project policies` section already exists.
-   - Read `.claude/.agents-mode`.
-   - If `.claude/.agents-mode` already exists, normalize it to the current canonical format before presenting or trusting the current values.
+   - Read `.claude/.agents-mode.yaml` first.
+   - If it is missing, read legacy `.claude/.agents-mode` as compatibility input only.
+   - If either file exists, normalize it to the current canonical format before presenting or trusting the current values.
+   - Normalize either input forward into `.claude/.agents-mode.yaml` and do not recreate legacy `.claude/.agents-mode`.
    - If either surface already exists, show the current values and ask whether to keep them, review them, or start fresh.
 
 2. **Read the installed canonical sources.**
@@ -110,13 +112,14 @@ Routing conventions (not persisted as keys):
 
 6. **Confirm choices.**
    - Present one summary table for `## Project policies`.
-   - Present one summary table for `.claude/.agents-mode`.
+   - Present one summary table for `.claude/.agents-mode.yaml`.
    - Ask for confirmation before writing.
 
-7. **Write `.claude/.agents-mode`.**
-   - Write the canonical file to `.claude/.agents-mode`.
+7. **Write `.claude/.agents-mode.yaml`.**
+   - Write the canonical file to `.claude/.agents-mode.yaml`.
    - Preserve unknown keys when updating an existing file.
    - Treat comment-free, partial, or older-layout files as legacy input and rewrite them to the current canonical format instead of preserving stale layout.
+   - Do not recreate legacy `.claude/.agents-mode`; write the canonical output only to `.claude/.agents-mode.yaml`.
    - Keep one key per line and include inline comments for every canonical scalar key plus every shipped `externalPriorityProfiles` / `externalOpinionCounts` entry.
    - Refresh the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks to the current pack version while preserving the effective values of known keys and any unknown keys.
    - Do not recreate retired legacy operator-overlay files.
@@ -161,7 +164,7 @@ Routing conventions (not persisted as keys):
 9. **Confirm completion.**
    - Tell the user the policies and operator mode file are saved.
    - Mention `/agents-policies` to view project policies later.
-   - Mention `.claude/.agents-mode` for future operator-mode changes.
+   - Mention `.claude/.agents-mode.yaml` for future operator-mode changes.
 
 ## Rules
 
@@ -169,6 +172,7 @@ Routing conventions (not persisted as keys):
 - Accept shorthand answers ("tdd", "80", "conventional", "trunk", etc.).
 - If the user gives a custom answer that doesn't match an option, record it as-is.
 - Do not invent extra `agents-mode` keys beyond the canonical Claude-line schema.
-- Preserve unknown keys in `.claude/.agents-mode` when updating.
-- Any read of `.claude/.agents-mode` that drives a decision should normalize the file to the current canonical format before trusting the flags.
+- Preserve unknown keys in `.claude/.agents-mode.yaml` when updating.
+- Any read of `.claude/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
+- Any read that drives a decision should prefer `.claude/.agents-mode.yaml`, fall back to legacy `.claude/.agents-mode` only if the canonical file is missing, normalize either input forward into `.claude/.agents-mode.yaml`, and not recreate the legacy file.
 - Do not change any other section of CLAUDE.md.

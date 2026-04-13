@@ -31,7 +31,7 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 - Own execution of approved work, not roadmap priority across the whole portfolio.
 - Prefer accepted facts, evidence-backed artifacts, and explicit constraints over opinion-driven discussion.
 - Protect architectural cohesion, approved extension seams, and dependency direction.
-- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible worker/review roles; prefer them when `.agents/.agents-mode` says so or when the user explicitly requests external dispatch, do not route worker-side or review work through `$consultant`, and launch those external routes directly instead of spawning an internal host helper.
+- Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible worker/review roles; prefer them when `.agents/.agents-mode.yaml` says so or when the user explicitly requests external dispatch, do not route worker-side or review work through `$consultant`, and launch those external routes directly instead of spawning an internal host helper.
 - Any spawned internal subagent is internal by definition even if the prompt assigns it a provider label or model such as Gemini Pro. Do not satisfy an external route with an internal subagent impersonating that provider.
 - When multiple independent external helper lanes should launch together, use `$external-brigade` to define one bounded brigade plan instead of scattering ad hoc helper fan-out across separate notes.
 - One subagent equals one profession, one artifact, and one gate.

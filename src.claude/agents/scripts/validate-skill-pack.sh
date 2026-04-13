@@ -295,9 +295,9 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
     "pack-local addenda may extend it with provider-specific fields" \
     "shared subagent-operating-model allows provider-specific addendum fields"
-  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode" \
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode.yaml" \
     "shared subagent-operating-model stays free of Codex-specific agents-mode paths"
-  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".claude/.agents-mode" \
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".claude/.agents-mode.yaml" \
     "shared subagent-operating-model stays free of Claude-specific agents-mode paths"
   check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "work-items/index.md" \
     "shared subagent-operating-model stays free of Claude task-memory concretization"
@@ -345,7 +345,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
 
   check_h2_section_contains "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "## Claude-specific runtime notes" \
-    'Consultant config lives in `.claude/.agents-mode`' \
+    'Consultant config lives in `.claude/.agents-mode.yaml`' \
     "Claude runtime-notes section documents the Claude agents-mode path"
   check_h2_section_contains "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "## Claude-specific runtime notes" \
@@ -361,7 +361,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Claude repository-concretization section keeps the Claude task-memory recovery entry point"
   check_h2_section_absent "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "## Claude-specific runtime notes" \
-    ".agents/.agents-mode" \
+    ".agents/.agents-mode.yaml" \
     "Claude runtime-notes section does not accidentally carry Codex agents-mode paths"
   check_contains "$CLAUDE_REF_DIR/subagent-operating-model.md" "## Claude-specific runtime notes" \
     "Claude addendum keeps the Claude runtime-notes section"
@@ -398,7 +398,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "3e1220bda44c01d8cf3bcbfdd5ce06f36e353feb9b9032d41f0f913f29d5c44d" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
-    "1bfce3650a7ff93b7751db096b28218a745e98b4db52b6f15619deaedebff7b2" \
+    "380fb2bf3279607743f03b35f78391a0a9a2d0e9b4bc1605a3617e6b220f81fd" \
     "Claude addendum matches the current canonical normalized fingerprint"
   echo ""
 fi
@@ -504,21 +504,21 @@ check_absent "$PACK/agents/contracts/external-dispatch.md" "allowed: external | 
   "external-dispatch schema restricts consultantMode to external/internal/disabled"
 check_absent "$PACK/agents/contracts/external-dispatch.md" "fallback approved by user" \
   "external-dispatch does not record consultant fallback approvals"
-check_contains "$PACK/agents/contracts/subagent-contracts.md" "Read and normalize \`.claude/.agents-mode\` first." \
+check_contains "$PACK/agents/contracts/subagent-contracts.md" "Read and normalize \`.claude/.agents-mode.yaml\` first." \
   "subagent-contracts require read-time agents-mode normalization"
 check_contains "$PACK/commands/agents-init-project.md" "normalize it to the current canonical format before presenting or trusting the current values." \
   "agents-init-project normalizes existing agents-mode before reading values"
-check_contains "$PACK/commands/agents-init-project.md" "Any read of \`.claude/.agents-mode\` that drives a decision should normalize the file to the current canonical format before trusting the flags." \
+check_contains "$PACK/commands/agents-init-project.md" "Any read of \`.claude/.agents-mode.yaml\` that drives a decision should normalize the file to the current canonical format before trusting the flags." \
   "agents-init-project requires read-time agents-mode normalization"
-check_contains "$PACK/commands/agents-second-opinion.md" "read and normalize \`.claude/.agents-mode\`." \
+check_contains "$PACK/commands/agents-second-opinion.md" "read and normalize \`.claude/.agents-mode.yaml\`." \
   "agents-second-opinion normalizes agents-mode before reporting status"
 check_absent "$AGENTS_FILE" "Adapter host runtime" \
   "shared governance no longer allows adapter-host metadata for external execution"
 check_contains "$AGENTS_FILE" "must use direct external launch" \
   "shared governance requires direct external launch"
-check_contains "$PACK/agents/external-worker.md" "Read and normalize \`.claude/.agents-mode\` to the current canonical format before trusting its flags." \
+check_contains "$PACK/agents/external-worker.md" "Read and normalize \`.claude/.agents-mode.yaml\` to the current canonical format before trusting its flags." \
   "external-worker normalizes agents-mode before routing"
-check_contains "$PACK/agents/external-reviewer.md" "Read and normalize \`.claude/.agents-mode\` to the current canonical format before trusting its flags." \
+check_contains "$PACK/agents/external-reviewer.md" "Read and normalize \`.claude/.agents-mode.yaml\` to the current canonical format before trusting its flags." \
   "external-reviewer normalizes agents-mode before routing"
 check_absent "$PACK/agents/contracts/external-dispatch.md" "Adapter host runtime:" \
   "external-dispatch no longer records adapter host runtime"

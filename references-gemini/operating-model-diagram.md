@@ -45,5 +45,5 @@ flowchart TB
 ## 3. Minimal rules
 
 - Keep runtime surfaces official-first: `GEMINI.md`, `/init`, and `.gemini/settings.json`.
-- Keep Orchestrarium routing overlays in `.gemini/.agents-mode`.
+- Keep Orchestrarium routing overlays in `.gemini/.agents-mode.yaml`.
 - Keep maintainer-side governance references in `references-gemini/`.

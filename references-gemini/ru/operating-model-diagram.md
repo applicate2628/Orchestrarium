@@ -45,5 +45,5 @@ flowchart TB
 ## 3. Минимальные правила
 
 - Держите runtime surfaces official-first: `GEMINI.md`, `/init` и `.gemini/settings.json`.
-- Держите Orchestrarium routing overlays в `.gemini/.agents-mode`.
+- Держите Orchestrarium routing overlays в `.gemini/.agents-mode.yaml`.
 - Держите maintainer-side governance references в `references-gemini/`.
