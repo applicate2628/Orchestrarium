@@ -12,17 +12,18 @@ Use this contract when `subagent_type` is `external-worker` or `external-reviewe
 
 - These roles are routing adapters, not new business professions.
 - The `Assigned role` field names the internal role being replaced for provenance.
-- Read and normalize `.claude/.agents-mode` first. Honor `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalClaudeSecretMode`, and `externalClaudeApiMode` when they are present. Treat `externalProvider: auto` as active-profile routing, not a host-line default. The canonical Claude-line config may include the Claude transport knobs when the resolved provider is `claude`; `externalClaudeProfile` remains Codex-line only.
+- Read and normalize `.claude/.agents-mode` first. Honor `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalModelMode`, `externalGeminiFallbackMode`, `externalClaudeSecretMode`, and `externalClaudeApiMode` when they are present. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode` file; it remains Codex-line only.
 - Resolve external routing in this order: `role eligibility -> provider selection -> CLI availability`.
-- Do not satisfy `$external-worker` or `$external-reviewer` by spawning an internal agent/helper/subagent host that merely relays to another CLI. If the current runtime cannot launch the selected external provider directly, the route is unavailable.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`. If a request lands in one of those lanes, fail fast with an unsupported-route explanation instead of probing providers.
 - Do not silently fall back to an internal specialist if the external CLI is unavailable; the adapter is disabled and the orchestrator may reroute.
+- Do not satisfy `$external-worker` or `$external-reviewer` by spawning an internal agent/helper/subagent host that merely relays to another CLI. If the current runtime cannot launch the selected external provider directly, the route is unavailable.
 - `external-worker` covers the full worker-side lane.
 - `external-reviewer` covers review and QA-side work.
-- `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work.
-- `externalOpinionCounts` is a same-lane distinct-opinion contract, not a helper-multiplicity cap. It does not prevent repeated same-provider helper instances on different admitted artifacts or disjoint slices.
-- When the routing decision is "launch a bounded set of external helpers together", prefer `/agents-external-brigade` so the brigade has one explicit plan, one ownership table, and one aggregated result surface.
+- `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual lanes.
 - Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support concurrent non-interactive execution. If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
+- Same-provider reuse is allowed for independent external fan-out. Do not impose a one-instance-per-provider cap when multiple admitted artifacts or disjoint slices need the same helper/provider combination.
+- `externalOpinionCounts` still governs distinct-provider opinion requirements for one lane; it does not limit brigade-style parallel launches across different independent lanes or slices.
+- When the routing decision is "launch a bounded set of external helpers together", prefer `/agents-external-brigade` so the brigade has one explicit plan, one ownership table, and one aggregated result surface.
 
 For external adapters, include the provenance header from `external-dispatch.md` in the returned artifact.
 

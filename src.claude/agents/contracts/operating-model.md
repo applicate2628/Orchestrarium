@@ -8,7 +8,6 @@ Reference for routing, interaction types, periodic controls, and role aliases. R
 
 - This applies to both `requiresLead: false` chains (main conversation invokes Agent tool per stage) and `requiresLead: true` chains (lead invokes Agent tool per specialist).
 - Independent roles (e.g., `security-engineer` and `performance-engineer`) SHOULD be launched in parallel via multiple Agent tool calls in a single message.
-- If native internal slot limits would otherwise block independent eligible lanes, prefer available external adapters over silent serialization or dropping a lane.
 - Sequential dependencies (e.g., `architect` → `planner`) MUST wait for the previous agent to return its artifact before launching the next.
 
 ## Template-based routing
@@ -56,18 +55,19 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode`.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
 - `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work.
-- The Claude-line canonical schema may include `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is Claude; `externalClaudeProfile` remains Codex-line only.
+- The Claude-line canonical schema may include the shared `externalModelMode`, `externalGeminiFallbackMode` when the resolved provider is Gemini, and `externalClaudeSecretMode` plus `externalClaudeApiMode` when the resolved provider is Claude; `externalClaudeProfile` remains Codex-line only.
 - The team template JSON does not change; routing substitutions happen at execution time.
 - `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.
 - Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.
 - Unsupported external requests fail fast. There is no generic external adapter for owner roles such as `$product-manager` or `$lead` on the Claude line.
-- An explicit request for `external` on an unsupported role changes the disclosure, not the eligibility. The orchestrator must say the route is unsupported and reroute honestly.
+- An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The orchestrator must say the route is unsupported and reroute honestly.
 - If the external CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work to another eligible path.
 - The adapter itself must not silently fall back to an internal specialist.
 - Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support concurrent non-interactive execution.
+- Same-provider external helper reuse is allowed when each helper run owns a different admitted artifact or disjoint slice.
+- Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the orchestrator may launch repeated same-provider external helpers concurrently.
+- Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices.
 - If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
-- Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` is a same-lane distinct-opinion contract, not a helper-multiplicity cap.
-- When multiple independent external helper lanes should launch together, use `/agents-external-brigade` to define one bounded brigade plan and one aggregated result surface.
 
 ## Batch-close consultant check
 
@@ -221,7 +221,6 @@ Before launching agents in parallel:
    - Checks for unintended interactions (e.g., both agents modified a shared import file that wasn't in either change surface)
    - If conflicts exist, resolve before advancing to the next stage
 4. **If a parallel agent returns REVISE or BLOCKED**, handle it independently — other parallel agents are not affected unless the finding impacts their change surface.
-5. **Prefer external lanes under slot pressure.** If independent eligible lanes are still available but native internal slot limits would otherwise force serialization, route the extra lanes through the available external adapters instead of silently dropping or delaying one.
 
 ## Artifact persistence protocol
 
