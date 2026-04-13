@@ -41,7 +41,7 @@ Everything a user installs into their target project. Self-contained, no externa
 Used only for developing and maintaining this skill pack. Not part of the installed artifact.
 
 - `AGENTS.md`: dev-specific repo rules for skill-pack maintenance (adds the dev layer on top of the installed `AGENTS.md` assembled from `src.codex/AGENTS.shared.md` + `src.codex/AGENTS.codex.md`)
-- `docs/`: branch-local docs index, runtime-layout notes, and `.agents/.agents-mode` reference
+- `docs/`: branch-local docs index, runtime-layout notes, and `.agents/.agents-mode.yaml` reference
 - `references-codex/`: canonical operating-model documents, governance references, and diagrams
 - `install-codex.sh`, `install-codex.ps1`: install scripts (bash and PowerShell)
 - `INSTALL.md`: installation instructions
@@ -64,9 +64,9 @@ bash install-codex.sh --global
 
 Important: multi-agent team workflows require explicit delegation permission from the user. Ask directly for delegation, name a role such as `$lead`, or clearly authorize subagents in the prompt; otherwise the assistant may stay in the main conversation instead of starting the team.
 
-For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, install seeds `.agents/.agents-mode`, and Codex built-in custom-agent overrides land in `.codex/agents/`. For global install, the pack mirrors into `~/.codex/`, seeds `~/.codex/.agents-mode`, and installs the same built-in overrides into `~/.codex/agents/`. See [INSTALL.md](INSTALL.md) for details.
+For repo-level install, skills go into `.agents/skills/`, `AGENTS.md` merges into the project root, install seeds `.agents/.agents-mode.yaml`, and Codex built-in custom-agent overrides land in `.codex/agents/`. For global install, the pack mirrors into `~/.codex/`, seeds `~/.codex/.agents-mode.yaml`, and installs the same built-in overrides into `~/.codex/agents/`. Legacy extensionless `.agents-mode` files remain compatibility input only and are normalized forward into the canonical `.yaml` path. See [INSTALL.md](INSTALL.md) for details.
 
-After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode`.
+After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode.yaml`. If only legacy `.agents/.agents-mode` exists, normalize it forward into the canonical `.yaml` file.
 
 ## Operating model
 
@@ -80,7 +80,7 @@ The repository is built around a few stable rules:
 - protect blast radius and require smoke coverage for nearby but nominally unrelated surfaces
 - treat `$consultant` as an optional independent advisory role only, never as a required pipeline stage
 
-Repository operating-model guidance is split: [docs/agents-mode-reference.md](docs/agents-mode-reference.md) is the operator-mode truth surface, while [references-codex/subagent-operating-model.md](references-codex/subagent-operating-model.md) is companion/addendum reference documentation. The branch-local operator reference also now carries switchable external priority profiles and opinion counts, so `.agents/.agents-mode` can ask for more than one independent external opinion when the workflow needs it.
+Repository operating-model guidance is split: [docs/agents-mode-reference.md](docs/agents-mode-reference.md) is the operator-mode truth surface, while [references-codex/subagent-operating-model.md](references-codex/subagent-operating-model.md) is companion/addendum reference documentation. The branch-local operator reference also now carries switchable external priority profiles and opinion counts, so `.agents/.agents-mode.yaml` can ask for more than one independent external opinion when the workflow needs it.
 Repository task-memory policy and storage model live in [references-codex/repository-task-memory.md](references-codex/repository-task-memory.md). The live task-memory directory, if used, is repository-defined.
 Repository publication-safety policy for all tracked content lives in [references-codex/repository-publication-safety.md](references-codex/repository-publication-safety.md).
 Repository periodic-control matrix lives in [references-codex/periodic-control-matrix.md](references-codex/periodic-control-matrix.md).

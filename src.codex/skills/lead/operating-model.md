@@ -274,7 +274,6 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - `external-worker` executes approved worker-side work through an external provider when the routing decision selects the external adapter for an eligible non-owner, non-review role.
 - `external-reviewer` performs review and QA through an external provider when the routing decision selects the external adapter for an eligible reviewer or QA role.
 - `consultant` is advisory-only and not part of the blocker chain. If the selected external consultant path is unavailable, report that honestly and reroute; use an internal consultant only when `consultantMode: internal` was selected explicitly ahead of time. `$external-worker` and `$external-reviewer` remain fail-closed at the role level and the lead may reroute to another eligible specialist.
-- Mandatory `security-reviewer` and `performance-reviewer` gates in risk-sensitive templates remain internal and are not replaced by the external reviewer.
 - The role map in this reference describes the canonical core team only. If a narrower installed specialist outside the core team is a better fit for the scoped work, the lead may use it; if the current repo/workspace defines or clearly implies a repo-local specialist, the lead may use that specialist. Using such a specialist does not add it to the canonical map automatically.
 
 ## Periodic controls

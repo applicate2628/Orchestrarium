@@ -24,7 +24,8 @@ description: Review approved Codex work through an external provider when the ro
 
 ## External execution
 
-- Read `.agents/.agents-mode` first.
+- Read `.agents/.agents-mode.yaml` first.
+- If it is missing, read legacy `.agents/.agents-mode` as compatibility input only, normalize it forward into `.agents/.agents-mode.yaml`, and do not recreate the legacy file.
 - `externalProvider: auto` resolves by the active priority profile and opinion-count policy, then applies explicit-only self-provider exclusion and CLI availability.
 - `externalProvider: codex` routes the same adapter through Codex CLI instead.
 - `externalProvider: claude` routes the same adapter through Claude CLI instead.

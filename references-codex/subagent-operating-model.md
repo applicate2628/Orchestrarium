@@ -1,6 +1,6 @@
 # Subagent Operating Model — v2
 
-> **Note**: this file is a standalone reference/addendum. Canonical operator truth for `.agents/.agents-mode`, the accepted init-time preset family, the shared lane matrix, and Claude transport/profile semantics lives in [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md).
+> **Note**: this file is a standalone reference/addendum. Canonical operator truth for `.agents/.agents-mode.yaml`, the accepted init-time preset family, the shared lane matrix, and Claude transport/profile semantics lives in [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md).
 
 Visual companion: [operating-model-diagram.md](operating-model-diagram.md)
 
@@ -156,7 +156,7 @@ AI gates do not replace external engineering policy.
 - If a role disagrees with an upstream artifact, it returns `REVISE` or `BLOCKED` to the orchestrating owner instead of renegotiating scope privately.
 - Reviewers stay independent and return findings to the orchestrating owner instead of driving implementation directly.
 - Direct specialist-to-specialist collaboration is allowed only when the orchestrating owner explicitly approves the edge, scope, and artifact boundary.
-- `$consultant` is an optional independent advisory role; it may be fulfilled by an external provider or an internal independent subagent, but it never becomes a delivery gate. Its current mode is controlled through `.agents/.agents-mode` via `consultantMode`; provider selection and Claude-specific transport or profile behavior follow `externalProvider`, `externalClaudeSecretMode`, `externalClaudeApiMode`, and `externalClaudeProfile` in the same file. Init-time presets are shortcuts only and are not persisted as a preset name.
+- `$consultant` is an optional independent advisory role; it may be fulfilled by an external provider or an internal independent subagent, but it never becomes a delivery gate. Its current mode is controlled through `.agents/.agents-mode.yaml` via `consultantMode`; provider selection and Claude-specific transport or profile behavior follow `externalProvider`, `externalClaudeSecretMode`, `externalClaudeApiMode`, and `externalClaudeProfile` in the same file. Init-time presets are shortcuts only and are not persisted as a preset name.
 
 ### 3.9 Rolling-loop execution
 

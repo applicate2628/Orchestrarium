@@ -13,14 +13,14 @@ description: Provide an independent advisory memo for the lead without becoming 
 
 ## Toggle file check
 
-Before any invocation, read `.agents/.agents-mode` first:
+Before any invocation, read `.agents/.agents-mode.yaml` first:
 
 - **No file** (default): consultant is disabled for ordinary optional second-opinion usage. Notify "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. For the mandatory batch-close external consultant-check, do not silently skip: return an advisory memo that records the disabled state and tells the lead to keep the batch open and escalate to the user.
 - **`consultantMode: external`**: external-only. Attempt the selected external CLI. If it fails or is unavailable, return an unavailable memo and require the lead to keep routing honest instead of downgrading to an internal consultant path.
 - **`consultantMode: internal`**: internal subagent only for ordinary optional usage. A mandatory batch-close external consultant-check is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
 - **`consultantMode: disabled`**: explicitly disabled. Same behavior as the no-file case.
 
-The toggle file is project-local state stored in `.agents/.agents-mode`. Keep it local-only and do not commit it to git.
+The toggle file is project-local state stored in `.agents/.agents-mode.yaml`. Keep it local-only and do not commit it to git.
 
 The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/external-dispatch.md). Treat the canonical file as the shared routing schema plus the profile, opinion-count, and Codex-only Claude transport/profile keys:
 
@@ -42,7 +42,8 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 - `externalClaudeApiMode`
 - `externalClaudeProfile`
 
-Read and normalize `.agents/.agents-mode` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
+Read and normalize `.agents/.agents-mode.yaml` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
+If the canonical file is missing, read legacy `.agents/.agents-mode` as compatibility input only, normalize it forward into `.agents/.agents-mode.yaml`, and do not recreate the legacy file.
 
 When changing `consultantMode`, preserve the other keys, including the profile, opinion-count, workdir, model-policy, Gemini-fallback, transport, and Claude-profile fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `delegationMode` to `manual`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` / `externalGeminiWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, `externalGeminiFallbackMode` to `auto`, `externalClaudeSecretMode` to `auto`, `externalClaudeApiMode` to `auto`, and `externalClaudeProfile` to `sonnet-high` unless the user explicitly requested a different Claude profile override.
 Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
@@ -105,13 +106,13 @@ Check the selected provider first:
 - Claude path: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows)
 - Gemini path: `gemini`
 
-If `.agents/.agents-mode` selects Claude and contains `externalClaudeProfile`, map it as follows:
+If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfile`, map it as follows:
 
 - `sonnet-high` → `--model sonnet --effort high`
 - `opus-max` → `--model opus --effort max`
 - key missing → use the current default Claude CLI invocation for this pack unless `externalModelMode: pinned-top-pro` requests the stronger Claude path
 
-If `.agents/.agents-mode` selects Gemini (`externalProvider: gemini`), honor `externalModelMode` first.
+If `.agents/.agents-mode.yaml` selects Gemini (`externalProvider: gemini`), honor `externalModelMode` first.
 
 - `runtime-default` → use Gemini CLI without forcing an explicit model/profile override.
 - `pinned-top-pro` → use Gemini CLI in non-interactive mode starting from the explicit Pro path below.
@@ -171,7 +172,7 @@ Claude API transport:
 ### No implicit fallback
 
 - `consultantMode: external` is external-only. If the selected external provider is unavailable, stalls, or fails, return an unavailable memo and let the lead reroute honestly.
-- `consultantMode: internal` is the only supported internal consultant path. It must be selected explicitly in `.agents/.agents-mode`; do not downgrade into it automatically after an external failure.
+- `consultantMode: internal` is the only supported internal consultant path. It must be selected explicitly in `.agents/.agents-mode.yaml`; do not downgrade into it automatically after an external failure.
 - Provider-backed consultant execution in `external` mode must use direct external launch from the orchestrating runtime or an approved transport wrapper script. If the current runtime cannot do that, disclose the dependency failure instead of proxying through an internal agent/helper/subagent host.
 - Never turn a failed external consultant run into a hidden internal substitute.
 

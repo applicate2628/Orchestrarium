@@ -26,8 +26,10 @@ Global install copies everything into `~/.codex/` (mirrors `src.codex/` structur
 bash install-codex.sh --target /path/to/repo
 ```
 
-Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and seeds the default operator file at `.agents/.agents-mode`.
+Repo-level install places skills into `.agents/skills/`, merges `AGENTS.md` into the project root, and seeds the default operator file at `.agents/.agents-mode.yaml`.
 It also seeds Codex built-in subagent overrides into `.codex/agents/default.toml`, `.codex/agents/worker.toml`, and `.codex/agents/explorer.toml` for project installs, or `~/.codex/agents/` for global installs.
+
+Canonical operator-overlay output now uses `.agents-mode.yaml`. Legacy extensionless `.agents-mode` files remain compatibility input only: reads should prefer `.agents-mode.yaml`, fall back to the sibling extensionless file only when the canonical file is missing, normalize forward into `.agents-mode.yaml`, and not recreate the legacy path.
 
 ## Install into current repo (default)
 
@@ -50,12 +52,12 @@ bash install-codex.sh
 
 The scripts handle clean removal of old files, copying, AGENTS.md merging, and file-level verification. Re-running = reinstall.
 
-Operator state lives in the installed target: repo installs seed `.agents/.agents-mode`, while global installs seed `~/.codex/.agents-mode`.
+Operator state lives in the installed target: repo installs seed `.agents/.agents-mode.yaml`, while global installs seed `~/.codex/.agents-mode.yaml`. Legacy `.agents/.agents-mode` and `~/.codex/.agents-mode` are compatibility input only.
 Built-in Codex subagent overrides also live in the installed target: repo installs seed `.codex/agents/`, while global installs seed `~/.codex/agents/`. The shipped `default.toml`, `worker.toml`, and `explorer.toml` pin those built-in subagents to `gpt-5.4` with `xhigh` unless the user already has custom files there.
 
 ## Init-time preset shortcuts
 
-After first-time project bootstrap, `$init-project` can start from one of these preset shortcuts before writing canonical `.agents/.agents-mode` keys:
+After first-time project bootstrap, `$init-project` can start from one of these preset shortcuts before writing canonical `.agents/.agents-mode.yaml` keys:
 
 - `default`
 - `absolute-balance`
@@ -90,7 +92,7 @@ The canonical Codex-line operator shape is:
 
 Project policies are configured as a `## Project policies` section in the target `AGENTS.md`, not as a separate directory. See `skills/lead/policies-catalog.md` for available policy options.
 
-After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode`.
+After first-time project install, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode.yaml`. If only legacy `.agents/.agents-mode` exists, normalize it forward into the canonical `.yaml` file.
 
 ## File separation
 
@@ -105,7 +107,7 @@ After first-time project install, run `$init-project` to write `## Project polic
 | `src.codex/skills/lead/policies-catalog.md` | Policy options reference (installed with skills) | Yes |
 | `src.codex/skills/external-brigade/` | Bounded parallel external helper orchestration | Yes |
 | `src.codex/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | Governance: delegation, hygiene, publication safety, role index | Yes |
-| `docs/` | Branch-local docs index, runtime-layout notes, `.agents/.agents-mode` reference | No — maintainer-facing source docs |
+| `docs/` | Branch-local docs index, runtime-layout notes, `.agents/.agents-mode.yaml` reference | No — maintainer-facing source docs |
 | `references-codex/` | Full reference docs (diagrams, translations, strategy) | No — skill-pack internal |
 
 ## Post-install
