@@ -72,6 +72,8 @@ Canonical provider semantics:
 | `externalPriorityProfile` | selects the active named profile used for `auto` |
 | `externalPriorityProfiles` | stores the profile -> lane -> ordered provider lists |
 | `externalOpinionCounts` | stores how many distinct external opinions to collect per lane |
+| `externalModelMode` | shared cross-provider model policy; `runtime-default` keeps provider runtime selection, `pinned-top-pro` pins the strongest documented provider-native model/profile with one named same-provider fallback |
+| `externalGeminiFallbackMode` | valid only when the resolved provider is Gemini and the model policy is pinned; `auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for limit-style Gemini failures |
 | `externalClaudeSecretMode` | valid only when the resolved provider is Claude |
 | `externalClaudeApiMode` | valid only when the resolved provider is Claude; `auto` allows a `claude-api` fallback after the allowed Claude CLI path, `force` starts on `claude-api` immediately |
 

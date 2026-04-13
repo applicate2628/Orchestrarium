@@ -123,7 +123,7 @@ Fact-first note:
 
 Consultant exception:
 - `$consultant` returns the same first four sections, but ends with `5. Advisory status: NON-BLOCKING` and `6. Continuation prompt: <ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action>`.
-- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.agents-mode` must preserve any existing `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalClaudeSecretMode`, `externalClaudeApiMode`, and `externalClaudeProfile` values.
+- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.agents-mode` must preserve any existing `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalModelMode`, `externalGeminiFallbackMode`, `externalClaudeSecretMode`, `externalClaudeApiMode`, and `externalClaudeProfile` values.
 - If the selected external consultant path is unavailable or fails, the lead must report that honestly and reroute; do not auto-downgrade into an internal consultant. An internal consultant remains valid only when `consultantMode: internal` was selected explicitly before dispatch. Mandatory batch-close external consultant checks stay open until an eligible external run succeeds or the user reprioritizes.
 
 ## Shared external dispatch contract
@@ -132,7 +132,7 @@ Use `external-dispatch.md` when the routing decision prefers or explicitly selec
 
 - The canonical config file is `.agents/.agents-mode`.
 - Read and normalize `.agents/.agents-mode` before trusting its flags. Comment-free, partial, or older-layout files are valid legacy input, not valid runtime output.
-- The extended schema contains `consultantMode`, `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalClaudeSecretMode`, `externalClaudeApiMode`, and an optional `externalClaudeProfile` used for Codex-line Claude CLI profile selection.
+- The extended schema contains `consultantMode`, `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalModelMode`, `externalGeminiFallbackMode`, `externalClaudeSecretMode`, `externalClaudeApiMode`, and an optional `externalClaudeProfile` used for Codex-line Claude CLI profile selection.
 - `consultantMode` governs `$consultant` behavior only.
 - The preference flags govern whether eligible implement or review/QA slots route to the external adapters by default.
 - The assigned role in the external handoff is a provenance/routing label, not a restriction on universality.
@@ -140,7 +140,11 @@ Use `external-dispatch.md` when the routing decision prefers or explicitly selec
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`. If a request lands in one of those lanes, fail fast with an unsupported-route explanation instead of probing providers.
 - If the external CLI is unavailable, the role is disabled at the role level and the orchestrator may reroute to another eligible internal specialist.
 - `$external-worker` and `$external-reviewer` are direct external launch routes, not internal specialist subagents. Do not satisfy these roles by spawning an internal helper/agent host that then relays to another CLI.
+- Any spawned internal subagent remains internal even if its prompt says to act as Gemini, Claude, or Codex. Provider-labeled internal delegation does not satisfy an external adapter route.
+- Wherever Codex is the resolved external provider, honor `externalModelMode` first. Under `runtime-default`, leave Codex on its runtime default model/profile. Under `pinned-top-pro`, start on `gpt-5.4 --reasoning-effort xhigh`; only `worker.long-autonomous` or another explicitly fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path. Do not silently downgrade below that floor.
+- Wherever Gemini is the resolved external provider, honor `externalModelMode` first. Under `runtime-default`, leave Gemini on its runtime default model/profile. Under `pinned-top-pro`, `externalGeminiFallbackMode` governs whether Gemini stays on `gemini-3.1-pro`, retries once on `gemini-3-flash` after a limit-style failure, or starts on `gemini-3-flash` immediately.
 - Wherever Claude is the resolved external provider, `externalClaudeApiMode` governs whether Claude may use the repo-local `claude-api` transport after or instead of the allowed Claude CLI path.
+- Treat fallback pools asymmetrically: `gpt-5.3-codex-spark` and `gemini-3-flash` are bounded mechanical overflow paths only, while `claude-api` is the approved economical near-full-strength Claude transport when the user explicitly wants it or the strongest Claude CLI path is exhausted.
 - `externalProvider: auto` resolves through the active priority profile, then applies explicit-only self-provider exclusion and CLI availability. Explicit user override or repo-local visual-routing heuristics may still prefer Gemini for image/icon/decorative visual lanes when that routing remains honest.
 - Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support concurrent non-interactive execution. If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
 - Same-provider reuse is allowed for independent external fan-out. Do not impose a one-instance-per-provider cap when multiple admitted artifacts or disjoint slices need the same helper/provider combination.
@@ -358,6 +362,7 @@ Acceptance criteria:
 - the handoff includes the internal worker role label being replaced; that label is provenance/routing metadata only and does not narrow the adapter
 - the requested work stays inside the approved worker-side artifact contract and change surface
 - the execution path is a direct external transport path; no silent fallback to `$consultant`, no internal subagent fallback, and no internal host layer pretending to be external
+- any spawned internal subagent counts as internal execution, not external transport, even if the prompt assigns it a provider name or model label
 - external-provider unavailability is reported as `BLOCKED:dependency` with the provider reason, and the orchestrator may reroute
 - the package reports the role-appropriate artifact, explicit assumptions or risks, any relevant verification evidence, and provenance
 

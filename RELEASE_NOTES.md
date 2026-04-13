@@ -10,10 +10,19 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-04-13
+
+### Changed
+
+- Added a shared `externalModelMode: runtime-default | pinned-top-pro` policy across the live `agents-mode` schema, operator reference, init surfaces, consultant and external-adapter contracts, and release-facing docs. `runtime-default` keeps the resolved provider on its own runtime-selected model/profile, while `pinned-top-pro` now means one strongest documented provider-native path plus one bounded same-provider fallback used only for usage-limit or quota exhaustion: Codex uses `gpt-5.4 --reasoning-effort xhigh` and allows `gpt-5.3-codex-spark` only on fully autonomous low-reasoning worker lanes, Claude keeps `opus-max` and falls back by transport through `claude-api` instead of dropping to `sonnet-high`, and Gemini uses `gemini-3.1-pro` then `gemini-3-flash`.
+- Tightened the external-execution contract so the new model policy does not get confused with transport choice or host-subagent routing. Claude transport knobs (`externalClaudeSecretMode`, `externalClaudeApiMode`) still apply only after provider/model selection, Codex-line `externalClaudeProfile` remains the narrower Claude override, and Gemini fallback semantics now apply only under pinned Gemini runs instead of being described as a generic always-on hop.
+- Clarified the fallback semantics so operators do not treat every fallback as the same kind of downgrade. Repo-local policy now records that `gpt-5.3-codex-spark` and `gemini-3-flash` are bounded mechanical overflow paths for separate-limit or budget relief only, while `claude-api` is the accepted economical near-full-strength Claude transport that may be used either after Claude CLI limit exhaustion or immediately through the explicit `externalClaudeApiMode: force` toggle.
+
 ## 2026-04-12
 
 ### Changed
 
+- Added `externalGeminiFallbackMode` to the canonical `agents-mode` schema and live operator surfaces. The new default is `auto`: Gemini-backed external work now targets `gemini-3.1-pro` first and allows one fallback retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures instead of keeping older pre-Gemini-3 references around.
 - `work-items/` is no longer treated as publication-facing tracked repository content in Orchestrarium. The directory remains the local recovery and handoff surface for admitted work on the operator machine, but root `.gitignore`, repo-local task-memory guidance, and the publication gate now keep it out of tracked git so execution memory no longer leaks into GitHub by default.
 - Project installers now reinforce that local-only task-memory rule instead of relying on operator memory. Codex, Claude, and Gemini project installs now ensure both `/.reports/` and `/work-items/` are ignored in target repositories, so freshly bootstrapped projects inherit the same local-only recovery boundary the monorepo now expects.
 - `agents-mode` init now exposes one explicit safe-start preset plus a small family of operator postures instead of implying that one default should cover every workflow. `default` stays the quiet safe-init path, `absolute-balance` is the everyday center, and the more aggressive `external-aggressive`, `correctness-first`, and `max-speed` shortcuts now let operators choose external saturation, verification density, or throughput deliberately without confusing that choice with the persisted provider-order profile name `balanced`.

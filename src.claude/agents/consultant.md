@@ -48,10 +48,12 @@ The local config file is `.claude/.agents-mode`. The canonical file may contain:
 - `externalPriorityProfile: balanced | gemini-crosscheck | <repo-local profile>`
 - `externalPriorityProfiles: structured profile map`
 - `externalOpinionCounts: structured lane-count map`
+- `externalModelMode: runtime-default | pinned-top-pro`
+- `externalGeminiFallbackMode: disabled | auto | force`
 - `externalClaudeSecretMode: auto | force`
 - `externalClaudeApiMode: disabled | auto | force`
 
-`consultantMode` continues to govern consultant behavior. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. When the resolved provider is `claude`, `externalClaudeSecretMode` and `externalClaudeApiMode` are transport knobs; `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
+`consultantMode` continues to govern consultant behavior. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. When the resolved provider is `gemini`, `externalModelMode` is the shared model-selection knob and `externalGeminiFallbackMode` controls the explicit pinned Gemini path. When the resolved provider is `claude`, `externalModelMode` may request the stronger Claude path while `externalClaudeSecretMode` and `externalClaudeApiMode` remain transport knobs; `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
 
 Read and normalize `.claude/.agents-mode` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 
@@ -125,12 +127,20 @@ claude --quiet --full-auto "$PROMPT"
 - Apply `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is Claude.
 - Do not silently downgrade from a selected Claude path to Codex or Gemini.
 
-If Gemini is selected explicitly:
+If Gemini is selected explicitly, honor `externalModelMode` first.
+
+- `runtime-default` leaves Gemini on its runtime default model/profile.
+- `pinned-top-pro` starts on the explicit Pro path below.
+
+Pinned Gemini example:
 
 ```bash
-printf '%s' "$PROMPT" | gemini -p "" --model gemini-2.5-pro --approval-mode yolo
+printf '%s' "$PROMPT" | gemini -p "" --model gemini-3.1-pro --approval-mode yolo
 ```
 
+- If `externalGeminiFallbackMode: disabled`, keep `gemini-3.1-pro` only.
+- If `externalGeminiFallbackMode: auto`, retry once on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures.
+- If `externalGeminiFallbackMode: force`, start on `gemini-3-flash` immediately.
 - Do not silently downgrade from a selected Gemini path back to Codex.
 - Use stdin or a prompt file rather than trying to push a multiline prompt through a single command-line string.
 

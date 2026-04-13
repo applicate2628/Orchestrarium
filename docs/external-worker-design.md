@@ -117,6 +117,8 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
      worker.ui-surgical-patch-cleanup: 1
      worker.visual-icon-decorative: 1
      review.visual: 1
+   externalModelMode: runtime-default
+   externalGeminiFallbackMode: auto
    externalClaudeSecretMode: auto
    externalClaudeApiMode: auto
    externalClaudeProfile: sonnet-high
@@ -131,11 +133,13 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - `externalPriorityProfile` — active named provider-order profile used only when `externalProvider: auto`
    - `externalPriorityProfiles` — per-profile lane matrix with ordered provider lists; `balanced` stays the default and `gemini-crosscheck` is the recommended broader-Gemini second-opinion profile
    - `externalOpinionCounts` — per-lane number of distinct external opinions required under `externalProvider: auto`; not a global cap on helper multiplicity
+   - `externalModelMode` — shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion
+   - `externalGeminiFallbackMode` — when the resolved provider is Gemini and the model policy is pinned, `disabled` keeps `gemini-3.1-pro` only, `auto` allows one retry on `gemini-3-flash` only for quota/limit/capacity-style failures, and `force` starts on `gemini-3-flash` immediately
    - `externalClaudeSecretMode` — when the selected provider is Claude, `auto` keeps the first Claude call plain and retries once with `ANTHROPIC_*` from the local Claude `SECRET.md` only after quota, limit, or reset errors; `force` applies the same environment override on the primary Claude call
    - `externalClaudeApiMode` — when the resolved provider is Claude, `disabled` forbids `claude-api`, `auto` allows one `claude-api` fallback after the allowed Claude CLI path is exhausted, and `force` uses `claude-api` as the primary Claude transport immediately
    - `externalClaudeProfile` — Codex-line only optional Claude CLI execution profile: `sonnet-high` or `opus-max`
    - Each toggle is independent
-   - Default full shape on first creation: `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, shipped `externalPriorityProfiles` including `balanced` and `gemini-crosscheck`, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; Claude transport keys default to `externalClaudeSecretMode: auto` and `externalClaudeApiMode: auto` wherever the resolved provider may be Claude; Codex also writes `externalClaudeProfile: sonnet-high`
+   - Default full shape on first creation: `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, shipped `externalPriorityProfiles` including `balanced` and `gemini-crosscheck`, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; the shared model policy defaults to `externalModelMode: runtime-default`; Gemini fallback defaults to `externalGeminiFallbackMode: auto`; Claude transport keys default to `externalClaudeSecretMode: auto` and `externalClaudeApiMode: auto` wherever the resolved provider may be Claude; Codex also writes `externalClaudeProfile: sonnet-high`
 
 3. **Dispatch protocol (platform-dependent)**
 
@@ -168,7 +172,9 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 
 4. **Common rules**
    - CLI availability check before dispatch (`which codex` / `where codex` on Claude Code, `claude` / `claude.exe` on Codex, `gemini` wherever Gemini is selected)
-   - Hard tasks: `--model gpt-5.4 --reasoning-effort xhigh` (Codex), `--effort high` (Claude CLI), or `--model gemini-2.5-pro` (Gemini CLI)
+   - Under `externalModelMode: runtime-default`, keep the selected provider on its runtime default model/profile.
+   - Under `externalModelMode: pinned-top-pro`, hard tasks start on the strongest documented provider-native path: `--model gpt-5.4 --reasoning-effort xhigh` (Codex), `opus-max` / `--model opus --effort max` (Claude CLI), or `--model gemini-3.1-pro` (Gemini CLI).
+   - If Gemini is the selected provider and the model policy is pinned, honor `externalGeminiFallbackMode`: `disabled` keeps `gemini-3.1-pro` only, `auto` allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures, and `force` starts on `gemini-3-flash` immediately. Neither mode counts as a provider switch.
    - If Claude CLI is the selected provider, honor `externalClaudeSecretMode`: `auto` keeps one limit-triggered one-line retry with `ANTHROPIC_*` from the local Claude `SECRET.md`, while `force` applies the same environment override to the primary Claude call. Neither mode counts as a profile downgrade or a provider switch.
    - On any line where the resolved provider is Claude, `externalClaudeApiMode: auto` keeps the installed Claude wrapper under `.claude/agents/scripts/invoke-claude-api.sh` or `.ps1` as the named secondary Claude transport after the allowed Claude CLI path is exhausted, with direct `claude-api` as the fallback only when the wrapper surface is unavailable. `force` starts on that Claude API transport immediately. If requested but unavailable, disclose that dependency/config failure instead of pretending the Claude route completed.
    - `externalPriorityProfile` selects the named provider-order map only when `externalProvider: auto`; unknown profile names fail closed instead of silently falling back.
@@ -216,9 +222,11 @@ The orchestrator (lead or main conversation) **prefers** external roles by defau
 - `externalPriorityProfile: balanced | gemini-crosscheck | <custom>` — select which ordered provider map `auto` uses
 - `externalPriorityProfiles` — maintain the per-profile lane matrix; this is where Gemini can be promoted into broader advisory or review roles when one opinion is not enough
 - `externalOpinionCounts` — raise specific lanes above `1` when the orchestrator should collect multiple independent external opinions
+- `externalModelMode: runtime-default | pinned-top-pro` — shared cross-provider model policy; `runtime-default` keeps provider runtime selection, while `pinned-top-pro` asks each provider for its strongest documented native path with one named same-provider fallback on retryable provider exhaustion
+- `externalGeminiFallbackMode: disabled | auto | force` — when the resolved provider is Gemini and the model policy is pinned, control whether Gemini stays on `gemini-3.1-pro`, retries once on `gemini-3-flash`, or starts on `gemini-3-flash` immediately
 - `externalClaudeSecretMode: auto | force` — when external execution resolves to Claude CLI, `auto` keeps the limit-triggered SECRET-backed retry path and `force` applies the same `ANTHROPIC_*` override to the primary Claude call
 - `externalClaudeApiMode: disabled | auto | force` — when the resolved provider is Claude, control whether `claude-api` is forbidden, used as a secondary Claude transport, or used as the primary Claude transport
-- `externalClaudeProfile: sonnet-high | opus-max` — Codex-line only; when Codex dispatches to Claude CLI, prefer the matching model/effort profile instead of the provider default
+- `externalClaudeProfile: sonnet-high | opus-max` — Codex-line only; when Codex dispatches to Claude CLI, prefer the matching model/effort profile instead of the provider default or the broader shared model policy
 
 Domain specialist is selected instead only when:
 
