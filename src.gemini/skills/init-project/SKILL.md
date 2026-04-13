@@ -44,6 +44,8 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalGeminiWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `runtime-default` |
+| `externalGeminiFallbackMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `externalClaudeSecretMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 
@@ -76,11 +78,11 @@ Routing conventions (not persisted as keys):
    - If that document is not present in the installed runtime, rely on this skill's canonical schema and rules below instead of inventing extra Gemini-only keys.
 
 4. **Select a preset (optional).**
-   - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, or `max-speed`.
-   - If the user picks a preset, apply its full key expansion from the table above as the starting values.
-   - If the user says "custom" or skips this step, start from the `default` baseline.
-   - After applying a preset, still walk through each key so the user can fine-tune individual values.
-   - The preset name is NOT persisted — only the expanded canonical keys are written.
+    - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, or `max-speed`.
+    - If the user picks a preset, apply its full key expansion from the table above as the starting values.
+    - If the user says "custom" or skips this step, start from the `default` baseline.
+    - After applying a preset, still walk through each key so the user can fine-tune individual values.
+    - The preset name is NOT persisted — only the expanded canonical keys are written.
 
 5. **Configure the shared routing overlay.**
    - Walk through these keys one at a time:
@@ -96,6 +98,8 @@ Routing conventions (not persisted as keys):
      - `externalCodexWorkdirMode`
      - `externalClaudeWorkdirMode`
      - `externalGeminiWorkdirMode`
+     - `externalModelMode`
+     - `externalGeminiFallbackMode`
      - `externalClaudeSecretMode`
      - `externalClaudeApiMode`
    - Use existing values when present, the preset-expanded value if one was selected, or otherwise default to:
@@ -112,10 +116,10 @@ Routing conventions (not persisted as keys):
      - `externalCodexWorkdirMode: neutral`
      - `externalClaudeWorkdirMode: neutral`
      - `externalGeminiWorkdirMode: neutral`
+     - `externalGeminiFallbackMode: auto`
      - `externalClaudeSecretMode: auto`
      - `externalClaudeApiMode: auto`
    - Accept shorthand such as `force`, `external reviewer only`, `balanced profile`, or `gemini crosscheck`.
-   - Keep `externalOpinionCounts` separate from helper multiplicity; bounded same-provider helper fan-out belongs to `external-brigade`.
 
 6. **Confirm before writing.**
    - Present one summary table for the final `.gemini/.agents-mode` values.
@@ -125,7 +129,7 @@ Routing conventions (not persisted as keys):
 7. **Write `.gemini/.agents-mode`.**
    - Keep one key per line.
    - Treat comment-free, partial, or older-layout files as legacy input and rewrite them to the current canonical format instead of preserving stale layout.
-   - Keep inline allowed-values comments on every canonical scalar key and preserve the multiline `externalPriorityProfiles` / `externalOpinionCounts` blocks verbatim.
+   - Keep inline comments on every canonical scalar key plus every shipped `externalPriorityProfiles` / `externalOpinionCounts` entry, and preserve the multiline blocks verbatim.
    - Refresh the shipped profile/count blocks to the current pack version while preserving effective known values and any unknown keys.
    - Use this canonical Gemini-line shape:
 
@@ -177,6 +181,8 @@ Routing conventions (not persisted as keys):
    externalCodexWorkdirMode: {value}  # allowed: neutral | project
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project
    externalGeminiWorkdirMode: {value}  # allowed: neutral | project
+   externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro
+   externalGeminiFallbackMode: {value}  # allowed when Gemini is selected: disabled | auto | force
    externalClaudeSecretMode: {value}  # allowed when Claude is selected: auto | force
    externalClaudeApiMode: {value}  # allowed when Claude is selected: disabled | auto | force
    ```
@@ -194,4 +200,3 @@ Routing conventions (not persisted as keys):
 - Do not invent extra keys beyond the canonical overlay schema.
 - Any read of `.gemini/.agents-mode` that drives a decision should normalize the file to the current canonical format before trusting the flags.
 - If the user asks for `externalProvider: gemini` on the Gemini line, accept it only as an explicit self-provider override; ordinary `auto` routing must still avoid same-provider self-bounce.
-- If the user asks to launch multiple parallel external helpers for one bounded batch, keep that plan in `external-brigade` rather than inflating `externalOpinionCounts`.

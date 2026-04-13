@@ -72,6 +72,7 @@ Important:
 - MCP servers such as Serena, Fetch, or Context7 still belong in `.gemini/settings.json` or the installed extension manifest at `.gemini/extensions/orchestrarium-gemini/gemini-extension.json`, not inside `AGENTS.md`.
 - `.gemini/.agents-mode` is the Orchestrarium routing overlay seeded by install, not a Gemini-native replacement.
 - Decision-driving reads of an existing `.gemini/.agents-mode` overlay must normalize stale, comment-free, or older-layout files to the current canonical format before trusting the flags.
+- When `.gemini/.agents-mode` resolves Gemini as the external provider, the overlay may also carry the shared `externalModelMode` plus `externalGeminiFallbackMode`, where `runtime-default` leaves Gemini on its runtime default model/profile and pinned `auto` means `gemini-3.1-pro` first with one fallback retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures.
 - When `.gemini/.agents-mode` resolves Claude as the external provider, the overlay may also carry `externalClaudeSecretMode` and `externalClaudeApiMode`.
 - `externalProvider: auto` resolves through the active named priority profile rather than a Gemini-line Claude default. Explicit same-provider Gemini routing requires an explicit override, and documented repo-local visual-routing heuristics may still keep eligible image, icon, decorative visual, and other clearly visual lanes on Gemini itself when that routing remains honest.
 - The overlay also carries `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`, so a lane can switch between `balanced` and `gemini-crosscheck` and ask for more than one external opinion when the routing policy requires it.
@@ -90,7 +91,7 @@ bash src.gemini/scripts/validate-pack.sh .
 
 ## Operator overlay reference
 
-The canonical value-by-value reference for the installed `.gemini/.agents-mode` overlay lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md). That reference also records task continuity, continue-by-default execution expectations, the init-time preset family, the named priority profiles, `externalClaudeApiMode`, the explicit `worker.systems-performance-implementation` lane, the repo-local visual-routing heuristic for initialized projects, and the distinction between lane-local opinion counts and brigade-style helper fan-out.
+The canonical value-by-value reference for the installed `.gemini/.agents-mode` overlay lives in [docs/agents-mode-reference.md](docs/agents-mode-reference.md). That reference also records task continuity, continue-by-default execution expectations, the init-time preset family, the named priority profiles, shared `externalModelMode`, `externalGeminiFallbackMode`, `externalClaudeSecretMode`, `externalClaudeApiMode`, the explicit `worker.systems-performance-implementation` lane, the repo-local visual-routing heuristic for initialized projects, and the distinction between lane-local opinion counts and brigade-style helper fan-out.
 
 The branch-level docs index and runtime-layout map live in [docs/README.md](docs/README.md) and [docs/provider-runtime-layout.md](docs/provider-runtime-layout.md).
 
