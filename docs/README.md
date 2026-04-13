@@ -11,5 +11,5 @@ Use it together with:
 
 Current docs in this branch:
 
-- [agents-mode-reference.md](agents-mode-reference.md) for the canonical `.agents/.agents-mode` operator reference
+- [agents-mode-reference.md](agents-mode-reference.md) for the canonical `.agents/.agents-mode.yaml` operator reference
 - [provider-runtime-layout.md](provider-runtime-layout.md) for the source-vs-installed Codex surface map

@@ -52,7 +52,7 @@ A bugfix with a known file or function maps to the `quick-fix` template by defau
 
 Role definitions live in the installed skills tree: `.agents/skills/<role>/SKILL.md` for repo-local installs, or `$CODEX_HOME/skills/<role>/SKILL.md` / `~/.codex/skills/<role>/SKILL.md` for global installs.
 
-Utility skills live in the same installed skills tree and may be invoked directly when their workflow fits. In particular, use `$init-project` to initialize project policies in the root `AGENTS.md` and bootstrap `.agents/.agents-mode` for a new Codex project.
+Utility skills live in the same installed skills tree and may be invoked directly when their workflow fits. In particular, use `$init-project` to initialize project policies in the root `AGENTS.md` and bootstrap `.agents/.agents-mode.yaml` for a new Codex project.
 Use `$external-brigade` when multiple independent external helper launches need to be planned or aggregated together as one bounded batch.
 
 Use these global anchor roles:
@@ -63,8 +63,8 @@ Use these global anchor roles:
 
 External dispatch roles also exist in the installed skills tree as bidirectional adapters:
 
-- `$external-worker`: external worker-side adapter for eligible non-owner, non-review roles; dispatches through the shared provider universe `auto | codex | claude | gemini` using the active priority profile in `.agents/.agents-mode`, with explicit self-provider selection staying explicit-only and Gemini eligible outside visual lanes when the profile asks for a second opinion
-- `$external-reviewer`: external review/QA adapter for eligible review-side roles; dispatches through the shared provider universe `auto | codex | claude | gemini` using the active priority profile in `.agents/.agents-mode`, with explicit self-provider selection staying explicit-only and Gemini eligible outside visual lanes when the profile asks for a second opinion
+- `$external-worker`: external worker-side adapter for eligible non-owner, non-review roles; dispatches through the shared provider universe `auto | codex | claude | gemini` using the active priority profile in `.agents/.agents-mode.yaml`, with explicit self-provider selection staying explicit-only and Gemini eligible outside visual lanes when the profile asks for a second opinion
+- `$external-reviewer`: external review/QA adapter for eligible review-side roles; dispatches through the shared provider universe `auto | codex | claude | gemini` using the active priority profile in `.agents/.agents-mode.yaml`, with explicit self-provider selection staying explicit-only and Gemini eligible outside visual lanes when the profile asks for a second opinion
 
 These roles are not aliases for `$consultant`.
 
@@ -74,7 +74,7 @@ Repository-specific `AGENTS.md` files should add local priorities, canonical pat
 
 ## Project bootstrap
 
-If the project root `AGENTS.md` lacks `## Project policies` or `.agents/.agents-mode` is missing, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred.
+If the project root `AGENTS.md` lacks `## Project policies` or `.agents/.agents-mode.yaml` is missing, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred.
 
 ## Publication safety scan
 

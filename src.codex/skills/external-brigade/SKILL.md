@@ -41,7 +41,7 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 
 ## Routing rules
 
-1. Read and normalize `.agents/.agents-mode` before trusting any flags.
+1. Read and normalize `.agents/.agents-mode.yaml` before trusting any flags.
 2. Honor the current external routing fields, including:
    - `externalProvider`
    - `externalPriorityProfile`

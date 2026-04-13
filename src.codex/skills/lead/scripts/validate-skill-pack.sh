@@ -201,7 +201,7 @@ if grep -Fq "fallback approved by user" "$SKILLS_DIR/lead/external-dispatch.md";
 else
   pass "external-dispatch does not record consultant fallback approvals"
 fi
-if grep -Fq 'Read and normalize `.agents/.agents-mode` before trusting its flags.' "$SKILLS_DIR/lead/subagent-contracts.md"; then
+if grep -Fq 'Read and normalize `.agents/.agents-mode.yaml` before trusting its flags.' "$SKILLS_DIR/lead/subagent-contracts.md"; then
   pass "subagent-contracts require read-time agents-mode normalization"
 else
   fail "subagent-contracts require read-time agents-mode normalization"
@@ -211,12 +211,12 @@ if grep -Fq "normalize it to the current canonical format before presenting or t
 else
   fail "init-project normalizes existing agents-mode before reading values"
 fi
-if grep -Fq 'Any read of `.agents/.agents-mode` that drives a decision should normalize the file to the current canonical format before trusting the flags.' "$SKILLS_DIR/init-project/SKILL.md"; then
+if grep -Fq 'Any read of `.agents/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.' "$SKILLS_DIR/init-project/SKILL.md"; then
   pass "init-project requires read-time agents-mode normalization"
 else
   fail "init-project requires read-time agents-mode normalization"
 fi
-if grep -Fq 'read and normalize `.agents/.agents-mode` first.' "$SKILLS_DIR/second-opinion/SKILL.md"; then
+if grep -Fq 'read and normalize `.agents/.agents-mode.yaml` first.' "$SKILLS_DIR/second-opinion/SKILL.md"; then
   pass "second-opinion normalizes agents-mode before reporting status"
 else
   fail "second-opinion normalizes agents-mode before reporting status"
