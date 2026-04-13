@@ -113,6 +113,32 @@ function Ensure-Dir {
     }
 }
 
+function Migrate-LegacyAgentsModeFile {
+    param(
+        [string]$LegacyFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        if (Test-Path -LiteralPath $LegacyFile) {
+            Write-Host "  Canonical $Label already exists; leaving legacy file untouched: $LegacyFile"
+        }
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $LegacyFile)) {
+        return
+    }
+
+    Write-Host "  Migrating legacy $Label to $TargetFile..."
+    if (-not $DryRun) {
+        Move-Item -LiteralPath $LegacyFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would move $LegacyFile -> $TargetFile"
+    }
+}
+
 function Install-Tree {
     param([string]$SourceDir, [string]$TargetDir, [string]$Label)
 
@@ -476,7 +502,8 @@ if ($Mode -eq "global") {
     $CommandsTarget = Join-Path $InstallRoot "commands"
     $ExtensionsTarget = Join-Path $InstallRoot "extensions"
     $ExtensionRoot = Join-Path $ExtensionsTarget $ExtensionName
-    $AgentsModeTarget = Join-Path $InstallRoot ".agents-mode"
+    $AgentsModeTarget = Join-Path $InstallRoot ".agents-mode.yaml"
+    $LegacyAgentsModeTarget = Join-Path $InstallRoot ".agents-mode.yaml"
     $GeminiTarget = Join-Path $InstallRoot "GEMINI.md"
     $SharedTarget = Join-Path $InstallRoot "AGENTS.md"
     $LegacySharedTarget = Join-Path $InstallRoot "AGENTS.shared.md"
@@ -487,7 +514,8 @@ if ($Mode -eq "global") {
     $CommandsTarget = Join-Path $InstallRoot "commands"
     $ExtensionsTarget = Join-Path $InstallRoot "extensions"
     $ExtensionRoot = Join-Path $ExtensionsTarget $ExtensionName
-    $AgentsModeTarget = Join-Path $InstallRoot ".agents-mode"
+    $AgentsModeTarget = Join-Path $InstallRoot ".agents-mode.yaml"
+    $LegacyAgentsModeTarget = Join-Path $InstallRoot ".agents-mode.yaml"
     $GeminiTarget = Join-Path $ProjectRoot "GEMINI.md"
     $SharedTarget = Join-Path $ProjectRoot "AGENTS.md"
     $LegacySharedTarget = Join-Path $ProjectRoot "AGENTS.shared.md"
@@ -543,7 +571,8 @@ Install-PackFile -SourceFile $ExtensionManifestSource -TargetFile $ExtensionMani
 Install-PackFile -SourceFile $ExtensionReadmeSource -TargetFile $ExtensionReadmeTarget -Label "extension README"
 Install-PackContent -Content ((Get-Content -LiteralPath (Join-Path $Source "GEMINI.md") -Raw) -replace '@\./AGENTS\.shared\.md', '@./AGENTS.md') -TargetFile $ExtensionGeminiTarget -Label "extension GEMINI.md"
 Install-PackContent -Content (Get-Content -LiteralPath (Join-Path $Source "AGENTS.shared.md") -Raw) -TargetFile $ExtensionAgentsTarget -Label "extension AGENTS.md"
-Install-PackFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode" -PreserveExisting
+Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
+Install-PackFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml" -PreserveExisting
 Remove-LegacyPackFile -TargetFile $LegacySharedTarget -Label "AGENTS.shared.md"
 Remove-LegacyPackFile -TargetFile $LegacyAgentsReadmeTarget -Label "agents/README.md"
 Remove-LegacyPackFile -TargetFile $LegacyExtensionSharedTarget -Label "extension AGENTS.shared.md"

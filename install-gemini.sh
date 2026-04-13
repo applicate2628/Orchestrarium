@@ -336,6 +336,28 @@ install_pack_file() {
   fi
 }
 
+migrate_legacy_agents_mode_file() {
+  local legacy="$1" dst="$2" label="$3"
+
+  if [[ -f "$dst" ]]; then
+    if [[ -f "$legacy" ]]; then
+      echo "  Canonical $label already exists; leaving legacy file untouched: $legacy"
+    fi
+    return
+  fi
+
+  if [[ ! -f "$legacy" ]]; then
+    return
+  fi
+
+  echo "  Migrating legacy $label to $dst..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would move $legacy -> $dst"
+  else
+    mv "$legacy" "$dst"
+  fi
+}
+
 install_pack_content_file() {
   local src="$1" dst="$2" label="$3"
   ensure_dir "$(dirname "$dst")"
@@ -483,7 +505,8 @@ if [[ "$MODE" == "global" ]]; then
   INSTALL_ROOT="$(canonical_path "$HOME/.gemini")"
   EXTENSIONS_TARGET="$INSTALL_ROOT/extensions"
   EXTENSION_ROOT="$EXTENSIONS_TARGET/$EXTENSION_NAME"
-  AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode"
+  AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode.yaml"
+  LEGACY_AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode.yaml"
   GEMINI_TARGET="$INSTALL_ROOT/GEMINI.md"
   SHARED_TARGET="$INSTALL_ROOT/AGENTS.md"
   LEGACY_SHARED_TARGET="$INSTALL_ROOT/AGENTS.shared.md"
@@ -502,7 +525,8 @@ else
   INSTALL_ROOT="$PROJECT_ROOT/.gemini"
   EXTENSIONS_TARGET="$INSTALL_ROOT/extensions"
   EXTENSION_ROOT="$EXTENSIONS_TARGET/$EXTENSION_NAME"
-  AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode"
+  AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode.yaml"
+  LEGACY_AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode.yaml"
   GEMINI_TARGET="$PROJECT_ROOT/GEMINI.md"
   SHARED_TARGET="$PROJECT_ROOT/AGENTS.md"
   LEGACY_SHARED_TARGET="$PROJECT_ROOT/AGENTS.shared.md"
@@ -554,7 +578,8 @@ trap 'rm -f "$extension_gemini_tmp"' EXIT
 sed 's|@\./AGENTS\.shared\.md|@./AGENTS.md|' "$SOURCE/GEMINI.md" > "$extension_gemini_tmp"
 install_pack_content_file "$extension_gemini_tmp" "$EXTENSION_GEMINI_TARGET" "extension GEMINI.md"
 install_pack_file "$SOURCE/AGENTS.shared.md" "$EXTENSION_AGENTS_TARGET" "extension AGENTS.md"
-install_pack_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode" 1
+migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+install_pack_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml" 1
 remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"
 remove_legacy_pack_file "$LEGACY_AGENTS_README_TARGET" "agents/README.md"
 remove_legacy_pack_file "$LEGACY_EXTENSION_SHARED_TARGET" "extension AGENTS.shared.md"

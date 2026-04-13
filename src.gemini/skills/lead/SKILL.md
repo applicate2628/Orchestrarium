@@ -35,8 +35,8 @@ That means:
 - keep official Gemini runtime surfaces straight:
   - `GEMINI.md` is the runtime entrypoint
   - `.gemini/settings.json` remains the official Gemini runtime config surface
-  - `.gemini/.agents-mode` is the Orchestrarium routing overlay only
-- keep external dispatch honest through `.gemini/.agents-mode` and the Gemini-line provider matrix in `external-dispatch.md`, with direct provider launch only for provider-backed external routes
+  - `.gemini/.agents-mode.yaml` is the Orchestrarium routing overlay only
+- keep external dispatch honest through `.gemini/.agents-mode.yaml` and the Gemini-line provider matrix in `external-dispatch.md`, with direct provider launch only for provider-backed external routes
 
 ## Required references
 

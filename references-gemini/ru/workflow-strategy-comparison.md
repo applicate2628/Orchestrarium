@@ -6,7 +6,7 @@
 
 - [subagent-operating-model.md](subagent-operating-model.md)
 - [operating-model-diagram.md](operating-model-diagram.md)
-- [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md), когда важно поведение `.gemini/.agents-mode`
+- [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md), когда важно поведение `.gemini/.agents-mode.yaml`
 
 ## Семейства стратегий
 

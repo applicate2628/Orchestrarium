@@ -2,14 +2,14 @@
 
 Визуальное дополнение: [operating-model-diagram.md](operating-model-diagram.md)
 
-Эта standalone ветка хранит один Gemini-local operating-model reference как addendum. Каноническая operator truth для `.gemini/.agents-mode`, принятого init-time preset family, общей lane matrix и Claude transport semantics живёт в [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md).
+Эта standalone ветка хранит один Gemini-local operating-model reference как addendum. Каноническая operator truth для `.gemini/.agents-mode.yaml`, принятого init-time preset family, общей lane matrix и Claude transport semantics живёт в [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md).
 
 ## Gemini runtime notes
 
 - `GEMINI.md` — Gemini runtime entrypoint.
 - Встроенная команда Gemini CLI `/init` — канонический способ создать или обновить project `GEMINI.md`.
 - `.gemini/settings.json` остаётся Gemini-native runtime config surface.
-- `.gemini/.agents-mode` — routing overlay Orchestrarium, который seedится при установке, а не замена `.gemini/settings.json`.
+- `.gemini/.agents-mode.yaml` — routing overlay Orchestrarium, который seedится при установке, а не замена `.gemini/settings.json`.
 - Принятое init-time preset family: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `max-speed`. Это только shortcuts на этапе init; имя preset'а не сохраняется после разворачивания в канонические ключи.
 - Skills живут в `skills/<name>/SKILL.md`.
 - Пользовательские command helpers живут в `commands/**/*.toml`.
@@ -25,12 +25,12 @@
 ## Gemini-side repository concretization
 
 - `references-gemini/` — обязательное standalone reference tree.
-- [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md) — канонический operator reference для `.gemini/.agents-mode`.
+- [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md) — канонический operator reference для `.gemini/.agents-mode.yaml`.
 - Task-memory root, recovery entry point, active-item directory и archive location остаются repository-defined, когда task memory включён.
 - Periodic controls живут в [periodic-control-matrix.md](periodic-control-matrix.md).
 - Publication safety живёт в [repository-publication-safety.md](repository-publication-safety.md).
 - `externalProvider: auto` использует active named priority profile, но documented repo-local visual heuristics всё ещё могут предпочесть сам Gemini для image, icon, decorative visual и других явно visual lanes.
-- `.gemini/.agents-mode` может содержать `externalPriorityProfile`, `externalPriorityProfiles` и `externalOpinionCounts`; shipped profiles сейчас `balanced` и `gemini-crosscheck`.
+- `.gemini/.agents-mode.yaml` может содержать `externalPriorityProfile`, `externalPriorityProfiles` и `externalOpinionCounts`; shipped profiles сейчас `balanced` и `gemini-crosscheck`.
 - Если Gemini маршрутизирует eligible external work в сам Gemini через explicit self-provider override, сначала нужно уважать `externalModelMode`. При `runtime-default` Gemini остаётся на runtime default model/profile. При `pinned-top-pro` уже действует `externalGeminiFallbackMode`: при `disabled` оставаться на `gemini-3.1-pro`, при `auto` разрешать один retry на `gemini-3-flash`, и не падать молча ниже Gemini 3.
 - Текущая shared lane taxonomy включает `review.performance-architecture`, `worker.systems-performance-implementation`, `worker.ui-structural-modernization` и `worker.ui-surgical-patch-cleanup` вместе с более старыми advisory, review, implementation, long-autonomous, visual и decorative lanes.
 - `externalOpinionCounts` задают same-lane distinct-opinion requirements, а не cap на количество same-provider helper instances; bounded helper batches используют `external-brigade`.

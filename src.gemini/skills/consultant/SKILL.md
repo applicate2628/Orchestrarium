@@ -13,7 +13,8 @@ description: Provide an independent advisory memo for the lead without becoming 
 
 ## Toggle state
 
-Read and normalize `.gemini/.agents-mode` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
+Read and normalize `.gemini/.agents-mode.yaml` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
+If the canonical file is missing, read legacy `.gemini/.agents-mode` as compatibility input only, normalize it forward into `.gemini/.agents-mode.yaml`, and do not recreate the legacy file.
 
 Relevant keys:
 
