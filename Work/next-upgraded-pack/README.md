@@ -17,6 +17,7 @@ It is allowed to change freely while designing and executing the next wave.
 | `Evidence/` | mutable run evidence for the next pack |
 | `Checkpoints/` | mutable interpretation and status layer |
 | `Results-drafts/` | draft result surfaces before archival admission |
+| `Tooling/` | mutable execution helpers for active-cohort runs |
 
 ## Boundary
 
