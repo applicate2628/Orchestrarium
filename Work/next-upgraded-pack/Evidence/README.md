@@ -14,3 +14,5 @@ Current mutable evidence:
 - `t08-local-validation-2026-04-17.md`
 - `t09-t10-local-validation-2026-04-17.md`
 - `t22-local-validation-2026-04-17.md`
+- `t23-local-validation-2026-04-17.md`
+- `t24-local-validation-2026-04-17.md`

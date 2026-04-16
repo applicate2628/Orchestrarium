@@ -26,4 +26,6 @@ Current concrete fixtures:
 - `retrofit-batch-1/T09-root-cause-owner-debug/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/T10-resume-stale-context-rejection/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/T22-build-owner-continuity/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-1/T23-path-recall-continuity/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-1/T24-multi-step-worker-persistence/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/` remains the mutable implementation zone for the rest of the retrofit slice

@@ -1,0 +1,8 @@
+{
+  "name": "t23-path-recall-continuity",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test"
+  }
+}

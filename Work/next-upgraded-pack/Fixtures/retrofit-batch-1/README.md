@@ -37,9 +37,9 @@ This directory is the implementation staging area for the first retrofit batch:
 
 Continue the retrofit fixture trees and verifier scripts inside this directory, starting with:
 
-1. `T23`
-2. `T24`
-3. `T25..T28`
+1. `T25`
+2. `T26`
+3. `T27..T28`
 
 ## Current concrete retrofit fixtures
 
@@ -47,3 +47,5 @@ Continue the retrofit fixture trees and verifier scripts inside this directory, 
 - `T09-root-cause-owner-debug/`
 - `T10-resume-stale-context-rejection/`
 - `T22-build-owner-continuity/`
+- `T23-path-recall-continuity/`
+- `T24-multi-step-worker-persistence/`

@@ -1,0 +1,8 @@
+{
+  "name": "t24-multi-step-worker-persistence",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test"
+  }
+}
