@@ -35,9 +35,12 @@ This directory is the implementation staging area for the first retrofit batch:
 
 ## Next concrete action
 
-Continue the retrofit fixture trees and verifier scripts inside this directory, starting with:
+`T22..T28` are now concrete and locally validated.
 
-1. `T28`
+Next, use this directory as the completed retrofit batch surface while execution moves to:
+
+1. active-cohort runs on the core pack
+2. any bounded fixups discovered during first full execution
 
 ## Current concrete retrofit fixtures
 
@@ -50,3 +53,4 @@ Continue the retrofit fixture trees and verifier scripts inside this directory, 
 - `T25-messy-worker-ownership/`
 - `T26-toolchain-owner-ambiguity/`
 - `T27-late-session-recall/`
+- `T28-reviewer-to-worker-transition/`

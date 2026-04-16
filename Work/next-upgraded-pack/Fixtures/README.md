@@ -31,4 +31,5 @@ Current concrete fixtures:
 - `retrofit-batch-1/T25-messy-worker-ownership/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/T26-toolchain-owner-ambiguity/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/T27-late-session-recall/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-1/T28-reviewer-to-worker-transition/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/` remains the mutable implementation zone for the rest of the retrofit slice
