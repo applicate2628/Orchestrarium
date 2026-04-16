@@ -12,3 +12,18 @@
 
 # Tool and plugin local state
 /.serena/
+
+# Local editor state
+/.vscode/
+/.idea/
+
+# Common local runtime caches
+**/node_modules/
+**/.pytest_cache/
+**/__pycache__/
+**/*.pyc
+**/coverage/
+
+# OS noise
+**/.DS_Store
+**/Thumbs.db

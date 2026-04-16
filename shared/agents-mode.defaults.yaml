@@ -7,17 +7,17 @@ externalProvider: auto  # default shared baseline; allowed here: auto | codex | 
 externalPriorityProfile: balanced  # default shared baseline; allowed: balanced | gemini-crosscheck | <repo-local profile>
 externalPriorityProfiles:  # allowed: profile -> lane -> ordered provider priority used when externalProvider=auto
   balanced:  # default shared routing profile
-    advisory.repo-understanding: [claude, gemini, codex]  # repo/codebase understanding advisory
+    advisory.repo-understanding: [claude, codex, gemini]  # simple admitted advisory rank: claude > codex > gemini
     advisory.design-adr: [claude, codex, gemini]  # design/ADR tradeoff advisory
     review.pre-pr: [claude, codex, gemini]  # pre-PR review and review-side QA
     review.performance-architecture: [claude, codex, gemini]  # performance/architecture review and hot-path cross-check
     worker.default-implementation: [codex, claude, gemini]  # ordinary worker-side implementation
     worker.systems-performance-implementation: [codex, claude, gemini]  # Rust hot path, systems/perf implementation, and media pipeline lane
     worker.long-autonomous: [claude, codex, gemini]  # long-running autonomous worker lane
-    worker.ui-structural-modernization: [gemini, claude, codex]  # broad UI scaffold, layout rewrite, and modernization lane
-    worker.ui-surgical-patch-cleanup: [claude, codex, gemini]  # exact UI patch, cleanup, and partial-edit correction lane
-    worker.visual-icon-decorative: [gemini, claude, codex]  # visual, icon, decorative worker lane
-    review.visual: [gemini, claude, codex]  # visual review and UX-style cross-check
+    worker.ui-structural-modernization: [codex, claude, gemini]  # simple admitted worker rank: codex > claude > gemini
+    worker.ui-surgical-patch-cleanup: [codex, claude, gemini]  # exact UI patch, cleanup, and partial-edit correction lane
+    worker.visual-icon-decorative: [codex, claude, gemini]  # visual/icon worker lane kept on the worker-side rank
+    review.visual: [claude, codex, gemini]  # visual review follows the admitted review/browser rank
   gemini-crosscheck:  # broader Gemini participation in advisory/review routing
     advisory.repo-understanding: [claude, gemini, codex]  # repo/codebase understanding advisory
     advisory.design-adr: [claude, gemini, codex]  # design/ADR tradeoff advisory with Gemini earlier
@@ -25,11 +25,11 @@ externalPriorityProfiles:  # allowed: profile -> lane -> ordered provider priori
     review.performance-architecture: [claude, codex, gemini]  # performance/architecture review keeps Claude first
     worker.default-implementation: [codex, claude, gemini]  # ordinary worker-side implementation
     worker.systems-performance-implementation: [codex, claude, gemini]  # systems/perf implementation keeps Codex first
-    worker.long-autonomous: [claude, gemini, codex]  # long-running autonomous worker lane with Gemini earlier
-    worker.ui-structural-modernization: [gemini, claude, codex]  # broad UI scaffold, layout rewrite, and modernization lane
-    worker.ui-surgical-patch-cleanup: [claude, codex, gemini]  # exact UI patch, cleanup, and partial-edit correction lane
-    worker.visual-icon-decorative: [gemini, claude, codex]  # visual, icon, decorative worker lane
-    review.visual: [gemini, claude, codex]  # visual review and UX-style cross-check
+    worker.long-autonomous: [claude, codex, gemini]  # cross-check profile no longer elevates Gemini above Codex here
+    worker.ui-structural-modernization: [codex, claude, gemini]  # UI worker lanes keep the admitted worker-side rank
+    worker.ui-surgical-patch-cleanup: [codex, claude, gemini]  # exact UI patch/cleanup keeps Codex first
+    worker.visual-icon-decorative: [codex, claude, gemini]  # visual/icon worker lane keeps the worker-side rank
+    review.visual: [claude, codex, gemini]  # visual review no longer elevates Gemini above the admitted browser/review order
 externalOpinionCounts:  # allowed: lane -> minimum distinct external opinions required before closure
   advisory.repo-understanding: 1  # repo-understanding advisory opinions
   advisory.design-adr: 1  # design/ADR advisory opinions
