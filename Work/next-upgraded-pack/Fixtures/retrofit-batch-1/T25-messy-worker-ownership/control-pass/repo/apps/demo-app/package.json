@@ -1,0 +1,8 @@
+{
+  "name": "t25-messy-worker-ownership",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test"
+  }
+}
