@@ -1,0 +1,9 @@
+{
+  "name": "t08-provider-local-note-fix",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test",
+    "verify-owner": "node scripts/verify-owner.js"
+  }
+}

@@ -1,0 +1,6 @@
+[loader] reading T09 root-cause fixture
+[merge] owner file: workspace/src/providers/mergeLaneVerdict.js
+[merge] helper addProviderLocalNotePreview("x4-secret-fallback") appended the note into preferred_slots
+[assert] expected preferred_slots to equal ["claude","codex","gemini"]
+[assert] actual preferred_slots   equals ["claude","codex","gemini","x4-secret-fallback"]
+[result] test failed: provider_local_note leaked into preferred_slots through the owner merge path

@@ -1,0 +1,9 @@
+{
+  "name": "t29-service-app-control",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test",
+    "verify-owner": "node scripts/verify-owner.js"
+  }
+}

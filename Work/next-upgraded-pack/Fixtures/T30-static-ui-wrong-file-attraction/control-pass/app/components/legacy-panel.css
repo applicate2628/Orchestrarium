@@ -1,0 +1,9 @@
+.lane-note-panel {
+  position: relative;
+  inset: auto;
+  margin-top: 8px;
+}
+
+.lane-note-panel[hidden] {
+  visibility: hidden;
+}

@@ -1,0 +1,9 @@
+{
+  "name": "t10-resume-stale-context-rejection",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test",
+    "verify-resume-memo": "node scripts/verify-resume-memo.js"
+  }
+}

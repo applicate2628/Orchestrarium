@@ -1,0 +1,7 @@
+- Open obligations before closeout:
+  - keep lead-owned task memory synchronized with accepted artifacts and execution progress
+  - execute `W1`, `W2`, and `W3` on top targets before fallback expansion
+  - build pairwise comparison verdicts across all `15` target pairs, with priority on `X3↔X4`, `X1↔X2`, and `X5↔X6`
+  - translate pairwise and role-suitability evidence into workflow-lane preferred priority guidance for `externalPriorityProfiles`
+  - establish go or no-go criteria for `X2` and `X6`
+  - keep MCP scoring deferred into its own later track

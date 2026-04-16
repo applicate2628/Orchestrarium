@@ -1,0 +1,24 @@
+# Local workspace state for the benchmark worktree
+/.codex/
+/.claude/
+/.gemini/
+/.serena/
+/.scratch/
+/.plans/
+/.reports/
+/.vscode/
+/.idea/
+
+# Mutable work-area runtime/install byproducts
+/Work/**/node_modules/
+/Work/**/.pytest_cache/
+/Work/**/__pycache__/
+/Work/**/*.pyc
+/Work/**/coverage/
+/Work/**/npm-debug.log*
+/Work/**/yarn-debug.log*
+/Work/**/yarn-error.log*
+
+# OS noise
+**/.DS_Store
+**/Thumbs.db

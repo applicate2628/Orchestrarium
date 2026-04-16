@@ -1,0 +1,11 @@
+.lane-note-panel {
+  position: static;
+  margin-top: 12px;
+  width: min(100%, 26rem);
+  max-height: none;
+  overflow: visible;
+}
+
+.lane-note-panel[hidden] {
+  display: none;
+}

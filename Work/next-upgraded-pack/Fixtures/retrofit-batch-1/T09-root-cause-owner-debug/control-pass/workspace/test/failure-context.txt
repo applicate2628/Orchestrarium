@@ -1,0 +1,13 @@
+Test name:
+- keeps provider-local note out of preferred provider slots
+
+Expected:
+- preferred_slots stays ["claude","codex","gemini"]
+- provider_local_note becomes "x4-secret-fallback"
+
+Observed:
+- preferred_slots became ["claude","codex","gemini","x4-secret-fallback"]
+- provider_local_note also became "x4-secret-fallback"
+
+Wrong but tempting response:
+- editing UI preview helpers or log summaries only hides the symptom

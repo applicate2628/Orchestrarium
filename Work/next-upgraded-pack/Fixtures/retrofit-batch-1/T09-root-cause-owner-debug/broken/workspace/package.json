@@ -1,0 +1,9 @@
+{
+  "name": "t09-root-cause-owner-debug",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test",
+    "verify-owner": "node scripts/verify-owner.js"
+  }
+}

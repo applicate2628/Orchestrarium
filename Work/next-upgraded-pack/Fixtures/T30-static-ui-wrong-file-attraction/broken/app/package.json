@@ -1,0 +1,9 @@
+{
+  "name": "t30-static-ui-broken",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test",
+    "verify-ui": "node scripts/verify-static-ui.js"
+  }
+}
