@@ -10,6 +10,13 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-04-14
+
+### Changed
+
+- Fixed the Claude secret-backed transport wrappers so they no longer depend on a separate `claude-api` executable. Both `.claude/agents/scripts/invoke-claude-api.ps1` and `.sh` now read the nearest Claude `SECRET.md`, export the declared `ANTHROPIC_*` environment, and then launch plain `claude`; this matters because the documented Claude fallback path can now run in environments where `claude` is installed but no extra `claude-api` shim exists.
+- Synced the operator docs and validation surface to the new wrapper contract. The Claude transport reference, install/help text, and skill-pack validator now describe the secret-backed wrapper as the canonical Claude API path, prefer `CLAUDE_BIN` as the explicit binary override, and stop claiming that a direct `claude-api` command must exist on PATH for the repo-local Claude fallback to work.
+
 ## 2026-04-13
 
 ### Changed

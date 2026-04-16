@@ -75,7 +75,7 @@ Canonical provider semantics:
 | `externalModelMode` | shared cross-provider model policy; `runtime-default` keeps provider runtime selection, `pinned-top-pro` pins the strongest documented provider-native model/profile with one named same-provider fallback |
 | `externalGeminiFallbackMode` | valid only when the resolved provider is Gemini and the model policy is pinned; `auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for limit-style Gemini failures |
 | `externalClaudeSecretMode` | valid only when the resolved provider is Claude |
-| `externalClaudeApiMode` | valid only when the resolved provider is Claude; `auto` allows a `claude-api` fallback after the allowed Claude CLI path, `force` starts on `claude-api` immediately |
+| `externalClaudeApiMode` | valid only when the resolved provider is Claude; `auto` allows the installed secret-backed Claude wrapper after the allowed Claude CLI path, `force` starts on that wrapper-backed path immediately |
 
 Gemini does not write `externalProvider: gemini` into the Gemini-line overlay because that would collapse into the current provider.
 - Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.

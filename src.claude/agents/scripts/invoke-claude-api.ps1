@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Run claude-api with ANTHROPIC_* loaded from the nearest Claude SECRET.md.
+    Run plain claude with environment variables loaded from the nearest Claude SECRET.md.
 .DESCRIPTION
     Search order:
       1. $env:CLAUDE_SECRET_FILE
@@ -8,9 +8,7 @@
       3. installed or source-adjacent .claude\SECRET.md
       4. $HOME\.claude\SECRET.md
 #>
-[CmdletBinding()]
 param(
-  [switch]$PrintSecretPath,
   [Parameter(ValueFromRemainingArguments = $true)]
   [string[]]$Arguments
 )
@@ -20,13 +18,16 @@ $ErrorActionPreference = 'Stop'
 function Show-Usage {
   @'
 Usage:
-  powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-claude-api.ps1 [claude-api args...]
+  powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-claude-api.ps1 --% [claude args...]
   powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-claude-api.ps1 -PrintSecretPath
   powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-claude-api.ps1 --print-secret-path
 
 Environment overrides:
   CLAUDE_SECRET_FILE   Explicit SECRET.md path to use
-  CLAUDE_API_BIN       Claude API executable or absolute path to invoke
+  CLAUDE_BIN           Claude executable or absolute path to invoke
+
+Note:
+  Use --% before forwarded Claude CLI flags so PowerShell does not treat them as script parameters.
 '@
 }
 
@@ -106,14 +107,14 @@ function Get-SecretObject {
   return ConvertTo-HashtableRecursive -Value $parsed
 }
 
-function Resolve-ClaudeApiCommand {
+function Resolve-ClaudeCommand {
   param([string]$RequestedName)
 
   $candidates = [System.Collections.Generic.List[string]]::new()
   if (-not [string]::IsNullOrWhiteSpace($RequestedName)) {
     $candidates.Add($RequestedName)
   } else {
-    foreach ($candidate in @('claude-api', 'claude-api.cmd', 'claude-api.exe')) {
+    foreach ($candidate in @('claude', 'claude.exe', 'claude.cmd')) {
       $candidates.Add($candidate)
     }
   }
@@ -132,11 +133,15 @@ $scriptDir = Split-Path -Parent $PSCommandPath
 $packRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptDir '..\..'))
 $candidates = [System.Collections.Generic.List[string]]::new()
 $remainingArguments = [System.Collections.Generic.List[string]]::new()
-$printSecretPathRequested = [bool]$PrintSecretPath
+$printSecretPathRequested = $false
 $showHelp = $false
 
 foreach ($argument in $Arguments) {
   switch ($argument) {
+    '-PrintSecretPath' {
+      $printSecretPathRequested = $true
+      continue
+    }
     '--print-secret-path' {
       $printSecretPathRequested = $true
       continue
@@ -190,21 +195,27 @@ $secretEnv = if ($secretObject.ContainsKey('env') -and $secretObject['env'] -is 
   $secretObject
 }
 
-$required = @('ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN')
+$required = @('ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN')
 $missing = @($required | Where-Object { -not $secretEnv.ContainsKey($_) -or [string]::IsNullOrWhiteSpace([string]$secretEnv[$_]) })
 if ($missing.Count -gt 0) {
   throw "SECRET.md '$secretPath' is missing required Claude transport keys: $($missing -join ', ')"
 }
 
-foreach ($key in $required) {
-  Set-Item -Path "Env:$key" -Value ([string]$secretEnv[$key])
+foreach ($entry in $secretEnv.GetEnumerator()) {
+  $key = [string]$entry.Key
+  if ([string]::IsNullOrWhiteSpace($key)) {
+    continue
+  }
+
+  $value = if ($null -eq $entry.Value) { '' } else { [string]$entry.Value }
+  Set-Item -Path "Env:$key" -Value $value
 }
 
-$claudeApiBin = $env:CLAUDE_API_BIN
-$commandInfo = Resolve-ClaudeApiCommand -RequestedName $claudeApiBin
+$claudeBin = $env:CLAUDE_BIN
+$commandInfo = Resolve-ClaudeCommand -RequestedName $claudeBin
 if (-not $commandInfo) {
-  $claudeApiLabel = if ([string]::IsNullOrWhiteSpace($claudeApiBin)) { 'claude-api' } else { $claudeApiBin }
-  throw "Claude API transport '$claudeApiLabel' is not available. Set CLAUDE_API_BIN to an executable or absolute path if it is not on the active shell PATH."
+  $claudeLabel = if ([string]::IsNullOrWhiteSpace($claudeBin)) { 'claude' } else { $claudeBin }
+  throw "Claude executable '$claudeLabel' is not available. Set CLAUDE_BIN to an executable or absolute path if it is not on the active shell PATH."
 }
 
 & $commandInfo.Source @($remainingArguments.ToArray())

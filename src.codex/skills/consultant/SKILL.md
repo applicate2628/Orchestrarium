@@ -150,17 +150,17 @@ Claude SECRET mode:
 - Do not switch providers, downgrade the Claude profile, or rewrite tracked config during either Claude path.
 
 Claude API transport:
-- If `externalClaudeApiMode: auto`, treat `claude-api` as the named secondary Claude transport after the allowed Claude CLI path is exhausted.
-- If `externalClaudeApiMode: force`, use `claude-api` as the primary Claude transport immediately instead of spending time on a preceding Claude CLI call.
-- `claude-api` must preserve the same provider intent and requested profile/model family; it is a Claude transport change, not a provider switch.
+- If `externalClaudeApiMode: auto`, treat the installed secret-backed Claude wrapper as the named secondary Claude transport after the allowed Claude CLI path is exhausted.
+- If `externalClaudeApiMode: force`, use that wrapper-backed path as the primary Claude transport immediately instead of spending time on a preceding Claude CLI call.
+- The secret-backed Claude path must preserve the same provider intent and requested profile/model family; it is a Claude transport change, not a provider switch.
 
 **Rules:**
 - If `externalClaudeProfile` is present, use it instead of improvising a different Claude model or effort level.
 - If `externalClaudeSecretMode: force` is selected and the local Claude `SECRET.md` cannot supply all three `ANTHROPIC_*` values, treat that as external-provider unavailability instead of silently dropping back to a plain Claude call.
 - If `externalProvider: gemini` is selected, do not silently reroute to Claude; honor `externalModelMode` first, then any allowed Gemini same-provider fallback, and disclose provider failure explicitly if the route still fails.
 - If the requested Claude profile is unavailable because of auth, client support, or non-limit CLI failures, treat that as external-provider unavailability and return an unavailable memo.
-- If the requested Claude profile fails because of plan limits, quota, or reset errors, honor `externalClaudeSecretMode`: `auto` tries the single SECRET-backed one-line retry first, while `force` treats the already-SECRET-backed primary call as the full allowed Claude path. If that allowed Claude CLI path still fails and `externalClaudeApiMode` permits `claude-api`, try `claude-api` before declaring Claude unavailable. Do not silently downgrade to another Claude profile.
-- If `externalClaudeApiMode` requires `claude-api` and that command is unavailable, disclose a dependency/config failure instead of pretending the Claude path was complete.
+- If the requested Claude profile fails because of plan limits, quota, or reset errors, honor `externalClaudeSecretMode`: `auto` tries the single SECRET-backed one-line retry first, while `force` treats the already-SECRET-backed primary call as the full allowed Claude path. If that allowed Claude CLI path still fails and `externalClaudeApiMode` permits the Claude API path, try the installed secret-backed wrapper before declaring Claude unavailable. Do not silently downgrade to another Claude profile.
+- If `externalClaudeApiMode` requires the Claude API path and that wrapper is unavailable, disclose a dependency/config failure instead of pretending the Claude path was complete.
 - If Gemini returns quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style errors, honor `externalGeminiFallbackMode`: `auto` allows one retry on `gemini-3-flash`, while `force` treats the already-flash primary call as the full allowed Gemini path. Do not silently downgrade below Gemini 3 or switch providers.
 - Do not pass multiline prompts as direct command-line arguments — use `stdin` or a file.
 - Do not use TTY when a non-interactive invocation is available.

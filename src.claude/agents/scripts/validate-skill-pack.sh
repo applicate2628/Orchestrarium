@@ -544,20 +544,20 @@ check_contains "$PACK/agents/external-reviewer.md" "direct external launch contr
   "external-reviewer requires direct external launch"
 check_contains "$PACK/agents/scripts/invoke-claude-api.sh" "SECRET.md" \
   "Claude API wrapper reads SECRET.md"
-check_contains "$PACK/agents/scripts/invoke-claude-api.sh" "claude-api" \
-  "Claude API wrapper invokes claude-api"
+check_contains "$PACK/agents/scripts/invoke-claude-api.sh" 'exec "$CLAUDE_CMD"' \
+  "Claude secret-backed wrapper invokes plain claude"
 check_contains "$PACK/agents/scripts/invoke-claude-api.ps1" "SECRET.md" \
   "PowerShell Claude API wrapper reads SECRET.md"
-check_contains "$PACK/agents/scripts/invoke-claude-api.ps1" "claude-api" \
-  "PowerShell Claude API wrapper invokes claude-api"
+check_contains "$PACK/agents/scripts/invoke-claude-api.ps1" '& $commandInfo.Source' \
+  "PowerShell Claude secret-backed wrapper invokes plain claude"
 check_absent "$PACK/agents/scripts/invoke-claude-api.ps1" "-AsHashtable" \
   "PowerShell Claude API wrapper avoids ConvertFrom-Json -AsHashtable"
 check_contains "$PACK/agents/scripts/invoke-claude-api.ps1" "--print-secret-path" \
   "PowerShell Claude API wrapper supports POSIX-style print-secret-path"
-check_contains "$PACK/agents/scripts/invoke-claude-api.sh" "CLAUDE_API_BIN" \
-  "Bash Claude API wrapper documents CLAUDE_API_BIN override"
-check_contains "$PACK/agents/scripts/invoke-claude-api.sh" "claude-api.cmd" \
-  "Bash Claude API wrapper resolves Windows claude-api.cmd"
+check_contains "$PACK/agents/scripts/invoke-claude-api.sh" "CLAUDE_BIN" \
+  "Bash Claude secret-backed wrapper documents CLAUDE_BIN override"
+check_contains "$PACK/agents/scripts/invoke-claude-api.sh" "claude.cmd" \
+  "Bash Claude secret-backed wrapper resolves Windows claude.cmd"
 check_contains "$PACK/agents/contracts/external-dispatch.md" "one instance per helper or provider" \
   "external-dispatch documents same-provider brigade reuse"
 check_contains "$PACK/commands/agents-external-brigade.md" "same-provider helper instances" \

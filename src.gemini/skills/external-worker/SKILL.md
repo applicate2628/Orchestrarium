@@ -28,7 +28,7 @@ Use the shared Gemini dispatch contract in [../lead/external-dispatch.md](../lea
 - Treat `gemini-3-flash` as a bounded mechanical overflow path only. `externalGeminiFallbackMode: force` is for tightly scoped low-reasoning work, not for broad reasoning or cleanup just to save tokens.
   - If Claude is selected, honor `externalClaudeSecretMode`.
 - If Claude is selected, honor `externalClaudeApiMode`.
-- Treat `claude-api` as the approved economical near-full-strength Claude transport. `externalClaudeApiMode: force` is an explicit budget choice as well as a limit fallback.
+- Treat the secret-backed Claude wrapper as the approved economical near-full-strength Claude transport. `externalClaudeApiMode: force` is an explicit budget choice as well as a limit fallback.
   - This adapter is a direct external launch contract. Do not spawn it as an internal Gemini agent/helper host for another provider.
   - `externalProvider: gemini` is allowed only as an explicit self-provider override.
 - Image generation, icon work, decorative visual polish, and other clearly visual worker-side lanes are the shared-matrix cases where Gemini should be preferred when that routing remains honest.

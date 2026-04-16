@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Run claude-api with ANTHROPIC_* loaded from the nearest Claude SECRET.md.
+# Run plain claude with environment variables loaded from the nearest Claude SECRET.md.
 # Usage:
-#   bash .claude/agents/scripts/invoke-claude-api.sh [claude-api args...]
+#   bash .claude/agents/scripts/invoke-claude-api.sh [claude args...]
 #   bash .claude/agents/scripts/invoke-claude-api.sh --print-secret-path
 set -euo pipefail
 
@@ -11,12 +11,12 @@ PACK_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  bash .claude/agents/scripts/invoke-claude-api.sh [claude-api args...]
+  bash .claude/agents/scripts/invoke-claude-api.sh [claude args...]
   bash .claude/agents/scripts/invoke-claude-api.sh --print-secret-path
 
 Environment overrides:
   CLAUDE_SECRET_FILE   Explicit SECRET.md path to use
-  CLAUDE_API_BIN       Claude API executable or absolute path to invoke
+  CLAUDE_BIN           Claude executable or absolute path to invoke
 EOF
 }
 
@@ -29,8 +29,8 @@ add_candidate() {
   SECRET_CANDIDATES+=("$path")
 }
 
-resolve_claude_api_bin() {
-  local requested="${CLAUDE_API_BIN:-}"
+resolve_claude_bin() {
+  local requested="${CLAUDE_BIN:-}"
   local candidate=""
   local resolved=""
 
@@ -46,7 +46,7 @@ resolve_claude_api_bin() {
     return 1
   fi
 
-  for candidate in claude-api claude-api.cmd claude-api.exe; do
+  for candidate in claude claude.cmd claude.exe; do
     if command -v "$candidate" >/dev/null 2>&1; then
       command -v "$candidate"
       return 0
@@ -54,7 +54,7 @@ resolve_claude_api_bin() {
   done
 
   if command -v powershell.exe >/dev/null 2>&1; then
-    resolved="$(powershell.exe -NoProfile -Command "(Get-Command claude-api,claude-api.cmd,claude-api.exe -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)" 2>/dev/null | tr -d '\r')"
+    resolved="$(powershell.exe -NoProfile -Command "(Get-Command claude,claude.exe,claude.cmd -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Source)" 2>/dev/null | tr -d '\r')"
     if [[ -n "$resolved" ]]; then
       printf '%s\n' "$resolved"
       return 0
@@ -62,7 +62,7 @@ resolve_claude_api_bin() {
   fi
 
   if command -v cmd.exe >/dev/null 2>&1; then
-    resolved="$(cmd.exe //c where claude-api 2>NUL | tr -d '\r' | head -n 1)"
+    resolved="$(cmd.exe //c where claude 2>NUL | tr -d '\r' | head -n 1)"
     if [[ -n "$resolved" ]]; then
       printf '%s\n' "$resolved"
       return 0
@@ -133,9 +133,9 @@ else
   exit 1
 fi
 
-if ! CLAUDE_API_CMD="$(resolve_claude_api_bin)"; then
-  CLAUDE_API_LABEL="${CLAUDE_API_BIN:-claude-api}"
-  echo "FAIL: Claude API transport '$CLAUDE_API_LABEL' is not available. Set CLAUDE_API_BIN to an executable or absolute path if it is not on the active shell PATH." >&2
+if ! CLAUDE_CMD="$(resolve_claude_bin)"; then
+  CLAUDE_LABEL="${CLAUDE_BIN:-claude}"
+  echo "FAIL: Claude executable '$CLAUDE_LABEL' is not available. Set CLAUDE_BIN to an executable or absolute path if it is not on the active shell PATH." >&2
   exit 1
 fi
 
@@ -173,7 +173,7 @@ if not isinstance(env, dict):
     print(f"FAIL: {path} must contain a JSON object or an 'env' object", file=sys.stderr)
     sys.exit(1)
 
-required = ["ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"]
+required = ["ANTHROPIC_BASE_URL", "ANTHROPIC_AUTH_TOKEN"]
 missing = [key for key in required if not env.get(key)]
 if missing:
     print(
@@ -184,6 +184,9 @@ if missing:
 
 for key in required:
     print(f"{key}={env[key]}")
+for key, value in env.items():
+    if key not in required:
+        print(f"{key}={value}")
 PY
 )
 
@@ -191,4 +194,4 @@ for assignment in "${SECRET_EXPORTS[@]}"; do
   export "$assignment"
 done
 
-exec "$CLAUDE_API_CMD" "$@"
+exec "$CLAUDE_CMD" "$@"
