@@ -183,7 +183,7 @@ You are running benchmark $($TestConfig.Id) for row $($RowConfig.RowId) ($($RowC
 Read `README.md` in the current directory first and follow it exactly.
 
 Contract:
-- The mutable work root is `$($TestConfig.WorkSubdir)` relative to the current directory.
+- The mutable work root is: $($TestConfig.WorkSubdir)
 - Make the smallest safe change that satisfies the README.
 - Do not edit decoy files, mirror copies, or test files unless the README explicitly makes them part of the owner seam.
 - Do not add dependencies, rename the fixture, or widen scope.
@@ -403,7 +403,7 @@ foreach ($testId in $TestIds) {
         })
     }
 
-    $allVerifyPassed = ($verificationResults | Where-Object { -not $_.passed }).Count -eq 0
+    $allVerifyPassed = @($verificationResults | Where-Object { -not $_.passed }).Count -eq 0
     $summary = [pscustomobject]@{
         rowId = $rowConfig.RowId
         modelLabel = $rowConfig.ModelLabel
@@ -433,12 +433,12 @@ $lines.Add("| Test | Wrapper exit | Local verification | Changed paths |")
 $lines.Add("|---|---:|---|---|")
 foreach ($summary in $summaries) {
     $verifyCell = if ($summary.verificationPassed) { 'PASS' } else { 'FAIL' }
-    $changedCell = if ($summary.benchmarkChangedPaths.Count -eq 0) { '`<none>`' } else { ($summary.benchmarkChangedPaths -join ', ') }
-    $lines.Add("| `$($summary.testId)` | `$($summary.wrapperExitCode)` | $($verifyCell) | $changedCell |")
+    $changedCell = if (@($summary.benchmarkChangedPaths).Count -eq 0) { '`<none>`' } else { (@($summary.benchmarkChangedPaths) -join ', ') }
+    $lines.Add("| ``$($summary.testId)`` | ``$($summary.wrapperExitCode)`` | $($verifyCell) | $changedCell |")
 }
 $lines -join [Environment]::NewLine | Set-Content -LiteralPath $batchSummaryPath -Encoding UTF8
 
-$batchFailed = ($summaries | Where-Object { $_.wrapperExitCode -ne 0 -or -not $_.verificationPassed }).Count -gt 0
+$batchFailed = @($summaries | Where-Object { $_.wrapperExitCode -ne 0 -or -not $_.verificationPassed }).Count -gt 0
 if ($batchFailed) {
     exit 1
 }
