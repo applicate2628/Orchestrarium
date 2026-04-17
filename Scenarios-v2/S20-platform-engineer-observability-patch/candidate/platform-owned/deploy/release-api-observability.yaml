@@ -1,0 +1,16 @@
+{
+  "deployment": {
+    "name": "release-api",
+    "namespace": "staging",
+    "podAnnotations": {
+      "prometheus.io/scrape": "true",
+      "prometheus.io/port": "8080",
+      "prometheus.io/path": "/readyz"
+    },
+    "env": {
+      "OTEL_EXPORTER_OTLP_ENDPOINT": "http://shared-runner.monitoring.svc:4318",
+      "OTEL_SERVICE_NAME": "release-api",
+      "OTEL_RESOURCE_ATTRIBUTES": "service.namespace=control-plane"
+    }
+  }
+}

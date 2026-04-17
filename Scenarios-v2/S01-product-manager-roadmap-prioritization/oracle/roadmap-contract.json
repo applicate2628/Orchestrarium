@@ -1,0 +1,135 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_metadata": {
+    "id": "S01",
+    "surface_id": "R01",
+    "pack_id": "P01",
+    "role_class": "owner",
+    "artifact_type": "roadmap decision package",
+    "modality_family": "roadmap and intake",
+    "allowed_change_surface": [
+      "candidate/roadmap-decision-package.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning",
+    "overlay_flags": []
+  },
+  "expected_candidate_entries": [
+    "README.md",
+    "roadmap-decision-package.md"
+  ],
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-intake-summary.md",
+    "inputs/initiative-cards.md",
+    "inputs/constraint-ledger.md",
+    "inputs/decision-rules.md",
+    "candidate/README.md",
+    "candidate/roadmap-decision-package.md",
+    "oracle/README.md",
+    "oracle/roadmap-contract.json",
+    "oracle/expected-prioritization.md",
+    "oracle/prohibited-patterns.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_roadmap_decision_package.py"
+  ],
+  "required_packet_sections": [
+    "# S01 Roadmap Decision Package",
+    "## Decision frame",
+    "## Intake signals considered",
+    "## Prioritized roadmap",
+    "## Deferred for now",
+    "## Rationale and tradeoffs",
+    "## Delivery and sequencing guardrails",
+    "## Risks and follow-ups",
+    "## Decision status"
+  ],
+  "required_priority_headings": [
+    "### Priority 1 - Wave 4 materialization and gates",
+    "### Priority 2 - Final coverage wave and rerun readiness"
+  ],
+  "required_deferred_headings": [
+    "### Deferred - Immediate publication rerun",
+    "### Deferred - Browser overlay expansion",
+    "### Deferred - Archive and README cleanup"
+  ],
+  "required_exact_lines": [
+    "- Decision owner: `$product-manager`",
+    "- Roadmap horizon: next two roadmap milestones",
+    "- Public preview target: `2026-06-19`",
+    "- Keep wave gates in order: integration -> QA -> architecture-review"
+  ],
+  "required_keyword_groups": [
+    [
+      "public preview",
+      "preview target"
+    ],
+    [
+      "single June rerun window",
+      "one clean rerun window",
+      "rerun window"
+    ],
+    [
+      "wave 4"
+    ],
+    [
+      "final coverage wave"
+    ],
+    [
+      "defer",
+      "deferred"
+    ],
+    [
+      "capacity"
+    ],
+    [
+      "QA"
+    ],
+    [
+      "architecture-review"
+    ]
+  ],
+  "valid_statuses": [
+    "APPROVED FOR ROADMAP",
+    "REQUIRES RE-INTAKE",
+    "BLOCKED BY MISSING CONSTRAINTS"
+  ],
+  "disallowed_markers": [
+    "TODO",
+    "NON-BLOCKING",
+    "## Advisory status",
+    "Current stage:",
+    "work-items/active/",
+    "diff --git",
+    "```python",
+    "```ts",
+    "```tsx",
+    "apply_patch"
+  ]
+}

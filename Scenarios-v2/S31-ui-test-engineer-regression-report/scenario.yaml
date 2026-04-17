@@ -1,0 +1,15 @@
+id: S31
+surface_id: R31
+pack_id: P06
+role_class: review
+artifact_type: UI test report
+modality_family: UI regression verification
+allowed_change_surface:
+  - candidate/ui-regression-report.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "review, QA"
+overlay_flags: []

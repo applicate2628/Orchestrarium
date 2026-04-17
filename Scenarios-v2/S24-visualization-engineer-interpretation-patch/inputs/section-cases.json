@@ -1,0 +1,64 @@
+{
+  "cases": [
+    {
+      "id": "signed-anomaly-encoding",
+      "packet": {
+        "title": "Shelf anomaly section",
+        "anomaly_limit_deg_c": 3.0,
+        "depth_levels_m": [0, 50],
+        "stations": [
+          {
+            "id": "A1",
+            "samples": [
+              {"depth_m": 0, "status": "observed", "anomaly_deg_c": -1.4},
+              {"depth_m": 50, "status": "observed", "anomaly_deg_c": 0.0}
+            ]
+          },
+          {
+            "id": "A2",
+            "samples": [
+              {"depth_m": 0, "status": "observed", "anomaly_deg_c": 1.8},
+              {"depth_m": 50, "status": "observed", "anomaly_deg_c": 2.7}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "depth-axis-descends",
+      "packet": {
+        "title": "Depth orientation probe",
+        "anomaly_limit_deg_c": 2.0,
+        "depth_levels_m": [0, 75, 150],
+        "stations": [
+          {
+            "id": "B1",
+            "samples": [
+              {"depth_m": 0, "status": "observed", "anomaly_deg_c": 0.2},
+              {"depth_m": 75, "status": "observed", "anomaly_deg_c": 0.9},
+              {"depth_m": 150, "status": "observed", "anomaly_deg_c": 1.7}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "missing-samples-remain-gaps",
+      "packet": {
+        "title": "Gap preservation probe",
+        "anomaly_limit_deg_c": 1.5,
+        "depth_levels_m": [0, 40, 80],
+        "stations": [
+          {
+            "id": "C1",
+            "samples": [
+              {"depth_m": 0, "status": "observed", "anomaly_deg_c": -0.4},
+              {"depth_m": 40, "status": "missing", "reason": "sensor-gap"},
+              {"depth_m": 80, "status": "observed", "anomaly_deg_c": 0.9}
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

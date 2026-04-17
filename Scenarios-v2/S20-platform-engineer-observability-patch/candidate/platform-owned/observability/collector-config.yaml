@@ -1,0 +1,52 @@
+{
+  "collector": {
+    "service": "release-api-observability",
+    "receivers": {
+      "prometheus": {
+        "scrape_configs": [
+          {
+            "job_name": "release-api",
+            "metrics_path": "/healthz",
+            "static_configs": [
+              {
+                "targets": [
+                  "release-api:8080"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "processors": {
+      "resource": {
+        "attributes": {
+          "service.name": "release-api",
+          "service.namespace": "control-plane",
+          "deployment.environment": "staging"
+        }
+      },
+      "batch": {
+        "timeout": "5s"
+      }
+    },
+    "exporters": {
+      "otlphttp": {
+        "endpoint": "http://provider-router.monitoring.svc:4318"
+      }
+    },
+    "pipelines": {
+      "metrics": {
+        "receivers": [
+          "prometheus"
+        ],
+        "processors": [
+          "batch"
+        ],
+        "exporters": [
+          "otlphttp"
+        ]
+      }
+    }
+  }
+}

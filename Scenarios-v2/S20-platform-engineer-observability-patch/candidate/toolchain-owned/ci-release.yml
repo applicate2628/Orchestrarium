@@ -1,0 +1,4 @@
+name: release-bundle
+steps:
+  - uses: actions/checkout@v4
+  - run: python candidate/platform-owned/scripts/validate_observability_patch.py

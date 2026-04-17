@@ -1,0 +1,26 @@
+{
+  "required_validation_output": "S20 validation PASS",
+  "expected": {
+    "collector": {
+      "metrics_path": "/metrics",
+      "processors": [
+        "resource",
+        "batch"
+      ],
+      "exporter_endpoint": "http://otel-collector.monitoring.svc:4318",
+      "resource_attributes": {
+        "service.name": "release-api",
+        "service.namespace": "release-platform",
+        "deployment.environment": "staging"
+      }
+    },
+    "deployment": {
+      "prometheus_path": "/metrics",
+      "otlp_endpoint": "http://otel-collector.monitoring.svc:4318",
+      "resource_attributes": {
+        "service.namespace": "release-platform",
+        "deployment.environment": "staging"
+      }
+    }
+  }
+}

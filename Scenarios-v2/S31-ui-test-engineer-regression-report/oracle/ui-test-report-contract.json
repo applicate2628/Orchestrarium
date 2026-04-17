@@ -1,0 +1,138 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "S31",
+    "surface_id": "R31",
+    "pack_id": "P06",
+    "role_class": "review",
+    "artifact_type": "UI test report",
+    "modality_family": "UI regression verification",
+    "allowed_change_surface": [
+      "candidate/ui-regression-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "review, QA",
+    "overlay_flags": []
+  },
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-phase-plan.md",
+    "inputs/keyboard-focus-run.md",
+    "inputs/high-dpi-captures.md",
+    "inputs/theme-variance.md",
+    "inputs/review-boundary.md",
+    "inputs/review-target/README.md",
+    "inputs/review-target/export_snapshot_dialog.py",
+    "inputs/review-target/export_snapshot_dialog.ui",
+    "inputs/review-target/export_snapshot_dialog.qss",
+    "candidate/README.md",
+    "candidate/ui-regression-report.md",
+    "oracle/README.md",
+    "oracle/ui-test-report-contract.json",
+    "oracle/expected-regressions.md",
+    "oracle/severity-anchors.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "oracle/report-boundary.md",
+    "verifiers/README.md",
+    "verifiers/check_ui_test_report.py"
+  ],
+  "editable_report": "candidate/ui-regression-report.md",
+  "required_report_sections": [
+    "## Reviewed Surface",
+    "## Evidence Used",
+    "## Stable Checks",
+    "## Regressions",
+    "## Recheck Scope",
+    "## Residual Risk",
+    "## Gate Decision"
+  ],
+  "expected_gate_decision": "REVISE",
+  "required_stable_checks": [
+    {
+      "name": "forward tab path stays stable",
+      "required_terms": [
+        "inputs/keyboard-focus-run.md",
+        "forward tab order",
+        "presetNameField",
+        "includeNotesCheckbox",
+        "baselineTable",
+        "saveSnapshotButton"
+      ]
+    }
+  ],
+  "required_regressions": [
+    {
+      "name": "modal focus escape",
+      "severity": "blocking",
+      "required_terms": [
+        "inputs/keyboard-focus-run.md",
+        "inputs/review-target/export_snapshot_dialog.py",
+        "Shift+Tab",
+        "cancelButton",
+        "openLogFolderButton",
+        "modal"
+      ]
+    },
+    {
+      "name": "150 percent scaling layout clip",
+      "severity": "major",
+      "required_terms": [
+        "inputs/high-dpi-captures.md",
+        "inputs/review-target/export_snapshot_dialog.ui",
+        "150%",
+        "footerRow",
+        "previewSummaryLabel",
+        "Save snapshot"
+      ]
+    },
+    {
+      "name": "dark theme focus and selection loss",
+      "severity": "major",
+      "required_terms": [
+        "inputs/theme-variance.md",
+        "inputs/review-target/export_snapshot_dialog.qss",
+        "Fusion Dark",
+        "baselineTable",
+        "#30343d",
+        "focus frame"
+      ]
+    }
+  ],
+  "prohibited_report_snippets": [
+    "## Acceptance Criteria Mapping",
+    "## Bug Registry Expectation",
+    "screen reader",
+    "aria-",
+    "information architecture",
+    "persona",
+    "apply_patch",
+    "browser-required",
+    "QA report"
+  ]
+}

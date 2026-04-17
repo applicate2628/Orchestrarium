@@ -1,0 +1,138 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_metadata": {
+    "id": "S13",
+    "surface_id": "R13",
+    "pack_id": "P03",
+    "role_class": "constraint",
+    "artifact_type": "performance constraint package",
+    "modality_family": "budget and bottleneck analysis",
+    "allowed_change_surface": [
+      "candidate/performance-constraint-package.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "scientist, constraints",
+    "overlay_flags": []
+  },
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/system-and-workload-brief.md",
+    "inputs/baseline-timing-and-resource-traces.md",
+    "inputs/bottleneck-probe-notes.md",
+    "inputs/budget-envelope.md",
+    "inputs/tradeoff-boundaries.md",
+    "candidate/README.md",
+    "candidate/performance-constraint-package.md",
+    "oracle/README.md",
+    "oracle/performance-constraint-contract.json",
+    "oracle/expected-package-read.md",
+    "oracle/budget-and-bottleneck-anchors.md",
+    "oracle/tradeoff-boundary-anchors.md",
+    "oracle/prohibited-patterns.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_performance_constraint_package.py"
+  ],
+  "candidate_file": "candidate/performance-constraint-package.md",
+  "required_sections": [
+    "# S13 Performance Constraint Package",
+    "## System and workload summary",
+    "## Budget envelope",
+    "## Bottleneck framing",
+    "## Measurement strategy",
+    "## Tradeoff boundaries",
+    "## Required constraints",
+    "## Open questions and evidence gaps",
+    "## Claims",
+    "## Gate decision"
+  ],
+  "required_budget_ids": [
+    "B1",
+    "B2",
+    "B3",
+    "B4",
+    "B5"
+  ],
+  "required_bottleneck_ids": [
+    "BT1",
+    "BT2",
+    "BT3",
+    "BT4"
+  ],
+  "required_measurement_ids": [
+    "MS1",
+    "MS2",
+    "MS3",
+    "MS4",
+    "MS5"
+  ],
+  "required_tradeoff_ids": [
+    "TB1",
+    "TB2",
+    "TB3",
+    "TB4"
+  ],
+  "required_constraint_ids": [
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5"
+  ],
+  "required_gap_ids": [
+    "G1",
+    "G2",
+    "G3"
+  ],
+  "required_evidence_refs": [
+    "E1",
+    "E2",
+    "E3",
+    "E4",
+    "E5"
+  ],
+  "required_phrases": [
+    "cold run",
+    "warm run",
+    "p95",
+    "peak RSS",
+    "hash manifest",
+    "redaction"
+  ],
+  "minimum_claim_count": 5,
+  "expected_gate_decision": "REVISE",
+  "disallowed_markers": [
+    "TODO",
+    "diff --git",
+    "```python",
+    "```ts",
+    "```tsx",
+    "```javascript",
+    "apply_patch"
+  ]
+}

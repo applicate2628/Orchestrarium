@@ -1,0 +1,17 @@
+QDialog#exportSnapshotDialog {
+    background: #2f343f;
+    color: #f5f7fa;
+}
+
+QTableView#baselineTable::item:selected {
+    background: #30343d;
+    color: #f5f7fa;
+}
+
+QTableView#baselineTable:focus {
+    border: 1px solid #30343d;
+}
+
+QPushButton#saveSnapshotButton:focus {
+    outline: none;
+}

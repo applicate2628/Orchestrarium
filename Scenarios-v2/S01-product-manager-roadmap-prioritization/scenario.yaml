@@ -1,0 +1,15 @@
+id: S01
+surface_id: R01
+pack_id: P01
+role_class: owner
+artifact_type: roadmap decision package
+modality_family: roadmap and intake
+allowed_change_surface:
+  - candidate/roadmap-decision-package.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "owner, advisory, factual, design, planning"
+overlay_flags: []

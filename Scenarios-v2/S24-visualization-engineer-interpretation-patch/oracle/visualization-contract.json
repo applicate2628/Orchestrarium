@@ -1,0 +1,88 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "required_bundle_files": [
+    "candidate/README.md",
+    "candidate/visualization-owned/README.md",
+    "candidate/visualization-owned/src/visualization_owned/__init__.py",
+    "candidate/visualization-owned/src/visualization_owned/anomaly_section.py",
+    "candidate/visualization-owned/tests/test_anomaly_section.py",
+    "candidate/graphics-pipeline/README.md",
+    "candidate/qt-legend-pane/README.md",
+    "candidate/model-view-adapter/README.md",
+    "candidate/scorer-hooks/README.md",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/interpretation-brief.md",
+    "inputs/boundary-notes.md",
+    "inputs/start-state-observations.md",
+    "inputs/section-cases.json",
+    "oracle/README.md",
+    "oracle/visualization-contract.json",
+    "oracle/encoding-oracle.json",
+    "oracle/forbidden-widening.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/run_visualization_checks.py",
+    "verifiers/check_scope.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "S24",
+    "surface_id": "R24",
+    "pack_id": "P05",
+    "role_class": "implementation",
+    "artifact_type": "code patch plus validation",
+    "modality_family": "scientific or data visualization",
+    "allowed_change_surface": [
+      "candidate/visualization-owned/src/visualization_owned/anomaly_section.py",
+      "candidate/visualization-owned/tests/test_anomaly_section.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/visualization-owned/README.md",
+      "candidate/visualization-owned/src/visualization_owned/__init__.py",
+      "candidate/graphics-pipeline/**",
+      "candidate/qt-legend-pane/**",
+      "candidate/model-view-adapter/**",
+      "candidate/scorer-hooks/**"
+    ],
+    "score_profile": "implementation",
+    "overlay_flags": []
+  },
+  "required_candidate_paths": [
+    "candidate/visualization-owned/src/visualization_owned/anomaly_section.py",
+    "candidate/visualization-owned/tests/test_anomaly_section.py"
+  ],
+  "scope_guard_roots": [
+    "candidate/graphics-pipeline",
+    "candidate/qt-legend-pane",
+    "candidate/model-view-adapter",
+    "candidate/scorer-hooks"
+  ],
+  "expected_start_state_failures": [
+    "signed-anomaly-encoding",
+    "depth-axis-descends",
+    "missing-samples-remain-gaps"
+  ]
+}

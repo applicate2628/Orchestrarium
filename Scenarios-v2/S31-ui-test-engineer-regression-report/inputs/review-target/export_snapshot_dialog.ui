@@ -1,0 +1,35 @@
+<ui version="4.0">
+  <class>ExportSnapshotDialog</class>
+  <widget class="QDialog" name="exportSnapshotDialog">
+    <layout class="QVBoxLayout" name="dialogLayout">
+      <item>
+        <widget class="QLabel" name="previewSummaryLabel">
+          <property name="wordWrap">
+            <bool>true</bool>
+          </property>
+          <property name="maximumHeight">
+            <number>56</number>
+          </property>
+        </widget>
+      </item>
+      <item>
+        <widget class="QWidget" name="footerRow">
+          <property name="minimumHeight">
+            <number>52</number>
+          </property>
+          <property name="maximumHeight">
+            <number>52</number>
+          </property>
+          <layout class="QHBoxLayout" name="footerLayout">
+            <item>
+              <widget class="QPushButton" name="saveSnapshotButton"/>
+            </item>
+            <item>
+              <widget class="QPushButton" name="cancelButton"/>
+            </item>
+          </layout>
+        </widget>
+      </item>
+    </layout>
+  </widget>
+</ui>

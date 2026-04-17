@@ -1,0 +1,15 @@
+id: S13
+surface_id: R13
+pack_id: P03
+role_class: constraint
+artifact_type: performance constraint package
+modality_family: budget and bottleneck analysis
+allowed_change_surface:
+  - candidate/performance-constraint-package.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "scientist, constraints"
+overlay_flags: []

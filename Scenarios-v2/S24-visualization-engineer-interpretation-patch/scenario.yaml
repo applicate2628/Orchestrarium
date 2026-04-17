@@ -1,0 +1,22 @@
+id: S24
+surface_id: R24
+pack_id: P05
+role_class: implementation
+artifact_type: code patch plus validation
+modality_family: scientific or data visualization
+allowed_change_surface:
+  - candidate/visualization-owned/src/visualization_owned/anomaly_section.py
+  - candidate/visualization-owned/tests/test_anomaly_section.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/visualization-owned/README.md
+  - candidate/visualization-owned/src/visualization_owned/__init__.py
+  - candidate/graphics-pipeline/**
+  - candidate/qt-legend-pane/**
+  - candidate/model-view-adapter/**
+  - candidate/scorer-hooks/**
+score_profile: implementation
+overlay_flags: []

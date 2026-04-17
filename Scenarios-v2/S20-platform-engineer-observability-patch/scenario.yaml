@@ -1,0 +1,24 @@
+id: S20
+surface_id: R20
+pack_id: P04
+role_class: implementation
+artifact_type: config patch plus validation
+modality_family: CI, deployment, or observability
+allowed_change_surface:
+  - candidate/platform-owned/observability/collector-config.yaml
+  - candidate/platform-owned/deploy/release-api-observability.yaml
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/platform-owned/README.md
+  - candidate/platform-owned/fixtures/**
+  - candidate/platform-owned/scripts/**
+  - candidate/backend-code/**
+  - candidate/toolchain-owned/**
+  - candidate/shared-runners/**
+  - candidate/provider-routing/**
+  - candidate/results-surfaces/**
+score_profile: implementation
+overlay_flags: []

@@ -1,0 +1,201 @@
+{
+  "cases": [
+    {
+      "id": "signed-anomaly-encoding",
+      "expected_spec": {
+        "title": "Shelf anomaly section",
+        "x_axis": {
+          "label": "Station",
+          "stations": ["A1", "A2"]
+        },
+        "y_axis": {
+          "label": "Depth (m)",
+          "direction": "down",
+          "levels": [0, 50]
+        },
+        "color_scale": {
+          "kind": "diverging",
+          "domain": [-3.0, 3.0],
+          "center": 0.0,
+          "units": "degC anomaly"
+        },
+        "legend": {
+          "negative_label": "cooler than baseline",
+          "neutral_label": "near baseline",
+          "positive_label": "warmer than baseline"
+        },
+        "cells": [
+          {
+            "station": "A1",
+            "station_index": 0,
+            "depth_m": 0,
+            "y_index": 0,
+            "anomaly_deg_c": -1.4,
+            "status": "observed",
+            "fill": "cool-2",
+            "label": "-1.4 degC"
+          },
+          {
+            "station": "A1",
+            "station_index": 0,
+            "depth_m": 50,
+            "y_index": 1,
+            "anomaly_deg_c": 0.0,
+            "status": "observed",
+            "fill": "neutral",
+            "label": "0.0 degC"
+          },
+          {
+            "station": "A2",
+            "station_index": 1,
+            "depth_m": 0,
+            "y_index": 0,
+            "anomaly_deg_c": 1.8,
+            "status": "observed",
+            "fill": "warm-2",
+            "label": "+1.8 degC"
+          },
+          {
+            "station": "A2",
+            "station_index": 1,
+            "depth_m": 50,
+            "y_index": 1,
+            "anomaly_deg_c": 2.7,
+            "status": "observed",
+            "fill": "warm-3",
+            "label": "+2.7 degC"
+          }
+        ],
+        "gaps": [],
+        "meta": {
+          "view": "anomaly-section",
+          "baseline": "zero-centered-climatology"
+        }
+      }
+    },
+    {
+      "id": "depth-axis-descends",
+      "expected_spec": {
+        "title": "Depth orientation probe",
+        "x_axis": {
+          "label": "Station",
+          "stations": ["B1"]
+        },
+        "y_axis": {
+          "label": "Depth (m)",
+          "direction": "down",
+          "levels": [0, 75, 150]
+        },
+        "color_scale": {
+          "kind": "diverging",
+          "domain": [-2.0, 2.0],
+          "center": 0.0,
+          "units": "degC anomaly"
+        },
+        "legend": {
+          "negative_label": "cooler than baseline",
+          "neutral_label": "near baseline",
+          "positive_label": "warmer than baseline"
+        },
+        "cells": [
+          {
+            "station": "B1",
+            "station_index": 0,
+            "depth_m": 0,
+            "y_index": 0,
+            "anomaly_deg_c": 0.2,
+            "status": "observed",
+            "fill": "neutral",
+            "label": "+0.2 degC"
+          },
+          {
+            "station": "B1",
+            "station_index": 0,
+            "depth_m": 75,
+            "y_index": 1,
+            "anomaly_deg_c": 0.9,
+            "status": "observed",
+            "fill": "warm-2",
+            "label": "+0.9 degC"
+          },
+          {
+            "station": "B1",
+            "station_index": 0,
+            "depth_m": 150,
+            "y_index": 2,
+            "anomaly_deg_c": 1.7,
+            "status": "observed",
+            "fill": "warm-3",
+            "label": "+1.7 degC"
+          }
+        ],
+        "gaps": [],
+        "meta": {
+          "view": "anomaly-section",
+          "baseline": "zero-centered-climatology"
+        }
+      }
+    },
+    {
+      "id": "missing-samples-remain-gaps",
+      "expected_spec": {
+        "title": "Gap preservation probe",
+        "x_axis": {
+          "label": "Station",
+          "stations": ["C1"]
+        },
+        "y_axis": {
+          "label": "Depth (m)",
+          "direction": "down",
+          "levels": [0, 40, 80]
+        },
+        "color_scale": {
+          "kind": "diverging",
+          "domain": [-1.5, 1.5],
+          "center": 0.0,
+          "units": "degC anomaly"
+        },
+        "legend": {
+          "negative_label": "cooler than baseline",
+          "neutral_label": "near baseline",
+          "positive_label": "warmer than baseline"
+        },
+        "cells": [
+          {
+            "station": "C1",
+            "station_index": 0,
+            "depth_m": 0,
+            "y_index": 0,
+            "anomaly_deg_c": -0.4,
+            "status": "observed",
+            "fill": "cool-1",
+            "label": "-0.4 degC"
+          },
+          {
+            "station": "C1",
+            "station_index": 0,
+            "depth_m": 80,
+            "y_index": 2,
+            "anomaly_deg_c": 0.9,
+            "status": "observed",
+            "fill": "warm-2",
+            "label": "+0.9 degC"
+          }
+        ],
+        "gaps": [
+          {
+            "station": "C1",
+            "station_index": 0,
+            "depth_m": 40,
+            "y_index": 1,
+            "reason": "sensor-gap"
+          }
+        ],
+        "meta": {
+          "view": "anomaly-section",
+          "baseline": "zero-centered-climatology"
+        }
+      }
+    }
+  ]
+}

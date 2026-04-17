@@ -1,0 +1,121 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/owner-map.md",
+    "inputs/observability-contract.md",
+    "inputs/failing-validation.md",
+    "inputs/scope-boundaries.md",
+    "candidate/README.md",
+    "candidate/platform-owned/README.md",
+    "candidate/platform-owned/observability/collector-config.yaml",
+    "candidate/platform-owned/deploy/release-api-observability.yaml",
+    "candidate/platform-owned/fixtures/observability-contract.json",
+    "candidate/platform-owned/scripts/validate_observability_patch.py",
+    "candidate/backend-code/README.md",
+    "candidate/backend-code/telemetry.py",
+    "candidate/toolchain-owned/README.md",
+    "candidate/toolchain-owned/ci-release.yml",
+    "candidate/shared-runners/README.md",
+    "candidate/shared-runners/run_release_observability.ps1",
+    "candidate/provider-routing/README.md",
+    "candidate/provider-routing/routing-profile.yaml",
+    "candidate/results-surfaces/README.md",
+    "candidate/results-surfaces/release-observability-summary.json",
+    "oracle/README.md",
+    "oracle/platform-contract.json",
+    "oracle/expected-patch.md",
+    "oracle/forbidden-widening.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_s20_platform_bundle.py",
+    "verifiers/check_scope.py"
+  ],
+  "expected_scenario": {
+    "id": "S20",
+    "surface_id": "R20",
+    "pack_id": "P04",
+    "role_class": "implementation",
+    "artifact_type": "config patch plus validation",
+    "modality_family": "CI, deployment, or observability",
+    "allowed_change_surface": [
+      "candidate/platform-owned/observability/collector-config.yaml",
+      "candidate/platform-owned/deploy/release-api-observability.yaml"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/platform-owned/README.md",
+      "candidate/platform-owned/fixtures/**",
+      "candidate/platform-owned/scripts/**",
+      "candidate/backend-code/**",
+      "candidate/toolchain-owned/**",
+      "candidate/shared-runners/**",
+      "candidate/provider-routing/**",
+      "candidate/results-surfaces/**"
+    ],
+    "score_profile": "implementation",
+    "overlay_flags": []
+  },
+  "editable_candidate_files": [
+    "candidate/platform-owned/observability/collector-config.yaml",
+    "candidate/platform-owned/deploy/release-api-observability.yaml"
+  ],
+  "scope_guard_roots": [
+    "candidate/backend-code",
+    "candidate/toolchain-owned",
+    "candidate/shared-runners",
+    "candidate/provider-routing",
+    "candidate/results-surfaces"
+  ],
+  "protected_candidate_hashes": {
+    "candidate/README.md": "1ab89e4be25d38b0f5e7d46848606534cdfb975e8b04a3e7b82edc8e904bd568",
+    "candidate/platform-owned/README.md": "6cfc8988a37f3de8ebdd5126754d6080c6fff03e73155175ad6464581d192310",
+    "candidate/platform-owned/fixtures/observability-contract.json": "6ca1b4f77600474403833144fb2b05bf5e15768e98e48e496f0bf8df15346ab2",
+    "candidate/platform-owned/scripts/validate_observability_patch.py": "1cbdac99a2a43fabeed66a66a93ada39d92534d6b0a6c773817e7b6a3fc13c71",
+    "candidate/backend-code/README.md": "02d5402022c89f02a8773320b078e2e39971f66bd237bb2954cc77ac8fca6d52",
+    "candidate/backend-code/telemetry.py": "870b21078882786c4bdb285b0b45414323fb77d16bb6e0da273dab0c9ccf3547",
+    "candidate/toolchain-owned/README.md": "c7fae5f0395d57fa244f09968fa20446f07965875fa40162e9cf606ebf13dfdc",
+    "candidate/toolchain-owned/ci-release.yml": "98d98d9f9781bb35d533ee28405603861dc48ba71b33f906aa312f2fd5d7ceb7",
+    "candidate/shared-runners/README.md": "be0ad27eed2aaefbe0a7bda869f9d01c0ef1dc6759b0d9426c499f24825cd594",
+    "candidate/shared-runners/run_release_observability.ps1": "bd86e6061a337da121ee78b9614fc422334a456f4a75932798ca04d6d046e245",
+    "candidate/provider-routing/README.md": "84f056b7b778afa6aeb7c0bbadf832375aedbec69f00133dd58ed5d89714f23b",
+    "candidate/provider-routing/routing-profile.yaml": "204505f8709a8ecd88e9b82c3467782616af259d601ecd9ee0974a9ced23cd3b",
+    "candidate/results-surfaces/README.md": "10cee74d0f7e140e3d5e8dec62ba41915f156c493908dd052e0117c7304a7515",
+    "candidate/results-surfaces/release-observability-summary.json": "36ce6c16fe21dc6744cd5161025af5f65772a596806841ede1a9e6a9f72e0658"
+  },
+  "validation_script_relative_path": "candidate/platform-owned/scripts/validate_observability_patch.py",
+  "validation_workdir": "candidate/platform-owned",
+  "required_validation_output": "S20 validation PASS",
+  "expected_start_state_failures": [
+    "collector-exporter-endpoint",
+    "collector-metrics-path",
+    "collector-metrics-processors",
+    "collector-resource-attributes",
+    "deployment-otlp-endpoint",
+    "deployment-prometheus-path",
+    "deployment-resource-attributes"
+  ]
+}

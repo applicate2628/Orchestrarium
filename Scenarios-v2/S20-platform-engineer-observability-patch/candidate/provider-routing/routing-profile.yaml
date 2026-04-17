@@ -1,0 +1,5 @@
+default_provider: codex
+allowed_providers:
+  - codex
+  - claude
+  - gemini

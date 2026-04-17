@@ -1,0 +1,148 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_metadata": {
+    "id": "S08",
+    "surface_id": "R08",
+    "pack_id": "P02",
+    "role_class": "design",
+    "artifact_type": "UX structure brief",
+    "modality_family": "interaction design",
+    "allowed_change_surface": [
+      "candidate/ux-structure-brief.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning",
+    "overlay_flags": []
+  },
+  "expected_candidate_entries": [
+    "README.md",
+    "ux-structure-brief.md"
+  ],
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-brief.md",
+    "inputs/current-cross-surface-audit.md",
+    "inputs/state-and-flow-friction.md",
+    "inputs/boundary-rules.md",
+    "candidate/README.md",
+    "candidate/ux-structure-brief.md",
+    "oracle/README.md",
+    "oracle/ux-brief-contract.json",
+    "oracle/expected-ux-direction.md",
+    "oracle/prohibited-patterns.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_ux_structure_brief.py"
+  ],
+  "required_brief_sections": [
+    "# S08 UX Structure Brief",
+    "## UX objective",
+    "## Users and operating context",
+    "## Current cross-surface pain points",
+    "## Design principles",
+    "## Proposed surface architecture",
+    "## Proposed end-to-end flow",
+    "## State model and ownership",
+    "## Key interaction changes",
+    "## Boundaries to implementation and review",
+    "## Open questions and follow-ups",
+    "## Brief status"
+  ],
+  "required_surface_headings": [
+    "### Desktop surface",
+    "### Web surface",
+    "### Shared handoff touchpoints"
+  ],
+  "required_flow_headings": [
+    "### Flow A - Desktop preparation",
+    "### Flow B - Web review and publish",
+    "### Flow C - Return loop for changes or interruptions"
+  ],
+  "required_state_headings": [
+    "### Desktop-owned state",
+    "### Web-owned state",
+    "### Shared handoff state"
+  ],
+  "required_exact_lines": [
+    "- Brief owner: `$ux-designer`",
+    "- Surfaces in scope: Windows desktop workspace plus web review console",
+    "- Artifact boundary: one UX structure brief only"
+  ],
+  "required_keyword_groups": [
+    [
+      "desktop"
+    ],
+    [
+      "web"
+    ],
+    [
+      "state"
+    ],
+    [
+      "flow"
+    ],
+    [
+      "handoff",
+      "handoffs"
+    ],
+    [
+      "changes or interruptions",
+      "change requests",
+      "returned"
+    ],
+    [
+      "implementation stays out of scope",
+      "implementation is out of scope",
+      "no implementation patch"
+    ],
+    [
+      "review findings stay out of scope",
+      "review output stays out of scope",
+      "not a review report"
+    ],
+    [
+      "surface architecture",
+      "information architecture"
+    ]
+  ],
+  "valid_statuses": [
+    "PASS",
+    "REVISE",
+    "BLOCKED"
+  ],
+  "disallowed_markers": [
+    "TODO",
+    "## Findings",
+    "Severity:",
+    "diff --git",
+    "```python",
+    "```ts",
+    "```tsx",
+    "apply_patch"
+  ]
+}
