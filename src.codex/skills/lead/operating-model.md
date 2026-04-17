@@ -63,7 +63,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`.
 - An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The lead must say the route is unsupported and reroute honestly.
 - `externalProvider: auto` is the ordinary default only; explicit user override or documented repo-local heuristics may still choose a different honest provider for the task domain.
-- In this repository, image generation, icon work, decorative visual polish, and other explicitly visual worker or review lanes should prefer Gemini when Gemini is installed and the lane is actually visual.
+- The shipped shared profiles do not hardwire Gemini-first visual routing. If a clearly visual worker or review lane should prefer Gemini, do that through an explicit provider override or a repo-local custom profile.
 - Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support it. If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters over silent serialization or dropped lanes.
 - Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the lead may launch repeated same-provider external helpers concurrently.
 - Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices.

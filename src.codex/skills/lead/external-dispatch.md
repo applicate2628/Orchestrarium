@@ -97,28 +97,28 @@ externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opu
 
 | Profile | Lane | Priority |
 | --- | --- | --- |
-| `balanced` | `advisory.repo-understanding` | `claude > gemini > codex` |
+| `balanced` | `advisory.repo-understanding` | `claude > codex > gemini` |
 |  | `advisory.design-adr` | `claude > codex > gemini` |
 |  | `review.pre-pr` | `claude > codex > gemini` |
 |  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
 |  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 |  | `worker.long-autonomous` | `claude > codex > gemini` |
-|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
-|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
-|  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
-|  | `review.visual` | `gemini > claude > codex` |
+|  | `worker.ui-structural-modernization` | `codex > claude > gemini` |
+|  | `worker.ui-surgical-patch-cleanup` | `codex > claude > gemini` |
+|  | `worker.visual-icon-decorative` | `codex > claude > gemini` |
+|  | `review.visual` | `claude > codex > gemini` |
 | `gemini-crosscheck` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > gemini > codex` |
 |  | `review.pre-pr` | `claude > gemini > codex` |
 |  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
 |  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
-|  | `worker.long-autonomous` | `claude > gemini > codex` |
-|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
-|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
-|  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
-|  | `review.visual` | `gemini > claude > codex` |
+|  | `worker.long-autonomous` | `claude > codex > gemini` |
+|  | `worker.ui-structural-modernization` | `codex > claude > gemini` |
+|  | `worker.ui-surgical-patch-cleanup` | `codex > claude > gemini` |
+|  | `worker.visual-icon-decorative` | `codex > claude > gemini` |
+|  | `review.visual` | `claude > codex > gemini` |
 
 ### `externalOpinionCounts`
 
@@ -161,17 +161,17 @@ Rules:
 
 | Lane | Priority |
 | --- | --- |
-| `advisory.repo-understanding` | `claude > gemini > codex` |
+| `advisory.repo-understanding` | `claude > codex > gemini` |
 | `advisory.design-adr` | `claude > codex > gemini` |
 | `review.pre-pr` | `claude > codex > gemini` |
 | `review.performance-architecture` | `claude > codex > gemini` |
 | `worker.default-implementation` | `codex > claude > gemini` |
 | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 | `worker.long-autonomous` | `claude > codex > gemini` |
-| `worker.ui-structural-modernization` | `gemini > claude > codex` |
-| `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
-| `worker.visual-icon-decorative` | `gemini > claude > codex` |
-| `review.visual` | `gemini > claude > codex` |
+| `worker.ui-structural-modernization` | `codex > claude > gemini` |
+| `worker.ui-surgical-patch-cleanup` | `codex > claude > gemini` |
+| `worker.visual-icon-decorative` | `codex > claude > gemini` |
+| `review.visual` | `claude > codex > gemini` |
 
 Rules:
 

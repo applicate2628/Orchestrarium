@@ -14,7 +14,7 @@
 - `.gemini/.agents-mode.yaml` — routing overlay Orchestrarium, который seedится при установке, а не замена `.gemini/settings.json`.
 - Gemini runtime assets живут в `src.gemini/skills/`, `src.gemini/commands/` и `src.gemini/extension/`.
 - Текущее Gemini source tree остаётся sequential и human-steered; не предполагайте native parallel dispatch.
-- На Gemini-линии `externalProvider: auto` разрешается по lane type через active named priority profile, а не через один жёсткий Gemini-line default. Документированные repo-local visual heuristics всё ещё могут честно предпочесть Gemini для image, icon, decorative и других явно visual lanes. Если Gemini резолвится в Claude, нужно уважать `externalClaudeApiMode` как единственный Claude wrapper-transport toggle (`disabled | auto | force`, default `auto`).
+- На Gemini-линии `externalProvider: auto` разрешается по lane type через active named priority profile, а не через один жёсткий Gemini-line default. Если репозиторий хочет Gemini-first routing для visual lanes, это нужно выражать явным provider override или repo-local custom profile, а не считать, что shipped shared profiles уже делают это по умолчанию. Если Gemini резолвится в Claude, нужно уважать `externalClaudeApiMode` как единственный Claude wrapper-transport toggle (`disabled | auto | force`, default `auto`).
 
 ## Gemini-side repository concretization
 

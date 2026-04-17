@@ -6,9 +6,9 @@ Canonical value-by-value operator reference for pack-local `agents-mode` files. 
 
 | Provider | Canonical file | Provider-specific note |
 |---|---|---|
-| Codex | `.agents/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `codex` is a self-provider override only, never the ordinary `auto` result. Legacy `.agents/.agents-mode` is compatibility input only and must be normalized forward into `.agents/.agents-mode.yaml`. Codex may additionally store the shared `externalClaudeApiMode`, `externalModelMode`, `externalGeminiFallbackMode` when the resolved provider is Gemini, and `externalClaudeProfile` when the resolved provider is Claude. |
-| Claude Code | `.claude/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `claude` is a self-provider override only, never the ordinary `auto` result. Legacy `.claude/.agents-mode` is compatibility input only and must be normalized forward into `.claude/.agents-mode.yaml`. The secret-backed Claude API path remains a Claude wrapper transport, not a separate provider. Claude-line config may also store the shared `externalClaudeApiMode`, `externalModelMode`, and `externalGeminiFallbackMode` when the resolved provider is Gemini. |
-| Gemini CLI | `.gemini/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `gemini` is a self-provider override only, never the ordinary `auto` result. Legacy `.gemini/.agents-mode` is compatibility input only and must be normalized forward into `.gemini/.agents-mode.yaml`. Official Gemini runtime config still lives in `.gemini/settings.json`; Orchestrarium install seeds the overlay, and Gemini `/init` still owns `GEMINI.md`. Gemini-line config may store the shared `externalClaudeApiMode`, `externalModelMode`, and `externalGeminiFallbackMode` for pinned Gemini fallback. |
+| Codex | `.agents/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `codex` is a self-provider override only, never the ordinary `auto` result. Legacy `.agents/.agents-mode` is compatibility input only and must be normalized forward into `.agents/.agents-mode.yaml`. Codex-line config may store the shared `externalModelMode`, `externalGeminiFallbackMode` when Gemini is the resolved provider, `externalClaudeApiMode` when Claude is the resolved provider, and optional `externalClaudeProfile` when Codex dispatches to Claude. |
+| Claude Code | `.claude/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `claude` is a self-provider override only, never the ordinary `auto` result. Legacy `.claude/.agents-mode` is compatibility input only and must be normalized forward into `.claude/.agents-mode.yaml`. The secret-backed Claude API path remains a Claude wrapper transport, not a separate provider. Claude-line config may store the shared `externalModelMode`, `externalGeminiFallbackMode` when Gemini is the resolved provider, and `externalClaudeApiMode` when Claude is the resolved provider. |
+| Gemini CLI | `.gemini/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `gemini` is a self-provider override only, never the ordinary `auto` result. Legacy `.gemini/.agents-mode` is compatibility input only and must be normalized forward into `.gemini/.agents-mode.yaml`. Official Gemini runtime config still lives in `.gemini/settings.json`; Orchestrarium install seeds the overlay, and Gemini `/init` still owns `GEMINI.md`. Gemini-line config may store the shared `externalModelMode`, `externalGeminiFallbackMode` when Gemini is the resolved provider, and `externalClaudeApiMode` when Claude is the resolved provider. |
 
 Canonical operator-overlay output is now `.agents-mode.yaml` on all three lines. Legacy extensionless `.agents-mode` files remain compatibility input only and must not be recreated as the preferred output.
 
@@ -175,28 +175,28 @@ Recommended shipped profiles:
 
 | Profile | Lane | Priority |
 |---|---|---|
-| `balanced` | `advisory.repo-understanding` | `claude > gemini > codex` |
+| `balanced` | `advisory.repo-understanding` | `claude > codex > gemini` |
 |  | `advisory.design-adr` | `claude > codex > gemini` |
 |  | `review.pre-pr` | `claude > codex > gemini` |
 |  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
 |  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 |  | `worker.long-autonomous` | `claude > codex > gemini` |
-|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
-|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
-|  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
-|  | `review.visual` | `gemini > claude > codex` |
+|  | `worker.ui-structural-modernization` | `codex > claude > gemini` |
+|  | `worker.ui-surgical-patch-cleanup` | `codex > claude > gemini` |
+|  | `worker.visual-icon-decorative` | `codex > claude > gemini` |
+|  | `review.visual` | `claude > codex > gemini` |
 | `gemini-crosscheck` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > gemini > codex` |
 |  | `review.pre-pr` | `claude > gemini > codex` |
 |  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
 |  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
-|  | `worker.long-autonomous` | `claude > gemini > codex` |
-|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
-|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
-|  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
-|  | `review.visual` | `gemini > claude > codex` |
+|  | `worker.long-autonomous` | `claude > codex > gemini` |
+|  | `worker.ui-structural-modernization` | `codex > claude > gemini` |
+|  | `worker.ui-surgical-patch-cleanup` | `codex > claude > gemini` |
+|  | `worker.visual-icon-decorative` | `codex > claude > gemini` |
+|  | `review.visual` | `claude > codex > gemini` |
 
 Notes:
 - `balanced` is the implicit default profile and should always be available.
@@ -204,7 +204,7 @@ Notes:
 - Use `worker.systems-performance-implementation` for Rust hot paths, systems/perf-sensitive implementation, and media-pipeline work; keep `worker.default-implementation` for ordinary worker-side implementation.
 - Use `worker.ui-structural-modernization` for broad UI scaffold, layout rewrite, and modernization work; use `worker.ui-surgical-patch-cleanup` for exact patch, cleanup, and partial-edit correction work.
 - Use `review.performance-architecture` for performance/architecture review and hot-path cross-checks instead of overloading `review.pre-pr`.
-- Visual and decorative lanes may honestly prefer Gemini first when the task is image, icon, or decorative visual work.
+- If a repository wants Gemini-first routing for visual lanes, express that through an explicit provider override or a repo-local custom profile rather than assuming the shipped shared profiles already do it.
 
 ### `externalOpinionCounts`
 
@@ -341,9 +341,9 @@ Notes:
 
 | Provider | `consultantMode` | `externalClaudeApiMode` | `delegationMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalGeminiWorkdirMode` | `externalModelMode` | `externalGeminiFallbackMode` | `externalClaudeProfile` |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Codex | requested value | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | `opus-max` unless explicitly overridden |
-| Claude Code | requested value | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | not part of canonical Claude-line config |
-| Gemini CLI | requested value | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | not part of canonical Gemini-line config |
+| Codex | `disabled` | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | `opus-max` unless explicitly overridden |
+| Claude Code | `disabled` | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | not part of canonical Claude-line config |
+| Gemini CLI | `disabled` | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | not part of canonical Gemini-line config |
 
 Structured defaults written alongside the scalar keys:
 
@@ -354,7 +354,7 @@ Structured defaults written alongside the scalar keys:
 | `externalOpinionCounts` | all documented lanes default to `1` unless repo-local policy explicitly raises a lane |
 
 Default-comment guidance:
-- In the canonical exemplar, every shipped scalar default should say `default shared baseline` in the inline comment so the first-write value is visible directly in the file.
+- In the canonical exemplar, every shipped scalar default should include both the `allowed` set and the explicit `default: ...` value in the inline comment so the first-write value is visible directly in the file.
 - `balanced` should stay marked as the default shared routing profile inside the `externalPriorityProfiles` block.
 
 ## Task continuity
@@ -402,5 +402,5 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 | Shared lane matrix | `externalProvider: auto` resolves by lane type through the active priority profile instead of by host pack identity. |
 | Self-provider rule | Ordinary `auto` must not resolve to the same provider as the host line. Self-provider is explicit-override only. This is a repo-local routing rule, not an official provider-wide ban on invoking the same CLI. |
 | Repo-local Gemini cross-check | In this repository, `gemini-crosscheck` is the named profile for bringing Gemini into broader non-visual advisory and review lanes when one independent opinion is not enough. |
-| Repo-local visual heuristic | In this repository, image generation, icon work, and decorative visual polish prefer Gemini as the external provider when that routing remains honest and Gemini is installed. This preference applies to eligible worker-side lanes and visual review or advisory work. |
+| Visual-lane override policy | The shipped shared profiles do not hardwire Gemini-first visual routing. If a repository wants Gemini first for image, icon, or decorative visual lanes, express that through an explicit provider override or a repo-local custom profile. |
 | Unknown keys | Tools that update `agents-mode` should preserve unknown keys and keep the file in expanded multi-key form rather than collapsing it back to a consultant-only shape. |

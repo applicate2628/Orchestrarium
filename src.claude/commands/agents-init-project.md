@@ -106,7 +106,7 @@ Routing conventions (not persisted as keys):
       - `externalClaudeWorkdirMode: neutral`
       - `externalGeminiWorkdirMode: neutral`
       - `externalGeminiFallbackMode: auto`
-    - `externalProvider: auto` resolves by lane type through the active named priority profile rather than a Claude-line default provider. Explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible, and documented repo-local visual heuristics may rank Gemini first for image/icon/decorative visual work when that routing remains honest.
+    - `externalProvider: auto` resolves by lane type through the active named priority profile rather than a Claude-line default provider. Explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible; if a repository wants Gemini-first visual routing, express that through an explicit provider override or a repo-local custom profile.
     - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
 6. **Confirm choices.**
