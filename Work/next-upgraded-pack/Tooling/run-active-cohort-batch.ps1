@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('X1', 'X2')]
+    [ValidateSet('X1', 'X2', 'X3', 'X5', 'X6')]
     [string]$RowId,
 
     [string]$BatchName = 'worker-heavy-first-batch',
@@ -90,7 +90,7 @@ function Get-ChangedRelativePaths {
 
 function Split-ChangedRelativePaths {
     param(
-        [Parameter(Mandatory = $true)]
+        [AllowNull()]
         [string[]]$Paths
     )
 
@@ -98,7 +98,7 @@ function Split-ChangedRelativePaths {
     $benchmarkPaths = [System.Collections.Generic.List[string]]::new()
     $auxiliaryPaths = [System.Collections.Generic.List[string]]::new()
 
-    foreach ($path in $Paths) {
+    foreach ($path in @($Paths)) {
         $isAuxiliary = $false
         foreach ($prefix in $auxiliaryPrefixes) {
             if ($path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -222,6 +222,28 @@ $rowConfigs = @{
         Provider = 'codex'
         WrapperPath = Join-Path $archiveToolingRoot 'codex-isolated-worker.ps1'
         CodexArgs = @('--model', 'gpt-5.3-codex-spark')
+    }
+    X3 = @{
+        RowId = 'X3'
+        ModelLabel = 'opus 4.7max'
+        Provider = 'claude'
+        WrapperPath = Join-Path $archiveToolingRoot 'claude-isolated-worker.ps1'
+        UseSecretWrapper = $false
+        ClaudeArgs = @('--model', 'opus', '--effort', 'max')
+    }
+    X5 = @{
+        RowId = 'X5'
+        ModelLabel = 'gemini3.1pro'
+        Provider = 'gemini'
+        WrapperPath = Join-Path $archiveToolingRoot 'gemini-isolated-worker.ps1'
+        GeminiArgs = @('--model', 'gemini-3-pro-high-explicit')
+    }
+    X6 = @{
+        RowId = 'X6'
+        ModelLabel = 'gemini3.1flash-lite-preview'
+        Provider = 'gemini'
+        WrapperPath = Join-Path $archiveToolingRoot 'gemini-isolated-worker.ps1'
+        GeminiArgs = @('--model', 'gemini-3.1-flash-lite-preview')
     }
 }
 
@@ -377,6 +399,25 @@ foreach ($testId in $TestIds) {
                 -Cwd $runRoot `
                 -CodexArgs $rowConfig.CodexArgs `
                 -SkipGitRepoCheck `
+                -OutputFile $workerOutputPath
+            $wrapperExitCode = $LASTEXITCODE
+        }
+        'claude' {
+            & $rowConfig.WrapperPath `
+                -PromptFile $promptPath `
+                -Cwd $runRoot `
+                -NoMcp `
+                -UseSecretWrapper:$rowConfig.UseSecretWrapper `
+                -ClaudeArgs $rowConfig.ClaudeArgs `
+                -OutputFile $workerOutputPath
+            $wrapperExitCode = $LASTEXITCODE
+        }
+        'gemini' {
+            & $rowConfig.WrapperPath `
+                -PromptFile $promptPath `
+                -WorkspaceDir $runRoot `
+                -NoMcp `
+                -GeminiArgs $rowConfig.GeminiArgs `
                 -OutputFile $workerOutputPath
             $wrapperExitCode = $LASTEXITCODE
         }
