@@ -14,6 +14,7 @@ Canonical Gemini-line schema:
 consultantMode: external  # allowed: external | internal | disabled; default: disabled
 externalClaudeApiMode: auto  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
 delegationMode: manual  # allowed: manual | auto | force; default: manual
+parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
@@ -35,6 +36,7 @@ Rules:
 - `externalPriorityProfile` selects the active profile used for `auto`; missing means `balanced`.
 - `externalPriorityProfiles` stores the ordered provider lists per lane for each named profile; missing `balanced` means the current shared matrix.
 - `externalOpinionCounts` stores how many distinct external opinions to collect per lane; missing entries mean `1`.
+- `parallelMode: manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, and `externalGeminiWorkdirMode` choose whether each provider-backed external run starts in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`.
 - `externalModelMode` is the shared cross-provider model-selection policy. `runtime-default` leaves the resolved provider on its runtime default model/profile. `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows only the bounded same-provider fallback used for usage-limit or quota exhaustion while staying inside that provider's approved version floor and lane policy.
 - `externalGeminiFallbackMode` is valid only when the resolved provider is Gemini and `externalModelMode: pinned-top-pro` is in effect.
@@ -114,9 +116,10 @@ Rules:
 - The assigned internal role remains provenance metadata only.
 - If the selected external CLI is unavailable, the adapter is disabled and the main session reroutes explicitly.
 - External adapters do not silently fall back inside the role.
-- Independent external adapters may run in parallel when their scopes are independent, the selected provider runtimes support concurrent non-interactive execution, and the requested opinion counts still need more than one provider.
+- `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external adapter fan-out is one overlay on top of that rule.
+- Independent external adapters may run in parallel when their scopes are independent, `parallelMode` permits ordinary parallel fan-out, the selected provider runtimes support concurrent non-interactive execution, and the requested opinion counts or admitted scopes still justify more than one helper lane.
 - Do not cap that fan-out at one instance per helper or provider: the same external helper and the same resolved provider may be launched multiple times concurrently when each run owns a different admitted artifact or disjoint slice.
-- `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not forbid brigade-style reuse of the same provider across different independent lanes or slices.
+- `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not replace the general `parallelMode` rule or forbid brigade-style reuse of the same provider across different independent lanes or slices.
 - If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
 - When multiple independent external lanes should launch together, prefer the pack-local `external-brigade` surface so the main Gemini session records one bounded brigade plan instead of scattering ad hoc parallel helper launches.
 - If Gemini is the resolved provider and the model policy is pinned, honor `externalGeminiFallbackMode`.

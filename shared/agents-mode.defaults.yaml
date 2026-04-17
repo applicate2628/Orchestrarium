@@ -1,6 +1,7 @@
 consultantMode: disabled  # allowed: external | internal | disabled; default: disabled
 externalClaudeApiMode: auto  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
 delegationMode: manual  # allowed: manual | auto | force; default: manual
+parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: false  # allowed: false | true; default: false
 preferExternalReviewer: false  # allowed: false | true; default: false

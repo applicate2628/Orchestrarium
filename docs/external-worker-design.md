@@ -76,6 +76,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    consultantMode: external
    externalClaudeApiMode: auto
    delegationMode: manual
+   parallelMode: auto
    mcpMode: auto
    preferExternalWorker: true
    preferExternalReviewer: true
@@ -125,6 +126,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 
    - `consultantMode` — consultant-only mode: `external`, `internal`, `disabled`
    - `delegationMode` — `manual`, `auto`, or `force` team delegation
+   - `parallelMode` — `manual`, `auto`, or `force` general helper parallelism across internal and external lanes
    - `mcpMode` — `auto` vs `force` MCP routing policy
    - `preferExternalWorker` — external-worker as default on eligible worker-side lanes
    - `preferExternalReviewer` — external-reviewer as default on `review` + `QA` stages
@@ -137,7 +139,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - `externalClaudeApiMode` — when the resolved provider is Claude, `disabled` forbids the secret-backed Claude API path, `auto` allows one wrapper-backed retry after the allowed Claude CLI path is exhausted, and `force` uses that wrapper-backed path as the primary Claude transport immediately
    - `externalClaudeProfile` — Codex-line only optional Claude CLI execution profile: `sonnet-high` or `opus-max`
    - Each toggle is independent
-   - Default full shape on first creation: `externalClaudeApiMode: auto`, `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, shipped `externalPriorityProfiles` including `balanced` and `gemini-crosscheck`, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; the shared model policy defaults to `externalModelMode: runtime-default`; Gemini fallback defaults to `externalGeminiFallbackMode: auto`; Codex also writes `externalClaudeProfile: opus-max`
+   - Default full shape on first creation: `externalClaudeApiMode: auto`, `delegationMode: manual`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, shipped `externalPriorityProfiles` including `balanced` and `gemini-crosscheck`, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; the shared model policy defaults to `externalModelMode: runtime-default`; Gemini fallback defaults to `externalGeminiFallbackMode: auto`; Codex also writes `externalClaudeProfile: opus-max`
 
 3. **Dispatch protocol (platform-dependent)**
 
@@ -212,6 +214,7 @@ The orchestrator (lead or main conversation) **prefers** external roles by defau
 
 - `consultantMode: external | internal | disabled` — consultant-only behavior
 - `delegationMode: manual | auto | force` — `manual` keeps explicit-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist
+- `parallelMode: manual | auto | force` — `manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction across internal and external helper lanes
 - `mcpMode: auto | force` — `auto` uses MCP by judgment; `force` treats relevant MCP use as an explicit standing instruction
 - `preferExternalWorker: true` — `$external-worker` on eligible worker-side lanes
 - `preferExternalReviewer: true` — `$external-reviewer` on eligible `review` + `QA` stages
@@ -219,6 +222,7 @@ The orchestrator (lead or main conversation) **prefers** external roles by defau
 - `externalPriorityProfile: balanced | gemini-crosscheck | <custom>` — select which ordered provider map `auto` uses
 - `externalPriorityProfiles` — maintain the per-profile lane matrix; this is where Gemini can be promoted into broader advisory or review roles when one opinion is not enough
 - `externalOpinionCounts` — raise specific lanes above `1` when the orchestrator should collect multiple independent external opinions
+- `parallelMode` is the general fan-out rule for any helper lane; `externalOpinionCounts` and brigade semantics remain the external-specific overlay on top
 - `externalModelMode: runtime-default | pinned-top-pro` — shared cross-provider model policy; `runtime-default` keeps provider runtime selection, while `pinned-top-pro` asks each provider for its strongest documented native path with one named same-provider fallback on retryable provider exhaustion
 - `externalGeminiFallbackMode: disabled | auto | force` — when the resolved provider is Gemini and the model policy is pinned, control whether Gemini stays on `gemini-3.1-pro`, retries once on `gemini-3-flash`, or starts on `gemini-3-flash` immediately
 - `externalClaudeApiMode: disabled | auto | force` — when the resolved provider is Claude, control whether the secret-backed Claude API path is forbidden, used as a secondary Claude transport, or used as the primary Claude transport

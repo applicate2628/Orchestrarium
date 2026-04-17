@@ -31,6 +31,7 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 
 - `consultantMode`
 - `delegationMode`
+- `parallelMode`
 - `mcpMode`
 - `preferExternalWorker`
 - `preferExternalReviewer`
@@ -49,7 +50,7 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 Read and normalize the effective Codex overlay before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode`. Normalize whichever file supplied the effective config in place and do not recreate any legacy file.
 
-When changing `consultantMode`, preserve the other keys, including the profile, opinion-count, workdir, model-policy, Gemini-fallback, transport, and Claude-profile fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `externalClaudeApiMode` to `auto`, `delegationMode` to `manual`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` / `externalGeminiWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, `externalGeminiFallbackMode` to `auto`, and `externalClaudeProfile` to `opus-max` unless the user explicitly requested a different Claude profile override.
+When changing `consultantMode`, preserve the other keys, including the profile, opinion-count, workdir, model-policy, Gemini-fallback, transport, Claude-profile, and general `parallelMode` fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `externalClaudeApiMode` to `auto`, `delegationMode` to `manual`, `parallelMode` to `auto`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` / `externalGeminiWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, `externalGeminiFallbackMode` to `auto`, and `externalClaudeProfile` to `opus-max` unless the user explicitly requested a different Claude profile override.
 Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 
 ## When to invoke

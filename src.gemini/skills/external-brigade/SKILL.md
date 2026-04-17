@@ -45,6 +45,7 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 3. Honor the current external routing fields, including:
    - `consultantMode`
    - `externalClaudeApiMode`
+   - `parallelMode`
    - `externalProvider`
    - `externalPriorityProfile`
    - `externalPriorityProfiles`
@@ -55,11 +56,12 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
    - `externalModelMode`
    - `externalGeminiFallbackMode`
 4. Reject unsupported owner routes before provider resolution.
-5. Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. It does not cap how many same-provider brigade items may run in parallel across different disjoint lanes or slices.
-6. Allow repeated same-provider fan-out when each brigade item owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
-7. If a brigade item itself requires `2+` same-lane opinions, satisfy that distinct-provider requirement first or fail that item closed.
-8. Honor `externalModelMode` before provider-specific fallback knobs. If the resolved provider is Gemini and the model policy is pinned, honor `externalGeminiFallbackMode` inside the Gemini provider path only.
-9. Do not silently downgrade external items to internal execution inside the brigade.
+5. Keep `parallelMode` as the general helper fan-out rule. Brigade launch is an explicit bounded overlay on top of that rule, not a second general concurrency model.
+6. Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. It does not cap how many same-provider brigade items may run in parallel across different disjoint lanes or slices.
+7. Allow repeated same-provider fan-out when each brigade item owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
+8. If a brigade item itself requires `2+` same-lane opinions, satisfy that distinct-provider requirement first or fail that item closed.
+9. Honor `externalModelMode` before provider-specific fallback knobs. If the resolved provider is Gemini and the model policy is pinned, honor `externalGeminiFallbackMode` inside the Gemini provider path only.
+10. Do not silently downgrade external items to internal execution inside the brigade.
 
 When Claude resolves inside the brigade, `externalClaudeApiMode` is the single Claude wrapper-transport toggle: `disabled | auto | force` with `auto` as the default.
 

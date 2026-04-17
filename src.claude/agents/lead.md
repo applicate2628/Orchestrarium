@@ -183,7 +183,8 @@ Do not advance work on optimism or partial acceptance.
 - **Risk owners**: assign explicit owners for risks that can independently fail the result. Keep builder and reviewer roles separate. A role that defines constraints does not approve its own work.
 - **Change isolation**: prefer additive change through approved seams. If a local feature requires cross-cutting edits, route back to `$architect` or `$architecture-reviewer`.
 - **Parallelism**: parallelize read-heavy work (research, triage) when scopes are independent. Write-heavy work needs explicit ownership boundaries.
-- **Parallel external reuse**: same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane.
+- **Parallelism mode**: `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
+- **Parallel external reuse**: same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.
 - **Capability gaps**: if approved work cannot be routed cleanly, escalate one recommendation: use installed specialist, define repo-local specialist, create new skill, or escalate hiring need.
 - **Governance**: when an accepted upstream artifact is materially revised, mark dependent downstream artifacts for re-review. Require human/CI gates when team policy demands them.
 

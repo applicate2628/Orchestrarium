@@ -52,6 +52,7 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 - `consultantMode` continues to govern `$consultant`.
 - `externalClaudeApiMode: disabled | auto | force` is the single Claude wrapper-transport knob. `auto` keeps plain Claude CLI first and then tries the approved wrapper as the named secondary Claude transport, while `force` starts on that wrapper immediately.
 - `delegationMode: manual` keeps delegation explicit-by-request, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
+- `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
@@ -64,9 +65,10 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 - An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The orchestrator must say the route is unsupported and reroute honestly.
 - If the external CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work to another eligible path.
 - The adapter itself must not silently fall back to an internal specialist.
-- Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support concurrent non-interactive execution.
+- `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external fan-out is one overlay on top of that rule.
+- Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support concurrent non-interactive execution.
 - Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the orchestrator may launch repeated same-provider external helpers concurrently.
-- Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices.
+- Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices on top of the general `parallelMode` rule.
 - If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
 
 ## Batch-close consultant check

@@ -14,6 +14,7 @@ Supported canonical keys:
 consultantMode: external  # allowed: external | internal | disabled; default: disabled
 externalClaudeApiMode: auto  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
 delegationMode: manual  # allowed: manual | auto | force; default: manual
+parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
@@ -32,6 +33,7 @@ Semantics:
 
 - `consultantMode` continues to govern `$consultant`.
 - `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
+- `parallelMode: manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` and `preferExternalReviewer` are routing preferences for eligible external adapter substitutions.
 - `externalProvider` uses the shared provider universe `auto | codex | claude | gemini`.
@@ -71,9 +73,10 @@ Semantics:
 - The adapter replaces an eligible internal role at routing time and keeps the replaced role label in provenance.
 - If the external CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work to another eligible path.
 - The adapter itself must not silently fall back to an internal specialist.
-- Multiple external adapters may run in parallel when their scopes are independent and the selected provider runtimes support concurrent non-interactive execution.
+- `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external adapter fan-out is one overlay on top of that rule.
+- Multiple external adapters may run in parallel when their scopes are independent, `parallelMode` permits ordinary parallel fan-out, and the selected provider runtimes support concurrent non-interactive execution.
 - Do not cap that fan-out at one instance per helper or provider: the same external helper and the same resolved provider may be launched multiple times concurrently when each run owns a different admitted artifact or disjoint slice.
-- `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not forbid brigade-style reuse of the same provider across different independent lanes or slices.
+- `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not replace the general `parallelMode` rule or forbid brigade-style reuse of the same provider across different independent lanes or slices.
 - Same-provider external helper reuse is allowed when each run owns a different admitted artifact or disjoint slice.
 - If internal native slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
 - When multiple independent external lanes should launch together, prefer the operator surface `/agents-external-brigade` so the batch has one explicit brigade plan and one aggregated result surface. This is the dedicated brigade surface.
