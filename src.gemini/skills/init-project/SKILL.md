@@ -69,9 +69,12 @@ Routing conventions (not persisted as keys):
 2. **Read current overlay state.**
    - Read `.gemini/.agents-mode.yaml` first.
    - If it is missing, read legacy `.gemini/.agents-mode` as compatibility input only.
+   - If both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode` as compatibility input.
    - If either file exists, normalize it to the current canonical format before presenting or trusting any values.
+   - If any file exists, normalize the effective file to the current canonical format before presenting or trusting any values.
    - Any read of `.gemini/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
-   - If it is missing, start from the canonical defaults below.
+   - Any read of the effective Gemini overlay that drives a decision should normalize that file to the current canonical format before trusting the flags.
+   - If neither local nor global overlay exists, start from the canonical defaults below.
    - Preserve unknown keys when updating an existing file.
 
 3. **Read the canonical operator reference when it is available.**
@@ -137,7 +140,7 @@ Routing conventions (not persisted as keys):
 
    ```yaml
    consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-   externalClaudeApiMode: {value}  # allowed when Claude is selected: disabled | auto | force; default: auto
+   externalClaudeApiMode: {value}  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
    delegationMode: {value}  # allowed: manual | auto | force; default: manual
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
@@ -185,7 +188,7 @@ Routing conventions (not persisted as keys):
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalGeminiWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-   externalGeminiFallbackMode: {value}  # allowed when Gemini is selected: disabled | auto | force; default: auto
+   externalGeminiFallbackMode: {value}  # allowed when Gemini CLI is the resolved provider for this run: disabled | auto | force; default: auto
    ```
 
 8. **Confirm completion.**
@@ -199,5 +202,5 @@ Routing conventions (not persisted as keys):
 - Do not create or rewrite `.gemini/settings.json`.
 - Do not pretend `.gemini/.agents-mode.yaml` is a Gemini-native runtime setting.
 - Do not invent extra keys beyond the canonical overlay schema.
-- Any read that drives a decision should prefer `.gemini/.agents-mode.yaml`, fall back to legacy `.gemini/.agents-mode` only if the canonical file is missing, normalize either input forward into `.gemini/.agents-mode.yaml`, and not recreate the legacy file.
+- Any read that drives a decision should prefer local `.gemini/.agents-mode.yaml`, then local legacy `.gemini/.agents-mode`, then global `~/.gemini/.agents-mode.yaml`, then global legacy `~/.gemini/.agents-mode`; normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 - If the user asks for `externalProvider: gemini` on the Gemini line, accept it only as an explicit self-provider override; ordinary `auto` routing must still avoid same-provider self-bounce.

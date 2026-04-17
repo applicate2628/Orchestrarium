@@ -44,7 +44,7 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 1. Read and normalize `.agents/.agents-mode.yaml` before trusting any flags.
 2. Honor the current external routing fields, including:
    - `consultantMode` (allowed: `external | internal | disabled`; default: `disabled`)
-   - `externalClaudeApiMode` (allowed when Claude is selected: `disabled | auto | force`; default: `auto`)
+   - `externalClaudeApiMode` (allowed when Claude Code is the resolved provider for this run: `disabled | auto | force`; default: `auto`)
    - `externalProvider`
    - `externalPriorityProfile`
    - `externalPriorityProfiles`

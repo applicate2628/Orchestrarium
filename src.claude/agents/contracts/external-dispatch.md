@@ -5,14 +5,14 @@ This contract defines the shared Claude-line routing semantics for the consultan
 ## Shared config file
 
 - Canonical path: `.claude/.agents-mode.yaml`
-- Legacy `.claude/.agents-mode` is compatibility input only. Prefer `.claude/.agents-mode.yaml`, fall back only if it is missing, normalize forward into `.claude/.agents-mode.yaml`, and do not recreate the legacy file.
+- Legacy `.claude/.agents-mode` is compatibility input only. Resolve Claude overlay state in this order: local `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, global `~/.claude/.agents-mode.yaml`, then global legacy `~/.claude/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope, do not recreate any legacy file, and do not synthesize a local override on read alone.
 - Full value-by-value operator semantics live in [../../../docs/agents-mode-reference.md](../../../docs/agents-mode-reference.md).
 
 Supported canonical keys:
 
 ```yaml
 consultantMode: external  # allowed: external | internal | disabled; default: disabled
-externalClaudeApiMode: auto  # allowed when Claude is selected: disabled | auto | force; default: auto
+externalClaudeApiMode: auto  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
 delegationMode: manual  # allowed: manual | auto | force; default: manual
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
@@ -25,7 +25,7 @@ externalCodexWorkdirMode: neutral  # allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project
 externalGeminiWorkdirMode: neutral  # allowed: neutral | project
 externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-externalGeminiFallbackMode: auto  # allowed when Gemini is selected under pinned mode: disabled | auto | force; default: auto
+externalGeminiFallbackMode: auto  # allowed when Gemini CLI is the resolved provider for this run under pinned mode: disabled | auto | force; default: auto
 ```
 
 Semantics:
@@ -46,8 +46,8 @@ Semantics:
 - Treat named fallback paths as alternate limit or budget pools only when runtime observation shows they exhaust independently. That remains repo-local operator policy rather than an official provider guarantee.
 - Claude-line does not use `externalClaudeProfile` as part of the canonical schema and should not write it into `.agents-mode.yaml`.
 - Any tool that updates the file must preserve unknown keys in place and must not rewrite the file back to a consultant-only shape.
-- Any read of `.claude/.agents-mode.yaml` that influences routing must normalize an existing file to the current canonical format before trusting the flags. Comment-free or older-layout files are valid input, not valid output.
-- If `.claude/.agents-mode.yaml` is missing, read legacy `.claude/.agents-mode` as compatibility input only, then normalize either input forward into `.claude/.agents-mode.yaml` before trusting the flags.
+- Any read of the effective Claude overlay that influences routing must normalize that file to the current canonical format before trusting the flags. Comment-free or older-layout files are valid input, not valid output.
+- If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.claude/.agents-mode.yaml` and then global legacy `~/.claude/.agents-mode`. Normalize whichever file supplied the effective config in place before trusting the flags.
 - When writing `.claude/.agents-mode.yaml`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
 - Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 - Explicit user override or documented repo-local task-domain heuristics may still rank Gemini first for image, icon, or decorative visual work over the ordinary `auto` result.

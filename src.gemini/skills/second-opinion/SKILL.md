@@ -11,7 +11,7 @@ Use this skill to invoke `$consultant` or to change Gemini-line consultant mode.
 
 Manage these keys in `.gemini/.agents-mode.yaml`:
 
-- Legacy `.gemini/.agents-mode` is compatibility input only. Prefer `.gemini/.agents-mode.yaml`, fall back only if it is missing, normalize forward into `.gemini/.agents-mode.yaml`, and do not recreate the legacy file.
+- Legacy `.gemini/.agents-mode` is compatibility input only. Resolve Gemini overlay state in this order: local `.gemini/.agents-mode.yaml`, local legacy `.gemini/.agents-mode`, global `~/.gemini/.agents-mode.yaml`, then global legacy `~/.gemini/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope, do not recreate any legacy file, and do not synthesize a local override on read alone.
 
 - `consultantMode`
 - `delegationMode`
@@ -47,7 +47,7 @@ Gemini-line rules:
 - `internal` -> `consultantMode: internal`
 - `disable` -> `consultantMode: disabled`
 - `status` -> read and normalize `.gemini/.agents-mode.yaml`, then print the current resolved values
-- If the canonical file is missing, read legacy `.gemini/.agents-mode` as compatibility input only and normalize it forward into `.gemini/.agents-mode.yaml` before reporting status
+- If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode` before reporting status
 
 Preserve unknown keys on write and normalize comment-free, partial, or older-layout files to the current canonical format on read. Keep one key per line with inline allowed-value comments. Legacy `.gemini/.agents-mode` is compatibility input only and must not be recreated.
 

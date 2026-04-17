@@ -17,7 +17,7 @@ Use the shared Gemini dispatch contract in [../lead/external-dispatch.md](../lea
 ## Gemini-line provider rules
 
 - Read and normalize `.gemini/.agents-mode.yaml` to the current canonical format before trusting its flags.
-- If the canonical file is missing, read legacy `.gemini/.agents-mode` as compatibility input only, normalize it forward into `.gemini/.agents-mode.yaml`, and do not recreate the legacy file.
+- Read and normalize `.gemini/.agents-mode.yaml` to the current canonical format before trusting its flags. If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 - Honor `.gemini/.agents-mode.yaml`, including `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`.
 - `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not cap how many same-provider worker instances may run in parallel for different disjoint lanes or slices.
 - `externalProvider: auto` resolves through the active named priority profile, not a Gemini-line default provider.

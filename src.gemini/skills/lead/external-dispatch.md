@@ -5,14 +5,14 @@ Shared Gemini-line dispatch contract for `$consultant`, `$external-worker`, and 
 ## Canonical config
 
 - Canonical file: `.gemini/.agents-mode.yaml`
-- Legacy `.gemini/.agents-mode` is compatibility input only. Prefer `.gemini/.agents-mode.yaml`, fall back only if it is missing, normalize forward into `.gemini/.agents-mode.yaml`, and do not recreate the legacy file.
+- Legacy `.gemini/.agents-mode` is compatibility input only. Resolve Gemini overlay state in this order: local `.gemini/.agents-mode.yaml`, local legacy `.gemini/.agents-mode`, global `~/.gemini/.agents-mode.yaml`, then global legacy `~/.gemini/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope, do not recreate any legacy file, and do not synthesize a local override on read alone.
 - Full operator tables: [../../../docs/agents-mode-reference.md](../../../docs/agents-mode-reference.md)
 
 Canonical Gemini-line schema:
 
 ```yaml
 consultantMode: external  # allowed: external | internal | disabled; default: disabled
-externalClaudeApiMode: auto  # allowed when Claude is selected: disabled | auto | force; default: auto
+externalClaudeApiMode: auto  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
 delegationMode: manual  # allowed: manual | auto | force; default: manual
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
@@ -25,7 +25,7 @@ externalCodexWorkdirMode: neutral  # allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project
 externalGeminiWorkdirMode: neutral  # allowed: neutral | project
 externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-externalGeminiFallbackMode: auto  # allowed when Gemini is selected: disabled | auto | force; default: auto
+externalGeminiFallbackMode: auto  # allowed when Gemini CLI is the resolved provider for this run: disabled | auto | force; default: auto
 ```
 
 Rules:
@@ -43,7 +43,8 @@ Rules:
 - `externalClaudeProfile` is not part of canonical Gemini-line config.
 - Preserve unknown keys on write.
 - Any read of `.gemini/.agents-mode.yaml` that influences routing must normalize an existing file to the current canonical format before trusting the flags. Comment-free or older-layout files are valid input, not valid output.
-- If `.gemini/.agents-mode.yaml` is missing, read legacy `.gemini/.agents-mode` as compatibility input only, then normalize either input forward into `.gemini/.agents-mode.yaml` before trusting the flags.
+- Any read of `.gemini/.agents-mode.yaml` that influences routing must normalize an existing file to the current canonical format before trusting the flags.
+- If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode`. Normalize whichever file supplied the effective config in place before trusting the flags.
 - Keep one key per line with inline allowed-value comments.
 - Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 - Gemini remains the preferred target for image, icon, decorative visual, and other clearly visual worker or review lanes when the active profile or repo-local heuristic ranks it first, but ordinary `auto` still respects the self-provider filter.
