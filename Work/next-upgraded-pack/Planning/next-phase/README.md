@@ -6,6 +6,9 @@ Status: `PASS`
 
 This directory is the staging area for the next benchmark phase after the current archive checkpoint.
 
+The original upgraded-pack planning set remains preserved here, but the current primary direction is
+now the role-complete redesign from 2026-04-17.
+
 Recommended future documents:
 
 | File | Purpose |
@@ -22,6 +25,9 @@ Recommended future documents:
 | `suspicious-rows-YYYY-MM-DD.md` | rows and overlays that need hardening or reranking pressure |
 | `roadmap-YYYY-MM-DD.md` | full staged roadmap for the upgraded pack |
 | `execution-plan-YYYY-MM-DD.md` | admitted run order and timeboxing |
+| `phase-brief-role-complete-redesign-YYYY-MM-DD.md` | history-free redesign brief for the full role universe |
+| `role-coverage-matrix-YYYY-MM-DD.md` | role inventory and benchmark coverage model |
+| `benchmark-architecture-v2-YYYY-MM-DD.md` | role-first benchmark architecture and pack model |
 
 ## Current baseline assumption
 
@@ -31,11 +37,8 @@ The next phase should treat the current archive checkpoint as the starting surfa
 - explanatory `Checkpoints`
 - append-only `Evidence`
 
-It should also preserve the new naming split:
-
-- `T` for atomic tests
-- `L` for practical lines
-- `O` for overlays
+The role-complete redesign now supersedes the earlier `10` merged line families as the future
+primary result surface.
 
 ## Current seeded documents
 
@@ -51,3 +54,6 @@ It should also preserve the new naming split:
 - `fixture-backlog-2026-04-16.md`
 - `roadmap-2026-04-16.md`
 - `execution-plan-2026-04-16.md`
+- `phase-brief-role-complete-redesign-2026-04-17.md`
+- `role-coverage-matrix-2026-04-17.md`
+- `benchmark-architecture-v2-2026-04-17.md`
