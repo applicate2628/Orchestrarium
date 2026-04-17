@@ -188,7 +188,7 @@ Contract:
 - Do not edit decoy files, mirror copies, or test files unless the README explicitly makes them part of the owner seam.
 - Do not add dependencies, rename the fixture, or widen scope.
 - If the README requires a diagnosis memo or resume memo, write it only in the allowed output seam.
-- Before finishing, run these commands from `$($TestConfig.WorkSubdir)` until they pass:
+- Before finishing, run these commands from $($TestConfig.WorkSubdir) until they pass:
 $verifyLines
 
 Final response format:
@@ -310,6 +310,33 @@ $testConfigs = @{
             @{ DisplayName = 'npm test'; FilePath = 'npm'; Arguments = @('test') },
             @{ DisplayName = 'node scripts/verify-open-worker.js'; FilePath = 'node'; Arguments = @('scripts/verify-open-worker.js') },
             @{ DisplayName = 'node scripts/verify-followup-worker.js'; FilePath = 'node'; Arguments = @('scripts/verify-followup-worker.js') }
+        )
+    }
+    T26 = @{
+        Id = 'T26'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-1\T26-toolchain-owner-ambiguity'
+        WorkSubdir = 'repo/apps/service-app'
+        VerifyCommands = @(
+            @{ DisplayName = 'npm test'; FilePath = 'npm'; Arguments = @('test') },
+            @{ DisplayName = 'node scripts/verify-toolchain-owner.js'; FilePath = 'node'; Arguments = @('scripts/verify-toolchain-owner.js') }
+        )
+    }
+    T27 = @{
+        Id = 'T27'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-1\T27-late-session-recall'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'npm test'; FilePath = 'npm'; Arguments = @('test') },
+            @{ DisplayName = 'node scripts/verify-recall.js'; FilePath = 'node'; Arguments = @('scripts/verify-recall.js') }
+        )
+    }
+    T28 = @{
+        Id = 'T28'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-1\T28-reviewer-to-worker-transition'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'npm test'; FilePath = 'npm'; Arguments = @('test') },
+            @{ DisplayName = 'node scripts/verify-reviewer-worker.js'; FilePath = 'node'; Arguments = @('scripts/verify-reviewer-worker.js') }
         )
     }
     T29 = @{
