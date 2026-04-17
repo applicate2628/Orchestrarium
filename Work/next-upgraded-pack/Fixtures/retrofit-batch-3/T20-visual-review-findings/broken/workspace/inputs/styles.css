@@ -1,0 +1,24 @@
+.hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.priority-badge {
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1f6feb, #58a6ff);
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.confidence-note {
+  color: #9aa0a6;
+  font-size: 12px;
+}
+
+.crown-strip {
+  font-size: 28px;
+}

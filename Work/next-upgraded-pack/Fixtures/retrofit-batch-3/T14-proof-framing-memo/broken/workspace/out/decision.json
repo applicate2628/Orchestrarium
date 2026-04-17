@@ -1,0 +1,5 @@
+{
+  "invariants": ["archive-rewrite-is-allowed"],
+  "forbiddenShortcut": "count-blocked-tests-as-fails",
+  "proofGoal": "justify-rerank-before-execution"
+}

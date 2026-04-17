@@ -1,0 +1,9 @@
+{
+  "name": "t21-worker-path-discovery",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test",
+    "verify-owner": "node scripts/verify-owner.js"
+  }
+}

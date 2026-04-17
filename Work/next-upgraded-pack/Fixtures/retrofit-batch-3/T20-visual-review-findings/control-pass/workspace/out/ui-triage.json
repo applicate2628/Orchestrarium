@@ -1,0 +1,25 @@
+{
+  "findings": [
+    {
+      "id": "global-priority-badge-dominates-layout",
+      "severity": "high",
+      "impact": "lane-reading-is-visually-overpowered"
+    },
+    {
+      "id": "confidence-note-is-underemphasized",
+      "severity": "medium",
+      "impact": "important-caveats-are-easy-to-miss"
+    },
+    {
+      "id": "decorative-crowns-repeat-without-meaning",
+      "severity": "low",
+      "impact": "decorative-noise-outweighs-signal"
+    }
+  ],
+  "nextFixOrder": [
+    "reduce-global-priority-badge-weight",
+    "restore-confidence-note-emphasis",
+    "remove-or-justify-repeated-crowns"
+  ],
+  "doNotUseAsSingleFix": "color-adjustment-only"
+}

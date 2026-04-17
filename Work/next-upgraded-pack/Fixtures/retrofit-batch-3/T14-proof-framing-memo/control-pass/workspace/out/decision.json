@@ -1,0 +1,10 @@
+{
+  "invariants": [
+    "archive-remains-frozen",
+    "scratch-broken-copy-is-only-run-root",
+    "pass-requires-verifier-green",
+    "ranking-change-requires-execution-evidence"
+  ],
+  "forbiddenShortcut": "count-blocked-or-unrun-tests-as-fails",
+  "proofGoal": "justify-full-registry-read-with-explicit-evidence"
+}

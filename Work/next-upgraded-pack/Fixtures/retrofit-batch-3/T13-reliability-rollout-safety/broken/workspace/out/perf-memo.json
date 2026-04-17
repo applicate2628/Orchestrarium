@@ -1,0 +1,6 @@
+{
+  "failureModes": ["archive-label-drift"],
+  "mitigations": ["rerank-immediately", "skip-evidence-update"],
+  "publishGate": "results-first",
+  "blockerPolicy": "runtime-stall-equals-fail"
+}

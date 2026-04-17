@@ -1,0 +1,8 @@
+{
+  "archiveSurface": "mutable-working-copy",
+  "mutableSurface": "archive-baseline",
+  "archiveX3Label": "opus 4.7max",
+  "mutableX3Label": "opus 4.6max",
+  "rewriteArchive": true,
+  "currentDefaultSource": "archive-short-results-x1-x5-2026-04-16"
+}

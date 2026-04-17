@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>T30 Static UI Wrong File Attraction</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="benchmark-shell">
+      <section class="page-summary">
+        <h1>Static UI triage fixture</h1>
+        <p>Inline note panels must open below their row and disappear from layout when collapsed.</p>
+      </section>
+
+      <section class="lane-toolbar" aria-label="Lane filters">
+        <button class="chip is-active" type="button">UI static</button>
+        <button class="chip" type="button">Worker patch</button>
+      </section>
+
+      <table class="lane-matrix">
+        <thead>
+          <tr>
+            <th>Lane</th>
+            <th>Ranking</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="lane-row lane-row--expanded">
+            <th scope="row">Static UI review</th>
+            <td class="lane-order">1. opus 4.7max</td>
+            <td class="lane-note-cell">
+              <button class="lane-note-toggle" type="button" aria-expanded="true" aria-controls="lane-note-a">
+                Why this row is expanded
+              </button>
+              <aside class="lane-note-panel" id="lane-note-a" hidden>
+                <h2>Observed issue</h2>
+                <p>The note should flow under the expanded row instead of covering the caption and first result.</p>
+              </aside>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </main>
+  </body>
+</html>

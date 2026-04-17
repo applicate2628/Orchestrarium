@@ -1,0 +1,11 @@
+{
+  "findings": [
+    {
+      "id": "change-blue-gradient-only",
+      "severity": "medium",
+      "impact": "the-badge-still-dominates-the-layout"
+    }
+  ],
+  "nextFixOrder": ["change-blue-gradient-only"],
+  "doNotUseAsSingleFix": "color-adjustment-only"
+}

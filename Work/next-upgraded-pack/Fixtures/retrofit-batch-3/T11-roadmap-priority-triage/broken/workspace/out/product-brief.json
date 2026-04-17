@@ -1,0 +1,8 @@
+{
+  "nextMilestone": "gemini-runtime-hardening-first",
+  "topPriority": ["archive-admission", "x5-rerun", "x6-rerun"],
+  "deferSamePass": [],
+  "goalType": "unbounded-research-reopen",
+  "requiresNewRankingSurface": false,
+  "openQuestions": ["whether-to-finish-the-remaining-extended-tests"]
+}

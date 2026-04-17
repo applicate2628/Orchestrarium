@@ -1,0 +1,7 @@
+{
+  "trustBoundary": "archive-vs-mutable-workspace",
+  "keepScratchIgnored": true,
+  "redactProviderOutputs": true,
+  "providerStallClassification": "operational-blocker",
+  "prePublishCheck": "leak-check-staged-changes"
+}

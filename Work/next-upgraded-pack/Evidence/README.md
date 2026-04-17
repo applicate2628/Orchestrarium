@@ -20,3 +20,4 @@ Current mutable evidence:
 - `t26-local-validation-2026-04-17.md`
 - `t27-local-validation-2026-04-17.md`
 - `t28-local-validation-2026-04-17.md`
+- `retrofit-batch-3-local-validation-2026-04-17.md`

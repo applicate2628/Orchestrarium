@@ -260,9 +260,25 @@ $testConfigs = @{
             @{ DisplayName = 'node scripts/verify-facts.js'; FilePath = 'node'; Arguments = @('scripts/verify-facts.js') }
         )
     }
+    T02 = @{
+        Id = 'T02'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-3\T02-source-of-truth-reconciliation'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'node scripts/verify-facts.js'; FilePath = 'node'; Arguments = @('scripts/verify-facts.js') }
+        )
+    }
     T03 = @{
         Id = 'T03'
         FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-2\T03-adr-decision-structure'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'node scripts/verify-decision.js'; FilePath = 'node'; Arguments = @('scripts/verify-decision.js') }
+        )
+    }
+    T04 = @{
+        Id = 'T04'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-3\T04-phased-planning-structure'
         WorkSubdir = 'workspace'
         VerifyCommands = @(
             @{ DisplayName = 'node scripts/verify-decision.js'; FilePath = 'node'; Arguments = @('scripts/verify-decision.js') }
@@ -274,6 +290,14 @@ $testConfigs = @{
         WorkSubdir = 'workspace'
         VerifyCommands = @(
             @{ DisplayName = 'node scripts/verify-review-findings.js'; FilePath = 'node'; Arguments = @('scripts/verify-review-findings.js') }
+        )
+    }
+    T06 = @{
+        Id = 'T06'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-3\T06-security-reasoning-memo'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'node scripts/verify-perf-memo.js'; FilePath = 'node'; Arguments = @('scripts/verify-perf-memo.js') }
         )
     }
     T07 = @{
@@ -311,6 +335,14 @@ $testConfigs = @{
             @{ DisplayName = 'node scripts/verify-resume-memo.js'; FilePath = 'node'; Arguments = @('scripts/verify-resume-memo.js') }
         )
     }
+    T11 = @{
+        Id = 'T11'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-3\T11-roadmap-priority-triage'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'node scripts/verify-product-brief.js'; FilePath = 'node'; Arguments = @('scripts/verify-product-brief.js') }
+        )
+    }
     T12 = @{
         Id = 'T12'
         FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-2\T12-product-brief-grounding'
@@ -319,12 +351,46 @@ $testConfigs = @{
             @{ DisplayName = 'node scripts/verify-product-brief.js'; FilePath = 'node'; Arguments = @('scripts/verify-product-brief.js') }
         )
     }
+    T13 = @{
+        Id = 'T13'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-3\T13-reliability-rollout-safety'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'node scripts/verify-perf-memo.js'; FilePath = 'node'; Arguments = @('scripts/verify-perf-memo.js') }
+        )
+    }
+    T14 = @{
+        Id = 'T14'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-3\T14-proof-framing-memo'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'node scripts/verify-decision.js'; FilePath = 'node'; Arguments = @('scripts/verify-decision.js') }
+        )
+    }
     T15 = @{
         Id = 'T15'
         FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-2\T15-build-break-diagnosis'
         WorkSubdir = 'workspace'
         VerifyCommands = @(
             @{ DisplayName = 'node scripts/verify-build-diagnosis.js'; FilePath = 'node'; Arguments = @('scripts/verify-build-diagnosis.js') }
+        )
+    }
+    T16 = @{
+        Id = 'T16'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-3\T16-backend-owner-implementation'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'node --test'; FilePath = 'node'; Arguments = @('--test') },
+            @{ DisplayName = 'node scripts/verify-owner.js'; FilePath = 'node'; Arguments = @('scripts/verify-owner.js') }
+        )
+    }
+    T17 = @{
+        Id = 'T17'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-3\T17-static-ui-structure-patch'
+        WorkSubdir = 'app'
+        VerifyCommands = @(
+            @{ DisplayName = 'npm test'; FilePath = 'npm'; Arguments = @('test') },
+            @{ DisplayName = 'node scripts/verify-static-ui.js'; FilePath = 'node'; Arguments = @('scripts/verify-static-ui.js') }
         )
     }
     T18 = @{
@@ -341,6 +407,14 @@ $testConfigs = @{
         WorkSubdir = 'workspace'
         VerifyCommands = @(
             @{ DisplayName = 'node scripts/verify-a11y-review.js'; FilePath = 'node'; Arguments = @('scripts/verify-a11y-review.js') }
+        )
+    }
+    T20 = @{
+        Id = 'T20'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\retrofit-batch-3\T20-visual-review-findings'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'node scripts/verify-ui-triage.js'; FilePath = 'node'; Arguments = @('scripts/verify-ui-triage.js') }
         )
     }
     T21 = @{

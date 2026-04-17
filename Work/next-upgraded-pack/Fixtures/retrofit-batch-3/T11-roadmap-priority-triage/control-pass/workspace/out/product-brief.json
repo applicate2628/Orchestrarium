@@ -1,0 +1,12 @@
+{
+  "nextMilestone": "complete-full-registry-execution-for-x1-x3",
+  "topPriority": [
+    "build-remaining-extended-fixtures",
+    "run-extended-batch-for-x1-x3",
+    "refresh-full-registry-results"
+  ],
+  "deferSamePass": ["gemini-runtime-hardening", "archive-admission"],
+  "goalType": "bounded-execution-closeout",
+  "requiresNewRankingSurface": true,
+  "openQuestions": []
+}

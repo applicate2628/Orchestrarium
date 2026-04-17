@@ -1,0 +1,14 @@
+{
+  "failureModes": [
+    "provider-runtime-stall",
+    "owner-seam-scope-widening",
+    "result-surface-refresh-without-evidence"
+  ],
+  "mitigations": [
+    "treat-runtime-stall-as-blocked",
+    "enforce-owner-seam-verifiers",
+    "commit-after-completed-pass"
+  ],
+  "publishGate": "update-evidence-before-results",
+  "blockerPolicy": "runtime-stall-is-blocked-not-fail"
+}

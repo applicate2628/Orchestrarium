@@ -1,0 +1,7 @@
+{
+  "trustBoundary": "provider-quota-window",
+  "keepScratchIgnored": false,
+  "redactProviderOutputs": false,
+  "providerStallClassification": "security-incident",
+  "prePublishCheck": "none"
+}

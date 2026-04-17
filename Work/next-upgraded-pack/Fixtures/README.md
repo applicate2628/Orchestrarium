@@ -16,6 +16,7 @@ Current active scaffolds:
 
 - `retrofit-batch-1/`
 - `retrofit-batch-2/`
+- `retrofit-batch-3/`
 - `T29-toolchain-false-root-ambiguity/`
 - `T30-static-ui-wrong-file-attraction/`
 
@@ -45,5 +46,15 @@ Current concrete fixtures:
 - `retrofit-batch-2/T18-static-ui-evidence-triage/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-2/T19-accessibility-ux-findings-review/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-2/T21-worker-path-discovery/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-3/T02-source-of-truth-reconciliation/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-3/T04-phased-planning-structure/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-3/T06-security-reasoning-memo/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-3/T11-roadmap-priority-triage/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-3/T13-reliability-rollout-safety/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-3/T14-proof-framing-memo/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-3/T16-backend-owner-implementation/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-3/T17-static-ui-structure-patch/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-3/T20-visual-review-findings/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/` remains the mutable implementation zone for the rest of the retrofit slice
 - `retrofit-batch-2/` backfills the remaining steady-state core anchors needed for full `X1..X3` coverage
+- `retrofit-batch-3/` backfills the remaining extended runnable set so the full `T01..T33` registry is executable

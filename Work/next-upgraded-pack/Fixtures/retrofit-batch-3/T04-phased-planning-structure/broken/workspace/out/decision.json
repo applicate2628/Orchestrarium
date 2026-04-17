@@ -1,0 +1,7 @@
+{
+  "phaseOrder": ["run-x1-x2-x3", "refresh-results", "build-fixtures", "local-validation"],
+  "activeRows": ["X1", "X2", "X3", "X5"],
+  "samePassDefers": [],
+  "archiveMutation": true,
+  "rerankBeforeEvidence": true
+}
