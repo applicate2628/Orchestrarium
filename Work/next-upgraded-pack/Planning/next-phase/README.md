@@ -28,6 +28,9 @@ Recommended future documents:
 | `phase-brief-role-complete-redesign-YYYY-MM-DD.md` | history-free redesign brief for the full role universe |
 | `role-coverage-matrix-YYYY-MM-DD.md` | role inventory and benchmark coverage model |
 | `benchmark-architecture-v2-YYYY-MM-DD.md` | role-first benchmark architecture and pack model |
+| `scenario-backlog-v1-YYYY-MM-DD.md` | milestone-1 seed scenarios for every role and adapter surface |
+| `scoring-and-results-model-YYYY-MM-DD.md` | weighted scorecard, winner logic, and publication model |
+| `pack-specs-v1-YYYY-MM-DD.md` | pack contract, bundle schema, and worked example bundles |
 
 ## Current baseline assumption
 
@@ -39,6 +42,12 @@ The next phase should treat the current archive checkpoint as the starting surfa
 
 The role-complete redesign now supersedes the earlier `10` merged line families as the future
 primary result surface.
+
+The next source-of-truth layer for that redesign is now:
+
+- `scenario-backlog-v1-2026-04-17.md`
+- `scoring-and-results-model-2026-04-17.md`
+- `pack-specs-v1-2026-04-17.md`
 
 ## Current seeded documents
 
@@ -57,3 +66,6 @@ primary result surface.
 - `phase-brief-role-complete-redesign-2026-04-17.md`
 - `role-coverage-matrix-2026-04-17.md`
 - `benchmark-architecture-v2-2026-04-17.md`
+- `scenario-backlog-v1-2026-04-17.md`
+- `scoring-and-results-model-2026-04-17.md`
+- `pack-specs-v1-2026-04-17.md`
