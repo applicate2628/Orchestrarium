@@ -79,11 +79,10 @@ the active cohort.
 These results are sufficient to say that the **current runnable mutable pack** is complete for
 `X1..X3`.
 
-They are not yet sufficient to claim a full next-pack ranking across every intended steady-state
-core anchor, because `T01`, `T03`, `T05`, `T07`, `T12`, `T15`, `T18`, `T19`, and `T21` are still
-outside the current runnable execution surface.
+This surface should now be read as a supporting worker-heavy slice alongside the wider
+`x1-x3-full-registry-results-2026-04-17.md` surface.
 
 ## Next step
 
-Decide whether to freeze this worker-heavy runnable checkpoint as the current admitted mutable
-surface, or backfill the remaining non-runnable core anchors before the next ranking refresh.
+Use this file as the worker-heavy supporting read, and use
+`x1-x3-full-registry-results-2026-04-17.md` when a wider execution-backed result surface is needed.

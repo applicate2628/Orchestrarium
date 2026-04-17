@@ -76,3 +76,7 @@ It is sufficient to say:
 - `X1` remains the cleanest admitted row
 - `X3` is the nearest full-core challenger to `X1`
 - `X2` remains fully green but stays below `X1` and `X3` because of the admitted `T29` toolchain-discipline caveat
+
+The wider `T01..T33` execution-backed read now also exists in:
+
+- `x1-x3-full-registry-results-2026-04-17.md`
