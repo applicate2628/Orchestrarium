@@ -395,7 +395,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CLAUDE_REF_DIR/subagent-operating-model.md" 120 \
     "Claude addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "3e0044a0f96a4e4f609543b790617aa940cc30c1a9a725e5499a86c29afc0f4b" \
+    "e9a5579b13061a8514fb60b47031bea2eedddd0117833b0be94162416f06727c" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "380fb2bf3279607743f03b35f78391a0a9a2d0e9b4bc1605a3617e6b220f81fd" \

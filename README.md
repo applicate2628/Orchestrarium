@@ -78,6 +78,7 @@ Important: operator preferences now live only in pack-local `agents-mode` files.
 - Claude Code reads `.claude/.agents-mode.yaml`.
 - Gemini reads `.gemini/.agents-mode.yaml`.
 - Legacy extensionless `.agents-mode` files remain compatibility input only. Reads should prefer `.agents-mode.yaml`, fall back to the sibling extensionless file only if the canonical file is missing, then normalize forward into `.agents-mode.yaml` without recreating the legacy path.
+- Reinstall is expected to do the same maintenance work for installed overlays: if the shipped schema or defaults changed, the installer must rewrite an existing `.agents-mode.yaml` to the current canonical form instead of preserving stale pack-owned structure verbatim.
 - `consultantMode` controls `$consultant`.
 - `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` lets the agent decide when MCP is appropriate; `force` means the config itself is an explicit instruction to use relevant available MCP tools instead of treating MCP usage as optional.

@@ -497,6 +497,18 @@ remove_dangling_symlink() {
   fi
 }
 
+resolve_python_command() {
+  if command -v python >/dev/null 2>&1; then
+    printf '%s' "python"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "python3"
+    return 0
+  fi
+  return 1
+}
+
 ensure_default_file() {
   local src="$1" dst="$2" label="$3"
 
@@ -512,6 +524,42 @@ ensure_default_file() {
     echo "    [dry-run] would create $dst"
   else
     cp "$src" "$dst"
+  fi
+}
+
+sync_agents_mode_file() {
+  local template="$1" dst="$2" label="$3"
+  local normalizer="$REPO_DIR/scripts/normalize-agents-mode.py"
+  local python_cmd=""
+
+  remove_dangling_symlink "$dst" "$label"
+  python_cmd="$(resolve_python_command || true)"
+
+  if [[ -n "$python_cmd" && -f "$normalizer" ]]; then
+    if [[ -f "$dst" ]]; then
+      echo "  Normalizing existing $label to current canonical format..."
+    else
+      echo "  Installing canonical $label..."
+    fi
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "    [dry-run] would normalize $dst"
+    else
+      "$python_cmd" "$normalizer" --template "$template" --target "$dst" --provider shared
+    fi
+    return
+  fi
+
+  if [[ -f "$dst" ]]; then
+    echo "FAIL: python or python3 is required to normalize existing $label at $dst" >&2
+    exit 1
+  fi
+
+  echo "  Installing canonical $label..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp "$template" "$dst"
   fi
 }
 
@@ -770,7 +818,7 @@ if [ "$MODE" != "global" ]; then
 fi
 
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
-ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""

@@ -140,6 +140,16 @@ function Migrate-LegacyAgentsModeFile {
     }
 }
 
+function Get-PythonCommand {
+    foreach ($name in @("python", "python3")) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
+        }
+    }
+    return $null
+}
+
 function Install-Tree {
     param([string]$SourceDir, [string]$TargetDir, [string]$Label)
 
@@ -404,6 +414,46 @@ function Install-PackFile {
     }
 }
 
+function Sync-AgentsModeFile {
+    param(
+        [string]$TemplateFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    $normalizer = Join-Path $RepoDir "scripts\normalize-agents-mode.py"
+    $python = Get-PythonCommand
+
+    if ($null -ne $python -and (Test-Path -LiteralPath $normalizer)) {
+        if (Test-Path -LiteralPath $TargetFile) {
+            Write-Host "  Normalizing existing $Label to current canonical format..."
+        } else {
+            Write-Host "  Installing canonical $Label..."
+        }
+
+        if (-not $DryRun) {
+            & $python $normalizer --template $TemplateFile --target $TargetFile --provider shared
+            if ($LASTEXITCODE -ne 0) {
+                throw "agents-mode normalization failed for $TargetFile"
+            }
+        } else {
+            Write-Host "    [dry-run] would normalize $TargetFile"
+        }
+        return
+    }
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        throw "Python is required to normalize existing $Label at $TargetFile."
+    }
+
+    Write-Host "  Installing canonical $Label..."
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $TemplateFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
 function Install-PackContent {
     param(
         [string]$Content,
@@ -620,7 +670,7 @@ Install-PackFile -SourceFile $ExtensionReadmeSource -TargetFile $ExtensionReadme
 Install-PackContent -Content ((Get-Content -LiteralPath (Join-Path $Source "GEMINI.md") -Raw) -replace '@\./AGENTS\.shared\.md', '@./AGENTS.md') -TargetFile $ExtensionGeminiTarget -Label "extension GEMINI.md"
 Install-PackContent -Content (Get-Content -LiteralPath (Join-Path $Source "AGENTS.shared.md") -Raw) -TargetFile $ExtensionAgentsTarget -Label "extension AGENTS.md"
 Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
-Install-PackFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml" -PreserveExisting
+Sync-AgentsModeFile -TemplateFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
 Remove-LegacyPackFile -TargetFile $LegacySharedTarget -Label "AGENTS.shared.md"
 Remove-LegacyPackFile -TargetFile $LegacyAgentsReadmeTarget -Label "agents/README.md"
 Remove-LegacyPackFile -TargetFile $LegacyExtensionSharedTarget -Label "extension AGENTS.shared.md"
