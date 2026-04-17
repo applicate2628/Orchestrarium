@@ -357,6 +357,33 @@ $testConfigs = @{
             @{ DisplayName = 'node scripts/verify-static-ui.js'; FilePath = 'node'; Arguments = @('scripts/verify-static-ui.js') }
         )
     }
+    T31 = @{
+        Id = 'T31'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\T31-fallback-noisy-evidence-filter'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'npm test'; FilePath = 'npm'; Arguments = @('test') },
+            @{ DisplayName = 'node scripts/verify-fallback.js'; FilePath = 'node'; Arguments = @('scripts/verify-fallback.js') }
+        )
+    }
+    T32 = @{
+        Id = 'T32'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\T32-constrained-multi-step-patch-no-drift'
+        WorkSubdir = 'workspace'
+        VerifyCommands = @(
+            @{ DisplayName = 'npm test'; FilePath = 'npm'; Arguments = @('test') },
+            @{ DisplayName = 'node scripts/verify-patch-flow.js'; FilePath = 'node'; Arguments = @('scripts/verify-patch-flow.js') }
+        )
+    }
+    T33 = @{
+        Id = 'T33'
+        FixturePath = Join-Path $nextPackRoot 'Fixtures\T33-decorative-consistency-with-asset-distractors'
+        WorkSubdir = 'app'
+        VerifyCommands = @(
+            @{ DisplayName = 'npm test'; FilePath = 'npm'; Arguments = @('test') },
+            @{ DisplayName = 'node scripts/verify-decor.js'; FilePath = 'node'; Arguments = @('scripts/verify-decor.js') }
+        )
+    }
 }
 
 if (-not $rowConfigs.ContainsKey($RowId)) {
