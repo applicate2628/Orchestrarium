@@ -1,0 +1,7 @@
+{
+  "primaryBudgetSignal": "per-run-cost-ceiling",
+  "requiredMetrics": ["duration_ms", "total_cost_usd", "tools.totalCalls"],
+  "noiseHandling": "record-envelope-noise-separately",
+  "replayRequirement": "fresh-worktree-and-ci-replay",
+  "overCeilingHandling": "keep-fallback-path-valid-but-fallback-only"
+}

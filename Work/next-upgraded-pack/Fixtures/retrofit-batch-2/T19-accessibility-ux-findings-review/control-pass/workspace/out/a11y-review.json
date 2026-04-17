@@ -1,0 +1,24 @@
+{
+  "findings": [
+    {
+      "id": "global-best-provider-conflicts-with-lane-specific-flow",
+      "severity": "high",
+      "impact": "operator-may-overtrust-a-global-winner"
+    },
+    {
+      "id": "focusable-card-without-action",
+      "severity": "medium",
+      "impact": "keyboard-users-stop-on-a-non-interactive-block"
+    },
+    {
+      "id": "low-confidence-note-has-low-contrast",
+      "severity": "medium",
+      "impact": "confidence-note-is-hard-to-read"
+    }
+  ],
+  "nextFixOrder": [
+    "global-best-provider-conflicts-with-lane-specific-flow",
+    "focusable-card-without-action",
+    "low-confidence-note-has-low-contrast"
+  ]
+}

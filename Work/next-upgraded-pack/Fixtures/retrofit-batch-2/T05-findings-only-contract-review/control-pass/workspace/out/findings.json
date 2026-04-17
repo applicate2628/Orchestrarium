@@ -1,0 +1,17 @@
+[
+  {
+    "severity": "high",
+    "mechanism": "unsupported-gemini-runtime-target",
+    "file": "work-items/active/2026-04-13-mcp-impact-role-provider-benchmarking/plan.md"
+  },
+  {
+    "severity": "high",
+    "mechanism": "promotes-fallback-transport-into-provider-order",
+    "file": "work-items/active/2026-04-13-mcp-impact-role-provider-benchmarking/matrices/model-verdict-to-lane-priority-mapping.md"
+  },
+  {
+    "severity": "medium",
+    "mechanism": "reorders-execution-toward-fallback-wave-before-remaining-top-path-work",
+    "file": "work-items/active/2026-04-13-mcp-impact-role-provider-benchmarking/status.md"
+  }
+]

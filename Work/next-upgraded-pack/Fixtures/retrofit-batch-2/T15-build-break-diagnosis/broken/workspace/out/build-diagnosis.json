@@ -1,0 +1,7 @@
+{
+  "rootCause": "last-visible-enoent-alone",
+  "firstFailureLayer": "shell-restart-needed",
+  "smallestSafeFix": "restart-powershell-and-rerun",
+  "reproCase": "developer-machine-only",
+  "doNotBlame": "clean-checkout"
+}

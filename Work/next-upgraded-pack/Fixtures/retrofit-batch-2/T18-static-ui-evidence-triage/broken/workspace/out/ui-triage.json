@@ -1,0 +1,5 @@
+{
+  "blockingIssues": ["z-index-not-high-enough"],
+  "fixOrder": ["raise-z-index-only"],
+  "doNotUseAsSingleFix": "none"
+}

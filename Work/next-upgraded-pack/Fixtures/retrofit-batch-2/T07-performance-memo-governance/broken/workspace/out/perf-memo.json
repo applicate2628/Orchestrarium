@@ -1,0 +1,7 @@
+{
+  "primaryBudgetSignal": "application-render-fps",
+  "requiredMetrics": ["cpu", "memory"],
+  "noiseHandling": "ignore-envelope-noise",
+  "replayRequirement": "developer-laptop-only",
+  "overCeilingHandling": "promote-fallback-path"
+}

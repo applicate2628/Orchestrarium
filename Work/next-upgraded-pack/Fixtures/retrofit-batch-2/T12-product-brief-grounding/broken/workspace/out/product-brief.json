@@ -1,0 +1,8 @@
+{
+  "primaryAudience": "contributors",
+  "deliverableMode": "editable-policy-tuning",
+  "preserveLaneSpecificRankings": false,
+  "rejectGlobalProviderWinner": false,
+  "firstSlice": "single global provider ranking redesign",
+  "openQuestions": []
+}

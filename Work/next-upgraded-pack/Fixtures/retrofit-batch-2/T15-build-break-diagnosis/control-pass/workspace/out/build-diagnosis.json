@@ -1,0 +1,7 @@
+{
+  "rootCause": "render-step-assumes-generated-provider-order-artifact-already-exists",
+  "firstFailureLayer": "missing-generated-input-before-render",
+  "smallestSafeFix": "initialize-or-generate-.scratch-generated-provider-order-json-before-render",
+  "reproCase": "fresh-worktree-or-ci",
+  "doNotBlame": "last-visible-enoent-alone"
+}

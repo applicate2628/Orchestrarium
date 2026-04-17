@@ -1,0 +1,11 @@
+{
+  "primaryAudience": "operators",
+  "deliverableMode": "read-only-reporting",
+  "preserveLaneSpecificRankings": true,
+  "rejectGlobalProviderWinner": true,
+  "firstSlice": "compact-lane-specific-provider-summary-with-fallback-notes",
+  "openQuestions": [
+    "which-audience-is-first-operators-or-contributors",
+    "is-the-first-deliverable-read-only-reporting-or-editable-policy-tuning"
+  ]
+}

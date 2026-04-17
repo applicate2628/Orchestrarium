@@ -1,0 +1,7 @@
+{
+  "decision": "keep-provider-order-at-provider-level",
+  "fallbackHandling": "provider-local-path-notes",
+  "transportHandling": "transport-is-not-provider",
+  "providerUniverse": ["codex", "claude", "gemini"],
+  "mcpScoring": "deferred"
+}

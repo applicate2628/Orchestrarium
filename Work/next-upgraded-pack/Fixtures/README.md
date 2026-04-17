@@ -15,6 +15,7 @@ Store here:
 Current active scaffolds:
 
 - `retrofit-batch-1/`
+- `retrofit-batch-2/`
 - `T29-toolchain-false-root-ambiguity/`
 - `T30-static-ui-wrong-file-attraction/`
 
@@ -35,4 +36,14 @@ Current concrete fixtures:
 - `retrofit-batch-1/T26-toolchain-owner-ambiguity/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/T27-late-session-recall/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/T28-reviewer-to-worker-transition/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-2/T01-bounded-fact-extraction/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-2/T03-adr-decision-structure/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-2/T05-findings-only-contract-review/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-2/T07-performance-memo-governance/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-2/T12-product-brief-grounding/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-2/T15-build-break-diagnosis/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-2/T18-static-ui-evidence-triage/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-2/T19-accessibility-ux-findings-review/` now has `broken/` and `control-pass/` runnable copies
+- `retrofit-batch-2/T21-worker-path-discovery/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/` remains the mutable implementation zone for the rest of the retrofit slice
+- `retrofit-batch-2/` backfills the remaining steady-state core anchors needed for full `X1..X3` coverage

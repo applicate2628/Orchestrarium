@@ -1,0 +1,7 @@
+{
+  "activeTrack": "mcp-impact",
+  "deferredTrack": "model-only",
+  "w1Targets": ["X3", "X1", "X5"],
+  "workflowOutput": "provider-local path notes",
+  "x3x4Interpretation": "separate-provider-entry"
+}

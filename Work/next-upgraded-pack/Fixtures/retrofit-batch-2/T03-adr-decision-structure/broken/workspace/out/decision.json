@@ -1,0 +1,7 @@
+{
+  "decision": "separate-routable-fallback-provider-entries",
+  "fallbackHandling": "promote-fallbacks-into-provider-order",
+  "transportHandling": "treat-transport-as-provider",
+  "providerUniverse": ["codex", "claude", "gemini", "claude-api"],
+  "mcpScoring": "in-scope"
+}

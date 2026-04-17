@@ -1,0 +1,13 @@
+{
+  "blockingIssues": [
+    "note-anchored-to-container-not-row",
+    "hidden-note-stays-in-keyboard-order",
+    "inline-note-uses-modal-semantics"
+  ],
+  "fixOrder": [
+    "fix-row-anchoring",
+    "respect-hidden-and-remove-from-keyboard-order",
+    "change-dialog-semantics-and-ranking-copy"
+  ],
+  "doNotUseAsSingleFix": "z-index-only"
+}

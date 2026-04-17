@@ -1,0 +1,65 @@
+<section class="benchmark-shell">
+  <header class="page-header">
+    <h1>Role Guidance Matrix</h1>
+    <p class="page-summary">
+      Use the ranked rows first. Provider-local notes may narrow a row, but should not replace the row ranking.
+    </p>
+  </header>
+
+  <div class="lane-toolbar" aria-label="Lane filters">
+    <button class="chip is-active" type="button" aria-pressed="true">Review lanes</button>
+    <button class="chip" type="button" aria-pressed="false">Worker lanes</button>
+  </div>
+
+  <table id="lane-matrix" class="lane-matrix">
+    <caption>Current default routing</caption>
+    <thead>
+      <tr>
+        <th scope="col">Lane</th>
+        <th scope="col">Default order</th>
+        <th scope="col">Provider-local note</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="lane-row lane-row--expanded">
+        <th scope="row">Accessibility / UX static review</th>
+        <td class="lane-order">opus 4.6max, Claude China, gpt-5.4</td>
+        <td class="lane-note-cell">
+          <button
+            id="lane-note-toggle"
+            class="lane-note-toggle"
+            type="button"
+            aria-expanded="true"
+            aria-controls="lane-note-panel">Show note</button>
+
+          <section
+            id="lane-note-panel"
+            class="lane-note-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="lane-note-title"
+            hidden>
+            <h2 id="lane-note-title">Claude local note</h2>
+            <p>
+              Claude China is the global UI winner and should replace the row ranking when this note is visible.
+            </p>
+            <a href="#lane-matrix">Jump back to matrix</a>
+            <button type="button">Close note</button>
+          </section>
+        </td>
+      </tr>
+
+      <tr class="lane-row">
+        <th scope="row">UI structural modernization</th>
+        <td class="lane-order">gpt-5.4, Claude China, gpt-spark</td>
+        <td>Keep implementation rows separate from review rows.</td>
+      </tr>
+
+      <tr class="lane-row">
+        <th scope="row">Visual / icon decorative edits</th>
+        <td class="lane-order">gpt-5.4, Claude China, gpt-spark</td>
+        <td>Prefer bounded patches over whole-layout rewrites.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>

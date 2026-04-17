@@ -1,0 +1,7 @@
+{
+  "activeTrack": "model-only",
+  "deferredTrack": "mcp-impact",
+  "w1Targets": ["X3", "X4", "X1", "X5"],
+  "workflowOutput": "workflow-lane priority map",
+  "x3x4Interpretation": "claude-path-note-first"
+}
