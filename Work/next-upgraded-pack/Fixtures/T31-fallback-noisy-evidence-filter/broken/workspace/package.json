@@ -1,0 +1,9 @@
+{
+  "name": "t31-fallback-noisy-evidence-filter",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test",
+    "verify-fallback": "node scripts/verify-fallback.js"
+  }
+}
