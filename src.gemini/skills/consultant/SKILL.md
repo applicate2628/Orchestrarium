@@ -19,13 +19,12 @@ If the canonical file is missing, read legacy `.gemini/.agents-mode` as compatib
 Relevant keys:
 
 - `consultantMode`
+- `externalClaudeApiMode`
 - `externalProvider`
 - `externalPriorityProfile`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalGeminiFallbackMode`
-- `externalClaudeSecretMode`
-- `externalClaudeApiMode`
 
 Gemini-line provider rules:
 
@@ -38,8 +37,8 @@ Gemini-line provider rules:
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion
 - `externalGeminiFallbackMode` matters only when the resolved provider is Gemini and the model policy is pinned
 - Under `externalModelMode: pinned-top-pro`, `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures
-- `externalClaudeSecretMode` matters only when the resolved provider is Claude
-- `externalClaudeApiMode` matters only when the resolved provider is Claude
+- `externalClaudeApiMode` matters only when the resolved provider is Claude; allowed values are `disabled | auto | force`, with `auto` as the default
+- `externalClaudeApiMode` is the single Claude wrapper-transport toggle: `disabled` forbids the installed secret-backed Claude wrapper, `auto` keeps the allowed Claude CLI path first and then permits that wrapper-backed retry, and `force` starts on the wrapper-backed path immediately
 - The shared lane matrix still prefers Gemini for image/icon/decorative advisory work when that routing remains honest
 - Same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce
 - When the active lane policy asks for more than one external opinion, the lead may invoke this skill more than once and aggregate the returned memos
@@ -58,6 +57,6 @@ Return one advisory memo with:
 ## Working rules
 
 - Distinguish confirmed facts, assumptions, and judgment.
-- For the mandatory batch-close external consultant-check, do not silently downgrade to an internal-only path.
-- If the external consultant path is unavailable for that mandatory closeout sweep, say so explicitly and keep the batch open for escalation.
-- If the active lane policy requests more than one external consultant-check, each invocation still returns one memo; the lead aggregates the memos and fails closed when the requested count cannot be satisfied.
+- If the lead or repo-local lane policy explicitly requests a closeout consultant sweep, follow the configured consultant mode honestly and do not silently downgrade to a different path.
+- If the selected consultant path is unavailable for that requested closeout sweep, say so explicitly and keep the batch open for escalation.
+- If the active lane policy requests more than one consultant-check, each invocation still returns one memo; the lead aggregates the memos and fails closed when the requested count cannot be satisfied.

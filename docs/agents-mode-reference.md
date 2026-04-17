@@ -6,9 +6,9 @@ Canonical value-by-value operator reference for pack-local `agents-mode` files. 
 
 | Provider | Canonical file | Provider-specific note |
 |---|---|---|
-| Codex | `.agents/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `codex` is a self-provider override only, never the ordinary `auto` result. Legacy `.agents/.agents-mode` is compatibility input only and must be normalized forward into `.agents/.agents-mode.yaml`. Codex may additionally store the shared `externalModelMode`, `externalGeminiFallbackMode` when the resolved provider is Gemini, and `externalClaudeSecretMode`, `externalClaudeApiMode`, and `externalClaudeProfile` when the resolved provider is Claude. |
-| Claude Code | `.claude/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `claude` is a self-provider override only, never the ordinary `auto` result. Legacy `.claude/.agents-mode` is compatibility input only and must be normalized forward into `.claude/.agents-mode.yaml`. The secret-backed Claude API path remains a Claude transport, not a separate provider. Claude-line config may also store the shared `externalModelMode`, `externalGeminiFallbackMode` when the resolved provider is Gemini, and Claude transport keys when the resolved provider is Claude. |
-| Gemini CLI | `.gemini/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `gemini` is a self-provider override only, never the ordinary `auto` result. Legacy `.gemini/.agents-mode` is compatibility input only and must be normalized forward into `.gemini/.agents-mode.yaml`. Official Gemini runtime config still lives in `.gemini/settings.json`; Orchestrarium install seeds the overlay, and Gemini `/init` still owns `GEMINI.md`. Gemini-line config may store the shared `externalModelMode`, `externalGeminiFallbackMode` for pinned Gemini fallback, and Claude transport keys when the resolved provider is Claude. |
+| Codex | `.agents/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `codex` is a self-provider override only, never the ordinary `auto` result. Legacy `.agents/.agents-mode` is compatibility input only and must be normalized forward into `.agents/.agents-mode.yaml`. Codex may additionally store the shared `externalClaudeApiMode`, `externalModelMode`, `externalGeminiFallbackMode` when the resolved provider is Gemini, and `externalClaudeProfile` when the resolved provider is Claude. |
+| Claude Code | `.claude/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `claude` is a self-provider override only, never the ordinary `auto` result. Legacy `.claude/.agents-mode` is compatibility input only and must be normalized forward into `.claude/.agents-mode.yaml`. The secret-backed Claude API path remains a Claude wrapper transport, not a separate provider. Claude-line config may also store the shared `externalClaudeApiMode`, `externalModelMode`, and `externalGeminiFallbackMode` when the resolved provider is Gemini. |
+| Gemini CLI | `.gemini/.agents-mode.yaml` | Shares the canonical provider universe `auto | codex | claude | gemini`. `auto` resolves by lane type through the active named profile below; explicit `gemini` is a self-provider override only, never the ordinary `auto` result. Legacy `.gemini/.agents-mode` is compatibility input only and must be normalized forward into `.gemini/.agents-mode.yaml`. Official Gemini runtime config still lives in `.gemini/settings.json`; Orchestrarium install seeds the overlay, and Gemini `/init` still owns `GEMINI.md`. Gemini-line config may store the shared `externalClaudeApiMode`, `externalModelMode`, and `externalGeminiFallbackMode` for pinned Gemini fallback. |
 
 Canonical operator-overlay output is now `.agents-mode.yaml` on all three lines. Legacy extensionless `.agents-mode` files remain compatibility input only and must not be recreated as the preferred output.
 
@@ -55,6 +55,7 @@ At init time, the helper may either write the selected preset immediately or ent
 | Key | `default` | `absolute-balance` | `external-aggressive` | `correctness-first` | `max-speed` |
 |---|---|---|---|---|---|
 | `consultantMode` | `disabled` | `internal` | `external` | `external` | `disabled` |
+| `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `delegationMode` | `manual` | `auto` | `force` | `force` | `auto` |
 | `mcpMode` | `auto` | `auto` | `auto` | `force` | `auto` |
 | `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
@@ -65,9 +66,7 @@ At init time, the helper may either write the selected preset immediately or ent
 | workdir modes | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `runtime-default` |
 | `externalGeminiFallbackMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalClaudeSecretMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalClaudeProfile` (Codex-line only) | `sonnet-high` | `sonnet-high` | `sonnet-high` | `opus-max` | `sonnet-high` |
+| `externalClaudeProfile` (Codex-line only) | `opus-max` | `sonnet-high` | `sonnet-high` | `opus-max` | `sonnet-high` |
 
 `correctness-first` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
@@ -85,16 +84,17 @@ At init time, the helper may either write the selected preset immediately or ent
 
 ### `consultantMode`
 
-| Value | Meaning | Ordinary optional consultant use | Mandatory batch-close external consultant-checks |
+| Value | Meaning | Ordinary optional consultant use | Batch-close consultant behavior |
 |---|---|---|---|
-| `external` | External-only consultant | Use the selected external CLI only. If it is unavailable or fails, return an unavailable advisory memo and keep routing honest. | Do not downgrade to internal fallback. Return an unavailable advisory memo and keep the batch open for escalation. |
-| `internal` | Internal-only consultant | Use the internal consultant path for ordinary optional second-opinion work. | Unavailable in this mode because the batch-close check is explicitly external. Keep the batch open for escalation. |
-| `disabled` | Consultant disabled | Skip ordinary optional second-opinion use. | Unavailable in this mode. Return an unavailable advisory memo and keep the batch open for escalation. |
+| `external` | External-only consultant | Use the selected external CLI only. If it is unavailable or fails, return an unavailable advisory memo and keep routing honest. | If the lead or repo-local lane policy explicitly asks for a closeout consultant sweep, run it externally. Do not downgrade to internal fallback. |
+| `internal` | Internal-only consultant | Use the internal consultant path for ordinary optional second-opinion work. | If the lead or repo-local lane policy explicitly asks for a closeout consultant sweep, run it internally. Do not invent an external-only requirement from `consultantMode` itself. |
+| `disabled` | Consultant disabled | Skip ordinary optional second-opinion use. | Skip consultant closeout and do not block batch closure on consultant alone. |
 
 Notes:
 - No config file behaves like consultant-disabled for ordinary optional consultant use.
 - `consultantMode` governs consultant behavior only. It does not replace reviewer, QA, or human publication gates, and `external` never authorizes an internal fallback.
-- The default closeout requirement follows the active lane policy's configured external consultant-check count. If a lane omits an explicit count, treat it as `1`.
+- `consultantMode` governs consultant availability itself. `consultantMode: disabled` disables consultant use entirely, including any default closeout sweep.
+- If a repository wants consultant input at closeout, it must request that policy explicitly; do not infer a hidden consultant blocker from the default contract.
 
 ### `delegationMode`
 
@@ -130,7 +130,7 @@ Notes:
 | Value | Meaning | Expected behavior |
 |---|---|---|
 | `auto` | Resolve the external provider by lane type through the active named priority profile | `auto` is pack-neutral. It uses the active profile below, explicit user override, and any documented repo-local routing heuristic. Ordinary `auto` must not silently resolve to the same provider as the current host line. |
-| `claude` | Route provider-backed external work to Claude CLI | Valid wherever Claude CLI is installed. When this value is selected or `auto` resolves to Claude, honor `externalModelMode`, `externalClaudeSecretMode`, and `externalClaudeApiMode`; Codex may additionally honor `externalClaudeProfile` as a narrower override. |
+| `claude` | Route provider-backed external work to Claude CLI | Valid wherever Claude CLI is installed. When this value is selected or `auto` resolves to Claude, honor `externalModelMode` and `externalClaudeApiMode`; Codex may additionally honor `externalClaudeProfile` as a narrower override. |
 | `codex` | Route provider-backed external work to Codex CLI | Valid wherever Codex CLI is installed. If selected from the Codex line, treat it as an explicit self-provider override only. |
 | `gemini` | Route provider-backed external work to Gemini CLI | Valid wherever Gemini CLI is installed. When this value is selected or `auto` resolves to Gemini, honor `externalModelMode`; if the model policy is pinned, also honor `externalGeminiFallbackMode`. If selected from the Gemini line, treat it as an explicit self-provider override only. |
 
@@ -254,7 +254,7 @@ Notes:
 - Codex: `gpt-5.4 --reasoning-effort xhigh`; only `worker.long-autonomous` and similarly fully autonomous low-reasoning worker lanes may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path
 - Claude: `opus-max`; if the allowed Claude CLI path hits usage-limit or quota exhaustion and `externalClaudeApiMode: auto` permits it, retry once through the installed secret-backed Claude wrapper, or start there immediately when the user explicitly sets `externalClaudeApiMode: force`, while preserving the strongest Claude intent instead of dropping to `sonnet-high`
 - Gemini: `gemini-3.1-pro`, then one retry on `gemini-3-flash`
-- Provider-specific transport keys still apply after the model/profile path is chosen. For example, Claude still honors `externalClaudeSecretMode` and `externalClaudeApiMode`.
+- Provider-specific transport keys still apply after the model/profile path is chosen. For example, Claude still honors `externalClaudeApiMode`.
 - Codex-line `externalClaudeProfile`, when explicitly set, remains a narrower override for Claude model/profile selection than the shared `externalModelMode`.
 - Do not silently downgrade below `gpt-5.3-codex-spark` on the Codex line or below Gemini 3 on the Gemini line.
 - Repo-local policy treats these named fallback paths as alternate limit or budget pools when runtime observation shows that they exhaust independently. They are not quality-equivalent substitutes for the primary path.
@@ -292,25 +292,12 @@ Notes:
 - The current shipped Gemini baseline is `gemini-3.1-pro` with `gemini-3-flash` as the named fallback. If Google renames the stable model aliases again, update both names in one canonical change instead of mixing generations.
 - `force` is a deliberate budget or alternate-limit path for tightly bounded mechanical work only. Do not default reasoning-heavy, ambiguous, or cleanup-heavy work to Flash just to save tokens.
 
-### `externalClaudeSecretMode`
-
-| Value | Meaning | Effective Claude CLI behavior |
-|---|---|---|
-| `auto` | Limit-triggered SECRET-backed retry | Start with the plain Claude command. If that call fails on quota, limit, or reset errors, rerun the same one-line Claude command once with `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, and `ANTHROPIC_AUTH_TOKEN` from the local Claude `SECRET.md` added to that command environment. |
-| `force` | SECRET-backed primary Claude call | Apply the same `ANTHROPIC_*` values from the local Claude `SECRET.md` to the first Claude call immediately. Do not perform a second SECRET-backed retry because the primary call already used that environment override. |
-
-Notes:
-- This key is relevant whenever the resolved provider is Claude.
-- `auto` is the first-write default where this key exists.
-- If the required `ANTHROPIC_*` values cannot be read from the local Claude `SECRET.md`, disclose that explicitly. `force` must not silently fall back to a plain Claude call, and `auto` must not claim that the retry happened when it did not.
-- This key changes only the Claude command environment. It does not authorize provider switches or profile downgrades.
-
 ### `externalClaudeApiMode`
 
 | Value | Meaning | Effective Claude transport behavior |
 |---|---|---|
 | `disabled` | No secret-backed Claude API transport | Use only the allowed Claude CLI path. If that path fails, Claude is unavailable. |
-| `auto` | Claude CLI first, then secret-backed fallback | Run the allowed Claude CLI path first, including any `externalClaudeSecretMode` retry semantics. If Claude still fails because of CLI availability, auth, quota, limit, or reset errors, retry once through the installed Claude wrapper under `.claude/agents/scripts/invoke-claude-api.sh` or `.ps1`. |
+| `auto` | Claude CLI first, then secret-backed fallback | Run the allowed Claude CLI path first. If Claude still fails because of CLI availability, auth, quota, limit, or reset errors, retry once through the installed Claude wrapper under `.claude/agents/scripts/invoke-claude-api.sh` or `.ps1`. |
 | `force` | Secret-backed Claude API primary transport | Use the installed Claude wrapper under `.claude/agents/scripts/invoke-claude-api.sh` or `.ps1` as the primary Claude transport and do not spend time on a preceding Claude CLI attempt. |
 
 Notes:
@@ -328,7 +315,7 @@ Notes:
 |---|---|
 | `externalModelMode: pinned-top-pro` and Codex is the chosen provider | Try `gpt-5.4 --reasoning-effort xhigh` first. Only on `worker.long-autonomous` or another explicitly fully autonomous low-reasoning worker lane may Codex retry once with `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path. Other lanes must disclose Codex unavailability instead of downgrading. |
 | `externalModelMode: pinned-top-pro` and Gemini is the chosen provider | Try `gemini-3.1-pro` first. If Gemini returns quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style errors, retry once with `gemini-3-flash`. |
-| `externalModelMode: pinned-top-pro` and Claude is the chosen provider | Try `opus-max` first unless the user explicitly sets `externalClaudeApiMode: force`, in which case start on the secret-backed Claude wrapper immediately. Under `externalClaudeApiMode: auto`, if Claude hits usage-limit or quota exhaustion, keep the strongest Claude model intent and retry once through the allowed secret-backed Claude transport instead of downgrading to `sonnet-high`. |
+| `externalModelMode: pinned-top-pro` and Claude is the chosen provider | Try `opus-max` first unless the user explicitly sets `externalClaudeApiMode: force`, in which case start on the secret-backed Claude wrapper immediately. Under `externalClaudeApiMode: auto`, if Claude hits CLI/auth/usage-limit or quota-style failure, keep the strongest Claude model intent and retry once through the allowed secret-backed Claude transport instead of downgrading to `sonnet-high`. |
 | Claude CLI is the chosen provider and is already authenticated | Use the plain Claude CLI path first. |
 | Claude CLI is not logged in, or auth is intentionally repo-local | Prefer the installed Claude API wrapper allowed by `externalClaudeApiMode` instead of repeatedly probing a plain `claude` command that cannot authenticate. |
 | PowerShell Claude API transport | Use `.claude/agents/scripts/invoke-claude-api.ps1`. The wrapper must work on Windows PowerShell 5.1 and PowerShell 7+, it accepts both `-PrintSecretPath` and `--print-secret-path`, and forwarded Claude flags should be passed after `--%`. |
@@ -352,11 +339,11 @@ Notes:
 
 ## First-write defaults
 
-| Provider | `consultantMode` | `delegationMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalGeminiWorkdirMode` | `externalModelMode` | `externalGeminiFallbackMode` | `externalClaudeSecretMode` | `externalClaudeApiMode` | `externalClaudeProfile` |
+| Provider | `consultantMode` | `externalClaudeApiMode` | `delegationMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalGeminiWorkdirMode` | `externalModelMode` | `externalGeminiFallbackMode` | `externalClaudeProfile` |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Codex | requested value | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | `auto` | `auto` | `sonnet-high` unless explicitly overridden |
-| Claude Code | requested value | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | `auto` | `auto` | not part of canonical Claude-line config |
-| Gemini CLI | requested value | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | `auto` | `auto` | not part of canonical Gemini-line config |
+| Codex | requested value | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | `opus-max` unless explicitly overridden |
+| Claude Code | requested value | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | not part of canonical Claude-line config |
+| Gemini CLI | requested value | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | not part of canonical Gemini-line config |
 
 Structured defaults written alongside the scalar keys:
 
@@ -407,8 +394,7 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 | External workdir mode | `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, and `externalGeminiWorkdirMode` choose whether each external provider runs in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`. |
 | Shared external model policy | `externalModelMode: runtime-default` keeps provider runtime model selection; `pinned-top-pro` pins the strongest documented model/profile for the resolved provider and allows one named same-provider fallback on retryable provider exhaustion. |
 | Gemini fallback mode | `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for limit, quota, or capacity-style Gemini failures when the model policy is pinned; `force` starts on `gemini-3-flash` immediately. |
-| Claude SECRET mode | `externalClaudeSecretMode: auto` keeps the limit-triggered retry path, while `force` applies the same `ANTHROPIC_*` environment to the primary Claude call. Both modes stay inside the Claude provider. |
-| Claude API mode | `externalClaudeApiMode: auto` keeps Claude CLI first and then tries the secret-backed Claude wrapper as the named secondary Claude transport; `force` starts on that wrapper immediately. |
+| Claude API mode | `externalClaudeApiMode: auto` keeps Claude CLI first and then tries the secret-backed Claude wrapper as the named secondary Claude transport; `force` starts on that wrapper immediately. This is the single Claude wrapper-transport toggle. |
 | Active priority profile | `externalPriorityProfile` selects the named provider-order map used only when `externalProvider: auto`. Unknown profile names fail closed. |
 | Multi-opinion routing | `externalOpinionCounts` controls how many distinct external opinions a lane must collect under `auto`. Missing counts mean `1`; shortfalls keep the lane `BLOCKED`. |
 | External brigade | A brigade is a bounded parallel set of external helper runs. It may mix providers or reuse one provider many times, but each brigade item still owns one execution role, one admitted artifact, and one gate. |

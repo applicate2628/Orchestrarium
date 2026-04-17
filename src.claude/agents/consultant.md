@@ -37,23 +37,24 @@ Do not invoke for:
 
 ## Shared config format
 
-The local config file is `.claude/.agents-mode.yaml`. The canonical file may contain:
+The local config file is `.claude/.agents-mode.yaml`. The canonical file may contain this schematic shape in this order:
 
-- `consultantMode: external | internal | disabled`
-- `delegationMode: manual | auto | force`
-- `mcpMode: auto | force`
-- `preferExternalWorker: true | false`
-- `preferExternalReviewer: true | false`
-- `externalProvider: auto | codex | claude | gemini`
-- `externalPriorityProfile: balanced | gemini-crosscheck | <repo-local profile>`
-- `externalPriorityProfiles: structured profile map`
-- `externalOpinionCounts: structured lane-count map`
-- `externalModelMode: runtime-default | pinned-top-pro`
-- `externalGeminiFallbackMode: disabled | auto | force`
-- `externalClaudeSecretMode: auto | force`
-- `externalClaudeApiMode: disabled | auto | force`
+```yaml
+consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
+externalClaudeApiMode: {value}  # allowed when Claude is selected: disabled | auto | force; default: auto
+delegationMode: {value}  # allowed: manual | auto | force; default: manual
+mcpMode: {value}  # allowed: auto | force; default: auto
+preferExternalWorker: {value}  # allowed: false | true; default: false
+preferExternalReviewer: {value}  # allowed: false | true; default: false
+externalProvider: {value}  # allowed here: auto | codex | claude | gemini; default: auto
+externalPriorityProfile: {value}  # allowed: balanced | gemini-crosscheck | <repo-local profile>; default: balanced
+externalPriorityProfiles: {...}  # structured profile map; default seed ships balanced + gemini-crosscheck
+externalOpinionCounts: {...}  # structured lane-count map; default seed keeps documented lanes at 1
+externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
+externalGeminiFallbackMode: {value}  # allowed when Gemini is selected: disabled | auto | force; default: auto
+```
 
-`consultantMode` continues to govern consultant behavior. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. When the resolved provider is `gemini`, `externalModelMode` is the shared model-selection knob and `externalGeminiFallbackMode` controls the explicit pinned Gemini path. When the resolved provider is `claude`, `externalModelMode` may request the stronger Claude path while `externalClaudeSecretMode` and `externalClaudeApiMode` remain transport knobs; `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
+`consultantMode` continues to govern consultant behavior. `externalClaudeApiMode` is the single Claude wrapper-transport knob: `disabled` keeps only plain Claude CLI, `auto` keeps plain Claude CLI first and allows one wrapper retry on Claude CLI/auth/usage-limit or quota-style failure, and `force` starts on the wrapper immediately. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work. When the resolved provider is `gemini`, `externalModelMode` is the shared model-selection knob and `externalGeminiFallbackMode` controls the explicit pinned Gemini path. When the resolved provider is `claude`, `externalModelMode` may request the stronger Claude path while `externalClaudeApiMode` decides whether the approved wrapper is forbidden, secondary, or primary; plain Claude CLI never receives a later SECRET-backed retry outside that wrapper path. `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
 
 Read and normalize `.claude/.agents-mode.yaml` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 If the canonical file is missing, read legacy `.claude/.agents-mode` as compatibility input only, normalize it forward into `.claude/.agents-mode.yaml`, and do not recreate the legacy file.
@@ -82,8 +83,7 @@ For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md]
 - This role is intentionally non-blocking and non-approving.
 - The lead decides whether to adopt or ignore the memo.
 - If the memo identifies a real blocker, flag it and recommend the proper specialist role instead of acting as that role.
-- For the mandatory batch-close external consultant requirement, the continuation section is required even when the consultant sees no new blockers; the memo must still end with a reusable second prompt that explicitly continues the next approved work.
-- If the batch-close external consultant requirement cannot run because external execution is disabled or unavailable, say so explicitly in the memo and instruct the lead to keep the batch open and escalate to the user.
+- If the lead explicitly requests a closeout consultant sweep, the continuation section is required even when the consultant sees no new blockers; the memo must still end with a reusable second prompt that explicitly continues the next approved work.
 
 ## Toggle file check
 
@@ -91,9 +91,9 @@ Before any invocation, read `.claude/.agents-mode.yaml`:
 
 - If the file exists, normalize it to the current canonical format before interpreting the flags.
 
-- **No file** (default): consultant is disabled for ordinary optional second-opinion usage. Notify "Second opinion skipped — consultant disabled (`/agents-second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. For the mandatory batch-close external consultant requirement, do not silently skip: return an advisory memo that records the disabled state and tells the lead to keep the batch open and escalate to the user.
+- **No file** (default): consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/agents-second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. Do not invent a closeout blocker solely because consultant did not run.
 - **`consultantMode: external`**: external-only. Attempt the selected external CLI. If it fails or is unavailable, return an unavailable memo and require the lead to keep routing honest instead of downgrading to an internal consultant path.
-- **`consultantMode: internal`**: internal subagent only for ordinary optional usage. A mandatory batch-close external consultant requirement is unavailable in this mode; return an unavailable memo and require the lead to keep the batch open and escalate.
+- **`consultantMode: internal`**: internal-only consultant. Use the internal consultant path for any consultant invocation that is still desired.
 - **`consultantMode: disabled`**: explicitly disabled. Same behavior as the no-file case.
 
 The toggle file is local-only (`.claude/` is in `.gitignore`) and not committed to git.
@@ -119,13 +119,15 @@ codex --quiet --full-auto "$PROMPT"
 - Wait 5–15 minutes before treating a single advisory run as stalled. Do not launch a duplicate advisory call for the same memo while the first may still be running; independent external lanes may still run in parallel when their scopes are disjoint and the routing contract allows it.
 - If Codex is not installed, fails, times out, or hits quota/auth limits, do not silently degrade the consultant requirement. Return an unavailable memo and keep routing honest.
 
-If Claude is selected explicitly:
+If Claude is selected explicitly, `externalClaudeApiMode` still governs the Claude transport:
 
 ```bash
 claude --quiet --full-auto "$PROMPT"
 ```
 
-- Apply `externalClaudeSecretMode` and `externalClaudeApiMode` when the resolved provider is Claude.
+- `externalClaudeApiMode: disabled` keeps this plain Claude CLI path only.
+- `externalClaudeApiMode: auto` tries the plain Claude CLI path first and, on Claude CLI/auth/usage-limit or quota-style failure, retries once through the approved wrapper transport.
+- `externalClaudeApiMode: force` starts on the approved wrapper transport immediately.
 - Do not silently downgrade from a selected Claude path to Codex or Gemini.
 
 If Gemini is selected explicitly, honor `externalModelMode` first.

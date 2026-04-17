@@ -120,7 +120,7 @@ default_agents_mode_template() {
   tmp="$(mktemp)"
   cat "$SHARED_AGENTS_MODE_SOURCE" > "$tmp"
   if ! grep -q '^externalClaudeProfile:' "$tmp"; then
-    printf '\nexternalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max\n' >> "$tmp"
+    printf '\nexternalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max\n' >> "$tmp"
   fi
   printf '%s' "$tmp"
 }

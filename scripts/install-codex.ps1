@@ -401,7 +401,7 @@ function Get-DefaultAgentsModeSource {
             if (-not $content.EndsWith("`n")) {
                 $content += "`n"
             }
-            $content += "externalClaudeProfile: sonnet-high  # allowed: sonnet-high | opus-max`n"
+            $content += "externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max`n"
         }
         if (-not $DryRun) {
             Set-Content -LiteralPath $tempPath -Value $content -NoNewline

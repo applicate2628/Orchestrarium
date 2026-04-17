@@ -11,22 +11,21 @@ This contract defines the shared Claude-line routing semantics for the consultan
 Supported canonical keys:
 
 ```yaml
-consultantMode: external  # allowed: external | internal | disabled
-delegationMode: manual  # allowed: manual | auto | force
-mcpMode: auto  # allowed: auto | force
-preferExternalWorker: true  # allowed: false | true
-preferExternalReviewer: true  # allowed: false | true
-externalProvider: auto  # allowed here: auto | codex | claude | gemini
-externalPriorityProfile: balanced  # allowed: balanced | gemini-crosscheck | <repo-local profile>
+consultantMode: external  # allowed: external | internal | disabled; default: disabled
+externalClaudeApiMode: auto  # allowed when Claude is selected: disabled | auto | force; default: auto
+delegationMode: manual  # allowed: manual | auto | force; default: manual
+mcpMode: auto  # allowed: auto | force; default: auto
+preferExternalWorker: true  # allowed: false | true; default: false
+preferExternalReviewer: true  # allowed: false | true; default: false
+externalProvider: auto  # allowed here: auto | codex | claude | gemini; default: auto
+externalPriorityProfile: balanced  # allowed: balanced | gemini-crosscheck | <repo-local profile>; default: balanced
 externalPriorityProfiles: {}  # allowed: structured profile map
 externalOpinionCounts: {}  # allowed: structured lane-count map
 externalCodexWorkdirMode: neutral  # allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project
 externalGeminiWorkdirMode: neutral  # allowed: neutral | project
-externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro
-externalGeminiFallbackMode: auto  # allowed when Gemini is selected under pinned mode: disabled | auto | force
-externalClaudeSecretMode: auto  # allowed when Claude is selected: auto | force
-externalClaudeApiMode: auto  # allowed when Claude is selected: disabled | auto | force
+externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
+externalGeminiFallbackMode: auto  # allowed when Gemini is selected under pinned mode: disabled | auto | force; default: auto
 ```
 
 Semantics:
@@ -43,7 +42,6 @@ Semantics:
 - `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, and `externalGeminiWorkdirMode` choose whether each provider-backed external run starts in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`.
 - `externalModelMode` is the shared cross-provider model policy. `runtime-default` leaves the resolved provider on its runtime default model/profile. `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion.
 - `externalGeminiFallbackMode` matters only when the resolved provider is Gemini and the model policy is pinned. `disabled` keeps `gemini-3.1-pro` only, `auto` starts on `gemini-3.1-pro` and allows one retry on `gemini-3-flash` only for limit, quota, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures, and `force` starts on `gemini-3-flash` immediately.
-- `externalClaudeSecretMode` applies whenever the resolved provider is Claude. `auto` keeps the first call plain and allows one limit-triggered retry; `force` applies the same environment override to the primary call.
 - `externalClaudeApiMode` applies whenever the resolved provider is Claude. `disabled` forbids the repo-local secret-backed Claude API path, `auto` uses it after the allowed Claude CLI path is exhausted, and `force` uses that secret-backed path as the primary Claude transport. It remains a Claude transport, not a fourth provider.
 - Treat named fallback paths as alternate limit or budget pools only when runtime observation shows they exhaust independently. That remains repo-local operator policy rather than an official provider guarantee.
 - Claude-line does not use `externalClaudeProfile` as part of the canonical schema and should not write it into `.agents-mode.yaml`.
@@ -59,8 +57,6 @@ Semantics:
 - `externalProvider: auto` resolves by lane type through the active named priority profile instead of by host-pack identity.
 - When the resolved provider is Codex, honor `externalCodexWorkdirMode`; when it is Claude, honor `externalClaudeWorkdirMode`; when it is Gemini, honor `externalGeminiWorkdirMode`.
 - Explicit `externalProvider: claude` is a self-provider override only. Ordinary `auto` must not silently self-bounce into Claude from the Claude line.
-- `externalClaudeSecretMode: auto` keeps the first Claude call plain and allows one SECRET-backed one-line retry only for limit, quota, or reset failures on the selected Claude provider. Do not use it to mask auth failures, bad prompts, or unrelated CLI errors.
-- `externalClaudeSecretMode: force` applies `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` from the local Claude `SECRET.md` to the primary Claude call immediately, while still forwarding `ANTHROPIC_API_KEY` if it exists. If the required values cannot be read, disclose a dependency/config failure instead of silently dropping back to a plain Claude call.
 - `externalClaudeApiMode: auto` keeps the installed secret-backed Claude wrapper as the named secondary Claude transport after the allowed Claude CLI path is exhausted. `externalClaudeApiMode: force` starts on that wrapper path immediately and skips the preceding Claude CLI attempt.
 - Treat the secret-backed wrapper as the approved economical near-full-strength Claude transport. `force` is therefore an explicit budget choice as well as a limit fallback.
 - When `externalClaudeApiMode` allows the Claude API path, use the installed wrapper under `.claude/agents/scripts/invoke-claude-api.sh` or `.claude/agents/scripts/invoke-claude-api.ps1` so the transport reads `ANTHROPIC_*` from repo-local `.claude/SECRET.md` first and then from `~/.claude/SECRET.md`, then launches plain `claude`.
