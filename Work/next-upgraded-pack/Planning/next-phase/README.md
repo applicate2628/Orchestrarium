@@ -31,6 +31,7 @@ Recommended future documents:
 | `scenario-backlog-v1-YYYY-MM-DD.md` | milestone-1 seed scenarios for every role and adapter surface |
 | `scoring-and-results-model-YYYY-MM-DD.md` | weighted scorecard, winner logic, and publication model |
 | `pack-specs-v1-YYYY-MM-DD.md` | pack contract, bundle schema, and worked example bundles |
+| `scenario-materialization-plan-v1-YYYY-MM-DD.md` | phase plan for the first real `Scenarios-v2/` bundle wave |
 
 ## Current baseline assumption
 
@@ -48,6 +49,7 @@ The next source-of-truth layer for that redesign is now:
 - `scenario-backlog-v1-2026-04-17.md`
 - `scoring-and-results-model-2026-04-17.md`
 - `pack-specs-v1-2026-04-17.md`
+- `scenario-materialization-plan-v1-2026-04-17.md`
 
 ## Current seeded documents
 
@@ -69,3 +71,4 @@ The next source-of-truth layer for that redesign is now:
 - `scenario-backlog-v1-2026-04-17.md`
 - `scoring-and-results-model-2026-04-17.md`
 - `pack-specs-v1-2026-04-17.md`
+- `scenario-materialization-plan-v1-2026-04-17.md`
