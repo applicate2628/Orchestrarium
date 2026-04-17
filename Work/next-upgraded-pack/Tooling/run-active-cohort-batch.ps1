@@ -99,6 +99,10 @@ function Split-ChangedRelativePaths {
     $auxiliaryPaths = [System.Collections.Generic.List[string]]::new()
 
     foreach ($path in @($Paths)) {
+        if ([string]::IsNullOrWhiteSpace($path)) {
+            continue
+        }
+
         $isAuxiliary = $false
         foreach ($prefix in $auxiliaryPrefixes) {
             if ($path.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
