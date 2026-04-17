@@ -1,0 +1,15 @@
+id: S09
+surface_id: R09
+pack_id: P02
+role_class: planning
+artifact_type: phase plan
+modality_family: phased delivery planning
+allowed_change_surface:
+  - candidate/phase-plan.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "owner, advisory, factual, design, planning"
+overlay_flags: []

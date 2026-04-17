@@ -1,0 +1,87 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "required_bundle_files": [
+    "candidate/README.md",
+    "candidate/graphics-owned/README.md",
+    "candidate/graphics-owned/src/graphics_pipeline/__init__.py",
+    "candidate/graphics-owned/src/graphics_pipeline/renderer.py",
+    "candidate/graphics-owned/tests/test_renderer.py",
+    "candidate/qt-preview-pane/README.md",
+    "candidate/web-preview-shell/README.md",
+    "candidate/geometry-kernel/README.md",
+    "candidate/visualization-lab/README.md",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/render-intent.md",
+    "inputs/pipeline-boundary.md",
+    "inputs/start-state-observations.md",
+    "oracle/README.md",
+    "oracle/graphics-contract.json",
+    "oracle/frame-oracle.json",
+    "oracle/forbidden-widening.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/run_graphics_checks.py",
+    "verifiers/check_scope.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "S23",
+    "surface_id": "R23",
+    "pack_id": "P05",
+    "role_class": "implementation",
+    "artifact_type": "code patch plus validation",
+    "modality_family": "rendering or graphics pipeline",
+    "allowed_change_surface": [
+      "candidate/graphics-owned/src/graphics_pipeline/renderer.py",
+      "candidate/graphics-owned/tests/test_renderer.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/graphics-owned/README.md",
+      "candidate/graphics-owned/src/graphics_pipeline/__init__.py",
+      "candidate/qt-preview-pane/**",
+      "candidate/web-preview-shell/**",
+      "candidate/geometry-kernel/**",
+      "candidate/visualization-lab/**"
+    ],
+    "score_profile": "implementation",
+    "overlay_flags": []
+  },
+  "required_candidate_paths": [
+    "candidate/graphics-owned/src/graphics_pipeline/renderer.py",
+    "candidate/graphics-owned/tests/test_renderer.py"
+  ],
+  "scope_guard_roots": [
+    "candidate/qt-preview-pane",
+    "candidate/web-preview-shell",
+    "candidate/geometry-kernel",
+    "candidate/visualization-lab"
+  ],
+  "expected_start_state_failures": [
+    "transparent-ordering",
+    "transparent-depth-preserves-spark",
+    "additive-glow-accumulates"
+  ]
+}

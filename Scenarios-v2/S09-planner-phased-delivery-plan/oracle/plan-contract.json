@@ -1,0 +1,159 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_metadata": {
+    "id": "S09",
+    "surface_id": "R09",
+    "pack_id": "P02",
+    "role_class": "planning",
+    "artifact_type": "phase plan",
+    "modality_family": "phased delivery planning",
+    "allowed_change_surface": [
+      "candidate/phase-plan.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning",
+    "overlay_flags": []
+  },
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-brief.md",
+    "inputs/accepted-design-package.md",
+    "inputs/accepted-constraints.md",
+    "candidate/README.md",
+    "candidate/phase-plan.md",
+    "oracle/README.md",
+    "oracle/plan-contract.json",
+    "oracle/expected-phase-order.md",
+    "oracle/anti-patterns.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_phase_plan.py"
+  ],
+  "required_plan_sections": [
+    "# S09 Phase Plan",
+    "## Planning goal",
+    "## Accepted inputs",
+    "## Boundaries and assumptions",
+    "## Phase sequence",
+    "## Cross-phase risks and mitigations",
+    "## Verification and handoff gates",
+    "## Deferred work",
+    "## Gate decision"
+  ],
+  "required_phase_headings": [
+    "### Phase 1 - JSON contract stabilization",
+    "### Phase 2 - Dry-run preview and write-guard",
+    "### Phase 3 - Verification, docs, and handoff"
+  ],
+  "required_phase_labels": [
+    "- Scope:",
+    "- File scope:",
+    "- Dependencies:",
+    "- Deliverable:",
+    "- Tests and checks:",
+    "- Rollback notes:"
+  ],
+  "phase_expectations": {
+    "### Phase 1 - JSON contract stabilization": {
+      "must_include": [
+        "tools/status_snapshot.py",
+        "tests/test_status_snapshot.py",
+        "accepted packet"
+      ]
+    },
+    "### Phase 2 - Dry-run preview and write-guard": {
+      "must_include": [
+        "tools/status_snapshot.py",
+        "tests/test_status_snapshot.py",
+        "Phase 1 PASS",
+        "--dry-run"
+      ]
+    },
+    "### Phase 3 - Verification, docs, and handoff": {
+      "must_include": [
+        "tools/status_snapshot.py",
+        "tests/test_status_snapshot.py",
+        "docs/cli/status-snapshot.md",
+        "Phase 2 PASS"
+      ]
+    }
+  },
+  "required_input_references": [
+    "inputs/accepted-brief.md",
+    "inputs/accepted-design-package.md",
+    "inputs/accepted-constraints.md"
+  ],
+  "required_keyword_groups": [
+    [
+      "status.snapshot.json"
+    ],
+    [
+      "--text-summary"
+    ],
+    [
+      "--dry-run"
+    ],
+    [
+      "500-item fixture",
+      "500 item fixture"
+    ],
+    [
+      "$qa-engineer",
+      "qa-engineer"
+    ],
+    [
+      "$architecture-reviewer",
+      "architecture-reviewer"
+    ],
+    [
+      "rollback"
+    ],
+    [
+      "dependencies"
+    ],
+    [
+      "tests and checks"
+    ]
+  ],
+  "valid_gate_decisions": [
+    "PASS",
+    "REVISE",
+    "BLOCKED"
+  ],
+  "disallowed_markers": [
+    "TODO",
+    "diff --git",
+    "```",
+    "apply_patch"
+  ],
+  "disallowed_headings": [
+    "## Confirmed facts",
+    "## Decision",
+    "## Findings"
+  ]
+}

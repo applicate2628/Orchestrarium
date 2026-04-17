@@ -1,0 +1,22 @@
+id: S23
+surface_id: R23
+pack_id: P05
+role_class: implementation
+artifact_type: code patch plus validation
+modality_family: rendering or graphics pipeline
+allowed_change_surface:
+  - candidate/graphics-owned/src/graphics_pipeline/renderer.py
+  - candidate/graphics-owned/tests/test_renderer.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/graphics-owned/README.md
+  - candidate/graphics-owned/src/graphics_pipeline/__init__.py
+  - candidate/qt-preview-pane/**
+  - candidate/web-preview-shell/**
+  - candidate/geometry-kernel/**
+  - candidate/visualization-lab/**
+score_profile: implementation
+overlay_flags: []

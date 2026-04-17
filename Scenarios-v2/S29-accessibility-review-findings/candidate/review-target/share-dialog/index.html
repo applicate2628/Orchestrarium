@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Share weekly summary</title>
+    <link rel="stylesheet" href="./dialog.css" />
+  </head>
+  <body>
+    <main class="workspace-shell">
+      <a class="danger-link" href="/workspace/delete">Delete workspace</a>
+      <button class="launcher" type="button">Share weekly summary</button>
+
+      <section
+        class="share-dialog is-open"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="share-title"
+        aria-describedby="share-intro"
+      >
+        <div class="dialog-header">
+          <h1 id="share-title">Share weekly summary</h1>
+          <button class="icon-button close-button" type="button" tabindex="2">
+            <svg aria-hidden="true" viewBox="0 0 16 16" focusable="false">
+              <path d="M3 3 L13 13 M13 3 L3 13"></path>
+            </svg>
+          </button>
+        </div>
+
+        <p id="share-intro">Invite reviewers before the Friday release checkpoint.</p>
+
+        <form class="share-form">
+          <div class="field-group">
+            <input
+              id="invite-email"
+              type="email"
+              placeholder="Invite people"
+              aria-describedby="invite-help"
+              autocomplete="off"
+            />
+            <p id="invite-help" class="helper">Use a team alias or an individual reviewer email.</p>
+          </div>
+
+          <div class="setting-row">
+            <span class="setting-label">Reviewers only</span>
+            <button id="scope-toggle" class="toggle-chip" type="button" aria-describedby="scope-hint">
+              On
+            </button>
+            <p id="scope-hint" class="sr-only">
+              Toggle whether outside collaborators can open the summary link.
+            </p>
+          </div>
+
+          <a class="footer-link" href="/docs/sharing" tabindex="1">Sharing policy</a>
+
+          <div class="dialog-actions">
+            <button class="secondary" type="button">Copy invite link</button>
+            <button class="primary" type="submit">Send invite</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <script src="./dialog.js"></script>
+  </body>
+</html>

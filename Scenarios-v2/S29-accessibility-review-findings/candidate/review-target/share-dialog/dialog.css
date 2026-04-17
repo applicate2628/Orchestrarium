@@ -1,0 +1,113 @@
+:root {
+  --dialog-bg: #fffaf4;
+  --page-bg: #f4ede6;
+  --body-text: #33261d;
+  --helper-text: #9b7f70;
+  --focus-outline: #d7b29d;
+  --border: #d7c3b4;
+  --primary-bg: #6a4126;
+  --primary-text: #ffffff;
+}
+
+body {
+  margin: 0;
+  background: var(--page-bg);
+  color: var(--body-text);
+  font-family: "Segoe UI", sans-serif;
+}
+
+.workspace-shell {
+  min-height: 100vh;
+  padding: 2rem;
+}
+
+.danger-link {
+  display: inline-block;
+  margin-bottom: 1rem;
+  color: #7a251f;
+}
+
+.share-dialog {
+  max-width: 32rem;
+  padding: 1.5rem;
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  background: var(--dialog-bg);
+  box-shadow: 0 1rem 2rem rgba(51, 38, 29, 0.12);
+}
+
+.dialog-header,
+.setting-row,
+.dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.share-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.field-group {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.helper {
+  margin: 0;
+  color: var(--helper-text);
+  font-size: 0.875rem;
+}
+
+.icon-button,
+.toggle-chip,
+.secondary,
+.primary,
+#invite-email,
+.footer-link {
+  border-radius: 0.625rem;
+}
+
+.icon-button,
+.toggle-chip,
+.secondary,
+.primary {
+  border: 1px solid var(--border);
+  padding: 0.6rem 0.85rem;
+  background: #ffffff;
+  color: var(--body-text);
+}
+
+.primary {
+  background: var(--primary-bg);
+  color: var(--primary-text);
+}
+
+#invite-email {
+  border: 1px solid var(--border);
+  padding: 0.7rem 0.8rem;
+}
+
+.icon-button:focus-visible,
+.toggle-chip:focus-visible,
+.secondary:focus-visible,
+.primary:focus-visible,
+#invite-email:focus-visible,
+.footer-link:focus-visible {
+  outline: 2px solid var(--focus-outline);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

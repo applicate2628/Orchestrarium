@@ -1,0 +1,129 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_metadata": {
+    "id": "S04",
+    "surface_id": "R04",
+    "pack_id": "P01",
+    "role_class": "hygiene",
+    "artifact_type": "source-of-truth update packet",
+    "modality_family": "archive and source-of-truth hygiene",
+    "allowed_change_surface": [
+      "candidate/source-of-truth-update-packet.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning",
+    "overlay_flags": []
+  },
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-source-map.md",
+    "inputs/drift-observations.md",
+    "inputs/archive-inventory.md",
+    "inputs/explicit-update-targets.md",
+    "inputs/governance-boundary.md",
+    "candidate/README.md",
+    "candidate/source-of-truth-update-packet.md",
+    "oracle/README.md",
+    "oracle/source-of-truth-contract.json",
+    "oracle/expected-reconciliation.md",
+    "oracle/prohibited-patterns.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_source_of_truth_update_packet.py"
+  ],
+  "required_packet_sections": [
+    "# S04 Source-of-Truth Update Packet",
+    "## Stewardship scope",
+    "## Canonical sources reviewed",
+    "## Explicit update targets",
+    "## Reconciliation actions",
+    "## Archive hygiene actions",
+    "## Governance and policy boundary",
+    "## Risks and follow-ups",
+    "## Stewardship outcome"
+  ],
+  "required_target_headings": [
+    "### Target 1 - docs/benchmarks/README.md",
+    "### Target 2 - docs/benchmarks/source-of-truth-index.md",
+    "### Target 3 - archive/README.md"
+  ],
+  "required_canonical_sources": [
+    "docs/benchmarks/source-of-truth-index.md",
+    "docs/benchmarks/wave-3-status.md",
+    "docs/process/role-routing-policy.md",
+    "archive/2026-03-transition-notes.md"
+  ],
+  "required_keyword_groups": [
+    [
+      "canonical source",
+      "source of truth"
+    ],
+    [
+      "reconcile",
+      "reconciliation"
+    ],
+    [
+      "archive hygiene",
+      "archive"
+    ],
+    [
+      "historical only",
+      "history-only"
+    ],
+    [
+      "governance"
+    ],
+    [
+      "policy"
+    ],
+    [
+      "$architecture-reviewer",
+      "architecture-reviewer"
+    ],
+    [
+      "AGENTS.md"
+    ],
+    [
+      "docs/process/role-routing-policy.md"
+    ]
+  ],
+  "valid_outcomes": [
+    "READY FOR APPLY",
+    "REQUIRES ARCHITECTURE REVIEW",
+    "BLOCKED BY SOURCE AMBIGUITY"
+  ],
+  "disallowed_markers": [
+    "TODO",
+    "diff --git",
+    "```python",
+    "```ts",
+    "```tsx",
+    "```javascript",
+    "apply_patch"
+  ]
+}

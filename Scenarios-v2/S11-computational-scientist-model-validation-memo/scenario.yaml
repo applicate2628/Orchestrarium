@@ -1,0 +1,15 @@
+id: S11
+surface_id: R11
+pack_id: P03
+role_class: scientist
+artifact_type: model and validation memo
+modality_family: numerical or physical reasoning
+allowed_change_surface:
+  - candidate/model-validation-memo.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "scientist, constraints"
+overlay_flags: []

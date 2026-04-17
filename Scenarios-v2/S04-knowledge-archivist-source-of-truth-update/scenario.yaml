@@ -1,0 +1,15 @@
+id: S04
+surface_id: R04
+pack_id: P01
+role_class: hygiene
+artifact_type: source-of-truth update packet
+modality_family: archive and source-of-truth hygiene
+allowed_change_surface:
+  - candidate/source-of-truth-update-packet.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "owner, advisory, factual, design, planning"
+overlay_flags: []

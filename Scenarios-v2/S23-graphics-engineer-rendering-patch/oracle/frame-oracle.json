@@ -1,0 +1,205 @@
+{
+  "cases": [
+    {
+      "id": "opaque-depth-precedence",
+      "scene": {
+        "width": 2,
+        "height": 1,
+        "clear_rgba": [0, 0, 0, 255],
+        "passes": [
+          {
+            "id": "far-blue",
+            "stage": "opaque",
+            "depth": 6,
+            "x": 0,
+            "y": 0,
+            "width": 2,
+            "height": 1,
+            "rgba": [20, 40, 120, 255]
+          },
+          {
+            "id": "near-red",
+            "stage": "opaque",
+            "depth": 2,
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rgba": [180, 30, 30, 255]
+          }
+        ]
+      },
+      "expected_frame": [
+        ["#b41e1eff", "#142878ff"]
+      ],
+      "anchor_pixels": {
+        "0,0": "#b41e1eff",
+        "1,0": "#142878ff"
+      }
+    },
+    {
+      "id": "transparent-ordering",
+      "scene": {
+        "width": 1,
+        "height": 1,
+        "clear_rgba": [0, 0, 0, 255],
+        "passes": [
+          {
+            "id": "base",
+            "stage": "opaque",
+            "depth": 10,
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rgba": [30, 30, 30, 255]
+          },
+          {
+            "id": "far-blue",
+            "stage": "transparent",
+            "depth": 7,
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rgba": [30, 120, 220, 128]
+          },
+          {
+            "id": "near-coral",
+            "stage": "transparent",
+            "depth": 3,
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rgba": [220, 80, 60, 128]
+          }
+        ]
+      },
+      "expected_frame": [
+        ["#7d4e5cff"]
+      ],
+      "anchor_pixels": {
+        "0,0": "#7d4e5cff"
+      }
+    },
+    {
+      "id": "transparent-depth-preserves-spark",
+      "scene": {
+        "width": 1,
+        "height": 1,
+        "clear_rgba": [0, 0, 0, 255],
+        "passes": [
+          {
+            "id": "base",
+            "stage": "opaque",
+            "depth": 10,
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rgba": [20, 20, 20, 255]
+          },
+          {
+            "id": "smoke",
+            "stage": "transparent",
+            "depth": 4,
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rgba": [40, 40, 80, 128]
+          },
+          {
+            "id": "spark",
+            "stage": "additive",
+            "depth": 5,
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rgba": [100, 20, 0, 128]
+          }
+        ]
+      },
+      "expected_frame": [
+        ["#502832ff"]
+      ],
+      "anchor_pixels": {
+        "0,0": "#502832ff"
+      }
+    },
+    {
+      "id": "additive-glow-accumulates",
+      "scene": {
+        "width": 1,
+        "height": 1,
+        "clear_rgba": [0, 0, 0, 255],
+        "passes": [
+          {
+            "id": "base",
+            "stage": "opaque",
+            "depth": 10,
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rgba": [15, 25, 40, 255]
+          },
+          {
+            "id": "glow",
+            "stage": "additive",
+            "depth": 3,
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rgba": [120, 40, 10, 128]
+          }
+        ]
+      },
+      "expected_frame": [
+        ["#4b2d2dff"]
+      ],
+      "anchor_pixels": {
+        "0,0": "#4b2d2dff"
+      }
+    },
+    {
+      "id": "transparent-behind-opaque-rejected",
+      "scene": {
+        "width": 1,
+        "height": 1,
+        "clear_rgba": [0, 0, 0, 255],
+        "passes": [
+          {
+            "id": "shield",
+            "stage": "opaque",
+            "depth": 2,
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rgba": [10, 10, 10, 255]
+          },
+          {
+            "id": "far-green",
+            "stage": "transparent",
+            "depth": 6,
+            "x": 0,
+            "y": 0,
+            "width": 1,
+            "height": 1,
+            "rgba": [20, 220, 40, 128]
+          }
+        ]
+      },
+      "expected_frame": [
+        ["#0a0a0aff"]
+      ],
+      "anchor_pixels": {
+        "0,0": "#0a0a0aff"
+      }
+    }
+  ]
+}

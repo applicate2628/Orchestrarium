@@ -1,0 +1,127 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "S29",
+    "surface_id": "R29",
+    "pack_id": "P06",
+    "role_class": "review",
+    "artifact_type": "review findings",
+    "modality_family": "accessibility gate",
+    "allowed_change_surface": [
+      "candidate/review-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "review, QA",
+    "overlay_flags": []
+  },
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-accessibility-scope.md",
+    "inputs/keyboard-and-at-observations.md",
+    "inputs/contrast-and-focus-notes.md",
+    "inputs/review-boundary.md",
+    "candidate/README.md",
+    "candidate/review-report.md",
+    "candidate/review-target/README.md",
+    "candidate/review-target/share-dialog/index.html",
+    "candidate/review-target/share-dialog/dialog.css",
+    "candidate/review-target/share-dialog/dialog.js",
+    "oracle/README.md",
+    "oracle/accessibility-review-contract.json",
+    "oracle/expected-findings.md",
+    "oracle/severity-anchors.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_accessibility_review.py"
+  ],
+  "editable_report": "candidate/review-report.md",
+  "required_report_sections": [
+    "## Reviewed Surfaces",
+    "## Findings",
+    "## Required Fixes Before Merge",
+    "## Residual Risk",
+    "## Gate Decision"
+  ],
+  "expected_gate_decision": "REVISE",
+  "required_findings": [
+    {
+      "name": "keyboard containment breach",
+      "severity": "blocking",
+      "required_terms": [
+        "candidate/review-target/share-dialog/dialog.js",
+        "inputs/keyboard-and-at-observations.md",
+        "Delete workspace",
+        "Tab",
+        "focus trap"
+      ]
+    },
+    {
+      "name": "semantic labeling and state exposure",
+      "severity": "blocking",
+      "required_terms": [
+        "candidate/review-target/share-dialog/index.html",
+        "close-button",
+        "invite-email",
+        "scope-toggle",
+        "accessible name",
+        "aria-pressed"
+      ]
+    },
+    {
+      "name": "focus order mismatch",
+      "severity": "major",
+      "required_terms": [
+        "inputs/accepted-accessibility-scope.md",
+        "Sharing policy",
+        "tabindex",
+        "focus order",
+        "reading order"
+      ]
+    },
+    {
+      "name": "contrast and focus visibility miss",
+      "severity": "major",
+      "required_terms": [
+        "candidate/review-target/share-dialog/dialog.css",
+        "inputs/contrast-and-focus-notes.md",
+        "3.2:1",
+        "1.9:1",
+        "focus-visible"
+      ]
+    }
+  ],
+  "prohibited_report_snippets": [
+    "## Acceptance Criteria Mapping",
+    "## Bug Registry Expectation",
+    "apply_patch",
+    "browser-required",
+    "QA report",
+    "repair-plan.md"
+  ]
+}

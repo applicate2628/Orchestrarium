@@ -1,0 +1,8 @@
+order_id,customer_id,business_date,status,subtotal_cents,refund_cents,ingested_at,batch_id
+o-100,c-001,2026-03-14,settled,1200,0,2026-03-15T00:05:00Z,batch-17
+o-101,c-001,2026-03-14,pending,900,0,2026-03-15T00:06:00Z,batch-17
+o-102,c-002,2026-03-14,settled,2000,500,2026-03-15T00:07:00Z,batch-17
+o-102,c-002,2026-03-14,settled,2000,500,2026-03-15T00:12:00Z,batch-18
+o-103,c-002,2026-03-15,cancelled,800,0,2026-03-16T00:03:00Z,batch-19
+o-104,c-003,2026-03-15,settled,1500,0,2026-03-16T00:04:00Z,batch-19
+o-105,c-003,2026-03-15,settled,700,700,2026-03-16T00:05:00Z,batch-19

@@ -1,0 +1,6 @@
+jobs:
+  customer-day-rollup:
+    owner: platform
+    schedule: "0 2 * * *"
+    warehouse: analytics-prod
+    task: shared-runners/run_shared_backfill.py

@@ -1,0 +1,22 @@
+id: S19
+surface_id: R19
+pack_id: P04
+role_class: implementation
+artifact_type: code or query patch plus validation
+modality_family: SQL, ETL, or data pipeline
+allowed_change_surface:
+  - candidate/workspace/sql/customer_day_rollup.sql
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/data/**
+  - candidate/workspace/scripts/**
+  - candidate/shared-runners/**
+  - candidate/infra-config/**
+  - candidate/results-surfaces/**
+  - candidate/existing-scenario-roots/**
+score_profile: implementation
+overlay_flags: []

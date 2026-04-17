@@ -1,0 +1,4 @@
+business_date,customer_id,settled_order_count,gross_revenue_cents,refund_cents,net_revenue_cents
+2026-03-14,c-001,2,2100,0,2100
+2026-03-14,c-002,2,4000,1000,3000
+2026-03-15,c-003,2,2200,700,1500
