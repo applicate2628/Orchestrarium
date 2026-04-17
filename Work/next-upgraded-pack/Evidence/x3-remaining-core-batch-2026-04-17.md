@@ -1,10 +1,10 @@
 Date: 2026-04-17
 Owner: `$lead`
-Status: `BLOCKED`
+Status: `PASS`
 
 ## Purpose
 
-This file records the attempted `X3` execution pass on the backfilled remaining steady-state core
+This file admits the successful `X3` execution pass on the backfilled remaining steady-state core
 slice:
 
 - `T01`
@@ -26,32 +26,32 @@ slice:
 | provider path | `claude` |
 | execution helper | `Tooling/run-active-cohort-batch.ps1` |
 | batch name | `remaining-core-batch` |
-| raw local bundle | `.scratch/active-cohort-runs/2026-04-17_05-50-08-X3-remaining-core-batch/` |
+| raw local bundle | `.scratch/active-cohort-runs/2026-04-17_10-59-39-X3-remaining-core-batch/` |
 
-## Attempt result
+## Admitted result
 
-| Test | Wrapper exit | Local verification | Benchmark-surface changes | Read |
-|---|---:|---|---|---|
-| `T01` | `0` | `FAIL` | `<none>` | provider output was quota banner only |
-| `T03` | `0` | `FAIL` | `<none>` | provider output was quota banner only |
-| `T05` | `0` | `FAIL` | `<none>` | provider output was quota banner only |
-| `T07` | `0` | `FAIL` | `<none>` | provider output was quota banner only |
-| `T12` | `0` | `FAIL` | `<none>` | provider output was quota banner only |
-| `T15` | `0` | `FAIL` | `<none>` | provider output was quota banner only |
-| `T18` | `0` | `FAIL` | `<none>` | provider output was quota banner only |
-| `T19` | `0` | `FAIL` | `<none>` | provider output was quota banner only |
-| `T21` | `0` | `FAIL` | `<none>` | provider output was quota banner only |
+| Test | Wrapper exit | Local verification | Benchmark-surface changes |
+|---|---:|---|---|
+| `T01` | `0` | `PASS` | `workspace/out/facts.json` |
+| `T03` | `0` | `PASS` | `workspace/out/decision.json` |
+| `T05` | `0` | `PASS` | `workspace/out/findings.json` |
+| `T07` | `0` | `PASS` | `workspace/out/perf-memo.json` |
+| `T12` | `0` | `PASS` | `workspace/out/product-brief.json` |
+| `T15` | `0` | `PASS` | `workspace/out/build-diagnosis.json` |
+| `T18` | `0` | `PASS` | `workspace/out/ui-triage.json` |
+| `T19` | `0` | `PASS` | `workspace/out/a11y-review.json` |
+| `T21` | `0` | `PASS` | `workspace/src/path/findOwnedTarget.js` |
 
-## Blocker evidence
+## Interpretation
 
-| Topic | Observation |
+| Topic | Read |
 |---|---|
-| raw provider output | all `9 / 9` worker outputs were the same banner: `You've hit your limit · resets 8am (Europe/Moscow)` |
-| model activity | no benchmark-surface file changed in any fixture |
-| harness read | runner is now stable on zero-change attempts and no longer crashes on empty `changedPaths` |
-| benchmark interpretation | this is an upstream provider availability block, not a model-quality fail on the slice |
+| batch verdict | `X3` is admitted green on the full remaining steady-state core slice |
+| structured-output discipline | all eight structured probes stayed inside their intended output seams |
+| worker ownership discipline | `T21` stayed inside the expected owner-selection seam |
+| result quality | `X3` now has full steady-state core completion with no new material caveat from this slice |
 
 ## Next step
 
-Rerun the same remaining-core batch for `X3` after the provider quota reset window, then refresh
-the full steady-state core result surface.
+Refresh the combined steady-state core result surface and close the current `X1/X2/X3`
+checkpoint.
