@@ -81,7 +81,7 @@ Gemini does not write `externalProvider: gemini` into the Gemini-line overlay be
 - Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.
 - Unsupported external requests fail fast. There is no generic external adapter for owner roles such as `$product-manager` or `$lead` on the Gemini line.
 - An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The main Gemini session must say the route is unsupported and reroute honestly.
-- Image generation, icon work, decorative visual polish, and other clearly visual worker, review, or advisory lanes should prefer Gemini when Gemini is installed and the lane is actually visual.
+- The shipped shared profiles do not hardwire Gemini-first visual routing. If a clearly visual worker, review, or advisory lane should prefer Gemini, do that through an explicit provider override or a repo-local custom profile.
 - Independent external adapters may run in parallel when their scopes are disjoint, provider runtimes support concurrent non-interactive execution, and the active profile or lane count asks for more than one opinion.
 - Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the main Gemini session may launch repeated same-provider external helpers concurrently.
 - Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices.

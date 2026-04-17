@@ -15,7 +15,7 @@ Summarize:
 - how `external-brigade` launches a bounded parallel helper set without turning `externalOpinionCounts` into a generic concurrency cap
 - how the same external helper and provider may be reused across multiple disjoint brigade items when the runtime supports concurrent non-interactive execution
 - which owner roles remain unsupported without a dedicated external owner adapter
-- the repo-local visual-routing heuristic that prefers Gemini for image generation, icon work, and decorative visual lanes
+- that Gemini-first visual routing now requires an explicit provider override or a repo-local custom profile rather than a hidden shipped heuristic
 - how the shared `externalModelMode` distinguishes runtime-default provider selection from pinned top-model execution
 - how `externalGeminiFallbackMode` only applies under pinned Gemini runs, keeping Gemini on `gemini-3.1-pro` or allowing a single retry on `gemini-3-flash` without dropping below Gemini 3
 - how `externalClaudeApiMode` changes Claude transport behavior when Gemini routes external work to Claude

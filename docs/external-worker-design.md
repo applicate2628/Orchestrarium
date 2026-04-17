@@ -83,17 +83,17 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    externalPriorityProfile: balanced
    externalPriorityProfiles:
      balanced:
-       advisory.repo-understanding: [claude, gemini, codex]
+       advisory.repo-understanding: [claude, codex, gemini]
        advisory.design-adr: [claude, codex, gemini]
        review.pre-pr: [claude, codex, gemini]
        review.performance-architecture: [claude, codex, gemini]
        worker.default-implementation: [codex, claude, gemini]
        worker.systems-performance-implementation: [codex, claude, gemini]
        worker.long-autonomous: [claude, codex, gemini]
-       worker.ui-structural-modernization: [gemini, claude, codex]
-       worker.ui-surgical-patch-cleanup: [claude, codex, gemini]
-       worker.visual-icon-decorative: [gemini, claude, codex]
-       review.visual: [gemini, claude, codex]
+       worker.ui-structural-modernization: [codex, claude, gemini]
+       worker.ui-surgical-patch-cleanup: [codex, claude, gemini]
+       worker.visual-icon-decorative: [codex, claude, gemini]
+       review.visual: [claude, codex, gemini]
      gemini-crosscheck:
        advisory.repo-understanding: [claude, gemini, codex]
        advisory.design-adr: [claude, gemini, codex]
@@ -101,11 +101,11 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
        review.performance-architecture: [claude, codex, gemini]
        worker.default-implementation: [codex, claude, gemini]
        worker.systems-performance-implementation: [codex, claude, gemini]
-       worker.long-autonomous: [claude, gemini, codex]
-       worker.ui-structural-modernization: [gemini, claude, codex]
-       worker.ui-surgical-patch-cleanup: [claude, codex, gemini]
-       worker.visual-icon-decorative: [gemini, claude, codex]
-       review.visual: [gemini, claude, codex]
+       worker.long-autonomous: [claude, codex, gemini]
+       worker.ui-structural-modernization: [codex, claude, gemini]
+       worker.ui-surgical-patch-cleanup: [codex, claude, gemini]
+       worker.visual-icon-decorative: [codex, claude, gemini]
+       review.visual: [claude, codex, gemini]
    externalOpinionCounts:
      advisory.repo-understanding: 1
      advisory.design-adr: 1
@@ -143,30 +143,30 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 
 | Profile | Lane | `externalProvider: auto` priority |
 |---------|---------|---------|
-| `balanced` | `advisory.repo-understanding` | `claude > gemini > codex` |
+| `balanced` | `advisory.repo-understanding` | `claude > codex > gemini` |
 |  | `advisory.design-adr` | `claude > codex > gemini` |
 |  | `review.pre-pr` | `claude > codex > gemini` |
 |  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
 |  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 |  | `worker.long-autonomous` | `claude > codex > gemini` |
-|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
-|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
-|  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
-|  | `review.visual` | `gemini > claude > codex` |
+|  | `worker.ui-structural-modernization` | `codex > claude > gemini` |
+|  | `worker.ui-surgical-patch-cleanup` | `codex > claude > gemini` |
+|  | `worker.visual-icon-decorative` | `codex > claude > gemini` |
+|  | `review.visual` | `claude > codex > gemini` |
 | `gemini-crosscheck` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > gemini > codex` |
 |  | `review.pre-pr` | `claude > gemini > codex` |
 |  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
 |  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
-|  | `worker.long-autonomous` | `claude > gemini > codex` |
-|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
-|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
-|  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
-|  | `review.visual` | `gemini > claude > codex` |
+|  | `worker.long-autonomous` | `claude > codex > gemini` |
+|  | `worker.ui-structural-modernization` | `codex > claude > gemini` |
+|  | `worker.ui-surgical-patch-cleanup` | `codex > claude > gemini` |
+|  | `worker.visual-icon-decorative` | `codex > claude > gemini` |
+|  | `review.visual` | `claude > codex > gemini` |
 
-   `externalProvider: auto` is pack-neutral and resolves through the active named profile instead of a line-default provider mapping. Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun. Repo-local documented heuristics may still refine `auto` honestly for a task domain; in Orchestrarium, image generation, icon work, and decorative visual polish prefer Gemini when Gemini is installed and the lane is actually visual, while `gemini-crosscheck` is the named profile for bringing Gemini into broader advisory and review second-opinion sets.
+   `externalProvider: auto` is pack-neutral and resolves through the active named profile instead of a line-default provider mapping. Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun. If a repository wants Gemini-first routing for visual lanes, express that through an explicit provider override or a repo-local custom profile; `gemini-crosscheck` is the named shipped profile for bringing Gemini into broader advisory and review second-opinion sets without changing the default worker and visual lane order.
 
 4. **Common rules**
    - CLI availability check before dispatch (`which codex` / `where codex` on Claude Code, `claude` / `claude.exe` on Codex, `gemini` wherever Gemini is selected)
@@ -215,7 +215,7 @@ The orchestrator (lead or main conversation) **prefers** external roles by defau
 - `mcpMode: auto | force` — `auto` uses MCP by judgment; `force` treats relevant MCP use as an explicit standing instruction
 - `preferExternalWorker: true` — `$external-worker` on eligible worker-side lanes
 - `preferExternalReviewer: true` — `$external-reviewer` on eligible `review` + `QA` stages
-- `externalProvider: auto | claude | codex | gemini` — use the shared provider universe; `auto` resolves through the active named profile, and documented repo-local heuristics may still refine the ordinary result honestly for a task domain such as Gemini-first visual work
+- `externalProvider: auto | claude | codex | gemini` — use the shared provider universe; `auto` resolves through the active named profile, and any extra Gemini-first visual routing should be expressed through an explicit provider override or a repo-local custom profile instead of assumed hidden heuristics
 - `externalPriorityProfile: balanced | gemini-crosscheck | <custom>` — select which ordered provider map `auto` uses
 - `externalPriorityProfiles` — maintain the per-profile lane matrix; this is where Gemini can be promoted into broader advisory or review roles when one opinion is not enough
 - `externalOpinionCounts` — raise specific lanes above `1` when the orchestrator should collect multiple independent external opinions

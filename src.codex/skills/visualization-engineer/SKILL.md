@@ -32,7 +32,7 @@ description: Implement an approved scientific or data-visualization phase withou
 - Prefer visual fidelity to the approved domain model over cosmetic convenience.
 - Make units, color-scale choices, coordinate transforms, and aggregation assumptions explicit.
 - Escalate conflicts between domain truth and visual design instead of silently biasing the visualization.
-- Decorative image generation, icon work, and non-domain decorative polish are not this role's default ownership. When the lane is primarily visual styling rather than truthful scientific or data representation, the orchestrator may prefer Gemini or Gemini-backed `$external-worker`.
+- Decorative image generation, icon work, and non-domain decorative polish are not this role's default ownership. When the lane is primarily visual styling rather than truthful scientific or data representation, the orchestrator may use an explicit Gemini route or an explicitly Gemini-routed `$external-worker`.
 
 ## Adjacent findings protocol
 

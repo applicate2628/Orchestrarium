@@ -8,6 +8,8 @@ A cross-provider agent orchestration monorepo that keeps the Codex, Claude Code,
 
 The provider lines share one governance model and role vocabulary, while each keeps the runtime structure expected by its own provider. In this branch, the root router installers now cover Codex, Claude Code, and Gemini CLI while still keeping each provider line honest through its own source-surface checks.
 
+Warning: Orchestrarium is optimized for maximum execution effectiveness and low orchestration drag rather than for minimum token spend. On large tasks, multi-opinion review lanes, or aggressive external fan-out, usage can rise quickly and consume a substantial token budget in a short time.
+
 ## Repository layout
 
 ```text
@@ -103,28 +105,28 @@ These are persisted `externalPriorityProfile` choices, not the init-time preset 
 
 | Profile | Lane | Priority |
 |---|---|---|
-| `balanced` | `advisory.repo-understanding` | `claude > gemini > codex` |
+| `balanced` | `advisory.repo-understanding` | `claude > codex > gemini` |
 |  | `advisory.design-adr` | `claude > codex > gemini` |
 |  | `review.pre-pr` | `claude > codex > gemini` |
 |  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
 |  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
 |  | `worker.long-autonomous` | `claude > codex > gemini` |
-|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
-|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
-|  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
-|  | `review.visual` | `gemini > claude > codex` |
+|  | `worker.ui-structural-modernization` | `codex > claude > gemini` |
+|  | `worker.ui-surgical-patch-cleanup` | `codex > claude > gemini` |
+|  | `worker.visual-icon-decorative` | `codex > claude > gemini` |
+|  | `review.visual` | `claude > codex > gemini` |
 | `gemini-crosscheck` | `advisory.repo-understanding` | `claude > gemini > codex` |
 |  | `advisory.design-adr` | `claude > gemini > codex` |
 |  | `review.pre-pr` | `claude > gemini > codex` |
 |  | `review.performance-architecture` | `claude > codex > gemini` |
 |  | `worker.default-implementation` | `codex > claude > gemini` |
 |  | `worker.systems-performance-implementation` | `codex > claude > gemini` |
-|  | `worker.long-autonomous` | `claude > gemini > codex` |
-|  | `worker.ui-structural-modernization` | `gemini > claude > codex` |
-|  | `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
-|  | `worker.visual-icon-decorative` | `gemini > claude > codex` |
-|  | `review.visual` | `gemini > claude > codex` |
+|  | `worker.long-autonomous` | `claude > codex > gemini` |
+|  | `worker.ui-structural-modernization` | `codex > claude > gemini` |
+|  | `worker.ui-surgical-patch-cleanup` | `codex > claude > gemini` |
+|  | `worker.visual-icon-decorative` | `codex > claude > gemini` |
+|  | `review.visual` | `claude > codex > gemini` |
 
 If a repo-local lane policy explicitly asks for consultant input at closeout, it should follow the configured `consultantMode`; `consultantMode: disabled` waives consultant closeout instead of blocking the batch. `externalOpinionCounts` may raise advisory or review lanes above `1` when the active policy wants multiple independent external opinions before advancing, but it does not prevent the lead from launching multiple same-provider external helpers in parallel on different disjoint brigade items.
 

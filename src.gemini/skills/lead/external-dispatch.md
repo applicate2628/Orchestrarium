@@ -81,11 +81,11 @@ Rules:
 | `review.performance-architecture` | `claude > codex > gemini` |
 | `worker.default-implementation` | `codex > claude > gemini` |
 | `worker.systems-performance-implementation` | `codex > claude > gemini` |
-| `worker.long-autonomous` | `claude > gemini > codex` |
-| `worker.ui-structural-modernization` | `gemini > claude > codex` |
-| `worker.ui-surgical-patch-cleanup` | `claude > codex > gemini` |
-| `worker.visual-icon-decorative` | `gemini > claude > codex` |
-| `review.visual` | `gemini > claude > codex` |
+| `worker.long-autonomous` | `claude > codex > gemini` |
+| `worker.ui-structural-modernization` | `codex > claude > gemini` |
+| `worker.ui-surgical-patch-cleanup` | `codex > claude > gemini` |
+| `worker.visual-icon-decorative` | `codex > claude > gemini` |
+| `review.visual` | `claude > codex > gemini` |
 
 ## Routing algorithm
 

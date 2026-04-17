@@ -36,7 +36,7 @@ Gemini-line rules:
 - `externalGeminiFallbackMode` matters only when provider resolves to Gemini and the model policy is pinned
 - Under `externalModelMode: pinned-top-pro`, `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures
 - `externalClaudeApiMode` matters only when provider resolves to Claude
-- documented repo-local visual heuristics may still keep eligible image/icon/decorative visual lanes on Gemini itself when that routing remains honest
+- if a repository wants Gemini-first routing for eligible image/icon/decorative visual lanes, express that through an explicit provider override or a repo-local custom profile
 - same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce
 - preserve unknown keys and keep the three new profile/count keys in expanded multi-key form rather than collapsing them into a consultant-only shape
 - `externalOpinionCounts` is lane-specific; when a lane asks for more than one opinion, the lead may invoke the matching external skill repeatedly and aggregate fail closed
