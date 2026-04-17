@@ -260,8 +260,9 @@ Do not advance work on optimism or partial acceptance.
 ## Parallelism rule
 
 - Parallelize read-heavy work such as research, triage, summarization, and test analysis when the scopes are independent.
+- `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - Be conservative with write-heavy work. Parallel edits are acceptable only when write scopes and contracts are already fixed.
-- Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane.
+- Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.
 - If merge or coordination cost is likely to exceed the benefit, do not parallelize.
 
 ## Governance rule

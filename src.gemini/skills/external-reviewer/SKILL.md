@@ -18,8 +18,8 @@ Use the shared Gemini dispatch contract in [../lead/external-dispatch.md](../lea
 
 - Read and normalize `.gemini/.agents-mode.yaml` to the current canonical format before trusting its flags.
 - Read and normalize `.gemini/.agents-mode.yaml` to the current canonical format before trusting its flags. If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
-- Honor `.gemini/.agents-mode.yaml`, including `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`.
-- `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not cap how many same-provider review instances may run in parallel for different disjoint lanes or slices.
+- Honor `.gemini/.agents-mode.yaml`, including `parallelMode`, `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`.
+- `parallelMode` is the general helper fan-out rule across internal and external lanes; `externalOpinionCounts` governs distinct-provider opinions for one lane and does not cap how many same-provider review instances may run in parallel for different disjoint lanes or slices.
 - `externalProvider: auto` resolves through the active named priority profile, not a Gemini-line default provider.
 - `externalPriorityProfile` defaults to `balanced`; `gemini-crosscheck` is the profile that keeps Gemini inside non-visual review cross-check lanes.
 - `externalProvider: codex` resolves to Codex CLI explicitly.

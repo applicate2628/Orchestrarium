@@ -12,7 +12,7 @@ Use this contract when `subagent_type` is `external-worker` or `external-reviewe
 
 - These roles are routing adapters, not new business professions.
 - The `Assigned role` field names the internal role being replaced for provenance.
-- Read and normalize `.claude/.agents-mode.yaml` first. Honor `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalModelMode`, `externalGeminiFallbackMode`, and `externalClaudeApiMode` when they are present. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode.yaml` file; it remains Codex-line only.
+- Read and normalize `.claude/.agents-mode.yaml` first. Honor `parallelMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalModelMode`, `externalGeminiFallbackMode`, and `externalClaudeApiMode` when they are present. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode.yaml` file; it remains Codex-line only.
 - If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.claude/.agents-mode.yaml` and then global legacy `~/.claude/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 - Resolve external routing in this order: `role eligibility -> provider selection -> CLI availability`.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`. If a request lands in one of those lanes, fail fast with an unsupported-route explanation instead of probing providers.
@@ -21,9 +21,10 @@ Use this contract when `subagent_type` is `external-worker` or `external-reviewe
 - `external-worker` covers the full worker-side lane.
 - `external-reviewer` covers review and QA-side work.
 - `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may be selected when the route is eligible. If a repository wants Gemini-first routing for image/icon/decorative visual lanes, express that through an explicit provider override or a repo-local custom profile.
-- Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support concurrent non-interactive execution. If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
+- `parallelMode` is the general rule for whether independent helper lanes should be parallelized by judgment at all. External fan-out follows that rule instead of defining a separate global concurrency model.
+- Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support concurrent non-interactive execution. If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
 - Same-provider reuse is allowed for independent external fan-out. Do not impose a one-instance-per-provider cap when multiple admitted artifacts or disjoint slices need the same helper/provider combination.
-- `externalOpinionCounts` still governs distinct-provider opinion requirements for one lane; it does not limit brigade-style parallel launches across different independent lanes or slices.
+- `externalOpinionCounts` still governs distinct-provider opinion requirements for one lane; it does not replace the general `parallelMode` rule or limit brigade-style parallel launches across different independent lanes or slices.
 - When the routing decision is "launch a bounded set of external helpers together", prefer `/agents-external-brigade` so the brigade has one explicit plan, one ownership table, and one aggregated result surface.
 
 For external adapters, include the provenance header from `external-dispatch.md` in the returned artifact.

@@ -64,9 +64,10 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The lead must say the route is unsupported and reroute honestly.
 - `externalProvider: auto` is the ordinary default only; explicit user override or documented repo-local heuristics may still choose a different honest provider for the task domain.
 - The shipped shared profiles do not hardwire Gemini-first visual routing. If a clearly visual worker or review lane should prefer Gemini, do that through an explicit provider override or a repo-local custom profile.
-- Independent external adapters may run in parallel when their scopes are disjoint and provider runtimes support it. If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters over silent serialization or dropped lanes.
+- `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external fan-out is one overlay on top of that rule.
+- Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support it. If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters over silent serialization or dropped lanes.
 - Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the lead may launch repeated same-provider external helpers concurrently.
-- Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices.
+- Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices on top of the general `parallelMode` rule.
 
 ## Canonical routing patterns
 
@@ -401,6 +402,7 @@ When NOT to save:
 ## Parallelism guidance
 
 - Parallelize read-heavy work such as research, triage, and test analysis when scopes are independent.
+- `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - Parallelize write-heavy work only after contracts and phase boundaries are frozen.
 - Do not run two writing roles in the same area without explicit ownership boundaries.
 

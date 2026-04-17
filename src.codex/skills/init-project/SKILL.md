@@ -25,6 +25,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `consultantMode` | `disabled` | `internal` | `external` | `external` | `disabled` |
 | `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `delegationMode` | `manual` | `auto` | `force` | `force` | `auto` |
+| `parallelMode` | `auto` | `auto` | `force` | `auto` | `force` |
 | `mcpMode` | `auto` | `auto` | `auto` | `force` | `auto` |
 | `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
 | `preferExternalReviewer` | `false` | `true` | `true` | `true` | `false` |
@@ -90,6 +91,7 @@ Routing conventions (not persisted as keys):
      - `consultantMode`
      - `externalClaudeApiMode`
      - `delegationMode`
+     - `parallelMode`
      - `mcpMode`
      - `preferExternalWorker`
      - `preferExternalReviewer`
@@ -104,6 +106,7 @@ Routing conventions (not persisted as keys):
      - `consultantMode: disabled`
    - `externalClaudeApiMode: auto`
    - `delegationMode: manual`
+   - `parallelMode: auto`
      - `mcpMode: auto`
    - `preferExternalWorker: false`
    - `preferExternalReviewer: false`
@@ -138,6 +141,7 @@ Routing conventions (not persisted as keys):
    consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
    externalClaudeApiMode: {value}  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
    delegationMode: {value}  # allowed: manual | auto | force; default: manual
+   parallelMode: {value}  # allowed: manual | auto | force; default: auto
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
    preferExternalReviewer: {value}  # allowed: false | true; default: false

@@ -17,6 +17,7 @@ The exemplar shared default lives in `shared/agents-mode.defaults.yaml`. In the 
 The shipped shared exemplar is intentionally a quiet baseline for first install:
 - consultant disabled by default
 - delegation manual by default
+- parallel routing by judgment by default
 - MCP automatic by default
 - no standing preference for external worker or reviewer lanes
 - `balanced` as the default named external priority profile
@@ -59,6 +60,7 @@ At init time, the helper may either write the selected preset immediately or ent
 | `consultantMode` | `disabled` | `internal` | `external` | `external` | `disabled` |
 | `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `delegationMode` | `manual` | `auto` | `force` | `force` | `auto` |
+| `parallelMode` | `auto` | `auto` | `force` | `auto` | `force` |
 | `mcpMode` | `auto` | `auto` | `auto` | `force` | `auto` |
 | `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
 | `preferExternalReviewer` | `false` | `true` | `true` | `true` | `false` |
@@ -105,6 +107,19 @@ Notes:
 | `manual` | Explicit delegation only | Do not treat ordinary delegation as pre-authorized. Delegate when the user or the governing workflow explicitly requests it. |
 | `auto` | Delegation by routing judgment | Treat ordinary delegation as enabled, but still choose locally vs delegated execution based on routing, scope, and specialist fit. |
 | `force` | Delegation whenever feasible | Treat delegation as a standing instruction whenever a matching specialist and viable tool path exist. If the tool path is unavailable, say so explicitly instead of pretending the forced delegation happened locally. |
+
+### `parallelMode`
+
+| Value | Meaning | Expected behavior |
+|---|---|---|
+| `manual` | Explicit parallelism only | Do not treat ordinary parallel fan-out as pre-authorized. Launch helper or subagent lanes in parallel only when the user, the governing workflow, or a repo-local policy explicitly asks for that parallel bundle. |
+| `auto` | Parallelism by routing judgment | Treat safe parallelism as available. Launch independent lanes together when dependencies are satisfied, scopes are disjoint, and merge or integration cost is justified. |
+| `force` | Parallelize whenever safe | Treat safe parallel launch as a standing instruction across both internal and external lanes. When two or more independent lanes or slices are ready, prefer launching them together instead of serializing, while still respecting dependency order, disjoint ownership, integration, and runtime limits. |
+
+Notes:
+- `parallelMode` is the general orchestrator fan-out rule for any helper or subagent lane, not only for external adapters.
+- `parallelMode: manual` does not waive an explicit user-requested or repo-policy-required parallel bundle; it only disables ordinary judgment-based parallel fan-out as the default.
+- External-specific controls remain overlays on top of `parallelMode`: `externalOpinionCounts` governs same-lane external distinct-opinion requirements, and `external-brigade` governs one bounded parallel external helper set.
 
 ### `mcpMode`
 
@@ -222,6 +237,7 @@ Notes:
 - For multi-opinion advisory or review lanes, any returned `REVISE` or `BLOCKED` verdict blocks gate advancement unless a stricter repo-local rule overrides it explicitly.
 - `externalOpinionCounts` is a same-lane distinct-opinion contract, not a global concurrency cap. It does not prevent the lead from running multiple same-provider helper instances in parallel on different disjoint lanes or slices.
 - When a lane asks for `2+` opinions, treat that as a distinct-opinion requirement whenever the provider order and availability make that possible. Reusing one provider repeatedly does not satisfy the opinion count for that same lane unless a repo-local rule says otherwise.
+- `parallelMode` is still the general rule for whether helper lanes should be parallelized by judgment at all; `externalOpinionCounts` only changes how many external opinions one lane must collect once that lane is active.
 - When bounded parallel same-provider reuse is needed, route that helper set through `/agents-external-brigade` instead of treating opinion counts as a concurrency control.
 
 ### `external<Provider>WorkdirMode`
@@ -341,11 +357,11 @@ Notes:
 
 ## First-write defaults
 
-| Provider | `consultantMode` | `externalClaudeApiMode` | `delegationMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalGeminiWorkdirMode` | `externalModelMode` | `externalGeminiFallbackMode` | `externalClaudeProfile` |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Codex | `disabled` | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | `opus-max` unless explicitly overridden |
-| Claude Code | `disabled` | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | not part of canonical Claude-line config |
-| Gemini CLI | `disabled` | `auto` | `manual` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | not part of canonical Gemini-line config |
+| Provider | `consultantMode` | `externalClaudeApiMode` | `delegationMode` | `parallelMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalGeminiWorkdirMode` | `externalModelMode` | `externalGeminiFallbackMode` | `externalClaudeProfile` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Codex | `disabled` | `auto` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | `opus-max` unless explicitly overridden |
+| Claude Code | `disabled` | `auto` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | not part of canonical Claude-line config |
+| Gemini CLI | `disabled` | `auto` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `neutral` | `neutral` | `neutral` | `runtime-default` | `auto` | not part of canonical Gemini-line config |
 
 Structured defaults written alongside the scalar keys:
 
@@ -388,8 +404,9 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 | Rule | Meaning |
 |---|---|
 | Explicit user override | An explicit user role or routing request can override the standing toggle state in either direction unless a higher-priority platform or policy rule forbids it. |
+| General parallelism mode | `parallelMode` governs whether ordinary helper/subagent fan-out stays explicit-only (`manual`), judgment-based (`auto`), or a standing instruction whenever safe (`force`) across both internal and external lanes. |
 | External routing order | Check role eligibility first. Only supported external buckets proceed to provider resolution and CLI availability checks. |
-| External parallelism | If independent eligible lanes are ready and provider runtimes support it, multiple external adapters may run concurrently. Internal native slot limits are not a reason to drop or silently serialize otherwise-ready external lanes. |
+| External parallelism | If `parallelMode` permits it and independent eligible external lanes are ready, multiple external adapters may run concurrently. Internal native slot limits are not a reason to drop or silently serialize otherwise-ready external lanes. |
 | Same-provider fan-out | Parallel external work is not capped at one instance per helper or provider. Multiple simultaneous `consultant`, `external-worker`, or `external-reviewer` runs may target the same provider when each run owns a different admitted artifact or disjoint slice. |
 | External adapter availability | `$external-worker` and `$external-reviewer` do not silently fall back inside the role. If the external CLI is unavailable, the adapter is disabled and the orchestrator reroutes explicitly. |
 | Direct external launch | Provider-backed consultant execution in `external` mode and both external adapter roles must launch the selected external transport directly. If the host runtime cannot do that, the route is disabled rather than proxied through an internal helper. |
@@ -398,8 +415,8 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 | Gemini fallback mode | `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for limit, quota, or capacity-style Gemini failures when the model policy is pinned; `force` starts on `gemini-3-flash` immediately. |
 | Claude API mode | `externalClaudeApiMode: auto` keeps Claude CLI first and then tries the secret-backed Claude wrapper as the named secondary Claude transport; `force` starts on that wrapper immediately. This is the single Claude wrapper-transport toggle. |
 | Active priority profile | `externalPriorityProfile` selects the named provider-order map used only when `externalProvider: auto`. Unknown profile names fail closed. |
-| Multi-opinion routing | `externalOpinionCounts` controls how many distinct external opinions a lane must collect under `auto`. Missing counts mean `1`; shortfalls keep the lane `BLOCKED`. |
-| External brigade | A brigade is a bounded parallel set of external helper runs. It may mix providers or reuse one provider many times, but each brigade item still owns one execution role, one admitted artifact, and one gate. |
+| Multi-opinion routing | `externalOpinionCounts` controls how many distinct external opinions a lane must collect under `auto`. Missing counts mean `1`; shortfalls keep the lane `BLOCKED`. It does not replace the general `parallelMode` rule. |
+| External brigade | A brigade is a bounded parallel set of external helper runs. It may mix providers or reuse one provider many times, but each brigade item still owns one execution role, one admitted artifact, and one gate, and it remains an external-specific overlay on top of the general `parallelMode` rule. |
 | Shared provider universe | All three packs use the same provider universe: `auto | codex | claude | gemini`. |
 | Shared lane matrix | `externalProvider: auto` resolves by lane type through the active priority profile instead of by host pack identity. |
 | Self-provider rule | Ordinary `auto` must not resolve to the same provider as the host line. Self-provider is explicit-override only. This is a repo-local routing rule, not an official provider-wide ban on invoking the same CLI. |

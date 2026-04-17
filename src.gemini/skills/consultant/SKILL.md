@@ -19,6 +19,7 @@ Read and normalize `.gemini/.agents-mode.yaml` before routing. If local `.gemini
 Relevant keys:
 
 - `consultantMode`
+- `parallelMode`
 - `externalClaudeApiMode`
 - `externalProvider`
 - `externalPriorityProfile`
@@ -39,9 +40,10 @@ Gemini-line provider rules:
 - Under `externalModelMode: pinned-top-pro`, `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures
 - `externalClaudeApiMode` matters only when the resolved provider is Claude; allowed values are `disabled | auto | force`, with `auto` as the default
 - `externalClaudeApiMode` is the single Claude wrapper-transport toggle: `disabled` forbids the installed secret-backed Claude wrapper, `auto` keeps the allowed Claude CLI path first and then permits that wrapper-backed retry, and `force` starts on the wrapper-backed path immediately
+- `parallelMode` is the general helper fan-out rule across internal and external lanes
 - The shared lane matrix still prefers Gemini for image/icon/decorative advisory work when that routing remains honest
 - Same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce
-- When the active lane policy asks for more than one external opinion, the lead may invoke this skill more than once and aggregate the returned memos
+- When the active lane policy asks for more than one external opinion, the lead may invoke this skill more than once and aggregate the returned memos on top of `parallelMode`
 
 ## Return
 

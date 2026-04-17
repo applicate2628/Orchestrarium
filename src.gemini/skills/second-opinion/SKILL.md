@@ -15,6 +15,7 @@ Manage these keys in `.gemini/.agents-mode.yaml`:
 
 - `consultantMode`
 - `delegationMode`
+- `parallelMode`
 - `mcpMode`
 - `preferExternalWorker`
 - `preferExternalReviewer`
@@ -39,7 +40,8 @@ Gemini-line rules:
 - if a repository wants Gemini-first routing for eligible image/icon/decorative visual lanes, express that through an explicit provider override or a repo-local custom profile
 - same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce
 - preserve unknown keys and keep the three new profile/count keys in expanded multi-key form rather than collapsing them into a consultant-only shape
-- `externalOpinionCounts` is lane-specific; when a lane asks for more than one opinion, the lead may invoke the matching external skill repeatedly and aggregate fail closed
+- `parallelMode` is the general helper fan-out rule across internal and external lanes
+- `externalOpinionCounts` is lane-specific; when a lane asks for more than one opinion, the lead may invoke the matching external skill repeatedly and aggregate fail closed on top of `parallelMode`
 
 ## Toggle actions
 

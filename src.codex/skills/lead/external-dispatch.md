@@ -17,6 +17,7 @@ Canonical schema:
 consultantMode: external  # allowed: external | internal | disabled; default: disabled
 externalClaudeApiMode: auto  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
 delegationMode: manual  # allowed: manual | auto | force; default: manual
+parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
@@ -33,6 +34,7 @@ externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opu
 
 - `consultantMode` controls `$consultant` behavior.
 - `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
+- `parallelMode: manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `mcpMode: auto` lets the agent decide when available MCP tools are appropriate; `force` makes relevant MCP usage a standing explicit instruction.
 - `preferExternalWorker` routes eligible worker-side roles through `$external-worker` by default.
 - `preferExternalReviewer` routes eligible reviewer/QA roles through `$external-reviewer` by default.
@@ -53,7 +55,7 @@ externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opu
 - If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode`. Normalize whichever file supplied the effective config in place before trusting the flags.
 - When writing `.agents/.agents-mode.yaml`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
 - Writes go to `.agents/.agents-mode.yaml`; preserve unknown keys and the other known keys when updating.
-- If the file is created from scratch, write the full default shape: the requested `consultantMode`, `externalClaudeApiMode: auto`, `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `externalPriorityProfiles` with shipped `balanced` and `gemini-crosscheck` blocks, `externalOpinionCounts` with documented lanes defaulting to `1`, `externalCodexWorkdirMode: neutral`, `externalClaudeWorkdirMode: neutral`, `externalGeminiWorkdirMode: neutral`, `externalModelMode: runtime-default`, `externalGeminiFallbackMode: auto`, and `externalClaudeProfile: opus-max` unless the user explicitly requested a different Claude profile.
+- If the file is created from scratch, write the full default shape: the requested `consultantMode`, `externalClaudeApiMode: auto`, `delegationMode: manual`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `externalPriorityProfiles` with shipped `balanced` and `gemini-crosscheck` blocks, `externalOpinionCounts` with documented lanes defaulting to `1`, `externalCodexWorkdirMode: neutral`, `externalClaudeWorkdirMode: neutral`, `externalGeminiWorkdirMode: neutral`, `externalModelMode: runtime-default`, `externalGeminiFallbackMode: auto`, and `externalClaudeProfile: opus-max` unless the user explicitly requested a different Claude profile.
 - Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 
 ## Routing model
@@ -81,9 +83,10 @@ externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opu
 - Provider-backed consultant execution in `external` mode plus `$external-worker` and `$external-reviewer` must use direct external launch from the orchestrating runtime or an approved transport wrapper script. Do not proxy them through an internal agent/helper/subagent host.
 - A spawned internal subagent is still an internal execution path even if the prompt assigns it a provider label such as Gemini Pro. That shape does not satisfy `$external-worker` or `$external-reviewer`.
 - The external adapter may be selected by the preference flags or by explicit user / lead override.
-- Multiple external adapters may run in parallel when their scopes are independent and the selected provider runtimes support concurrent non-interactive execution.
+- `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external adapter fan-out is one overlay on top of that rule.
+- Multiple external adapters may run in parallel when their scopes are independent, `parallelMode` permits ordinary parallel fan-out, and the selected provider runtimes support concurrent non-interactive execution.
 - Do not cap that fan-out at one instance per helper or provider: the same external helper and the same resolved provider may be launched multiple times concurrently when each run owns a different admitted artifact or disjoint slice.
-- `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not forbid brigade-style reuse of the same provider across different independent lanes or slices.
+- `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not replace the general `parallelMode` rule or forbid brigade-style reuse of the same provider across different independent lanes or slices.
 - If the active priority profile requests multiple opinions for a lane, collect them fail-closed: partial collection is evidence, not success, and the lane stays blocked until the requested opinion count is satisfied.
 - If internal native slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping those lanes.
 - When multiple independent external lanes should launch together, prefer the pack-local `external-brigade` surface so the lead records one bounded brigade plan instead of scattering ad hoc parallel helper launches.
