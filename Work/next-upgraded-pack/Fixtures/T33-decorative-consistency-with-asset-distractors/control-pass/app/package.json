@@ -1,0 +1,9 @@
+{
+  "name": "t33-decorative-consistency",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test",
+    "verify-decor": "node scripts/verify-decor.js"
+  }
+}

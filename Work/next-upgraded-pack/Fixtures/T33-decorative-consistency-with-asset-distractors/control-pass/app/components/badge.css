@@ -1,0 +1,4 @@
+/* decor preview only; not the real owner seam */
+.badge-preview {
+  border-radius: 999px;
+}

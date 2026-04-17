@@ -24,6 +24,7 @@ Current concrete fixtures:
 - `T30-static-ui-wrong-file-attraction/` now has `broken/` and `control-pass/` runnable copies
 - `T31-fallback-noisy-evidence-filter/` now has `broken/` and `control-pass/` runnable copies
 - `T32-constrained-multi-step-patch-no-drift/` now has `broken/` and `control-pass/` runnable copies
+- `T33-decorative-consistency-with-asset-distractors/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/T08-provider-local-note-fix/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/T09-root-cause-owner-debug/` now has `broken/` and `control-pass/` runnable copies
 - `retrofit-batch-1/T10-resume-stale-context-rejection/` now has `broken/` and `control-pass/` runnable copies

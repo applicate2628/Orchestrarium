@@ -1,0 +1,4 @@
+/* The real owner seam is selectDecorSpec.js, not this stylesheet. */
+.status-card {
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.08);
+}
