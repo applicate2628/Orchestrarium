@@ -57,6 +57,32 @@ Its job is to keep two top-level zones separate:
 | keep root simple | the root should stay as a navigation surface, not become a dumping ground |
 | keep salvage out of git package | leftovers kept for recovery must stay in ignored local storage and must not become archive or work sources of truth |
 
+## Result publication format
+
+When publishing or restating benchmark results in this branch, prefer the compact operator style over prose-heavy summaries.
+
+| Rule | Meaning |
+|---|---|
+| publish results as compact tables first | do not lead with prose rankings when the user asked for results |
+| start with model legend when several rows appear | use `ID | Label` before the main ranking table when more than one model family is referenced |
+| use numbered result tables | main result tables should use the shape ``# | Линия | 1 | 2 | 3 ...`` |
+| keep one row per surface or line | result rows should be named by the comparison surface, lane, or line, not by commentary text |
+| keep test mapping separate | when needed, add a second compact table ``# | Линия | Тесты`` instead of stuffing test IDs into the ranking table |
+| keep caveats separate | penalties, blocked rows, and runtime notes belong in their own compact note tables |
+| distinguish ranked rows from supplemental rows | blocked or exploratory rows such as runtime-stalled Gemini lanes must not be mixed into the main ranking table |
+| prefer canonical labels from the active surface | use exactly the labels and ordering from the admitted archive or current mutable result surface, not ad hoc rephrasings |
+| preserve archive wording inside archive reads | when restating archived results, keep the archived labels and model versions unchanged |
+| for current mutable reads, prefer the live short table | default current-state restatements should align to `Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-17.md` or its later successor |
+
+## Current preferred publication shapes
+
+| Situation | Preferred source |
+|---|---|
+| archived basis result | `Archive/2026-04-16-first-baseline/Results/short-results-x1-x5-2026-04-16.md` |
+| current mutable compact result | `Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-17.md` |
+| current main admitted ranking surface | `Work/next-upgraded-pack/Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
+| current supporting runnable surface | `Work/next-upgraded-pack/Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` |
+
 ## Next-phase expectation
 
 The next benchmark phase should be designed inside `Work/<pack>/Planning/` first, then executed in that mutable workspace, and only after admitted evidence exists should it be archived as a new dated package under `Archive/`.
