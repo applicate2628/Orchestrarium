@@ -23,7 +23,6 @@ $RepoDir = Split-Path -Parent $ScriptDir
 $Source = Join-Path $RepoDir "src.codex"
 $AgentsSource = Join-Path $Source "agents"
 $SharedAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
-$script:DefaultAgentsModeTemp = $null
 $script:CodexPackBeginMarker = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
 $script:CodexPackEndMarker = "<!-- END ORCHESTRARIUM CODEX PACK -->"
 
@@ -389,27 +388,78 @@ function Migrate-LegacyAgentsModeFile {
     }
 }
 
-function Get-DefaultAgentsModeSource {
-    if (-not (Test-Path -LiteralPath $SharedAgentsModeSource)) {
-        throw "Missing shared agents-mode template at $SharedAgentsModeSource."
-    }
-
-    if ($null -eq $script:DefaultAgentsModeTemp) {
-        $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("orchestrarium-codex-agents-mode-{0}.yaml" -f ([guid]::NewGuid().ToString("N")))
-        $content = Get-Content -LiteralPath $SharedAgentsModeSource -Raw
-        if ($content -notmatch "(?m)^externalClaudeProfile:") {
-            if (-not $content.EndsWith("`n")) {
-                $content += "`n"
-            }
-            $content += "externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max`n"
+function Get-PythonCommand {
+    foreach ($name in @("python", "python3")) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
         }
+    }
+    return $null
+}
+
+function Write-CodexDefaultAgentsModeFile {
+    param(
+        [string]$TemplateFile,
+        [string]$TargetFile
+    )
+
+    $content = Get-Content -LiteralPath $TemplateFile -Raw
+    if ($content -notmatch "(?m)^externalClaudeProfile:") {
+        if (-not $content.EndsWith("`n")) {
+            $content += "`n"
+        }
+        $content += "externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opus-max`n"
+    }
+    Set-Content -LiteralPath $TargetFile -Value $content -NoNewline
+}
+
+function Sync-AgentsModeFile {
+    param(
+        [string]$TemplateFile,
+        [string]$TargetFile,
+        [string]$Label,
+        [ValidateSet("codex", "shared")]
+        [string]$Provider
+    )
+
+    Remove-DanglingLink -Path $TargetFile -Label $Label
+
+    $normalizer = Join-Path $RepoDir "scripts\normalize-agents-mode.py"
+    $python = Get-PythonCommand
+
+    if ($null -ne $python -and (Test-Path -LiteralPath $normalizer)) {
+        if (Test-Path -LiteralPath $TargetFile) {
+            Write-Host "  Normalizing existing $Label to current canonical format..."
+        } else {
+            Write-Host "  Installing canonical $Label..."
+        }
+
         if (-not $DryRun) {
-            Set-Content -LiteralPath $tempPath -Value $content -NoNewline
+            & $python $normalizer --template $TemplateFile --target $TargetFile --provider $Provider
+            if ($LASTEXITCODE -ne 0) {
+                throw "agents-mode normalization failed for $TargetFile"
+            }
+        } else {
+            Write-Host "    [dry-run] would normalize $TargetFile"
         }
-        $script:DefaultAgentsModeTemp = $tempPath
+        return
     }
 
-    return $script:DefaultAgentsModeTemp
+    if (Test-Path -LiteralPath $TargetFile) {
+        throw "Python is required to normalize existing $Label at $TargetFile."
+    }
+
+    Write-Host "  Installing canonical $Label..."
+    if (-not $DryRun) {
+        if ($Provider -eq "codex") {
+            Write-CodexDefaultAgentsModeFile -TemplateFile $TemplateFile -TargetFile $TargetFile
+        } else {
+            Copy-Item -LiteralPath $TemplateFile -Destination $TargetFile -Force
+        }
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
 }
 
 function Get-CodexPackStartIndex {
@@ -574,7 +624,10 @@ if (-not (Test-Path -LiteralPath $AgentsSource)) {
     Write-Host "Run this script from the Orchestrarium repo root."
     exit 1
 }
-$DefaultAgentsModeSource = Get-DefaultAgentsModeSource
+if (-not (Test-Path -LiteralPath $SharedAgentsModeSource)) {
+    Write-Host "FAIL: Missing shared agents-mode template at $SharedAgentsModeSource." -ForegroundColor Red
+    exit 1
+}
 
 # Create parent directories as needed
 foreach ($tdir in @($SkillsTarget, $AgentOverridesTarget)) {
@@ -737,7 +790,7 @@ if ($Mode -ne "global") {
 }
 
 Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
-Ensure-DefaultFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
+Sync-AgentsModeFile -TemplateFile $SharedAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml" -Provider codex
 
 if ($DryRun) {
     Write-Host ""
@@ -824,8 +877,4 @@ if ($errors -gt 0) {
     Write-Host ""
     Write-Host "Next: open Codex in the target project and run '`$init-project' to review/update project policies and the installed default .agents/.agents-mode.yaml."
     Write-Host "Then run 'bash $LeadScriptsTarget/validate-skill-pack.sh' if you are validating the installation from a maintainer shell."
-}
-
-if (-not $DryRun -and $null -ne $script:DefaultAgentsModeTemp -and (Test-Path -LiteralPath $script:DefaultAgentsModeTemp)) {
-    Remove-Item -LiteralPath $script:DefaultAgentsModeTemp -Force
 }

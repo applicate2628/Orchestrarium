@@ -120,6 +120,18 @@ ensure_dir() {
   fi
 }
 
+resolve_python_command() {
+  if command -v python >/dev/null 2>&1; then
+    printf '%s' "python"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "python3"
+    return 0
+  fi
+  return 1
+}
+
 confirm_action() {
   local prompt="$1"
   if [[ "$FORCE" -eq 1 || "$DRY_RUN" -eq 1 || ! -t 0 ]]; then
@@ -377,6 +389,41 @@ install_pack_file() {
   fi
 }
 
+sync_agents_mode_file() {
+  local template="$1" dst="$2" label="$3"
+  local normalizer="$REPO_DIR/scripts/normalize-agents-mode.py"
+  local python_cmd=""
+
+  python_cmd="$(resolve_python_command || true)"
+
+  if [[ -n "$python_cmd" && -f "$normalizer" ]]; then
+    if [[ -f "$dst" ]]; then
+      echo "  Normalizing existing $label to current canonical format..."
+    else
+      echo "  Installing canonical $label..."
+    fi
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "    [dry-run] would normalize $dst"
+    else
+      "$python_cmd" "$normalizer" --template "$template" --target "$dst" --provider shared
+    fi
+    return
+  fi
+
+  if [[ -f "$dst" ]]; then
+    echo "FAIL: python or python3 is required to normalize existing $label at $dst" >&2
+    exit 1
+  fi
+
+  echo "  Installing canonical $label..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp -f "$template" "$dst"
+  fi
+}
+
 migrate_legacy_agents_mode_file() {
   local legacy="$1" dst="$2" label="$3"
 
@@ -621,7 +668,7 @@ sed 's|@\./AGENTS\.shared\.md|@./AGENTS.md|' "$SOURCE/GEMINI.md" > "$extension_g
 install_pack_content_file "$extension_gemini_tmp" "$EXTENSION_GEMINI_TARGET" "extension GEMINI.md"
 install_pack_file "$SOURCE/AGENTS.shared.md" "$EXTENSION_AGENTS_TARGET" "extension AGENTS.md"
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
-install_pack_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml" 1
+sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"
 remove_legacy_pack_file "$LEGACY_AGENTS_README_TARGET" "agents/README.md"
 remove_legacy_pack_file "$LEGACY_EXTENSION_SHARED_TARGET" "extension AGENTS.shared.md"

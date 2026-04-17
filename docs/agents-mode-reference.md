@@ -12,7 +12,7 @@ Canonical value-by-value operator reference for pack-local `agents-mode` files. 
 
 Canonical operator-overlay output is now `.agents-mode.yaml` on all three lines. Legacy extensionless `.agents-mode` files remain compatibility input only and must not be recreated as the preferred output.
 
-The exemplar shared default lives in `shared/agents-mode.defaults.yaml`. In the monorepo, installers seed project-local and global `agents-mode` files directly from that shared exemplar while preserving existing files on reinstall; any provider-only additions are applied at install time instead of living in separate `src.<provider>/agents-mode.defaults.yaml` files. Standalone pack roots still ship one canonical pack-root seed file so those repositories remain self-contained outside the monorepo.
+The exemplar shared default lives in `shared/agents-mode.defaults.yaml`. In the monorepo, installers seed project-local and global `agents-mode` files directly from that shared exemplar and must normalize existing files on reinstall when schema or shipped defaults drift; any provider-only additions are applied at install time instead of living in separate `src.<provider>/agents-mode.defaults.yaml` files. Standalone pack roots still ship one canonical pack-root seed file so those repositories remain self-contained outside the monorepo.
 
 The shipped shared exemplar is intentionally a quiet baseline for first install:
 - consultant disabled by default
@@ -27,6 +27,7 @@ The shipped shared exemplar is intentionally a quiet baseline for first install:
 
 - Any tool or skill that reads an existing `agents-mode` file to make a routing or operator-mode decision must normalize that file to the current canonical format before trusting the flags.
 - Read `.agents-mode.yaml` first. If it is missing, read the legacy extensionless `.agents-mode` file in the same provider directory as compatibility input only, normalize either input forward into `.agents-mode.yaml`, and do not recreate the legacy file.
+- Installers are part of that maintenance contract: if `.agents-mode.yaml` already exists and the canonical schema or shipped defaults have changed, reinstall must rewrite it to the current canonical form instead of preserving stale pack-owned structure verbatim.
 - In the monorepo, edit only `shared/agents-mode.defaults.yaml`; do not reintroduce provider-local `src.<provider>/agents-mode.defaults.yaml` duplicates.
 - Treat comment-free files, partially populated files, older layouts, and stale shipped profile blocks as legacy input that must be rewritten rather than preserved verbatim.
 - Read-time normalization preserves the effective values of known keys, preserves unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments on every canonical scalar key plus every shipped profile/count entry, rewrites the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks to the current pack version, and restores canonical key order.

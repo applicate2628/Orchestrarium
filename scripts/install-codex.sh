@@ -110,21 +110,6 @@ canonical_path() {
   echo "$result"
 }
 
-default_agents_mode_template() {
-  if [[ ! -f "$SHARED_AGENTS_MODE_SOURCE" ]]; then
-    echo "FAIL: missing shared agents-mode template at $SHARED_AGENTS_MODE_SOURCE" >&2
-    return 1
-  fi
-
-  local tmp
-  tmp="$(mktemp)"
-  cat "$SHARED_AGENTS_MODE_SOURCE" > "$tmp"
-  if ! grep -q '^externalClaudeProfile:' "$tmp"; then
-    printf '\nexternalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max\n' >> "$tmp"
-  fi
-  printf '%s' "$tmp"
-}
-
 resolve_install_target() {
   local input_path="$1"
   local normalized
@@ -463,8 +448,10 @@ if [[ ! -d "$AGENTS_SOURCE" ]]; then
   echo "Run this script from the Orchestrarium repo root."
   exit 1
 fi
-DEFAULT_AGENTS_MODE_SOURCE="$(default_agents_mode_template)"
-trap '[[ -n "${DEFAULT_AGENTS_MODE_SOURCE:-}" && -f "${DEFAULT_AGENTS_MODE_SOURCE:-}" ]] && rm -f "${DEFAULT_AGENTS_MODE_SOURCE:-}"' EXIT
+if [[ ! -f "$SHARED_AGENTS_MODE_SOURCE" ]]; then
+  echo "FAIL: missing shared agents-mode template at $SHARED_AGENTS_MODE_SOURCE" >&2
+  exit 1
+fi
 
 # Create target parent directories as needed
 for tdir in "$SKILLS_TARGET" "$AGENT_OVERRIDES_TARGET"; do
@@ -551,6 +538,18 @@ remove_dangling_symlink() {
   fi
 }
 
+resolve_python_command() {
+  if command -v python >/dev/null 2>&1; then
+    printf '%s' "python"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "python3"
+    return 0
+  fi
+  return 1
+}
+
 ensure_default_file() {
   local src="$1" dst="$2" label="$3"
 
@@ -566,6 +565,14 @@ ensure_default_file() {
     echo "    [dry-run] would create $dst"
   else
     cp "$src" "$dst"
+  fi
+}
+
+write_codex_default_agents_mode_file() {
+  local template="$1" dst="$2"
+  cat "$template" > "$dst"
+  if ! grep -q '^externalClaudeProfile:' "$dst"; then
+    printf '\nexternalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opus-max\n' >> "$dst"
   fi
 }
 
@@ -591,6 +598,44 @@ migrate_legacy_agents_mode_file() {
     echo "    [dry-run] would move $legacy -> $dst"
   else
     mv "$legacy" "$dst"
+  fi
+}
+
+sync_agents_mode_file() {
+  local template="$1" dst="$2" label="$3" provider="$4"
+  local normalizer="$REPO_DIR/scripts/normalize-agents-mode.py"
+  local python_cmd=""
+
+  remove_dangling_symlink "$dst" "$label"
+  python_cmd="$(resolve_python_command || true)"
+
+  if [[ -n "$python_cmd" && -f "$normalizer" ]]; then
+    if [[ -f "$dst" ]]; then
+      echo "  Normalizing existing $label to current canonical format..."
+    else
+      echo "  Installing canonical $label..."
+    fi
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "    [dry-run] would normalize $dst"
+    else
+      "$python_cmd" "$normalizer" --template "$template" --target "$dst" --provider "$provider"
+    fi
+    return
+  fi
+
+  if [[ -f "$dst" ]]; then
+    echo "FAIL: python or python3 is required to normalize existing $label at $dst" >&2
+    exit 1
+  fi
+
+  echo "  Installing canonical $label..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would create $dst"
+  elif [[ "$provider" == "codex" ]]; then
+    write_codex_default_agents_mode_file "$template" "$dst"
+  else
+    cp "$template" "$dst"
   fi
 }
 
@@ -816,7 +861,7 @@ if [ "$MODE" != "global" ]; then
 fi
 
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
-ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+sync_agents_mode_file "$SHARED_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml" "codex"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""

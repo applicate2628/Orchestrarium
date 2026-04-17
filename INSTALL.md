@@ -52,6 +52,7 @@ The preset name itself is not persisted; the helper writes the resolved canonica
 If the user wants the preset unchanged, the helper should write the preset-expanded `.agents-mode.yaml` directly; key-by-key fine-tuning is optional rather than mandatory.
 
 Canonical operator-overlay output now uses `.agents-mode.yaml` on every provider line. Legacy extensionless `.agents-mode` files remain compatibility input only: reads should prefer `.agents-mode.yaml`, fall back to the sibling extensionless file only when the canonical file is missing, normalize forward into `.agents-mode.yaml`, and not recreate the legacy path.
+The same rule now applies to reinstall: if an existing `.agents-mode.yaml` is older than the current shipped schema or defaults, the installer must normalize it to the current canonical form instead of preserving stale pack-owned structure verbatim.
 
 ## Codex install details
 
