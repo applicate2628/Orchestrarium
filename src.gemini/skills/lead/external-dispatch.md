@@ -11,22 +11,21 @@ Shared Gemini-line dispatch contract for `$consultant`, `$external-worker`, and 
 Canonical Gemini-line schema:
 
 ```yaml
-consultantMode: external  # allowed: external | internal | disabled
-delegationMode: manual  # allowed: manual | auto | force
-mcpMode: auto  # allowed: auto | force
-preferExternalWorker: true  # allowed: false | true
-preferExternalReviewer: true  # allowed: false | true
-externalProvider: auto  # allowed here: auto | codex | claude | gemini
+consultantMode: external  # allowed: external | internal | disabled; default: disabled
+externalClaudeApiMode: auto  # allowed when Claude is selected: disabled | auto | force; default: auto
+delegationMode: manual  # allowed: manual | auto | force; default: manual
+mcpMode: auto  # allowed: auto | force; default: auto
+preferExternalWorker: true  # allowed: false | true; default: false
+preferExternalReviewer: true  # allowed: false | true; default: false
+externalProvider: auto  # allowed here: auto | codex | claude | gemini; default: auto
 externalPriorityProfile: balanced  # allowed: balanced | gemini-crosscheck
 externalPriorityProfiles: {}  # profile -> lane -> ordered provider list
 externalOpinionCounts: {}  # lane -> integer
 externalCodexWorkdirMode: neutral  # allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project
 externalGeminiWorkdirMode: neutral  # allowed: neutral | project
-externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro
-externalGeminiFallbackMode: auto  # allowed when Gemini is selected: disabled | auto | force
-externalClaudeSecretMode: auto  # allowed when Claude is selected: auto | force
-externalClaudeApiMode: auto  # allowed when Claude is selected: disabled | auto | force
+externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
+externalGeminiFallbackMode: auto  # allowed when Gemini is selected: disabled | auto | force; default: auto
 ```
 
 Rules:
@@ -39,7 +38,6 @@ Rules:
 - `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, and `externalGeminiWorkdirMode` choose whether each provider-backed external run starts in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`.
 - `externalModelMode` is the shared cross-provider model-selection policy. `runtime-default` leaves the resolved provider on its runtime default model/profile. `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows only the bounded same-provider fallback used for usage-limit or quota exhaustion while staying inside that provider's approved version floor and lane policy.
 - `externalGeminiFallbackMode` is valid only when the resolved provider is Gemini and `externalModelMode: pinned-top-pro` is in effect.
-- `externalClaudeSecretMode` is valid only when the resolved provider is Claude.
 - `externalClaudeApiMode` is valid only when the resolved provider is Claude.
 - The secret-backed Claude API path remains a Claude transport, not a fourth provider.
 - `externalClaudeProfile` is not part of canonical Gemini-line config.

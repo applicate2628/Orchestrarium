@@ -50,12 +50,13 @@ When lead coordinates, or when the main conversation needs to decide between rol
 Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 
 - `consultantMode` continues to govern `$consultant`.
+- `externalClaudeApiMode: disabled | auto | force` is the single Claude wrapper-transport knob. `auto` keeps plain Claude CLI first and then tries the approved wrapper as the named secondary Claude transport, while `force` starts on that wrapper immediately.
 - `delegationMode: manual` keeps delegation explicit-by-request, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
 - `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may be selected when the route is eligible. The active profile or documented repo-local visual heuristic may rank Gemini first for image/icon/decorative visual work.
-- The Claude-line canonical schema may include the shared `externalModelMode`, `externalGeminiFallbackMode` when the resolved provider is Gemini, and `externalClaudeSecretMode` plus `externalClaudeApiMode` when the resolved provider is Claude; `externalClaudeProfile` remains Codex-line only.
+- The Claude-line canonical schema may include the shared `externalModelMode`, `externalGeminiFallbackMode` when the resolved provider is Gemini, and `externalClaudeApiMode` when the resolved provider is Claude; `externalClaudeProfile` remains Codex-line only.
 - The team template JSON does not change; routing substitutions happen at execution time.
 - `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.
 - Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.
@@ -70,11 +71,11 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 
 ## Batch-close consultant check
 
-For lead-managed work, every completed task-batch must satisfy the active lane policy's external consultant requirement before closure.
+For lead-managed work, consultant input at closeout is optional unless a repo-local lane policy explicitly asks for it, and `consultantMode: disabled` waives consultant closeout instead of leaving a hidden blocker.
 
 - The check uses `$consultant` as an advisory-only closure sweep; it does not replace reviewers, QA, or human/CI gates.
-- Request the external execution path explicitly for this closure check.
-- If the external path is unavailable, disabled, or would downgrade to an internal-only run, do not mark the batch closed; record the miss and escalate to the user instead.
+- Follow the configured `consultantMode` honestly for any requested closure check.
+- If the selected consultant path is unavailable, disabled, or would downgrade in a way the current mode does not allow, do not mark the batch closed; record the miss and escalate to the user instead.
 - The memo must end with both:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
   - The continuation prompt must begin with a direct imperative to continue and name the next concrete action.
@@ -129,7 +130,7 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive and update index |
 | Governance alignment | `$knowledge-archivist` | Governance change | Propagate to all governance files in same commit |
 | Documentation sync | `$knowledge-archivist` | Skill, role, or template added/removed/renamed | Update README, INSTALL, install scripts per root CLAUDE.md checklists |
-| Batch-close consultant-check | `$lead` | Every completed lead-managed batch | Satisfy the active lane policy's external consultant requirement or keep the batch open and escalate |
+| Batch-close consultant-check | `$lead` | Only when explicitly requested by lead or repo-local lane policy and `consultantMode` is enabled | Satisfy the requested consultant sweep or keep the batch open and escalate honestly |
 
 ## Non-obvious routing pairs
 

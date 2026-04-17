@@ -23,7 +23,6 @@ Manage these keys in `.gemini/.agents-mode.yaml`:
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalGeminiFallbackMode`
-- `externalClaudeSecretMode`
 - `externalClaudeApiMode`
 
 Gemini-line rules:
@@ -36,7 +35,6 @@ Gemini-line rules:
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion
 - `externalGeminiFallbackMode` matters only when provider resolves to Gemini and the model policy is pinned
 - Under `externalModelMode: pinned-top-pro`, `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures
-- `externalClaudeSecretMode` matters only when provider resolves to Claude
 - `externalClaudeApiMode` matters only when provider resolves to Claude
 - documented repo-local visual heuristics may still keep eligible image/icon/decorative visual lanes on Gemini itself when that routing remains honest
 - same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce

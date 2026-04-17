@@ -23,6 +23,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | Key | `default` (safe-init) | `absolute-balance` (everyday center) | `external-aggressive` (aggressive external use) | `correctness-first` (no-time-limit correctness) | `max-speed` (speed-first) |
 |---|---|---|---|---|---|
 | `consultantMode` | `disabled` | `internal` | `external` | `external` | `disabled` |
+| `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `delegationMode` | `manual` | `auto` | `force` | `force` | `auto` |
 | `mcpMode` | `auto` | `auto` | `auto` | `force` | `auto` |
 | `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
@@ -36,9 +37,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `externalGeminiWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `runtime-default` |
 | `externalGeminiFallbackMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalClaudeSecretMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalClaudeProfile` | `sonnet-high` | `sonnet-high` | `sonnet-high` | `opus-max` | `sonnet-high` |
+| `externalClaudeProfile` | `opus-max` | `sonnet-high` | `sonnet-high` | `opus-max` | `sonnet-high` |
 
 `correctness-first` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
@@ -87,6 +86,7 @@ Routing conventions (not persisted as keys):
    - Run this step only when the user started from `custom`, skipped preset selection, or explicitly asked to fine-tune after selecting a preset.
    - Walk through the canonical `agents-mode` keys one at a time:
      - `consultantMode`
+     - `externalClaudeApiMode`
      - `delegationMode`
      - `mcpMode`
      - `preferExternalWorker`
@@ -97,12 +97,11 @@ Routing conventions (not persisted as keys):
      - `externalGeminiWorkdirMode`
      - `externalModelMode`
      - `externalGeminiFallbackMode`
-     - `externalClaudeSecretMode`
-     - `externalClaudeApiMode`
      - `externalClaudeProfile`
    - Use the existing value when present, the preset-expanded value if one was selected, or otherwise default to:
      - `consultantMode: disabled`
-     - `delegationMode: manual`
+   - `externalClaudeApiMode: auto`
+   - `delegationMode: manual`
      - `mcpMode: auto`
    - `preferExternalWorker: false`
    - `preferExternalReviewer: false`
@@ -115,9 +114,7 @@ Routing conventions (not persisted as keys):
    - `externalGeminiWorkdirMode: neutral`
    - `externalModelMode: runtime-default`
    - `externalGeminiFallbackMode: auto`
-   - `externalClaudeSecretMode: auto`
-   - `externalClaudeApiMode: auto`
-   - `externalClaudeProfile: sonnet-high`
+   - `externalClaudeProfile: opus-max`
    - Accept shorthand answers such as `force`, `external reviewer only`, `opus`, or `defaults for the rest`.
 
 6. **Confirm the final choices.**
@@ -136,23 +133,22 @@ Routing conventions (not persisted as keys):
    Use this canonical shape:
 
    ```yaml
-   consultantMode: {value}  # allowed: external | internal | disabled
-   delegationMode: {value}  # allowed: manual | auto | force
-   mcpMode: {value}  # allowed: auto | force
-   preferExternalWorker: {value}  # allowed: false | true
-   preferExternalReviewer: {value}  # allowed: false | true
-   externalProvider: {value}  # allowed here: auto | codex | claude | gemini
-   externalPriorityProfile: {value}  # allowed: balanced | gemini-crosscheck | <repo-local profile>
+   consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
+   externalClaudeApiMode: {value}  # allowed when Claude is selectable: disabled | auto | force; default: auto
+   delegationMode: {value}  # allowed: manual | auto | force; default: manual
+   mcpMode: {value}  # allowed: auto | force; default: auto
+   preferExternalWorker: {value}  # allowed: false | true; default: false
+   preferExternalReviewer: {value}  # allowed: false | true; default: false
+   externalProvider: {value}  # allowed here: auto | codex | claude | gemini; default: auto
+   externalPriorityProfile: {value}  # allowed: balanced | gemini-crosscheck | <repo-local profile>; default: balanced
    externalPriorityProfiles: {value}  # allowed: structured profile map
    externalOpinionCounts: {value}  # allowed: structured lane-count map
-   externalCodexWorkdirMode: {value}  # allowed: neutral | project
-   externalClaudeWorkdirMode: {value}  # allowed: neutral | project
-   externalGeminiWorkdirMode: {value}  # allowed: neutral | project
-   externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro
-   externalGeminiFallbackMode: {value}  # allowed when Gemini is selected: disabled | auto | force
-   externalClaudeSecretMode: {value}  # allowed when Claude is selectable: auto | force
-   externalClaudeApiMode: {value}  # allowed when Claude is selectable: disabled | auto | force
-   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max
+   externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
+   externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
+   externalGeminiWorkdirMode: {value}  # allowed: neutral | project; default: neutral
+   externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
+   externalGeminiFallbackMode: {value}  # allowed when Gemini is selected: disabled | auto | force; default: auto
+   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max; default: opus-max
    ```
 
 8. **Write `## Project policies` to `AGENTS.md`.**

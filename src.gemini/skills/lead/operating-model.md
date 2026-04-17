@@ -65,6 +65,8 @@ Canonical provider semantics:
 
 | Key | Meaning |
 |---|---|
+| `consultantMode` | consultant behavior toggle for Gemini-line routing; `disabled` skips consultant work by default, `internal` keeps consultant internal-only, and `external` allows consultant requests to use external routing |
+| `externalClaudeApiMode` | valid only when the resolved provider is Claude; single Claude wrapper-transport toggle where `disabled` forbids the installed secret-backed Claude wrapper, `auto` keeps Claude CLI first and then allows the wrapper-backed retry, and `force` starts on that wrapper-backed path immediately; default `auto` |
 | `externalProvider: auto` | Resolve by the active named priority profile and then apply the self-provider filter; `balanced` is the ordinary baseline and `gemini-crosscheck` keeps Gemini present in non-visual advisory and review cross-check lanes |
 | `externalProvider: codex` | explicit Codex CLI path |
 | `externalProvider: claude` | explicit Claude CLI path |
@@ -74,8 +76,6 @@ Canonical provider semantics:
 | `externalOpinionCounts` | stores how many distinct external opinions to collect per lane |
 | `externalModelMode` | shared cross-provider model policy; `runtime-default` keeps provider runtime selection, `pinned-top-pro` pins the strongest documented provider-native model/profile with one named same-provider fallback |
 | `externalGeminiFallbackMode` | valid only when the resolved provider is Gemini and the model policy is pinned; `auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for limit-style Gemini failures |
-| `externalClaudeSecretMode` | valid only when the resolved provider is Claude |
-| `externalClaudeApiMode` | valid only when the resolved provider is Claude; `auto` allows the installed secret-backed Claude wrapper after the allowed Claude CLI path, `force` starts on that wrapper-backed path immediately |
 
 Gemini does not write `externalProvider: gemini` into the Gemini-line overlay because that would collapse into the current provider.
 - Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.

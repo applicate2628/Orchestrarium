@@ -1,10 +1,11 @@
-consultantMode: disabled  # default shared baseline; allowed: external | internal | disabled
-delegationMode: manual  # default shared baseline; allowed: manual | auto | force
-mcpMode: auto  # default shared baseline; allowed: auto | force
-preferExternalWorker: false  # default shared baseline; allowed: false | true
-preferExternalReviewer: false  # default shared baseline; allowed: false | true
-externalProvider: auto  # default shared baseline; allowed here: auto | codex | claude | gemini
-externalPriorityProfile: balanced  # default shared baseline; allowed: balanced | gemini-crosscheck | <repo-local profile>
+consultantMode: disabled  # allowed: external | internal | disabled; default: disabled
+externalClaudeApiMode: auto  # allowed when Claude is selectable: disabled | auto | force; default: auto
+delegationMode: manual  # allowed: manual | auto | force; default: manual
+mcpMode: auto  # allowed: auto | force; default: auto
+preferExternalWorker: false  # allowed: false | true; default: false
+preferExternalReviewer: false  # allowed: false | true; default: false
+externalProvider: auto  # allowed here: auto | codex | claude | gemini; default: auto
+externalPriorityProfile: balanced  # allowed: balanced | gemini-crosscheck | <repo-local profile>; default: balanced
 externalPriorityProfiles:  # allowed: profile -> lane -> ordered provider priority used when externalProvider=auto
   balanced:  # default shared routing profile
     advisory.repo-understanding: [claude, codex, gemini]  # simple admitted advisory rank: claude > codex > gemini
@@ -42,10 +43,8 @@ externalOpinionCounts:  # allowed: lane -> minimum distinct external opinions re
   worker.ui-surgical-patch-cleanup: 1  # surgical UI patch/cleanup worker opinions
   worker.visual-icon-decorative: 1  # visual/icon/decorative worker opinions
   review.visual: 1  # visual review opinions
-externalCodexWorkdirMode: neutral  # default shared baseline; allowed: neutral | project
-externalClaudeWorkdirMode: neutral  # default shared baseline; allowed: neutral | project
-externalGeminiWorkdirMode: neutral  # default shared baseline; allowed: neutral | project
-externalModelMode: runtime-default  # default shared baseline; allowed: runtime-default | pinned-top-pro
-externalGeminiFallbackMode: auto  # default shared baseline when Gemini is selectable; only affects pinned-top-pro: disabled | auto | force
-externalClaudeSecretMode: auto  # default shared baseline when Claude is selectable; allowed: auto | force
-externalClaudeApiMode: auto  # default shared baseline when Claude is selectable; allowed: disabled | auto | force
+externalCodexWorkdirMode: neutral  # allowed: neutral | project; default: neutral
+externalClaudeWorkdirMode: neutral  # allowed: neutral | project; default: neutral
+externalGeminiWorkdirMode: neutral  # allowed: neutral | project; default: neutral
+externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
+externalGeminiFallbackMode: auto  # allowed when Gemini is selectable: disabled | auto | force; default: auto

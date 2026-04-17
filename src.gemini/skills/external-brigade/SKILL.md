@@ -43,6 +43,8 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 1. Read and normalize `.gemini/.agents-mode.yaml` before trusting any flags.
 2. If the canonical file is missing, read legacy `.gemini/.agents-mode` as compatibility input only, normalize it forward into `.gemini/.agents-mode.yaml`, and do not recreate the legacy file.
 3. Honor the current external routing fields, including:
+   - `consultantMode`
+   - `externalClaudeApiMode`
    - `externalProvider`
    - `externalPriorityProfile`
    - `externalPriorityProfiles`
@@ -52,14 +54,14 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
    - `externalGeminiWorkdirMode`
    - `externalModelMode`
    - `externalGeminiFallbackMode`
-   - `externalClaudeSecretMode`
-   - `externalClaudeApiMode`
 4. Reject unsupported owner routes before provider resolution.
 5. Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. It does not cap how many same-provider brigade items may run in parallel across different disjoint lanes or slices.
 6. Allow repeated same-provider fan-out when each brigade item owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
 7. If a brigade item itself requires `2+` same-lane opinions, satisfy that distinct-provider requirement first or fail that item closed.
 8. Honor `externalModelMode` before provider-specific fallback knobs. If the resolved provider is Gemini and the model policy is pinned, honor `externalGeminiFallbackMode` inside the Gemini provider path only.
 9. Do not silently downgrade external items to internal execution inside the brigade.
+
+When Claude resolves inside the brigade, `externalClaudeApiMode` is the single Claude wrapper-transport toggle: `disabled | auto | force` with `auto` as the default.
 
 ## Return exactly one artifact
 
