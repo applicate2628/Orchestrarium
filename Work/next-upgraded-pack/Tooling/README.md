@@ -14,6 +14,7 @@ archived baseline under `Archive/`.
 | Path | Purpose |
 |---|---|
 | `run-active-cohort-batch.ps1` | clones canonical `broken/` fixtures into ignored run sandboxes, launches one active-cohort row sequentially, and performs local post-run verification |
+| `HOW-TO-USE-TESTS.md` | human-facing instructions for inspecting fixtures, running batches, and reading outputs |
 
 ## Current execution rule
 
@@ -36,3 +37,11 @@ The current helper defaults to the first worker-heavy admitted execution slice:
 7. `T25`
 8. `T29`
 9. `T30`
+
+## Human usage
+
+| Need | Go to |
+|---|---|
+| quick start for running one row | `HOW-TO-USE-TESTS.md` |
+| current ranked result surface | `../Results-drafts/short-results-current-2026-04-17.md` |
+| live checkpoint and next action | `../Checkpoints/status-2026-04-16.md` |

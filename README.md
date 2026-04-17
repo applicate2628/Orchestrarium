@@ -23,6 +23,8 @@ It preserves:
 | `Archive/2026-04-16-first-baseline/Results/full-results-2026-04-16.md` | current full archived result table |
 | `Archive/2026-04-16-first-baseline/Results/short-results-x1-x5-2026-04-16.md` | narrowed `X1..X5` basis surface |
 | `Work/next-upgraded-pack/README.md` | active mutable workspace for the next upgraded pack |
+| `Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-17.md` | current live short result table |
+| `Work/next-upgraded-pack/Tooling/HOW-TO-USE-TESTS.md` | human guide for running the current tests |
 
 ## Package layout
 
@@ -50,6 +52,7 @@ It preserves:
 |---|---|
 | current frozen snapshot | `Archive/2026-04-16-first-baseline/` |
 | active mutable workspace | `Work/next-upgraded-pack/` |
+| current live short checkpoint | `Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-17.md` |
 | active mutable model-version note | `X3` now maps to `opus 4.7max` for future mutable work |
 | archive model-version note | frozen archive keeps historical `opus 4.6max` labels because that snapshot must not be rewritten |
 | local salvage layer | intentionally excluded from the committed package |
