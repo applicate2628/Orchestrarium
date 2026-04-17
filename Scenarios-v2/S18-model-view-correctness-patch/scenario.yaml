@@ -1,0 +1,22 @@
+id: S18
+surface_id: R18
+pack_id: P05
+role_class: implementation
+artifact_type: code patch plus local verification
+modality_family: Qt model/view
+allowed_change_surface:
+  - candidate/model-view-owned/src/model_view_owned/selection_model.py
+  - candidate/model-view-owned/tests/test_selection_model.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/model-view-owned/README.md
+  - candidate/model-view-owned/src/model_view_owned/__init__.py
+  - candidate/graphics-owned/**
+  - candidate/qt-ui-owned/**
+  - candidate/visualization-owned/**
+  - candidate/scorer-hooks/**
+score_profile: implementation
+overlay_flags: []

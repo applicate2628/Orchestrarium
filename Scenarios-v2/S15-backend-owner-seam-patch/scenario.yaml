@@ -1,0 +1,22 @@
+id: S15
+surface_id: R15
+pack_id: P04
+role_class: implementation
+artifact_type: code patch plus local verification
+modality_family: backend code
+allowed_change_surface:
+  - candidate/backend-owned/src/backend_owned/session_window.py
+  - candidate/backend-owned/tests/test_session_window.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/backend-owned/README.md
+  - candidate/backend-owned/src/backend_owned/__init__.py
+  - candidate/platform-owned/**
+  - candidate/data-owned/**
+  - candidate/api-owned/**
+  - candidate/toolchain-owned/**
+score_profile: implementation
+overlay_flags: []

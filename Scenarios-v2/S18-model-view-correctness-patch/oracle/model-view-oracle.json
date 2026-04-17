@@ -1,0 +1,28 @@
+{
+  "cases": [
+    {
+      "id": "hidden-row-visible",
+      "expected_state": {
+        "visible_ids": ["row-a"],
+        "selected_id": "row-a",
+        "detail_id": "row-a"
+      }
+    },
+    {
+      "id": "proxy-sort-ignored",
+      "expected_state": {
+        "visible_ids": ["row-c", "row-b", "row-a"],
+        "selected_id": "row-a",
+        "detail_id": "row-a"
+      }
+    },
+    {
+      "id": "stale-detail-selection",
+      "expected_state": {
+        "visible_ids": ["row-a"],
+        "selected_id": "row-a",
+        "detail_id": "row-a"
+      }
+    }
+  ]
+}

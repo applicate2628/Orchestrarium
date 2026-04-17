@@ -1,0 +1,15 @@
+id: S30
+surface_id: R30
+pack_id: P06
+role_class: review
+artifact_type: review findings
+modality_family: UX gate
+allowed_change_surface:
+  - candidate/review-report.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/review-target/**
+score_profile: "review, QA"
+overlay_flags: []

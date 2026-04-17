@@ -1,0 +1,84 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_files": [
+    "candidate/README.md",
+    "candidate/reliability-constraint-package.md",
+    "inputs/README.md",
+    "inputs/degradation-boundaries.md",
+    "inputs/failure-mode-notes.md",
+    "inputs/incident-trace-and-slo-notes.md",
+    "inputs/rollout-envelope.md",
+    "inputs/service-and-traffic-brief.md",
+    "inputs/task.md",
+    "oracle/README.md",
+    "oracle/expected-reliability-package.md",
+    "oracle/prohibited-patterns.md",
+    "oracle/reliability-constraint-contract.json",
+    "oracle/rollout-and-failure-anchors.md",
+    "oracle/scoring-anchors.md",
+    "oracle/tradeoff-boundary-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_reliability_constraint_package.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_metadata": {
+    "id": "S14",
+    "surface_id": "R14",
+    "pack_id": "P03",
+    "role_class": "constraint",
+    "artifact_type": "reliability constraint package",
+    "modality_family": "failure and rollout analysis",
+    "allowed_change_surface": [
+      "candidate/reliability-constraint-package.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "scientist, constraints",
+    "overlay_flags": []
+  },
+  "candidate_file": "candidate/reliability-constraint-package.md",
+  "required_sections": [
+    "## Service Summary",
+    "## Rollout Stages",
+    "## Failure Modes",
+    "## Rollback Triggers",
+    "## Degradation Expectations",
+    "## Recovery And Observability",
+    "## Evidence Gaps",
+    "## Claims"
+  ],
+  "required_anchor_terms": [
+    "preview",
+    "promotion",
+    "rollback",
+    "degradation"
+  ],
+  "disallowed_markers": [
+    "[fill in after run]",
+    "TODO"
+  ],
+  "minimum_claim_count": 2,
+  "expected_gate_decision": "PASS"
+}

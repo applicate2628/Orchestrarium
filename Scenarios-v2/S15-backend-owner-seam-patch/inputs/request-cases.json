@@ -1,0 +1,46 @@
+{
+  "cases": [
+    {
+      "id": "revoked-session-survives",
+      "now_ts": 200,
+      "grants": [
+        {
+          "user_id": "u1",
+          "session_id": "sess-a",
+          "expires_at": 220,
+          "revoked": true
+        }
+      ]
+    },
+    {
+      "id": "cutoff-expiry-survives",
+      "now_ts": 200,
+      "grants": [
+        {
+          "user_id": "u1",
+          "session_id": "sess-a",
+          "expires_at": 200,
+          "revoked": false
+        }
+      ]
+    },
+    {
+      "id": "oldest-duplicate-wins",
+      "now_ts": 200,
+      "grants": [
+        {
+          "user_id": "u2",
+          "session_id": "sess-old",
+          "expires_at": 260,
+          "revoked": false
+        },
+        {
+          "user_id": "u2",
+          "session_id": "sess-new",
+          "expires_at": 320,
+          "revoked": false
+        }
+      ]
+    }
+  ]
+}

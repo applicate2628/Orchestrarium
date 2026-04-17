@@ -1,0 +1,29 @@
+{
+  "cases": [
+    {
+      "id": "hidden-row-visible",
+      "rows": [
+        {"id": "row-b", "visible": false, "priority": 5},
+        {"id": "row-a", "visible": true, "priority": 1}
+      ],
+      "selected_id": "row-a"
+    },
+    {
+      "id": "proxy-sort-ignored",
+      "rows": [
+        {"id": "row-a", "visible": true, "priority": 1},
+        {"id": "row-c", "visible": true, "priority": 3},
+        {"id": "row-b", "visible": true, "priority": 2}
+      ],
+      "selected_id": "row-a"
+    },
+    {
+      "id": "stale-detail-selection",
+      "rows": [
+        {"id": "row-a", "visible": true, "priority": 1},
+        {"id": "row-b", "visible": false, "priority": 5}
+      ],
+      "selected_id": "row-b"
+    }
+  ]
+}

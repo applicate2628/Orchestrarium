@@ -1,0 +1,15 @@
+id: S05
+surface_id: R05
+pack_id: P02
+role_class: factual
+artifact_type: product brief
+modality_family: product framing
+allowed_change_surface:
+  - candidate/product-brief.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "owner, advisory, factual, design, planning"
+overlay_flags: []

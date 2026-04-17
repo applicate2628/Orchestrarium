@@ -1,0 +1,77 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/product-brief.md",
+    "inputs/README.md",
+    "inputs/bounded-scope.md",
+    "inputs/noisy-intake-notes.md",
+    "inputs/task.md",
+    "oracle/README.md",
+    "oracle/expected-product-brief.md",
+    "oracle/product-brief-contract.json",
+    "oracle/prohibited-patterns.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_product_brief.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "S05",
+    "surface_id": "R05",
+    "pack_id": "P02",
+    "role_class": "factual",
+    "artifact_type": "product brief",
+    "modality_family": "product framing",
+    "allowed_change_surface": [
+      "candidate/product-brief.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning",
+    "overlay_flags": []
+  },
+  "editable_brief": "candidate/product-brief.md",
+  "required_brief_sections": [
+    "## Product Goal",
+    "## Primary User",
+    "## In Scope",
+    "## Out of Scope",
+    "## Constraints",
+    "## Success Signals",
+    "## Open Questions"
+  ],
+  "disallowed_markers": [
+    "[fill in after run]",
+    "TODO"
+  ],
+  "required_anchor_terms": [
+    "milestone 1",
+    "open question",
+    "constraint",
+    "success"
+  ],
+  "expected_gate_decision": "PASS"
+}

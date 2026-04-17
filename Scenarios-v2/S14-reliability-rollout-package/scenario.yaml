@@ -1,0 +1,15 @@
+id: S14
+surface_id: R14
+pack_id: P03
+role_class: constraint
+artifact_type: reliability constraint package
+modality_family: failure and rollout analysis
+allowed_change_surface:
+  - candidate/reliability-constraint-package.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "scientist, constraints"
+overlay_flags: []

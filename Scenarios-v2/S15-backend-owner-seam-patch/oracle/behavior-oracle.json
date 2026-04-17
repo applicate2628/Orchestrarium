@@ -1,0 +1,22 @@
+{
+  "cases": [
+    {
+      "id": "revoked-session-survives",
+      "expected_window": []
+    },
+    {
+      "id": "cutoff-expiry-survives",
+      "expected_window": []
+    },
+    {
+      "id": "oldest-duplicate-wins",
+      "expected_window": [
+        {
+          "user_id": "u2",
+          "session_id": "sess-new",
+          "expires_at": 320
+        }
+      ]
+    }
+  ]
+}

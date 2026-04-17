@@ -1,0 +1,65 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "S18",
+    "surface_id": "R18",
+    "pack_id": "P05",
+    "role_class": "implementation",
+    "artifact_type": "code patch plus local verification",
+    "modality_family": "Qt model/view",
+    "allowed_change_surface": [
+      "candidate/model-view-owned/src/model_view_owned/selection_model.py",
+      "candidate/model-view-owned/tests/test_selection_model.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/model-view-owned/README.md",
+      "candidate/model-view-owned/src/model_view_owned/__init__.py",
+      "candidate/graphics-owned/**",
+      "candidate/qt-ui-owned/**",
+      "candidate/visualization-owned/**",
+      "candidate/scorer-hooks/**"
+    ],
+    "score_profile": "implementation",
+    "overlay_flags": []
+  },
+  "required_candidate_paths": [
+    "candidate/model-view-owned/README.md",
+    "candidate/model-view-owned/src/model_view_owned/__init__.py",
+    "candidate/model-view-owned/src/model_view_owned/selection_model.py",
+    "candidate/model-view-owned/tests/test_selection_model.py"
+  ],
+  "scope_guard_roots": [
+    "candidate/graphics-owned",
+    "candidate/qt-ui-owned",
+    "candidate/visualization-owned",
+    "candidate/scorer-hooks"
+  ],
+  "expected_start_state_failures": [
+    "hidden-row-visible",
+    "proxy-sort-ignored",
+    "stale-detail-selection"
+  ]
+}

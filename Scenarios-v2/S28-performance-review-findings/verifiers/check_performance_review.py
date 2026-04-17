@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Check the S28 performance-review bundle shape or a completed review report."
+    )
+    default_root = Path(__file__).resolve().parents[1]
+    parser.add_argument("--bundle-root", type=Path, default=default_root)
+    parser.add_argument("--bundle-shape-only", action="store_true")
+    return parser.parse_args()
+
+
+def load_contract(bundle_root: Path):
+    return json.loads((bundle_root / "oracle" / "performance-review-contract.json").read_text(encoding="utf-8"))
+
+
+def parse_simple_yaml(path: Path):
+    data = {}
+    current_list = None
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.rstrip()
+        if not line or line.lstrip().startswith("#"):
+            continue
+        if line.startswith("  - "):
+            data.setdefault(current_list, []).append(line[4:].strip())
+            continue
+        if ":" not in line:
+            continue
+        key, raw_value = line.split(":", 1)
+        key = key.strip()
+        value = raw_value.strip()
+        if value == "":
+            data[key] = []
+            current_list = key
+        elif value == "[]":
+            data[key] = []
+            current_list = None
+        else:
+            data[key] = value.strip('"')
+            current_list = None
+    return data
+
+
+def top_level_yaml_keys(path: Path):
+    keys = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.rstrip()
+        if not line or line.startswith(" ") or line.startswith("#"):
+            continue
+        if ":" not in line:
+            continue
+        keys.append(line.split(":", 1)[0].strip())
+    return keys
+
+
+def require(condition, message, errors):
+    if not condition:
+        errors.append(message)
+
+
+def check_bundle_shape(bundle_root: Path, contract, errors):
+    for entry in contract["required_top_level_entries"]:
+        require((bundle_root / entry).exists(), f"Missing top-level entry: {entry}", errors)
+    for relative_path in contract["required_bundle_paths"]:
+        require((bundle_root / relative_path).exists(), f"Missing required bundle path: {relative_path}", errors)
+
+    scenario_path = bundle_root / "scenario.yaml"
+    require(scenario_path.exists(), "Missing scenario.yaml", errors)
+    if not scenario_path.exists():
+        return
+    require(
+        top_level_yaml_keys(scenario_path) == contract["scenario_yaml_fields"],
+        "scenario.yaml fields do not match the required contract order exactly",
+        errors,
+    )
+    require(
+        parse_simple_yaml(scenario_path) == contract["expected_metadata"],
+        "scenario.yaml metadata does not match S28",
+        errors,
+    )
+
+
+def check_completed_report(bundle_root: Path, contract, errors):
+    report_path = bundle_root / contract["editable_report"]
+    require(report_path.exists(), f"Missing candidate file: {contract['editable_report']}", errors)
+    if errors:
+        return
+    text = report_path.read_text(encoding="utf-8")
+    lower = text.lower()
+
+    for section in contract["required_report_sections"]:
+        require(section in text, f"Missing report section: {section}", errors)
+    require(contract["expected_gate_decision"].lower() in lower, "Missing REVISE gate decision", errors)
+
+    for finding in contract["required_findings"]:
+        require(f"[{finding['severity']}]" in lower, f"Missing severity label for {finding['name']}", errors)
+        for term in finding["required_terms"]:
+            require(term.lower() in lower, f"Missing required term '{term}' for {finding['name']}", errors)
+
+    for snippet in contract["prohibited_report_snippets"]:
+        require(snippet not in lower, f"Prohibited snippet present: {snippet}", errors)
+
+
+def main():
+    args = parse_args()
+    bundle_root = args.bundle_root.resolve()
+    if not bundle_root.exists():
+        print(f"Bundle root does not exist: {bundle_root}", file=sys.stderr)
+        return 1
+
+    errors = []
+    contract = load_contract(bundle_root)
+    check_bundle_shape(bundle_root, contract, errors)
+    if not args.bundle_shape_only:
+        check_completed_report(bundle_root, contract, errors)
+
+    if errors:
+        for error in errors:
+            print(f"ERROR: {error}", file=sys.stderr)
+        return 1
+
+    mode = "bundle shape" if args.bundle_shape_only else "completed review report"
+    print(f"S28 verifier PASS ({mode})")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

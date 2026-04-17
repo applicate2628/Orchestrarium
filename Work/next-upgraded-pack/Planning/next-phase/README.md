@@ -54,6 +54,7 @@ The next source-of-truth layer for that redesign is now:
 - `scenario-materialization-plan-wave-2-2026-04-17.md`
 - `scenario-materialization-plan-wave-3-2026-04-17.md`
 - `scenario-materialization-plan-wave-4-2026-04-17.md`
+- `scenario-materialization-plan-wave-5-2026-04-17.md`
 
 ## Current seeded documents
 
@@ -79,3 +80,4 @@ The next source-of-truth layer for that redesign is now:
 - `scenario-materialization-plan-wave-2-2026-04-17.md`
 - `scenario-materialization-plan-wave-3-2026-04-17.md`
 - `scenario-materialization-plan-wave-4-2026-04-17.md`
+- `scenario-materialization-plan-wave-5-2026-04-17.md`
