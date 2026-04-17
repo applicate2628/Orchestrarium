@@ -1,0 +1,7 @@
+id: S07
+surface_id: R07
+pack_id: P02
+role_class: design
+artifact_type: ADR or design package
+modality_family: architecture decision
+score_profile: "owner, advisory, factual, design, planning"

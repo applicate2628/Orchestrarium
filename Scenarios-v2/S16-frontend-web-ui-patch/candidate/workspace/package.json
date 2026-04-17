@@ -1,0 +1,9 @@
+{
+  "name": "s16-frontend-web-ui-patch",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "preview:scenario": "node scripts/static-server.mjs",
+    "verify:scenario": "node scripts/verify-ui-contract.mjs"
+  }
+}

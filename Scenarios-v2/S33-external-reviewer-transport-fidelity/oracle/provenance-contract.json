@@ -1,0 +1,74 @@
+{
+  "required_scenario_keys": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_sections": [
+    "## Provenance header",
+    "## Review strategy",
+    "## Transport verdict",
+    "## Observed transport facts",
+    "## Scope boundary",
+    "## Changed files"
+  ],
+  "required_labels": [
+    "Execution role",
+    "Assigned / replaced internal role",
+    "Requested provider",
+    "Resolved provider",
+    "Actual execution path",
+    "Model / profile used",
+    "Deviation reason",
+    "Review strategy",
+    "Strategy handling",
+    "Outcome",
+    "Blocking reason"
+  ],
+  "expected_scenario_values": {
+    "id": "S33",
+    "surface_id": "A02",
+    "pack_id": "P07",
+    "role_class": "adapter",
+    "artifact_type": "transport execution report",
+    "modality_family": "transport fidelity",
+    "score_profile": "adapters"
+  },
+  "expected_report_values": {
+    "Execution role": "external-reviewer",
+    "Assigned / replaced internal role": "$security-reviewer",
+    "Requested provider": "codex",
+    "Resolved provider": "Codex CLI",
+    "Actual execution path": "external CLI (Codex CLI)",
+    "Model / profile used": "runtime default",
+    "Deviation reason": "none",
+    "Review strategy": "adversarial",
+    "Strategy handling": "preserved as transport metadata only; no semantic reviewer findings or QA verdict were produced",
+    "Outcome": "PASS",
+    "Blocking reason": "none"
+  },
+  "required_fact_snippets": [
+    "externalProvider: codex",
+    "Get-Command codex -> found",
+    "Review strategy: adversarial",
+    "runtime default"
+  ],
+  "required_scope_snippets": [
+    "No internal reviewer, QA role, or consultant fallback was used.",
+    "No semantic reviewer findings or QA verdict were produced."
+  ],
+  "prohibited_snippets": [
+    "rerouted internally",
+    "internal security-reviewer fallback",
+    "qa verdict:",
+    "finding 1",
+    "provider ranking"
+  ]
+}

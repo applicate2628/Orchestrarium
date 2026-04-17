@@ -1,0 +1,14 @@
+id: S25
+surface_id: R25
+pack_id: P06
+role_class: review
+artifact_type: QA report and test verdict
+modality_family: verification and test design
+allowed_change_surface:
+  - candidate/qa-verdict.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+score_profile: "review, QA"
+overlay_flags: []

@@ -1,0 +1,77 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "required_bundle_files": [
+    "candidate/README.md",
+    "candidate/qt-settings-dialog/README.md",
+    "candidate/qt-settings-dialog/src/qt_settings_dialog/__init__.py",
+    "candidate/qt-settings-dialog/src/qt_settings_dialog/qt_compat.py",
+    "candidate/qt-settings-dialog/src/qt_settings_dialog/rename_preset_dialog.py",
+    "candidate/qt-settings-dialog/tests/test_rename_preset_dialog.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/focus-and-keyboard-contract.md",
+    "inputs/widget-lifecycle-notes.md",
+    "inputs/non-browser-boundary.md",
+    "oracle/README.md",
+    "oracle/qt-ui-contract.json",
+    "oracle/interaction-oracle.json",
+    "oracle/prohibited-patterns.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_scope.py",
+    "verifiers/run_qt_ui_checks.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "S17",
+    "surface_id": "R17",
+    "pack_id": "P05",
+    "role_class": "implementation",
+    "artifact_type": "code patch plus local verification",
+    "modality_family": "Qt desktop UI",
+    "allowed_change_surface": [
+      "candidate/qt-settings-dialog/src/qt_settings_dialog/rename_preset_dialog.py",
+      "candidate/qt-settings-dialog/tests/test_rename_preset_dialog.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/qt-settings-dialog/README.md",
+      "candidate/qt-settings-dialog/src/qt_settings_dialog/__init__.py",
+      "candidate/qt-settings-dialog/src/qt_settings_dialog/qt_compat.py"
+    ],
+    "score_profile": "implementation",
+    "overlay_flags": []
+  },
+  "required_candidate_paths": [
+    "candidate/qt-settings-dialog/src/qt_settings_dialog",
+    "candidate/qt-settings-dialog/tests"
+  ],
+  "expected_start_state_failures": [
+    "blank-name-focus-recovery",
+    "error-label-focus-policy",
+    "reopen-lifecycle",
+    "return-accepts-invalid",
+    "tab-order"
+  ]
+}

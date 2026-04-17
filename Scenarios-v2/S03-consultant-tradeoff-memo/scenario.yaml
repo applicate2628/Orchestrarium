@@ -1,0 +1,15 @@
+id: S03
+surface_id: R03
+pack_id: P01
+role_class: advisory
+artifact_type: advisory memo
+modality_family: tradeoff memo
+allowed_change_surface:
+  - candidate/advisory-memo.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "owner, advisory, factual, design, planning"
+overlay_flags: []

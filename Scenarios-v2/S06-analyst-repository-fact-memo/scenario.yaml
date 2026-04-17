@@ -1,0 +1,16 @@
+id: S06
+surface_id: R06
+pack_id: P02
+role_class: factual
+artifact_type: factual research memo
+modality_family: repository investigation
+allowed_change_surface:
+  - candidate/repository-fact-memo.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/repo-snapshot/**
+score_profile: "owner, advisory, factual, design, planning"
+overlay_flags: []

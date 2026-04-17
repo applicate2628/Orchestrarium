@@ -1,0 +1,15 @@
+id: S10
+surface_id: R10
+pack_id: P03
+role_class: scientist
+artifact_type: invariant and proof memo
+modality_family: formal reasoning
+allowed_change_surface:
+  - candidate/algorithm-invariant-proof-memo.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "scientist, constraints"
+overlay_flags: []

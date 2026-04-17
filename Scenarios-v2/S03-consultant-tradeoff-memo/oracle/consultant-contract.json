@@ -1,0 +1,145 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_metadata": {
+    "id": "S03",
+    "surface_id": "R03",
+    "pack_id": "P01",
+    "role_class": "advisory",
+    "artifact_type": "advisory memo",
+    "modality_family": "tradeoff memo",
+    "allowed_change_surface": [
+      "candidate/advisory-memo.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning",
+    "overlay_flags": []
+  },
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-brief.md",
+    "inputs/evidence-summary.md",
+    "inputs/decision-pressure.md",
+    "inputs/open-questions.md",
+    "candidate/README.md",
+    "candidate/advisory-memo.md",
+    "oracle/README.md",
+    "oracle/consultant-contract.json",
+    "oracle/admissible-directions.md",
+    "oracle/anti-patterns.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_consultant_memo.py"
+  ],
+  "required_memo_sections": [
+    "# S03 Consultant Advisory Memo",
+    "## Provenance",
+    "## Decision question",
+    "## Recommended direction",
+    "## Alternatives considered",
+    "## Major tradeoffs",
+    "## Key risks",
+    "## Assumptions and uncertainty",
+    "## Confidence",
+    "## Advisory status",
+    "## Continuation prompt"
+  ],
+  "required_option_headings": [
+    "### Option A - one local advisory pilot first",
+    "### Option B - shared memo scaffolding first",
+    "### Option C - wait for more evidence before materializing"
+  ],
+  "required_exact_lines": [
+    "- Execution role: consultant",
+    "- Assigned / replaced internal role: none",
+    "- Requested provider: internal",
+    "- Resolved provider: none",
+    "- Requested consultant mode: internal",
+    "- Actual execution path: internal consultant",
+    "- Deviation reason: none"
+  ],
+  "required_prefix_lines": [
+    "- Model / profile used:"
+  ],
+  "required_recommended_option": "Option A - one local advisory pilot first",
+  "required_keyword_groups": [
+    [
+      "inputs/accepted-brief.md",
+      "accepted brief"
+    ],
+    [
+      "inputs/evidence-summary.md",
+      "evidence summary"
+    ],
+    [
+      "inputs/open-questions.md",
+      "open questions"
+    ],
+    [
+      "tradeoff",
+      "tradeoffs"
+    ],
+    [
+      "risk",
+      "risks"
+    ],
+    [
+      "assumption",
+      "assumptions"
+    ],
+    [
+      "uncertainty"
+    ],
+    [
+      "confidence"
+    ],
+    [
+      "lead"
+    ],
+    [
+      "non-blocking",
+      "NON-BLOCKING"
+    ]
+  ],
+  "required_advisory_status": "NON-BLOCKING",
+  "valid_continuation_prefixes": [
+    "Continue working:",
+    "Proceed with the next batch:"
+  ],
+  "disallowed_markers": [
+    "TODO",
+    "PASS",
+    "REVISE",
+    "BLOCKED",
+    "diff --git",
+    "```python",
+    "```ts",
+    "```tsx",
+    "```javascript",
+    "apply_patch"
+  ]
+}

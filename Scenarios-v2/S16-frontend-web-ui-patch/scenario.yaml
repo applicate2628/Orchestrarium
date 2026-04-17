@@ -1,0 +1,24 @@
+id: S16
+surface_id: R16
+pack_id: P04
+role_class: implementation
+artifact_type: code patch plus local verification
+modality_family: web UI
+allowed_change_surface:
+  - candidate/workspace/src/dashboard.js
+  - candidate/workspace/src/ui-copy.js
+  - candidate/workspace/src/dashboard.css
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/package.json
+  - candidate/workspace/index.html
+  - candidate/workspace/src/main.js
+  - candidate/workspace/src/fixtures.js
+  - candidate/workspace/scripts/**
+  - candidate/workspace/tests/**
+score_profile: implementation
+overlay_flags:
+  - browser-required

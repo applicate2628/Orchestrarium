@@ -1,0 +1,19 @@
+{
+  "required_start_focus": "name_edit",
+  "required_tab_chain": [
+    "name_edit",
+    "pin_checkbox",
+    "save_button",
+    "cancel_button"
+  ],
+  "required_error_focus_policy": "NoFocus",
+  "blank_name_save_enabled": false,
+  "blank_name_error_visible": true,
+  "blank_name_focus_target": "name_edit",
+  "return_accept_requires_valid_name": true,
+  "escape_rejects": true,
+  "reopen_requires_result_reset": true,
+  "reopen_focus_target": "name_edit",
+  "reopen_error_visible": false,
+  "valid_reopen_save_enabled": true
+}

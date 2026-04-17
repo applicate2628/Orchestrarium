@@ -1,0 +1,97 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/noisy-intake-notes.md",
+    "inputs/bounded-scope.md",
+    "candidate/README.md",
+    "candidate/repository-fact-memo.md",
+    "candidate/repo-snapshot/README.md",
+    "candidate/repo-snapshot/benchmarks/runner/collect_scenarios.py",
+    "candidate/repo-snapshot/benchmarks/registry/scenario_catalog.py",
+    "candidate/repo-snapshot/benchmarks/registry/score_profiles.py",
+    "candidate/repo-snapshot/benchmarks/publication/write_results.py",
+    "candidate/repo-snapshot/benchmarks/publication/legacy_score_profiles.py",
+    "candidate/repo-snapshot/benchmarks/tools/export_legacy_index.py",
+    "candidate/repo-snapshot/benchmarks/tools/export_role_matrix.py",
+    "candidate/repo-snapshot/benchmarks/docs/legacy-routing-notes.md",
+    "candidate/repo-snapshot/benchmarks/docs/migration-status.md",
+    "candidate/repo-snapshot/benchmarks/archive/scenario_index_v1.yaml",
+    "candidate/repo-snapshot/benchmarks/tests/test_collect_scenarios.py",
+    "candidate/repo-snapshot/benchmarks/tests/test_write_results.py",
+    "oracle/expected-findings.md",
+    "oracle/false-leads.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/check_factual_memo.py"
+  ],
+  "editable_memo": "candidate/repository-fact-memo.md",
+  "required_memo_sections": [
+    "# S06 Repository Fact Memo",
+    "## Investigation goal",
+    "## Relevant files and symbols",
+    "## Confirmed facts",
+    "## Current data and control flow",
+    "## Observed contracts",
+    "## Similar implementations or adjacent patterns",
+    "## Tests and coverage clues",
+    "## False leads rejected",
+    "## Explicit unknowns",
+    "## Change risks",
+    "## Gate decision"
+  ],
+  "minimum_repo_references": 6,
+  "required_reference_anchors": [
+    "candidate/repo-snapshot/benchmarks/runner/collect_scenarios.py",
+    "candidate/repo-snapshot/benchmarks/registry/scenario_catalog.py",
+    "candidate/repo-snapshot/benchmarks/registry/score_profiles.py",
+    "candidate/repo-snapshot/benchmarks/publication/write_results.py",
+    "candidate/repo-snapshot/benchmarks/tests/test_collect_scenarios.py",
+    "candidate/repo-snapshot/benchmarks/tests/test_write_results.py"
+  ],
+  "required_false_lead_terms": [
+    "legacy-routing-notes.md",
+    "legacy_score_profiles.py",
+    "scenario_index_v1.yaml"
+  ],
+  "required_unknown_terms": [
+    "entrypoint selecting the requested surface id",
+    "not present in this repo slice"
+  ],
+  "expected_gate_decision": "PASS",
+  "disallowed_headings": [
+    "## Recommendations",
+    "## Proposed fix",
+    "## Design",
+    "## Implementation plan",
+    "## Delivery phases"
+  ],
+  "disallowed_markers": [
+    "TODO",
+    "diff --git",
+    "apply_patch",
+    "```python",
+    "```ts",
+    "```tsx",
+    "```javascript"
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_bundle_paths": [
+    "inputs/task.md",
+    "inputs/accepted-phase-plan.md",
+    "inputs/repo-context.md",
+    "inputs/bounded-diff.patch",
+    "inputs/executed-checks.md",
+    "inputs/nearby-smoke-coverage.md",
+    "inputs/performance-smoke.md",
+    "candidate/README.md",
+    "candidate/qa-verdict.md",
+    "oracle/expected-verdict.md",
+    "oracle/regression-classification.md",
+    "oracle/bug-registry-expectations.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/check_qa_verdict.py"
+  ],
+  "editable_report": "candidate/qa-verdict.md",
+  "required_report_sections": [
+    "## Acceptance Criteria Mapping",
+    "## Executed Checks",
+    "## Nearby Smoke Coverage",
+    "## Regression Classification",
+    "## Performance Smoke",
+    "## Bug Registry Expectation",
+    "## Residual Risk",
+    "## Gate Decision"
+  ],
+  "expected_gate_decision": "REVISE",
+  "required_acceptance_ids": [
+    "AC1",
+    "AC2",
+    "AC3",
+    "AC4"
+  ],
+  "required_verdict_anchors": [
+    {
+      "name": "json acceptance pass",
+      "required_terms": [
+        "AC1",
+        "inputs/executed-checks.md",
+        "status",
+        "generated_at",
+        "items",
+        "pass"
+      ]
+    },
+    {
+      "name": "dry-run regression",
+      "required_terms": [
+        "AC2",
+        "dry-run",
+        "status.snapshot.json",
+        "inputs/executed-checks.md",
+        "inputs/bounded-diff.patch",
+        "regression"
+      ]
+    },
+    {
+      "name": "nearby smoke gap",
+      "required_terms": [
+        "AC3",
+        "--text-summary",
+        "inputs/nearby-smoke-coverage.md",
+        "not run"
+      ]
+    },
+    {
+      "name": "performance smoke pass",
+      "required_terms": [
+        "AC4",
+        "inputs/performance-smoke.md",
+        "1.41s",
+        "pass"
+      ]
+    },
+    {
+      "name": "bug registry expectation",
+      "required_terms": [
+        "bug registry",
+        "high",
+        "reproduction",
+        "dry-run"
+      ]
+    }
+  ]
+}

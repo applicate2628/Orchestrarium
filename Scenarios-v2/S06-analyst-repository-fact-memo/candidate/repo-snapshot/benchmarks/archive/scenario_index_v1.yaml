@@ -1,0 +1,7 @@
+scenarios:
+  - id: T06
+    role: analyst
+    path: archived/legacy-analyst-memo
+  - id: T07
+    role: architect
+    path: archived/legacy-architect-adr

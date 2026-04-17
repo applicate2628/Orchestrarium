@@ -1,0 +1,97 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/ui-state-contract.md",
+    "inputs/accessibility-notes.md",
+    "inputs/failing-browser-observations.md",
+    "inputs/component-scope.md",
+    "candidate/README.md",
+    "candidate/workspace/package.json",
+    "candidate/workspace/index.html",
+    "candidate/workspace/src/fixtures.js",
+    "candidate/workspace/src/ui-copy.js",
+    "candidate/workspace/src/dashboard.js",
+    "candidate/workspace/src/dashboard.css",
+    "candidate/workspace/src/main.js",
+    "candidate/workspace/scripts/static-server.mjs",
+    "candidate/workspace/scripts/verify-ui-contract.mjs",
+    "candidate/workspace/tests/browser-checklist.md",
+    "oracle/README.md",
+    "oracle/frontend-contract.json",
+    "oracle/expected-patch.md",
+    "oracle/forbidden-widening.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_s16_frontend_bundle.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_scenario": {
+    "id": "S16",
+    "surface_id": "R16",
+    "pack_id": "P04",
+    "role_class": "implementation",
+    "artifact_type": "code patch plus local verification",
+    "modality_family": "web UI",
+    "allowed_change_surface": [
+      "candidate/workspace/src/dashboard.js",
+      "candidate/workspace/src/ui-copy.js",
+      "candidate/workspace/src/dashboard.css"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/package.json",
+      "candidate/workspace/index.html",
+      "candidate/workspace/src/main.js",
+      "candidate/workspace/src/fixtures.js",
+      "candidate/workspace/scripts/**",
+      "candidate/workspace/tests/**"
+    ],
+    "score_profile": "implementation",
+    "overlay_flags": [
+      "browser-required"
+    ]
+  },
+  "editable_candidate_files": [
+    "candidate/workspace/src/dashboard.js",
+    "candidate/workspace/src/ui-copy.js",
+    "candidate/workspace/src/dashboard.css"
+  ],
+  "protected_candidate_hashes": {
+    "candidate/README.md": "75ac564ab9beee3b087e62f244505c21e0432fe0fbaefdd6caaf8c1d3fc6cdef",
+    "candidate/workspace/package.json": "317e15ab01d5be660d585455990230c677c99d686a850eaed683e024e9e05f4d",
+    "candidate/workspace/index.html": "790c1f9738b381b884b8c23db810a7fc93c463c901229cf9b0345621fb823b93",
+    "candidate/workspace/src/main.js": "2bec4ff81eaa4b54bde00f358a430bcd0f9ccfa16d3689a8221e3f4c2c6e1e75",
+    "candidate/workspace/src/fixtures.js": "cd8dc43cf5c5dc4aa3f948d23241a74aa6467c94586865a900d94639d009fe8a",
+    "candidate/workspace/scripts/static-server.mjs": "72f2a23fd15a451855e8309974d505d18e5d28815645be8b3a308d92938281f7",
+    "candidate/workspace/scripts/verify-ui-contract.mjs": "8c1755c078a25f4df4f536ed4e9838807e0628e43e2721b4181b6a716db00595",
+    "candidate/workspace/tests/browser-checklist.md": "9a2862f43f8a32e70b3eb8e2aea69ba84ed7756a2d316d74c6ef55637eed3dae"
+  },
+  "validation_command_argv": [
+    "node",
+    "scripts/verify-ui-contract.mjs"
+  ],
+  "required_validation_output": "S16 UI contract PASS"
+}

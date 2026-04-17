@@ -1,0 +1,9 @@
+roles:
+  R06:
+    role_name: analyst
+    role_class: factual
+    modality_family: repository investigation
+  R07:
+    role_name: architect
+    role_class: design
+    modality_family: architecture decision

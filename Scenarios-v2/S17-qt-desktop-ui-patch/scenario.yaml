@@ -1,0 +1,19 @@
+id: S17
+surface_id: R17
+pack_id: P05
+role_class: implementation
+artifact_type: code patch plus local verification
+modality_family: Qt desktop UI
+allowed_change_surface:
+  - candidate/qt-settings-dialog/src/qt_settings_dialog/rename_preset_dialog.py
+  - candidate/qt-settings-dialog/tests/test_rename_preset_dialog.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/qt-settings-dialog/README.md
+  - candidate/qt-settings-dialog/src/qt_settings_dialog/__init__.py
+  - candidate/qt-settings-dialog/src/qt_settings_dialog/qt_compat.py
+score_profile: implementation
+overlay_flags: []

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>S16 Frontend Web UI Patch</title>
+    <link rel="stylesheet" href="./src/dashboard.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="shell__header">
+        <p class="shell__eyebrow">S16 / R16 frontend-engineer</p>
+        <h1>Release readiness board</h1>
+        <p class="shell__lede">
+          Use the preview controls to inspect each browser state, then repair the bounded UI files in
+          <code>src/</code>.
+        </p>
+      </header>
+
+      <section class="control-bar" aria-label="Preview controls">
+        <div class="control-bar__group">
+          <p class="control-bar__label">Preview state</p>
+          <div id="state-toggles" class="control-bar__buttons" aria-label="Preview state options"></div>
+        </div>
+        <div class="control-bar__group">
+          <p class="control-bar__label">Active filter</p>
+          <div id="filter-toggles" class="control-bar__buttons" aria-label="Preview filter options"></div>
+        </div>
+      </section>
+
+      <div id="app"></div>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
