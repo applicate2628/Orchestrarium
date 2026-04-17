@@ -1,10 +1,10 @@
-Date: 2026-04-17
+Date: 2026-04-18
 Owner: `$lead`
 Status: `PASS`
 
 ## Purpose
 
-This is the human-facing guide for running the current upgraded-pack tests.
+This is the human-facing guide for running the current upgraded-pack and bounded v2 tests.
 
 Use this document when you want to:
 
@@ -18,18 +18,23 @@ Use this document when you want to:
 | Surface | Current read |
 |---|---|
 | main admitted ranking surface | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
-| compact operator table | `Results-drafts/short-results-current-2026-04-17.md` |
+| compact operator table | `Results-drafts/short-results-current-2026-04-18.md` |
 | supporting runnable surface | `Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` |
-| active runner | `Tooling/run-active-cohort-batch.ps1` |
+| first bounded v2 result surface | `Results-drafts/v2-worked-example-cohort-results-2026-04-18.md` |
+| active upgraded-pack runner | `Tooling/run-active-cohort-batch.ps1` |
+| active v2 runner | `Tooling/run-v2-cohort-batch.ps1` |
 | canonical fixture area | `Fixtures/` |
 | raw run sandboxes | ignored `.scratch/active-cohort-runs/` |
+| raw v2 sandboxes | ignored `.scratch/v2-cohort-runs/` |
 
 ## Mental model
 
 | Item | Meaning |
 |---|---|
 | one `Tnn` fixture | one runnable benchmark test with its own verifier |
+| one `Snn` scenario | one runnable v2 scenario bundle with its own verifier |
 | one batch | one explicit set of `T` tests run together for one row |
+| one v2 cohort | one explicit set of `S` scenarios run together for one row |
 | one row | one model lane such as `X1`, `X2`, or `X3` |
 | fixture `broken/` copy | canonical starting state used for every run |
 | scratch run sandbox | disposable copied workspace where the model actually edits files |
@@ -45,17 +50,18 @@ It copies `broken/` into ignored scratch storage and runs there.
 | `X1` | `gpt-5.4` | main active row |
 | `X2` | `gpt-spark` | main active row |
 | `X3` | `opus 4.7max` | main active row |
-| `X5` | `gemini3.1pro` | exploratory retry row |
-| `X6` | `gemini3.1flash-lite-preview` | exploratory retry row |
+| `X5` | `gemini3.1pro` | bounded v2 row |
+| `X6` | `gemini3.1flash-lite-preview` | bounded v2 row |
 
 `X4` is not wired into the current runner.
 
-## Current admitted batches
+## Current admitted execution slices
 
 | Batch | Tests |
 |---|---|
 | `worker-heavy-first-batch` | `T08`, `T09`, `T10`, `T22`, `T23`, `T24`, `T25`, `T29`, `T30` |
 | `remaining-core-batch` | `T01`, `T03`, `T05`, `T07`, `T12`, `T15`, `T18`, `T19`, `T21` |
+| `v2-worked-example-pack` | `S02`, `S07`, `S12`, `S21`, `S22`, `S26`, `S32` |
 
 The full steady-state core execution pack is the union of those two batches.
 
@@ -65,7 +71,7 @@ The full steady-state core execution pack is the union of those two batches.
 |---|---|
 | use PowerShell | the runner is a PowerShell script |
 | run inside the `benchmarks` worktree | paths and archive wrappers assume this workspace |
-| make sure provider CLIs are already working | the runner calls archived provider wrappers directly |
+| make sure provider CLIs are already working | the runners call provider CLIs and wrapper surfaces directly |
 | read the fixture README first if you are targeting a custom test | each fixture defines the owner seam and allowed output |
 
 ## Where to run from
@@ -108,6 +114,21 @@ powershell -ExecutionPolicy Bypass -File .\Tooling\run-active-cohort-batch.ps1 `
   -TestIds @('T29')
 ```
 
+Run the default bounded v2 cohort for `X1`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Tooling\run-v2-cohort-batch.ps1 -RowId X1
+```
+
+Run one narrow v2 scenario for `X5`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Tooling\run-v2-cohort-batch.ps1 `
+  -RowId X5 `
+  -BatchName x5-s32-only `
+  -ScenarioIds @('S32')
+```
+
 ## How to inspect a test before running it
 
 | What to read | Why |
@@ -128,6 +149,12 @@ After a run, look under:
 
 ```text
 benchmarks/.scratch/active-cohort-runs/<timestamp>-<RowId>-<BatchName>/
+```
+
+For v2 cohort runs, look under:
+
+```text
+benchmarks/.scratch/v2-cohort-runs/<timestamp>-<RowId>-<BatchName>/
 ```
 
 Inside each batch root:
@@ -169,8 +196,9 @@ After a meaningful run:
 | If you changed | Update |
 |---|---|
 | one row on one batch | `Evidence/` |
-| the compact live table | `Results-drafts/short-results-current-2026-04-17.md` |
+| the compact live table | `Results-drafts/short-results-current-2026-04-18.md` |
 | the main admitted core ranking | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
+| the bounded v2 cohort read | `Results-drafts/v2-worked-example-cohort-results-2026-04-18.md` |
 | live resume point | `Checkpoints/status-2026-04-16.md` |
 
 ## Safety rules
@@ -186,7 +214,8 @@ After a meaningful run:
 
 | Goal | What to do |
 |---|---|
-| inspect current state fast | read `Results-drafts/short-results-current-2026-04-17.md` |
+| inspect current state fast | read `Results-drafts/short-results-current-2026-04-18.md` |
 | inspect the main admitted ranking | read `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
-| rerun one active row | use `run-active-cohort-batch.ps1` from the next-pack root |
-| retry Gemini safely | only after runtime-contract hardening, not ad hoc |
+| inspect the bounded v2 read | read `Results-drafts/v2-worked-example-cohort-results-2026-04-18.md` |
+| rerun one upgraded-pack row | use `run-active-cohort-batch.ps1` from the next-pack root |
+| rerun one v2 row | use `run-v2-cohort-batch.ps1` from the next-pack root |

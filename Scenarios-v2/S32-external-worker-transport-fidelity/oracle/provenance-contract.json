@@ -59,7 +59,6 @@
   ],
   "prohibited_snippets": [
     "rerouted internally",
-    "consultant fallback",
     "implemented the platform phase",
     "provider ranking"
   ]
