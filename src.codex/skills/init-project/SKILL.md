@@ -56,8 +56,10 @@ Routing conventions (not persisted as keys):
    - Read the project's root `AGENTS.md` and check whether a `## Project policies` section already exists.
    - Read `.agents/.agents-mode.yaml` first.
    - If it is missing, read legacy `.agents/.agents-mode` as compatibility input only.
+   - If both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode` as compatibility input.
    - If either file exists, normalize it to the current canonical format before presenting or trusting the current values.
-   - Normalize either input forward into `.agents/.agents-mode.yaml` and do not recreate legacy `.agents/.agents-mode`.
+   - If any file exists, normalize the effective file to the current canonical format before presenting or trusting the current values.
+   - Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file. If the effective config came from the global scope, use it as the starting point for the project-local review instead of pretending there was no prior state.
    - If either surface already exists, show the current values and ask whether to keep them, review them, or start fresh.
 
 2. **Read the installed canonical sources.**
@@ -134,7 +136,7 @@ Routing conventions (not persisted as keys):
 
    ```yaml
    consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-   externalClaudeApiMode: {value}  # allowed when Claude is selectable: disabled | auto | force; default: auto
+   externalClaudeApiMode: {value}  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
    delegationMode: {value}  # allowed: manual | auto | force; default: manual
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
@@ -147,7 +149,7 @@ Routing conventions (not persisted as keys):
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalGeminiWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-   externalGeminiFallbackMode: {value}  # allowed when Gemini is selected: disabled | auto | force; default: auto
+   externalGeminiFallbackMode: {value}  # allowed when Gemini CLI is the resolved provider for this run: disabled | auto | force; default: auto
    externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max; default: opus-max
    ```
 
@@ -181,6 +183,7 @@ Routing conventions (not persisted as keys):
 - Do not invent extra policy keys or extra `agents-mode` keys.
 - Preserve unknown keys in `.agents/.agents-mode.yaml` when updating.
 - Any read of `.agents/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
-- Any read that drives a decision should prefer `.agents/.agents-mode.yaml`, fall back to legacy `.agents/.agents-mode` only if the canonical file is missing, normalize either input forward into `.agents/.agents-mode.yaml`, and not recreate the legacy file.
+- Any read of the effective Codex overlay that drives a decision should normalize that file to the current canonical format before trusting the flags.
+- Any read that drives a decision should prefer local `.agents/.agents-mode.yaml`, then local legacy `.agents/.agents-mode`, then global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`; normalize whichever file supplied the effective config in the same scope and do not recreate any legacy file.
 - Do not modify any other section of `AGENTS.md`.
 - Treat root `AGENTS.md` as the project-runtime target, not the Orchestrarium monorepo maintenance overlay.

@@ -13,14 +13,19 @@ description: Provide an independent advisory memo for the lead without becoming 
 
 ## Toggle file check
 
-Before any invocation, read `.agents/.agents-mode.yaml` first:
+Before any invocation, resolve the effective Codex overlay in this order:
 
-- **No file** (default): consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. Do not invent a closeout blocker solely because consultant did not run.
+- local `.agents/.agents-mode.yaml`
+- local legacy `.agents/.agents-mode`
+- global `~/.codex/.agents-mode.yaml`
+- global legacy `~/.codex/.agents-mode`
+
+- **No file** (default): if neither local nor global overlay exists, consultant is disabled. Notify "Second opinion skipped — consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. Do not invent a closeout blocker solely because consultant did not run.
 - **`consultantMode: external`**: external-only. Attempt the selected external CLI. If it fails or is unavailable, return an unavailable memo and require the lead to keep routing honest instead of downgrading to an internal consultant path.
 - **`consultantMode: internal`**: internal-only consultant. Use the internal consultant path for any consultant invocation that is still desired.
 - **`consultantMode: disabled`**: explicitly disabled. Same behavior as the no-file case.
 
-The toggle file is project-local state stored in `.agents/.agents-mode.yaml`. Keep it local-only and do not commit it to git.
+`.agents/.agents-mode.yaml` is the project-local override surface. When it is absent, read-only consultant routing falls back to the global Codex overlay at `~/.codex/.agents-mode.yaml`. Keep any project-local override local-only and do not commit it to git.
 
 The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/external-dispatch.md). Treat the canonical file as the shared routing schema plus the profile, opinion-count, and Codex-only Claude transport/profile keys:
 
@@ -41,8 +46,8 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 - `externalClaudeApiMode`
 - `externalClaudeProfile`
 
-Read and normalize `.agents/.agents-mode.yaml` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
-If the canonical file is missing, read legacy `.agents/.agents-mode` as compatibility input only, normalize it forward into `.agents/.agents-mode.yaml`, and do not recreate the legacy file.
+Read and normalize the effective Codex overlay before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
+If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode`. Normalize whichever file supplied the effective config in place and do not recreate any legacy file.
 
 When changing `consultantMode`, preserve the other keys, including the profile, opinion-count, workdir, model-policy, Gemini-fallback, transport, and Claude-profile fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `externalClaudeApiMode` to `auto`, `delegationMode` to `manual`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` / `externalGeminiWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, `externalGeminiFallbackMode` to `auto`, and `externalClaudeProfile` to `opus-max` unless the user explicitly requested a different Claude profile override.
 Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.

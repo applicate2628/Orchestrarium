@@ -24,8 +24,9 @@ description: Execute approved worker-side role work through an external provider
 
 ## External execution
 
-- Read `.agents/.agents-mode.yaml` first.
-- If it is missing, read legacy `.agents/.agents-mode` as compatibility input only, normalize it forward into `.agents/.agents-mode.yaml`, and do not recreate the legacy file.
+- Read the effective Codex overlay first.
+- Resolve in this order: local `.agents/.agents-mode.yaml`, local legacy `.agents/.agents-mode`, global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`.
+- Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file or synthesize a local override on read alone.
 - `externalProvider: auto` resolves by the active priority profile and opinion-count policy, then applies explicit-only self-provider exclusion and CLI availability.
 - `externalProvider: codex` routes the same adapter through Codex CLI instead.
 - `externalProvider: claude` routes the same adapter through Claude CLI instead.

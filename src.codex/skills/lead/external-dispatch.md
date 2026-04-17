@@ -7,7 +7,7 @@ Shared dispatch contract for `$consultant`, `$external-worker`, and `$external-r
 The project-local config file is:
 
 - `.agents/.agents-mode.yaml`
-- Legacy `.agents/.agents-mode` is compatibility input only. Prefer `.agents/.agents-mode.yaml`, fall back only if it is missing, normalize forward into `.agents/.agents-mode.yaml`, and do not recreate the legacy file.
+- Legacy `.agents/.agents-mode` is compatibility input only. Resolve Codex overlay state in this order: local `.agents/.agents-mode.yaml`, local legacy `.agents/.agents-mode`, global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope, do not recreate any legacy file, and do not synthesize a local override on read alone.
 
 Full value-by-value operator semantics live in [../../../docs/agents-mode-reference.md](../../../docs/agents-mode-reference.md).
 
@@ -15,7 +15,7 @@ Canonical schema:
 
 ```yaml
 consultantMode: external  # allowed: external | internal | disabled; default: disabled
-externalClaudeApiMode: auto  # allowed when Claude is selectable: disabled | auto | force; default: auto
+externalClaudeApiMode: auto  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
 delegationMode: manual  # allowed: manual | auto | force; default: manual
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
@@ -27,7 +27,7 @@ externalOpinionCounts: {}  # allowed: structured lane-count map
 externalCodexWorkdirMode: neutral  # allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project
 externalGeminiWorkdirMode: neutral  # allowed: neutral | project
-externalGeminiFallbackMode: auto  # allowed when Gemini is selectable: disabled | auto | force; default: auto
+externalGeminiFallbackMode: auto  # allowed when Gemini CLI is the resolved provider for this run: disabled | auto | force; default: auto
 externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opus-max
 ```
 
@@ -49,8 +49,8 @@ externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opu
 - `externalClaudeProfile` is Codex-line only and selects or overrides the Claude CLI execution profile when `externalProvider` resolves to Claude. Supported values: `sonnet-high` (`--model sonnet --effort high`) and `opus-max` (`--model opus --effort max`).
 - The preference flags are independent.
 - Any write to this file must preserve unknown keys and the other known keys.
-- Any read of this file for routing must normalize an existing `.agents/.agents-mode.yaml` file to the current canonical format before trusting its flags. Comment-free or older-layout files are valid input, not valid output.
-- If `.agents/.agents-mode.yaml` is missing, read legacy `.agents/.agents-mode` as compatibility input only, then normalize either input forward into `.agents/.agents-mode.yaml` before trusting the flags.
+- Any read of this file for routing must normalize the effective Codex overlay file to the current canonical format before trusting its flags. Comment-free or older-layout files are valid input, not valid output.
+- If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode`. Normalize whichever file supplied the effective config in place before trusting the flags.
 - When writing `.agents/.agents-mode.yaml`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
 - Writes go to `.agents/.agents-mode.yaml`; preserve unknown keys and the other known keys when updating.
 - If the file is created from scratch, write the full default shape: the requested `consultantMode`, `externalClaudeApiMode: auto`, `delegationMode: manual`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `externalPriorityProfiles` with shipped `balanced` and `gemini-crosscheck` blocks, `externalOpinionCounts` with documented lanes defaulting to `1`, `externalCodexWorkdirMode: neutral`, `externalClaudeWorkdirMode: neutral`, `externalGeminiWorkdirMode: neutral`, `externalModelMode: runtime-default`, `externalGeminiFallbackMode: auto`, and `externalClaudeProfile: opus-max` unless the user explicitly requested a different Claude profile.

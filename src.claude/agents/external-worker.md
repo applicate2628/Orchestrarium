@@ -21,7 +21,7 @@ description: External worker-side adapter for Claude-line. Use when an eligible 
 ## Claude-line provider
 
 - Read and normalize `.claude/.agents-mode.yaml` to the current canonical format before trusting its flags.
-- If the canonical file is missing, read legacy `.claude/.agents-mode` as compatibility input only, normalize it forward into `.claude/.agents-mode.yaml`, and do not recreate the legacy file.
+- If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.claude/.agents-mode.yaml` and then global legacy `~/.claude/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 - Honor `.claude/.agents-mode.yaml`, including `preferExternalWorker`, `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`.
 - `externalOpinionCounts` is a same-lane distinct-opinion contract; it governs distinct-provider opinions for one lane and does not cap how many same-provider worker instances may run in parallel for different disjoint lanes or slices.
 - `externalProvider: auto` resolves by the active named priority profile instead of a host-line default.

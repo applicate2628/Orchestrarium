@@ -131,8 +131,8 @@ Consultant exception:
 Use `external-dispatch.md` when the routing decision prefers or explicitly selects an external adapter.
 
 - The canonical config file is `.agents/.agents-mode.yaml`.
-- Read and normalize `.agents/.agents-mode.yaml` before trusting its flags. Comment-free, partial, or older-layout files are valid legacy input, not valid runtime output.
-- If the canonical file is missing, read legacy `.agents/.agents-mode` as compatibility input only, normalize it forward into `.agents/.agents-mode.yaml`, and do not recreate the legacy file.
+- Read and normalize `.agents/.agents-mode.yaml` before trusting its flags. If the local canonical file is absent, continue resolving the effective Codex overlay in this order: local legacy `.agents/.agents-mode`, global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`. Comment-free, partial, or older-layout files are valid legacy input, not valid runtime output.
+- Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope, do not recreate any legacy file, and do not synthesize a local override on read alone.
 - The extended schema contains `consultantMode`, `externalClaudeApiMode`, `delegationMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalModelMode`, `externalGeminiFallbackMode`, and an optional `externalClaudeProfile` used for Codex-line Claude CLI profile selection.
 - `consultantMode` governs `$consultant` behavior only. Allowed values: `external | internal | disabled`; default: `disabled`.
 - `externalClaudeApiMode` governs the single Claude wrapper-transport toggle whenever Claude is the resolved provider. Allowed values: `disabled | auto | force`; default: `auto`.

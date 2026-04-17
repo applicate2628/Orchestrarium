@@ -127,7 +127,7 @@ Routing conventions (not persisted as keys):
 
    ```yaml
    consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-   externalClaudeApiMode: {value}  # allowed when Claude is selected: disabled | auto | force; default: auto
+   externalClaudeApiMode: {value}  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
    delegationMode: {value}  # allowed: manual | auto | force; default: manual
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
@@ -140,7 +140,7 @@ Routing conventions (not persisted as keys):
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalGeminiWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-   externalGeminiFallbackMode: {value}  # allowed when Gemini is selected: disabled | auto | force; default: auto
+   externalGeminiFallbackMode: {value}  # allowed when Gemini CLI is the resolved provider for this run: disabled | auto | force; default: auto
    ```
 
 8. **Write to CLAUDE.md.** Add or replace the `## Project policies` section in `.claude/CLAUDE.md`. Place it between `## Engineering hygiene` and `## Publication safety`. Use this format:
@@ -172,5 +172,5 @@ Routing conventions (not persisted as keys):
 - Do not invent extra `agents-mode` keys beyond the canonical Claude-line schema.
 - Preserve unknown keys in `.claude/.agents-mode.yaml` when updating.
 - Any read of `.claude/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
-- Any read that drives a decision should prefer `.claude/.agents-mode.yaml`, fall back to legacy `.claude/.agents-mode` only if the canonical file is missing, normalize either input forward into `.claude/.agents-mode.yaml`, and not recreate the legacy file.
+- Any read that drives a decision should prefer local `.claude/.agents-mode.yaml`, then local legacy `.claude/.agents-mode`, then global `~/.claude/.agents-mode.yaml`, then global legacy `~/.claude/.agents-mode`; normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 - Do not change any other section of CLAUDE.md.

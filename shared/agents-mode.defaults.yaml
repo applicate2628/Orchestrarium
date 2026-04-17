@@ -1,5 +1,5 @@
 consultantMode: disabled  # allowed: external | internal | disabled; default: disabled
-externalClaudeApiMode: auto  # allowed when Claude is selectable: disabled | auto | force; default: auto
+externalClaudeApiMode: auto  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
 delegationMode: manual  # allowed: manual | auto | force; default: manual
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: false  # allowed: false | true; default: false
@@ -47,4 +47,4 @@ externalCodexWorkdirMode: neutral  # allowed: neutral | project; default: neutra
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project; default: neutral
 externalGeminiWorkdirMode: neutral  # allowed: neutral | project; default: neutral
 externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-externalGeminiFallbackMode: auto  # allowed when Gemini is selectable: disabled | auto | force; default: auto
+externalGeminiFallbackMode: auto  # allowed when Gemini CLI is the resolved provider for this run: disabled | auto | force; default: auto

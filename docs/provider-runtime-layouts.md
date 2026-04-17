@@ -41,7 +41,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Governance entrypoint | `<project>/AGENTS.md` | Codex pack section is merged into the project-root `AGENTS.md` |
 | Skill tree | `<project>/.agents/skills/<role>/SKILL.md` | Mirrors the global `skills/` structure |
 | Built-in subagent overrides | `<project>/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Project-level custom agents that override Codex built-ins and pin them to `gpt-5.4` + `xhigh`; seeded on first install and preserved on reinstall |
-| Local config | `<project>/.agents/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `$init-project` reviews or updates it, while legacy sibling `<project>/.agents/.agents-mode` remains compatibility input only |
+| Local config | `<project>/.agents/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `$init-project` reviews or updates it, while legacy sibling `<project>/.agents/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Codex overlay when the local scope is absent. |
 | Validation script | `<project>/.agents/skills/lead/scripts/validate-skill-pack.sh` | Run from the target project root after install |
 | Publication-safety scan | `<project>/.agents/skills/lead/scripts/check-publication-safety.sh` | PowerShell wrapper exists alongside the shell script |
 
@@ -67,7 +67,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Project subagents | `<project>/.claude/agents/*.md` | Official project-level custom subagent surface |
 | Legacy commands | `<project>/.claude/commands/*.md` | Still work, but lose precedence to a skill with the same name |
 | Orchestrarium shared governance copy | `<project>/.claude/AGENTS.md` | Repo-local overlay copied by Orchestrarium install scripts; not a Claude-native runtime requirement |
-| Orchestrarium local config | `<project>/.claude/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `/agents-init-project` reviews or updates it, while legacy sibling `<project>/.claude/.agents-mode` remains compatibility input only |
+| Orchestrarium local config | `<project>/.claude/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `/agents-init-project` reviews or updates it, while legacy sibling `<project>/.claude/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Claude overlay when the local scope is absent. |
 | Pack memory | `<project>/.claude/memory/` | Repo-local installed memory payload for the Orchestrarium Claude pack |
 
 ## Gemini CLI
@@ -101,7 +101,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Workspace custom commands | `<project>/.gemini/commands/` | Official project-local Gemini custom commands; Orchestrarium does not mirror its own commands here |
 | Workspace extensions | `<project>/.gemini/extensions/<extension>/` | Official workspace extension location; Orchestrarium materializes `orchestrarium-gemini` here on project-local Gemini install |
 | Workspace settings | `<project>/.gemini/settings.json` | Official project-local Gemini settings |
-| Orchestrarium operator overlay | `<project>/.gemini/.agents-mode.yaml` | Repo-local shared routing overlay for consultant, delegation, MCP, external-provider preferences, named priority profiles, and opinion counts; local install seeds the default, Gemini `/init` still owns `GEMINI.md`, the Orchestrarium Gemini init helper reviews or updates the overlay when project-specific choices are needed, and legacy sibling `<project>/.gemini/.agents-mode` remains compatibility input only |
+| Orchestrarium operator overlay | `<project>/.gemini/.agents-mode.yaml` | Repo-local shared routing overlay for consultant, delegation, MCP, external-provider preferences, named priority profiles, and opinion counts; local install seeds the default, Gemini `/init` still owns `GEMINI.md`, the Orchestrarium Gemini init helper reviews or updates the overlay when project-specific choices are needed, and legacy sibling `<project>/.gemini/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Gemini overlay when the local scope is absent. |
 | Optional context filename override | `context.fileName` in settings | `AGENTS.md` is not a default Gemini entrypoint; Orchestrarium uses `GEMINI.md` imports instead of taking over this settings-owned surface |
 | Extension-provided skills | installed extension content | Official third discovery tier after workspace and user skills |
 | Important overlap note | workspace `.agents/skills/` | If a repository already uses `.agents/skills/` for Codex, Gemini will also discover those skills because this alias is official Gemini behavior |

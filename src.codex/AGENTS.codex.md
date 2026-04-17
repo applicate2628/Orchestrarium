@@ -73,7 +73,7 @@ Repository-specific `AGENTS.md` files should add local priorities, canonical pat
 
 ## Project bootstrap
 
-If the project root `AGENTS.md` lacks `## Project policies` or `.agents/.agents-mode.yaml` is missing, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred.
+If the project root `AGENTS.md` lacks `## Project policies`, or if neither `.agents/.agents-mode.yaml` nor the matching global fallback `~/.codex/.agents-mode.yaml` exists, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred. If the project-local overlay is missing but the global overlay exists, ordinary reads should use the global file honestly until the user wants a project-local override.
 
 ## Publication safety scan
 
