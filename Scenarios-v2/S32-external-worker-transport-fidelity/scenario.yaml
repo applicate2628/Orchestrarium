@@ -1,0 +1,16 @@
+id: S32
+surface_id: A01
+pack_id: P07
+role_class: adapter
+artifact_type: transport execution report
+modality_family: transport fidelity
+allowed_change_surface:
+  - candidate/transport-execution-report.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: adapters
+overlay_flags:
+  - external-transport

@@ -1,0 +1,117 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-brief.md",
+    "inputs/factual-repo-memo.md",
+    "inputs/competing-seam-options.md",
+    "inputs/dependency-map.md",
+    "candidate/README.md",
+    "candidate/design-package.md",
+    "oracle/README.md",
+    "oracle/design-contract.json",
+    "oracle/admissible-seams.md",
+    "oracle/anti-patterns.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_design_packet.py"
+  ],
+  "required_design_sections": [
+    "# S07 Architect Design Package",
+    "## Decision",
+    "## Context and accepted facts",
+    "## Decision drivers",
+    "## Options considered",
+    "## Chosen approach and rationale",
+    "## Rejected alternatives",
+    "## Boundaries and protected surfaces",
+    "## Approved extension seam",
+    "## Dependency direction",
+    "## Contracts",
+    "## Failure modes and mitigations",
+    "## Observability expectations",
+    "## Security-by-design requirements",
+    "## Test strategy",
+    "## Claims",
+    "## Gate decision"
+  ],
+  "required_design_subsections": [
+    "### Option A - scenario.yaml enrichment seam",
+    "### Option B - bundle-local oracle and verifier seam",
+    "### Option C - central scorer rule seam",
+    "### Internal contracts",
+    "### External contracts"
+  ],
+  "required_chosen_seam": "Option B - bundle-local oracle and verifier seam",
+  "required_rejected_seams": [
+    "Option A - scenario.yaml enrichment seam",
+    "Option C - central scorer rule seam"
+  ],
+  "required_keyword_groups": [
+    [
+      "scenario.yaml"
+    ],
+    [
+      "design-contract.json",
+      "oracle/design-contract.json"
+    ],
+    [
+      "verifier",
+      "verifiers"
+    ],
+    [
+      "score profile",
+      "score_profile"
+    ],
+    [
+      "allowed_change_surface"
+    ],
+    [
+      "dependency direction"
+    ],
+    [
+      "implementation remains out of scope",
+      "implementation is out of scope",
+      "no implementation patch"
+    ]
+  ],
+  "required_claim_prefixes": [
+    "1.",
+    "2.",
+    "3."
+  ],
+  "valid_gate_decisions": [
+    "PASS",
+    "REVISE",
+    "BLOCKED"
+  ],
+  "disallowed_markers": [
+    "TODO",
+    "diff --git",
+    "```python",
+    "```ts",
+    "```tsx",
+    "```javascript",
+    "apply_patch"
+  ]
+}

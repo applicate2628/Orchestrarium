@@ -1,0 +1,66 @@
+{
+  "required_scenario_keys": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_sections": [
+    "## Provenance header",
+    "## Transport verdict",
+    "## Observed transport facts",
+    "## Scope boundary",
+    "## Changed files"
+  ],
+  "required_labels": [
+    "Execution role",
+    "Assigned / replaced internal role",
+    "Requested provider",
+    "Resolved provider",
+    "Actual execution path",
+    "Model / profile used",
+    "Deviation reason",
+    "Outcome",
+    "Blocking reason"
+  ],
+  "expected_scenario_values": {
+    "id": "S32",
+    "surface_id": "A01",
+    "pack_id": "P07",
+    "role_class": "adapter",
+    "artifact_type": "transport execution report",
+    "modality_family": "transport fidelity",
+    "score_profile": "adapters"
+  },
+  "expected_report_values": {
+    "Execution role": "external-worker",
+    "Assigned / replaced internal role": "$platform-engineer",
+    "Requested provider": "gemini",
+    "Resolved provider": "none",
+    "Actual execution path": "role disabled",
+    "Model / profile used": "unspecified by runtime",
+    "Deviation reason": "external unavailable: gemini CLI missing from PATH",
+    "Outcome": "BLOCKED:dependency",
+    "Blocking reason": "explicit provider gemini selected but gemini CLI is unavailable and no approved fallback path exists"
+  },
+  "required_fact_snippets": [
+    "externalProvider: gemini",
+    "Get-Command gemini -> not found",
+    "Codex and Claude availability is irrelevant because provider selection is explicit."
+  ],
+  "required_scope_snippets": [
+    "No internal specialist, reviewer, or consultant fallback was used."
+  ],
+  "prohibited_snippets": [
+    "rerouted internally",
+    "consultant fallback",
+    "implemented the platform phase",
+    "provider ranking"
+  ]
+}

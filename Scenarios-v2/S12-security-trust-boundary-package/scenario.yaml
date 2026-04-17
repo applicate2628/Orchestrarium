@@ -1,0 +1,15 @@
+id: S12
+surface_id: R12
+pack_id: P03
+role_class: constraint
+artifact_type: security constraint package
+modality_family: threat and trust analysis
+allowed_change_surface:
+  - candidate/security-constraint-package.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "scientist, constraints"
+overlay_flags: []

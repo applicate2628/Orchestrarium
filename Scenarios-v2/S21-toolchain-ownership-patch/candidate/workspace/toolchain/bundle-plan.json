@@ -1,0 +1,14 @@
+{
+  "packageName": "@bench/scenario-bundle",
+  "packageRoot": "packages/scenario-bundle",
+  "outDir": "build",
+  "entrypoints": {
+    ".": "src/index.js",
+    "./cli": "src/cli.js"
+  },
+  "publishFiles": [
+    "build/**",
+    "README.md",
+    "../../fixtures/T29-reference/**"
+  ]
+}

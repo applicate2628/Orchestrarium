@@ -1,0 +1,78 @@
+{
+  "base_area_epsilon": 2.5e-10,
+  "base_coordinate_epsilon": 2.5e-10,
+  "cases": [
+    {
+      "id": "scale-aware-collinear",
+      "kind": "orientation",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2000000.0,
+          2000000.0
+        ],
+        [
+          1000000.0,
+          1000000.00012
+        ]
+      ],
+      "expected_orientation": 0,
+      "reason": "The signed area is small relative to the edge scale and must collapse to collinear."
+    },
+    {
+      "id": "endpoint-gap-within-tolerance",
+      "kind": "segment_intersection",
+      "segment_a": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2.0,
+          0.0
+        ]
+      ],
+      "segment_b": [
+        [
+          2.00000000001,
+          0.0
+        ],
+        [
+          3.0,
+          0.0
+        ]
+      ],
+      "expected_intersects": true,
+      "reason": "A gap below the approved coordinate tolerance still counts as endpoint contact."
+    },
+    {
+      "id": "large-scale-collinear-overlap",
+      "kind": "segment_intersection",
+      "segment_a": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2000000.0,
+          2000000.0
+        ]
+      ],
+      "segment_b": [
+        [
+          1000000.0,
+          1000000.00012
+        ],
+        [
+          3000000.0,
+          3000000.00036
+        ]
+      ],
+      "expected_intersects": true,
+      "reason": "Near-collinear overlap at large scale must not be rejected by a fixed absolute epsilon."
+    }
+  ]
+}

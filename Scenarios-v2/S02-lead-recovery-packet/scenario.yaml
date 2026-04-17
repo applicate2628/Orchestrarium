@@ -1,0 +1,21 @@
+id: S02
+surface_id: R02
+pack_id: P01
+role_class: owner
+artifact_type: canonical brief and status packet
+modality_family: orchestration and recovery
+allowed_change_surface:
+  - candidate/work-items/active/WAVE-P01-S02/brief.md
+  - candidate/work-items/active/WAVE-P01-S02/status.md
+  - candidate/work-items/active/WAVE-P01-S02/routing/qa-engineer-handoff.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/work-items/active/WAVE-P01-S02/roadmap.md
+  - candidate/work-items/archive/**
+  - candidate/frozen-results/**
+  - candidate/archived-evidence/**
+  - candidate/unrelated-fixtures/**
+score_profile: "owner, advisory, factual, design, planning"
+overlay_flags: []

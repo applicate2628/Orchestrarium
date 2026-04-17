@@ -1,0 +1,3 @@
+externalProvider: gemini
+externalModelMode: runtime-default
+externalGeminiFallbackMode: disabled

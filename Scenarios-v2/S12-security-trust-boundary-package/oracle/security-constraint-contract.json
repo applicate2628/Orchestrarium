@@ -1,0 +1,87 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "S12",
+    "surface_id": "R12",
+    "pack_id": "P03",
+    "role_class": "constraint",
+    "artifact_type": "security constraint package",
+    "modality_family": "threat and trust analysis",
+    "score_profile": "scientist, constraints"
+  },
+  "candidate_file": "candidate/security-constraint-package.md",
+  "required_sections": [
+    "## System and evidence summary",
+    "## Trust boundaries",
+    "## Sensitive assets and data classes",
+    "## Threat model",
+    "## Abuse cases",
+    "## Required controls",
+    "## Implementation constraints",
+    "## Must-fix items",
+    "## Verification expectations",
+    "## Claims",
+    "## Gate decision"
+  ],
+  "required_boundary_ids": [
+    "TB1",
+    "TB2",
+    "TB3",
+    "TB4",
+    "TB5"
+  ],
+  "required_abuse_case_ids": [
+    "AB1",
+    "AB2",
+    "AB3"
+  ],
+  "required_control_ids": [
+    "C1",
+    "C2",
+    "C3",
+    "C4",
+    "C5",
+    "C6"
+  ],
+  "required_must_fix_ids": [
+    "M1",
+    "M2",
+    "M3",
+    "M4",
+    "M5"
+  ],
+  "required_verification_ids": [
+    "V1",
+    "V2",
+    "V3",
+    "V4"
+  ],
+  "required_evidence_refs": [
+    "E1",
+    "E2",
+    "E3",
+    "E4",
+    "E5"
+  ],
+  "minimum_claim_count": 5,
+  "expected_gate_decision": "REVISE"
+}

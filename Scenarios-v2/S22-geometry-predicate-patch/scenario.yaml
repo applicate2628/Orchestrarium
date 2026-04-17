@@ -1,0 +1,20 @@
+id: S22
+surface_id: R22
+pack_id: P05
+role_class: implementation
+artifact_type: code patch plus validation
+modality_family: geometry or transforms
+allowed_change_surface:
+  - candidate/geometry-owned/src/geometry/predicates.py
+  - candidate/geometry-owned/tests/test_predicates.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/geometry-owned/README.md
+  - candidate/geometry-owned/src/geometry/__init__.py
+  - candidate/graphics-renderer/**
+  - candidate/ui-overlays/**
+  - candidate/unrelated-benchmarks/**
+score_profile: implementation
+overlay_flags: []

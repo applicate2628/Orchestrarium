@@ -1,0 +1,46 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "S22",
+    "surface_id": "R22",
+    "pack_id": "P05",
+    "role_class": "implementation",
+    "artifact_type": "code patch plus validation",
+    "modality_family": "geometry or transforms",
+    "score_profile": "implementation",
+    "overlay_flags": []
+  },
+  "required_candidate_paths": [
+    "candidate/geometry-owned/src/geometry/predicates.py",
+    "candidate/geometry-owned/tests/test_predicates.py"
+  ],
+  "expected_start_state_failures": [
+    "scale-aware-collinear",
+    "endpoint-gap-within-tolerance",
+    "large-scale-collinear-overlap"
+  ],
+  "scope_guard_roots": [
+    "candidate/graphics-renderer",
+    "candidate/ui-overlays",
+    "candidate/unrelated-benchmarks"
+  ]
+}

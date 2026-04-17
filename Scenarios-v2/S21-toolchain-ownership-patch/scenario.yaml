@@ -1,0 +1,21 @@
+id: S21
+surface_id: R21
+pack_id: P04
+role_class: implementation
+artifact_type: toolchain patch plus validation
+modality_family: build and packaging
+allowed_change_surface:
+  - candidate/workspace/package.json
+  - candidate/workspace/toolchain/bundle-plan.json
+  - candidate/workspace/packages/scenario-bundle/package.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/workspace/toolchain/package-bundle.mjs
+  - candidate/workspace/packages/scenario-bundle/src/**
+  - candidate/workspace/packages/scenario-bundle/README.md
+  - candidate/workspace/tooling/**
+  - candidate/workspace/fixtures/T29-reference/**
+score_profile: implementation
+overlay_flags: []

@@ -1,0 +1,90 @@
+diff --git a/tools/review_bundle_builder.py b/tools/review_bundle_builder.py
+new file mode 100644
+index 0000000..8c4c2af
+--- /dev/null
++++ b/tools/review_bundle_builder.py
+@@ -0,0 +1,41 @@
++from pathlib import Path
++from publication.score_profiles import REVIEW_QA_PROFILE
++
++SEVERITY_LABELS = ("blocking", "major", "minor")
++
++REVIEW_READONLY_SURFACES = [
++    "inputs/**",
++    "oracle/**",
++    "verifiers/**",
++    "candidate/review-target/**",
++]
++
++PROTECTED_SURFACES = [
++    "inputs/**",
++    "oracle/**",
++    "verifiers/**",
++    "candidate/review-target/**",
++]
++
++def build_review_bundle(bundle_root: Path) -> dict:
++    metadata = {
++        "role_class": "review",
++        "artifact_type": "findings-only review report",
++        "score_profile": REVIEW_QA_PROFILE.label,
++        "allowed_change_surface": [
++            "candidate/review-report.md",
++            "candidate/repair-plan.md",
++        ],
++        "must_not_touch": PROTECTED_SURFACES,
++    }
++    write_bundle_readme(bundle_root)
++    write_candidate_readme(bundle_root)
++    (bundle_root / "candidate" / "repair-plan.md").write_text(
++        "# Repair Plan\n\n- Convert each accepted finding into a direct patch step.\n",
++        encoding="utf-8",
++    )
++    return metadata
++
++def write_candidate_readme(bundle_root: Path) -> None:
++    lines = ["Editable files:"]
++    lines.extend(f"- {path}" for path in REVIEW_READONLY_SURFACES)
++    lines.append("- review-report.md")
++    lines.append("- repair-plan.md")
++    (bundle_root / "candidate" / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+diff --git a/review_bundle/README.md b/review_bundle/README.md
+new file mode 100644
+index 0000000..19cd3df
+--- /dev/null
++++ b/review_bundle/README.md
+@@ -0,0 +1,14 @@
++# Review Bundle
++
++This bundle supports the architecture-reviewer worked example.
++
++## Expected outputs
++
++- `candidate/review-report.md`
++- `candidate/repair-plan.md`
++
++The reviewer should capture prioritized findings and a short repair plan so the implementer can
++apply the fixes directly.
++
++## Scope
++
++The review remains additive and local to this bundle root.
+diff --git a/review_bundle/candidate/README.md b/review_bundle/candidate/README.md
+new file mode 100644
+index 0000000..5b1fe51
+--- /dev/null
++++ b/review_bundle/candidate/README.md
+@@ -0,0 +1,12 @@
++# Candidate Root
++
++Editable files:
++
++- `review-report.md`
++- `repair-plan.md`
++
++Keep the repair plan concise and file-oriented so implementation can start immediately after review.
++
++## Read-only context
++
++- `../tools/`
++- `../publication/`

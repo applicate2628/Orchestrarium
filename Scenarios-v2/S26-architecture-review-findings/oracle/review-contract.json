@@ -1,0 +1,81 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_bundle_paths": [
+    "inputs/task.md",
+    "inputs/accepted-design.md",
+    "inputs/repo-context.md",
+    "inputs/known-risks.md",
+    "inputs/bounded-diff.patch",
+    "candidate/README.md",
+    "candidate/review-report.md",
+    "candidate/review-target/tools/review_bundle_builder.py",
+    "candidate/review-target/review_bundle/README.md",
+    "candidate/review-target/review_bundle/candidate/README.md",
+    "candidate/review-target/review_bundle/candidate/repair-plan.md",
+    "candidate/review-target/publication/score_profiles.py",
+    "oracle/expected-findings.md",
+    "oracle/severity-anchors.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/check_architecture_review.py"
+  ],
+  "editable_report": "candidate/review-report.md",
+  "required_report_sections": [
+    "## Findings",
+    "## Open Questions",
+    "## Maintainability Notes",
+    "## Gate Decision"
+  ],
+  "expected_gate_decision": "REVISE",
+  "required_findings": [
+    {
+      "name": "downstream scoring dependency",
+      "severity": "blocking",
+      "required_terms": [
+        "candidate/review-target/tools/review_bundle_builder.py",
+        "publication/score_profiles.py",
+        "dependency",
+        "score profile"
+      ]
+    },
+    {
+      "name": "findings-only contract breach",
+      "severity": "blocking",
+      "required_terms": [
+        "candidate/review-target/review_bundle/README.md",
+        "candidate/review-target/review_bundle/candidate/README.md",
+        "repair-plan.md",
+        "findings-only"
+      ]
+    },
+    {
+      "name": "duplicated protected-surface rules",
+      "severity": "major",
+      "required_terms": [
+        "review_readonly_surfaces",
+        "protected_surfaces",
+        "duplicate",
+        "drift"
+      ]
+    }
+  ]
+}

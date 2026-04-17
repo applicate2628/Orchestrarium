@@ -1,0 +1,8 @@
+{
+  "name": "s21-toolchain-workspace",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "validate:scenario-bundle": "node toolchain/package-bundle.mjs --out-dir build --legacy-runner tooling/run-active-cohort-batch.ps1 --legacy-fixture fixtures/T29-reference"
+  }
+}

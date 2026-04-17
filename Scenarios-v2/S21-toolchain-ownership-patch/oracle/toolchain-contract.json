@@ -1,0 +1,125 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/owner-map.md",
+    "inputs/expected-artifact-contract.md",
+    "inputs/failing-validation.md",
+    "inputs/legacy-reference-note.md",
+    "candidate/README.md",
+    "candidate/workspace/package.json",
+    "candidate/workspace/toolchain/bundle-plan.json",
+    "candidate/workspace/toolchain/package-bundle.mjs",
+    "candidate/workspace/packages/scenario-bundle/package.json",
+    "candidate/workspace/packages/scenario-bundle/README.md",
+    "candidate/workspace/packages/scenario-bundle/src/index.js",
+    "candidate/workspace/packages/scenario-bundle/src/cli.js",
+    "candidate/workspace/tooling/run-active-cohort-batch.ps1",
+    "candidate/workspace/fixtures/T29-reference/README.md",
+    "oracle/README.md",
+    "oracle/toolchain-contract.json",
+    "oracle/expected-patch.md",
+    "oracle/forbidden-widening.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_s21_toolchain_bundle.py"
+  ],
+  "expected_scenario": {
+    "id": "S21",
+    "surface_id": "R21",
+    "pack_id": "P04",
+    "role_class": "implementation",
+    "artifact_type": "toolchain patch plus validation",
+    "modality_family": "build and packaging",
+    "allowed_change_surface": [
+      "candidate/workspace/package.json",
+      "candidate/workspace/toolchain/bundle-plan.json",
+      "candidate/workspace/packages/scenario-bundle/package.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/workspace/toolchain/package-bundle.mjs",
+      "candidate/workspace/packages/scenario-bundle/src/**",
+      "candidate/workspace/packages/scenario-bundle/README.md",
+      "candidate/workspace/tooling/**",
+      "candidate/workspace/fixtures/T29-reference/**"
+    ],
+    "score_profile": "implementation",
+    "overlay_flags": []
+  },
+  "editable_files": [
+    "candidate/workspace/package.json",
+    "candidate/workspace/toolchain/bundle-plan.json",
+    "candidate/workspace/packages/scenario-bundle/package.json"
+  ],
+  "protected_candidate_hashes": {
+    "candidate/README.md": "3dfa041a67eeea9acb6fdbfc9c481e58e551bda6a3775c9a64967e398e6f4454",
+    "candidate/workspace/fixtures/T29-reference/README.md": "b54e9a9bf547e4c673f0ac69123d3f87812f516bbbebd06bb09e8dad44bc455e",
+    "candidate/workspace/packages/scenario-bundle/README.md": "7ba3c2f385caf25407321641010e3e69eda1d3d09960548ffa8de84b6e176022",
+    "candidate/workspace/packages/scenario-bundle/src/cli.js": "6d7767ca567adc7dc445aea1e5a04a12f217b65ce2d1142559c05d46cff120df",
+    "candidate/workspace/packages/scenario-bundle/src/index.js": "4908aecee6313aa97b7fb268ed55490ea34b3149616264a8e0f0e7d84d84c5c9",
+    "candidate/workspace/toolchain/package-bundle.mjs": "45f7585af97c85a341d18f883eac3ab9556e5e0d4013410e35c199911f5d84f8",
+    "candidate/workspace/tooling/run-active-cohort-batch.ps1": "5c56224c59ece88246a9e8c9244e1ff287a01810e7a14d12861ac7adb9986871"
+  },
+  "required_workspace_script_name": "validate:scenario-bundle",
+  "required_validation_command": "node toolchain/package-bundle.mjs",
+  "validation_command_argv": [
+    "node",
+    "toolchain/package-bundle.mjs"
+  ],
+  "required_validation_output": "S21 validation PASS",
+  "expected_plan": {
+    "packageName": "@bench/scenario-bundle",
+    "packageRoot": "packages/scenario-bundle",
+    "outDir": "dist",
+    "entrypoints": {
+      ".": "src/index.js",
+      "./cli": "src/cli.js"
+    },
+    "publishFiles": [
+      "dist/**",
+      "README.md"
+    ]
+  },
+  "expected_package_manifest": {
+    "name": "@bench/scenario-bundle",
+    "main": "./dist/index.js",
+    "bin": {
+      "scenario-bundle": "./dist/cli.js"
+    },
+    "exports": {
+      ".": "./dist/index.js",
+      "./cli": "./dist/cli.js"
+    },
+    "files": [
+      "dist",
+      "README.md"
+    ]
+  },
+  "forbidden_tokens_in_editable_files": [
+    "T29",
+    "run-active-cohort-batch.ps1"
+  ]
+}

@@ -1,0 +1,242 @@
+{
+  "base_area_epsilon": 2.5e-10,
+  "base_coordinate_epsilon": 2.5e-10,
+  "orientation_cases": [
+    {
+      "id": "ccw-basic",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          4.0,
+          0.0
+        ],
+        [
+          1.0,
+          3.0
+        ]
+      ],
+      "expected_orientation": 1
+    },
+    {
+      "id": "cw-basic",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          4.0
+        ],
+        [
+          3.0,
+          1.0
+        ]
+      ],
+      "expected_orientation": -1
+    },
+    {
+      "id": "collinear-exact",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          4.0,
+          4.0
+        ],
+        [
+          8.0,
+          8.0
+        ]
+      ],
+      "expected_orientation": 0
+    },
+    {
+      "id": "scale-aware-collinear",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2000000.0,
+          2000000.0
+        ],
+        [
+          1000000.0,
+          1000000.00012
+        ]
+      ],
+      "expected_orientation": 0
+    },
+    {
+      "id": "scale-aware-not-collinear",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2000000.0,
+          2000000.0
+        ],
+        [
+          1000000.0,
+          1000000.002
+        ]
+      ],
+      "expected_orientation": 1
+    }
+  ],
+  "segment_cases": [
+    {
+      "id": "crossing-interior",
+      "segment_a": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          4.0,
+          4.0
+        ]
+      ],
+      "segment_b": [
+        [
+          0.0,
+          4.0
+        ],
+        [
+          4.0,
+          0.0
+        ]
+      ],
+      "expected_intersects": true
+    },
+    {
+      "id": "endpoint-gap-within-tolerance",
+      "segment_a": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2.0,
+          0.0
+        ]
+      ],
+      "segment_b": [
+        [
+          2.00000000001,
+          0.0
+        ],
+        [
+          3.0,
+          0.0
+        ]
+      ],
+      "expected_intersects": true
+    },
+    {
+      "id": "large-scale-collinear-overlap",
+      "segment_a": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2000000.0,
+          2000000.0
+        ]
+      ],
+      "segment_b": [
+        [
+          1000000.0,
+          1000000.00012
+        ],
+        [
+          3000000.0,
+          3000000.00036
+        ]
+      ],
+      "expected_intersects": true
+    },
+    {
+      "id": "collinear-but-disjoint",
+      "segment_a": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2.0,
+          0.0
+        ]
+      ],
+      "segment_b": [
+        [
+          2.0000005,
+          0.0
+        ],
+        [
+          4.0,
+          0.0
+        ]
+      ],
+      "expected_intersects": false
+    },
+    {
+      "id": "parallel-separate",
+      "segment_a": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          5.0,
+          0.0
+        ]
+      ],
+      "segment_b": [
+        [
+          0.0,
+          0.01
+        ],
+        [
+          5.0,
+          0.01
+        ]
+      ],
+      "expected_intersects": false
+    },
+    {
+      "id": "near-collinear-outside-bbox",
+      "segment_a": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2000000.0,
+          2000000.0
+        ]
+      ],
+      "segment_b": [
+        [
+          2000000.5,
+          2000000.50012
+        ],
+        [
+          3000000.5,
+          3000000.50024
+        ]
+      ],
+      "expected_intersects": false
+    }
+  ]
+}

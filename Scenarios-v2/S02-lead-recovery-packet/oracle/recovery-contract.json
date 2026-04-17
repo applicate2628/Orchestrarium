@@ -1,0 +1,40 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_resume_stage": "QA",
+  "expected_last_accepted_artifact": "inputs/accepted-artifacts/implementation-package.md",
+  "expected_next_role": "$qa-engineer",
+  "expected_later_gate": "$architecture-reviewer",
+  "required_handoff_sections": [
+    "Role:",
+    "Goal:",
+    "Approved inputs:",
+    "Allowed tools:",
+    "Scope:",
+    "Out of scope:",
+    "Allowed change surface:",
+    "Must-not-break surfaces:",
+    "Constraints:",
+    "Expected artifact:",
+    "Acceptance criteria:",
+    "Gate to next stage:"
+  ]
+}
