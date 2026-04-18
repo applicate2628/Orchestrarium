@@ -24,6 +24,13 @@ def parse_args():
         action="store_true",
         help="Validate only the bundle contract, not a completed candidate run.",
     )
+    parser.add_argument(
+        "--changed-path",
+        dest="changed_paths",
+        action="append",
+        default=[],
+        help="Relative benchmark path changed during the run; may be repeated.",
+    )
     return parser.parse_args()
 
 
@@ -86,6 +93,15 @@ def sha256_path(path: Path):
 def require(condition, message, errors):
     if not condition:
         errors.append(message)
+
+
+def check_changed_paths(changed_paths, allowed_paths, errors):
+    allowed = set(allowed_paths)
+    unexpected = sorted({path for path in changed_paths if path not in allowed})
+    if unexpected:
+        errors.append(
+            "Changed path outside the allowed change surface: " + ", ".join(unexpected)
+        )
 
 
 def check_bundle_shape(bundle_root: Path, contract, errors):
@@ -246,6 +262,8 @@ def main():
 
     contract = load_json(bundle_root / "oracle" / "toolchain-contract.json")
     check_bundle_shape(bundle_root, contract, errors)
+    if args.changed_paths:
+        check_changed_paths(args.changed_paths, contract["expected_scenario"]["allowed_change_surface"], errors)
     if not args.bundle_shape_only:
         check_completed_candidate(bundle_root, contract, errors)
 

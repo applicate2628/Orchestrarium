@@ -123,6 +123,13 @@ def main() -> int:
         default="template",
         help="template validates the seeded bundle; completed validates a filled report against the oracle",
     )
+    parser.add_argument(
+        "--changed-path",
+        dest="changed_paths",
+        action="append",
+        default=[],
+        help="Relative benchmark path changed during the run; may be repeated.",
+    )
     args = parser.parse_args()
 
     bundle_root = Path(__file__).resolve().parent.parent
@@ -134,6 +141,18 @@ def main() -> int:
 
     check_bundle_shape(bundle_root, errors)
     check_scenario_yaml(bundle_root, contract, errors)
+    if args.changed_paths:
+        unexpected = sorted(
+            {
+                path
+                for path in args.changed_paths
+                if path != "candidate/transport-execution-report.md"
+            }
+        )
+        if unexpected:
+            errors.append(
+                "Changed path outside the allowed change surface: " + ", ".join(unexpected)
+            )
 
     report_text = read_text(report_path)
     check_report_sections(report_text, contract, errors)

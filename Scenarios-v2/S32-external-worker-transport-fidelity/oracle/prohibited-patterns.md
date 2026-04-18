@@ -6,4 +6,5 @@ The following patterns are contract breaks for `S32`:
 - substituting an internal `$platform-engineer` implementation package for the adapter report
 - using `$consultant`, a reviewer, or any other internal helper as a hidden transport fallback
 - discussing provider ranking, score-table placement, or semantic role quality
-- inventing a launched model or profile after the route was disabled before execution
+- reporting a disabled route or missing-CLI outcome after the packet confirms a direct Gemini path
+- inventing a launched model or profile beyond `runtime default`

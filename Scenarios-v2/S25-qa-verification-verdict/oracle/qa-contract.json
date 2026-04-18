@@ -36,6 +36,45 @@
     "oracle/scoring-anchors.md",
     "verifiers/check_qa_verdict.py"
   ],
+  "expected_metadata": {
+    "id": "S25",
+    "surface_id": "R25",
+    "pack_id": "P06",
+    "role_class": "review",
+    "artifact_type": "QA report and test verdict",
+    "modality_family": "verification and test design",
+    "allowed_change_surface": [
+      "candidate/qa-verdict.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**"
+    ],
+    "score_profile": "review, QA",
+    "overlay_flags": []
+  },
+  "protected_surface_hashes": {
+    "candidate/README.md": "bb6270197976e2ad514afcad2e4e6038adb995845477a7da47f0ae48e3edc285",
+    "inputs/accepted-phase-plan.md": "4f31490acd7f0db63907329d2c957e03d4dc9284c72aa2ce95620e3c2f6fc8b9",
+    "inputs/bounded-diff.patch": "1b81951b50871e3a7ee2594429f3a3baed1dfc0ea8db281cb59222e6915e5c4f",
+    "inputs/executed-checks.md": "30995691e9ad9fc893022e55172e157fd259885df7774fe1572b7687fe2c960a",
+    "inputs/nearby-smoke-coverage.md": "4ea73a6efeb67e3689a328de12c8a9a3a38352b8059a2a84d294d2fb599823d3",
+    "inputs/performance-smoke.md": "ab8c84965b19cf3daced1ec204b857a01b141b52b8d16f27bbc43466a94fb09c",
+    "inputs/README.md": "9db66e6930aab90162b936304cf786d927de89ba7b926e3b05b97364a2b341df",
+    "inputs/repo-context.md": "240fb4fa3d899a61f767f71b5ad61f94b080e90b5fb950904b19ffdaeff8071e",
+    "inputs/task.md": "004d485209e4ff0820afb25a1a4feabb6211ee9a66b9360e5593668a93fd8a10",
+    "oracle/bug-registry-expectations.md": "4f81d96258f14deb04f3cc78e98f0facf71203783858586666a3eb9c0fe39d59",
+    "oracle/expected-verdict.md": "96f5736d074dcc103c13566734a3f8a4bcc1779be003a9812f36363d3d233852",
+    "oracle/false-positive-traps.md": "9b4ceaba57504a0d812d2fa6883c251da362bccd3a9d2957c725ad0f24a742df",
+    "oracle/README.md": "d432eaaebde0e8fba966b57fd37d2670e619dc44452d9da07108c9909921d553",
+    "oracle/regression-classification.md": "27e6e0e393f05118547c406bb888868aebe3c91917f52d9e7c6b54d2119d96fc",
+    "oracle/scoring-anchors.md": "427e135c5936f2fb2f5473a413f8fa9499a4885e389b28d6c9cf01459dd9bed6",
+    "README.md": "107fc0a6b1f832221eb041f23f3727a6bd9f31e86f7421ee4a47894b1d8155ef",
+    "scenario.yaml": "139066b8c93f651c0752a9105288777aa3bbcb77a337e120c1aad24a4c436ebd",
+    "verifiers/check_qa_verdict.py": "0835974bd61c8c3f6a0abb87dc264ee63156489e53753575d2950df231ef07ef",
+    "verifiers/README.md": "ca5d89be7cdec30331f13419eac87476cd8de1e1dd660bdb611ffed2d340ab06"
+  },
   "editable_report": "candidate/qa-verdict.md",
   "required_report_sections": [
     "## Acceptance Criteria Mapping",
@@ -102,6 +141,66 @@
         "high",
         "reproduction",
         "dry-run"
+      ]
+    }
+  ],
+  "required_section_terms": [
+    {
+      "section": "## Acceptance Criteria Mapping",
+      "required_terms": [
+        "AC1",
+        "pass",
+        "AC2",
+        "fail",
+        "AC3",
+        "not run",
+        "AC4",
+        "1.41s"
+      ]
+    },
+    {
+      "section": "## Executed Checks",
+      "required_terms": [
+        "inputs/executed-checks.md",
+        "--dry-run",
+        "--json"
+      ]
+    },
+    {
+      "section": "## Nearby Smoke Coverage",
+      "required_terms": [
+        "--text-summary",
+        "not run"
+      ]
+    },
+    {
+      "section": "## Regression Classification",
+      "required_terms": [
+        "regression",
+        "dry-run"
+      ]
+    },
+    {
+      "section": "## Performance Smoke",
+      "required_terms": [
+        "inputs/performance-smoke.md",
+        "1.41s",
+        "2.0s"
+      ]
+    },
+    {
+      "section": "## Bug Registry Expectation",
+      "required_terms": [
+        "high",
+        "reproduction",
+        "dry-run"
+      ]
+    },
+    {
+      "section": "## Residual Risk",
+      "required_terms": [
+        "dry-run",
+        "nearby smoke"
       ]
     }
   ]

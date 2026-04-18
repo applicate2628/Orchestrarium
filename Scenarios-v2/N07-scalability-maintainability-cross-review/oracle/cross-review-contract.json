@@ -1,0 +1,102 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-review-constraints.md",
+    "inputs/review-boundary.md",
+    "inputs/review-observations.md",
+    "inputs/scalability-notes.md",
+    "candidate/README.md",
+    "candidate/review-report.md",
+    "candidate/review-target/README.md",
+    "candidate/review-target/routing-matrix/assemble_lane_matrix.py",
+    "candidate/review-target/routing-matrix/lane_basis.py",
+    "candidate/review-target/routing-matrix/lane_catalog.py",
+    "oracle/README.md",
+    "oracle/cross-review-contract.json",
+    "oracle/expected-findings.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "oracle/severity-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_cross_review.py"
+  ],
+  "expected_metadata": {
+    "id": "N07",
+    "surface_id": "R26",
+    "pack_id": "P06",
+    "role_class": "review",
+    "artifact_type": "findings-only review report",
+    "modality_family": "scalability and maintainability gate",
+    "allowed_change_surface": [
+      "candidate/review-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "review, QA",
+    "overlay_flags": []
+  },
+  "editable_report": "candidate/review-report.md",
+  "required_report_sections": [
+    "## Findings",
+    "## False Positives Avoided",
+    "## Maintainability Notes",
+    "## Gate Decision"
+  ],
+  "expected_gate_decision": "REVISE",
+  "required_findings": [
+    {
+      "name": "repeated full-tree rescans",
+      "severity": "blocking",
+      "required_terms": [
+        "collect_lane_members",
+        "scenarios_root.iterdir()",
+        "build_lane_cards"
+      ]
+    },
+    {
+      "name": "duplicated lane-basis owners",
+      "severity": "blocking",
+      "required_terms": [
+        "lane_basis.py",
+        "lane_catalog.py",
+        "duplicate",
+        "drift"
+      ]
+    },
+    {
+      "name": "unbounded snapshot retention",
+      "severity": "major",
+      "required_terms": [
+        "HISTORY.append",
+        "json.dumps(cards)",
+        "snapshot",
+        "memory"
+      ]
+    }
+  ]
+}

@@ -42,22 +42,28 @@
     "Execution role": "external-worker",
     "Assigned / replaced internal role": "$platform-engineer",
     "Requested provider": "gemini",
-    "Resolved provider": "none",
-    "Actual execution path": "role disabled",
-    "Model / profile used": "unspecified by runtime",
-    "Deviation reason": "external unavailable: gemini CLI missing from PATH",
-    "Outcome": "BLOCKED:dependency",
-    "Blocking reason": "explicit provider gemini selected but gemini CLI is unavailable and no approved fallback path exists"
+    "Resolved provider": "Gemini CLI",
+    "Actual execution path": "external CLI (Gemini CLI)",
+    "Model / profile used": "runtime default",
+    "Deviation reason": "none",
+    "Outcome": "PASS",
+    "Blocking reason": "none"
   },
   "required_fact_snippets": [
     "externalProvider: gemini",
-    "Get-Command gemini -> not found",
+    "Get-Command gemini -> found",
+    "gemini --version -> 0.38.2",
+    "non-interactive (headless) mode",
+    "runtime default",
     "Codex and Claude availability is irrelevant because provider selection is explicit."
   ],
   "required_scope_snippets": [
-    "No internal specialist, reviewer, or consultant fallback was used."
+    "No internal specialist, reviewer, or consultant fallback was used.",
+    "No semantic platform patch or validation was produced."
   ],
   "prohibited_snippets": [
+    "role disabled",
+    "BLOCKED:dependency",
     "rerouted internally",
     "implemented the platform phase",
     "provider ranking"

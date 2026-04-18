@@ -1,0 +1,15 @@
+id: N04
+surface_id: R25
+pack_id: P06
+role_class: review
+artifact_type: regression triage report
+modality_family: generic regression triage
+allowed_change_surface:
+  - candidate/regression-triage-report.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "review, QA"
+overlay_flags: []

@@ -1,0 +1,119 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N03",
+    "surface_id": "R25",
+    "pack_id": "P06",
+    "role_class": "review",
+    "artifact_type": "findings-only review report",
+    "modality_family": "generic code review",
+    "allowed_change_surface": [
+      "candidate/review-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "review, QA",
+    "overlay_flags": []
+  },
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-review-scope.md",
+    "inputs/repo-context.md",
+    "inputs/review-boundary.md",
+    "inputs/bounded-diff.patch",
+    "candidate/README.md",
+    "candidate/review-report.md",
+    "candidate/review-target/README.md",
+    "candidate/review-target/src/review_packet_builder.py",
+    "candidate/review-target/tests/test_review_packet_builder.py",
+    "oracle/README.md",
+    "oracle/generic-review-contract.json",
+    "oracle/expected-findings.md",
+    "oracle/severity-anchors.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_generic_review.py"
+  ],
+  "editable_report": "candidate/review-report.md",
+  "required_report_sections": [
+    "## Reviewed Surface",
+    "## Findings",
+    "## Open Questions",
+    "## Boundary Notes",
+    "## Gate Decision"
+  ],
+  "expected_gate_decision": "REVISE",
+  "required_findings": [
+    {
+      "name": "added and renamed paths dropped",
+      "severity": "blocking",
+      "required_terms": [
+        "candidate/review-target/src/review_packet_builder.py",
+        "inputs/accepted-review-scope.md",
+        "status",
+        "modified",
+        "added",
+        "renamed",
+        "changed_paths"
+      ]
+    },
+    {
+      "name": "title-only dedupe collapses distinct findings",
+      "severity": "major",
+      "required_terms": [
+        "candidate/review-target/src/review_packet_builder.py",
+        "title_key",
+        "path",
+        "line",
+        "collapse",
+        "finding"
+      ]
+    },
+    {
+      "name": "malformed hunk parsing is silently hidden",
+      "severity": "major",
+      "required_terms": [
+        "candidate/review-target/src/review_packet_builder.py",
+        "parse_hunk_lines",
+        "except",
+        "return []",
+        "malformed",
+        "hunk"
+      ]
+    }
+  ],
+  "prohibited_report_snippets": [
+    "## Threat Model",
+    "## Performance Budget",
+    "## Architecture Redesign",
+    "repair-plan.md",
+    "apply_patch",
+    "penetration test",
+    "microbenchmark"
+  ]
+}

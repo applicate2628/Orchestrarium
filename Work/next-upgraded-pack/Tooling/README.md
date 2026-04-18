@@ -43,5 +43,5 @@ The current helper defaults to the first worker-heavy admitted execution slice:
 | Need | Go to |
 |---|---|
 | quick start for running one row | `HOW-TO-USE-TESTS.md` |
-| current ranked result surface | `../Results-drafts/short-results-current-2026-04-17.md` |
+| current ranked result surface | `../Results-drafts/short-results-current-2026-04-18.md` |
 | live checkpoint and next action | `../Checkpoints/status-2026-04-16.md` |

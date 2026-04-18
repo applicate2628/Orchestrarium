@@ -1,0 +1,142 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N04",
+    "surface_id": "R25",
+    "pack_id": "P06",
+    "role_class": "review",
+    "artifact_type": "regression triage report",
+    "modality_family": "generic regression triage",
+    "allowed_change_surface": [
+      "candidate/regression-triage-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "review, QA",
+    "overlay_flags": []
+  },
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-triage-boundary.md",
+    "inputs/recent-changes.md",
+    "inputs/executed-checks.md",
+    "inputs/smoke-results.md",
+    "inputs/operator-signals.md",
+    "inputs/stable-signals.md",
+    "inputs/review-target/README.md",
+    "inputs/review-target/src/status_snapshot_cli.py",
+    "inputs/review-target/src/report_formatter.py",
+    "inputs/review-target/src/alert_digest.py",
+    "candidate/README.md",
+    "candidate/regression-triage-report.md",
+    "oracle/README.md",
+    "oracle/regression-triage-contract.json",
+    "oracle/expected-regressions.md",
+    "oracle/severity-anchors.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "oracle/report-boundary.md",
+    "verifiers/README.md",
+    "verifiers/check_regression_triage.py"
+  ],
+  "editable_report": "candidate/regression-triage-report.md",
+  "required_report_sections": [
+    "## Packet Reviewed",
+    "## Evidence Used",
+    "## Likely Regressions",
+    "## Stable Or Deprioritized Signals",
+    "## Recheck Scope",
+    "## Gate Decision"
+  ],
+  "expected_gate_decision": "REVISE",
+  "required_regressions": [
+    {
+      "name": "dry-run persists run marker",
+      "severity": "blocking",
+      "required_terms": [
+        "inputs/review-target/src/status_snapshot_cli.py",
+        "persist_run_marker",
+        "dry_run",
+        "inputs/smoke-results.md",
+        ".status-cache/last-run.json"
+      ]
+    },
+    {
+      "name": "only-failed footer counts the wrong set",
+      "severity": "major",
+      "required_terms": [
+        "inputs/review-target/src/report_formatter.py",
+        "build_footer",
+        "inputs/executed-checks.md",
+        "3 visible jobs",
+        "12 total jobs",
+        "only_failed"
+      ]
+    },
+    {
+      "name": "ops-summary digest dedupe regressed",
+      "severity": "major",
+      "required_terms": [
+        "inputs/review-target/src/alert_digest.py",
+        "generated_at_minute",
+        "inputs/operator-signals.md",
+        "duplicate",
+        "ops-summary",
+        "channel"
+      ]
+    }
+  ],
+  "required_supporting_points": [
+    {
+      "name": "stable nearby surfaces",
+      "required_terms": [
+        "inputs/stable-signals.md",
+        "default text output",
+        "include_paused",
+        "PASS"
+      ]
+    },
+    {
+      "name": "deprioritized pre-existing noise",
+      "required_terms": [
+        "test_windows_timezone_stamp",
+        "pre-existing",
+        "flake",
+        "lint"
+      ]
+    }
+  ],
+  "prohibited_report_snippets": [
+    "## Implementation Plan",
+    "apply_patch",
+    "acceptance matrix",
+    "threat model",
+    "microbenchmark",
+    "new architecture",
+    "PR ready"
+  ]
+}

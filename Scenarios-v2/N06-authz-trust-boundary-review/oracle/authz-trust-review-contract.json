@@ -1,0 +1,100 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/review-report.md",
+    "candidate/review-target/README.md",
+    "candidate/review-target/access-surface/grant_console.js",
+    "candidate/review-target/access-surface/grant_console.html",
+    "candidate/review-target/access-surface/policy.css",
+    "inputs/README.md",
+    "inputs/accepted-security-claims.md",
+    "inputs/review-boundary.md",
+    "inputs/review-observations.md",
+    "inputs/task.md",
+    "inputs/trust-boundary-notes.md",
+    "oracle/README.md",
+    "oracle/authz-trust-review-contract.json",
+    "oracle/expected-findings.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "oracle/severity-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_authz_trust_review.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N06",
+    "surface_id": "R27",
+    "pack_id": "P06",
+    "role_class": "review",
+    "artifact_type": "review findings",
+    "modality_family": "security gate",
+    "allowed_change_surface": [
+      "candidate/review-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "review, QA",
+    "overlay_flags": []
+  },
+  "editable_report": "candidate/review-report.md",
+  "required_report_sections": [
+    "## Findings",
+    "## False Positives Avoided",
+    "## Gate Decision"
+  ],
+  "required_findings": [
+    {
+      "name": "query role escalation",
+      "severity": "high",
+      "required_terms": [
+        "reviewerRole",
+        "approve-grant"
+      ]
+    },
+    {
+      "name": "parent tenant trust break",
+      "severity": "high",
+      "required_terms": [
+        "payload.trusted",
+        "effectiveTenant"
+      ]
+    },
+    {
+      "name": "client authority replay",
+      "severity": "medium",
+      "required_terms": [
+        "X-Reviewer-Role",
+        "tenantId"
+      ]
+    }
+  ],
+  "prohibited_report_snippets": [
+    "ship it",
+    "looks fine"
+  ],
+  "expected_gate_decision": "REVISE"
+}

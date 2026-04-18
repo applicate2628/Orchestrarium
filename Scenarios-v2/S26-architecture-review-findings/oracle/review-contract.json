@@ -38,6 +38,49 @@
     "oracle/scoring-anchors.md",
     "verifiers/check_architecture_review.py"
   ],
+  "expected_metadata": {
+    "id": "S26",
+    "surface_id": "R26",
+    "pack_id": "P06",
+    "role_class": "review",
+    "artifact_type": "findings-only review report",
+    "modality_family": "maintainability gate",
+    "allowed_change_surface": [
+      "candidate/review-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "review, QA",
+    "overlay_flags": []
+  },
+  "protected_surface_hashes": {
+    "candidate/README.md": "9c86df1e5422a4962153fdb17c6bda418700ad954c0b8ba2636db8f800061d26",
+    "candidate/review-target/publication/score_profiles.py": "8fefc375dd98051e523e84bb75abaed455d580d3aaa43338a8ae2966b868aecc",
+    "candidate/review-target/README.md": "8d5b322dc2c85b07b33c5804874fab286118179c0c25ce3b9aab70fd2bb64a77",
+    "candidate/review-target/review_bundle/candidate/README.md": "d3f09efdc3f0cceb65ef9213ab367a92a8d1ca52b35bb0f0fd3629cf96b78eb1",
+    "candidate/review-target/review_bundle/candidate/repair-plan.md": "e001bc69110cf5f3a6689f0b9dde5e4aae43c391e352765ac58b9bfcbf15e244",
+    "candidate/review-target/review_bundle/README.md": "fcfc6da98eabe65aa18c5230b5451292bb19b5b6d153a210241654eb61fd5162",
+    "candidate/review-target/tools/review_bundle_builder.py": "d6012769d01da828d6b07326af65acd26e789742fe39730748df3efb0ad2c884",
+    "inputs/accepted-design.md": "14146ee6479c6d48a0d559aab3be5076e43109ae5a1bf164e7c6216d26f63940",
+    "inputs/bounded-diff.patch": "951ce1ff392c26cf45786f41738e95585a8b644b050fc8c9bde9c30e98f09c60",
+    "inputs/known-risks.md": "c59792c58653bfb9e4c80a5951f2c04e4fe08ca4cf8081479fa7966653f66c4e",
+    "inputs/README.md": "54a364290df01fa201442c920ca5773154b786c3f6f30c7f4f8c2ca29549538b",
+    "inputs/repo-context.md": "bcf61e409ad8238d958d09e11bfd4a6de0f3d42ab4e7e6e0e129b0ee240597f4",
+    "inputs/task.md": "5cddee698479c30e2a6bcefff06cd0bd90cbb14919b6d279a5599b3a01bd7b4a",
+    "oracle/expected-findings.md": "03eacec23a3bef6aad4bef0c07711913120f50b52ee8901fbb0303cc2eefc88f",
+    "oracle/false-positive-traps.md": "883c9658a3a2ae8a341077ea9b40309cbdf4c239e69f13992416453f353e0d79",
+    "oracle/README.md": "0799c40a2d0a005e26d20b8a37d1c74e4726ee64ae458c48b54f2547f4f09cb7",
+    "oracle/scoring-anchors.md": "9481d6f2f4d6b6a6eb4dd74b48b3635981a7e2b801168d9f9b3023cc70eaf953",
+    "oracle/severity-anchors.md": "9af2553145efab79ac78da6084759339130061f309b73dafe7b2ffa0c9ae093d",
+    "README.md": "2888e5abf65efa94ee8224d6cf6f9117c63b67f1ed4be620f8b02fd50e198dd8",
+    "scenario.yaml": "96d8c18dab33186c79ba35086ab6d2943763f8015643c3a344f151fef6765823",
+    "verifiers/check_architecture_review.py": "266cc78aea32db44c789a3f607b11b0460e773b627f71ecf8990c2c33a381450",
+    "verifiers/README.md": "08bd20a029439ab028dfeddbe9542a08f42ce5d9a652f3b7216547a1afbf0b4f"
+  },
   "editable_report": "candidate/review-report.md",
   "required_report_sections": [
     "## Findings",
@@ -54,7 +97,8 @@
         "candidate/review-target/tools/review_bundle_builder.py",
         "publication/score_profiles.py",
         "dependency",
-        "score profile"
+        "score profile",
+        "dependency direction"
       ]
     },
     {
@@ -64,7 +108,9 @@
         "candidate/review-target/review_bundle/README.md",
         "candidate/review-target/review_bundle/candidate/README.md",
         "repair-plan.md",
-        "findings-only"
+        "findings-only",
+        "editable artifact",
+        "implementation steps"
       ]
     },
     {
@@ -74,7 +120,19 @@
         "review_readonly_surfaces",
         "protected_surfaces",
         "duplicate",
-        "drift"
+        "drift",
+        "cognitive load",
+        "maintained"
+      ]
+    }
+  ],
+  "required_section_terms": [
+    {
+      "section": "## Maintainability Notes",
+      "required_terms": [
+        "blast radius",
+        "cohesion",
+        "drift risk"
       ]
     }
   ]

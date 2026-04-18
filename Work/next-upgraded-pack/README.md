@@ -23,7 +23,7 @@ It is allowed to change freely while designing and executing the next wave.
 
 | File | Role |
 |---|---|
-| `Results-drafts/short-results-current-2026-04-17.md` | compact operator-facing current table |
+| `Results-drafts/short-results-current-2026-04-18.md` | compact operator-facing current table |
 | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` | main admitted steady-state core ranking |
 | `Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` | supporting runnable-pack ranking surface |
 | `Checkpoints/status-2026-04-16.md` | live resume point and active obligations |

@@ -66,20 +66,22 @@ When publishing or restating benchmark results in this branch, prefer the compac
 | publish results as compact tables first | do not lead with prose rankings when the user asked for results |
 | start with model legend when several rows appear | use `ID | Label` before the main ranking table when more than one model family is referenced |
 | use numbered result tables | main result tables should use the shape ``# | Линия | 1 | 2 | 3 ...`` |
+| keep the archived short-basis layout as the default template | unless a newer admitted short template explicitly replaces it, restate current and future scenario results in the same layout family as `Archive/2026-04-16-first-baseline/Results/short-results-x1-x5-2026-04-16.md`: legend first, then the ranked `Линия` table, then separate note or caveat tables, and only then any raw scenario matrix if the user asks for it |
 | keep one row per surface or line | result rows should be named by the comparison surface, lane, or line, not by commentary text |
 | keep test mapping separate | when needed, add a second compact table ``# | Линия | Тесты`` instead of stuffing test IDs into the ranking table |
 | keep caveats separate | penalties, blocked rows, and runtime notes belong in their own compact note tables |
 | distinguish ranked rows from supplemental rows | blocked or exploratory rows such as runtime-stalled Gemini lanes must not be mixed into the main ranking table |
 | prefer canonical labels from the active surface | use exactly the labels and ordering from the admitted archive or current mutable result surface, not ad hoc rephrasings |
 | preserve archive wording inside archive reads | when restating archived results, keep the archived labels and model versions unchanged |
-| for current mutable reads, prefer the live short table | default current-state restatements should align to `Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-17.md` or its later successor |
+| for current mutable reads, prefer the live short table | default current-state restatements should align to `Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-18.md` or its later successor |
 
 ## Current preferred publication shapes
 
 | Situation | Preferred source |
 |---|---|
+| default short-results layout template | `Archive/2026-04-16-first-baseline/Results/short-results-x1-x5-2026-04-16.md` |
 | archived basis result | `Archive/2026-04-16-first-baseline/Results/short-results-x1-x5-2026-04-16.md` |
-| current mutable compact result | `Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-17.md` |
+| current mutable compact result | `Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-18.md` |
 | current main admitted ranking surface | `Work/next-upgraded-pack/Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
 | current supporting runnable surface | `Work/next-upgraded-pack/Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` |
 

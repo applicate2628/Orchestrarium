@@ -1,0 +1,15 @@
+id: N01
+surface_id: R08
+pack_id: P02
+role_class: design
+artifact_type: UX structure brief
+modality_family: interaction design
+allowed_change_surface:
+  - candidate/ux-structure-brief.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "owner, advisory, factual, design, planning"
+overlay_flags: []
