@@ -20,7 +20,7 @@ Use this document when you want to:
 | main admitted ranking surface | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
 | compact operator table | `Results-drafts/short-results-current-2026-04-18.md` |
 | supporting runnable surface | `Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` |
-| first bounded v2 result surface | `Results-drafts/v2-worked-example-cohort-results-2026-04-18.md` |
+| full v2 result surface | `Results-drafts/v2-full-s01-s33-results-2026-04-18.md` |
 | active upgraded-pack runner | `Tooling/run-active-cohort-batch.ps1` |
 | active v2 runner | `Tooling/run-v2-cohort-batch.ps1` |
 | canonical fixture area | `Fixtures/` |
@@ -50,8 +50,8 @@ It copies `broken/` into ignored scratch storage and runs there.
 | `X1` | `gpt-5.4` | main active row |
 | `X2` | `gpt-spark` | main active row |
 | `X3` | `opus 4.7max` | main active row |
-| `X5` | `gemini3.1pro` | bounded v2 row |
-| `X6` | `gemini3.1flash-lite-preview` | bounded v2 row |
+| `X5` | `gemini3.1pro` | full-v2 row |
+| `X6` | `gemini3.1flash-lite-preview` | full-v2 row |
 
 `X4` is not wired into the current runner.
 
@@ -62,6 +62,7 @@ It copies `broken/` into ignored scratch storage and runs there.
 | `worker-heavy-first-batch` | `T08`, `T09`, `T10`, `T22`, `T23`, `T24`, `T25`, `T29`, `T30` |
 | `remaining-core-batch` | `T01`, `T03`, `T05`, `T07`, `T12`, `T15`, `T18`, `T19`, `T21` |
 | `v2-worked-example-pack` | `S02`, `S07`, `S12`, `S21`, `S22`, `S26`, `S32` |
+| `v2-full-surface` | `S01..S33` |
 
 The full steady-state core execution pack is the union of those two batches.
 
@@ -198,7 +199,7 @@ After a meaningful run:
 | one row on one batch | `Evidence/` |
 | the compact live table | `Results-drafts/short-results-current-2026-04-18.md` |
 | the main admitted core ranking | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
-| the bounded v2 cohort read | `Results-drafts/v2-worked-example-cohort-results-2026-04-18.md` |
+| the full v2 read | `Results-drafts/v2-full-s01-s33-results-2026-04-18.md` |
 | live resume point | `Checkpoints/status-2026-04-16.md` |
 
 ## Safety rules
@@ -216,6 +217,6 @@ After a meaningful run:
 |---|---|
 | inspect current state fast | read `Results-drafts/short-results-current-2026-04-18.md` |
 | inspect the main admitted ranking | read `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
-| inspect the bounded v2 read | read `Results-drafts/v2-worked-example-cohort-results-2026-04-18.md` |
+| inspect the full v2 read | read `Results-drafts/v2-full-s01-s33-results-2026-04-18.md` |
 | rerun one upgraded-pack row | use `run-active-cohort-batch.ps1` from the next-pack root |
 | rerun one v2 row | use `run-v2-cohort-batch.ps1` from the next-pack root |
