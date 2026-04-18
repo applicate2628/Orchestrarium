@@ -3,9 +3,9 @@ param(
     [ValidateSet('X1', 'X2', 'X3', 'X5', 'X6')]
     [string]$RowId,
 
-    [string]$BatchName = 'v2-worked-example-pack',
+    [string]$BatchName,
 
-    [string[]]$ScenarioIds = @('S02', 'S07', 'S12', 'S21', 'S22', 'S26', 'S32')
+    [string[]]$ScenarioIds
 )
 
 Set-StrictMode -Version Latest
@@ -306,6 +306,75 @@ function Read-SimpleScenarioMetadata {
     return $metadata
 }
 
+function Test-PathMatchesAllowedSurface {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RelativePath,
+
+        [AllowNull()]
+        [object[]]$AllowedSurface
+    )
+
+    $normalizedPath = $RelativePath -replace '\\', '/'
+
+    foreach ($rawPattern in @($AllowedSurface)) {
+        if ($null -eq $rawPattern) {
+            continue
+        }
+
+        $pattern = ($rawPattern.ToString() -replace '\\', '/')
+        if ([string]::IsNullOrWhiteSpace($pattern)) {
+            continue
+        }
+
+        if ($pattern.EndsWith('/**')) {
+            $prefix = $pattern.Substring(0, $pattern.Length - 3)
+            if ($normalizedPath.Equals($prefix, [System.StringComparison]::OrdinalIgnoreCase) -or
+                $normalizedPath.StartsWith("$prefix/", [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+            continue
+        }
+
+        if ($pattern.Contains('*')) {
+            $wildcard = [System.Management.Automation.WildcardPattern]::new(
+                $pattern,
+                [System.Management.Automation.WildcardOptions]::IgnoreCase
+            )
+            if ($wildcard.IsMatch($normalizedPath)) {
+                return $true
+            }
+            continue
+        }
+
+        if ($normalizedPath.Equals($pattern, [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-ChangedPathScopeViolations {
+    param(
+        [AllowNull()]
+        [string[]]$ChangedPaths,
+
+        [AllowNull()]
+        [object[]]$AllowedSurface
+    )
+
+    $violations = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($changedPath in @($ChangedPaths)) {
+        if (-not (Test-PathMatchesAllowedSurface -RelativePath $changedPath -AllowedSurface $AllowedSurface)) {
+            $violations.Add($changedPath)
+        }
+    }
+
+    return @($violations)
+}
+
 function Get-ScenarioConfigs {
     param(
         [Parameter(Mandatory = $true)]
@@ -314,7 +383,7 @@ function Get-ScenarioConfigs {
 
     $configs = @{}
     foreach ($directory in Get-ChildItem -LiteralPath $ScenarioRoot -Directory) {
-        if ($directory.Name -notmatch '^(S\d{2})-') {
+        if ($directory.Name -notmatch '^((?:S|N)\d{2})-') {
             continue
         }
 
@@ -396,16 +465,28 @@ function Get-ScenarioVerificationPlan {
 
     $bundleRoot = $ScenarioConfig.BundlePath
     $verifierRoot = Join-Path $bundleRoot 'verifiers'
-    $scripts = @(Get-ChildItem -LiteralPath $verifierRoot -File -Filter '*.py' | Sort-Object Name)
+    $scripts = @(
+        Get-ChildItem -LiteralPath $verifierRoot -File -Filter '*.py' |
+            Sort-Object @{ Expression = { if ($_.Name -eq 'check_scope.py') { 1 } else { 0 } } }, Name
+    )
     $plan = [System.Collections.Generic.List[psobject]]::new()
 
-    $mainScripts = @($scripts | Where-Object { $_.Name -ne 'check_scope.py' })
-    $scopeScripts = @($scripts | Where-Object { $_.Name -eq 'check_scope.py' })
-
-    foreach ($script in $mainScripts) {
+    foreach ($script in $scripts) {
         $arguments = @($script.FullName)
         if ($script.Name -eq 'check_transport_report.py') {
             $arguments += @('--mode', 'completed')
+        }
+
+        $changedPathArgumentName = $null
+        $scriptText = Get-Content -LiteralPath $script.FullName -Raw
+        if ($scriptText -match '["'']--changed-path["'']') {
+            $changedPathArgumentName = '--changed-path'
+        }
+
+        if ($changedPathArgumentName) {
+            foreach ($changedPath in @($ChangedPaths)) {
+                $arguments += @($changedPathArgumentName, $changedPath)
+            }
         }
 
         $displayName = if ($script.Name -eq 'check_transport_report.py') {
@@ -415,23 +496,7 @@ function Get-ScenarioVerificationPlan {
             "python $($script.Name)"
         }
 
-        $safeName = ($displayName -replace '[^A-Za-z0-9]+', '-').Trim('-').ToLowerInvariant()
-        $plan.Add([pscustomobject]@{
-            displayName = $displayName
-            filePath = 'python'
-            arguments = $arguments
-            logStem = $safeName
-        })
-    }
-
-    foreach ($script in $scopeScripts) {
-        $arguments = @($script.FullName)
-        foreach ($changedPath in @($ChangedPaths)) {
-            $arguments += @('--changed-path', $changedPath)
-        }
-
-        $displayName = 'python check_scope.py'
-        if (@($ChangedPaths).Count -gt 0) {
+        if ($changedPathArgumentName -and @($ChangedPaths).Count -gt 0) {
             $displayName += " --changed-path <x$(@($ChangedPaths).Count)>"
         }
 
@@ -445,6 +510,21 @@ function Get-ScenarioVerificationPlan {
     }
 
     return @($plan)
+}
+
+function Sort-ScenarioIds {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Ids
+    )
+
+    return @(
+        $Ids |
+            Sort-Object `
+                @{ Expression = { if ($_ -match '^S') { 0 } elseif ($_ -match '^N') { 1 } else { 2 } } }, `
+                @{ Expression = { if ($_ -match '^[A-Z](\d+)$') { [int]$Matches[1] } else { [int]::MaxValue } } }, `
+                @{ Expression = { $_ } }
+    )
 }
 
 $scriptDir = Split-Path -Parent $PSCommandPath
@@ -508,9 +588,30 @@ if (-not (Test-Path -LiteralPath $scenarioRoot -PathType Container)) {
 }
 
 $scenarioConfigs = Get-ScenarioConfigs -ScenarioRoot $scenarioRoot
+$availableScenarioIds = Sort-ScenarioIds -Ids @($scenarioConfigs.Keys)
+$usingDiscoveredSurface = (-not $PSBoundParameters.ContainsKey('ScenarioIds')) -or @($ScenarioIds).Count -eq 0
+if ($usingDiscoveredSurface) {
+    $ScenarioIds = @($availableScenarioIds)
+}
+else {
+    $ScenarioIds = Sort-ScenarioIds -Ids @($ScenarioIds)
+}
+
 $unknownScenarios = @($ScenarioIds | Where-Object { -not $scenarioConfigs.ContainsKey($_) })
 if ($unknownScenarios.Count -gt 0) {
     throw "Unknown scenario id(s): $($unknownScenarios -join ', ')"
+}
+
+if (-not $PSBoundParameters.ContainsKey('BatchName') -or [string]::IsNullOrWhiteSpace($BatchName)) {
+    if ($usingDiscoveredSurface) {
+        $BatchName = 'v2-full-surface'
+    }
+    elseif (@($ScenarioIds).Count -eq 1) {
+        $BatchName = "v2-$($ScenarioIds[0].ToLowerInvariant())-only"
+    }
+    else {
+        $BatchName = 'v2-custom-slice'
+    }
 }
 
 $timestamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
@@ -608,6 +709,33 @@ foreach ($scenarioId in $ScenarioIds) {
     $splitChangedPaths = Split-ChangedRelativePaths -Paths $changedPaths
 
     $verificationResults = [System.Collections.Generic.List[psobject]]::new()
+    $scopeViolations = Get-ChangedPathScopeViolations `
+        -ChangedPaths @($splitChangedPaths.benchmark) `
+        -AllowedSurface @($runtimeScenarioConfig.Metadata.allowed_change_surface)
+    if (@($scopeViolations).Count -gt 0) {
+        $scopeLogPath = Join-Path $metaRoot 'verify-changed-path-scope-gate.txt'
+        $scopeLogLines = [System.Collections.Generic.List[string]]::new()
+        $scopeLogLines.Add('ERROR: changed paths outside allowed_change_surface')
+        $scopeLogLines.Add('Allowed patterns:')
+        foreach ($pattern in @($runtimeScenarioConfig.Metadata.allowed_change_surface)) {
+            $scopeLogLines.Add("- $pattern")
+        }
+        $scopeLogLines.Add('Observed benchmark changed paths:')
+        foreach ($path in @($splitChangedPaths.benchmark)) {
+            $scopeLogLines.Add("- $path")
+        }
+        $scopeLogLines.Add('Violations:')
+        foreach ($path in @($scopeViolations)) {
+            $scopeLogLines.Add("- $path")
+        }
+        $scopeLogLines | Set-Content -LiteralPath $scopeLogPath -Encoding UTF8
+        $verificationResults.Add([pscustomobject]@{
+            command = 'changed-path scope gate'
+            exitCode = 1
+            log = $scopeLogPath
+            passed = $false
+        })
+    }
     $verificationPlan = Get-ScenarioVerificationPlan -ScenarioConfig $runtimeScenarioConfig -ChangedPaths @($splitChangedPaths.benchmark)
 
     foreach ($verify in $verificationPlan) {

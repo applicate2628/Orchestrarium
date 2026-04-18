@@ -20,7 +20,7 @@ Use this document when you want to:
 | main admitted ranking surface | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
 | compact operator table | `Results-drafts/short-results-current-2026-04-18.md` |
 | supporting runnable surface | `Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` |
-| full v2 result surface | `Results-drafts/v2-full-s01-s33-results-2026-04-18.md` |
+| full v2 result surface | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
 | active upgraded-pack runner | `Tooling/run-active-cohort-batch.ps1` |
 | active v2 runner | `Tooling/run-v2-cohort-batch.ps1` |
 | canonical fixture area | `Fixtures/` |
@@ -32,7 +32,7 @@ Use this document when you want to:
 | Item | Meaning |
 |---|---|
 | one `Tnn` fixture | one runnable benchmark test with its own verifier |
-| one `Snn` scenario | one runnable v2 scenario bundle with its own verifier |
+| one `Snn` or `Nnn` scenario | one runnable v2 scenario bundle with its own verifier |
 | one batch | one explicit set of `T` tests run together for one row |
 | one v2 cohort | one explicit set of `S` scenarios run together for one row |
 | one row | one model lane such as `X1`, `X2`, or `X3` |
@@ -61,8 +61,8 @@ It copies `broken/` into ignored scratch storage and runs there.
 |---|---|
 | `worker-heavy-first-batch` | `T08`, `T09`, `T10`, `T22`, `T23`, `T24`, `T25`, `T29`, `T30` |
 | `remaining-core-batch` | `T01`, `T03`, `T05`, `T07`, `T12`, `T15`, `T18`, `T19`, `T21` |
-| `v2-worked-example-pack` | `S02`, `S07`, `S12`, `S21`, `S22`, `S26`, `S32` |
-| `v2-full-surface` | `S01..S33` |
+| `v2-worked-example-pack` | explicit bounded slice: `S02`, `S07`, `S12`, `S21`, `S22`, `S26`, `S32` |
+| `v2-full-surface` | default discovered `Scenarios-v2` roots in the current checkout, currently `S01..S33` plus `N01..N07` |
 
 The full steady-state core execution pack is the union of those two batches.
 
@@ -115,10 +115,19 @@ powershell -ExecutionPolicy Bypass -File .\Tooling\run-active-cohort-batch.ps1 `
   -TestIds @('T29')
 ```
 
-Run the default bounded v2 cohort for `X1`:
+Run the default full discovered v2 cohort for `X1`:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Tooling\run-v2-cohort-batch.ps1 -RowId X1
+```
+
+Run the historical worked-example slice explicitly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Tooling\run-v2-cohort-batch.ps1 `
+  -RowId X1 `
+  -BatchName v2-worked-example-pack `
+  -ScenarioIds @('S02','S07','S12','S21','S22','S26','S32')
 ```
 
 Run one narrow v2 scenario for `X5`:
@@ -199,7 +208,7 @@ After a meaningful run:
 | one row on one batch | `Evidence/` |
 | the compact live table | `Results-drafts/short-results-current-2026-04-18.md` |
 | the main admitted core ranking | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
-| the full v2 read | `Results-drafts/v2-full-s01-s33-results-2026-04-18.md` |
+| the full v2 read | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
 | live resume point | `Checkpoints/status-2026-04-16.md` |
 
 ## Safety rules
@@ -217,6 +226,6 @@ After a meaningful run:
 |---|---|
 | inspect current state fast | read `Results-drafts/short-results-current-2026-04-18.md` |
 | inspect the main admitted ranking | read `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
-| inspect the full v2 read | read `Results-drafts/v2-full-s01-s33-results-2026-04-18.md` |
+| inspect the full v2 read | read `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
 | rerun one upgraded-pack row | use `run-active-cohort-batch.ps1` from the next-pack root |
 | rerun one v2 row | use `run-v2-cohort-batch.ps1` from the next-pack root |
