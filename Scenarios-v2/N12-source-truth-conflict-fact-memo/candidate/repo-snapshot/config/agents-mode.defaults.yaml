@@ -1,0 +1,13 @@
+externalPriorityProfiles:
+  advisory.design-adr:
+    - X3
+    - X1
+    - X5
+  review.security:
+    - X3
+    - X1
+    - X5
+providerRoutes:
+  X4:
+    transport: secret-backed-claude
+    status: disabled-until-route-recovers

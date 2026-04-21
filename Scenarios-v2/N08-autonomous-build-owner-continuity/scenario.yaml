@@ -1,0 +1,26 @@
+id: N08
+surface_id: E1
+pack_id: E1
+role_class: overlay worker
+artifact_type: autonomous implementation patch plus validation
+modality_family: long autonomous build-owner continuity
+allowed_change_surface:
+  - candidate/workspace/src/path/findOwnedTarget.js
+  - candidate/workspace/src/workspace/findWorkspaceRoot.js
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/scripts/**
+  - candidate/docs/**
+  - candidate/legacy/**
+  - candidate/workspace-shadow/**
+  - candidate/workspace/vendor/**
+  - candidate/workspace/src/routing/**
+  - candidate/workspace/src/toolchain/**
+  - candidate/workspace/scripts/**
+  - candidate/workspace/test/**
+score_profile: "implementation, long-autonomous"
+overlay_flags:
+  - long-autonomous

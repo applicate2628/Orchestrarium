@@ -1,0 +1,17 @@
+id: N13
+surface_id: E2
+pack_id: E2
+role_class: review
+artifact_type: adversarial review report
+modality_family: top-pair review false-positive traps
+allowed_change_surface:
+  - candidate/review-report.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/review-target/**
+score_profile: "review, top-pair-separator"
+overlay_flags:
+  - top-pair-separator

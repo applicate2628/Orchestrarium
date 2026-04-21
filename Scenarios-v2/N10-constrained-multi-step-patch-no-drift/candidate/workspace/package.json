@@ -1,0 +1,9 @@
+{
+  "name": "t32-constrained-multi-step-patch",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node --test",
+    "verify-patch-flow": "node scripts/verify-patch-flow.js"
+  }
+}

@@ -1,0 +1,303 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N12",
+    "surface_id": "E2",
+    "pack_id": "E2",
+    "role_class": "factual",
+    "artifact_type": "source-truth conflict memo",
+    "modality_family": "top-pair multi-hop repository evidence",
+    "allowed_change_surface": [
+      "candidate/repository-fact-memo.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/repo-snapshot/**"
+    ],
+    "score_profile": "factual, top-pair-separator",
+    "overlay_flags": [
+      "top-pair-separator"
+    ]
+  },
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/source-rules.md",
+    "candidate/README.md",
+    "candidate/repository-fact-memo.md",
+    "candidate/repo-snapshot/README.md",
+    "candidate/repo-snapshot/config/agents-mode.defaults.yaml",
+    "candidate/repo-snapshot/docs/operator-routing.md",
+    "candidate/repo-snapshot/docs/legacy-notes.md",
+    "candidate/repo-snapshot/results/result-manifest.md",
+    "candidate/repo-snapshot/results/hardened-core12.md",
+    "candidate/repo-snapshot/results/legacy-top-pair.md",
+    "oracle/README.md",
+    "oracle/source-truth-contract.json",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_source_truth_conflict_memo.py"
+  ],
+  "required_sections": [
+    "## Source Ranking",
+    "## Evidence Line Ledger",
+    "## Confirmed Facts",
+    "## Conflict Table",
+    "## Exclusions",
+    "## Non-Claim And Gap Ledger",
+    "## Confidence And Gaps",
+    "## Gate Decision"
+  ],
+  "section_terms": [
+    {
+      "section": "## Source Ranking",
+      "terms": [
+        "agents-mode.defaults.yaml",
+        "operator-routing.md",
+        "hardened-core12.md",
+        "result-manifest.md",
+        "legacy-top-pair.md",
+        "legacy-notes.md"
+      ]
+    },
+    {
+      "section": "## Evidence Line Ledger",
+      "terms": [
+        "Citation",
+        "Source",
+        "Fact extracted",
+        "Status",
+        "config/agents-mode.defaults.yaml:1",
+        "config/agents-mode.defaults.yaml:10",
+        "docs/operator-routing.md:7",
+        "results/hardened-core12.md:5",
+        "results/result-manifest.md:3",
+        "results/legacy-top-pair.md:5",
+        "docs/legacy-notes.md:3"
+      ]
+    },
+    {
+      "section": "## Confirmed Facts",
+      "terms": [
+        "externalPriorityProfiles",
+        "plural",
+        "X4",
+        "secret-backed Claude",
+        "providerRoutes",
+        "no lane-profile membership",
+        "route status",
+        "not a model capability failure"
+      ]
+    },
+    {
+      "section": "## Conflict Table",
+      "terms": [
+        "externalPriorityProfile",
+        "singular",
+        "legacy-notes.md",
+        "compatibility alias",
+        "does not override"
+      ]
+    },
+    {
+      "section": "## Exclusions",
+      "terms": [
+        "not separated",
+        "X1",
+        "X3",
+        "15 / 15",
+        "X5",
+        "9 PASS / 1 FAIL / 5 TIMEOUT",
+        "No directional claim"
+      ]
+    },
+    {
+      "section": "## Non-Claim And Gap Ledger",
+      "terms": [
+        "Non-claim",
+        "Why excluded",
+        "Required follow-up",
+        "X1 versus X3",
+        "model capability failure",
+        "X4 recovery timeline",
+        "additional separators"
+      ]
+    },
+    {
+      "section": "## Conflict Table",
+      "terms": [
+        "result-manifest.md",
+        "authoritative_result",
+        "legacy-top-pair.md",
+        "superseded_result",
+        "does not override",
+        "X3",
+        "60 / 60",
+        "X1",
+        "55 / 60"
+      ]
+    },
+    {
+      "section": "## Confidence And Gaps",
+      "terms": [
+        "High confidence",
+        "Gap:",
+        "additional separators",
+        "recovery timeline"
+      ]
+    }
+  ],
+  "required_citations": [
+    "config/agents-mode.defaults.yaml:1",
+    "config/agents-mode.defaults.yaml:10",
+    "config/agents-mode.defaults.yaml:11",
+    "docs/operator-routing.md:7",
+    "results/hardened-core12.md:5",
+    "results/hardened-core12.md:6",
+    "results/hardened-core12.md:9",
+    "results/result-manifest.md:3",
+    "results/result-manifest.md:4",
+    "results/result-manifest.md:6",
+    "results/legacy-top-pair.md:5",
+    "results/legacy-top-pair.md:6",
+    "docs/legacy-notes.md:3",
+    "docs/legacy-notes.md:5"
+  ],
+  "required_table_headers": [
+    {
+      "section": "## Evidence Line Ledger",
+      "header": "| Citation | Source | Fact extracted | Status |"
+    },
+    {
+      "section": "## Non-Claim And Gap Ledger",
+      "header": "| Non-claim | Why excluded | Required follow-up |"
+    }
+  ],
+  "required_ledger_rows": [
+    {
+      "citation": "config/agents-mode.defaults.yaml:1",
+      "fact_terms": [
+        "externalPriorityProfiles",
+        "plural"
+      ],
+      "status_terms": [
+        "authoritative",
+        "config"
+      ]
+    },
+    {
+      "citation": "docs/operator-routing.md:7",
+      "fact_terms": [
+        "not a lane profile",
+        "not",
+        "model capability failure"
+      ],
+      "status_terms": [
+        "operator",
+        "interpretation"
+      ]
+    },
+    {
+      "citation": "results/result-manifest.md:3",
+      "fact_terms": [
+        "authoritative_result",
+        "hardened-core12.md"
+      ],
+      "status_terms": [
+        "current",
+        "result"
+      ]
+    },
+    {
+      "citation": "results/result-manifest.md:4",
+      "fact_terms": [
+        "superseded_result",
+        "legacy-top-pair.md"
+      ],
+      "status_terms": [
+        "superseded"
+      ]
+    },
+    {
+      "citation": "results/hardened-core12.md:9",
+      "fact_terms": [
+        "does not separate",
+        "X1",
+        "X3"
+      ],
+      "status_terms": [
+        "non-directional"
+      ]
+    }
+  ],
+  "required_non_claim_rows": [
+    {
+      "non_claim_terms": [
+        "X1 versus X3"
+      ],
+      "why_terms": [
+        "15 / 15 PASS",
+        "not separated"
+      ],
+      "follow_up_terms": [
+        "additional separators"
+      ]
+    },
+    {
+      "non_claim_terms": [
+        "X4",
+        "model capability failure"
+      ],
+      "why_terms": [
+        "route status",
+        "not a lane profile"
+      ],
+      "follow_up_terms": [
+        "providerRoutes"
+      ]
+    },
+    {
+      "non_claim_terms": [
+        "legacy",
+        "current ranking"
+      ],
+      "why_terms": [
+        "superseded_result"
+      ],
+      "follow_up_terms": [
+        "manifest"
+      ]
+    }
+  ],
+  "valid_gate_decisions": [
+    "PASS"
+  ],
+  "disallowed_markers": [
+    "TODO",
+    "X1 is better than X3",
+    "X3 is better than X1",
+    "externalPriorityProfile is authoritative"
+  ]
+}

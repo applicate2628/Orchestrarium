@@ -1,0 +1,16 @@
+id: N11
+surface_id: E2
+pack_id: E2
+role_class: design
+artifact_type: conflict-aware ADR package
+modality_family: top-pair architecture evidence conflict
+allowed_change_surface:
+  - candidate/design-package.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "design, top-pair-separator"
+overlay_flags:
+  - top-pair-separator

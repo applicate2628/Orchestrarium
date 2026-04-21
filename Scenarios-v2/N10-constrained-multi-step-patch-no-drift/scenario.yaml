@@ -1,0 +1,23 @@
+id: N10
+surface_id: E1
+pack_id: E1
+role_class: overlay worker
+artifact_type: constrained multi-step implementation patch plus validation
+modality_family: long autonomous no-drift patch execution
+allowed_change_surface:
+  - candidate/workspace/src/worker/chooseOwnedTarget.js
+  - candidate/workspace/src/worker/appendPatchStep.js
+  - candidate/workspace/src/worker/preserveVerificationPlan.js
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/src/runPatchFlow.js
+  - candidate/workspace/scripts/**
+  - candidate/workspace/test/**
+  - candidate/workspace/docs/**
+  - candidate/workspace/legacy/**
+score_profile: "implementation, long-autonomous"
+overlay_flags:
+  - long-autonomous

@@ -1,0 +1,17 @@
+id: N12
+surface_id: E2
+pack_id: E2
+role_class: factual
+artifact_type: source-truth conflict memo
+modality_family: top-pair multi-hop repository evidence
+allowed_change_surface:
+  - candidate/repository-fact-memo.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/repo-snapshot/**
+score_profile: "factual, top-pair-separator"
+overlay_flags:
+  - top-pair-separator

@@ -1,0 +1,22 @@
+id: N09
+surface_id: E1
+pack_id: E1
+role_class: overlay worker
+artifact_type: autonomous resume-safe implementation patch plus validation
+modality_family: long autonomous resume and path recall
+allowed_change_surface:
+  - candidate/workspace/src/workspace/recallWorkspaceRootAfterEdit.js
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/docs/**
+  - candidate/legacy/**
+  - candidate/workspace/src/runPathRecallTask.js
+  - candidate/workspace/src/ui/**
+  - candidate/workspace/scripts/**
+  - candidate/workspace/test/**
+score_profile: "implementation, long-autonomous"
+overlay_flags:
+  - long-autonomous

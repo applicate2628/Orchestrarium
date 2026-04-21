@@ -1,0 +1,374 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N11",
+    "surface_id": "E2",
+    "pack_id": "E2",
+    "role_class": "design",
+    "artifact_type": "conflict-aware ADR package",
+    "modality_family": "top-pair architecture evidence conflict",
+    "allowed_change_surface": [
+      "candidate/design-package.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "design, top-pair-separator",
+    "overlay_flags": [
+      "top-pair-separator"
+    ]
+  },
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/accepted-brief.md",
+    "inputs/evidence-map.md",
+    "inputs/seam-options.md",
+    "inputs/dependency-map.md",
+    "candidate/README.md",
+    "candidate/design-package.md",
+    "oracle/README.md",
+    "oracle/architecture-conflict-contract.json",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_architecture_evidence_conflict.py"
+  ],
+  "required_sections": [
+    "## Decision",
+    "## Evidence Ledger",
+    "## Evidence Binding Table",
+    "## Conflict Resolution",
+    "## Machine-Checkable Decision",
+    "## Options Considered",
+    "### Option A - Consumer Dispatch Normalization",
+    "### Option B - Agents-Mode Loader Normalization",
+    "### Option C - Provider Fallback Profile",
+    "## Chosen Seam",
+    "## Rejected Alternatives",
+    "## Boundary And Dependency Direction",
+    "## Forbidden Direction Test",
+    "## Migration And Tests",
+    "## Failure Modes And Mitigations",
+    "## Claims",
+    "## Gate Decision"
+  ],
+  "section_terms": [
+    {
+      "section": "## Decision",
+      "terms": [
+        "agents-mode loader normalization",
+        "externalPriorityProfiles"
+      ]
+    },
+    {
+      "section": "## Evidence Ledger",
+      "terms": [
+        "E-A",
+        "Orchestrarium/shared/agents-mode.defaults.yaml",
+        "authoritative",
+        "E-B",
+        "Archive/legacy-provider-runbook.md",
+        "stale",
+        "E-C",
+        "benchmarks/Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-18.md",
+        "route constraint",
+        "runtime transport",
+        "E-D",
+        "Orchestrarium/shared/external-adapter-contract.md",
+        "transport-only"
+      ]
+    },
+    {
+      "section": "## Evidence Binding Table",
+      "terms": [
+        "Evidence",
+        "Concrete source",
+        "Accepted claim",
+        "Decision use",
+        "Conflict risk",
+        "E-A",
+        "Orchestrarium/shared/agents-mode.defaults.yaml",
+        "E-B",
+        "Archive/legacy-provider-runbook.md",
+        "E-C",
+        "benchmarks/Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-18.md",
+        "E-D",
+        "Orchestrarium/shared/external-adapter-contract.md"
+      ]
+    },
+    {
+      "section": "## Conflict Resolution",
+      "terms": [
+        "externalPriorityProfiles",
+        "externalPriorityProfile",
+        "compatibility alias",
+        "not source of truth",
+        "visible deprecation signal",
+        "providerRoutes",
+        "runtime transport"
+      ]
+    },
+    {
+      "section": "## Machine-Checkable Decision",
+      "terms": [
+        "chosen_seam",
+        "agents-mode-loader-normalization",
+        "authoritative_profile_key",
+        "externalPriorityProfiles",
+        "compatibility_alias",
+        "externalPriorityProfile",
+        "route_state_keys",
+        "providerRoutes",
+        "non_profile_routes",
+        "X4",
+        "forbidden_adapter_reads"
+      ]
+    },
+    {
+      "section": "## Chosen Seam",
+      "terms": [
+        "agents-mode loader",
+        "normalized profile catalog",
+        "single owner",
+        "adapters stay transport-only",
+        "singular-to-plural rewrite"
+      ]
+    },
+    {
+      "section": "## Rejected Alternatives",
+      "terms": [
+        "Consumer Dispatch Normalization",
+        "duplicates policy parsing",
+        "Provider Fallback Profile",
+        "silently override"
+      ]
+    },
+    {
+      "section": "## Boundary And Dependency Direction",
+      "terms": [
+        "agents-mode loader -> normalized profile catalog -> external-worker",
+        "external-reviewer",
+        "forbidden direction",
+        "X4",
+        "secret-backed Claude",
+        "runtime transport",
+        "must not become a key"
+      ]
+    },
+    {
+      "section": "## Forbidden Direction Test",
+      "terms": [
+        "Forbidden read",
+        "Why forbidden",
+        "Test implication",
+        "external-worker",
+        "external-reviewer",
+        "externalPriorityProfiles",
+        "lane taxonomy",
+        "transport-only",
+        "must fail"
+      ]
+    },
+    {
+      "section": "## Migration And Tests",
+      "terms": [
+        "singular compatibility input",
+        "deprecation warning",
+        "normalized plural output",
+        "providerRoutes",
+        "X4",
+        "runtime transport",
+        "not a profile key",
+        "adapter contract test",
+        "must not parse lane policy"
+      ]
+    },
+    {
+      "section": "## Failure Modes And Mitigations",
+      "terms": [
+        "deprecation signal",
+        "not exported",
+        "regression test",
+        "X4 never appears as a key"
+      ]
+    }
+  ],
+  "required_claim_prefixes": [
+    "1.",
+    "2.",
+    "3."
+  ],
+  "required_claim_terms": [
+    "Verification:",
+    "Regression:"
+  ],
+  "required_table_headers": [
+    {
+      "section": "## Evidence Binding Table",
+      "header": "| Evidence | Concrete source | Accepted claim | Decision use | Conflict risk |"
+    },
+    {
+      "section": "## Forbidden Direction Test",
+      "header": "| Forbidden read | Why forbidden | Test implication |"
+    }
+  ],
+  "required_evidence_bindings": [
+    {
+      "evidence": "E-A",
+      "source": "Orchestrarium/shared/agents-mode.defaults.yaml",
+      "accepted_claim_terms": [
+        "externalPriorityProfiles",
+        "plural",
+        "authoritative"
+      ],
+      "decision_use_terms": [
+        "loader",
+        "canonical",
+        "source"
+      ],
+      "conflict_risk_terms": [
+        "low"
+      ]
+    },
+    {
+      "evidence": "E-B",
+      "source": "Archive/legacy-provider-runbook.md",
+      "accepted_claim_terms": [
+        "externalPriorityProfile",
+        "singular",
+        "stale"
+      ],
+      "decision_use_terms": [
+        "compatibility alias",
+        "deprecation"
+      ],
+      "conflict_risk_terms": [
+        "high"
+      ]
+    },
+    {
+      "evidence": "E-C",
+      "source": "benchmarks/Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-18.md",
+      "accepted_claim_terms": [
+        "X4",
+        "route constraint",
+        "secret-backed Claude",
+        "runtime transport"
+      ],
+      "decision_use_terms": [
+        "providerRoutes",
+        "route",
+        "not",
+        "profile"
+      ],
+      "conflict_risk_terms": [
+        "high"
+      ]
+    },
+    {
+      "evidence": "E-D",
+      "source": "Orchestrarium/shared/external-adapter-contract.md",
+      "accepted_claim_terms": [
+        "transport-only",
+        "resolved priority order"
+      ],
+      "decision_use_terms": [
+        "forbid",
+        "adapters",
+        "profile"
+      ],
+      "conflict_risk_terms": [
+        "high"
+      ]
+    }
+  ],
+  "required_forbidden_read_rows": [
+    {
+      "forbidden_terms": [
+        "external-worker",
+        "externalPriorityProfiles"
+      ],
+      "why_terms": [
+        "transport-only",
+        "lane taxonomy"
+      ],
+      "test_terms": [
+        "adapter contract test",
+        "fail"
+      ]
+    },
+    {
+      "forbidden_terms": [
+        "external-reviewer",
+        "externalPriorityProfiles"
+      ],
+      "why_terms": [
+        "transport-only",
+        "resolved priority order"
+      ],
+      "test_terms": [
+        "adapter contract test",
+        "fail"
+      ]
+    },
+    {
+      "forbidden_terms": [
+        "lane taxonomy"
+      ],
+      "why_terms": [
+        "agents-mode loader",
+        "normalization"
+      ],
+      "test_terms": [
+        "missing profiles",
+        "fail"
+      ]
+    }
+  ],
+  "machine_decision": {
+    "chosen_seam": "agents-mode-loader-normalization",
+    "authoritative_profile_key": "externalPriorityProfiles",
+    "compatibility_alias": "externalPriorityProfile",
+    "route_state_keys": [
+      "providerRoutes"
+    ],
+    "non_profile_routes": [
+      "X4"
+    ],
+    "forbidden_adapter_reads": [
+      "externalPriorityProfile",
+      "externalPriorityProfiles",
+      "lane taxonomy"
+    ]
+  },
+  "valid_gate_decisions": [
+    "PASS"
+  ],
+  "disallowed_markers": [
+    "TODO",
+    "Option A is chosen",
+    "Option C is chosen"
+  ]
+}

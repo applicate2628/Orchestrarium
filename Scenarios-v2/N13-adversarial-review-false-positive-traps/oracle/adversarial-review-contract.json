@@ -1,0 +1,259 @@
+{
+  "required_top_level_entries": [
+    "scenario.yaml",
+    "README.md",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N13",
+    "surface_id": "E2",
+    "pack_id": "E2",
+    "role_class": "review",
+    "artifact_type": "adversarial review report",
+    "modality_family": "top-pair review false-positive traps",
+    "allowed_change_surface": [
+      "candidate/review-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "review, top-pair-separator",
+    "overlay_flags": [
+      "top-pair-separator"
+    ]
+  },
+  "required_bundle_paths": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/review-boundary.md",
+    "inputs/operator-signals.md",
+    "candidate/README.md",
+    "candidate/review-report.md",
+    "candidate/review-target/README.md",
+    "candidate/review-target/routing/retry_policy.py",
+    "candidate/review-target/routing/lane_summary.py",
+    "candidate/review-target/routing/sample_rows.py",
+    "candidate/review-target/routing/ui_helpers.py",
+    "oracle/README.md",
+    "oracle/adversarial-review-contract.json",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_adversarial_review_traps.py"
+  ],
+  "required_sections": [
+    "## Findings",
+    "## False Positives Avoided",
+    "## Scoreability Causal Ledger",
+    "## Evidence Boundary",
+    "## Gate Decision"
+  ],
+  "required_findings": [
+    {
+      "name": "quota misclassified as fail",
+      "severity": "blocking",
+      "terms": [
+        "retry_policy.py",
+        "classify_result",
+        "provider_error",
+        "quota",
+        "REQUEUE",
+        "not verifier FAIL",
+        "Fix:",
+        "distinct"
+      ]
+    },
+    {
+      "name": "timeout artifact promoted to pass",
+      "severity": "blocking",
+      "terms": [
+        "lane_summary.py",
+        "status_label",
+        "timeout",
+        "artifact_verifier",
+        "PASS",
+        "not a clean PASS",
+        "Fix:",
+        "TIMEOUT-ARTIFACT-OK"
+      ]
+    },
+    {
+      "name": "denominator counts non-scoreable cells",
+      "severity": "major",
+      "terms": [
+        "lane_summary.py",
+        "summarize_lane",
+        "len(rows)",
+        "scoreable",
+        "denominator",
+        "Fix:",
+        "len(scoreable)",
+        "non-scoreable counts separately"
+      ]
+    },
+    {
+      "name": "timeout retry suppressed",
+      "severity": "major",
+      "terms": [
+        "retry_policy.py",
+        "should_retry",
+        "timeout",
+        "attempt",
+        "retryable",
+        "wrapper timeout",
+        "Fix:",
+        "attempt budget"
+      ]
+    },
+    {
+      "name": "composed scoreable summary corrupts final read",
+      "severity": "major",
+      "terms": [
+        "sample_rows.py",
+        "SAMPLE_RESULTS",
+        "classify_result",
+        "status_label",
+        "summarize_lane",
+        "causal path",
+        "1/5",
+        "1/2",
+        "non-scoreable"
+      ]
+    }
+  ],
+  "exact_finding_count": 5,
+  "required_finding_labels": [
+    "Mechanism:",
+    "Impact:",
+    "Fix:",
+    "Regression:"
+  ],
+  "false_positive_terms": [
+    "ui_helpers.py",
+    "chip-neutral",
+    "render_chip",
+    "display-only",
+    "not blocking",
+    "out of scope"
+  ],
+  "required_table_headers": [
+    {
+      "section": "## Scoreability Causal Ledger",
+      "header": "| Source signal | Local wrong class | Correct class | Downstream score impact | Owner fix |"
+    }
+  ],
+  "required_causal_rows": [
+    {
+      "source_terms": [
+        "retry_policy.py",
+        "classify_result",
+        "quota"
+      ],
+      "wrong_class_terms": [
+        "fail"
+      ],
+      "correct_class_terms": [
+        "REQUEUE",
+        "non-scoreable"
+      ],
+      "impact_terms": [
+        "denominator",
+        "scoreable"
+      ],
+      "owner_fix_terms": [
+        "distinct",
+        "quota"
+      ]
+    },
+    {
+      "source_terms": [
+        "lane_summary.py",
+        "status_label",
+        "timeout"
+      ],
+      "wrong_class_terms": [
+        "PASS"
+      ],
+      "correct_class_terms": [
+        "TIMEOUT-ARTIFACT-OK",
+        "not a clean PASS"
+      ],
+      "impact_terms": [
+        "timeout",
+        "clean PASS"
+      ],
+      "owner_fix_terms": [
+        "preserve",
+        "timeout"
+      ]
+    },
+    {
+      "source_terms": [
+        "lane_summary.py",
+        "summarize_lane",
+        "len(rows)"
+      ],
+      "wrong_class_terms": [
+        "len(rows)"
+      ],
+      "correct_class_terms": [
+        "len(scoreable)"
+      ],
+      "impact_terms": [
+        "non-scoreable",
+        "denominator"
+      ],
+      "owner_fix_terms": [
+        "non-scoreable counts separately"
+      ]
+    },
+    {
+      "source_terms": [
+        "sample_rows.py",
+        "SAMPLE_RESULTS"
+      ],
+      "wrong_class_terms": [
+        "composed",
+        "1/5"
+      ],
+      "correct_class_terms": [
+        "1/2",
+        "non-scoreable"
+      ],
+      "impact_terms": [
+        "final read",
+        "corrupt"
+      ],
+      "owner_fix_terms": [
+        "causal path"
+      ]
+    }
+  ],
+  "valid_gate_decisions": [
+    "REVISE"
+  ],
+  "disallowed_markers": [
+    "TODO",
+    "ui_helpers.py is blocking",
+    "chip-neutral is blocking",
+    "quota is fail"
+  ]
+}
