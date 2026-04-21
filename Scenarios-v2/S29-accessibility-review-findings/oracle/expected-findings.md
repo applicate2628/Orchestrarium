@@ -39,6 +39,16 @@ The ground-truth report for `S29` should return `REVISE` with these findings, in
   outline measures `1.9:1`, so low-vision users do not get the promised readable guidance or
   visible focus cues
 
+## 5. Major: submit status changes are not announced to assistive technology
+
+- anchor files:
+  - `candidate/review-target/share-dialog/index.html`
+  - `candidate/review-target/share-dialog/dialog.js`
+- supporting reference: `inputs/keyboard-and-at-observations.md`
+- reason: submitting the form changes `send-status` from `Ready to send` to
+  `Invite sent to reviewers`, but the status node has no `aria-live` or `role="status"` exposure,
+  so assistive technology users do not receive the completion update
+
 ## Expected gate
 
 `REVISE`

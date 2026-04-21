@@ -85,6 +85,38 @@ def require(condition, message, errors):
         errors.append(message)
 
 
+def extract_section_bodies(markdown_text: str):
+    sections = {}
+    current_section = None
+    current_lines = []
+    for line in markdown_text.splitlines():
+        if line.startswith("## "):
+            if current_section is not None:
+                sections[current_section] = "\n".join(current_lines).strip()
+            current_section = line.strip()
+            current_lines = []
+            continue
+        if current_section is not None:
+            current_lines.append(line)
+    if current_section is not None:
+        sections[current_section] = "\n".join(current_lines).strip()
+    return sections
+
+
+def split_label_blocks(section_text: str):
+    blocks = []
+    current = []
+    for line in section_text.splitlines():
+        if line.lstrip().startswith("[") and current:
+            blocks.append("\n".join(current).strip())
+            current = []
+        if line.strip():
+            current.append(line)
+    if current:
+        blocks.append("\n".join(current).strip())
+    return blocks
+
+
 def check_changed_paths(changed_paths, allowed_paths, errors):
     allowed = set(allowed_paths)
     unexpected = sorted({path for path in changed_paths if path not in allowed})
@@ -129,17 +161,22 @@ def check_completed_report(bundle_root: Path, contract, errors):
 
     report_text = report_path.read_text(encoding="utf-8")
     report_lower = report_text.lower()
+    section_bodies = extract_section_bodies(report_text)
 
     for section in contract["required_report_sections"]:
         require(section in report_text, f"Missing report section: {section}", errors)
 
     require("todo" not in report_lower, "review-report.md still contains TODO markers", errors)
+    gate_body = section_bodies.get("## Gate Decision", "")
     require(
-        contract["expected_gate_decision"].lower() in report_lower,
-        f"review-report.md does not contain gate decision {contract['expected_gate_decision']}",
+        contract["expected_gate_decision"].lower() in gate_body.lower(),
+        f"review-report.md does not contain gate decision {contract['expected_gate_decision']} in ## Gate Decision",
         errors,
     )
 
+    findings_body = section_bodies.get("## Findings", "")
+    finding_blocks = split_label_blocks(findings_body)
+    last_index = -1
     for finding in contract["required_findings"]:
         severity = finding["severity"].lower()
         require(
@@ -147,10 +184,40 @@ def check_completed_report(bundle_root: Path, contract, errors):
             f"Missing severity label for finding: {finding['name']}",
             errors,
         )
+        block_anchor = finding["required_terms"][1].lower()
+        matching_index = next(
+            (
+                index for index, block in enumerate(finding_blocks)
+                if f"[{severity}]" in block.lower()
+                and block_anchor in block.lower()
+            ),
+            -1,
+        )
+        require(matching_index >= 0, f"Missing distinct finding block for: {finding['name']}", errors)
+        require(matching_index > last_index, f"Finding appears out of required order: {finding['name']}", errors)
+        if matching_index >= 0:
+            last_index = matching_index
+        block_lower = finding_blocks[matching_index].lower() if matching_index >= 0 else ""
         for term in finding["required_terms"]:
             require(
                 term.lower() in report_lower,
                 f"Missing required anchor '{term}' for finding: {finding['name']}",
+                errors,
+            )
+            require(
+                term.lower() in block_lower,
+                f"Missing required anchor '{term}' inside finding block: {finding['name']}",
+                errors,
+            )
+
+    for section_requirement in contract.get("required_section_terms", []):
+        section_name = section_requirement["section"]
+        section_lower = section_bodies.get(section_name, "").lower()
+        require(section_lower != "", f"Missing body for report section: {section_name}", errors)
+        for term in section_requirement["required_terms"]:
+            require(
+                term.lower() in section_lower,
+                f"Missing required term '{term}' in section {section_name}",
                 errors,
             )
 

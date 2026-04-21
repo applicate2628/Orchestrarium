@@ -86,6 +86,24 @@ def require(condition, message, errors):
         errors.append(message)
 
 
+def extract_section_bodies(markdown_text: str):
+    sections = {}
+    current_section = None
+    current_lines = []
+    for line in markdown_text.splitlines():
+        if line.startswith("## "):
+            if current_section is not None:
+                sections[current_section] = "\n".join(current_lines).strip()
+            current_section = line.strip()
+            current_lines = []
+            continue
+        if current_section is not None:
+            current_lines.append(line)
+    if current_section is not None:
+        sections[current_section] = "\n".join(current_lines).strip()
+    return sections
+
+
 def contains_any(text, alternatives):
     lowered = text.lower()
     return any(option.lower() in lowered for option in alternatives)
@@ -131,6 +149,7 @@ def check_completed_memo(bundle_root: Path, contract, errors):
         return
 
     text = memo_path.read_text(encoding="utf-8")
+    section_bodies = extract_section_bodies(text)
 
     for section in contract["required_memo_sections"]:
         require(section in text, f"Missing required section: {section}", errors)
@@ -160,6 +179,17 @@ def check_completed_memo(bundle_root: Path, contract, errors):
             f"Memo is missing required keyword coverage from: {alternatives}",
             errors,
         )
+
+    for section_requirement in contract.get("required_section_terms", []):
+        section_name = section_requirement["section"]
+        section_lower = section_bodies.get(section_name, "").lower()
+        require(section_lower != "", f"Missing body for section: {section_name}", errors)
+        for term in section_requirement["required_terms"]:
+            require(
+                term.lower() in section_lower,
+                f"Missing required term '{term}' in section {section_name}",
+                errors,
+            )
 
     status_pattern = rf"(?ms)^## Advisory status\s+{re.escape(contract['required_advisory_status'])}\s*(?:\n## Continuation prompt|\Z)"
     require(

@@ -19,6 +19,26 @@
     "score_profile",
     "overlay_flags"
   ],
+  "required_metadata": {
+    "id": "S06",
+    "surface_id": "R06",
+    "pack_id": "P02",
+    "role_class": "factual",
+    "artifact_type": "factual research memo",
+    "modality_family": "repository investigation",
+    "allowed_change_surface": [
+      "candidate/repository-fact-memo.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/repo-snapshot/**"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning",
+    "overlay_flags": []
+  },
   "required_bundle_paths": [
     "inputs/README.md",
     "inputs/task.md",
@@ -76,6 +96,31 @@
   "required_unknown_terms": [
     "entrypoint selecting the requested surface id",
     "not present in this repo slice"
+  ],
+  "required_section_terms": [
+    {
+      "section": "## Confirmed facts",
+      "required_terms": [
+        "collect_scenarios.py",
+        "scenario_catalog.py",
+        "score_profiles.py"
+      ]
+    },
+    {
+      "section": "## False leads rejected",
+      "required_terms": [
+        "legacy-routing-notes.md",
+        "legacy_score_profiles.py",
+        "scenario_index_v1.yaml"
+      ]
+    },
+    {
+      "section": "## Explicit unknowns",
+      "required_terms": [
+        "entrypoint selecting the requested surface id",
+        "not present in this repo slice"
+      ]
+    }
   ],
   "expected_gate_decision": "PASS",
   "disallowed_headings": [

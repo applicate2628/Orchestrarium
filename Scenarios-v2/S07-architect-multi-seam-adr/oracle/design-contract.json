@@ -19,6 +19,25 @@
     "score_profile",
     "overlay_flags"
   ],
+  "required_metadata": {
+    "id": "S07",
+    "surface_id": "R07",
+    "pack_id": "P02",
+    "role_class": "design",
+    "artifact_type": "ADR or design package",
+    "modality_family": "architecture decision",
+    "allowed_change_surface": [
+      "candidate/design-package.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning",
+    "overlay_flags": []
+  },
   "required_bundle_files": [
     "inputs/README.md",
     "inputs/task.md",
@@ -94,6 +113,37 @@
       "implementation is out of scope",
       "no implementation patch"
     ]
+  ],
+  "required_section_terms": [
+    {
+      "section": "## Chosen approach and rationale",
+      "required_terms": [
+        "Option B",
+        "bundle-local",
+        "oracle",
+        "verifier",
+        "self-contained"
+      ]
+    },
+    {
+      "section": "## Rejected alternatives",
+      "required_terms": [
+        "Option A",
+        "scenario.yaml",
+        "Option C",
+        "central scorer",
+        "blast radius"
+      ]
+    },
+    {
+      "section": "## Dependency direction",
+      "required_terms": [
+        "scenario.yaml",
+        "oracle",
+        "verifiers",
+        "score profile"
+      ]
+    }
   ],
   "required_claim_prefixes": [
     "1.",

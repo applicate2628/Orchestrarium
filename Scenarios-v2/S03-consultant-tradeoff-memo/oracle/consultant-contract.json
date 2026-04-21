@@ -125,6 +125,34 @@
       "NON-BLOCKING"
     ]
   ],
+  "required_section_terms": [
+    {
+      "section": "## Recommended direction",
+      "required_terms": [
+        "Option A",
+        "local advisory pilot",
+        "evidence",
+        "blast radius"
+      ]
+    },
+    {
+      "section": "## Alternatives considered",
+      "required_terms": [
+        "Option B",
+        "shared memo scaffolding",
+        "Option C",
+        "wait for more evidence"
+      ]
+    },
+    {
+      "section": "## Assumptions and uncertainty",
+      "required_terms": [
+        "missing evidence",
+        "open questions",
+        "uncertainty"
+      ]
+    }
+  ],
   "required_advisory_status": "NON-BLOCKING",
   "valid_continuation_prefixes": [
     "Continue working:",

@@ -12,6 +12,8 @@ findings-only accessibility report in `candidate/review-report.md`.
 - tie findings to keyboard access, semantic labeling, focus order, contrast, or AT exposure
 - summarize the required fixes before merge without writing the patch
 - end with exactly one gate decision: `PASS`, `REVISE`, or `BLOCKED`
+- keep findings in this priority order: keyboard containment, semantic naming/state exposure,
+  focus order, contrast/focus visibility, submit status announcement
 
 ## Scope limits
 

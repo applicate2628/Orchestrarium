@@ -67,11 +67,51 @@
     "[fill in after run]",
     "TODO"
   ],
+  "disallowed_headings": [
+    "## Decision",
+    "## Phase sequence",
+    "## Implementation plan",
+    "## Findings"
+  ],
   "required_anchor_terms": [
     "milestone 1",
     "open question",
     "constraint",
     "success"
+  ],
+  "required_section_terms": [
+    {
+      "section": "## Product Goal",
+      "required_terms": [
+        "milestone 1",
+        "role-first",
+        "v2 results"
+      ]
+    },
+    {
+      "section": "## In Scope",
+      "required_terms": [
+        "semantic role winners",
+        "adapter surfaces",
+        "overlays",
+        "caveats"
+      ]
+    },
+    {
+      "section": "## Out of Scope",
+      "required_terms": [
+        "provider reruns",
+        "prerequisite",
+        "publish surface"
+      ]
+    },
+    {
+      "section": "## Open Questions",
+      "required_terms": [
+        "near-tie",
+        "handling"
+      ]
+    }
   ],
   "expected_gate_decision": "PASS"
 }

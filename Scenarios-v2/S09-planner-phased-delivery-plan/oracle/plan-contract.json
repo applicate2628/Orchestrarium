@@ -140,6 +140,36 @@
       "tests and checks"
     ]
   ],
+  "required_section_terms": [
+    {
+      "section": "## Boundaries and assumptions",
+      "required_terms": [
+        "tools/status_snapshot.py",
+        "tests/test_status_snapshot.py",
+        "runners",
+        "archive"
+      ]
+    },
+    {
+      "section": "## Cross-phase risks and mitigations",
+      "required_terms": [
+        "dry-run",
+        "write",
+        "rollback",
+        "Phase 1",
+        "Phase 2"
+      ]
+    },
+    {
+      "section": "## Verification and handoff gates",
+      "required_terms": [
+        "500-item",
+        "$qa-engineer",
+        "$architecture-reviewer",
+        "handoff"
+      ]
+    }
+  ],
   "valid_gate_decisions": [
     "PASS",
     "REVISE",

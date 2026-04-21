@@ -64,6 +64,7 @@
     "## UX objective",
     "## Users and operating context",
     "## Current interaction-state failures",
+    "## Source-to-state trace",
     "## State and interruption principles",
     "## Proposed state model",
     "## Proposed end-to-end interaction flow",
@@ -87,6 +88,43 @@
     "### Desktop resume cues",
     "### Web resume cues",
     "### Shared timeline and handoff cues"
+  ],
+  "required_trace_headings": [
+    "### Ready handoff ambiguity",
+    "### Generic draft return",
+    "### Paused review resume",
+    "### Publish blocker gate"
+  ],
+  "required_trace_table_header": "| Source failure | Proposed state response | Owner | Visible return cue |",
+  "required_trace_rows": [
+    {
+      "heading": "### Ready handoff ambiguity",
+      "source_terms": ["Ready", "web review", "acknowledged", "handoff"],
+      "response_terms": ["handoff", "acknowledged", "state"],
+      "owner_terms": ["curator", "reviewer"],
+      "cue_terms": ["acknowledged", "handoff"]
+    },
+    {
+      "heading": "### Generic draft return",
+      "source_terms": ["reviewer question", "generic draft"],
+      "response_terms": ["targeted", "return", "section"],
+      "owner_terms": ["curator"],
+      "cue_terms": ["section", "checkpoint"]
+    },
+    {
+      "heading": "### Paused review resume",
+      "source_terms": ["paused", "resume from here"],
+      "response_terms": ["paused", "resume", "prior decision"],
+      "owner_terms": ["reviewer"],
+      "cue_terms": ["resume from here", "prior decision"]
+    },
+    {
+      "heading": "### Publish blocker gate",
+      "source_terms": ["Publish approval", "change-return loop"],
+      "response_terms": ["publish", "blocked", "same loop"],
+      "owner_terms": ["curator", "reviewer"],
+      "cue_terms": ["same loop", "approval"]
+    }
   ],
   "required_exact_lines": [
     "- Brief owner: `$ux-designer`",
@@ -142,6 +180,49 @@
       "review output stays out of scope",
       "not a review report"
     ]
+  ],
+  "required_section_terms": [
+    {
+      "section": "## Proposed state model",
+      "required_terms": [
+        "validation failure",
+        "reviewer question",
+        "paused",
+        "re-entry",
+        "owner"
+      ]
+    },
+    {
+      "section": "## Source-to-state trace",
+      "required_terms": [
+        "ready",
+        "web review acknowledged",
+        "generic draft",
+        "reviewer question",
+        "resume from here",
+        "publish approval",
+        "same loop"
+      ]
+    },
+    {
+      "section": "## Proposed end-to-end interaction flow",
+      "required_terms": [
+        "local preparation",
+        "review handoff",
+        "blocking question",
+        "returned",
+        "ready to re-enter"
+      ]
+    },
+    {
+      "section": "## Resume cues and feedback",
+      "required_terms": [
+        "resume target",
+        "visible cue",
+        "what changed",
+        "where the operator left"
+      ]
+    }
   ],
   "valid_statuses": [
     "PASS",

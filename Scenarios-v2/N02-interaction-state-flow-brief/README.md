@@ -31,6 +31,10 @@ Use only the accepted packet in `inputs/`. The completed UX structure brief must
 
 - stay UX-designer-owned and structure-focused
 - define a coherent state model spanning desktop preparation and web review
+- trace the source input failures into the proposed state model instead of describing states in
+  isolation
+- make each source-to-state trace subsection a Markdown table with columns:
+  `Source failure`, `Proposed state response`, `Owner`, `Visible return cue`
 - restructure the interruption and return-loop behavior for validation failures, reviewer asks, and
   paused work
 - assign state ownership and visible resume cues across both surfaces

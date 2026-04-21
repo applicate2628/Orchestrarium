@@ -67,6 +67,38 @@ def require(condition, message, errors):
         errors.append(message)
 
 
+def extract_section_bodies(markdown_text: str):
+    sections = {}
+    current_section = None
+    current_lines = []
+    for line in markdown_text.splitlines():
+        if line.startswith("## "):
+            if current_section is not None:
+                sections[current_section] = "\n".join(current_lines).strip()
+            current_section = line.strip()
+            current_lines = []
+            continue
+        if current_section is not None:
+            current_lines.append(line)
+    if current_section is not None:
+        sections[current_section] = "\n".join(current_lines).strip()
+    return sections
+
+
+def split_finding_blocks(findings_text: str):
+    blocks = []
+    current = []
+    for line in findings_text.splitlines():
+        if line.lstrip().startswith("[") and current:
+            blocks.append("\n".join(current).strip())
+            current = []
+        if line.strip():
+            current.append(line)
+    if current:
+        blocks.append("\n".join(current).strip())
+    return blocks
+
+
 def check_changed_paths(changed_paths, allowed_paths, errors):
     allowed = set(allowed_paths)
     unexpected = sorted({path for path in changed_paths if path not in allowed})
@@ -105,15 +137,44 @@ def check_completed_report(bundle_root: Path, contract, errors):
         return
     text = report_path.read_text(encoding="utf-8")
     lower = text.lower()
+    section_bodies = extract_section_bodies(text)
 
     for section in contract["required_report_sections"]:
         require(section in text, f"Missing report section: {section}", errors)
-    require(contract["expected_gate_decision"].lower() in lower, "Missing REVISE gate decision", errors)
+    gate_body = section_bodies.get("## Gate Decision", "")
+    require(
+        contract["expected_gate_decision"].lower() in gate_body.lower(),
+        "Missing REVISE gate decision in ## Gate Decision",
+        errors,
+    )
 
+    findings_body = section_bodies.get("## Findings", "")
+    finding_blocks = split_finding_blocks(findings_body)
     for finding in contract["required_findings"]:
-        require(f"[{finding['severity']}]" in lower, f"Missing severity label for {finding['name']}", errors)
+        severity = f"[{finding['severity']}]"
+        matching_blocks = [
+            block for block in finding_blocks
+            if severity in block.lower() and finding["name"].split()[0].lower() in block.lower()
+        ]
+        if not matching_blocks:
+            matching_blocks = [block for block in finding_blocks if severity in block.lower()]
+        block_text = matching_blocks[0].lower() if matching_blocks else ""
+        require(block_text != "", f"Missing distinct finding block for {finding['name']}", errors)
         for term in finding["required_terms"]:
             require(term.lower() in lower, f"Missing required term '{term}' for {finding['name']}", errors)
+            require(
+                term.lower() in block_text,
+                f"Missing required term '{term}' inside finding block for {finding['name']}",
+                errors,
+            )
+
+    false_positive_body = section_bodies.get("## False Positives Avoided", "").lower()
+    for term in contract.get("required_false_positive_terms", []):
+        require(
+            term.lower() in false_positive_body,
+            f"Missing false-positive boundary term: {term}",
+            errors,
+        )
 
     for snippet in contract["prohibited_report_snippets"]:
         require(snippet not in lower, f"Prohibited snippet present: {snippet}", errors)

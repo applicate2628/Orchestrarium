@@ -107,6 +107,25 @@
       ]
     }
   ],
+  "required_section_terms": [
+    {
+      "section": "## Boundary Notes",
+      "required_terms": [
+        "inputs/review-boundary.md",
+        "false-positive",
+        "line wrapping",
+        "cosmetic",
+        "not a standalone finding"
+      ]
+    },
+    {
+      "section": "## Open Questions",
+      "required_terms": [
+        "none",
+        "not blocking"
+      ]
+    }
+  ],
   "prohibited_report_snippets": [
     "## Threat Model",
     "## Performance Budget",

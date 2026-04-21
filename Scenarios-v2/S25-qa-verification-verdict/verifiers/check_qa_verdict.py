@@ -157,8 +157,9 @@ def check_completed_report(bundle_root: Path, contract, errors):
 
     require("todo" not in report_lower, "qa-verdict.md still contains TODO markers", errors)
     require(
-        contract["expected_gate_decision"].lower() in report_lower,
-        f"qa-verdict.md does not contain gate decision {contract['expected_gate_decision']}",
+        contract["expected_gate_decision"].lower()
+        in section_bodies.get("## Gate Decision", "").lower(),
+        f"qa-verdict.md does not contain gate decision {contract['expected_gate_decision']} in ## Gate Decision",
         errors,
     )
 

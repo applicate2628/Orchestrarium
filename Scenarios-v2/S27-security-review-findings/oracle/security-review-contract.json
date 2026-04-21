@@ -70,18 +70,37 @@
     {
       "name": "token persistence",
       "severity": "high",
-      "required_terms": ["localStorage", "preview_access_token"]
+      "required_terms": [
+        "candidate/review-target/auth-surface/token_exchange.js",
+        "localStorage",
+        "preview_access_token",
+        "bearer"
+      ]
     },
     {
       "name": "wildcard postMessage",
       "severity": "high",
-      "required_terms": ["postMessage", "\"*\""]
+      "required_terms": [
+        "candidate/review-target/auth-surface/token_exchange.js",
+        "postMessage",
+        "\"*\"",
+        "origin"
+      ]
     },
     {
       "name": "token exposure",
       "severity": "medium",
-      "required_terms": ["token.slice", "preview-channel"]
+      "required_terms": [
+        "candidate/review-target/auth-surface/token_exchange.js",
+        "token.slice",
+        "preview-channel",
+        "visible"
+      ]
     }
+  ],
+  "required_false_positive_terms": [
+    "monospace",
+    "internal-only"
   ],
   "prohibited_report_snippets": [
     "ship it",

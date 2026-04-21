@@ -93,6 +93,53 @@ def require(condition, message, errors):
         errors.append(message)
 
 
+def extract_section_bodies(markdown_text: str):
+    sections = {}
+    current_section = None
+    current_lines = []
+    for line in markdown_text.splitlines():
+        if line.startswith("## "):
+            if current_section is not None:
+                sections[current_section] = "\n".join(current_lines).strip()
+            current_section = line.strip()
+            current_lines = []
+            continue
+        if current_section is not None:
+            current_lines.append(line)
+    if current_section is not None:
+        sections[current_section] = "\n".join(current_lines).strip()
+    return sections
+
+
+def extract_subsection_body(markdown_text: str, heading: str) -> str:
+    pattern = rf"(?ms)^{re.escape(heading)}\s*\n(.*?)(?=^### |\Z)"
+    match = re.search(pattern, markdown_text)
+    if match is None:
+        return ""
+    return match.group(1).strip()
+
+
+def parse_markdown_table(section: str):
+    rows = []
+    for raw_line in section.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("|") or not line.endswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if not cells or all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+            continue
+        rows.append(cells)
+    if not rows:
+        return [], []
+    return rows[0], rows[1:]
+
+
+def require_terms(text: str, terms, context: str, errors):
+    lowered = text.lower()
+    for term in terms:
+        require(term.lower() in lowered, f"Missing required term '{term}' in {context}", errors)
+
+
 def check_changed_paths(changed_paths, allowed_paths, errors):
     allowed = set(allowed_paths)
     unexpected = sorted({path for path in changed_paths if path not in allowed})
@@ -174,6 +221,7 @@ def check_completed_brief(bundle_root: Path, contract, errors):
         return
 
     text = brief_path.read_text(encoding="utf-8")
+    section_bodies = extract_section_bodies(text)
 
     for section in contract["required_brief_sections"]:
         require(section in text, f"Missing required section: {section}", errors)
@@ -181,6 +229,49 @@ def check_completed_brief(bundle_root: Path, contract, errors):
     check_ordered_headings(text, contract["required_state_headings"], "state heading", errors)
     check_ordered_headings(text, contract["required_flow_headings"], "flow heading", errors)
     check_ordered_headings(text, contract["required_resume_headings"], "resume heading", errors)
+    check_ordered_headings(text, contract["required_trace_headings"], "trace heading", errors)
+    trace_table_header = contract["required_trace_table_header"]
+    for heading in contract["required_trace_headings"]:
+        subsection_body = extract_subsection_body(text, heading)
+        require(
+            trace_table_header in subsection_body,
+            f"Trace subsection is missing required table header: {heading}",
+            errors,
+        )
+        require(
+            re.search(r"(?m)^\| .+ \| .+ \| .+ \| .+ \|$", subsection_body) is not None,
+            f"Trace subsection is missing a populated trace row: {heading}",
+            errors,
+        )
+        table_header, table_rows = parse_markdown_table(subsection_body)
+        if table_header:
+            require(
+                table_header == [
+                    "Source failure",
+                    "Proposed state response",
+                    "Owner",
+                    "Visible return cue",
+                ],
+                f"Trace table header does not match required columns exactly: {heading}",
+                errors,
+            )
+        row_rule = next(
+            (rule for rule in contract.get("required_trace_rows", []) if rule["heading"] == heading),
+            None,
+        )
+        if row_rule is not None:
+            matching_rows = []
+            for row in table_rows:
+                if len(row) < 4:
+                    continue
+                if all(term.lower() in row[0].lower() for term in row_rule["source_terms"]):
+                    matching_rows.append(row)
+            require(matching_rows, f"Trace subsection is missing source-bound row: {heading}", errors)
+            if matching_rows:
+                row = matching_rows[0]
+                require_terms(row[1], row_rule["response_terms"], f"trace response row {heading}", errors)
+                require_terms(row[2], row_rule["owner_terms"], f"trace owner row {heading}", errors)
+                require_terms(row[3], row_rule["cue_terms"], f"trace visible cue row {heading}", errors)
 
     for exact_line in contract["required_exact_lines"]:
         require(exact_line in text, f"Missing required line: {exact_line}", errors)
@@ -191,6 +282,17 @@ def check_completed_brief(bundle_root: Path, contract, errors):
             f"Brief is missing required keyword coverage from: {alternatives}",
             errors,
         )
+
+    for section_requirement in contract.get("required_section_terms", []):
+        section_name = section_requirement["section"]
+        section_lower = section_bodies.get(section_name, "").lower()
+        require(section_lower != "", f"Missing body for section: {section_name}", errors)
+        for term in section_requirement["required_terms"]:
+            require(
+                term.lower() in section_lower,
+                f"Missing required term '{term}' in section {section_name}",
+                errors,
+            )
 
     status_pattern = r"(?ms)^## Brief status\s+([A-Z][A-Z -]+)\s*\Z"
     match = re.search(status_pattern, text)

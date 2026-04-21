@@ -85,6 +85,38 @@ def require(condition, message, errors):
         errors.append(message)
 
 
+def extract_section_bodies(markdown_text: str):
+    sections = {}
+    current_section = None
+    current_lines = []
+    for line in markdown_text.splitlines():
+        if line.startswith("## "):
+            if current_section is not None:
+                sections[current_section] = "\n".join(current_lines).strip()
+            current_section = line.strip()
+            current_lines = []
+            continue
+        if current_section is not None:
+            current_lines.append(line)
+    if current_section is not None:
+        sections[current_section] = "\n".join(current_lines).strip()
+    return sections
+
+
+def split_label_blocks(section_text: str):
+    blocks = []
+    current = []
+    for line in section_text.splitlines():
+        if line.lstrip().startswith("[") and current:
+            blocks.append("\n".join(current).strip())
+            current = []
+        if line.strip():
+            current.append(line)
+    if current:
+        blocks.append("\n".join(current).strip())
+    return blocks
+
+
 def check_changed_paths(changed_paths, allowed_paths, errors):
     allowed = set(allowed_paths)
     unexpected = sorted({path for path in changed_paths if path not in allowed})
@@ -129,6 +161,7 @@ def check_completed_report(bundle_root: Path, contract, errors):
 
     report_text = report_path.read_text(encoding="utf-8")
     report_lower = report_text.lower()
+    section_bodies = extract_section_bodies(report_text)
 
     for section in contract["required_report_sections"]:
         require(section in report_text, f"Missing report section: {section}", errors)
@@ -138,15 +171,19 @@ def check_completed_report(bundle_root: Path, contract, errors):
         "regression-triage-report.md still contains TODO markers",
         errors,
     )
+    gate_body = section_bodies.get("## Gate Decision", "")
     require(
-        contract["expected_gate_decision"].lower() in report_lower,
+        contract["expected_gate_decision"].lower() in gate_body.lower(),
         (
-            "regression-triage-report.md does not contain gate decision "
+            "regression-triage-report.md does not contain gate decision in ## Gate Decision "
             f"{contract['expected_gate_decision']}"
         ),
         errors,
     )
 
+    likely_body = section_bodies.get("## Likely Regressions", "")
+    regression_blocks = split_label_blocks(likely_body)
+    last_index = -1
     for regression in contract["required_regressions"]:
         severity = regression["severity"].lower()
         require(
@@ -154,10 +191,29 @@ def check_completed_report(bundle_root: Path, contract, errors):
             f"Missing severity label for regression: {regression['name']}",
             errors,
         )
+        block_anchor = regression["required_terms"][1].lower()
+        matching_index = next(
+            (
+                index for index, block in enumerate(regression_blocks)
+                if f"[{severity}]" in block.lower()
+                and block_anchor in block.lower()
+            ),
+            -1,
+        )
+        require(matching_index >= 0, f"Missing distinct regression block for: {regression['name']}", errors)
+        require(matching_index > last_index, f"Regression appears out of required order: {regression['name']}", errors)
+        if matching_index >= 0:
+            last_index = matching_index
+        block_lower = regression_blocks[matching_index].lower() if matching_index >= 0 else ""
         for term in regression["required_terms"]:
             require(
                 term.lower() in report_lower,
                 f"Missing required anchor '{term}' for regression: {regression['name']}",
+                errors,
+            )
+            require(
+                term.lower() in block_lower,
+                f"Missing required anchor '{term}' inside regression block: {regression['name']}",
                 errors,
             )
 
@@ -166,6 +222,17 @@ def check_completed_report(bundle_root: Path, contract, errors):
             require(
                 term.lower() in report_lower,
                 f"Missing required supporting anchor '{term}' for {point['name']}",
+                errors,
+            )
+
+    for section_requirement in contract.get("required_section_terms", []):
+        section_name = section_requirement["section"]
+        section_lower = section_bodies.get(section_name, "").lower()
+        require(section_lower != "", f"Missing body for report section: {section_name}", errors)
+        for term in section_requirement["required_terms"]:
+            require(
+                term.lower() in section_lower,
+                f"Missing required term '{term}' in section {section_name}",
                 errors,
             )
 

@@ -15,6 +15,24 @@ TODO
 
 TODO
 
+## Source-to-state trace
+
+### Ready handoff ambiguity
+
+TODO
+
+### Generic draft return
+
+TODO
+
+### Paused review resume
+
+TODO
+
+### Publish blocker gate
+
+TODO
+
 ## State and interruption principles
 
 TODO

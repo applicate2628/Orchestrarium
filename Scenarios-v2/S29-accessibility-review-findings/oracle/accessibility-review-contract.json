@@ -114,7 +114,28 @@
         "1.9:1",
         "focus-visible"
       ]
+    },
+    {
+      "name": "submit status not announced",
+      "severity": "major",
+      "required_terms": [
+        "candidate/review-target/share-dialog/index.html",
+        "candidate/review-target/share-dialog/dialog.js",
+        "inputs/keyboard-and-at-observations.md",
+        "send-status",
+        "Invite sent to reviewers",
+        "aria-live",
+        "role=\"status\""
+      ]
     }
+  ],
+  "exact_finding_count": 5,
+  "finding_order_terms": [
+    "focus trap",
+    "accessible name",
+    "focus order",
+    "3.2:1",
+    "Invite sent to reviewers"
   ],
   "prohibited_report_snippets": [
     "## Acceptance Criteria Mapping",

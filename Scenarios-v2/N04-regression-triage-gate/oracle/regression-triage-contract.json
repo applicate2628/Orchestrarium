@@ -130,6 +130,34 @@
       ]
     }
   ],
+  "required_section_terms": [
+    {
+      "section": "## Evidence Used",
+      "required_terms": [
+        "inputs/recent-changes.md",
+        "inputs/executed-checks.md",
+        "inputs/smoke-results.md",
+        "inputs/operator-signals.md"
+      ]
+    },
+    {
+      "section": "## Stable Or Deprioritized Signals",
+      "required_terms": [
+        "inputs/stable-signals.md",
+        "pre-existing",
+        "flake",
+        "lint"
+      ]
+    },
+    {
+      "section": "## Recheck Scope",
+      "required_terms": [
+        "status_snapshot_cli.py",
+        "report_formatter.py",
+        "alert_digest.py"
+      ]
+    }
+  ],
   "prohibited_report_snippets": [
     "## Implementation Plan",
     "apply_patch",

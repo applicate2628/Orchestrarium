@@ -112,6 +112,33 @@
       "docs/process/role-routing-policy.md"
     ]
   ],
+  "required_section_terms": [
+    {
+      "section": "## Reconciliation actions",
+      "required_terms": [
+        "docs/benchmarks/README.md",
+        "docs/benchmarks/source-of-truth-index.md",
+        "docs/benchmarks/wave-3-status.md",
+        "archive/README.md"
+      ]
+    },
+    {
+      "section": "## Archive hygiene actions",
+      "required_terms": [
+        "archive/2026-03-transition-notes.md",
+        "historical only",
+        "backlink"
+      ]
+    },
+    {
+      "section": "## Governance and policy boundary",
+      "required_terms": [
+        "docs/process/role-routing-policy.md",
+        "AGENTS.md",
+        "$architecture-reviewer"
+      ]
+    }
+  ],
   "valid_outcomes": [
     "READY FOR APPLY",
     "REQUIRES ARCHITECTURE REVIEW",

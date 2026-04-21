@@ -61,6 +61,13 @@ body {
   font-size: 0.875rem;
 }
 
+.send-status {
+  min-height: 1.25rem;
+  margin: 0;
+  color: var(--body-text);
+  font-size: 0.875rem;
+}
+
 .icon-button,
 .toggle-chip,
 .secondary,

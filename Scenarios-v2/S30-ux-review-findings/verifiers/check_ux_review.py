@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -64,6 +65,44 @@ def require(condition, message, errors):
         errors.append(message)
 
 
+def section_bodies(text: str):
+    sections = {}
+    current = None
+    lines = []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if current is not None:
+                sections[current] = "\n".join(lines).strip()
+            current = line.strip()
+            lines = []
+        elif current is not None:
+            lines.append(line)
+    if current is not None:
+        sections[current] = "\n".join(lines).strip()
+    return sections
+
+
+def parse_markdown_table(section: str):
+    rows = []
+    for raw_line in section.splitlines():
+        line = raw_line.strip()
+        if not line.startswith("|") or not line.endswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if not cells or all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
+            continue
+        rows.append(cells)
+    if not rows:
+        return [], []
+    return rows[0], rows[1:]
+
+
+def require_terms(text: str, terms, context: str, errors):
+    lower = text.lower()
+    for term in terms:
+        require(term.lower() in lower, f"Missing required term '{term}' in {context}", errors)
+
+
 def check_bundle_shape(bundle_root: Path, contract, errors):
     for entry in contract["required_top_level_entries"]:
         require((bundle_root / entry).exists(), f"Missing top-level entry: {entry}", errors)
@@ -93,15 +132,65 @@ def check_completed_report(bundle_root: Path, contract, errors):
         return
     text = report_path.read_text(encoding="utf-8")
     lower = text.lower()
+    sections = section_bodies(text)
 
     for section in contract["required_report_sections"]:
         require(section in text, f"Missing report section: {section}", errors)
     require(contract["expected_gate_decision"].lower() in lower, "Missing REVISE gate decision", errors)
 
+    findings = sections.get("## Findings", "")
+    finding_blocks = [block for block in re.split(r"(?m)^\s*-\s+", findings) if block.strip()]
+    expected_count = contract.get("exact_finding_count")
+    if expected_count is not None:
+        require(len(finding_blocks) == expected_count, f"Expected exactly {expected_count} findings, found {len(finding_blocks)}", errors)
+
     for finding in contract["required_findings"]:
         require(f"[{finding['severity']}]" in lower, f"Missing severity label for {finding['name']}", errors)
         for term in finding["required_terms"]:
             require(term.lower() in lower, f"Missing required term '{term}' for {finding['name']}", errors)
+        matching_blocks = []
+        for block in finding_blocks:
+            block_lower = block.lower()
+            if all(term.lower() in block_lower for term in finding["required_terms"][:2]):
+                matching_blocks.append(block)
+        require(matching_blocks, f"Missing structured finding block for {finding['name']}", errors)
+        if matching_blocks:
+            block_lower = matching_blocks[0].lower()
+            for label in contract.get("required_finding_labels", []):
+                require(label.lower() in block_lower, f"Missing {label} for {finding['name']}", errors)
+
+    for table_rule in contract.get("required_table_headers", []):
+        body = sections.get(table_rule["section"], "")
+        require(table_rule["header"] in body, f"Missing table header in {table_rule['section']}: {table_rule['header']}", errors)
+
+    _, evidence_rows = parse_markdown_table(sections.get("## Evidence-To-Finding Ledger", ""))
+    for index, row_rule in enumerate(contract.get("required_evidence_rows", []), start=1):
+        matching_rows = []
+        for row in evidence_rows:
+            if len(row) < 4:
+                continue
+            if all(term.lower() in row[0].lower() for term in row_rule["finding_terms"]):
+                matching_rows.append(row)
+        require(matching_rows, f"Missing evidence-to-finding ledger row {index}", errors)
+        if matching_rows:
+            row = matching_rows[0]
+            require_terms(row[1], row_rule["evidence_terms"], f"evidence ledger evidence row {index}", errors)
+            require_terms(row[2], row_rule["impact_terms"], f"evidence ledger impact row {index}", errors)
+            require_terms(row[3], row_rule["severity_terms"], f"evidence ledger severity row {index}", errors)
+
+    _, false_positive_rows = parse_markdown_table(sections.get("## False Positives Avoided", ""))
+    for index, row_rule in enumerate(contract.get("required_false_positive_rows", []), start=1):
+        matching_rows = []
+        for row in false_positive_rows:
+            if len(row) < 3:
+                continue
+            if all(term.lower() in row[0].lower() for term in row_rule["decoy_terms"]):
+                matching_rows.append(row)
+        require(matching_rows, f"Missing false-positive ledger row {index}", errors)
+        if matching_rows:
+            row = matching_rows[0]
+            require_terms(row[1], row_rule["why_terms"], f"false-positive why row {index}", errors)
+            require_terms(row[2], row_rule["boundary_terms"], f"false-positive boundary row {index}", errors)
 
     for snippet in contract["prohibited_report_snippets"]:
         require(snippet not in lower, f"Prohibited snippet present: {snippet}", errors)

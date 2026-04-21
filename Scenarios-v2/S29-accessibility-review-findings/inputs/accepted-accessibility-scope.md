@@ -12,5 +12,6 @@ The sharing dialog was admitted to the accessibility gate with these expected ou
   announce state changes
 - helper text must meet a `4.5:1` contrast threshold for normal text, and custom focus indicators
   must meet a `3:1` contrast threshold against adjacent colors
+- invite submission status changes must be announced through a live region or status role
 - this lane stays findings-only; code patching, browser overlays, and QA verdict substitution are
   out of scope

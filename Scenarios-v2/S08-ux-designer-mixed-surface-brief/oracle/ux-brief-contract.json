@@ -130,6 +130,37 @@
       "information architecture"
     ]
   ],
+  "required_section_terms": [
+    {
+      "section": "## Proposed surface architecture",
+      "required_terms": [
+        "desktop",
+        "web",
+        "shared",
+        "review",
+        "publish"
+      ]
+    },
+    {
+      "section": "## State model and ownership",
+      "required_terms": [
+        "curator",
+        "reviewer",
+        "approver",
+        "owner",
+        "changes requested"
+      ]
+    },
+    {
+      "section": "## Key interaction changes",
+      "required_terms": [
+        "return",
+        "repair target",
+        "blocker",
+        "publish"
+      ]
+    }
+  ],
   "valid_statuses": [
     "PASS",
     "REVISE",

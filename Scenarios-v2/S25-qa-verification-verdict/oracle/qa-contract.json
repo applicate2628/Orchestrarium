@@ -72,7 +72,7 @@
     "oracle/scoring-anchors.md": "427e135c5936f2fb2f5473a413f8fa9499a4885e389b28d6c9cf01459dd9bed6",
     "README.md": "107fc0a6b1f832221eb041f23f3727a6bd9f31e86f7421ee4a47894b1d8155ef",
     "scenario.yaml": "139066b8c93f651c0752a9105288777aa3bbcb77a337e120c1aad24a4c436ebd",
-    "verifiers/check_qa_verdict.py": "0835974bd61c8c3f6a0abb87dc264ee63156489e53753575d2950df231ef07ef",
+    "verifiers/check_qa_verdict.py": "ec459fb3d6123370703f315fcbf31b3ca82a5a0e04bb0dd2ac9e460c9a885d7f",
     "verifiers/README.md": "ca5d89be7cdec30331f13419eac87476cd8de1e1dd660bdb611ffed2d340ab06"
   },
   "editable_report": "candidate/qa-verdict.md",

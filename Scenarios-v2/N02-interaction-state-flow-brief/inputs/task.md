@@ -11,6 +11,10 @@ Produce one UX structure brief for the release workflow described in this bundle
 ## What the brief must accomplish
 
 - define an explicit progress and interruption state model across desktop and web
+- include a source-to-state trace that maps the admitted input failures to the proposed states and
+  transitions
+- each source-to-state trace subsection must use a Markdown table with columns: `Source failure`,
+  `Proposed state response`, `Owner`, and `Visible return cue`
 - explain how review questions, validation failures, paused work, and resumed work should move
   people through the workflow
 - make the return path legible after interruptions or requested changes

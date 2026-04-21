@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -137,6 +138,23 @@ def check_completed_report(bundle_root: Path, contract, errors):
                 f"Missing required anchor '{term}' for finding: {finding['name']}",
                 errors,
             )
+
+    expected_count = contract.get("exact_finding_count")
+    if expected_count is not None:
+        finding_count = len(re.findall(r"(?m)^\s*-\s+\[(?:blocking|major)\]", report_lower))
+        require(
+            finding_count == expected_count,
+            f"Expected exactly {expected_count} severity-tagged findings, found {finding_count}",
+            errors,
+        )
+
+    order_terms = contract.get("finding_order_terms", [])
+    previous_index = -1
+    for term in order_terms:
+        index = report_lower.find(term.lower())
+        require(index != -1, f"Missing order anchor: {term}", errors)
+        require(index > previous_index, f"Finding order anchor out of order: {term}", errors)
+        previous_index = index
 
     for snippet in contract["prohibited_report_snippets"]:
         require(

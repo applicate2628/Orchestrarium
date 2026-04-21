@@ -64,6 +64,24 @@ def require(condition, message, errors):
         errors.append(message)
 
 
+def extract_section_bodies(markdown_text: str):
+    sections = {}
+    current_section = None
+    current_lines = []
+    for line in markdown_text.splitlines():
+        if line.startswith("## "):
+            if current_section is not None:
+                sections[current_section] = "\n".join(current_lines).strip()
+            current_section = line.strip()
+            current_lines = []
+            continue
+        if current_section is not None:
+            current_lines.append(line)
+    if current_section is not None:
+        sections[current_section] = "\n".join(current_lines).strip()
+    return sections
+
+
 def check_bundle_shape(bundle_root: Path, contract, errors):
     for entry in contract["required_top_level_entries"]:
         require((bundle_root / entry).exists(), f"Missing top-level entry: {entry}", errors)
@@ -94,13 +112,26 @@ def check_completed_brief(bundle_root: Path, contract, errors):
         return
     text = brief_path.read_text(encoding="utf-8")
     lower = text.lower()
+    section_bodies = extract_section_bodies(text)
 
     for section in contract["required_brief_sections"]:
         require(section in text, f"Missing brief section: {section}", errors)
     for marker in contract["disallowed_markers"]:
         require(marker not in text, f"Disallowed placeholder remains: {marker}", errors)
+    for heading in contract.get("disallowed_headings", []):
+        require(heading not in text, f"Disallowed role-drift heading present: {heading}", errors)
     for term in contract["required_anchor_terms"]:
         require(term in lower, f"Missing required anchor term: {term}", errors)
+    for section_requirement in contract.get("required_section_terms", []):
+        section_name = section_requirement["section"]
+        section_lower = section_bodies.get(section_name, "").lower()
+        require(section_lower != "", f"Missing body for section: {section_name}", errors)
+        for term in section_requirement["required_terms"]:
+            require(
+                term.lower() in section_lower,
+                f"Missing required term '{term}' in section {section_name}",
+                errors,
+            )
     require(
         contract["expected_gate_decision"] in text,
         f"Brief does not contain gate decision {contract['expected_gate_decision']}",

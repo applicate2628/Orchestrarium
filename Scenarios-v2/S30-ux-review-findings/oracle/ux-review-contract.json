@@ -63,29 +63,84 @@
   "editable_report": "candidate/review-report.md",
   "required_report_sections": [
     "## Findings",
+    "## Evidence-To-Finding Ledger",
     "## False Positives Avoided",
     "## Gate Decision"
+  ],
+  "exact_finding_count": 3,
+  "required_finding_labels": [
+    "Evidence:",
+    "Impact:",
+    "Recommendation:",
+    "Regression:"
   ],
   "required_findings": [
     {
       "name": "ambiguous primary action",
       "severity": "high",
-      "required_terms": ["Ship", "primary"]
+      "required_terms": ["Ship", "primary", "ambiguous"]
     },
     {
       "name": "generic disclosure label",
       "severity": "medium",
-      "required_terms": ["More", "settings"]
+      "required_terms": ["More", "settings", "generic"]
     },
     {
       "name": "ephemeral success feedback",
       "severity": "medium",
-      "required_terms": ["Done", "close"]
+      "required_terms": ["Done", "close", "immediately"]
+    }
+  ],
+  "required_table_headers": [
+    {
+      "section": "## Evidence-To-Finding Ledger",
+      "header": "| Finding | Bundle-local evidence | User impact | Severity reason |"
+    },
+    {
+      "section": "## False Positives Avoided",
+      "header": "| Decoy | Why not a finding | Boundary cue |"
+    }
+  ],
+  "required_evidence_rows": [
+    {
+      "finding_terms": ["Ship", "primary"],
+      "evidence_terms": ["index.html", "primary-action", "review-observations.md"],
+      "impact_terms": ["misunderstand", "share"],
+      "severity_terms": ["high", "core operation"]
+    },
+    {
+      "finding_terms": ["More", "settings"],
+      "evidence_terms": ["index.html", "more-toggle", "content-and-flow-notes.md"],
+      "impact_terms": ["hidden", "settings"],
+      "severity_terms": ["medium", "secondary"]
+    },
+    {
+      "finding_terms": ["Done", "close"],
+      "evidence_terms": ["dialog.js", "completeShare", "review-observations.md"],
+      "impact_terms": ["feedback", "disappear"],
+      "severity_terms": ["medium", "confirm"]
+    }
+  ],
+  "required_false_positive_rows": [
+    {
+      "decoy_terms": ["bold styling"],
+      "why_terms": ["not", "UX finding"],
+      "boundary_terms": ["styling", "alone"]
+    },
+    {
+      "decoy_terms": ["optional settings"],
+      "why_terms": ["not", "issue"],
+      "boundary_terms": ["presence", "on its own"]
     }
   ],
   "prohibited_report_snippets": [
     "ship it",
-    "looks fine"
+    "looks fine",
+    "diff --git",
+    "```python",
+    "```tsx",
+    "implementation ticket",
+    "design brief"
   ],
   "expected_gate_decision": "REVISE"
 }

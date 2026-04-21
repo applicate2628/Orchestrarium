@@ -71,26 +71,36 @@
       "name": "query role escalation",
       "severity": "high",
       "required_terms": [
+        "candidate/review-target/access-surface/grant_console.js",
         "reviewerRole",
-        "approve-grant"
+        "approve-grant",
+        "client"
       ]
     },
     {
       "name": "parent tenant trust break",
       "severity": "high",
       "required_terms": [
+        "candidate/review-target/access-surface/grant_console.js",
         "payload.trusted",
-        "effectiveTenant"
+        "effectiveTenant",
+        "tenant"
       ]
     },
     {
       "name": "client authority replay",
       "severity": "medium",
       "required_terms": [
+        "candidate/review-target/access-surface/grant_console.js",
         "X-Reviewer-Role",
-        "tenantId"
+        "tenantId",
+        "server"
       ]
     }
+  ],
+  "required_false_positive_terms": [
+    "disabled button",
+    "policy.css"
   ],
   "prohibited_report_snippets": [
     "ship it",

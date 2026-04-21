@@ -21,3 +21,5 @@ gate packet was frozen.
 - the invite field is announced as `edit blank`; the placeholder text is not treated as a label
 - the reviewers-only toggle is announced as `On button`; after activation the text changes to
   `Off`, but no pressed or switch state is exposed
+- activating `Send invite` changes visible status text from `Ready to send` to
+  `Invite sent to reviewers`, but the screen-reader spot check does not announce the update

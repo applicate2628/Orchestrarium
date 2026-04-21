@@ -131,6 +131,37 @@
       "not a review report"
     ]
   ],
+  "required_section_terms": [
+    {
+      "section": "## Proposed cross-surface information structure",
+      "required_terms": [
+        "current release verdict",
+        "blocker",
+        "reviewer ask",
+        "evidence freshness",
+        "supporting metadata"
+      ]
+    },
+    {
+      "section": "## Proposed static emphasis model",
+      "required_terms": [
+        "primary",
+        "secondary",
+        "deferred",
+        "desktop",
+        "web"
+      ]
+    },
+    {
+      "section": "## Key hierarchy changes",
+      "required_terms": [
+        "routine metadata",
+        "history",
+        "unresolved",
+        "cross-surface"
+      ]
+    }
+  ],
   "valid_statuses": [
     "PASS",
     "REVISE",
