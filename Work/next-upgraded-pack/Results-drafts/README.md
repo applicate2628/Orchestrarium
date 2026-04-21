@@ -13,10 +13,14 @@ Only admitted later packages should become new dated snapshots under `Archive/`.
 
 | File | Role |
 |---|---|
-| `x1-x3-steady-state-core-results-2026-04-17.md` | main admitted steady-state core result surface |
-| `x1-x3-current-runnable-pack-results-2026-04-17.md` | supporting runnable-pack surface |
-| `x1-x3-full-registry-results-2026-04-17.md` | widest execution-backed registry surface for `X1..X3` |
+| `x1-x3-steady-state-core-results-2026-04-17.md` | legacy admitted steady-state core result surface |
+| `x1-x3-current-runnable-pack-results-2026-04-17.md` | legacy supporting runnable-pack surface |
+| `x1-x3-full-registry-results-2026-04-17.md` | legacy widest execution-backed registry surface for `X1..X3` |
 | `v2-worked-example-cohort-results-2026-04-18.md` | first admitted bounded v2 result surface for `X1`, `X2`, `X5`, and `X6` |
 | `v2-full-s01-s33-results-2026-04-18.md` | earlier same-day full v2 result surface on `S01..S33` only |
-| `v2-full-s01-s33-n01-n07-results-2026-04-18.md` | current full v2 result surface for `X1`, `X2`, `X5`, and `X6` on `S01..S33 + N01..N07` |
-| `short-results-current-2026-04-18.md` | compact operator-facing short table for the current live state |
+| `v2-full-s01-s33-n01-n07-results-2026-04-18.md` | current quota-aware full v2 result surface for `X1`, `X2`, `X3`, `X4`, `X5`, and `X6` on `S01..S33 + N01..N07`; `X5/S12` reran into scoreable `FAIL` |
+| `v2-extra-lane-n08-n10-results-2026-04-20.md` | reference extra-lane result surface for `E1 worker.long-autonomous`; `X4` is `NOT-RUN` while the secret-backed Claude route is unavailable |
+| `v2-core12-tie-hardened-results-2026-04-20.md` | targeted hardening result for weak-separator core lanes; `X1` and `X3` tied, `X5` separated lower with timeout caveats |
+| `v2-top-pair-separators-n11-n13-results-2026-04-20.md` | diagnostic `E2` result; initial and hardened2 runs still tie `X1` and `X3` |
+| `v2-top-pair-rubric-e3-results-2026-04-20.md` | diagnostic E3 rubric over fresh 2026-04-21 `N11..N13` outputs; narrow `X1 60 / 60` vs `X3 59 / 60` read |
+| `short-results-current-2026-04-18.md` | compact operator-facing short table for the current six-row live state |

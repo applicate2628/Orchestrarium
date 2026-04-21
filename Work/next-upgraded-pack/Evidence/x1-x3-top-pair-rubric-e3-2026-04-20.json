@@ -1,0 +1,479 @@
+{
+  "rubric": "E3 top-pair-rubric",
+  "generated_on": "2026-04-21",
+  "rows": [
+    {
+      "row": "X1 / gpt-5.4",
+      "root": "..\\..\\.scratch\\v2-cohort-runs\\2026-04-21_14-43-50-X1-x1-v3-ui-review-e2-hardening-2026-04-21",
+      "score": 60,
+      "max": 60,
+      "scenarios": [
+        {
+          "scenario": "N11",
+          "artifact": "..\\..\\.scratch\\v2-cohort-runs\\2026-04-21_14-43-50-X1-x1-v3-ui-review-e2-hardening-2026-04-21\\N11\\run\\candidate\\design-package.md",
+          "score": 20,
+          "max": 20,
+          "criteria": [
+            {
+              "name": "source specificity",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "Orchestrarium/shared/agents-mode.defaults.yaml",
+                "Archive/legacy-provider-runbook.md",
+                "benchmarks/Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-18.md",
+                "Orchestrarium/shared/external-adapter-contract.md"
+              ],
+              "missing": [],
+              "note": "names the concrete evidence sources instead of only evidence IDs"
+            },
+            {
+              "name": "conflict resolution precision",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "externalPriorityProfiles",
+                "externalPriorityProfile",
+                "compatibility alias",
+                "visible deprecation signal"
+              ],
+              "missing": [],
+              "note": "separates plural source of truth from singular compatibility input"
+            },
+            {
+              "name": "ownership seam",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "agents-mode loader",
+                "normalized profile catalog",
+                "single owner",
+                "singular-to-plural rewrite"
+              ],
+              "missing": [],
+              "note": "keeps policy parsing owned by the loader"
+            },
+            {
+              "name": "adapter boundary",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "adapters stay transport-only",
+                "not exported",
+                "forbidden direction",
+                "lane taxonomy"
+              ],
+              "missing": [],
+              "note": "prevents adapter-side lane/profile parsing"
+            },
+            {
+              "name": "route-policy separation",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "X4",
+                "secret-backed Claude",
+                "runtime transport",
+                "X4 never appears as a key"
+              ],
+              "missing": [],
+              "note": "keeps route availability out of profile identity"
+            }
+          ],
+          "char_count": 10114,
+          "line_count": 186,
+          "file_refs": []
+        },
+        {
+          "scenario": "N12",
+          "artifact": "..\\..\\.scratch\\v2-cohort-runs\\2026-04-21_14-43-50-X1-x1-v3-ui-review-e2-hardening-2026-04-21\\N12\\run\\candidate\\repository-fact-memo.md",
+          "score": 20,
+          "max": 20,
+          "criteria": [
+            {
+              "name": "source ranking",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "agents-mode.defaults.yaml",
+                "operator-routing.md",
+                "hardened-core12.md",
+                "legacy-notes.md"
+              ],
+              "missing": [],
+              "note": "orders the conflicting sources explicitly"
+            },
+            {
+              "name": "confirmed fact precision",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "externalPriorityProfiles",
+                "providerRoutes",
+                "no lane-profile membership",
+                "not a model capability failure"
+              ],
+              "missing": [],
+              "note": "states current config facts without turning route status into capability judgment"
+            },
+            {
+              "name": "legacy conflict handling",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "externalPriorityProfile",
+                "singular",
+                "compatibility alias",
+                "does not override"
+              ],
+              "missing": [],
+              "note": "classifies stale singular wording correctly"
+            },
+            {
+              "name": "top-pair non-claim",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "not separated",
+                "15 / 15",
+                "No directional claim",
+                "additional separators"
+              ],
+              "missing": [],
+              "note": "does not over-rank X1 versus X3 from tied evidence"
+            },
+            {
+              "name": "gap discipline",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "High confidence",
+                "Gap:",
+                "recovery timeline",
+                "additional separators"
+              ],
+              "missing": [],
+              "note": "states confidence and remaining evidence gaps"
+            }
+          ],
+          "char_count": 8479,
+          "line_count": 79,
+          "file_refs": []
+        },
+        {
+          "scenario": "N13",
+          "artifact": "..\\..\\.scratch\\v2-cohort-runs\\2026-04-21_14-43-50-X1-x1-v3-ui-review-e2-hardening-2026-04-21\\N13\\run\\candidate\\review-report.md",
+          "score": 20,
+          "max": 20,
+          "criteria": [
+            {
+              "name": "finding localization",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "retry_policy.py",
+                "classify_result",
+                "lane_summary.py",
+                "status_label"
+              ],
+              "missing": [],
+              "note": "localizes defects to file and symbol"
+            },
+            {
+              "name": "scoreability semantics",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "REQUEUE",
+                "not verifier FAIL",
+                "not a clean PASS",
+                "scoreable"
+              ],
+              "missing": [],
+              "note": "keeps quota, timeout, and verifier status separate"
+            },
+            {
+              "name": "fix specificity",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "Fix:",
+                "distinct",
+                "TIMEOUT-ARTIFACT-OK",
+                "len(scoreable)"
+              ],
+              "missing": [],
+              "note": "gives concrete repair guidance for each defect class"
+            },
+            {
+              "name": "false-positive discipline",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "ui_helpers.py",
+                "chip-neutral",
+                "not blocking",
+                "out of scope"
+              ],
+              "missing": [],
+              "note": "avoids the explicit decoy finding"
+            },
+            {
+              "name": "denominator reporting",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "len(rows)",
+                "denominator",
+                "non-scoreable counts separately",
+                "route status"
+              ],
+              "missing": [],
+              "note": "requires denominator and non-scoreable status clarity"
+            }
+          ],
+          "char_count": 5629,
+          "line_count": 54,
+          "file_refs": []
+        }
+      ]
+    },
+    {
+      "row": "X3 / opus 4.7max",
+      "root": "..\\..\\.scratch\\v2-cohort-runs\\2026-04-21_15-00-47-X3-x3-v3-ui-review-e2-hardening-2026-04-21",
+      "score": 59,
+      "max": 60,
+      "scenarios": [
+        {
+          "scenario": "N11",
+          "artifact": "..\\..\\.scratch\\v2-cohort-runs\\2026-04-21_15-00-47-X3-x3-v3-ui-review-e2-hardening-2026-04-21\\N11\\run\\candidate\\design-package.md",
+          "score": 20,
+          "max": 20,
+          "criteria": [
+            {
+              "name": "source specificity",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "Orchestrarium/shared/agents-mode.defaults.yaml",
+                "Archive/legacy-provider-runbook.md",
+                "benchmarks/Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-18.md",
+                "Orchestrarium/shared/external-adapter-contract.md"
+              ],
+              "missing": [],
+              "note": "names the concrete evidence sources instead of only evidence IDs"
+            },
+            {
+              "name": "conflict resolution precision",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "externalPriorityProfiles",
+                "externalPriorityProfile",
+                "compatibility alias",
+                "visible deprecation signal"
+              ],
+              "missing": [],
+              "note": "separates plural source of truth from singular compatibility input"
+            },
+            {
+              "name": "ownership seam",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "agents-mode loader",
+                "normalized profile catalog",
+                "single owner",
+                "singular-to-plural rewrite"
+              ],
+              "missing": [],
+              "note": "keeps policy parsing owned by the loader"
+            },
+            {
+              "name": "adapter boundary",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "adapters stay transport-only",
+                "not exported",
+                "forbidden direction",
+                "lane taxonomy"
+              ],
+              "missing": [],
+              "note": "prevents adapter-side lane/profile parsing"
+            },
+            {
+              "name": "route-policy separation",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "X4",
+                "secret-backed Claude",
+                "runtime transport",
+                "X4 never appears as a key"
+              ],
+              "missing": [],
+              "note": "keeps route availability out of profile identity"
+            }
+          ],
+          "char_count": 11093,
+          "line_count": 107,
+          "file_refs": []
+        },
+        {
+          "scenario": "N12",
+          "artifact": "..\\..\\.scratch\\v2-cohort-runs\\2026-04-21_15-00-47-X3-x3-v3-ui-review-e2-hardening-2026-04-21\\N12\\run\\candidate\\repository-fact-memo.md",
+          "score": 20,
+          "max": 20,
+          "criteria": [
+            {
+              "name": "source ranking",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "agents-mode.defaults.yaml",
+                "operator-routing.md",
+                "hardened-core12.md",
+                "legacy-notes.md"
+              ],
+              "missing": [],
+              "note": "orders the conflicting sources explicitly"
+            },
+            {
+              "name": "confirmed fact precision",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "externalPriorityProfiles",
+                "providerRoutes",
+                "no lane-profile membership",
+                "not a model capability failure"
+              ],
+              "missing": [],
+              "note": "states current config facts without turning route status into capability judgment"
+            },
+            {
+              "name": "legacy conflict handling",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "externalPriorityProfile",
+                "singular",
+                "compatibility alias",
+                "does not override"
+              ],
+              "missing": [],
+              "note": "classifies stale singular wording correctly"
+            },
+            {
+              "name": "top-pair non-claim",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "not separated",
+                "15 / 15",
+                "No directional claim",
+                "additional separators"
+              ],
+              "missing": [],
+              "note": "does not over-rank X1 versus X3 from tied evidence"
+            },
+            {
+              "name": "gap discipline",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "High confidence",
+                "Gap:",
+                "recovery timeline",
+                "additional separators"
+              ],
+              "missing": [],
+              "note": "states confidence and remaining evidence gaps"
+            }
+          ],
+          "char_count": 7201,
+          "line_count": 71,
+          "file_refs": []
+        },
+        {
+          "scenario": "N13",
+          "artifact": "..\\..\\.scratch\\v2-cohort-runs\\2026-04-21_15-00-47-X3-x3-v3-ui-review-e2-hardening-2026-04-21\\N13\\run\\candidate\\review-report.md",
+          "score": 19,
+          "max": 20,
+          "criteria": [
+            {
+              "name": "finding localization",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "retry_policy.py",
+                "classify_result",
+                "lane_summary.py",
+                "status_label"
+              ],
+              "missing": [],
+              "note": "localizes defects to file and symbol"
+            },
+            {
+              "name": "scoreability semantics",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "REQUEUE",
+                "not verifier FAIL",
+                "not a clean PASS",
+                "scoreable"
+              ],
+              "missing": [],
+              "note": "keeps quota, timeout, and verifier status separate"
+            },
+            {
+              "name": "fix specificity",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "Fix:",
+                "distinct",
+                "TIMEOUT-ARTIFACT-OK",
+                "len(scoreable)"
+              ],
+              "missing": [],
+              "note": "gives concrete repair guidance for each defect class"
+            },
+            {
+              "name": "false-positive discipline",
+              "points": 4,
+              "max": 4,
+              "present": [
+                "ui_helpers.py",
+                "chip-neutral",
+                "not blocking",
+                "out of scope"
+              ],
+              "missing": [],
+              "note": "avoids the explicit decoy finding"
+            },
+            {
+              "name": "denominator reporting",
+              "points": 3,
+              "max": 4,
+              "present": [
+                "len(rows)",
+                "denominator",
+                "non-scoreable counts separately"
+              ],
+              "missing": [
+                "route status"
+              ],
+              "note": "requires denominator and non-scoreable status clarity"
+            }
+          ],
+          "char_count": 8468,
+          "line_count": 64,
+          "file_refs": []
+        }
+      ]
+    }
+  ]
+}
