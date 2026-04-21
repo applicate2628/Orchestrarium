@@ -82,8 +82,8 @@ When publishing or restating benchmark results in this branch, prefer the compac
 | default short-results layout template | `Archive/2026-04-16-first-baseline/Results/short-results-x1-x5-2026-04-16.md` |
 | archived basis result | `Archive/2026-04-16-first-baseline/Results/short-results-x1-x5-2026-04-16.md` |
 | current mutable compact result | `Work/next-upgraded-pack/Results-drafts/short-results-current-2026-04-18.md` |
-| current main admitted ranking surface | `Work/next-upgraded-pack/Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
-| current supporting runnable surface | `Work/next-upgraded-pack/Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` |
+| current main admitted ranking surface | `Work/next-upgraded-pack/Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
+| current legacy supporting runnable surface | `Work/next-upgraded-pack/Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` |
 
 ## Next-phase expectation
 

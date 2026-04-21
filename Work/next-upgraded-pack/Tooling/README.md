@@ -14,6 +14,8 @@ archived baseline under `Archive/`.
 | Path | Purpose |
 |---|---|
 | `run-active-cohort-batch.ps1` | clones canonical `broken/` fixtures into ignored run sandboxes, launches one active-cohort row sequentially, and performs local post-run verification |
+| `run-v2-cohort-batch.ps1` | clones `Scenarios-v2` bundles into ignored run sandboxes, launches one v2 row, and performs local post-run verification |
+| `score-top-pair-rubric.py` | diagnostic E3 scorer for already generated `N11..N13` top-pair outputs; does not run models |
 | `HOW-TO-USE-TESTS.md` | human-facing instructions for inspecting fixtures, running batches, and reading outputs |
 
 ## Current execution rule
@@ -21,6 +23,8 @@ archived baseline under `Archive/`.
 | Rule | Meaning |
 |---|---|
 | canonical fixtures stay immutable | model runs happen only inside ignored `.scratch/active-cohort-runs/` sandboxes |
+| v2 scenario bundles stay immutable | v2 model runs happen only inside ignored `.scratch/v2-cohort-runs/` sandboxes |
+| scenario allowed surface wins inside scratch | benchmark workers must not create `.reports/`, `.plans/`, session logs, or top-level control-plane artifacts inside copied run roots |
 | one row at a time | active cohort rows are run sequentially for cleaner evidence and easier attribution |
 | one completed pass, one commit | once a row pass is interpreted and written into mutable evidence, commit it before moving on |
 

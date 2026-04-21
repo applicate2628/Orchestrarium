@@ -17,17 +17,35 @@ Use this document when you want to:
 
 | Surface | Current read |
 |---|---|
-| main admitted ranking surface | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
+| main admitted ranking surface | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
 | compact operator table | `Results-drafts/short-results-current-2026-04-18.md` |
-| supporting runnable surface | `Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` |
+| legacy admitted upgraded-pack ranking | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
+| supporting legacy runnable surface | `Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` |
 | full v2 result surface | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
+| reference extra-lane surface | `Results-drafts/v2-extra-lane-n08-n10-results-2026-04-20.md` |
+| diagnostic top-pair rubric surface | `Results-drafts/v2-top-pair-rubric-e3-results-2026-04-20.md` |
 | active upgraded-pack runner | `Tooling/run-active-cohort-batch.ps1` |
 | active v2 runner | `Tooling/run-v2-cohort-batch.ps1` |
+| diagnostic E3 scorer | `Tooling/score-top-pair-rubric.py` |
 | canonical fixture area | `Fixtures/` |
 | raw run sandboxes | ignored `.scratch/active-cohort-runs/` |
 | raw v2 sandboxes | ignored `.scratch/v2-cohort-runs/` |
 
 ## Mental model
+
+## V3 hardening rule
+
+The old full-v2 `40 / 40` and `39 / 40` rows are pre-v3 baseline evidence, not final
+classification. When a scenario is hardened, replace the live result/evidence line that described
+the stale surface instead of adding a second competing result surface.
+
+| Rule | Meaning |
+|---|---|
+| update in place | keep `short-results-current-2026-04-18.md` and `v2-full-s01-s33-n01-n07-results-2026-04-18.md` as the live operator surfaces |
+| no stale forks | do not create new `short-results-current-v3-*` or duplicate full-result files unless a new archive snapshot is admitted |
+| mark pre-v3 clearly | any remaining old score line must say `pre-v3 baseline` or `ceiling-effect baseline` |
+| hardening before rerank | do not publish a stronger classification claim until hardened scenario contracts and rerun evidence exist |
+| quota boundary | quota, provider-limit, and clean runtime timeouts remain `NOT-RUN` / `REQUEUE`, not model `FAIL` |
 
 | Item | Meaning |
 |---|---|
@@ -50,10 +68,9 @@ It copies `broken/` into ignored scratch storage and runs there.
 | `X1` | `gpt-5.4` | main active row |
 | `X2` | `gpt-spark` | main active row |
 | `X3` | `opus 4.7max` | main active row |
+| `X4` | `Claude China` | full-v2 row on the repo-canonical secret-backed Claude path, with the same current `opus` `max` profile as `X3` |
 | `X5` | `gemini3.1pro` | full-v2 row |
 | `X6` | `gemini3.1flash-lite-preview` | full-v2 row |
-
-`X4` is not wired into the current runner.
 
 ## Current admitted execution slices
 
@@ -62,7 +79,9 @@ It copies `broken/` into ignored scratch storage and runs there.
 | `worker-heavy-first-batch` | `T08`, `T09`, `T10`, `T22`, `T23`, `T24`, `T25`, `T29`, `T30` |
 | `remaining-core-batch` | `T01`, `T03`, `T05`, `T07`, `T12`, `T15`, `T18`, `T19`, `T21` |
 | `v2-worked-example-pack` | explicit bounded slice: `S02`, `S07`, `S12`, `S21`, `S22`, `S26`, `S32` |
-| `v2-full-surface` | default discovered `Scenarios-v2` roots in the current checkout, currently `S01..S33` plus `N01..N07` |
+| `v2-core-full-surface` | core discovered `Scenarios-v2` roots through the current `12` routing lanes: `S01..S33` plus `N01..N07` |
+| `v2-extra-worker-long-autonomous` | reference extra-lane slice: `N08`, `N09`, `N10` |
+| `v2-top-pair-rubric-e3` | diagnostic scorer over supplied `N11`, `N12`, `N13` run roots; does not launch models itself |
 
 The full steady-state core execution pack is the union of those two batches.
 
@@ -139,6 +158,25 @@ powershell -ExecutionPolicy Bypass -File .\Tooling\run-v2-cohort-batch.ps1 `
   -ScenarioIds @('S32')
 ```
 
+Run the `worker.long-autonomous` reference extra lane for `X1`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Tooling\run-v2-cohort-batch.ps1 `
+  -RowId X1 `
+  -BatchName x1-n08-n10-2026-04-20 `
+  -ScenarioIds @('N08','N09','N10')
+```
+
+Score supplied `N11..N13` outputs with the diagnostic E3 rubric:
+
+```powershell
+python .\Tooling\score-top-pair-rubric.py `
+  --x1-root '..\..\.scratch\v2-cohort-runs\2026-04-21_14-43-50-X1-x1-v3-ui-review-e2-hardening-2026-04-21' `
+  --x3-root '..\..\.scratch\v2-cohort-runs\2026-04-21_15-00-47-X3-x3-v3-ui-review-e2-hardening-2026-04-21' `
+  --output-md '.\Results-drafts\v2-top-pair-rubric-e3-results-2026-04-20.md' `
+  --output-json '.\Evidence\x1-x3-top-pair-rubric-e3-2026-04-20.json'
+```
+
 ## How to inspect a test before running it
 
 | What to read | Why |
@@ -184,8 +222,11 @@ Inside each batch root:
 |---|---|
 | wrapper exit `0` and local verification `PASS` | raw run succeeded for that test |
 | wrapper exit non-zero | provider or wrapper execution failed |
+| explicit quota, rate, or usage-limit failure | not a scoreable model result; admit as `NOT-RUN` / `REQUEUE` until rerun produces a clean attempt |
+| bounded provider/runtime timeout without worker output | not quota; admit as `TIMEOUT` until a scoring decision or clean rerun exists |
 | verifier `FAIL` | the model changed the wrong surface or did not satisfy the fixture |
 | extra changed benchmark paths | likely scope widening or owner-seam drift |
+| extra `.reports/` or `.plans/` paths | benchmark control-plane drift; scenario allowed surface overrides repo session-log rules inside scratch runs |
 
 The runner exits `1` if any test in the batch fails.
 
@@ -207,8 +248,10 @@ After a meaningful run:
 |---|---|
 | one row on one batch | `Evidence/` |
 | the compact live table | `Results-drafts/short-results-current-2026-04-18.md` |
-| the main admitted core ranking | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
+| the main admitted ranking surface | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
 | the full v2 read | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
+| the `worker.long-autonomous` extra-lane read | `Results-drafts/v2-extra-lane-n08-n10-results-2026-04-20.md` |
+| the diagnostic top-pair rubric read | `Evidence/x1-x3-top-pair-rubric-e3-2026-04-20.md`, `Results-drafts/v2-top-pair-rubric-e3-results-2026-04-20.md` |
 | live resume point | `Checkpoints/status-2026-04-16.md` |
 
 ## Safety rules
@@ -219,13 +262,17 @@ After a meaningful run:
 | do not run inside canonical fixture directories | use the runner so work stays in scratch |
 | do not treat scratch output as admitted evidence by itself | only admitted docs under `Evidence/` and `Results-drafts/` count |
 | do not rerank from one raw run without updating the written evidence surface | the docs are the canonical read |
+| do not create `.reports/`, `.plans/`, or session logs inside a benchmark run root | benchmark workers must obey `scenario.yaml` allowed surfaces even when repo-level governance asks ordinary sessions to log |
 
 ## Recommended current usage
 
 | Goal | What to do |
 |---|---|
 | inspect current state fast | read `Results-drafts/short-results-current-2026-04-18.md` |
-| inspect the main admitted ranking | read `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
+| inspect the main admitted ranking | read `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
 | inspect the full v2 read | read `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
+| inspect the `worker.long-autonomous` extra-lane read | read `Results-drafts/v2-extra-lane-n08-n10-results-2026-04-20.md` |
+| inspect the diagnostic top-pair rubric | read `Results-drafts/v2-top-pair-rubric-e3-results-2026-04-20.md` |
+| inspect the legacy upgraded-pack ranking | read `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
 | rerun one upgraded-pack row | use `run-active-cohort-batch.ps1` from the next-pack root |
 | rerun one v2 row | use `run-v2-cohort-batch.ps1` from the next-pack root |

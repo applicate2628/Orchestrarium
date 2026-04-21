@@ -1,4 +1,5 @@
 Date: 2026-04-17
+Updated: 2026-04-20
 Owner: `$lead`
 Status: `PASS`
 
@@ -18,6 +19,7 @@ benchmark surface so fixture-building can begin without reopening the role taxon
 | non-web-first | only `S16` is intrinsically web implementation; other web pressure stays role-fit and optional |
 | adapters stay separate | `S32` and `S33` benchmark transport fidelity only and do not stand in for semantic role ability |
 | legacy checkpoint only | old `T/L/O` assets may inspire future fixtures, but they do not define v2 scenario identity |
+| reference overlays stay separate | `N08..N10` define the `worker.long-autonomous` extra-lane basis; `N11..N13` define a diagnostic `top-pair-separator` overlay; neither alters the milestone-1 `33` seed count |
 
 ## Scenario root convention
 
@@ -97,6 +99,20 @@ The bundle contract itself is specified in `pack-specs-v1-2026-04-17.md`.
 | `S32` | `A01 $external-worker` | adapter | transport fidelity | transport execution report | external-worker routing fidelity and output cleanliness | `[external-transport]` |
 | `S33` | `A02 $external-reviewer` | adapter | transport fidelity | transport execution report | external-reviewer routing fidelity and output cleanliness | `[external-transport]` |
 
+## Reference overlay backlog
+
+These scenarios are the materialized extra/reference and diagnostic overlays.
+They are not part of the role-complete `S01..S33` seed backlog and are scored separately from the core routing surface.
+
+| Scenario | Surface | Role class | Modality family | Artifact type | Archetype | Overlay flags |
+|---|---|---|---|---|---|---|
+| `N08` | `E1 worker.long-autonomous` | overlay worker | autonomous ownership continuity | multi-step implementation packet | build-owner continuity with nested owner discovery | `[long-autonomous]` |
+| `N09` | `E1 worker.long-autonomous` | overlay worker | autonomous resume and recall | resume-safe implementation packet | path recall and admitted-scope continuity after interruption | `[long-autonomous]` |
+| `N10` | `E1 worker.long-autonomous` | overlay worker | constrained multi-step execution | patch plus verification packet | multi-step patch with no unrelated churn or contract drift | `[long-autonomous]` |
+| `N11` | `E2 top-pair-separator` | diagnostic overlay | architecture evidence conflict | ADR package | conflicting evidence, seam ownership, and phased migration tradeoff | `[top-pair-separator]` |
+| `N12` | `E2 top-pair-separator` | diagnostic overlay | source-of-truth conflict | repository fact memo | factual memo from conflicting docs, config, and result files | `[top-pair-separator]` |
+| `N13` | `E2 top-pair-separator` | diagnostic overlay | adversarial review traps | review findings | must-find defects with nearby false-positive traps | `[top-pair-separator]` |
+
 ## Coverage and balance check
 
 | Check | Read |
@@ -104,6 +120,7 @@ The bundle contract itself is specified in `pack-specs-v1-2026-04-17.md`.
 | role coverage | `R01..R31` appear exactly once in the seed backlog |
 | adapter coverage | `A01..A02` appear exactly once in the seed backlog |
 | total seed scenarios | `33` |
+| reference overlay scenarios | `N08..N10` define `worker.long-autonomous`; `N11..N13` define diagnostic `top-pair-separator`; all are excluded from the `33` seed total |
 | pack coverage | `P01..P07` all have explicit seed members |
 | non-web balance | every pack has at least one non-web-shaped scenario; only `S16` is intrinsically browser-bound |
 | adapter separation | transport scenarios are isolated in `P07` and do not appear in semantic packs |

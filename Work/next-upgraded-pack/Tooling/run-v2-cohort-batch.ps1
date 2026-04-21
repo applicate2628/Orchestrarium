@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('X1', 'X2', 'X3', 'X5', 'X6')]
+    [ValidateSet('X1', 'X2', 'X3', 'X4', 'X5', 'X6')]
     [string]$RowId,
 
     [string]$BatchName,
@@ -442,6 +442,8 @@ $allowedSurface
 - Make the smallest safe change that satisfies the scenario contract.
 - If the bundle README names a local validation flow, run it before finishing.
 - Do not rename files, widen scope, or add dependencies.
+- Benchmark override: do not create .reports/, .plans/, session logs, recovery notes, or any other top-level control-plane artifacts inside this disposable run root.
+- The scenario allowed change surface overrides repository governance such as mandatory session logging for this benchmark worker run.
 - Use exact bundle-local paths when citing evidence in review, QA, or memo bundles.
 
 Final response format:
@@ -556,6 +558,14 @@ $rowConfigs = @{
         Provider = 'claude'
         WrapperPath = Join-Path $archiveToolingRoot 'claude-isolated-worker.ps1'
         UseSecretWrapper = $false
+        ClaudeArgs = @('--model', 'opus', '--effort', 'max')
+    }
+    X4 = @{
+        RowId = 'X4'
+        ModelLabel = 'Claude China'
+        Provider = 'claude'
+        WrapperPath = Join-Path $archiveToolingRoot 'claude-isolated-worker.ps1'
+        UseSecretWrapper = $true
         ClaudeArgs = @('--model', 'opus', '--effort', 'max')
     }
     X5 = @{

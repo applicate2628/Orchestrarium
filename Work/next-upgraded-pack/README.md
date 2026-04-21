@@ -24,8 +24,10 @@ It is allowed to change freely while designing and executing the next wave.
 | File | Role |
 |---|---|
 | `Results-drafts/short-results-current-2026-04-18.md` | compact operator-facing current table |
-| `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` | main admitted steady-state core ranking |
-| `Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` | supporting runnable-pack ranking surface |
+| `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` | main live quota-aware full-v2 ranking surface; `X5/S12` reran into scoreable `FAIL` |
+| `Results-drafts/v2-extra-lane-n08-n10-results-2026-04-20.md` | reference extra-lane result surface for `E1 worker.long-autonomous`; `X4` deferred while the secret-backed route is unavailable |
+| `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` | legacy upgraded-pack ranking surface |
+| `Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` | legacy supporting runnable-pack surface |
 | `Checkpoints/status-2026-04-16.md` | live resume point and active obligations |
 
 ## How to use the tests

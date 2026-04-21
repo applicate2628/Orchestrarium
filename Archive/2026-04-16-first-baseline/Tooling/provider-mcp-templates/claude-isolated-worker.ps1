@@ -128,12 +128,19 @@ function Invoke-ClaudeCommand {
 
 function Resolve-SecretWrapperPath {
     $templateRoot = Split-Path -Parent $PSCommandPath
-    $candidate = [System.IO.Path]::GetFullPath((Join-Path $templateRoot '..\Orchestrarium\src.claude\agents\scripts\invoke-claude-api.ps1'))
-    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
-        throw "Could not resolve the repo-canonical Claude secret wrapper next to provider templates. Expected: $candidate"
+
+    $candidates = @(
+        [System.IO.Path]::GetFullPath((Join-Path $templateRoot '..\Orchestrarium\src.claude\agents\scripts\invoke-claude-api.ps1')),
+        [System.IO.Path]::GetFullPath((Join-Path $templateRoot '..\..\..\..\..\Orchestrarium\src.claude\agents\scripts\invoke-claude-api.ps1'))
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return $candidate
+        }
     }
 
-    return $candidate
+    throw "Could not resolve the repo-canonical Claude secret wrapper. Checked: $($candidates -join '; ')"
 }
 
 if ($NoMcp -and $McpConfigPath.Count -gt 0) {

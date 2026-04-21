@@ -8,6 +8,24 @@ This file defines the v1 scoring contract and publication model for the role-com
 
 It replaces the old pack-first or line-family-first publication surface with a role-first scorecard.
 
+## V3 Full-Hardening Update
+
+The completed `S01..S33 + N01..N07` full-v2 pass rates exposed a ceiling effect: rows such as
+`40 / 40` and `39 / 40` are no longer sufficient classification evidence. Treat those rows as
+`pre-v3 baseline` only until they are replaced by hardened evidence.
+
+V3 hardening must make pass/fail depend on role-specific reasoning artifacts, not only on section
+presence and keyword coverage.
+
+| Hardening rule | Meaning |
+|---|---|
+| replace stale lines in place | update the current live result/evidence surfaces instead of creating parallel stale copies |
+| structural ledgers over prose | require source ledgers, decision tables, trace tables, non-claim ledgers, or fix ledgers where a role can otherwise pass with generic prose |
+| source binding | factual, advisory, architecture, and review outputs must bind claims to concrete sources or inspected surfaces |
+| non-claim discipline | tied evidence, quota, runtime routes, and model-capability claims must stay separate from confirmed facts |
+| forbidden-action checks | verifiers should name actions that must not happen, such as adapter-side lane parsing or review-role implementation |
+| ceiling-effect downgrade | a clean binary sweep on weak contracts is not a winner claim; publish it as baseline until hardened rerun evidence exists |
+
 ## Score dimensions
 
 | Dimension | Meaning |
@@ -97,6 +115,8 @@ Winners are published per surface using exactly this rule:
 | semantic rows only in the primary table | `R01..R31` only |
 | adapters published separately | `A01` and `A02` never appear inside the semantic winner table |
 | overlays stay secondary | runtime, browser, quota, and transport notes do not masquerade as role wins |
+| explicit quota failures are not scoreable | provider quota, rate, or usage-limit failures that prevent a clean attempt are `NOT-RUN` / `REQUEUE`, not `PASS` or `FAIL` |
+| runtime timeout failures are isolated | a bounded provider/runtime hang without worker output is `TIMEOUT`; keep it separate from quota and do not convert it to `PASS` / `FAIL` without an explicit scoring decision |
 | scenario mapping stays explicit | every role row points back to its supporting scenario bundle or bundles |
 | legacy checkpoint stays labeled | old upgraded-pack results remain reference-only and are not republished as v2 role winners |
 
