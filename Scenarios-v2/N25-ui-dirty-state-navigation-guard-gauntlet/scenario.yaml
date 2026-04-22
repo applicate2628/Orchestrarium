@@ -1,0 +1,24 @@
+id: N25
+surface_id: E15
+pack_id: E15
+role_class: implementation
+artifact_type: UI dirty-state editor patch plus scored repeat rubric
+modality_family: UI implementation, form state, navigation guard, accessibility rendering
+allowed_change_surface:
+  - candidate/workspace/src/editor-state.mjs
+  - candidate/workspace/src/editor-panel.mjs
+  - candidate/workspace/src/editor.css
+  - candidate/workspace/tests/editor-contract.test.mjs
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/docs/**
+  - candidate/workspace/src/protected-copy.mjs
+score_profile: "implementation, ui-dirty-state-repeat, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - ui-interaction
+  - repeat-confirmation
+  - scored-rubric

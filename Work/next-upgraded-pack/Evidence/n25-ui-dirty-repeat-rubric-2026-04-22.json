@@ -1,0 +1,151 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_12-59-55-X1-wave-w4-n25-ui-dirty-repeat-2026-04-22\\N25",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 86,
+      "correctness": 40,
+      "patch_quality": 30,
+      "time_points": 12,
+      "cost_points": 4,
+      "elapsed_proxy_seconds": 277.103,
+      "cost_proxy_output_bytes": 194944,
+      "changed_paths": [
+        "candidate/workspace/src/editor-panel.mjs",
+        "candidate/workspace/src/editor-state.mjs",
+        "candidate/workspace/src/editor.css",
+        "candidate/workspace/tests/editor-contract.test.mjs"
+      ],
+      "diff": {
+        "added": 187,
+        "deleted": 25
+      },
+      "notes": [
+        "tests changed",
+        "css changed",
+        "changed=4 source=3 add=187 del=25"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_12-59-55-X3-wave-w4-n25-ui-dirty-repeat-2026-04-22\\N25",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 97,
+      "correctness": 40,
+      "patch_quality": 30,
+      "time_points": 12,
+      "cost_points": 15,
+      "elapsed_proxy_seconds": 377.336,
+      "cost_proxy_output_bytes": 2293,
+      "changed_paths": [
+        "candidate/workspace/src/editor-panel.mjs",
+        "candidate/workspace/src/editor-state.mjs",
+        "candidate/workspace/src/editor.css",
+        "candidate/workspace/tests/editor-contract.test.mjs"
+      ],
+      "diff": {
+        "added": 328,
+        "deleted": 45
+      },
+      "notes": [
+        "tests changed",
+        "css changed",
+        "changed=4 source=3 add=328 del=45"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_13-06-44-X6-wave-w4-n25-ui-dirty-repeat-2026-04-22\\N25",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "ROUTE-FAIL",
+      "scoreability": "runtime-route",
+      "wrapper_exit_code": 1,
+      "verification_passed": false,
+      "total": 0,
+      "correctness": 0,
+      "patch_quality": 24,
+      "time_points": 0,
+      "cost_points": 0,
+      "elapsed_proxy_seconds": 110.986,
+      "cost_proxy_output_bytes": 1984,
+      "changed_paths": [
+        "candidate/workspace/src/editor-panel.mjs",
+        "candidate/workspace/src/editor-state.mjs"
+      ],
+      "diff": {
+        "added": 20,
+        "deleted": 12
+      },
+      "notes": [
+        "tests unchanged",
+        "css unchanged",
+        "changed=2 source=2 add=20 del=12"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_13-06-45-X2-wave-w4-n25-ui-dirty-repeat-2026-04-22\\N25",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 43,
+      "correctness": 10,
+      "patch_quality": 14,
+      "time_points": 15,
+      "cost_points": 4,
+      "elapsed_proxy_seconds": 58.244,
+      "cost_proxy_output_bytes": 78266,
+      "changed_paths": [],
+      "diff": {
+        "added": 0,
+        "deleted": 0
+      },
+      "notes": [
+        "tests unchanged",
+        "css unchanged",
+        "changed=0 source=0 add=0 del=0"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_13-09-52-X5-wave-w4-n25-ui-dirty-repeat-2026-04-22\\N25",
+      "row": "X5",
+      "model": "gemini3.1pro",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 98,
+      "correctness": 40,
+      "patch_quality": 28,
+      "time_points": 15,
+      "cost_points": 15,
+      "elapsed_proxy_seconds": 181.236,
+      "cost_proxy_output_bytes": 873,
+      "changed_paths": [
+        "candidate/workspace/src/editor-panel.mjs",
+        "candidate/workspace/src/editor-state.mjs",
+        "candidate/workspace/src/editor.css"
+      ],
+      "diff": {
+        "added": 95,
+        "deleted": 21
+      },
+      "notes": [
+        "tests unchanged",
+        "css changed",
+        "changed=3 source=3 add=95 del=21"
+      ]
+    }
+  ]
+}

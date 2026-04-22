@@ -1241,3 +1241,57 @@ lower-cost (`95 / 100` versus `86 / 100`). Because this is an independent same-l
 systems/toolchain recommendation can move from `X3 provisional-primary` to `X3 primary` for compact
 path/cache/fingerprint/lease patches, with `X1` as the test-rich secondary. `X2`, `X5`, and `X6`
 are not primary candidates for this lane after scoreable verifier failures.
+
+## 2026-04-22 Follow-Up: W4 / N25 UI Dirty-State Repeat
+
+`N25-ui-dirty-state-navigation-guard-gauntlet` was added as diagnostic `E15` to repeat the `N20`
+UI implementation signal on a different UI surface: dirty baselines, guarded navigation,
+validation-gated save, failed-save rollback, focus return, ARIA status/error rendering, and stable
+CSS constraints.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/ui-dirty-contract.json` | `PASS` |
+| `python Scenarios-v2/N25-ui-dirty-state-navigation-guard-gauntlet/verifiers/check_ui_dirty_state.py --bundle-shape-only` | `N25 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N25-ui-dirty-state-navigation-guard-gauntlet/verifiers/check_ui_dirty_state.py --expect-start-state` | `N25 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n25-ui-reference/` | `N25 verifier PASS (completed run)` |
+| scratch reference scope guard | `N25 scope PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_12-59-55-X1-wave-w4-n25-ui-dirty-repeat-2026-04-22/N25/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_12-59-55-X3-wave-w4-n25-ui-dirty-repeat-2026-04-22/N25/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-22_13-06-45-X2-wave-w4-n25-ui-dirty-repeat-2026-04-22/N25/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X5 / gemini3.1pro` | `.scratch/v2-cohort-runs/2026-04-22_13-09-52-X5-wave-w4-n25-ui-dirty-repeat-2026-04-22/N25/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-22_13-06-44-X6-wave-w4-n25-ui-dirty-repeat-2026-04-22/N25/` | `1` | `FAIL` | `PASS` | `ROUTE-FAIL` |
+
+`X5` was admitted only after a same-session direct smoke wrote
+`.scratch/gemini-smoke-n25-2026-04-22/x5-output.txt` with `X5_SMOKE_OK`. Unlike N21, the semantic
+Gemini Pro run completed and passed the verifier. `X2` is a scoreable fail: it left the candidate
+unchanged, created a forbidden top-level `.reports/` entry, and failed every dirty-state invariant.
+`X6` remains a runtime route failure because the Gemini route hit missing-tool loop recovery and
+`AbortError`.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Correctness | Patch quality | Time | Cost | Elapsed proxy | Output bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `X5 / gemini3.1pro` | `PASS` | `scoreable` | `98 / 100` | `40` | `28` | `15` | `15` | `181.236s` | `873` | tests unchanged; CSS changed; `95` added, `21` deleted |
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `97 / 100` | `40` | `30` | `12` | `15` | `377.336s` | `2293` | tests changed; CSS changed; `328` added, `45` deleted |
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `86 / 100` | `40` | `30` | `12` | `4` | `277.103s` | `194944` | tests changed; CSS changed; `187` added, `25` deleted |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `43 / 100` | `10` | `14` | `15` | `4` | `58.244s` | `78266` | no candidate edits; forbidden `.reports` bundle-shape drift |
+| `X6 / gemini3.1flash-lite-preview` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | `0` | `24` | `0` | `0` | `110.986s` | `1984` | Gemini missing-tool loop / `AbortError` |
+
+### N25 Verdict
+
+`binary tie remains` for `X1` and `X3`, but N25 independently confirms the N20 UI implementation
+edge: `X3` is again materially ahead of `X1` (`97 / 100` versus `86 / 100`). UI implementation can
+move from `X3 provisional-primary` to `X3 primary` versus `X1`. N25 also produces the first healthy
+modern `X5` UI implementation pass after smoke, and it narrowly tops the rubric at `98 / 100`; keep
+`X5` as a UI contender when the Gemini Pro route is healthy, but require another UI-family pass
+before promoting it over `X3` globally.

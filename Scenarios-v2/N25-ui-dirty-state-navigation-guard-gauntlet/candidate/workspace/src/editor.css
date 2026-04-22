@@ -1,0 +1,13 @@
+.editor {
+  display: grid;
+  gap: 8px;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.status {
+  font-weight: 600;
+}
