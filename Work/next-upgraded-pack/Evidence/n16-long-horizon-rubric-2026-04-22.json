@@ -1,0 +1,73 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_00-33-10-X1-n16-long-horizon-integration-2026-04-22\\N16",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "total": 89,
+      "correctness": 40,
+      "patch_quality": 30,
+      "time_points": 15,
+      "cost_points": 4,
+      "elapsed_proxy_seconds": 338.689,
+      "cost_proxy_output_bytes": 393174,
+      "changed_paths": [
+        "candidate/workspace/src/releaseflow/audit.py",
+        "candidate/workspace/src/releaseflow/config.py",
+        "candidate/workspace/src/releaseflow/dedupe.py",
+        "candidate/workspace/src/releaseflow/executor.py",
+        "candidate/workspace/src/releaseflow/intake.py",
+        "candidate/workspace/src/releaseflow/ledger.py",
+        "candidate/workspace/src/releaseflow/notifier.py",
+        "candidate/workspace/src/releaseflow/planner.py",
+        "candidate/workspace/src/releaseflow/report.py",
+        "candidate/workspace/src/releaseflow/rollback.py",
+        "candidate/workspace/src/releaseflow/scheduler.py",
+        "candidate/workspace/tests/test_releaseflow.py"
+      ],
+      "diff": {
+        "added": 173,
+        "deleted": 29
+      },
+      "notes": [
+        "tests changed",
+        "changed=12 add=173 del=29"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_00-33-09-X3-n16-long-horizon-integration-2026-04-22\\N16",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "total": 95,
+      "correctness": 40,
+      "patch_quality": 25,
+      "time_points": 15,
+      "cost_points": 15,
+      "elapsed_proxy_seconds": 502.532,
+      "cost_proxy_output_bytes": 2829,
+      "changed_paths": [
+        "candidate/workspace/src/releaseflow/audit.py",
+        "candidate/workspace/src/releaseflow/config.py",
+        "candidate/workspace/src/releaseflow/dedupe.py",
+        "candidate/workspace/src/releaseflow/executor.py",
+        "candidate/workspace/src/releaseflow/intake.py",
+        "candidate/workspace/src/releaseflow/ledger.py",
+        "candidate/workspace/src/releaseflow/notifier.py",
+        "candidate/workspace/src/releaseflow/planner.py",
+        "candidate/workspace/src/releaseflow/report.py",
+        "candidate/workspace/src/releaseflow/rollback.py",
+        "candidate/workspace/src/releaseflow/scheduler.py"
+      ],
+      "diff": {
+        "added": 99,
+        "deleted": 25
+      },
+      "notes": [
+        "tests unchanged",
+        "changed=11 add=99 del=25"
+      ]
+    }
+  ]
+}

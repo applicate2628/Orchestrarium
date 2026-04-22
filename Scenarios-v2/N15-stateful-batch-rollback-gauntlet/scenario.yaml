@@ -1,0 +1,31 @@
+id: N15
+surface_id: E5
+pack_id: E5
+role_class: implementation
+artifact_type: stateful batch rollback implementation gauntlet
+modality_family: stateful multi-step system reasoning
+allowed_change_surface:
+  - candidate/workspace/src/batchflow/planner.py
+  - candidate/workspace/src/batchflow/journal.py
+  - candidate/workspace/src/batchflow/checkpoint.py
+  - candidate/workspace/src/batchflow/retry.py
+  - candidate/workspace/src/batchflow/rollback.py
+  - candidate/workspace/src/batchflow/executor.py
+  - candidate/workspace/src/batchflow/report.py
+  - candidate/workspace/src/batchflow/store.py
+  - candidate/workspace/tests/test_batchflow.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/src/batchflow/__init__.py
+  - candidate/workspace/src/batchflow/api.py
+  - candidate/workspace/src/batchflow/models.py
+  - candidate/workspace/docs/**
+  - candidate/workspace/legacy/**
+  - candidate/workspace/ui/**
+score_profile: "implementation, top-pair-separator, stateful-gauntlet"
+overlay_flags:
+  - top-pair-separator
+  - stateful-gauntlet

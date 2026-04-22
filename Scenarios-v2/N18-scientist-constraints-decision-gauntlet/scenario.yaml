@@ -1,0 +1,19 @@
+id: N18
+surface_id: E8
+pack_id: E8
+role_class: scientist
+artifact_type: constraint decision memo plus scored rubric
+modality_family: scientist and constraint reasoning
+allowed_change_surface:
+  - candidate/constraint-decision-memo.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/stale-advice/**
+score_profile: "scientist, constraints, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - scientist-constraints
+  - scored-rubric

@@ -1,0 +1,68 @@
+{
+  "required_top_level_entries": ["README.md", "candidate", "inputs", "oracle", "scenario.yaml", "verifiers"],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N20",
+    "surface_id": "E10",
+    "pack_id": "E10",
+    "role_class": "implementation",
+    "artifact_type": "UI command palette interaction patch plus scored rubric",
+    "modality_family": "UI implementation, keyboard interaction, state rendering",
+    "allowed_change_surface": [
+      "candidate/workspace/src/command-palette.mjs",
+      "candidate/workspace/src/palette-state.mjs",
+      "candidate/workspace/src/palette.css",
+      "candidate/workspace/tests/palette-contract.test.mjs"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/docs/**",
+      "candidate/workspace/src/protected-copy.mjs"
+    ],
+    "score_profile": "implementation, ui-interaction, top-pair-role-fit",
+    "overlay_flags": ["top-pair-role-fit", "ui-interaction", "scored-rubric"]
+  },
+  "required_bundle_paths": [
+    "candidate/workspace/src/command-palette.mjs",
+    "candidate/workspace/src/palette-state.mjs",
+    "candidate/workspace/src/palette.css",
+    "candidate/workspace/src/protected-copy.mjs",
+    "candidate/workspace/tests/palette-contract.test.mjs",
+    "candidate/workspace/docs/stale-note.md"
+  ],
+  "expected_start_state_failures": [
+    "disabled-focus-skip",
+    "filter-stability",
+    "escape-restore",
+    "disabled-select-block",
+    "render-active-descendant",
+    "render-visible-return-cue",
+    "css-stability"
+  ],
+  "required_css_markers": [
+    ":focus-visible",
+    "min-inline-size",
+    "overflow-wrap",
+    "aria-selected"
+  ],
+  "prohibited_candidate_terms": [
+    "mouse-only",
+    "hardcode deploy",
+    "position: absolute",
+    "letter-spacing: -"
+  ]
+}

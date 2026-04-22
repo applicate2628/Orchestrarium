@@ -1,0 +1,30 @@
+id: N19
+surface_id: E9
+pack_id: E9
+role_class: implementation
+artifact_type: systems toolchain cache patch plus scored rubric
+modality_family: systems, toolchain, path and cache correctness
+allowed_change_surface:
+  - candidate/workspace/src/toolgate/config.py
+  - candidate/workspace/src/toolgate/paths.py
+  - candidate/workspace/src/toolgate/cache.py
+  - candidate/workspace/src/toolgate/lockfile.py
+  - candidate/workspace/src/toolgate/planner.py
+  - candidate/workspace/src/toolgate/executor.py
+  - candidate/workspace/src/toolgate/report.py
+  - candidate/workspace/tests/test_toolgate.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/src/toolgate/__init__.py
+  - candidate/workspace/src/toolgate/api.py
+  - candidate/workspace/src/toolgate/models.py
+  - candidate/workspace/docs/**
+  - candidate/workspace/legacy/**
+score_profile: "implementation, systems-toolchain, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - systems-toolchain
+  - scored-rubric

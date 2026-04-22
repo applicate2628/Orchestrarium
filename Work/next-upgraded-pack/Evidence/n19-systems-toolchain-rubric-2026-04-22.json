@@ -1,0 +1,130 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-16-13-X1-n19-systems-toolchain-2026-04-22\\N19",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 86,
+      "correctness": 40,
+      "patch_quality": 30,
+      "time_points": 12,
+      "cost_points": 4,
+      "elapsed_proxy_seconds": 295.278,
+      "cost_proxy_output_bytes": 281440,
+      "changed_paths": [
+        "candidate/workspace/src/toolgate/cache.py",
+        "candidate/workspace/src/toolgate/config.py",
+        "candidate/workspace/src/toolgate/executor.py",
+        "candidate/workspace/src/toolgate/paths.py",
+        "candidate/workspace/src/toolgate/planner.py",
+        "candidate/workspace/src/toolgate/report.py",
+        "candidate/workspace/tests/test_toolgate.py"
+      ],
+      "diff": {
+        "added": 133,
+        "deleted": 26
+      },
+      "notes": [
+        "tests changed",
+        "changed=7 source=6 add=133 del=26"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-16-13-X3-n19-systems-toolchain-2026-04-22\\N19",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 95,
+      "correctness": 40,
+      "patch_quality": 25,
+      "time_points": 15,
+      "cost_points": 15,
+      "elapsed_proxy_seconds": 201.068,
+      "cost_proxy_output_bytes": 2786,
+      "changed_paths": [
+        "candidate/workspace/src/toolgate/cache.py",
+        "candidate/workspace/src/toolgate/config.py",
+        "candidate/workspace/src/toolgate/executor.py",
+        "candidate/workspace/src/toolgate/paths.py",
+        "candidate/workspace/src/toolgate/planner.py",
+        "candidate/workspace/src/toolgate/report.py"
+      ],
+      "diff": {
+        "added": 93,
+        "deleted": 30
+      },
+      "notes": [
+        "tests unchanged",
+        "changed=6 source=6 add=93 del=30"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-21-39-X2-n19-systems-toolchain-calibration-2026-04-22\\N19",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 84,
+      "correctness": 40,
+      "patch_quality": 25,
+      "time_points": 15,
+      "cost_points": 4,
+      "elapsed_proxy_seconds": 63.006,
+      "cost_proxy_output_bytes": 215440,
+      "changed_paths": [
+        "candidate/workspace/src/toolgate/cache.py",
+        "candidate/workspace/src/toolgate/config.py",
+        "candidate/workspace/src/toolgate/executor.py",
+        "candidate/workspace/src/toolgate/planner.py",
+        "candidate/workspace/src/toolgate/report.py"
+      ],
+      "diff": {
+        "added": 96,
+        "deleted": 36
+      },
+      "notes": [
+        "tests unchanged",
+        "changed=5 source=5 add=96 del=36"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-21-38-X6-n19-systems-toolchain-calibration-2026-04-22\\N19",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 65,
+      "correctness": 10,
+      "patch_quality": 25,
+      "time_points": 15,
+      "cost_points": 15,
+      "elapsed_proxy_seconds": 74.852,
+      "cost_proxy_output_bytes": 1655,
+      "changed_paths": [
+        "candidate/workspace/src/toolgate/cache.py",
+        "candidate/workspace/src/toolgate/config.py",
+        "candidate/workspace/src/toolgate/executor.py",
+        "candidate/workspace/src/toolgate/planner.py"
+      ],
+      "diff": {
+        "added": 50,
+        "deleted": 22
+      },
+      "notes": [
+        "tests unchanged",
+        "changed=4 source=4 add=50 del=22"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+id: N14
+surface_id: E4
+pack_id: E4
+role_class: implementation
+artifact_type: multi-file dependency code patch plus validation
+modality_family: cross-file dependency reasoning
+allowed_change_surface:
+  - candidate/workspace/src/routing_eval/config.py
+  - candidate/workspace/src/routing_eval/status.py
+  - candidate/workspace/src/routing_eval/scorecard.py
+  - candidate/workspace/src/routing_eval/render.py
+  - candidate/workspace/tests/test_routing_eval.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/src/routing_eval/__init__.py
+  - candidate/workspace/src/routing_eval/api.py
+  - candidate/workspace/docs/**
+  - candidate/workspace/legacy/**
+  - candidate/workspace/ui/**
+score_profile: "implementation, top-pair-separator"
+overlay_flags:
+  - top-pair-separator
+  - multi-file-dependency

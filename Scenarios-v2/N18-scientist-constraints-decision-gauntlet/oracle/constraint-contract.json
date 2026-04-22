@@ -1,0 +1,115 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N18",
+    "surface_id": "E8",
+    "pack_id": "E8",
+    "role_class": "scientist",
+    "artifact_type": "constraint decision memo plus scored rubric",
+    "modality_family": "scientist and constraint reasoning",
+    "allowed_change_surface": [
+      "candidate/constraint-decision-memo.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/stale-advice/**"
+    ],
+    "score_profile": "scientist, constraints, top-pair-role-fit",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "scientist-constraints",
+      "scored-rubric"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/hard-constraints.md",
+    "inputs/measurement-ledger.md",
+    "inputs/risk-ledger.md",
+    "inputs/conflicting-notes.md",
+    "candidate/README.md",
+    "candidate/constraint-decision-memo.md",
+    "candidate/stale-advice/old-fastest-option.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/constraint-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_constraint_decision.py",
+    "verifiers/check_scope.py"
+  ],
+  "required_sections": [
+    "## Decision",
+    "## Evidence Binding Ledger",
+    "## Constraint Equation Ledger",
+    "## Rejected Options",
+    "## Non-Claim Ledger",
+    "## Falsification Plan",
+    "## Residual Risk And Owners"
+  ],
+  "required_exact_phrases": [
+    "Decision: Option C - keyed index plus exact ledger replay",
+    "Reject Option A - linear exact ledger scan: p95 latency 280ms exceeds <= 200ms",
+    "Reject Option B - probabilistic sketch gate: rollback false negatives 1.8% violates 0 allowed",
+    "p95 gate decision latency <= 200ms",
+    "rollback false negatives 0 allowed",
+    "audit source trace 100% preserved",
+    "memory budget <= 256MB",
+    "Option C measured p95 latency 118ms",
+    "Option C measured memory 164MB",
+    "Option C measured false-negative risk 0",
+    "Option C measured source trace 100%",
+    "UI badge smoothness is not release safety evidence",
+    "stale benchmark notes cannot override current measured profiles",
+    "synthetic fixtures only; no production secrets in prompt/cache"
+  ],
+  "required_table_headers": [
+    "| Source | Binding | Decision use | Non-claim boundary |",
+    "| Check | Threshold | Failure meaning | Owner |",
+    "| Risk | Mitigation | Owner | Residual status |"
+  ],
+  "required_risk_ids": [
+    "R1 latency regression",
+    "R2 replay drift",
+    "R3 index corruption",
+    "R4 secret exposure"
+  ],
+  "disallowed_markers": [
+    "Use Option B because it is fastest",
+    "false-negative rate is probably acceptable",
+    "choose both Option B and Option C",
+    "UI badge demo proves safety",
+    "production secrets are allowed"
+  ],
+  "expected_start_state_failures": [
+    "missing-required-sections",
+    "missing-required-phrases",
+    "missing-required-tables",
+    "missing-risk-ownership",
+    "contains-disallowed-markers"
+  ]
+}

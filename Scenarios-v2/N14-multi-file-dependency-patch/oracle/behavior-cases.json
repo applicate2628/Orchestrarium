@@ -1,0 +1,267 @@
+{
+  "cases": [
+    {
+      "id": "profile-catalog-runtime-caveat",
+      "config": {
+        "activeProfile": "balanced",
+        "externalPriorityProfile": "legacy-claude-first",
+        "externalPriorityProfiles": {
+          "balanced": [
+            "codex",
+            "claude",
+            "gemini"
+          ],
+          "legacy-claude-first": [
+            "claude",
+            "codex",
+            "gemini"
+          ]
+        }
+      },
+      "attempts": [
+        {
+          "row": "X1",
+          "provider": "codex",
+          "wrapperExitCode": 0,
+          "verificationInvoked": true,
+          "verificationPassed": true,
+          "workerOutputPresent": true,
+          "changedPaths": [
+            "candidate/workspace/src/routing_eval/status.py"
+          ]
+        },
+        {
+          "row": "X3",
+          "provider": "claude",
+          "wrapperExitCode": 1,
+          "verificationInvoked": true,
+          "verificationPassed": false,
+          "workerOutputPresent": true,
+          "changedPaths": [
+            "candidate/workspace/src/routing_eval/render.py"
+          ]
+        },
+        {
+          "row": "X5",
+          "provider": "gemini",
+          "wrapperExitCode": 124,
+          "verificationInvoked": false,
+          "verificationPassed": false,
+          "runtimeError": "timeout",
+          "workerOutputPresent": false,
+          "changedPaths": []
+        }
+      ],
+      "expected": {
+        "provider_order": [
+          "codex",
+          "claude",
+          "gemini"
+        ],
+        "attempts": [
+          {
+            "row": "X1",
+            "provider": "codex",
+            "verdict": "PASS",
+            "scoreable": true,
+            "reason": "verified"
+          },
+          {
+            "row": "X3",
+            "provider": "claude",
+            "verdict": "FAIL",
+            "scoreable": true,
+            "reason": "verifier-failed"
+          },
+          {
+            "row": "X5",
+            "provider": "gemini",
+            "verdict": "REQUEUE",
+            "scoreable": false,
+            "reason": "timeout"
+          }
+        ],
+        "score": {
+          "pass": 1,
+          "fail": 1,
+          "scoreable": 2,
+          "non_scoreable": 1,
+          "denominator": 2,
+          "rate": "1/2",
+          "non_scoreable_by_verdict": {
+            "REQUEUE": 1
+          }
+        },
+        "report_lines": [
+          "provider_order: codex > claude > gemini",
+          "score: 1/2 scoreable",
+          "pass: X1",
+          "fail: X3",
+          "caveat: X5 REQUEUE timeout"
+        ]
+      }
+    },
+    {
+      "id": "singular-selector-route-unavailable",
+      "config": {
+        "externalPriorityProfile": "gemini-crosscheck",
+        "externalPriorityProfiles": {
+          "balanced": [
+            "codex",
+            "claude",
+            "gemini"
+          ],
+          "gemini-crosscheck": [
+            "gemini",
+            "codex",
+            "claude"
+          ]
+        }
+      },
+      "attempts": [
+        {
+          "row": "X4",
+          "provider": "claude",
+          "routeStatus": "unavailable",
+          "routeError": "502 unknown provider for model claude-opus-4-7",
+          "wrapperExitCode": null,
+          "verificationInvoked": false,
+          "verificationPassed": false,
+          "workerOutputPresent": false,
+          "changedPaths": []
+        },
+        {
+          "row": "X6",
+          "provider": "gemini",
+          "wrapperExitCode": 1,
+          "verificationInvoked": true,
+          "verificationPassed": false,
+          "workerOutputPresent": true,
+          "changedPaths": [
+            "candidate/workspace/src/routing_eval/scorecard.py"
+          ]
+        }
+      ],
+      "expected": {
+        "provider_order": [
+          "gemini",
+          "codex",
+          "claude"
+        ],
+        "attempts": [
+          {
+            "row": "X4",
+            "provider": "claude",
+            "verdict": "NOT-RUN",
+            "scoreable": false,
+            "reason": "route-unavailable"
+          },
+          {
+            "row": "X6",
+            "provider": "gemini",
+            "verdict": "FAIL",
+            "scoreable": true,
+            "reason": "verifier-failed"
+          }
+        ],
+        "score": {
+          "pass": 0,
+          "fail": 1,
+          "scoreable": 1,
+          "non_scoreable": 1,
+          "denominator": 1,
+          "rate": "0/1",
+          "non_scoreable_by_verdict": {
+            "NOT-RUN": 1
+          }
+        },
+        "report_lines": [
+          "provider_order: gemini > codex > claude",
+          "score: 0/1 scoreable",
+          "fail: X6",
+          "caveat: X4 NOT-RUN route-unavailable"
+        ]
+      }
+    },
+    {
+      "id": "wrapper-zero-verifier-fail-vs-missing-output",
+      "config": {
+        "activeProfile": "gemini-crosscheck",
+        "externalPriorityProfiles": {
+          "balanced": [
+            "codex",
+            "claude",
+            "gemini"
+          ],
+          "gemini-crosscheck": [
+            "gemini",
+            "codex",
+            "claude"
+          ]
+        }
+      },
+      "attempts": [
+        {
+          "row": "X2",
+          "provider": "codex",
+          "wrapperExitCode": 0,
+          "verificationInvoked": true,
+          "verificationPassed": false,
+          "workerOutputPresent": true,
+          "changedPaths": [
+            "candidate/workspace/src/routing_eval/render.py"
+          ]
+        },
+        {
+          "row": "X5",
+          "provider": "gemini",
+          "wrapperExitCode": 0,
+          "verificationInvoked": false,
+          "verificationPassed": false,
+          "workerOutputPresent": false,
+          "changedPaths": []
+        }
+      ],
+      "expected": {
+        "provider_order": [
+          "gemini",
+          "codex",
+          "claude"
+        ],
+        "attempts": [
+          {
+            "row": "X2",
+            "provider": "codex",
+            "verdict": "FAIL",
+            "scoreable": true,
+            "reason": "verifier-failed"
+          },
+          {
+            "row": "X5",
+            "provider": "gemini",
+            "verdict": "REQUEUE",
+            "scoreable": false,
+            "reason": "missing-worker-output"
+          }
+        ],
+        "score": {
+          "pass": 0,
+          "fail": 1,
+          "scoreable": 1,
+          "non_scoreable": 1,
+          "denominator": 1,
+          "rate": "0/1",
+          "non_scoreable_by_verdict": {
+            "REQUEUE": 1
+          }
+        },
+        "report_lines": [
+          "provider_order: gemini > codex > claude",
+          "score: 0/1 scoreable",
+          "fail: X2",
+          "caveat: X5 REQUEUE missing-worker-output"
+        ]
+      }
+    }
+  ]
+}

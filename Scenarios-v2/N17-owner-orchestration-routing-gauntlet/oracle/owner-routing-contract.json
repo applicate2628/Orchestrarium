@@ -1,0 +1,116 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N17",
+    "surface_id": "E7",
+    "pack_id": "E7",
+    "role_class": "owner",
+    "artifact_type": "owner routing and recovery decision packet plus scored rubric",
+    "modality_family": "owner orchestration and routing recovery",
+    "allowed_change_surface": [
+      "candidate/owner-routing-decision.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/archive/**",
+      "candidate/stale-results/**"
+    ],
+    "score_profile": "owner, advisory, factual, design, planning, top-pair-role-fit",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "owner-orchestration",
+      "scored-rubric"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/current-evidence.md",
+    "inputs/interruption-log.md",
+    "inputs/policy-rules.md",
+    "inputs/artifact-map.md",
+    "candidate/README.md",
+    "candidate/owner-routing-decision.md",
+    "candidate/archive/README.md",
+    "candidate/stale-results/old-winner-table.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/owner-routing-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_owner_routing.py",
+    "verifiers/check_scope.py"
+  ],
+  "required_sections": [
+    "## Primary Task Ledger",
+    "## Interruption Classification",
+    "## Decision Ledger",
+    "## Role Routing",
+    "## Calibration Policy",
+    "## Resume Point"
+  ],
+  "required_exact_phrases": [
+    "Primary task: role-fit routing read for X1/X3 by lane",
+    "Do not promote N16 into a routing lane yet",
+    "Use N16 as E6 diagnostic rubric only",
+    "Admit next pilot: owner/orchestration scored routing-recovery packet",
+    "Next role now: $lead",
+    "QA gate: after the pilot bundle and scorer validate",
+    "Architecture-reviewer gate: after a routing-policy surface changes",
+    "X2 calibration: run when lane policy could change",
+    "X5 calibration: require a direct smoke that writes worker-output.txt before semantic runs",
+    "X6 calibration: run as lower-cost calibration after X2 or when runtime is healthy",
+    "Runtime failures remain NOT-RUN, not model FAIL",
+    "Resume from Results-drafts/role-fit-scorecard-v1-2026-04-22.md"
+  ],
+  "required_table_headers": [
+    "| Interruption | Classification | Owner decision | Evidence | Visible next cue |",
+    "| Request | Decision | Calibration rows | Runtime guard |"
+  ],
+  "expected_interruption_ids": [
+    "I1",
+    "I2",
+    "I3",
+    "I4",
+    "I5"
+  ],
+  "disallowed_markers": [
+    "N16 proves the global winner",
+    "promote N16 into the routing lanes",
+    "Run X2, X5, and X6 on every scenario",
+    "Send the output to QA now",
+    "$product-manager owns this delivery",
+    "QA owns the next design",
+    "architecture reviewer decide what to do"
+  ],
+  "expected_start_state_failures": [
+    "missing-required-sections",
+    "missing-required-phrases",
+    "missing-required-tables",
+    "missing-interruption-classification",
+    "contains-disallowed-markers"
+  ]
+}

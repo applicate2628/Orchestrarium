@@ -1,0 +1,76 @@
+{
+  "required_top_level_entries": ["README.md", "candidate", "inputs", "oracle", "scenario.yaml", "verifiers"],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N19",
+    "surface_id": "E9",
+    "pack_id": "E9",
+    "role_class": "implementation",
+    "artifact_type": "systems toolchain cache patch plus scored rubric",
+    "modality_family": "systems, toolchain, path and cache correctness",
+    "allowed_change_surface": [
+      "candidate/workspace/src/toolgate/config.py",
+      "candidate/workspace/src/toolgate/paths.py",
+      "candidate/workspace/src/toolgate/cache.py",
+      "candidate/workspace/src/toolgate/lockfile.py",
+      "candidate/workspace/src/toolgate/planner.py",
+      "candidate/workspace/src/toolgate/executor.py",
+      "candidate/workspace/src/toolgate/report.py",
+      "candidate/workspace/tests/test_toolgate.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/src/toolgate/__init__.py",
+      "candidate/workspace/src/toolgate/api.py",
+      "candidate/workspace/src/toolgate/models.py",
+      "candidate/workspace/docs/**",
+      "candidate/workspace/legacy/**"
+    ],
+    "score_profile": "implementation, systems-toolchain, top-pair-role-fit",
+    "overlay_flags": ["top-pair-role-fit", "systems-toolchain", "scored-rubric"]
+  },
+  "required_bundle_paths": [
+    "candidate/workspace/src/toolgate/api.py",
+    "candidate/workspace/src/toolgate/models.py",
+    "candidate/workspace/src/toolgate/config.py",
+    "candidate/workspace/src/toolgate/paths.py",
+    "candidate/workspace/src/toolgate/cache.py",
+    "candidate/workspace/src/toolgate/planner.py",
+    "candidate/workspace/src/toolgate/executor.py",
+    "candidate/workspace/src/toolgate/report.py",
+    "candidate/workspace/tests/test_toolgate.py",
+    "candidate/workspace/docs/stale-runbook.md",
+    "candidate/workspace/legacy/old_cache.py"
+  ],
+  "expected_start_state_failures": [
+    "active-profile-precedence",
+    "invalid-env-fallback",
+    "dependency-order",
+    "cache-key-portable",
+    "feature-conflict-rejected",
+    "lock-release-on-failure",
+    "source-trace-report"
+  ],
+  "prohibited_candidate_terms": [
+    "D:/dev",
+    "D:\\\\dev",
+    "C:/Users",
+    "C:\\\\Users",
+    "legacyProfile wins",
+    "keep failed locks"
+  ]
+}

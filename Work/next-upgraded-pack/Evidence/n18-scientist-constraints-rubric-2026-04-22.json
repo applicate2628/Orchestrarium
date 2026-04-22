@@ -1,0 +1,99 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_02-09-59-X1-n18-scientist-constraints-2026-04-22\\N18",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "criteria": {
+        "decision_correctness": 20,
+        "evidence_binding": 20,
+        "non_claim_discipline": 20,
+        "falsification_coverage": 20,
+        "risk_ownership": 20
+      },
+      "elapsed_proxy_seconds": 124.214,
+      "output_bytes": 93786,
+      "changed_paths": [
+        "candidate/constraint-decision-memo.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_02-09-59-X3-n18-scientist-constraints-2026-04-22\\N18",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "criteria": {
+        "decision_correctness": 20,
+        "evidence_binding": 20,
+        "non_claim_discipline": 20,
+        "falsification_coverage": 20,
+        "risk_ownership": 20
+      },
+      "elapsed_proxy_seconds": 181.701,
+      "output_bytes": 2122,
+      "changed_paths": [
+        "candidate/constraint-decision-memo.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_02-14-52-X2-n18-scientist-constraints-calibration-2026-04-22\\N18",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "criteria": {
+        "decision_correctness": 20,
+        "evidence_binding": 20,
+        "non_claim_discipline": 20,
+        "falsification_coverage": 20,
+        "risk_ownership": 20
+      },
+      "elapsed_proxy_seconds": 36.402,
+      "output_bytes": 67739,
+      "changed_paths": [
+        "candidate/constraint-decision-memo.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_02-14-51-X6-n18-scientist-constraints-calibration-2026-04-22\\N18",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "ROUTE-FAIL",
+      "scoreability": "runtime-route",
+      "wrapper_exit_code": 1,
+      "verification_passed": false,
+      "total": 60,
+      "criteria": {
+        "decision_correctness": 20,
+        "evidence_binding": 0,
+        "non_claim_discipline": 20,
+        "falsification_coverage": 20,
+        "risk_ownership": 20
+      },
+      "elapsed_proxy_seconds": 46.079,
+      "output_bytes": 1579,
+      "changed_paths": [
+        "candidate/constraint-decision-memo.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_02-50-07-X5-n18-scientist-constraints-calibration-2026-04-22-rerun\\N18",
+      "row": "X5",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "total": 0
+    }
+  ]
+}

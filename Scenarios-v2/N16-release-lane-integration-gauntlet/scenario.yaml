@@ -1,0 +1,36 @@
+id: N16
+surface_id: E6
+pack_id: E6
+role_class: implementation
+artifact_type: long-horizon release lane integration patch plus scored rubric
+modality_family: long-horizon integration reasoning
+allowed_change_surface:
+  - candidate/workspace/src/releaseflow/config.py
+  - candidate/workspace/src/releaseflow/intake.py
+  - candidate/workspace/src/releaseflow/dedupe.py
+  - candidate/workspace/src/releaseflow/planner.py
+  - candidate/workspace/src/releaseflow/scheduler.py
+  - candidate/workspace/src/releaseflow/ledger.py
+  - candidate/workspace/src/releaseflow/notifier.py
+  - candidate/workspace/src/releaseflow/rollback.py
+  - candidate/workspace/src/releaseflow/audit.py
+  - candidate/workspace/src/releaseflow/report.py
+  - candidate/workspace/src/releaseflow/executor.py
+  - candidate/workspace/src/releaseflow/store.py
+  - candidate/workspace/tests/test_releaseflow.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/src/releaseflow/__init__.py
+  - candidate/workspace/src/releaseflow/api.py
+  - candidate/workspace/src/releaseflow/models.py
+  - candidate/workspace/docs/**
+  - candidate/workspace/legacy/**
+  - candidate/workspace/ui/**
+score_profile: "implementation, top-pair-separator, long-horizon-rubric"
+overlay_flags:
+  - top-pair-separator
+  - long-horizon
+  - scored-rubric

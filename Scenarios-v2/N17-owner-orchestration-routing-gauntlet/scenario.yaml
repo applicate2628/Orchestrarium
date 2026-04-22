@@ -1,0 +1,20 @@
+id: N17
+surface_id: E7
+pack_id: E7
+role_class: owner
+artifact_type: owner routing and recovery decision packet plus scored rubric
+modality_family: owner orchestration and routing recovery
+allowed_change_surface:
+  - candidate/owner-routing-decision.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/archive/**
+  - candidate/stale-results/**
+score_profile: "owner, advisory, factual, design, planning, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - owner-orchestration
+  - scored-rubric

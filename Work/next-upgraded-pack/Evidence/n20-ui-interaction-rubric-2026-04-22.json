@@ -1,0 +1,123 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-29-41-X1-n20-ui-interaction-2026-04-22\\N20",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 87,
+      "correctness": 40,
+      "patch_quality": 28,
+      "time_points": 15,
+      "cost_points": 4,
+      "elapsed_proxy_seconds": 155.955,
+      "cost_proxy_output_bytes": 126621,
+      "changed_paths": [
+        "candidate/workspace/src/command-palette.mjs",
+        "candidate/workspace/src/palette-state.mjs",
+        "candidate/workspace/src/palette.css"
+      ],
+      "diff": {
+        "added": 60,
+        "deleted": 11
+      },
+      "notes": [
+        "tests unchanged",
+        "css changed",
+        "changed=3 source=3 add=60 del=11"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-29-41-X3-n20-ui-interaction-2026-04-22\\N20",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 95,
+      "correctness": 40,
+      "patch_quality": 28,
+      "time_points": 12,
+      "cost_points": 15,
+      "elapsed_proxy_seconds": 250.417,
+      "cost_proxy_output_bytes": 1406,
+      "changed_paths": [
+        "candidate/workspace/src/command-palette.mjs",
+        "candidate/workspace/src/palette-state.mjs",
+        "candidate/workspace/src/palette.css"
+      ],
+      "diff": {
+        "added": 97,
+        "deleted": 15
+      },
+      "notes": [
+        "tests unchanged",
+        "css changed",
+        "changed=3 source=3 add=97 del=15"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-34-20-X2-n20-ui-interaction-calibration-2026-04-22\\N20",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 57,
+      "correctness": 10,
+      "patch_quality": 28,
+      "time_points": 15,
+      "cost_points": 4,
+      "elapsed_proxy_seconds": 51.658,
+      "cost_proxy_output_bytes": 144661,
+      "changed_paths": [
+        "candidate/workspace/src/command-palette.mjs",
+        "candidate/workspace/src/palette-state.mjs",
+        "candidate/workspace/src/palette.css"
+      ],
+      "diff": {
+        "added": 67,
+        "deleted": 12
+      },
+      "notes": [
+        "tests unchanged",
+        "css changed",
+        "changed=3 source=3 add=67 del=12"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-34-20-X6-n20-ui-interaction-calibration-2026-04-22\\N20",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "ROUTE-FAIL",
+      "scoreability": "runtime-route",
+      "wrapper_exit_code": 1,
+      "verification_passed": false,
+      "total": 0,
+      "correctness": 0,
+      "patch_quality": 24,
+      "time_points": 15,
+      "cost_points": 15,
+      "elapsed_proxy_seconds": 38.598,
+      "cost_proxy_output_bytes": 2097,
+      "changed_paths": [
+        "candidate/workspace/src/command-palette.mjs",
+        "candidate/workspace/src/palette-state.mjs"
+      ],
+      "diff": {
+        "added": 6,
+        "deleted": 2
+      },
+      "notes": [
+        "tests unchanged",
+        "css unchanged",
+        "changed=2 source=2 add=6 del=2"
+      ]
+    }
+  ]
+}

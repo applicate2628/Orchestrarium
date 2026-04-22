@@ -1,0 +1,108 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N15",
+    "surface_id": "E5",
+    "pack_id": "E5",
+    "role_class": "implementation",
+    "artifact_type": "stateful batch rollback implementation gauntlet",
+    "modality_family": "stateful multi-step system reasoning",
+    "allowed_change_surface": [
+      "candidate/workspace/src/batchflow/planner.py",
+      "candidate/workspace/src/batchflow/journal.py",
+      "candidate/workspace/src/batchflow/checkpoint.py",
+      "candidate/workspace/src/batchflow/retry.py",
+      "candidate/workspace/src/batchflow/rollback.py",
+      "candidate/workspace/src/batchflow/executor.py",
+      "candidate/workspace/src/batchflow/report.py",
+      "candidate/workspace/src/batchflow/store.py",
+      "candidate/workspace/tests/test_batchflow.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/src/batchflow/__init__.py",
+      "candidate/workspace/src/batchflow/api.py",
+      "candidate/workspace/src/batchflow/models.py",
+      "candidate/workspace/docs/**",
+      "candidate/workspace/legacy/**",
+      "candidate/workspace/ui/**"
+    ],
+    "score_profile": "implementation, top-pair-separator, stateful-gauntlet",
+    "overlay_flags": [
+      "top-pair-separator",
+      "stateful-gauntlet"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/decoy-map.md",
+    "candidate/README.md",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/batchflow/__init__.py",
+    "candidate/workspace/src/batchflow/api.py",
+    "candidate/workspace/src/batchflow/models.py",
+    "candidate/workspace/src/batchflow/store.py",
+    "candidate/workspace/src/batchflow/planner.py",
+    "candidate/workspace/src/batchflow/journal.py",
+    "candidate/workspace/src/batchflow/checkpoint.py",
+    "candidate/workspace/src/batchflow/retry.py",
+    "candidate/workspace/src/batchflow/rollback.py",
+    "candidate/workspace/src/batchflow/report.py",
+    "candidate/workspace/src/batchflow/executor.py",
+    "candidate/workspace/tests/test_batchflow.py",
+    "candidate/workspace/docs/rollback-notes.md",
+    "candidate/workspace/legacy/retry_runner.py",
+    "candidate/workspace/ui/status_badges.py",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/invariants.md",
+    "oracle/stateful-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_stateful_batch_gauntlet.py",
+    "verifiers/check_scope.py"
+  ],
+  "expected_start_state_failures": [
+    "input-plan-not-mutated",
+    "causal-plan-order-preserved",
+    "per-batch-checkpoint-isolation",
+    "rollback-current-attempt-only",
+    "retry-queue-causal-order",
+    "report-derived-from-journal"
+  ],
+  "prohibited_candidate_terms": [
+    "input-plan-not-mutated",
+    "causal-plan-order-preserved",
+    "per-batch-checkpoint-isolation",
+    "rollback-current-attempt-only",
+    "retry-queue-causal-order",
+    "journal-sequence-global",
+    "report-derived-from-journal",
+    "stateful-contract",
+    "oracle/"
+  ]
+}

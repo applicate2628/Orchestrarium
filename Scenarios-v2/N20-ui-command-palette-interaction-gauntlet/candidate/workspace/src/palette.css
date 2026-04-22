@@ -1,0 +1,13 @@
+.palette {
+  display: grid;
+  gap: 6px;
+}
+
+.palette-option {
+  border: 1px solid #888;
+  padding: 6px 8px;
+}
+
+.palette-option[aria-selected="true"] {
+  background: #dde7ff;
+}

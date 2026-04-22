@@ -1,0 +1,80 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_01-37-48-X1-n17-owner-routing-2026-04-22\\N17",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "total": 100,
+      "criteria": {
+        "primary_continuity": 20,
+        "diagnostic_separation": 20,
+        "role_routing": 20,
+        "calibration_discipline": 20,
+        "interruption_classification": 20
+      },
+      "elapsed_proxy_seconds": 121.745,
+      "output_bytes": 97344,
+      "changed_paths": [
+        "candidate/owner-routing-decision.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_01-37-48-X3-n17-owner-routing-2026-04-22\\N17",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "total": 100,
+      "criteria": {
+        "primary_continuity": 20,
+        "diagnostic_separation": 20,
+        "role_routing": 20,
+        "calibration_discipline": 20,
+        "interruption_classification": 20
+      },
+      "elapsed_proxy_seconds": 116.485,
+      "output_bytes": 1965,
+      "changed_paths": [
+        "candidate/owner-routing-decision.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_01-40-22-X2-n17-owner-routing-calibration-2026-04-22\\N17",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "PASS",
+      "total": 100,
+      "criteria": {
+        "primary_continuity": 20,
+        "diagnostic_separation": 20,
+        "role_routing": 20,
+        "calibration_discipline": 20,
+        "interruption_classification": 20
+      },
+      "elapsed_proxy_seconds": 33.741,
+      "output_bytes": 81627,
+      "changed_paths": [
+        "candidate/owner-routing-decision.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_01-43-32-X6-n17-owner-routing-calibration-2026-04-22\\N17",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "PASS",
+      "total": 100,
+      "criteria": {
+        "primary_continuity": 20,
+        "diagnostic_separation": 20,
+        "role_routing": 20,
+        "calibration_discipline": 20,
+        "interruption_classification": 20
+      },
+      "elapsed_proxy_seconds": 58.275,
+      "output_bytes": 977,
+      "changed_paths": [
+        "candidate/owner-routing-decision.md"
+      ]
+    }
+  ]
+}

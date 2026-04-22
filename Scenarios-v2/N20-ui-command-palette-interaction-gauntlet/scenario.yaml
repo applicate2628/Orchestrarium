@@ -1,0 +1,23 @@
+id: N20
+surface_id: E10
+pack_id: E10
+role_class: implementation
+artifact_type: UI command palette interaction patch plus scored rubric
+modality_family: UI implementation, keyboard interaction, state rendering
+allowed_change_surface:
+  - candidate/workspace/src/command-palette.mjs
+  - candidate/workspace/src/palette-state.mjs
+  - candidate/workspace/src/palette.css
+  - candidate/workspace/tests/palette-contract.test.mjs
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/docs/**
+  - candidate/workspace/src/protected-copy.mjs
+score_profile: "implementation, ui-interaction, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - ui-interaction
+  - scored-rubric
