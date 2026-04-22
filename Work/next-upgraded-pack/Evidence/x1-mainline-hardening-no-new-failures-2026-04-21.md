@@ -1295,3 +1295,58 @@ move from `X3 provisional-primary` to `X3 primary` versus `X1`. N25 also produce
 modern `X5` UI implementation pass after smoke, and it narrowly tops the rubric at `98 / 100`; keep
 `X5` as a UI contender when the Gemini Pro route is healthy, but require another UI-family pass
 before promoting it over `X3` globally.
+
+## 2026-04-22 Follow-Up: W6 / N26 Owner Recovery Repeat
+
+`N26-owner-recovery-wave-roadmap-reconciliation-gauntlet` was added as diagnostic `E16` to repeat
+the `N23` owner/orchestration signal after N24/N25 changed the live lane state. The packet forces
+source-of-truth reconciliation, stale winner rejection, denominator discipline, lane-state mapping,
+spawn/result-file policy, bounded calibration, and a parseable JSON decision block.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/owner-wave-contract.json` | `PASS` |
+| `python Scenarios-v2/N26-owner-recovery-wave-roadmap-reconciliation-gauntlet/verifiers/check_owner_wave_reconciliation.py --bundle-shape-only` | `N26 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N26-owner-recovery-wave-roadmap-reconciliation-gauntlet/verifiers/check_owner_wave_reconciliation.py --expect-start-state` | `N26 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n26-owner-wave-reference/` | `N26 verifier PASS (completed packet)` |
+| scratch reference scope guard | `N26 scope PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_13-36-21-X1-wave-w6-n26-owner-recovery-repeat-2026-04-22/N26/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_13-36-21-X3-wave-w6-n26-owner-recovery-repeat-2026-04-22/N26/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-22_13-41-39-X2-wave-w6-n26-owner-recovery-repeat-2026-04-22/N26/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X5 / gemini3.1pro` | `.scratch/v2-cohort-runs/2026-04-22_13-46-21-X5-wave-w6-n26-owner-recovery-repeat-2026-04-22/N26/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-22_13-41-38-X6-wave-w6-n26-owner-recovery-repeat-2026-04-22/N26/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+
+`X5` was admitted only after the second same-session smoke invocation used absolute paths and wrote
+`.scratch/gemini-smoke-n26-2026-04-22/x5-output.txt` with `X5_SMOKE_OK`. The first X5 smoke attempt
+failed before model classification because a relative `WorkspaceDir` was doubled under scratch; it
+is an invocation footnote, not model evidence. `X2` and `X6` both produced scoreable verifier
+failures under `wrapperExitCode=0`; X6 output also included known Gemini missing-tool noise, but the
+summary/verifier source of truth is scoreable `FAIL` for this run.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Source/stale | Continuity | Routing | Cal/runtime | Citation/denom | Compact | Elapsed proxy | Output bytes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `100 / 100` | `25` | `20` | `20` | `15` | `10` | `10` | `274.897s` | `2488` |
+| `X5 / gemini3.1pro` | `PASS` | `scoreable` | `100 / 100` | `25` | `20` | `20` | `15` | `10` | `10` | `150.840s` | `766` |
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `92 / 100` | `25` | `20` | `20` | `15` | `10` | `2` | `137.357s` | `119280` |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `70 / 100` | `25` | `20` | `9` | `15` | `8` | `2` | `46.786s` | `115864` |
+| `X6 / gemini3.1flash-lite-preview` | `FAIL` | `scoreable` | `50 / 100` | `10` | `0` | `9` | `15` | `6` | `10` | `72.965s` | `2718` |
+
+### N26 Verdict
+
+`binary tie remains` for `X1` and `X3`, but N26 repeats the N23 owner recovery split: `X3` again
+beats `X1` by rubric (`100 / 100` versus `92 / 100`) while both pass the verifier and scope guard.
+Because owner recovery now has independent same-lane evidence (`N23` and `N26`), owner/orchestration
+can move from `X3 provisional-primary` to `X3 primary` versus `X1` for compact recovery/routing
+packets. `X5` also passes N26 and ties X3 at `100 / 100` after a healthy smoke-gated route, so it is
+a serious owner-recovery contender; keep it behind `X3` until another owner-family pass confirms
+the signal. `X2` and `X6` separate lower with scoreable verifier failures.

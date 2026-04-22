@@ -1,0 +1,109 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_13-36-21-X1-wave-w6-n26-owner-recovery-repeat-2026-04-22\\N26",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 92,
+      "source_stale": 25,
+      "continuity": 20,
+      "routing": 20,
+      "calibration_runtime": 15,
+      "citations_denominator": 10,
+      "compactness": 2,
+      "elapsed_proxy_seconds": 137.357,
+      "output_bytes": 119280,
+      "changed_paths": [
+        "candidate/owner-recovery-wave-roadmap-decision.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_13-36-21-X3-wave-w6-n26-owner-recovery-repeat-2026-04-22\\N26",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "source_stale": 25,
+      "continuity": 20,
+      "routing": 20,
+      "calibration_runtime": 15,
+      "citations_denominator": 10,
+      "compactness": 10,
+      "elapsed_proxy_seconds": 274.897,
+      "output_bytes": 2488,
+      "changed_paths": [
+        "candidate/owner-recovery-wave-roadmap-decision.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_13-41-39-X2-wave-w6-n26-owner-recovery-repeat-2026-04-22\\N26",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 70,
+      "source_stale": 25,
+      "continuity": 20,
+      "routing": 9,
+      "calibration_runtime": 15,
+      "citations_denominator": 8,
+      "compactness": 2,
+      "elapsed_proxy_seconds": 46.786,
+      "output_bytes": 115864,
+      "changed_paths": [
+        "candidate/owner-recovery-wave-roadmap-decision.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_13-41-38-X6-wave-w6-n26-owner-recovery-repeat-2026-04-22\\N26",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 50,
+      "source_stale": 10,
+      "continuity": 0,
+      "routing": 9,
+      "calibration_runtime": 15,
+      "citations_denominator": 6,
+      "compactness": 10,
+      "elapsed_proxy_seconds": 72.965,
+      "output_bytes": 2718,
+      "changed_paths": [
+        "candidate/owner-recovery-wave-roadmap-decision.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_13-46-21-X5-wave-w6-n26-owner-recovery-repeat-2026-04-22\\N26",
+      "row": "X5",
+      "model": "gemini3.1pro",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "source_stale": 25,
+      "continuity": 20,
+      "routing": 20,
+      "calibration_runtime": 15,
+      "citations_denominator": 10,
+      "compactness": 10,
+      "elapsed_proxy_seconds": 150.84,
+      "output_bytes": 766,
+      "changed_paths": [
+        "candidate/owner-recovery-wave-roadmap-decision.md"
+      ]
+    }
+  ]
+}

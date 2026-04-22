@@ -1,0 +1,22 @@
+id: N26
+surface_id: E16
+pack_id: E16
+role_class: owner
+artifact_type: owner recovery wave roadmap reconciliation packet plus scored rubric
+modality_family: owner orchestration, recovery, wave roadmap reconciliation
+allowed_change_surface:
+  - candidate/owner-recovery-wave-roadmap-decision.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/archive/**
+  - candidate/stale-results/**
+score_profile: "owner, recovery, wave-roadmap, calibration, denominator-discipline, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - owner-orchestration
+  - scored-rubric
+  - stale-source-recovery
+  - repeat-confirmation

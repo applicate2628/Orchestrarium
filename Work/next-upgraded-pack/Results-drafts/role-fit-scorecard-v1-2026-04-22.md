@@ -21,7 +21,7 @@ lane. It is not a single global leaderboard. It separates:
 | `v2-core12-tie-hardened-results-2026-04-20.md` | hardened `X1` / `X3` / `X5` read for advisory, design, generic review, and security review |
 | `v2-extra-lane-n08-n10-results-2026-04-20.md` | `E1 worker.long-autonomous` extra-lane read |
 | `v2-top-pair-rubric-e3-results-2026-04-20.md` | narrow rubric read over `N11..N13`; `X1 60 / 60`, `X3 59 / 60` |
-| `x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted hardening record for `N06`, wave 2, `S06`, `S22`, `N14`, `N15`, `N16`, `N17`, `N18`, `N19`, `N20`, `N21`, `N22`, `N23`, `N24`, and `N25` |
+| `x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted hardening record for `N06`, wave 2, `S06`, `S22`, `N14`, `N15`, `N16`, `N17`, `N18`, `N19`, `N20`, `N21`, `N22`, `N23`, `N24`, `N25`, and `N26` |
 | `n16-long-horizon-rubric-2026-04-22.json` | `E6` long-horizon integration rubric; `X3 95 / 100`, `X1 89 / 100` |
 | `n17-owner-routing-rubric-2026-04-22.json` | `E7` owner/orchestration routing rubric; `X1`, `X2`, `X3`, and `X6` all `100 / 100`; `X5` runtime `NOT-RUN` after failed smoke |
 | `n18-scientist-constraints-rubric-2026-04-22.json` | `E8` scientist/constraints rubric; `X1`, `X2`, and `X3` all `100 / 100`; `X6` route-fails with partial `60 / 100`; `X5` semantic run times out |
@@ -32,6 +32,7 @@ lane. It is not a single global leaderboard. It separates:
 | `n23-owner-recovery-rubric-2026-04-22.json` | `E13` owner recovery rubric; `X3 100 / 100`, `X1 90 / 100`, `X2 70 / 100 FAIL`, `X6 ROUTE-FAIL` |
 | `n24-toolchain-repeat-rubric-2026-04-22.json` | `E14` systems/toolchain repeat; `X3 95 / 100`, `X1 86 / 100`; `X2`, `X5`, and `X6` scoreable `FAIL` |
 | `n25-ui-dirty-repeat-rubric-2026-04-22.json` | `E15` UI dirty-state repeat; `X5 98 / 100`, `X3 97 / 100`, `X1 86 / 100`; `X2 FAIL`, `X6 ROUTE-FAIL` |
+| `n26-owner-wave-rubric-2026-04-22.json` | `E16` owner recovery repeat; `X3 100 / 100`, `X5 100 / 100`, `X1 92 / 100`; `X2` and `X6` scoreable `FAIL` |
 
 ## Decision Labels
 
@@ -79,21 +80,22 @@ lane. It is not a single global leaderboard. It separates:
 | `E13 owner recovery` | `N23` scored run roots | binary still ties, but scored owner recovery favors `X3` by `10` points; `X2` scoreably fails bundle shape; `X6` route-fails |
 | `E14 systems/toolchain repeat` | `N24` scored run roots | binary still ties, but repeat confirms `X3 95 / 100` versus `X1 86 / 100`; `X2`, `X5`, and `X6` are scoreable lower-model verifier failures |
 | `E15 UI dirty-state repeat` | `N25` scored run roots | binary correctness ties `X1`/`X3` but repeat confirms `X3` over `X1`; `X5` also passes and narrowly leads the N25 rubric; `X2` fails scoreably and `X6` route-fails |
+| `E16 owner recovery repeat` | `N26` scored run roots | binary correctness ties `X1`/`X3` again, but repeat confirms `X3` over `X1`; `X5` also passes and ties `X3`, while `X2` and `X6` fail scoreably |
 
 ## Scorer Normalization Note
 
 | Rule | Current use |
 |---|---|
 | within-lane comparison | raw rubric scores are usable for `X1` versus `X3` on the same scenario |
-| cross-lane ranking | do not compare `N16`, `N19`, `N20`, `N21`, `N22`, `N23`, `N24`, and `N25` as one global `0..100` leaderboard without splitting semantic and efficiency points |
+| cross-lane ranking | do not compare `N16`, `N19`, `N20`, `N21`, `N22`, `N23`, `N24`, `N25`, and `N26` as one global `0..100` leaderboard without splitting semantic and efficiency points |
 | promotion threshold | promote a row to hard policy only after a semantic edge or an independent same-lane repeat; a one-run output/cost edge stays `provisional-primary` |
-| diagnostic labels | current `X3` edges on implementation, owner recovery, and visual raster are useful routing preferences; systems/toolchain and UI now have independent same-lane repeat evidence |
+| diagnostic labels | current `X3` edges on implementation, owner recovery, and visual raster are useful routing preferences; systems/toolchain, UI, and owner recovery now have independent same-lane repeat evidence |
 
 ## Role-First Routing Read
 
 | Roles | Lane | Primary | Secondary | Confidence | Why |
 |---|---|---|---|---|---|
-| `$product-manager`, `$lead` | owner, excluded from semantic routing lanes | `X3 provisional-primary` for compact owner recovery/routing packets | `X1` for verbose trace-heavy recovery; avoid `X2/X6` as primary | medium for bounded recovery packets | N23 keeps binary PASS/PASS but scores `X3 100` vs `X1 90`; scorer-normalization audit says repeat before hard owner-routing policy |
+| `$product-manager`, `$lead` | owner, excluded from semantic routing lanes | `X3 primary` for compact owner recovery/routing packets versus X1 | `X1` for verbose trace-heavy recovery; `X5` is an owner-recovery contender after N26 but needs another owner-family pass before promotion | medium-high for X3 over X1; medium for X5 | N23 and N26 both keep binary PASS/PASS for X1/X3 but favor X3 by rubric; N26 also shows route-healthy X5 can pass and tie X3 |
 | `$consultant`, `$knowledge-archivist`, `$analyst` | `advisory.repo-understanding` | `X1` / `X3 near-tie` | `X5` | medium | hardened advisory/repo evidence ties top pair and keeps X5 viable |
 | `$product-analyst`, `$architect`, `$planner` | `advisory.design-adr` | `X1` when trace/rubric matters | `X3` when compactness matters | medium | E3 slightly favors X1 on source/denominator discipline, but binary gates tie |
 | `$ux-designer` | `design.ui-ux-structure` | `X1` / `X3 near-tie` | `X5` | medium | hardened UI/UX structure ties top pair; no proven style-quality separator |
@@ -125,7 +127,7 @@ lane. It is not a single global leaderboard. It separates:
 | systems/toolchain ownership patch with path/cache/lock/fingerprint semantics | `X3 primary`, `X1 secondary`; avoid `X2/X5/X6` as primary |
 | UI state/render/keyboard/form interaction patch | `X3 primary`, `X1 secondary`; consider `X5` when Gemini Pro route is healthy and another UI-family pass is not required |
 | trace-heavy design memo, source-bound review, denominator/status reporting | `X1 slight primary`, `X3 secondary`; confidence is diagnostic-only |
-| owner recovery under stale-source and interruption traps | `X3 provisional-primary`, `X1 secondary`; avoid `X2/X6` as primary |
+| owner recovery under stale-source and interruption traps | `X3 primary`, `X1 secondary`; `X5` contender after N26; avoid `X2/X6` as primary |
 | scientist/constraint decision memo with exact gates and residual-risk owners | `X1` / `X3 near-tie`; choose `X1` for trace-heavy numerical evidence, `X3` for compact exact output |
 | hardened review/security correctness | `X1` / `X3 near-tie`; avoid `X5` as primary until it clears hardened review rows |
 | cheap lower-bound calibration | `X2` first, `X6` second; never promote from calibration without lane-specific evidence |
@@ -138,9 +140,9 @@ below is a compact routing view of the same queue.
 
 | Gap | Best next pilot |
 |---|---|
-| owner/orchestration scored split needs confirmation only if becoming hard policy | repeat N23-style stale-source recovery once before changing owner-routing policy globally |
+| owner/orchestration scored split needs confirmation only if becoming hard policy | complete for X3 versus X1: `N23` and `N26` both favor `X3`; `X5` needs another owner-family pass before promotion over X3 |
 | scientist/constraint lane still lacks a binary top-pair split | treat `N18` and `N22` as co-primary evidence; normalize runtime/cost if this lane becomes hard policy |
 | systems/toolchain lane repeat evidence | complete: `N19` and `N24` both favor `X3 95 / 100` over `X1 86 / 100`; next repeat is not needed unless policy asks for another subdomain |
 | UI implementation repeat evidence | complete for X3 versus X1: `N20` and `N25` both favor `X3`; `X5` needs one more UI-family pass before promotion over X3 |
 | visual provider heuristic is not benchmark-proven | N21 proved top-pair raster correctness but both Gemini semantic rows timed out; repeat only after Gemini semantic route health is fixed |
-| owner/orchestration compactness needs repeat evidence | repeat the N17-style compactness read on a longer recovery packet before promoting it from style signal to routing policy |
+| owner/orchestration compactness needs repeat evidence | complete for X3 versus X1 on recovery packets; repeat only if deciding between X3 and X5 or expanding owner work beyond recovery packets |

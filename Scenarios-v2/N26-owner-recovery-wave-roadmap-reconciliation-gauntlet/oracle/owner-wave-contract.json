@@ -1,0 +1,183 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N26",
+    "surface_id": "E16",
+    "pack_id": "E16",
+    "role_class": "owner",
+    "artifact_type": "owner recovery wave roadmap reconciliation packet plus scored rubric",
+    "modality_family": "owner orchestration, recovery, wave roadmap reconciliation",
+    "allowed_change_surface": [
+      "candidate/owner-recovery-wave-roadmap-decision.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/archive/**",
+      "candidate/stale-results/**"
+    ],
+    "score_profile": "owner, recovery, wave-roadmap, calibration, denominator-discipline, top-pair-role-fit",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "owner-orchestration",
+      "scored-rubric",
+      "stale-source-recovery",
+      "repeat-confirmation"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/source-excerpts.md",
+    "inputs/stale-sources.md",
+    "inputs/interruption-log.md",
+    "inputs/policy-rules.md",
+    "candidate/README.md",
+    "candidate/owner-recovery-wave-roadmap-decision.md",
+    "candidate/archive/README.md",
+    "candidate/stale-results/old-winner-table.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/owner-wave-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_owner_wave_reconciliation.py",
+    "verifiers/check_scope.py"
+  ],
+  "required_sections": [
+    "## Current Source Ledger",
+    "## Stale Source Rejection Ledger",
+    "## Lane State Matrix",
+    "## Denominator Discipline",
+    "## Interruption Continuity Ledger",
+    "## Owner Gate Order",
+    "## Calibration And Runtime Policy",
+    "## Spawn And Stale-File Policy",
+    "## Resume Point",
+    "## Decision JSON"
+  ],
+  "required_exact_phrases": [
+    "Current source of truth: Work/next-upgraded-pack/Results-drafts/role-fit-scorecard-v1-2026-04-22.md",
+    "Systems/toolchain: X3 primary, X1 secondary",
+    "UI implementation: X3 primary versus X1; X5 contender only",
+    "Owner recovery: X3 provisional-primary pending N26 repeat",
+    "Review/security: X1 and X3 near-tie",
+    "N16..N25 are diagnostic overlays, not a merged old full-v2 denominator",
+    "Next owner now: $lead",
+    "QA gate only after N26 bundle, verifier, scorer, and reference pass validate",
+    "Architecture-reviewer gate only after routing-policy surface changes",
+    "X1 and X3 run first",
+    "X2 and X6 calibrate only when lane policy may change",
+    "X5 requires same-session smoke that writes worker-output.txt before semantic run",
+    "Runtime failures stay NOT-RUN, REQUEUE, RUNTIME-FAIL, or ROUTE-FAIL, not model FAIL",
+    "Read-only explorers may propose disjoint designs; main owner keeps roadmap and live result surfaces",
+    "No stale parallel result files",
+    "Resume from Work/next-upgraded-pack/Planning/next-phase/hardening-wave-roadmap-2026-04-22.md",
+    "Next scenario: N26-owner-recovery-wave-roadmap-reconciliation-gauntlet"
+  ],
+  "required_citations": [
+    "Work/next-upgraded-pack/Results-drafts/role-fit-scorecard-v1-2026-04-22.md:57",
+    "Work/next-upgraded-pack/Results-drafts/role-fit-scorecard-v1-2026-04-22.md:58",
+    "Work/next-upgraded-pack/Results-drafts/role-fit-scorecard-v1-2026-04-22.md:79",
+    "Work/next-upgraded-pack/Results-drafts/role-fit-scorecard-v1-2026-04-22.md:96",
+    "Work/next-upgraded-pack/Results-drafts/role-fit-scorecard-v1-2026-04-22.md:130",
+    "Work/next-upgraded-pack/Planning/next-phase/hardening-wave-roadmap-2026-04-22.md:62",
+    "Work/next-upgraded-pack/Planning/next-phase/hardening-wave-roadmap-2026-04-22.md:78",
+    "Work/next-upgraded-pack/Planning/next-phase/hardening-wave-roadmap-2026-04-22.md:116",
+    "Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md:12"
+  ],
+  "required_table_headers": [
+    "| Source | Current use | Citation |",
+    "| Stale source | Rejection reason | Boundary |",
+    "| Lane | Current policy | Boundary |",
+    "| Interruption | Classification | Continuity decision | Visible return cue |",
+    "| Request | Row policy | Runtime guard |",
+    "| Field | Value |"
+  ],
+  "expected_interruption_ids": [
+    "I1",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+  ],
+  "expected_stale_ids": [
+    "ST1",
+    "ST2",
+    "ST3",
+    "ST4",
+    "ST5",
+    "ST6",
+    "ST7",
+    "ST8"
+  ],
+  "expected_lane_ids": [
+    "systems/toolchain",
+    "UI implementation",
+    "owner recovery",
+    "review/security"
+  ],
+  "decision_json_required_keys": [
+    "primary_task",
+    "current_owner_policy",
+    "next_scenario",
+    "run_order",
+    "calibration_policy",
+    "gate_order",
+    "runtime_failure_policy",
+    "resume_from"
+  ],
+  "decision_json_expected": {
+    "next_scenario": "N26-owner-recovery-wave-roadmap-reconciliation-gauntlet",
+    "current_owner_policy": "X3 provisional-primary pending N26 repeat"
+  },
+  "disallowed_markers": [
+    "X3 is the global winner",
+    "X1 is the global winner",
+    "N16 proves the global winner",
+    "promote N16 into routing policy",
+    "N23 is hard owner policy",
+    "X5 is the global UI default",
+    "Run X2, X5, and X6 on every scenario",
+    "$product-manager owns the next step",
+    "Send the output to QA now",
+    "runtime failures are model failures",
+    "write a new results copy"
+  ],
+  "expected_start_state_failures": [
+    "contains-disallowed-markers",
+    "missing-citations",
+    "missing-decision-json",
+    "missing-interruption-classification",
+    "missing-lane-state",
+    "missing-required-phrases",
+    "missing-required-sections",
+    "missing-required-tables",
+    "missing-stale-classification"
+  ]
+}

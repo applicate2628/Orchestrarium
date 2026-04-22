@@ -237,6 +237,15 @@ failures as `PASS`.
 | `5` | `X6 / gemini3.1flash-lite-preview` | runtime `ROUTE-FAIL`; Gemini missing-tool loop / `AbortError`; partial patch not scoreable |
 | `6` | conclusion | `binary tie remains` for `X1`/`X3`, but N25 repeats the N20 UI split: `X3` beats `X1`; `X5` is a strong UI contender after a healthy semantic pass |
 
+| `#` | W6 / N26 owner recovery repeat note | Current state |
+|---|---|---|
+| `1` | `X3 / opus 4.7max` | `PASS`; owner wave verifier `PASS`; scope guard `PASS`; rubric `100 / 100`; elapsed proxy `274.897s`; output-size cost proxy `2488` bytes |
+| `2` | `X5 / gemini3.1pro` | `PASS` after direct smoke `X5_SMOKE_OK`; owner wave verifier `PASS`; scope guard `PASS`; rubric `100 / 100`; elapsed proxy `150.840s`; output-size cost proxy `766` bytes |
+| `3` | `X1 / gpt-5.4` | `PASS`; owner wave verifier `PASS`; scope guard `PASS`; rubric `92 / 100`; elapsed proxy `137.357s`; output-size cost proxy `119280` bytes |
+| `4` | `X2 / gpt-spark` | scoreable `FAIL`; wrapper `0`, verifier `FAIL`, scope guard `PASS`; stale markers/lane-state misses; rubric `70 / 100` |
+| `5` | `X6 / gemini3.1flash-lite-preview` | scoreable `FAIL`; wrapper `0`, verifier `FAIL`, scope guard `PASS`; incomplete owner packet despite small output; rubric `50 / 100` |
+| `6` | conclusion | `binary tie remains` for `X1`/`X3`, but N26 repeats N23: `X3` beats `X1`; `X5` is a serious owner contender after a healthy semantic pass |
+
 | `#` | Hardened N06 tuple-exact note | Current state |
 |---|---|---|
 | `1` | `X1 / gpt-5.4` | `PASS` on hardened `N06`; 3 of 3 required tuples match; no forbidden-trap rows; `wrapperExitCode=0` |
@@ -286,6 +295,7 @@ failures as `PASS`.
 | `27` | `N21` was added on `2026-04-22` as W1/E11 visual-raster provider-fit task; it is not merged into the old full-v2 denominator; `X1`, `X2`, and `X3` pass; `X3` reads `100 / 100`, `X1` reads `89 / 100`, `X2` reads `85 / 100`; `X5` and `X6` are runtime no-summary timeouts after launch | `N21 visual raster` |
 | `28` | `N24` was added on `2026-04-22` as W4/E14 systems-toolchain repeat; it is not merged into the old full-v2 denominator; `X1` and `X3` pass; `X3` reads `95 / 100`, `X1` reads `86 / 100`; `X2`, `X5`, and `X6` are scoreable verifier failures | `N24 systems repeat` |
 | `29` | `N25` was added on `2026-04-22` as W4/E15 UI dirty-state repeat; it is not merged into the old full-v2 denominator; `X1`, `X3`, and `X5` pass; `X5` reads `98 / 100`, `X3` reads `97 / 100`, `X1` reads `86 / 100`; `X2` scoreably fails and `X6` route-fails | `N25 UI dirty state` |
+| `30` | `N26` was added on `2026-04-22` as W6/E16 owner recovery repeat; it is not merged into the old full-v2 denominator; `X1`, `X3`, and `X5` pass; `X3` and `X5` read `100 / 100`, `X1` reads `92 / 100`; `X2` and `X6` scoreably fail | `N26 owner recovery repeat` |
 
 ## Source
 
@@ -319,3 +329,4 @@ failures as `PASS`.
 | `../Evidence/n23-owner-recovery-rubric-2026-04-22.json` | machine-readable N23 owner-recovery scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs |
 | `../Evidence/n24-toolchain-repeat-rubric-2026-04-22.json` | machine-readable N24 systems/toolchain repeat scored-rubric output for admitted `X1`, `X2`, `X3`, `X5`, and `X6` runs |
 | `../Evidence/n25-ui-dirty-repeat-rubric-2026-04-22.json` | machine-readable N25 UI dirty-state repeat scored-rubric output for admitted `X1`, `X2`, `X3`, `X5`, and `X6` runs |
+| `../Evidence/n26-owner-wave-rubric-2026-04-22.json` | machine-readable N26 owner recovery repeat scored-rubric output for admitted `X1`, `X2`, `X3`, `X5`, and `X6` runs |
