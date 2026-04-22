@@ -1188,3 +1188,56 @@ tests, and runtime all tie, while output-size cost separates strongly. `X2` pass
 calibration row but does not beat the top pair. The intended Gemini visual-provider preference is
 not benchmark-proven by N21 because both Gemini semantic runs timed out after a successful direct
 smoke.
+
+## 2026-04-22 Follow-Up: W4 / N24 Systems Toolchain Repeat
+
+`N24-systems-toolchain-staging-repeat` was added as diagnostic `E14` to repeat the `N19`
+systems/toolchain signal on a different surface: artifact staging, portable fingerprints,
+dependency ordering, cache restore trace, and lease lifecycle. This is a same-lane confirmation
+scenario, not a new global denominator cell.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/toolchain-staging-contract.json` | `PASS` |
+| `python Scenarios-v2/N24-systems-toolchain-staging-repeat/verifiers/check_stagegate_systems.py --bundle-shape-only` | `N24 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N24-systems-toolchain-staging-repeat/verifiers/check_stagegate_systems.py --expect-start-state` | `N24 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n24-toolchain-reference/` | `N24 verifier PASS (completed run)` |
+| scratch reference scope guard | `N24 scope PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_12-31-40-X1-wave-w4-n24-toolchain-repeat-2026-04-22/N24/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_12-31-39-X3-wave-w4-n24-toolchain-repeat-2026-04-22/N24/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-22_12-38-33-X2-wave-w4-n24-toolchain-repeat-2026-04-22/N24/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X5 / gemini3.1pro` | `.scratch/v2-cohort-runs/2026-04-22_12-41-43-X5-wave-w4-n24-toolchain-repeat-2026-04-22/N24/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-22_12-38-33-X6-wave-w4-n24-toolchain-repeat-2026-04-22/N24/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+
+`X5` was admitted only after a same-session direct smoke wrote
+`.scratch/gemini-smoke-n24-2026-04-22/x5-output.txt` with `X5_SMOKE_OK`. Its semantic N24 run then
+produced a scoreable verifier failure, not a runtime caveat. `X2` also failed scoreably by creating
+a forbidden top-level `.reports/` directory inside the disposable bundle, which tripped bundle shape.
+`X6` produced a small partial patch but missed multiple functional invariants.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Correctness | Patch quality | Time | Cost | Elapsed proxy | Output bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `95 / 100` | `40` | `25` | `15` | `15` | `233.975s` | `2705` | tests unchanged; `84` added, `53` deleted |
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `86 / 100` | `40` | `30` | `12` | `4` | `371.585s` | `363208` | tests changed; `170` added, `50` deleted |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `54 / 100` | `10` | `25` | `15` | `4` | `79.149s` | `239859` | forbidden `.reports` bundle-shape drift |
+| `X5 / gemini3.1pro` | `FAIL` | `scoreable` | `65 / 100` | `10` | `25` | `15` | `15` | `133.314s` | `1577` | missed cache restore reason and summary source trace |
+| `X6 / gemini3.1flash-lite-preview` | `FAIL` | `scoreable` | `65 / 100` | `10` | `25` | `15` | `15` | `76.754s` | `1286` | missed env fallback, dependency order, fingerprint portability, conflicts, and trace |
+
+### N24 Verdict
+
+`binary tie remains` for `X1` and `X3`, but W4/N24 confirms the same systems/toolchain shape seen
+in N19: the top pair both solve the functional oracle, while `X3` is materially more compact and
+lower-cost (`95 / 100` versus `86 / 100`). Because this is an independent same-lane repeat, the
+systems/toolchain recommendation can move from `X3 provisional-primary` to `X3 primary` for compact
+path/cache/fingerprint/lease patches, with `X1` as the test-rich secondary. `X2`, `X5`, and `X6`
+are not primary candidates for this lane after scoreable verifier failures.

@@ -32,4 +32,5 @@ Only admitted later packages should become new dated snapshots under `Archive/`.
 | `../Evidence/n21-visual-raster-rubric-2026-04-22.json` | machine-readable E11 visual-raster calibration read for `X1`, `X2`, `X3`, `X5`, and `X6` launch attempts |
 | `../Evidence/n22-numerical-stability-rubric-2026-04-22.json` | machine-readable E12 numerical-stability calibration read for `X1`, `X2`, `X3`, and `X6` |
 | `../Evidence/n23-owner-recovery-rubric-2026-04-22.json` | machine-readable E13 owner-recovery calibration read for `X1`, `X2`, `X3`, and `X6` |
+| `../Evidence/n24-toolchain-repeat-rubric-2026-04-22.json` | machine-readable E14 systems/toolchain repeat read for `X1`, `X2`, `X3`, `X5`, and `X6`; confirms systems/toolchain `X3 primary` |
 | `short-results-current-2026-04-18.md` | compact operator-facing short table for the current six-row live state |

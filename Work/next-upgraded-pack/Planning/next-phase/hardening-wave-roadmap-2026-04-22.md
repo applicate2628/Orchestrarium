@@ -37,7 +37,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W1` visual provider fit | `DONE` | Is Gemini actually better for visual/graphics work, or only policy-preferred? | `E11 / N21` visual asset or graphics-state rubric | `$graphics-engineer` + `$ui-test-engineer` style verifier | visual explorer proposal accepted and materialized | `X1`, `X2`, and `X3` scoreable PASS; `X3 100`, `X1 89`, `X2 85`; Gemini rows runtime no-summary after launch |
 | `W2` hard numerical constraints | `DONE` | Can X1/X3 separate on algorithmic/numerical reasoning beyond N18? | `E12 / N22` numerical stability constraint gauntlet | `$algorithm-scientist` or `$computational-scientist` | numerical explorer proposal accepted and materialized | `X1` and `X3` both pass; `X2` scoreably fails; `X6` route-fails |
 | `W3` owner recovery under stale-source traps | `DONE` | Does a longer recovery/routing packet split owner/orchestration style or correctness? | `E13 / N23` owner recovery packet | `$lead` with `$knowledge-archivist` constraints | owner explorer proposal accepted and materialized | `X1` and `X3` both pass; scored read favors `X3 100` over `X1 90` |
-| `W4` repeat-confirmation | `ADMITTED` | Are N19/N20/N23/N21 X3 edges stable enough for routing policy? | `N24` N19-style systems/toolchain repeat first; then `N25` UI repeat if needed | matching implementation owner | repeat-confirmation spawn completed candidate table | run only if scorecard change would become policy, not just diagnostic |
+| `W4` repeat-confirmation | `DONE` for `N24`; `N25` queued conditionally | Are N19/N20/N23/N21 X3 edges stable enough for routing policy? | `N24` systems/toolchain repeat complete; `N25` UI repeat next only if UI routing policy is being hardened | matching implementation owner | repeat-confirmation spawn completed candidate table; N25 sidecar proposal received | `N24` confirms systems/toolchain `X3 primary`; run `N25` only for UI policy confirmation |
 | `W5` scoring normalization | `DONE` | Should rubric scores be normalized across N16/N19/N20/N21/N22/N23 before stronger claims? | scorer-only analysis, no model run | `$qa-engineer` / `$analyst` | scorer-normalization spawn completed memo | compactness-only single-run winners downgraded to `provisional-primary` |
 
 ## Active Spawn Board
@@ -57,17 +57,19 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W1 / E11` | `N21-visual-provider-fit-raster-gauntlet` | deterministic raster oracle for transparent gaps, focus layering, legend order, annotation pixels, and PPM metadata | `DONE`; binary correctness tied X1/X3, X3 won rubric by compactness/cost, Gemini preference not proven because X5/X6 timed out after launch |
 | `W2 / E12` | `N22-numerical-stability-constraint-gauntlet` | exact numerical witnesses for p95, variance, shard merge, memory bounds, and stale benchmark rejection | `DONE`; binary tie remained (`X1 PASS`, `X3 PASS`), scored read `X1 100`, `X3 99`, `X2 FAIL`, `X6 ROUTE-FAIL` |
 | `W3 / E13` | `N23-owner-recovery-stale-source-routing-gauntlet` | recovery/source-of-truth discrimination under stale leaderboard, diagnostic-promotion, owner-route, and calibration traps | `DONE`; useful owner-lane scored split: `X3 100`, `X1 90`, `X2 FAIL`, `X6 ROUTE-FAIL` |
-| `W4` | `N24-n19r2-systems-toolchain-repeat` | repeat N19-style path/cache/lock semantics before making systems/toolchain `X3` a hard primary | `ADMITTED`; top pair plus `X2/X6`, `X5` only after smoke-output |
+| `W4 / E14` | `N24-systems-toolchain-staging-repeat` | repeat N19-style path/cache/fingerprint/lease semantics before making systems/toolchain `X3` a hard primary | `DONE`; `X1 PASS 86`, `X3 PASS 95`; `X2`, `X5`, and `X6` scoreable `FAIL`; `X5` admitted after same-session smoke-output |
+| `W4 / next` | `N25-ui-dirty-state-navigation-guard-gauntlet` | repeat N20-style UI implementation on dirty-state, navigation guards, validation, failed-save rollback, focus, and status rendering | `QUEUED`; run only if UI lane is the next policy target |
 | `W5` | scorer-normalization memo | compare semantic versus efficiency points before cross-lane claims | `DONE`; current scorecard marks compactness/output edges as `provisional-primary` |
 
 ## Current Admission Decision
 
-`W4 / N24` is the next admitted wave.
+`W4 / N24` is complete and confirms the systems/toolchain read.
 
-Reason: `W1 / N21` proved top-pair visual raster correctness and produced an `X3` compactness edge,
-but W5 normalization says compactness-only single-run winners must stay `provisional-primary`.
-The strongest policy-relevant repeat candidate is systems/toolchain (`N19` edge), so W4 starts with
-an N19-style repeat. `X5` stays behind a same-session smoke-output gate.
+Reason: `N19` and `N24` now independently read `X3 95 / 100` versus `X1 86 / 100`, with both top
+pair rows passing the binary verifier and calibration rows separating lower. This is enough to move
+systems/toolchain from `X3 provisional-primary` to `X3 primary` for compact path/cache/fingerprint
+and lease-lifecycle patches. The next conditional repeat is `N25` for UI implementation only if
+the UI lane is the next policy target.
 
 ## Execution Order
 
@@ -91,15 +93,16 @@ an N19-style repeat. `X5` stays behind a same-session smoke-output gate.
    - `X5` only after a direct smoke writes output
 6. Score and update live surfaces in place.
 7. Re-rank the wave queue; continue while results are useful.
-8. Materialize `W4 / N24` as a systems/toolchain repeat before hardening `X3` from provisional to hard primary.
+8. Materialize `W4 / N24` as a systems/toolchain repeat before hardening `X3` from provisional to hard primary. `DONE` on 2026-04-22.
+9. If continuing same-lane confirmation, materialize `N25` as a UI dirty-state/navigation guard repeat; skip it if systems/toolchain was the only policy target.
 
 ## Current Routing Impact
 
 | Lane | Current Read | Next Need |
 |---|---|---|
 | long-horizon integration | `X3` diagnostic edge from `N16` | repeat only if becoming hard policy |
-| systems/toolchain | `X3` provisional-primary signal from `N19`; `X6` scoreable lower | `W4 / N24` admitted for confirmation |
-| UI implementation | `X3` provisional-primary signal from `N20`; `X2/X6` lower | repeat after N24 only if policy still needs it |
+| systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `X2/X5/X6` lower on N24 | no immediate repeat needed unless a new systems subdomain becomes policy-critical |
+| UI implementation | `X3` provisional-primary signal from `N20`; `X2/X6` lower | `N25` queued if UI policy needs repeat confirmation |
 | scientist/constraints | `X1/X3` correctness tie on `N18`; `N22` also ties by binary, with `X1 100`, `X3 99`, and `X3` far more compact | no more immediate numeric hardening; normalize runtime/cost only if policy depends on it |
 | owner/orchestration | `N23` keeps binary tie but gives `X3` a `10` point scored edge over `X1`; W5 downgrades it to provisional before repeat | repeat only if becoming hard owner-routing policy |
 | visual/graphics | geometry tied on `S22`; `N21` ties X1/X3 on visual correctness and favors X3 on compactness; Gemini preference not proven | repeat only after Gemini semantic route health is fixed |
@@ -112,6 +115,8 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume by materializing `W4 / N24` as a systems/toolchain repeat-confirmation
-scenario. Start from N19's path/cache/lock semantics, keep the verifier functional, run `X1` and
-`X3` first, then `X2`/`X6`; run `X5` only after a same-session smoke writes output.
+If interrupted now, resume after the `W4 / N24` closeout commit. Systems/toolchain is confirmed:
+`X3` is primary for compact path/cache/fingerprint/lease patches and `X1` is secondary when
+test-rich edits matter. The next conditional work item is `N25` UI dirty-state/navigation guard
+repeat, using the sidecar proposal recorded in the N24 session log and only if UI lane hardening is
+the next policy target.

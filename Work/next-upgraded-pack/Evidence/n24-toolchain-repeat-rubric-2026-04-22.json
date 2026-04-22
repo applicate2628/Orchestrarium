@@ -1,0 +1,159 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_12-31-39-X3-wave-w4-n24-toolchain-repeat-2026-04-22\\N24",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 95,
+      "correctness": 40,
+      "patch_quality": 25,
+      "time_points": 15,
+      "cost_points": 15,
+      "elapsed_proxy_seconds": 233.975,
+      "cost_proxy_output_bytes": 2705,
+      "changed_paths": [
+        "candidate/workspace/src/stagegate/config.py",
+        "candidate/workspace/src/stagegate/executor.py",
+        "candidate/workspace/src/stagegate/fingerprint.py",
+        "candidate/workspace/src/stagegate/planner.py",
+        "candidate/workspace/src/stagegate/report.py"
+      ],
+      "diff": {
+        "added": 84,
+        "deleted": 53
+      },
+      "notes": [
+        "tests unchanged",
+        "changed=5 source=5 add=84 del=53"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_12-31-40-X1-wave-w4-n24-toolchain-repeat-2026-04-22\\N24",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 86,
+      "correctness": 40,
+      "patch_quality": 30,
+      "time_points": 12,
+      "cost_points": 4,
+      "elapsed_proxy_seconds": 371.585,
+      "cost_proxy_output_bytes": 363208,
+      "changed_paths": [
+        "candidate/workspace/src/stagegate/config.py",
+        "candidate/workspace/src/stagegate/executor.py",
+        "candidate/workspace/src/stagegate/fingerprint.py",
+        "candidate/workspace/src/stagegate/planner.py",
+        "candidate/workspace/src/stagegate/report.py",
+        "candidate/workspace/tests/test_stagegate.py"
+      ],
+      "diff": {
+        "added": 170,
+        "deleted": 50
+      },
+      "notes": [
+        "tests changed",
+        "changed=6 source=5 add=170 del=50"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_12-38-33-X2-wave-w4-n24-toolchain-repeat-2026-04-22\\N24",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 54,
+      "correctness": 10,
+      "patch_quality": 25,
+      "time_points": 15,
+      "cost_points": 4,
+      "elapsed_proxy_seconds": 79.149,
+      "cost_proxy_output_bytes": 239859,
+      "changed_paths": [
+        "candidate/workspace/src/stagegate/config.py",
+        "candidate/workspace/src/stagegate/executor.py",
+        "candidate/workspace/src/stagegate/fingerprint.py",
+        "candidate/workspace/src/stagegate/paths.py",
+        "candidate/workspace/src/stagegate/planner.py",
+        "candidate/workspace/src/stagegate/report.py"
+      ],
+      "diff": {
+        "added": 82,
+        "deleted": 47
+      },
+      "notes": [
+        "tests unchanged",
+        "changed=6 source=6 add=82 del=47"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_12-38-33-X6-wave-w4-n24-toolchain-repeat-2026-04-22\\N24",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 65,
+      "correctness": 10,
+      "patch_quality": 25,
+      "time_points": 15,
+      "cost_points": 15,
+      "elapsed_proxy_seconds": 76.754,
+      "cost_proxy_output_bytes": 1286,
+      "changed_paths": [
+        "candidate/workspace/src/stagegate/config.py",
+        "candidate/workspace/src/stagegate/executor.py",
+        "candidate/workspace/src/stagegate/fingerprint.py"
+      ],
+      "diff": {
+        "added": 33,
+        "deleted": 31
+      },
+      "notes": [
+        "tests unchanged",
+        "changed=3 source=3 add=33 del=31"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_12-41-43-X5-wave-w4-n24-toolchain-repeat-2026-04-22\\N24",
+      "row": "X5",
+      "model": "gemini3.1pro",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 65,
+      "correctness": 10,
+      "patch_quality": 25,
+      "time_points": 15,
+      "cost_points": 15,
+      "elapsed_proxy_seconds": 133.314,
+      "cost_proxy_output_bytes": 1577,
+      "changed_paths": [
+        "candidate/workspace/src/stagegate/config.py",
+        "candidate/workspace/src/stagegate/executor.py",
+        "candidate/workspace/src/stagegate/fingerprint.py",
+        "candidate/workspace/src/stagegate/planner.py",
+        "candidate/workspace/src/stagegate/report.py"
+      ],
+      "diff": {
+        "added": 71,
+        "deleted": 45
+      },
+      "notes": [
+        "tests unchanged",
+        "changed=5 source=5 add=71 del=45"
+      ]
+    }
+  ]
+}

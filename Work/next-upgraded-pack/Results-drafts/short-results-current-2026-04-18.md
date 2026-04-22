@@ -219,6 +219,15 @@ failures as `PASS`.
 | `5` | `X6 / gemini3.1flash-lite-preview` | runtime `RUNTIME-FAIL`; semantic N21 run timed out without `summary.json` or `worker-output.txt` |
 | `6` | conclusion | `binary tie remains` for `X1`/`X3`; visual correctness ties, but compactness/cost favors `X3`; Gemini visual preference remains unproven |
 
+| `#` | W4 / N24 systems-toolchain repeat note | Current state |
+|---|---|---|
+| `1` | `X3 / opus 4.7max` | `PASS`; stagegate verifier `PASS`; scope guard `PASS`; rubric `95 / 100`; elapsed proxy `233.975s`; output-size cost proxy `2705` bytes |
+| `2` | `X1 / gpt-5.4` | `PASS`; stagegate verifier `PASS`; scope guard `PASS`; rubric `86 / 100`; elapsed proxy `371.585s`; output-size cost proxy `363208` bytes |
+| `3` | `X2 / gpt-spark` | scoreable `FAIL`; wrapper `0`, verifier `FAIL`, scope guard `PASS`; forbidden top-level `.reports` bundle-shape drift; rubric `54 / 100` |
+| `4` | `X5 / gemini3.1pro` | scoreable `FAIL` after direct smoke `X5_SMOKE_OK`; missed cache-restore reason and summary source trace; rubric `65 / 100` |
+| `5` | `X6 / gemini3.1flash-lite-preview` | scoreable `FAIL`; missed env fallback, dependency order, fingerprint portability, conflicts, and trace; rubric `65 / 100` |
+| `6` | conclusion | `binary tie remains` for `X1`/`X3`, but N24 repeats the N19 systems/toolchain split: `X3 95 / 100` versus `X1 86 / 100`; systems/toolchain can move to `X3 primary`, `X1 secondary` |
+
 | `#` | Hardened N06 tuple-exact note | Current state |
 |---|---|---|
 | `1` | `X1 / gpt-5.4` | `PASS` on hardened `N06`; 3 of 3 required tuples match; no forbidden-trap rows; `wrapperExitCode=0` |
@@ -266,6 +275,7 @@ failures as `PASS`.
 | `25` | `N22` was added on `2026-04-22` as W2/E12 numerical-stability constraint task with exact JSON witnesses; it is not merged into the old full-v2 denominator; `X1` and `X3` pass; `X1` reads `100 / 100`, `X3` reads `99 / 100`; `X2` scoreably fails and `X6` route-fails | `N22 numerical stability` |
 | `26` | `N23` was added on `2026-04-22` as W3/E13 owner-recovery stale-source routing task; it is not merged into the old full-v2 denominator; `X1` and `X3` pass; `X3` reads `100 / 100`, `X1` reads `90 / 100`; `X2` scoreably fails and `X6` route-fails | `N23 owner recovery` |
 | `27` | `N21` was added on `2026-04-22` as W1/E11 visual-raster provider-fit task; it is not merged into the old full-v2 denominator; `X1`, `X2`, and `X3` pass; `X3` reads `100 / 100`, `X1` reads `89 / 100`, `X2` reads `85 / 100`; `X5` and `X6` are runtime no-summary timeouts after launch | `N21 visual raster` |
+| `28` | `N24` was added on `2026-04-22` as W4/E14 systems-toolchain repeat; it is not merged into the old full-v2 denominator; `X1` and `X3` pass; `X3` reads `95 / 100`, `X1` reads `86 / 100`; `X2`, `X5`, and `X6` are scoreable verifier failures | `N24 systems repeat` |
 
 ## Source
 
@@ -294,5 +304,7 @@ failures as `PASS`.
 | `../Evidence/n18-scientist-constraints-rubric-2026-04-22.json` | machine-readable N18 scientist/constraints scored-rubric output for admitted `X1`, `X2`, `X3`, partial-route `X6`, and timeout `X5` runs |
 | `../Evidence/n19-systems-toolchain-rubric-2026-04-22.json` | machine-readable N19 systems/toolchain scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs |
 | `../Evidence/n20-ui-interaction-rubric-2026-04-22.json` | machine-readable N20 UI interaction scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs |
+| `../Evidence/n21-visual-raster-rubric-2026-04-22.json` | machine-readable N21 visual-raster scored-rubric output for admitted `X1`, `X2`, `X3`, `X5`, and `X6` launch attempts |
 | `../Evidence/n22-numerical-stability-rubric-2026-04-22.json` | machine-readable N22 numerical-stability scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs |
 | `../Evidence/n23-owner-recovery-rubric-2026-04-22.json` | machine-readable N23 owner-recovery scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs |
+| `../Evidence/n24-toolchain-repeat-rubric-2026-04-22.json` | machine-readable N24 systems/toolchain repeat scored-rubric output for admitted `X1`, `X2`, `X3`, `X5`, and `X6` runs |
