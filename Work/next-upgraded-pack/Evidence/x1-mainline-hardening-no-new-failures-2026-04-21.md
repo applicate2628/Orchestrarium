@@ -1410,3 +1410,63 @@ compact production integration patches, with `X1` retained when explicit self-ad
 tests or verbose trace are more valuable. `X2` is a useful calibration pass on N27 but is not
 promoted because other implementation repeats still separate it lower. `X5` has no N27 semantic
 evidence due quota-gated smoke failure, and `X6` remains a route-health caveat.
+
+## 2026-04-22 Follow-Up: W8 / N28 Incident-Driven Integration Repair
+
+`N28-incident-driven-integration-repair-gauntlet` was added as diagnostic `E18` to push beyond
+ordinary implementation repeats. It extends the N27 deploygrid runtime with incident-source
+arbitration, stale requirements, review feedback, a required reconciliation note, and the same
+multi-file repair surface. The verifier now checks both runtime behavior and cross-role note
+obligations: source arbitration, stale-source rejection, review-response coverage, and validation
+evidence.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/incident-repair-contract.json` | `PASS` |
+| `python Scenarios-v2/N28-incident-driven-integration-repair-gauntlet/verifiers/check_incident_integration_repair.py --bundle-shape-only` | `N28 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N28-incident-driven-integration-repair-gauntlet/verifiers/check_incident_integration_repair.py --expect-start-state` | `N28 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n28-incident-reference/` | `N28 verifier PASS (completed run)` |
+| scratch reference scope guard | `N28 scope PASS` |
+| sidecar verifier/scorer audit | `PASS`; noted that reconciliation checks are substring-based and should not be treated as hidden semantic proof |
+| `python -m py_compile` for verifier, scope checker, and scorer | `PASS` |
+| `git diff --check` before launch | exit `0` |
+| `mcp-free` after Gemini timeouts | `STATS kill: none`; active parent-owned MCP processes skipped |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-23_00-00-20-X1-wave-w8-n28-incident-repair-2026-04-22/N28/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-23_00-00-20-X3-wave-w8-n28-incident-repair-2026-04-22/N28/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-23_00-16-36-X2-wave-w8-n28-incident-repair-2026-04-22/N28/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-23_00-16-36-X6-wave-w8-n28-incident-repair-2026-04-22/N28/` | `1` | `FAIL` | `PASS` | `ROUTE-FAIL` |
+| `X5 / gemini3.1pro` | smoke only: `.scratch/gemini-smoke-n28-2026-04-22*/x5-smoke-output.txt` | timeout | n/a | n/a | `REQUEUE` |
+
+`X2` is a scoreable fail: `wrapperExitCode=0`, no benchmark files changed, and the verifier failed
+all runtime and reconciliation invariants. `X6` produced a partial patch and note, but
+`wrapperExitCode=1` with Gemini quota/tool-loop/`AbortError` route evidence; classify it as
+`ROUTE-FAIL/runtime-route`, not model-quality `FAIL`. `X5` was not admitted to semantic N28 because
+two same-session smoke attempts timed out without writing `X5_SMOKE_OK`; classify it as
+`REQUEUE/runtime-timeout`.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Correct | Stateful | Recon | Patch | Tests | Time | Cost | Elapsed proxy | Output bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `99 / 100` | `45` | `10` | `20` | `10` | `5` | `4` | `5` | `932.627s` | `3057` | tests changed; note changed; `481` added, `56` deleted |
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `93 / 100` | `45` | `10` | `20` | `10` | `2` | `5` | `1` | `419.507s` | `304834` | tests unchanged; note changed; `278` added, `43` deleted |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `16 / 100` | `0` | `0` | `0` | `6` | `0` | `5` | `5` | `6.256s` | `903` | no candidate edits; failed all runtime and reconciliation invariants |
+| `X6 / gemini3.1flash-lite-preview` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | `0` | `0` | `0` | `0` | `5` | `0` | `0` | `200.996s` | `4070` | Gemini quota/tool-loop/`AbortError`; partial patch failed runtime invariants |
+| `X5 / gemini3.1pro` | `REQUEUE` | `runtime-timeout` | n/a | n/a | n/a | n/a | n/a | n/a | n/a | smoke only | n/a | two direct smoke attempts timed out with no `X5_SMOKE_OK` |
+
+### N28 Verdict
+
+`binary tie remains` for `X1` and `X3`; N28 still does not produce a semantic correctness separator
+between the top pair. The scored read favors `X3` (`99 / 100`) over `X1` (`93 / 100`) because X3
+changed tests and stayed compact while X1 generated a much larger worker output and left tests
+unchanged. This strengthens the routing read that cross-role incident repair / long-horizon
+integration should prefer `X3 primary` for compact production patches, with `X1` retained when
+verbose trace is valued more than output cost. `X2` now separates lower scoreably on the same
+cross-role surface, unlike its N27 pass.

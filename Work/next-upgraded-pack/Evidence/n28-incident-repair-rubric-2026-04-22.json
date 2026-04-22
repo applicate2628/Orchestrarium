@@ -1,0 +1,191 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-23_00-00-20-X1-wave-w8-n28-incident-repair-2026-04-22\\N28",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 93,
+      "correctness": 45,
+      "stateful_recovery": 10,
+      "reconciliation": 20,
+      "patch_quality": 10,
+      "tests_points": 2,
+      "time_points": 5,
+      "cost_points": 1,
+      "elapsed_proxy_seconds": 419.507,
+      "cost_proxy_output_bytes": 304834,
+      "changed_paths": [
+        "candidate/reconciliation-note.md",
+        "candidate/workspace/src/deploygrid/audit.py",
+        "candidate/workspace/src/deploygrid/config.py",
+        "candidate/workspace/src/deploygrid/dedupe.py",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/intake.py",
+        "candidate/workspace/src/deploygrid/ledger.py",
+        "candidate/workspace/src/deploygrid/notifier.py",
+        "candidate/workspace/src/deploygrid/planner.py",
+        "candidate/workspace/src/deploygrid/policy.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/src/deploygrid/rollback.py",
+        "candidate/workspace/src/deploygrid/scheduler.py"
+      ],
+      "diff": {
+        "added": 278,
+        "deleted": 43
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests unchanged",
+        "note changed",
+        "changed=13 source=12 add=278 del=43"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-23_00-16-36-X2-wave-w8-n28-incident-repair-2026-04-22\\N28",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 16,
+      "correctness": 0,
+      "stateful_recovery": 0,
+      "reconciliation": 0,
+      "patch_quality": 6,
+      "tests_points": 0,
+      "time_points": 5,
+      "cost_points": 5,
+      "elapsed_proxy_seconds": 6.256,
+      "cost_proxy_output_bytes": 903,
+      "changed_paths": [],
+      "diff": {
+        "added": 0,
+        "deleted": 0
+      },
+      "failed_invariants": [
+        "active-profile-precedence",
+        "canary-before-prod",
+        "crash-resume-no-replay",
+        "cycle-blocked",
+        "dependency-order",
+        "frozen-scope-deferred",
+        "idempotent-repeat",
+        "report-from-ledger-audit",
+        "request-input-immutability",
+        "review-response-note",
+        "rollback-current-attempt-only",
+        "semantic-dedupe-latest-wins",
+        "source-arbitration-note",
+        "source-trace-preserved",
+        "stale-source-rejected",
+        "validation-evidence-note"
+      ],
+      "notes": [
+        "tests unchanged",
+        "note unchanged",
+        "failed invariants: active-profile-precedence, canary-before-prod, crash-resume-no-replay, cycle-blocked, dependency-order, frozen-scope-deferred, idempotent-repeat, report-from-ledger-audit, request-input-immutability, review-response-note, rollback-current-attempt-only, semantic-dedupe-latest-wins, source-arbitration-note, source-trace-preserved, stale-source-rejected, validation-evidence-note",
+        "changed=0 source=0 add=0 del=0"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-23_00-00-20-X3-wave-w8-n28-incident-repair-2026-04-22\\N28",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 99,
+      "correctness": 45,
+      "stateful_recovery": 10,
+      "reconciliation": 20,
+      "patch_quality": 10,
+      "tests_points": 5,
+      "time_points": 4,
+      "cost_points": 5,
+      "elapsed_proxy_seconds": 932.627,
+      "cost_proxy_output_bytes": 3057,
+      "changed_paths": [
+        "candidate/reconciliation-note.md",
+        "candidate/workspace/src/deploygrid/audit.py",
+        "candidate/workspace/src/deploygrid/config.py",
+        "candidate/workspace/src/deploygrid/dedupe.py",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/intake.py",
+        "candidate/workspace/src/deploygrid/ledger.py",
+        "candidate/workspace/src/deploygrid/notifier.py",
+        "candidate/workspace/src/deploygrid/planner.py",
+        "candidate/workspace/src/deploygrid/policy.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/src/deploygrid/rollback.py",
+        "candidate/workspace/src/deploygrid/scheduler.py",
+        "candidate/workspace/src/deploygrid/store.py",
+        "candidate/workspace/tests/test_deploygrid.py"
+      ],
+      "diff": {
+        "added": 481,
+        "deleted": 56
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests changed",
+        "note changed",
+        "changed=15 source=13 add=481 del=56"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-23_00-16-36-X6-wave-w8-n28-incident-repair-2026-04-22\\N28",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "ROUTE-FAIL",
+      "scoreability": "runtime-route",
+      "wrapper_exit_code": 1,
+      "verification_passed": false,
+      "total": 0,
+      "correctness": 0,
+      "stateful_recovery": 0,
+      "reconciliation": 0,
+      "patch_quality": 0,
+      "tests_points": 5,
+      "time_points": 0,
+      "cost_points": 0,
+      "elapsed_proxy_seconds": 200.996,
+      "cost_proxy_output_bytes": 4070,
+      "changed_paths": [
+        "candidate/reconciliation-note.md",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/tests/test_deploygrid.py"
+      ],
+      "diff": {
+        "added": 44,
+        "deleted": 2
+      },
+      "failed_invariants": [
+        "active-profile-precedence",
+        "canary-before-prod",
+        "crash-resume-no-replay",
+        "cycle-blocked",
+        "dependency-order",
+        "frozen-scope-deferred",
+        "idempotent-repeat",
+        "report-from-ledger-audit",
+        "request-input-immutability",
+        "review-response-note",
+        "rollback-current-attempt-only",
+        "semantic-dedupe-latest-wins",
+        "source-trace-preserved"
+      ],
+      "notes": [
+        "tests changed",
+        "note changed",
+        "failed invariants: active-profile-precedence, canary-before-prod, crash-resume-no-replay, cycle-blocked, dependency-order, frozen-scope-deferred, idempotent-repeat, report-from-ledger-audit, request-input-immutability, review-response-note, rollback-current-attempt-only, semantic-dedupe-latest-wins, source-trace-preserved",
+        "changed=3 source=1 add=44 del=2"
+      ]
+    }
+  ]
+}

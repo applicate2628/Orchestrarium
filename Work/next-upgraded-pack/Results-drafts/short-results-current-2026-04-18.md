@@ -255,6 +255,15 @@ failures as `PASS`.
 | `5` | `X5 / gemini3.1pro` | runtime `REQUEUE`; same-session smoke failed with quota and did not write `X5_SMOKE_OK`; semantic N27 run not launched |
 | `6` | conclusion | `binary tie remains` for `X1`/`X3`, but N27 repeats N16's compact long-horizon split: `X3` beats `X1`; `X2` passes as calibration only |
 
+| `#` | W8 / N28 incident-driven integration repair note | Current state |
+|---|---|---|
+| `1` | `X3 / opus 4.7max` | `PASS`; incident repair verifier `PASS`; scope guard `PASS`; rubric `99 / 100`; elapsed proxy `932.627s`; output-size cost proxy `3057` bytes; tests and reconciliation note changed |
+| `2` | `X1 / gpt-5.4` | `PASS`; incident repair verifier `PASS`; scope guard `PASS`; rubric `93 / 100`; elapsed proxy `419.507s`; output-size cost proxy `304834` bytes; reconciliation note changed, tests unchanged |
+| `3` | `X2 / gpt-spark` | scoreable `FAIL`; wrapper `0`, verifier `FAIL`, scope guard `PASS`; no candidate edits; rubric `16 / 100`; failed runtime and reconciliation invariants |
+| `4` | `X6 / gemini3.1flash-lite-preview` | runtime `ROUTE-FAIL`; wrapper `1` with Gemini quota/tool-loop/`AbortError`; partial patch failed runtime invariants and is not model-quality FAIL |
+| `5` | `X5 / gemini3.1pro` | runtime `REQUEUE`; two same-session direct smoke attempts timed out without writing `X5_SMOKE_OK`; semantic N28 run not launched |
+| `6` | conclusion | `binary tie remains` for `X1`/`X3`, but N28 strengthens the cross-role integration read: `X3 99 / 100` beats `X1 93 / 100`; `X2` separates lower scoreably |
+
 | `#` | Hardened N06 tuple-exact note | Current state |
 |---|---|---|
 | `1` | `X1 / gpt-5.4` | `PASS` on hardened `N06`; 3 of 3 required tuples match; no forbidden-trap rows; `wrapperExitCode=0` |
@@ -306,6 +315,7 @@ failures as `PASS`.
 | `29` | `N25` was added on `2026-04-22` as W4/E15 UI dirty-state repeat; it is not merged into the old full-v2 denominator; `X1`, `X3`, and `X5` pass; `X5` reads `98 / 100`, `X3` reads `97 / 100`, `X1` reads `86 / 100`; `X2` scoreably fails and `X6` route-fails | `N25 UI dirty state` |
 | `30` | `N26` was added on `2026-04-22` as W6/E16 owner recovery repeat; it is not merged into the old full-v2 denominator; `X1`, `X3`, and `X5` pass; `X3` and `X5` read `100 / 100`, `X1` reads `92 / 100`; `X2` and `X6` scoreably fail | `N26 owner recovery repeat` |
 | `31` | `N27` was added on `2026-04-22` as W7/E17 long-horizon release-train repeat; it is not merged into the old full-v2 denominator; `X1`, `X2`, and `X3` pass; `X3` reads `92 / 100`, `X1` and `X2` read `88 / 100`; `X6` route-fails and `X5` requeues after quota-gated smoke | `N27 long-horizon repeat` |
+| `32` | `N28` was added on `2026-04-22` as W8/E18 incident-driven cross-role integration repair; it is not merged into the old full-v2 denominator; `X1` and `X3` pass; `X3` reads `99 / 100`, `X1` reads `93 / 100`; `X2` scoreably fails, `X6` route-fails, and `X5` requeues after smoke timeouts | `N28 incident repair` |
 
 ## Source
 
@@ -341,3 +351,4 @@ failures as `PASS`.
 | `../Evidence/n25-ui-dirty-repeat-rubric-2026-04-22.json` | machine-readable N25 UI dirty-state repeat scored-rubric output for admitted `X1`, `X2`, `X3`, `X5`, and `X6` runs |
 | `../Evidence/n26-owner-wave-rubric-2026-04-22.json` | machine-readable N26 owner recovery repeat scored-rubric output for admitted `X1`, `X2`, `X3`, `X5`, and `X6` runs |
 | `../Evidence/n27-release-train-rubric-2026-04-22.json` | machine-readable N27 long-horizon release-train scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs; `X5` stayed smoke-gated `REQUEUE` |
+| `../Evidence/n28-incident-repair-rubric-2026-04-22.json` | machine-readable N28 incident-driven integration repair scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs; `X5` stayed smoke-gated `REQUEUE` |

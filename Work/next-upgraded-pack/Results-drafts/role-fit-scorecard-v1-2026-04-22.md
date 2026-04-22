@@ -21,7 +21,7 @@ lane. It is not a single global leaderboard. It separates:
 | `v2-core12-tie-hardened-results-2026-04-20.md` | hardened `X1` / `X3` / `X5` read for advisory, design, generic review, and security review |
 | `v2-extra-lane-n08-n10-results-2026-04-20.md` | `E1 worker.long-autonomous` extra-lane read |
 | `v2-top-pair-rubric-e3-results-2026-04-20.md` | narrow rubric read over `N11..N13`; `X1 60 / 60`, `X3 59 / 60` |
-| `x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted hardening record for `N06`, wave 2, `S06`, `S22`, `N14`, `N15`, `N16`, `N17`, `N18`, `N19`, `N20`, `N21`, `N22`, `N23`, `N24`, `N25`, `N26`, and `N27` |
+| `x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted hardening record for `N06`, wave 2, `S06`, `S22`, `N14`, `N15`, `N16`, `N17`, `N18`, `N19`, `N20`, `N21`, `N22`, `N23`, `N24`, `N25`, `N26`, `N27`, and `N28` |
 | `n16-long-horizon-rubric-2026-04-22.json` | `E6` long-horizon integration rubric; `X3 95 / 100`, `X1 89 / 100` |
 | `n17-owner-routing-rubric-2026-04-22.json` | `E7` owner/orchestration routing rubric; `X1`, `X2`, `X3`, and `X6` all `100 / 100`; `X5` runtime `NOT-RUN` after failed smoke |
 | `n18-scientist-constraints-rubric-2026-04-22.json` | `E8` scientist/constraints rubric; `X1`, `X2`, and `X3` all `100 / 100`; `X6` route-fails with partial `60 / 100`; `X5` semantic run times out |
@@ -34,6 +34,7 @@ lane. It is not a single global leaderboard. It separates:
 | `n25-ui-dirty-repeat-rubric-2026-04-22.json` | `E15` UI dirty-state repeat; `X5 98 / 100`, `X3 97 / 100`, `X1 86 / 100`; `X2 FAIL`, `X6 ROUTE-FAIL` |
 | `n26-owner-wave-rubric-2026-04-22.json` | `E16` owner recovery repeat; `X3 100 / 100`, `X5 100 / 100`, `X1 92 / 100`; `X2` and `X6` scoreable `FAIL` |
 | `n27-release-train-rubric-2026-04-22.json` | `E17` long-horizon integration repeat; `X3 92 / 100`, `X1 88 / 100`, `X2 88 / 100`; `X6 ROUTE-FAIL`, `X5 REQUEUE` after failed smoke |
+| `n28-incident-repair-rubric-2026-04-22.json` | `E18` cross-role incident repair repeat; `X3 99 / 100`, `X1 93 / 100`; `X2` scoreable `FAIL 16 / 100`; `X6 ROUTE-FAIL`, `X5 REQUEUE` after smoke timeouts |
 
 ## Decision Labels
 
@@ -55,7 +56,7 @@ lane. It is not a single global leaderboard. It separates:
 | `advisory.design-adr` | `S05`, `S07`, `S09` | `near-tie`; hardened `3 / 3` | `near-tie`; hardened `3 / 3` | calibration weak: baseline `0 / 3` | viable: hardened `3 / 3` | partial: baseline `2 / 3` | co-primary; prefer `X1` when trace/rubric discipline matters, `X3` when compactness matters |
 | `design.ui-ux-structure` | `S08`, `N01`, `N02` | `near-tie`; hardened `3 / 3` | `near-tie`; hardened `3 / 3` | partial: baseline `1 / 3` | viable: hardened `3 / 3` | weak: baseline `1 / 3` | co-primary; no proven top-pair split |
 | `worker.reasoning-constraints` | `S10`, `S11`, `S12`; plus `N18` and `N22` scored rubrics | `PASS` on `N18` and `N22`; `N22 100 / 100`; verbose but exact | `PASS` on `N18` and `N22`; `N22 99 / 100`; much more compact | `PASS` on `N18`, scoreable `N22 FAIL`; calibration-only | `NOT-RUN` on N18 semantic timeout; not launched on N22 | `ROUTE-FAIL` on N18 and N22; N22 partial artifact had wrong variance/p95 values under route abort | co-primary for correctness; `X1` has a tiny N22 elapsed-score edge, `X3` keeps the compactness edge |
-| `worker.default-implementation` | `S15`, `S19`, `S20`; plus `N14`, `N15`, `N16`, and `N27` diagnostics | binary `PASS` across current top-pair pilots; tends to add tests; `N27 88 / 100` | binary `PASS` across current top-pair pilots; more compact on `N16` and `N27`; `N27 92 / 100` | partial baseline `1 / 3`; scoreable `N14 FAIL`; `N27 PASS 88 / 100` calibration | baseline `3 / 3`; runtime `NOT-RUN` on N14; `N27 REQUEUE` after failed smoke | baseline `3 / 3`; runtime `NOT-RUN` on N14; `N27 ROUTE-FAIL` | `X3 primary` for compact long-horizon integration patches; `X1 primary` when self-added regression tests are valuable |
+| `worker.default-implementation` | `S15`, `S19`, `S20`; plus `N14`, `N15`, `N16`, `N27`, and `N28` diagnostics | binary `PASS` across current top-pair pilots; `N28 93 / 100`; verbose/high-output; tests unchanged on N28 | binary `PASS` across current top-pair pilots; more compact on `N16`, `N27`, and `N28`; `N28 99 / 100` with tests changed | partial baseline `1 / 3`; scoreable `N14 FAIL`; `N27 PASS 88 / 100`; `N28 FAIL 16 / 100` | baseline `3 / 3`; runtime `NOT-RUN` on N14; `N27 REQUEUE`; `N28 REQUEUE` after smoke timeouts | baseline `3 / 3`; runtime `NOT-RUN` on N14; `N27` and `N28 ROUTE-FAIL` | `X3 primary` for compact long-horizon / cross-role integration repair patches; `X1 primary` when verbose trace is more valuable |
 | `worker.systems-performance-implementation` | `S13`, `S14`, `S21`; plus `N19` and `N24` systems/toolchain rubrics | `PASS` on `N19` and `N24`; both `86 / 100`; test-rich but high output cost | `PASS` on `N19` and `N24`; both `95 / 100`; compact and low output | `N19 PASS`; scoreable `N24 FAIL` after forbidden `.reports` bundle drift | `N24 FAIL` after smoke; missed cache-restore reason and summary source trace | scoreable `N19` and `N24 FAIL`; misses portable/cache/trace invariants | `X3 primary` for compact systems/toolchain patches; `X1 secondary` when explicit test augmentation matters |
 | `worker.ui-implementation` | `S16`, `S17`, `S18`; plus `N20` and `N25` UI rubrics | `PASS` on `N20` and `N25`; `N25 86 / 100`; safe secondary | `PASS` on `N20` and `N25`; `N25 97 / 100`; compact and low output | scoreable `N20` and `N25 FAIL`; control-plane/shape issues | `N25 PASS 98 / 100` after smoke; strong UI contender but needs another modern UI-family pass before global primary | `ROUTE-FAIL` on `N20` and `N25` | `X3 primary` for UI state/render patches versus X1; `X5` is a route-healthy contender; avoid `X2/X6` as primary |
 | `worker.visual-graphics-visualization` | `S22`, `S23`, `S24`; hardened `S22`; plus `N21` visual raster rubric | hardened `S22 23 / 23`; `N21 PASS`, rubric `89 / 100`; visual correctness ties | hardened `S22 23 / 23`; `N21 PASS`, rubric `100 / 100`; compactness/cost wins | `N21 PASS`, rubric `85 / 100`; tests unchanged | `N21 RUNTIME-FAIL` after successful smoke and semantic no-summary timeout | `N21 RUNTIME-FAIL` after semantic no-summary timeout | co-primary for visual correctness; `X3 provisional-primary` for compact visual raster patches; Gemini visual preference remains unproven |
@@ -83,13 +84,14 @@ lane. It is not a single global leaderboard. It separates:
 | `E15 UI dirty-state repeat` | `N25` scored run roots | binary correctness ties `X1`/`X3` but repeat confirms `X3` over `X1`; `X5` also passes and narrowly leads the N25 rubric; `X2` fails scoreably and `X6` route-fails |
 | `E16 owner recovery repeat` | `N26` scored run roots | binary correctness ties `X1`/`X3` again, but repeat confirms `X3` over `X1`; `X5` also passes and ties `X3`, while `X2` and `X6` fail scoreably |
 | `E17 long-horizon integration repeat` | `N27` scored run roots | binary correctness ties `X1`/`X3`; repeat confirms `X3` over `X1` on compactness/cost (`92` versus `88`); `X2` also passes as calibration, `X5` requeues on smoke quota, and `X6` route-fails |
+| `E18 cross-role incident repair` | `N28` scored run roots plus X5 smoke attempts | binary correctness ties `X1`/`X3`; cross-role repair rubric favors `X3` (`99`) over `X1` (`93`); `X2` separates lower scoreably, `X5` requeues after smoke timeouts, and `X6` route-fails |
 
 ## Scorer Normalization Note
 
 | Rule | Current use |
 |---|---|
 | within-lane comparison | raw rubric scores are usable for `X1` versus `X3` on the same scenario |
-| cross-lane ranking | do not compare `N16`, `N19`, `N20`, `N21`, `N22`, `N23`, `N24`, `N25`, `N26`, and `N27` as one global `0..100` leaderboard without splitting semantic and efficiency points |
+| cross-lane ranking | do not compare `N16`, `N19`, `N20`, `N21`, `N22`, `N23`, `N24`, `N25`, `N26`, `N27`, and `N28` as one global `0..100` leaderboard without splitting semantic and efficiency points |
 | promotion threshold | promote a row to hard policy only after a semantic edge or an independent same-lane repeat; a one-run output/cost edge stays `provisional-primary` |
 | diagnostic labels | current `X3` edges on implementation, owner recovery, and visual raster are useful routing preferences; systems/toolchain, UI, and owner recovery now have independent same-lane repeat evidence |
 
@@ -102,7 +104,7 @@ lane. It is not a single global leaderboard. It separates:
 | `$product-analyst`, `$architect`, `$planner` | `advisory.design-adr` | `X1` when trace/rubric matters | `X3` when compactness matters | medium | E3 slightly favors X1 on source/denominator discipline, but binary gates tie |
 | `$ux-designer` | `design.ui-ux-structure` | `X1` / `X3 near-tie` | `X5` | medium | hardened UI/UX structure ties top pair; no proven style-quality separator |
 | `$algorithm-scientist`, `$computational-scientist`, `$security-engineer` | `worker.reasoning-constraints` | `X1` / `X3 near-tie`; choose by trace need versus compactness | `X2` calibration-only, not primary | medium | N18 and N22 both keep X1/X3 scoreable; N22 gives X1 only a one-point elapsed edge while X3 is far smaller; X2 fails the harder witness packet and Gemini rows route-fail or time out |
-| `$backend-engineer`, `$data-engineer`, `$platform-engineer` | `worker.default-implementation` | `X3 primary` for compact long-horizon integration patch | `X1` for test-rich patch; `X2` calibration-only after N27 pass | medium-high for compact long-horizon work | N14/N15/N16/N27 keep the top-pair binary tie, while N16 and N27 both favor X3 compactness/cost over X1 |
+| `$backend-engineer`, `$data-engineer`, `$platform-engineer` | `worker.default-implementation` | `X3 primary` for compact long-horizon and cross-role incident repair patches | `X1` for verbose trace-heavy patch; `X2` calibration-only despite N27 pass | high for compact cross-role integration versus X1; medium for binary correctness separation because binary still ties | N14/N15/N16/N27/N28 keep the top-pair binary tie, while N16, N27, and N28 all favor X3 compactness/cost over X1; N28 also separates X2 lower scoreably |
 | `$performance-engineer`, `$reliability-engineer`, `$toolchain-engineer` | `worker.systems-performance-implementation` | `X3 primary` for compact systems/toolchain patch | `X1` for test-rich patch; avoid `X2/X5/X6` as primary | medium-high | N19 and N24 both preserve binary correctness for X1/X3 and both give X3 a `9` point rubric edge; N24 separates X2/X5/X6 lower scoreably |
 | `$frontend-engineer`, `$qt-ui-engineer`, `$model-view-engineer` | `worker.ui-implementation` | `X3 primary` for compact UI state/render patch versus X1 | `X1` as safe secondary; `X5` as route-healthy contender for form-state UI | medium-high for X3 over X1; medium for X5 | N20 and N25 both favor X3 over X1; N25 also shows X5 can pass and narrowly lead when Gemini Pro route is healthy |
 | `$geometry-engineer`, `$graphics-engineer`, `$visualization-engineer` | `worker.visual-graphics-visualization` | `X3 provisional-primary` for compact raster patch; `X1` co-primary for correctness | `X2` calibration-only; Gemini rows not promoted | medium for geometry/raster correctness, low for Gemini preference | S22 and N21 tie X1/X3 by binary visual correctness; N21 cost edge favors X3, while X5/X6 timed out after launch |
@@ -115,7 +117,7 @@ lane. It is not a single global leaderboard. It separates:
 |---|---|---|---|---|
 | new X1/X3 result could change a routing lane | yes | yes, after Gemini smoke | yes | gives lower-bound and alternate-provider context |
 | top pair ties by binary but rubric separates by more than `3` points | yes | optional | optional | checks whether rubric is only top-pair noise or a broader quality gradient |
-| new task is long-horizon / integration | yes | only if direct smoke writes worker output | only if runner has not recently no-output timed out | Gemini no-output hangs should stay runtime `NOT-RUN`, not model fail |
+| new task is long-horizon / integration / cross-role repair | yes | only if direct smoke writes worker output | only if runner has not recently no-output timed out | Gemini no-output hangs should stay runtime `NOT-RUN`, not model fail |
 | review/security hardening | yes | yes | yes | prior evidence separates X5 lower here; useful to keep calibration fresh |
 | cheap smoke / wrapper validation | yes | yes | yes | validates route health, not semantic quality |
 
@@ -124,7 +126,7 @@ lane. It is not a single global leaderboard. It separates:
 | Need | Use |
 |---|---|
 | safest general top-pair answer when correctness matters and no style preference exists | `X1` and `X3` as near-tie; choose by availability |
-| long-horizon integration, compact patch, low output cost | `X3 primary`, `X1 secondary`; `X2` remains calibration-only despite N27 pass |
+| long-horizon integration / cross-role incident repair, compact patch, low output cost | `X3 primary`, `X1 secondary`; `X2` remains calibration-only and now fails N28 scoreably |
 | patch where self-added tests/regression coverage are explicitly valued | `X1 primary`, `X3 secondary` |
 | systems/toolchain ownership patch with path/cache/lock/fingerprint semantics | `X3 primary`, `X1 secondary`; avoid `X2/X5/X6` as primary |
 | UI state/render/keyboard/form interaction patch | `X3 primary`, `X1 secondary`; consider `X5` when Gemini Pro route is healthy and another UI-family pass is not required |
@@ -143,7 +145,7 @@ below is a compact routing view of the same queue.
 | Gap | Best next pilot |
 |---|---|
 | owner/orchestration scored split needs confirmation only if becoming hard policy | complete for X3 versus X1: `N23` and `N26` both favor `X3`; `X5` needs another owner-family pass before promotion over X3 |
-| long-horizon integration repeat evidence | complete for compact integration routing: `N16` and `N27` both favor `X3` over `X1` while binary correctness ties |
+| long-horizon and cross-role integration repeat evidence | complete for compact integration routing: `N16`, `N27`, and `N28` all favor `X3` over `X1` while binary correctness ties |
 | scientist/constraint lane still lacks a binary top-pair split | treat `N18` and `N22` as co-primary evidence; normalize runtime/cost if this lane becomes hard policy |
 | systems/toolchain lane repeat evidence | complete: `N19` and `N24` both favor `X3 95 / 100` over `X1 86 / 100`; next repeat is not needed unless policy asks for another subdomain |
 | UI implementation repeat evidence | complete for X3 versus X1: `N20` and `N25` both favor `X3`; `X5` needs one more UI-family pass before promotion over X3 |

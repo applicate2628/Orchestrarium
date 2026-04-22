@@ -41,6 +41,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W5` scoring normalization | `DONE` | Should rubric scores be normalized across N16/N19/N20/N21/N22/N23 before stronger claims? | scorer-only analysis, no model run | `$qa-engineer` / `$analyst` | scorer-normalization spawn completed memo | compactness-only single-run winners downgraded to `provisional-primary` |
 | `W6` owner repeat-confirmation | `DONE` | Is the N23 owner recovery edge stable enough for owner-routing policy? | `E16 / N26` owner recovery wave roadmap reconciliation | `$lead` | post-N25 sidecar proposal accepted and materialized | `X1`, `X3`, and `X5` pass; `X3 100`, `X5 100`, `X1 92`; `X2` and `X6` scoreable `FAIL` |
 | `W7` long-horizon repeat | `DONE` | Does the N16 long-horizon integration edge repeat on a new domain? | `E17 / N27` release train governor repeat | `$backend-engineer` / `$platform-engineer` style verifier | N27 scorer/verifier sidecar caught anti-hardcoding gap before launch | `X1`, `X2`, and `X3` pass; `X3 92`, `X1 88`, `X2 88`; `X6 ROUTE-FAIL`; `X5 REQUEUE` after failed smoke |
+| `W8` cross-role incident repair | `DONE` | Does adding incident source arbitration, stale requirements, review response, tests, and final reconciliation finally split X1/X3? | `E18 / N28` incident-driven integration repair | `$backend-engineer` plus review/reconciliation gate | N28 read-only sidecar accepted verifier/scorer gate before launch | `X1` and `X3` pass; `X3 99`, `X1 93`; `X2 scoreable FAIL 16`; `X6 ROUTE-FAIL`; `X5 REQUEUE` after smoke timeouts |
 
 ## Active Spawn Board
 
@@ -53,6 +54,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | scorer-normalization auditor | inspect N16..N23 scorer comparability | none | scorer-normalization memo | `DONE`; scorecard now uses `provisional-primary` for compactness-only edges |
 | post-N25 roadmap sidecar | inspect N24/N25 closeout direction and remaining lane needs | none | next-wave ordering proposal | `DONE`; recommended `N26` owner-recovery repeat before long-horizon expansion when owner policy matters |
 | N27 scorer/verifier sidecar | inspect N27 contract/verifier/scorer patterns | none | scorer field proposal and verifier consistency gate | `DONE`; anti-hardcoding coverage REVISE accepted before X1/X3 launch |
+| N28 cross-role gate sidecar | inspect N28 contract/verifier/scorer after materialization | none | gate verdict and risk note | `DONE`; accepted as cross-role gate, with caveat that reconciliation note checks are substring-based |
 
 ## Spawn Proposal Results
 
@@ -66,10 +68,11 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W5` | scorer-normalization memo | compare semantic versus efficiency points before cross-lane claims | `DONE`; current scorecard marks compactness/output edges as `provisional-primary` |
 | `W6 / E16` | `N26-owner-recovery-wave-roadmap-reconciliation-gauntlet` | repeat N23-style owner recovery after N24/N25 changed live lane state; includes denominator, spawn, X5-contender, and stale-file traps | `DONE`; `X3 PASS 100`, `X5 PASS 100`, `X1 PASS 92`, `X2 scoreable FAIL 70`, `X6 scoreable FAIL 50`; owner policy now reads `X3 primary` versus `X1`, with `X5` an owner contender pending another owner-family pass |
 | `W7 / E17` | `N27-release-train-governor-long-horizon-repeat-gauntlet` | repeat N16 long-horizon integration on a new deploygrid domain: profile precedence, dedupe, dependencies, canary/prod, freeze, resume, rollback, and audit/report trace | `DONE`; `X3 PASS 92`, `X1 PASS 88`, `X2 PASS 88`, `X6 ROUTE-FAIL`; `X5 REQUEUE` because same-session smoke hit quota |
+| `W8 / E18` | `N28-incident-driven-integration-repair-gauntlet` | extend N27 into cross-role incident repair: runtime patch, source arbitration, stale-source rejection, review response, tests, and final reconciliation | `DONE`; `X3 PASS 99`, `X1 PASS 93`, `X2 scoreable FAIL 16`, `X6 ROUTE-FAIL`; `X5 REQUEUE` because same-session smoke timed out |
 
 ## Current Admission Decision
 
-`W4 / N24`, `W4 / N25`, `W6 / N26`, and `W7 / N27` are complete.
+`W4 / N24`, `W4 / N25`, `W6 / N26`, `W7 / N27`, and `W8 / N28` are complete.
 
 Reason: `N19` and `N24` independently read `X3 95 / 100` versus `X1 86 / 100`, with both top
 pair rows passing the binary verifier and calibration rows separating lower. This moves
@@ -84,16 +87,19 @@ but needs one more UI-family pass before it can displace `X3` as the general UI 
 route-healthy `X5 PASS 100 / 100`, tying `X3 PASS 100 / 100`, so `X5` is a real owner-recovery
 contender but needs another owner-family pass before it can displace `X3`.
 
-`N16` and `N27` now independently read `X3 > X1` on compact long-horizon integration. Both top-pair
-rows pass the binary gates, so this is a role-fit and cost/compactness policy signal rather than a
-semantic correctness separator. `X2` passed N27 as calibration but remains lower-confidence because
-adjacent implementation repeats separate it lower. `X5` has no N27 semantic read because smoke hit
-quota.
+`N16` and `N27` independently read `X3 > X1` on compact long-horizon integration, and `N28`
+extends that signal into cross-role incident repair with source arbitration and review response.
+All three keep the top-pair binary gate tied, so this is a role-fit and cost/compactness policy
+signal rather than a semantic correctness separator. `X2` passed N27 as calibration but failed N28
+scoreably, so it remains calibration-only. `X5` has no N27/N28 semantic read because smoke failed or
+timed out.
 
-Next admitted branch: if deciding `X3` versus `X5`, run one more smoke-gated owner/UI family pass
-when Gemini Pro quota is healthy. If the goal is a stronger X1/X3 binary separator, stop expanding
-ordinary implementation repeats and design a harder cross-role task with ambiguous requirements,
-review feedback, patching, tests, and final reconciliation in one scenario.
+Next admitted branch: ordinary implementation repeats are no longer the right path for top-pair
+binary separation. For role-fit policy, current evidence is enough to prefer `X3` for compact
+cross-role integration/incident repair. If binary separation remains required, the next wave should
+move to a genuinely adversarial owner-plus-implementation-plus-review scenario with hidden
+contradictions and a stricter semantic reconciliation verifier, or to a timed multi-commit repair
+gauntlet where test quality and patch economy are first-class gates.
 
 ## Execution Order
 
@@ -121,13 +127,14 @@ review feedback, patching, tests, and final reconciliation in one scenario.
 9. Materialize `N25` as a UI dirty-state/navigation guard repeat. `DONE` on 2026-04-22.
 10. Materialize `N26-owner-recovery-repeat`. `DONE` on 2026-04-22.
 11. Materialize `N27-long-horizon-integration-repeat`. `DONE` on 2026-04-22.
-12. Next wave should either confirm `X5` contender status in owner/UI after a healthy smoke, or move to a harder cross-role binary separator rather than another ordinary implementation repeat.
+12. Materialize `N28-cross-role-incident-repair`. `DONE` on 2026-04-22.
+13. Next wave should stop ordinary repeats and move to a stricter adversarial cross-role separator, or confirm `X5` contender status only after Gemini Pro smoke is healthy.
 
 ## Current Routing Impact
 
 | Lane | Current Read | Next Need |
 |---|---|---|
-| long-horizon integration | `X3 primary` for compact integration after `N16` and `N27` both favor X3 over X1 while binary correctness ties | no more ordinary repeat needed; next hardening must add cross-role ambiguity if binary separation is required |
+| long-horizon / cross-role integration | `X3 primary` for compact integration and incident repair after `N16`, `N27`, and `N28` all favor X3 over X1 while binary correctness ties | no more ordinary repeat needed; next hardening must add stricter semantic reconciliation or multi-commit constraints if binary separation is required |
 | systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `X2/X5/X6` lower on N24 | no immediate repeat needed unless a new systems subdomain becomes policy-critical |
 | UI implementation | `X3` primary versus `X1` after `N20` and `N25`; `X5` is a route-healthy contender after `N25 PASS 98`, but needs another UI-family pass before policy promotion | one more UI-family `X5` check only if deciding between `X3` and `X5` |
 | scientist/constraints | `X1/X3` correctness tie on `N18`; `N22` also ties by binary, with `X1 100`, `X3 99`, and `X3` far more compact | no more immediate numeric hardening; normalize runtime/cost only if policy depends on it |
@@ -142,9 +149,9 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume after the `W7 / N27` closeout commit. Systems/toolchain, UI
-implementation, owner recovery, and compact long-horizon integration are confirmed as `X3 primary`
-versus `X1`. `X5` is a live UI and owner-recovery contender after route-healthy `N25` and `N26`
-wins/ties, but N27 produced only `REQUEUE` because the Gemini Pro smoke hit quota. The next
-conditional work item is either a smoke-gated `X5` contender confirmation in owner/UI or a new
-cross-role binary-separator design.
+If interrupted now, resume after the `W8 / N28` closeout commit. Systems/toolchain, UI
+implementation, owner recovery, compact long-horizon integration, and cross-role incident repair are
+confirmed as `X3 primary` versus `X1` by scored lane-fit evidence, while binary gates still tie.
+`X5` is a live UI and owner-recovery contender after route-healthy `N25` and `N26` wins/ties, but
+N27 and N28 produced only smoke-gated `REQUEUE`. The next conditional work item is a stricter
+adversarial cross-role binary-separator design, not another ordinary implementation repeat.
