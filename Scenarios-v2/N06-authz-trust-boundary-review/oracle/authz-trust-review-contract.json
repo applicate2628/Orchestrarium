@@ -17,7 +17,6 @@
     "inputs/README.md",
     "inputs/accepted-security-claims.md",
     "inputs/review-boundary.md",
-    "inputs/review-observations.md",
     "inputs/task.md",
     "inputs/trust-boundary-notes.md",
     "oracle/README.md",
@@ -66,45 +65,50 @@
     "## False Positives Avoided",
     "## Gate Decision"
   ],
+  "findings_table_header": ["#", "File", "Line", "Category", "Severity", "Title", "Evidence"],
+  "allowed_categories": ["authz", "trust-boundary", "replay", "session"],
+  "allowed_severities": ["high", "medium", "low"],
+  "exact_finding_count": 3,
   "required_findings": [
     {
-      "name": "query role escalation",
+      "id": "F1",
+      "file": "candidate/review-target/access-surface/grant_console.js",
+      "acceptable_lines": [2, 7],
       "severity": "high",
-      "required_terms": [
-        "candidate/review-target/access-surface/grant_console.js",
-        "reviewerRole",
-        "approve-grant",
-        "client"
-      ]
+      "category_terms": ["authz", "privilege", "role"],
+      "title_keywords": ["query", "role", "escalation", "client", "reviewerrole", "privileged"],
+      "required_evidence_terms": ["reviewerRole", "params"]
     },
     {
-      "name": "parent tenant trust break",
+      "id": "F2",
+      "file": "candidate/review-target/access-surface/grant_console.js",
+      "acceptable_lines": [27, 28, 29],
       "severity": "high",
-      "required_terms": [
-        "candidate/review-target/access-surface/grant_console.js",
-        "payload.trusted",
-        "effectiveTenant",
-        "tenant"
-      ]
+      "category_terms": ["trust", "boundary", "origin"],
+      "title_keywords": ["parent", "tenant", "trust", "boundary", "message", "postmessage"],
+      "required_evidence_terms": ["payload.trusted", "effectiveTenant"]
     },
     {
-      "name": "client authority replay",
+      "id": "F3",
+      "file": "candidate/review-target/access-surface/grant_console.js",
+      "acceptable_lines": [15, 18, 19],
       "severity": "medium",
-      "required_terms": [
-        "candidate/review-target/access-surface/grant_console.js",
-        "X-Reviewer-Role",
-        "tenantId",
-        "server"
-      ]
+      "category_terms": ["authz", "replay", "forward"],
+      "title_keywords": ["replay", "authority", "forwarded", "client", "header"],
+      "required_evidence_terms": ["X-Reviewer-Role", "tenantId"]
     }
   ],
-  "required_false_positive_terms": [
-    "disabled button",
-    "policy.css"
+  "forbidden_findings": [
+    {
+      "title_keywords": ["policy.css", "opacity", "cosmetic", "css"],
+      "reason": "CSS decoration; no security impact"
+    },
+    {
+      "title_keywords": ["disabled button", "approve-grant disabled", "button disabled"],
+      "reason": "client-side UI hint; not an authz boundary by itself"
+    }
   ],
-  "prohibited_report_snippets": [
-    "ship it",
-    "looks fine"
-  ],
+  "required_false_positive_terms": ["disabled button", "policy.css"],
+  "prohibited_report_snippets": ["ship it", "looks fine"],
   "expected_gate_decision": "REVISE"
 }

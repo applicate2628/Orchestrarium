@@ -1,43 +1,43 @@
 # Expected Findings
 
-The strongest factual memo should surface the following evidence-backed conclusions from the visible
-slice.
+The ground-truth memo for `S06` must return `PASS` with exactly four confirmed facts, exactly
+four false leads rejected, and exactly two explicit unknowns, presented as the three structured
+tables specified in `inputs/task.md`.
 
-## Confirmed current path
+## Confirmed Facts ground truth
 
-1. Scenario discovery starts in `candidate/repo-snapshot/benchmarks/runner/collect_scenarios.py`,
-   which sets `SCENARIO_ROOT` to the bundle-local `Scenarios-v2` tree and iterates only
-   `*/scenario.yaml` files.
-2. Surface filtering is based on each scenario metadata file's `surface_id`, and matching metadata
-   is normalized through `ScenarioRecord.from_metadata(...)` in
-   `candidate/repo-snapshot/benchmarks/registry/scenario_catalog.py`.
-3. `score_profile` is carried from scenario metadata into `ScenarioRecord` and then into result
-   output through `candidate/repo-snapshot/benchmarks/publication/write_results.py`.
-4. The actual profile weights come from the shared registry table in
-   `candidate/repo-snapshot/benchmarks/registry/score_profiles.py`.
+| id | Question | File | Line (any of) | Symbol (any keyword) | Fact terms (all present) |
+|---|---|---|---|---|---|
+| F1 | `1`, `1/2`, `1/3` | `candidate/repo-snapshot/benchmarks/runner/collect_scenarios.py` | `7`, `13`, `15`, `19` | `SCENARIO_ROOT`, `glob`, `surface_id`, `load_scenarios_for_surface` | `Scenarios-v2`, `scenario.yaml` |
+| F2 | `1`, `1/2`, `2`, `1/3` | `candidate/repo-snapshot/benchmarks/registry/scenario_catalog.py` | `5`–`7`, `14`–`16`, `19`–`22` | `ScenarioRecord`, `from_metadata`, `dataclass`, `bundle_root` | `score_profile` |
+| F3 | `2` | `candidate/repo-snapshot/benchmarks/registry/score_profiles.py` | `1`, `2`, `21`, `22` | `PROFILE_WEIGHTS`, `get_profile` | `weights` |
+| F4 | `2` | `candidate/repo-snapshot/benchmarks/publication/write_results.py` | `1`, `4`, `5`, `6` | `build_result_row`, `get_profile`, `score_profiles` | `record.score_profile` |
 
-## False leads and decoys
+Line tolerance: candidate must cite one of the listed lines per fact. Symbol cell must contain at
+least one of the listed keywords. Fact cell must contain all of the listed fact terms.
 
-1. `candidate/repo-snapshot/benchmarks/docs/legacy-routing-notes.md` describes older migration-time
-   behavior and is not sufficient evidence for the live code path.
-2. `candidate/repo-snapshot/benchmarks/publication/legacy_score_profiles.py` exists, but the visible
-   result-writer imports the registry profile table instead.
-3. `candidate/repo-snapshot/benchmarks/archive/scenario_index_v1.yaml` is consumed by
-   `candidate/repo-snapshot/benchmarks/tools/export_legacy_index.py`, which looks like export-only
-   or archival handling rather than active scenario collection.
-4. `candidate/repo-snapshot/benchmarks/registry/role_matrix.yaml` is present in the slice, but the
-   visible collector path keys off scenario metadata rather than the role matrix.
+Exact confirmed-fact count: `4`.
 
-## Coverage clues
+## False Leads Rejected ground truth
 
-1. `candidate/repo-snapshot/benchmarks/tests/test_collect_scenarios.py` confirms the collector
-   targets `Scenarios-v2` and returns only the matching surface.
-2. `candidate/repo-snapshot/benchmarks/tests/test_write_results.py` confirms the result row uses the
-   `ScenarioRecord.score_profile` value and yields the expected total weight.
+| id | Theme keyword (any) | File | Rejection term (all present) |
+|---|---|---|---|
+| L1 | `legacy config`, `legacy configuration`, `legacy profile`, `legacy module` | `candidate/repo-snapshot/benchmarks/publication/legacy_score_profiles.py` | `write_results`, `score_profiles` |
+| L2 | `archived scenario index`, `archived index`, `archive index`, `v1 index` | `candidate/repo-snapshot/benchmarks/archive/scenario_index_v1.yaml` | `export_legacy_index`, `not` |
+| L3 | `role-to-surface`, `role-surface mapping`, `role to surface`, `role mapping`, `role_matrix` | `candidate/repo-snapshot/benchmarks/registry/role_matrix.yaml` | `metadata`, `scenario.yaml` |
+| L4 | `stale doc`, `legacy doc`, `runtime routing doc`, `routing notes`, `docs page` | `candidate/repo-snapshot/benchmarks/docs/legacy-routing-notes.md` | `migration`, `not` |
 
-## Explicit unknowns
+Exact false-lead count: `4`.
 
-1. The entrypoint selecting the requested surface ID before `load_scenarios_for_surface(...)` runs
-   is not present in this repo slice.
-2. No evidence in this slice proves whether any external publication workflow still imports the
-   legacy score-profile module outside the visible writer path.
+## Explicit Unknowns ground truth
+
+| id | Unknown keyword (any) | Why term (all present) |
+|---|---|---|
+| U1 | `entrypoint`, `requested surface id`, `caller`, `scheduler`, `cli` | `not present`, `not included`, `slice`, `bounded` (any one) |
+| U2 | `external publication`, `outside the visible`, `legacy profile module`, `other consumer` | `slice`, `bounded`, `not included`, `no evidence` (any one) |
+
+Exact unknown count: `2`.
+
+## Expected gate
+
+`PASS`

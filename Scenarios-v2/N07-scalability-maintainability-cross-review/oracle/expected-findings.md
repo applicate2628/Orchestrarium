@@ -1,30 +1,31 @@
 # Expected Findings
 
-The ground-truth report for `N07` should return `REVISE` with these findings, in severity order.
+The ground-truth report for `N07` must return `REVISE` with exactly these three findings,
+presented as a structured table under `## Findings`.
 
-## 1. Blocking: repeated full-tree rescans in lane-card assembly
+## Ground-truth finding tuples
 
-- anchor file: `candidate/review-target/routing-matrix/assemble_lane_matrix.py`
-- supporting references:
-  - `collect_lane_members`
-  - `build_lane_cards`
-  - `scenarios_root.iterdir()`
-- reason: every lane rebuild rescans the full scenario root, reparses each `scenario.yaml`, and
-  repeats lane resolution work instead of building one shared view
+| # | File | Line (any of) | Category | Severity | Title anchor | Required evidence terms |
+|---|---|---|---|---|---|---|
+| F1 | `candidate/review-target/routing-matrix/assemble_lane_matrix.py` | `21`–`24`, `33`–`36` | `scalability` | `blocking` | every lane rescans the full scenarios tree | `collect_lane_members`, `iterdir` |
+| F2 | `candidate/review-target/routing-matrix/lane_basis.py` | `1`–`4` | `maintainability` | `blocking` | lane-basis membership duplicated across `lane_basis.py` and `lane_catalog.py` | `lane_basis.py`, `lane_catalog.py` |
+| F3 | `candidate/review-target/routing-matrix/assemble_lane_matrix.py` | `7`, `48`–`50` | `memory` | `major` | snapshot history grows without bound | `HISTORY.append`, `json.dumps` |
 
-## 2. Blocking: duplicated lane-basis ownership invites drift
+Line tolerance: the candidate must cite one of the listed lines per finding.
 
-- anchor files:
-  - `candidate/review-target/routing-matrix/lane_basis.py`
-  - `candidate/review-target/routing-matrix/lane_catalog.py`
-- reason: lane membership is maintained in both `ROUTING_BASIS` and `ROUTE_GROUPS`, so routing
-  truth can drift across two local owners
+Finding count: exactly three.
 
-## 3. Major: unbounded snapshot retention stores full serialized card payloads
+## Forbidden findings (false-positive traps)
 
-- anchor file: `candidate/review-target/routing-matrix/assemble_lane_matrix.py`
-- reason: `HISTORY.append(json.dumps(cards))` retains full lane-card snapshots with no bound, so
-  repeated refreshes compound memory cost
+| Title keyword group | Reason |
+|---|---|
+| `lane label`, `labels presentation`, `presentation data` | lane labels are harmless presentation data |
+| `unassigned`, `resolve_lane return` | returning `unassigned` from `resolve_lane` is not the defect |
+| `small tuple`, `local literal`, `small list` | small local literals are acceptable when not competing maintained owners |
+
+## Required false-positive mentions
+
+The `## False Positives Avoided` section must mention both `lane_catalog` and `unassigned`.
 
 ## Expected gate
 

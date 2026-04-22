@@ -35,8 +35,12 @@
   ],
   "expected_start_state_failures": [
     "scale-aware-collinear",
+    "small-scale-not-collinear",
+    "large-scale-near-collinear-negative",
     "endpoint-gap-within-tolerance",
-    "large-scale-collinear-overlap"
+    "large-scale-collinear-overlap",
+    "zero-length-point-near-segment-end",
+    "near-endpoint-diagonal-within-tolerance"
   ],
   "scope_guard_roots": [
     "candidate/graphics-renderer",

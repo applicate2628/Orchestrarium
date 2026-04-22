@@ -17,7 +17,6 @@
     "inputs/README.md",
     "inputs/accepted-security-claims.md",
     "inputs/review-boundary.md",
-    "inputs/review-observations.md",
     "inputs/secret-and-boundary-notes.md",
     "inputs/task.md",
     "oracle/README.md",
@@ -66,45 +65,50 @@
     "## False Positives Avoided",
     "## Gate Decision"
   ],
+  "findings_table_header": ["#", "File", "Line", "Category", "Severity", "Title", "Evidence"],
+  "allowed_categories": ["secret-storage", "credential-exposure", "origin-boundary", "session"],
+  "allowed_severities": ["high", "medium", "low"],
+  "exact_finding_count": 3,
   "required_findings": [
     {
-      "name": "token persistence",
+      "id": "F1",
+      "file": "candidate/review-target/auth-surface/token_exchange.js",
+      "acceptable_lines": [1, 4],
       "severity": "high",
-      "required_terms": [
-        "candidate/review-target/auth-surface/token_exchange.js",
-        "localStorage",
-        "preview_access_token",
-        "bearer"
-      ]
+      "category_terms": ["secret-storage", "credential", "persist", "storage"],
+      "title_keywords": ["localstorage", "token", "persist", "storage", "bearer", "cached"],
+      "required_evidence_terms": ["localStorage", "preview_access_token"]
     },
     {
-      "name": "wildcard postMessage",
-      "severity": "high",
-      "required_terms": [
-        "candidate/review-target/auth-surface/token_exchange.js",
-        "postMessage",
-        "\"*\"",
-        "origin"
-      ]
-    },
-    {
-      "name": "token exposure",
+      "id": "F2",
+      "file": "candidate/review-target/auth-surface/token_exchange.js",
+      "acceptable_lines": [5, 6],
       "severity": "medium",
-      "required_terms": [
-        "candidate/review-target/auth-surface/token_exchange.js",
-        "token.slice",
-        "preview-channel",
-        "visible"
-      ]
+      "category_terms": ["credential-exposure", "visible", "exposure", "secret"],
+      "title_keywords": ["visible", "exposure", "token", "slice", "preview-channel", "display", "leak"],
+      "required_evidence_terms": ["token.slice", "preview-channel"]
+    },
+    {
+      "id": "F3",
+      "file": "candidate/review-target/auth-surface/token_exchange.js",
+      "acceptable_lines": [7, 8, 9, 10],
+      "severity": "high",
+      "category_terms": ["origin-boundary", "origin", "trust", "postmessage"],
+      "title_keywords": ["wildcard", "postmessage", "origin", "target"],
+      "required_evidence_terms": ["postMessage", "\"*\""]
     }
   ],
-  "required_false_positive_terms": [
-    "monospace",
-    "internal-only"
+  "forbidden_findings": [
+    {
+      "title_keywords": ["monospace", "debug", "text-align", "font"],
+      "reason": "monospace text styling is not a vulnerability"
+    },
+    {
+      "title_keywords": ["internal-only", "audience", "internal only"],
+      "reason": "internal-only framing does not erase bearer-token risk"
+    }
   ],
-  "prohibited_report_snippets": [
-    "ship it",
-    "looks fine"
-  ],
+  "required_false_positive_terms": ["monospace", "internal-only"],
+  "prohibited_report_snippets": ["ship it", "looks fine"],
   "expected_gate_decision": "REVISE"
 }

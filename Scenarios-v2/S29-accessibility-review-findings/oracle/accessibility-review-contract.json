@@ -42,7 +42,6 @@
     "inputs/README.md",
     "inputs/task.md",
     "inputs/accepted-accessibility-scope.md",
-    "inputs/keyboard-and-at-observations.md",
     "inputs/contrast-and-focus-notes.md",
     "inputs/review-boundary.md",
     "candidate/README.md",
@@ -62,81 +61,72 @@
   ],
   "editable_report": "candidate/review-report.md",
   "required_report_sections": [
-    "## Reviewed Surfaces",
     "## Findings",
-    "## Required Fixes Before Merge",
-    "## Residual Risk",
+    "## False Positives Avoided",
     "## Gate Decision"
   ],
-  "expected_gate_decision": "REVISE",
+  "findings_table_header": ["#", "File", "Line", "Category", "Severity", "Title", "Evidence"],
+  "allowed_categories": ["keyboard", "semantic-labeling", "focus-order", "contrast", "at-exposure", "aria", "focus"],
+  "allowed_severities": ["blocking", "major", "minor"],
+  "exact_finding_count": 5,
   "required_findings": [
     {
-      "name": "keyboard containment breach",
+      "id": "F1",
+      "file": "candidate/review-target/share-dialog/dialog.js",
+      "acceptable_lines": [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
       "severity": "blocking",
-      "required_terms": [
-        "candidate/review-target/share-dialog/dialog.js",
-        "inputs/keyboard-and-at-observations.md",
-        "Delete workspace",
-        "Tab",
-        "focus trap"
-      ]
+      "category_terms": ["keyboard", "focus", "trap"],
+      "title_keywords": ["keyboard", "containment", "focus trap", "trap", "tab", "breach"],
+      "required_evidence_terms": ["delete workspace", "tab"]
     },
     {
-      "name": "semantic labeling and state exposure",
+      "id": "F2",
+      "file": "candidate/review-target/share-dialog/index.html",
+      "acceptable_lines": [22, 23, 34, 45],
       "severity": "blocking",
-      "required_terms": [
-        "candidate/review-target/share-dialog/index.html",
-        "close-button",
-        "invite-email",
-        "scope-toggle",
-        "accessible name",
-        "aria-pressed"
-      ]
+      "category_terms": ["semantic-labeling", "aria", "label"],
+      "title_keywords": ["semantic", "labeling", "accessible name", "aria", "label", "name"],
+      "required_evidence_terms": ["close-button", "invite-email", "scope-toggle"]
     },
     {
-      "name": "focus order mismatch",
+      "id": "F3",
+      "file": "candidate/review-target/share-dialog/index.html",
+      "acceptable_lines": [22, 53],
       "severity": "major",
-      "required_terms": [
-        "inputs/accepted-accessibility-scope.md",
-        "Sharing policy",
-        "tabindex",
-        "focus order",
-        "reading order"
-      ]
+      "category_terms": ["focus-order", "focus", "order"],
+      "title_keywords": ["focus order", "tabindex", "reading order", "order"],
+      "required_evidence_terms": ["tabindex", "sharing policy"]
     },
     {
-      "name": "contrast and focus visibility miss",
+      "id": "F4",
+      "file": "candidate/review-target/share-dialog/dialog.css",
+      "acceptable_lines": [5, 6, 58, 59, 60, 61, 62, 100, 101, 102, 103, 104, 105, 106, 107, 108],
       "severity": "major",
-      "required_terms": [
-        "candidate/review-target/share-dialog/dialog.css",
-        "inputs/contrast-and-focus-notes.md",
-        "3.2:1",
-        "1.9:1",
-        "focus-visible"
-      ]
+      "category_terms": ["contrast", "focus-visible", "ratio", "focus"],
+      "title_keywords": ["contrast", "focus visibility", "focus-visible", "outline", "ratio"],
+      "required_evidence_terms": ["3.2:1", "1.9:1"]
     },
     {
-      "name": "submit status not announced",
+      "id": "F5",
+      "file": "candidate/review-target/share-dialog/index.html",
+      "acceptable_lines": [60],
       "severity": "major",
-      "required_terms": [
-        "candidate/review-target/share-dialog/index.html",
-        "candidate/review-target/share-dialog/dialog.js",
-        "inputs/keyboard-and-at-observations.md",
-        "send-status",
-        "Invite sent to reviewers",
-        "aria-live",
-        "role=\"status\""
-      ]
+      "category_terms": ["at-exposure", "aria", "status", "live"],
+      "title_keywords": ["submit", "status", "announce", "aria-live", "live region", "live"],
+      "required_evidence_terms": ["send-status", "invite sent to reviewers"]
     }
   ],
-  "exact_finding_count": 5,
-  "finding_order_terms": [
-    "focus trap",
-    "accessible name",
-    "focus order",
-    "3.2:1",
-    "Invite sent to reviewers"
+  "forbidden_findings": [
+    {
+      "title_keywords": ["role=\"dialog\"", "aria-labelledby", "dialog role missing", "dialog aria missing", "missing dialog semantics"],
+      "reason": "role=\"dialog\" and aria-labelledby are already present and correct"
+    },
+    {
+      "title_keywords": ["escape handling missing", "escape broken", "escape key bug", "escape not working"],
+      "reason": "Escape handling works and returns focus to launcher"
+    }
   ],
+  "required_false_positive_terms": ["role=\"dialog\"", "Escape"],
   "prohibited_report_snippets": [
     "## Acceptance Criteria Mapping",
     "## Bug Registry Expectation",
@@ -144,5 +134,6 @@
     "browser-required",
     "QA report",
     "repair-plan.md"
-  ]
+  ],
+  "expected_gate_decision": "REVISE"
 }

@@ -1,53 +1,33 @@
 # Expected Findings
 
-The ground-truth report for `S29` should return `REVISE` with these findings, in severity order.
+The ground-truth report for `S29` must return `REVISE` with exactly these five findings,
+presented as a structured table under `## Findings`.
 
-## 1. Blocking: keyboard focus is not contained inside the dialog
+## Ground-truth finding tuples
 
-- anchor files:
-  - `candidate/review-target/share-dialog/index.html`
-  - `candidate/review-target/share-dialog/dialog.js`
-- supporting reference: `inputs/keyboard-and-at-observations.md`
-- reason: the dialog opens on the footer help link, positive `tabindex` values reorder keyboard
-  travel, and `Tab` continues to the background `Delete workspace` link because no focus trap or
-  wrap logic keeps focus inside the modal
+| # | File | Line (any of) | Category | Severity | Title anchor | Required evidence terms |
+|---|---|---|---|---|---|---|
+| F1 | `candidate/review-target/share-dialog/dialog.js` | `8`–`18` | `keyboard` | `blocking` | no focus trap containing Tab within the open dialog | `Delete workspace`, `Tab` |
+| F2 | `candidate/review-target/share-dialog/index.html` | `22`, `23`, `34`, `45` | `semantic-labeling` | `blocking` | close button, invite field, and reviewers-only toggle lack accessible names or state exposure | `close-button`, `invite-email`, `scope-toggle` |
+| F3 | `candidate/review-target/share-dialog/index.html` | `22`, `53` | `focus-order` | `major` | tabindex values force focus order out of reading order | `tabindex`, `Sharing policy` |
+| F4 | `candidate/review-target/share-dialog/dialog.css` | `5`, `6`, `58`–`62`, `100`–`108` | `contrast` | `major` | helper text and focus outlines fail accepted contrast thresholds | `3.2:1`, `1.9:1` |
+| F5 | `candidate/review-target/share-dialog/index.html` | `60` | `at-exposure` | `major` | submit status change is not announced to assistive tech | `send-status`, `Invite sent to reviewers` |
 
-## 2. Blocking: key controls do not expose usable names and state to assistive technology
+Line tolerance: the candidate must cite one of the listed lines per finding.
 
-- anchor files:
-  - `candidate/review-target/share-dialog/index.html`
-  - `candidate/review-target/share-dialog/dialog.js`
-- supporting reference: `inputs/keyboard-and-at-observations.md`
-- reason: the close icon has no accessible name, the invite field relies on placeholder text
-  instead of a label, and `scope-toggle` changes visible text without exposing pressed or switch
-  state to assistive technology
+Finding count: exactly five.
 
-## 3. Major: focus order does not follow the dialog reading order
+## Forbidden findings (false-positive traps)
 
-- anchor files:
-  - `candidate/review-target/share-dialog/index.html`
-  - `candidate/review-target/share-dialog/dialog.js`
-- supporting reference: `inputs/accepted-accessibility-scope.md`
-- reason: `tabindex="1"` on `Sharing policy` and `tabindex="2"` on the close icon force keyboard
-  travel into footer and header shortcuts before the primary invite flow
+| Title keyword group | Reason |
+|---|---|
+| `role="dialog"`, `aria-labelledby`, `dialog role missing` | `role="dialog"` and `aria-labelledby` are already correctly set |
+| `escape handling missing`, `escape broken`, `escape key bug` | Escape handling works and returns focus to launcher |
 
-## 4. Major: helper text and focus indicators are below the accepted contrast threshold
+## Required false-positive mentions
 
-- anchor file: `candidate/review-target/share-dialog/dialog.css`
-- supporting reference: `inputs/contrast-and-focus-notes.md`
-- reason: helper text measures `3.2:1` on the dialog background and the custom `:focus-visible`
-  outline measures `1.9:1`, so low-vision users do not get the promised readable guidance or
-  visible focus cues
-
-## 5. Major: submit status changes are not announced to assistive technology
-
-- anchor files:
-  - `candidate/review-target/share-dialog/index.html`
-  - `candidate/review-target/share-dialog/dialog.js`
-- supporting reference: `inputs/keyboard-and-at-observations.md`
-- reason: submitting the form changes `send-status` from `Ready to send` to
-  `Invite sent to reviewers`, but the status node has no `aria-live` or `role="status"` exposure,
-  so assistive technology users do not receive the completion update
+The `## False Positives Avoided` section must mention both `role="dialog"` and `Escape` as
+patterns the reviewer considered but excluded from findings.
 
 ## Expected gate
 

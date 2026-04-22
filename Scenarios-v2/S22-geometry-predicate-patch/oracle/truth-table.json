@@ -91,6 +91,114 @@
         ]
       ],
       "expected_orientation": 1
+    },
+    {
+      "id": "degenerate-duplicate-start",
+      "points": [
+        [
+          1.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0
+        ],
+        [
+          3.0,
+          5.0
+        ]
+      ],
+      "expected_orientation": 0
+    },
+    {
+      "id": "small-scale-near-collinear-negative",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.001,
+          0.001
+        ],
+        [
+          0.002,
+          0.0019999999998
+        ]
+      ],
+      "expected_orientation": 0
+    },
+    {
+      "id": "small-scale-not-collinear",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.001,
+          0.001
+        ],
+        [
+          0.002,
+          0.0019995
+        ]
+      ],
+      "expected_orientation": -1
+    },
+    {
+      "id": "right-handed-swapped-negative",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          3.0
+        ],
+        [
+          4.0,
+          0.0
+        ]
+      ],
+      "expected_orientation": -1
+    },
+    {
+      "id": "large-scale-near-collinear-negative",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2000000.0,
+          2000000.0
+        ],
+        [
+          1000000.0,
+          999999.99988
+        ]
+      ],
+      "expected_orientation": 0
+    },
+    {
+      "id": "large-scale-left-handed-not-collinear",
+      "points": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2000000.0,
+          2000000.0
+        ],
+        [
+          1000000.0,
+          999999.998
+        ]
+      ],
+      "expected_orientation": -1
     }
   ],
   "segment_cases": [
@@ -237,6 +345,150 @@
         ]
       ],
       "expected_intersects": false
+    },
+    {
+      "id": "zero-length-point-on-segment",
+      "segment_a": [
+        [
+          1.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0
+        ]
+      ],
+      "segment_b": [
+        [
+          0.0,
+          1.0
+        ],
+        [
+          2.0,
+          1.0
+        ]
+      ],
+      "expected_intersects": true
+    },
+    {
+      "id": "zero-length-point-near-segment-end",
+      "segment_a": [
+        [
+          2.0000000001,
+          0.0
+        ],
+        [
+          2.0000000001,
+          0.0
+        ]
+      ],
+      "segment_b": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2.0,
+          0.0
+        ]
+      ],
+      "expected_intersects": true
+    },
+    {
+      "id": "zero-length-point-outside-tolerance",
+      "segment_a": [
+        [
+          2.000000002,
+          0.0
+        ],
+        [
+          2.000000002,
+          0.0
+        ]
+      ],
+      "segment_b": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          2.0,
+          0.0
+        ]
+      ],
+      "expected_intersects": false
+    },
+    {
+      "id": "near-endpoint-diagonal-within-tolerance",
+      "segment_a": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1000000.0,
+          1000000.0
+        ]
+      ],
+      "segment_b": [
+        [
+          1000000.0001,
+          1000000.0001
+        ],
+        [
+          2000000.0,
+          2000000.0
+        ]
+      ],
+      "expected_intersects": true
+    },
+    {
+      "id": "near-endpoint-diagonal-outside-tolerance",
+      "segment_a": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          1000000.0,
+          1000000.0
+        ]
+      ],
+      "segment_b": [
+        [
+          1000000.001,
+          1000000.001
+        ],
+        [
+          2000000.0,
+          2000000.0
+        ]
+      ],
+      "expected_intersects": false
+    },
+    {
+      "id": "shared-endpoint-reversed-boundary",
+      "segment_a": [
+        [
+          -1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0
+        ]
+      ],
+      "segment_b": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          -1.0
+        ]
+      ],
+      "expected_intersects": true
     }
   ]
 }

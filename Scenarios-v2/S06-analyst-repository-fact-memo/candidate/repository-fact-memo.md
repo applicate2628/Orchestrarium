@@ -2,48 +2,26 @@
 
 ## Investigation goal
 
-TODO
+[fill in after run]
 
-## Relevant files and symbols
+## Confirmed Facts
 
-TODO
+| # | Question | File | Line | Symbol | Fact |
+|---|---|---|---|---|---|
+| 1 | [fill] | [fill] | [fill] | [fill] | [fill] |
 
-## Confirmed facts
+## False Leads Rejected
 
-- TODO
+| # | Note Theme | File | Why Rejected |
+|---|---|---|---|
+| 1 | [fill] | [fill] | [fill] |
 
-## Current data and control flow
+## Explicit Unknowns
 
-TODO
+| # | Unknown | Why |
+|---|---|---|
+| 1 | [fill] | [fill] |
 
-## Observed contracts
+## Gate Decision
 
-TODO
-
-## Similar implementations or adjacent patterns
-
-TODO
-
-## Tests and coverage clues
-
-TODO
-
-## False leads rejected
-
-TODO
-
-## Explicit unknowns
-
-TODO
-
-## Change risks
-
-TODO
-
-## Adjacent findings
-
-None.
-
-## Gate decision
-
-PASS
+[fill in after run]

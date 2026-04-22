@@ -2,18 +2,18 @@
 
 ## Findings
 
-- TODO: replace with the most severe cross-review finding and supporting evidence
-- TODO: replace with the second cross-review finding and supporting evidence
-- TODO: replace with the compounding scalability or memory finding and supporting evidence
+| # | File | Line | Category | Severity | Title | Evidence |
+|---|---|---|---|---|---|---|
+| 1 | [fill in after run] | [fill] | [fill] | [fill] | [fill] | [fill] |
 
 ## False Positives Avoided
 
-- TODO: note one tempting but acceptable detail that should not be raised
+- [fill in after run]
 
 ## Maintainability Notes
 
-- TODO: summarize blast radius, ownership fit, and residual scalability risk after the required fixes
+- [fill in after run]
 
 ## Gate Decision
 
-TODO: REVISE
+[fill in after run]
