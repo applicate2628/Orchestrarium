@@ -1,0 +1,130 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-23_00-47-52-X1-wave-w9-n29-ownership-budget-2026-04-22\\N29",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 96,
+      "correctness": 35,
+      "stateful_recovery": 10,
+      "repair_ledger": 20,
+      "patch_quality": 10,
+      "patch_budget": 10,
+      "tests_points": 5,
+      "time_points": 5,
+      "cost_points": 1,
+      "elapsed_proxy_seconds": 228.279,
+      "cost_proxy_output_bytes": 155704,
+      "changed_paths": [
+        "candidate/repair-ledger.json",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/tests/test_deploygrid.py"
+      ],
+      "diff": {
+        "added": 143,
+        "deleted": 12
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests changed",
+        "ledger changed",
+        "budget exact",
+        "changed=4 source=2 add=143 del=12"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-23_01-22-52-X2-wave-w9-n29-ownership-budget-calibration-2026-04-23\\N29",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 42,
+      "correctness": 23,
+      "stateful_recovery": 2,
+      "repair_ledger": 4,
+      "patch_quality": 3,
+      "patch_budget": 0,
+      "tests_points": 0,
+      "time_points": 5,
+      "cost_points": 5,
+      "elapsed_proxy_seconds": 43.644,
+      "cost_proxy_output_bytes": 1212,
+      "changed_paths": [],
+      "diff": {
+        "added": 0,
+        "deleted": 0
+      },
+      "failed_invariants": [
+        "crash-resume-no-replay",
+        "idempotent-repeat",
+        "patch-budget-ledger",
+        "report-from-ledger-audit",
+        "review-response-ledger",
+        "semantic-dedupe-latest-wins",
+        "source-decisions-ledger",
+        "validation-ledger"
+      ],
+      "notes": [
+        "tests unchanged",
+        "ledger unchanged",
+        "budget mismatch",
+        "failed invariants: crash-resume-no-replay, idempotent-repeat, patch-budget-ledger, report-from-ledger-audit, review-response-ledger, semantic-dedupe-latest-wins, source-decisions-ledger, validation-ledger",
+        "changed=0 source=0 add=0 del=0"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-23_01-10-19-X3-wave-w9-n29-ownership-budget-rerun-2026-04-23\\N29",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "correctness": 35,
+      "stateful_recovery": 10,
+      "repair_ledger": 20,
+      "patch_quality": 10,
+      "patch_budget": 10,
+      "tests_points": 5,
+      "time_points": 5,
+      "cost_points": 5,
+      "elapsed_proxy_seconds": 694.629,
+      "cost_proxy_output_bytes": 2325,
+      "changed_paths": [
+        "candidate/repair-ledger.json",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/tests/test_deploygrid.py"
+      ],
+      "diff": {
+        "added": 116,
+        "deleted": 12
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests changed",
+        "ledger changed",
+        "budget exact",
+        "changed=4 source=2 add=116 del=12"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-23_01-22-43-X6-wave-w9-n29-ownership-budget-calibration-2026-04-23\\N29",
+      "row": "X6",
+      "binary": "RUNTIME-FAIL",
+      "scoreability": "runtime-no-summary",
+      "total": 0,
+      "notes": [
+        "missing summary.json after launch"
+      ]
+    }
+  ]
+}

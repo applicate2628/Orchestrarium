@@ -1470,3 +1470,60 @@ unchanged. This strengthens the routing read that cross-role incident repair / l
 integration should prefer `X3 primary` for compact production patches, with `X1` retained when
 verbose trace is valued more than output cost. `X2` now separates lower scoreably on the same
 cross-role surface, unlike its N27 pass.
+
+## 2026-04-23 Follow-Up: W9 / N29 Ownership-Budget Incident Repair
+
+`N29-ownership-budget-incident-repair-gauntlet` was added as diagnostic `E19` after N28 showed that
+ordinary cross-role repair still tied the top pair by binary gate. N29 starts from a near-pass
+DeployGrid baseline with localized retry/resume and report-source defects. The task requires a valid
+runtime repair, tests, and a machine-readable `candidate/repair-ledger.json`. The scope verifier
+compares actual changed paths against the ledger's patch budget, so a broad runtime-correct rewrite
+is a binary failure.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/ownership-budget-contract.json` and `candidate/repair-ledger.json` | `PASS` |
+| `python Scenarios-v2/N29-ownership-budget-incident-repair-gauntlet/verifiers/check_ownership_budget_repair.py --bundle-shape-only` | `N29 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N29-ownership-budget-incident-repair-gauntlet/verifiers/check_ownership_budget_repair.py --expect-start-state` | `N29 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n29-ownership-budget-reference/` | `N29 verifier PASS (completed run)` |
+| scratch reference scope guard with exact four changed paths | `N29 scope PASS` |
+| `python -m py_compile` for verifier, scope checker, and scorer | `PASS` |
+| `git diff --check` before launch | exit `0` |
+| `mcp-free` during/after long provider runs | first pass `kill: none`; post-X6 cleanup killed `9` orphan `mcp-language-server.exe` helpers |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-23_00-47-52-X1-wave-w9-n29-ownership-budget-2026-04-22/N29/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-23_01-10-19-X3-wave-w9-n29-ownership-budget-rerun-2026-04-23/N29/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-23_01-22-52-X2-wave-w9-n29-ownership-budget-calibration-2026-04-23/N29/` | `0` | `FAIL` | `FAIL` | `0 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-23_01-22-43-X6-wave-w9-n29-ownership-budget-calibration-2026-04-23/N29/` | timeout | no summary | n/a | `RUNTIME-FAIL` |
+| `X5 / gemini3.1pro` | smoke only: `.scratch/gemini-smoke-n29-2026-04-23/x5-smoke-output.txt` | timeout | n/a | n/a | `REQUEUE` |
+
+The first `X3` launch was interrupted by the user before worker output or summary existed; it is not
+admitted as model evidence. The admitted `X3` result is the rerun root above. `X2` is a scoreable
+fail: `wrapperExitCode=0`, no benchmark files changed, semantic verifier failed, and the patch
+budget scope gate failed. `X6` timed out without `summary.json` or worker output, so it is
+`runtime-no-summary`, not a model-quality fail. `X5` was not admitted to semantic N29 because the
+same-session smoke timed out without `X5_SMOKE_OK`.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Correct | Stateful | Ledger | Patch | Budget | Tests | Time | Cost | Elapsed proxy | Output bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `100 / 100` | `35` | `10` | `20` | `10` | `10` | `5` | `5` | `5` | `694.629s` | `2325` | tests changed; ledger changed; exact four-path budget |
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `96 / 100` | `35` | `10` | `20` | `10` | `10` | `5` | `5` | `1` | `228.279s` | `155704` | tests changed; ledger changed; exact four-path budget |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `42 / 100` | `23` | `2` | `4` | `3` | `0` | `0` | `5` | `5` | `43.644s` | `1212` | no edits; failed runtime, ledger, and budget gates |
+| `X6 / gemini3.1flash-lite-preview` | `RUNTIME-FAIL` | `runtime-no-summary` | `0 / 100` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | n/a | n/a | missing summary after launch timeout |
+| `X5 / gemini3.1pro` | `REQUEUE` | `runtime-timeout` | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | smoke only | n/a | smoke timed out with no output |
+
+### N29 Verdict
+
+`binary tie remains` for `X1` and `X3` even after the stricter semantic ledger and exact four-path
+patch-budget gate. This is useful negative evidence: near-pass ownership-budget repairs are not a
+binary separator for the top pair. The role-fit read still favors `X3` (`100 / 100`) over `X1` (`96
+/ 100`) by output cost only; both solved the runtime defect, updated tests, and matched the exact
+patch budget. `X2` separates lower scoreably, and Gemini rows remain runtime-route/timeout caveats.
