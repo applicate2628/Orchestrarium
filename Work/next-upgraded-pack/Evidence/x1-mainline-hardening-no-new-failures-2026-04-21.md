@@ -124,3 +124,1067 @@ Notes:
   checks. `X6/N11` and `X6/N12` changed their artifacts but failed strict source/ledger checks with
   wrapper exit `1`; `X6/N13` changed its artifact with wrapper exit `0` but failed the strict review
   contract.
+
+## 2026-04-21 Follow-Up: N06 Tuple-Exact Hardening Wave
+
+This wave targets `N06-authz-trust-boundary-review` — a core routing lane (`N01..N07`) — as
+pilot for a stricter verifier shape that replaces keyword-substring matching with tuple-exact
+`(file, line, category, severity, title-keyword, evidence-term)` matching. The goal is to
+remove the answer-leak path that currently lets compliance-retelling pass review scenarios,
+and to test whether near-ceiling `X1`/`X3` separate once that path is closed.
+
+Motivation traces to `Evidence/separator-audit-2026-04-21.md`, which classified `N06` as
+`high leak, high separation potential`: `inputs/review-observations.md` enumerated all three
+expected findings verbatim, and the existing verifier only required keyword presence in the
+candidate report.
+
+### In-place hardening delta
+
+| Path | Change |
+|---|---|
+| `inputs/review-observations.md` | deleted; this file enumerated all three oracle findings as bullet points |
+| `inputs/task.md` | rewritten from a 3-line abstract framing to a full structured-table requirement with `\| # \| File \| Line \| Category \| Severity \| Title \| Evidence \|` header, per-column validation rules, allowed-category and allowed-severity enums, and a `## False Positives Avoided` discipline section — without enumerating any answer |
+| `oracle/authz-trust-review-contract.json` | replaced `required_findings` keyword-term shape with tuple shape `{id, file, acceptable_lines[], category_terms[], severity, title_keywords[], required_evidence_terms[]}`; added `forbidden_findings[]` with title-keyword groups that trigger FAIL; added `exact_finding_count: 3`; removed `inputs/review-observations.md` from `required_bundle_paths`; preserved `required_false_positive_terms`, `prohibited_report_snippets`, `expected_gate_decision` |
+| `oracle/expected-findings.md` | rewritten to tuple-table ground truth with `acceptable_lines` per finding; documents forbidden-finding keyword groups |
+| `verifiers/check_authz_trust_review.py` | rewrote finding-check routine to parse `## Findings` markdown table, match each oracle tuple to at least one candidate row with `file == oracle.file`, `line in acceptable_lines`, exact severity, any category-term and any title-keyword match, and all required-evidence-terms substring-present in the `Evidence` cell; reject any row matching forbidden-finding keyword groups; enforce `len(rows) == exact_finding_count`; preserve `--bundle-shape-only` fast path |
+| `candidate/review-report.md` | placeholder refreshed to the new structured-table schema |
+
+### Oracle tuples (hardened contract)
+
+| id | file | acceptable_lines | severity | category_terms | title_keywords | required_evidence_terms |
+|---|---|---|---|---|---|---|
+| F1 | `candidate/review-target/access-surface/grant_console.js` | `[2, 7]` | `high` | `[authz, privilege, role]` | `[query, role, escalation, client, reviewerrole, privileged]` | `[reviewerRole, params]` |
+| F2 | `candidate/review-target/access-surface/grant_console.js` | `[27, 28, 29]` | `high` | `[trust, boundary, origin]` | `[parent, tenant, trust, boundary, message, postmessage]` | `[payload.trusted, effectiveTenant]` |
+| F3 | `candidate/review-target/access-surface/grant_console.js` | `[15, 18, 19]` | `medium` | `[authz, replay, forward]` | `[replay, authority, forwarded, client, header]` | `[X-Reviewer-Role, tenantId]` |
+
+Forbidden findings reject any candidate row whose title keywords include `policy.css`,
+`opacity`, `cosmetic`, `css`, `disabled button`, `approve-grant disabled`, or `button disabled`.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse of `oracle/authz-trust-review-contract.json` | `PASS` (3 required_findings, 2 forbidden_findings, `exact_finding_count: 3`) |
+| `--bundle-shape-only` on hardened bundle | `N06 verifier PASS (bundle shape)` |
+| dry-run valid synthesized candidate at `.scratch/verifier-probes/2026-04-21-n06-hardened/` | `N06 verifier PASS (completed review report)` |
+| dry-run variant A — wrong line (`F1 line=99`) | `FAIL` with `Oracle finding F1 has no matching candidate row ... acceptable_lines=[2, 7]` |
+| dry-run variant B — over-count (4 findings) | `FAIL` with `Findings table row count mismatch: expected exactly 3, got 4` |
+| dry-run variant C — forbidden trap (`policy.css opacity` in findings) | `FAIL` with `Finding row 3 title '...' matches forbidden trap (CSS decoration; no security impact)` and `Oracle finding F3 has no matching candidate row` |
+| `git diff --check` | exit `0` |
+
+One verifier bug was caught and fixed during the dry-run: `finding_matches_oracle` compared
+`Evidence`-cell content without lowercasing, while `all_terms_in` applied `term.lower() in text`.
+Mixed-case required terms (`reviewerRole`, `X-Reviewer-Role`) never matched. Fix: lowercase the
+evidence cell before the term-presence check. Without the dry-run step, this bug would have
+surfaced first as an apparent X1/X3 FAIL on legitimate output and been misread as a model signal.
+
+### X1 and X3 Runs
+
+| Row | Scratch root | Wrapper exit | Verifier | Binary read |
+|---|---|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-21_19-33-37-X1-x1-n06-authz-tuple-hardening-retry2-2026-04-21/N06/` | `0` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-21_19-13-40-X3-x3-n06-authz-tuple-hardening-2026-04-21/N06/` | `0` | `PASS` | `1 / 1` |
+
+### Candidate tuple reads
+
+| Row | F1 line | F2 line | F3 line | F1 category | F2 category | F3 category | All severities match | Forbidden trap in findings | False-positive bullets |
+|---|---:|---:|---:|---|---|---|---|---|---:|
+| `X1` | `7` | `28` | `15` | `authz` | `trust-boundary` | `authz` | yes | no | `4` |
+| `X3` | `2` | `28` | `15` | `authz` | `trust-boundary` | `authz` | yes | no | `3` |
+
+All X1 and X3 tuples fall within the hardened `acceptable_lines` sets. The only observed delta
+is the F1 line choice: `X1` cited line `7` (the first authorization decision using
+`reviewerRole`), `X3` cited line `2` (the URL read of `reviewerRole`). Both sit in
+`acceptable_lines: [2, 7]`. This is not a correctness difference. X1 and X3 diverged only on
+false-positive bullet count (`X1: 4`, `X3: 3`) — X3's shorter list includes an adversarial
+observation that `claims.allowAdminOverride` at line 7 is not a separate finding because it is
+already subsumed under F1, which is a non-trivial anti-double-counting read.
+
+### N06 Verdict
+
+`binary tie remains` on the hardened N06 tuple-exact contract. Both near-ceiling models produce
+legitimately correct tuples — the hardened verifier successfully blocks compliance-retelling
+(without reading `grant_console.js` the candidate cannot reconstruct the `(file, line)` pairs),
+but both `X1` and `X3` actually read the code and match the oracle. The ceiling at N06 is
+honest; paraphrase of a deleted observation file is no longer the separation path.
+
+### Runtime footnote (X1 attempt lineage)
+
+The first X1 launch stalled on a `stdin` dead-lock when codex was started via
+`run_in_background: true` inside the pwsh tool path — the background pipe held `stdin` open
+and codex blocked on read. After ~17 minutes the process had accumulated `0.03s` total CPU
+(versus typical multi-hundred-second CPU for real codex runs), confirming the hang. The
+process was killed and relaunched through `cmd /c "pwsh -File ... < NUL"`, which forces
+`stdin` to `NUL` and gives codex an immediate EOF. The third attempt completed in a few
+minutes with the X1 PASS result above. This is a runtime invocation incompatibility between
+the provider-direct codex path in `run-v2-cohort-batch.ps1 Invoke-CodexDirect` and the tool
+harness's background stdin handling; it is not a model failure and is not a verifier failure.
+
+### Post-Wave Decision
+
+Because binary gates still tie on hardened N06, the next wave extends the same tuple-exact
+template to additional review cells identified by the separator audit as `high leak, high
+separation potential`:
+
+- `S27-security-review-findings`
+- `S28-performance-review-findings`
+- `S29-accessibility-review-findings` (already partially hardened, but shares the
+  `review-observations.md` leak pattern)
+- `N05-secret-exposure-review`
+- `N07-scalability-maintainability-cross-review`
+
+Each of these retains the same `review-observations.md` answer-leak shape and the same
+keyword-substring verifier today; each is structurally capable of surfacing X1/X3
+separation once leak removal and tuple-exact checks are applied. The template is now
+reusable: the JSON contract shape, verifier parsing logic, and dry-run protocol carry
+over with only per-scenario oracle tuples to calibrate.
+
+## 2026-04-21 Follow-Up: Wave 2 Tuple-Exact Hardening (S27, S28, S29, N05, N07)
+
+After the `N06` pilot confirmed that the tuple-exact verifier blocks compliance-retelling but
+does not separate near-ceiling models in isolation, the same template was applied in-place to
+the remaining five `high leak, high separation potential` review cells identified by
+`Evidence/separator-audit-2026-04-21.md`.
+
+### Scope
+
+| Scenario | Role | Severity anchors | Exact finding count | Leak file deleted |
+|---|---|---|---|---|
+| `S27` security-review-findings | security | `high/medium/low` | `3` | `inputs/review-observations.md` |
+| `S28` performance-review-findings | performance | `high/medium/low` | `3` | `inputs/review-observations.md` |
+| `S29` accessibility-review-findings | accessibility | `blocking/major/minor` | `5` | `inputs/keyboard-and-at-observations.md` |
+| `N05` secret-exposure-review | security (exposure) | `high/medium/low` | `3` | `inputs/review-observations.md` |
+| `N07` scalability-maintainability-cross-review | architecture / memory | `blocking/major/minor` | `3` | `inputs/review-observations.md` |
+
+Total ground-truth tuples per model: `17` (`3+3+5+3+3`).
+
+### In-place hardening delta (per scenario)
+
+Every cell got the same five-file delta as `N06`: the answer-leak file was deleted; `inputs/task.md`
+was rewritten to require a structured `## Findings` table without enumerating any answer; the
+oracle contract JSON was rewritten with the tuple shape (`id`, `file`, `acceptable_lines`,
+`severity`, `category_terms`, `title_keywords`, `required_evidence_terms`), plus
+`forbidden_findings[]`, `exact_finding_count`, and allowed category and severity enums; the
+oracle `expected-findings.md` was rewritten to match the new tuple ground truth; the scenario
+verifier was rewritten to parse the findings markdown table and match tuples; the candidate
+`review-report.md` placeholder was refreshed to the new schema.
+
+### Verifier parser robustness fix
+
+During pre-run dry-run, a synthesized valid candidate for `S27` failed because the Evidence
+cell contained `targetOrigin || "*"` — the naive `|`-split produced `9` cells instead of `7`
+and truncated the Evidence cell to just `targetOrigin` without `"*"`, which then failed the
+required-evidence-terms check. The fix applied to all five wave-2 verifiers:
+
+- `\|` inside a cell is now honored as an escape; a literal `\|` becomes `|` after parse.
+- Rows whose cell count exceeds the header are folded: extra trailing cells are merged back
+  into the last column with `" | "` as separator, so raw `||` inside the Evidence cell no
+  longer breaks tuple matching.
+
+This closes a real failure mode for real `X1`/`X3` reports that quote JS code containing `||`.
+`N06` was not re-patched because its admitted PASS reports did not exercise the path; the
+wave-2 verifiers are the forward-compatible version, and the same fix should be back-ported
+to `N06` if the cell is ever re-run.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for all 5 new oracle contracts | `PASS` (3/3/5/3/3 required findings; 2/2/2/2/3 forbidden-finding groups) |
+| `--bundle-shape-only` on all 5 hardened bundles | `PASS` for each (`S27 / S28 / S29 / N05 / N07 verifier PASS`) |
+| dry-run synthesized valid candidate (first attempt) | `S27` failed on pipe-split bug; `S28` failed because my synthesis wrote `sorting once` instead of the required substring `sort once`; the other three passed |
+| dry-run synthesized valid candidate (after parser fix + synthesis fix) | `PASS` for all 5 |
+| `git diff --check` before launch | exit `0`; staged changes are limited to the wave-2 bundles and the wave-2 plan, audit, and evidence surfaces |
+
+### X1 and X3 runs
+
+`X3` ran all five scenarios in one sequential batch through `run-v2-cohort-batch.ps1 -RowId X3
+-ScenarioIds S27,S28,S29,N05,N07`. `X1` ran each scenario as an independent parallel background
+task, because the `cmd /c "pwsh -File ... -ScenarioIds S27,S28,S29,N05,N07"` invocation path
+loses array-binding across the cmd boundary and pwsh `-File` mode sees the whole comma-joined
+string as a single scenario id. Five separate `cmd /c "pwsh -File ... -ScenarioIds S27 < NUL"`
+launches sidestep that issue and also preserve the `< NUL` stdin fix needed to avoid the
+codex stdin dead-lock observed in `N06 X1` attempt 1.
+
+| Row | S27 | S28 | S29 | N05 | N07 | Wave-2 subtotal |
+|---|---|---|---|---|---|---:|
+| `X1 / gpt-5.4` | `PASS` | `PASS` | `PASS` | `PASS` | `PASS` | `5 / 5` |
+| `X3 / opus 4.7max` | `PASS` | `PASS` | `PASS` | `PASS` | `PASS` | `5 / 5` |
+
+All ten runs: `wrapperExitCode = 0`, `verificationPassed = true`, changed paths strictly
+`candidate/review-report.md`. Across the 17 ground-truth tuples per model, all 17 matched for
+both `X1` and `X3`; no forbidden-finding rows appeared in either run set; all required
+false-positive terms were mentioned in every `## False Positives Avoided` section.
+
+### Wave-2 run roots
+
+| Row | Run root |
+|---|---|
+| `X1 / S27` | `.scratch/v2-cohort-runs/2026-04-21_20-16-55-X1-wave2-s27-tuple-hardening-2026-04-21/S27/` |
+| `X1 / S28` | `.scratch/v2-cohort-runs/2026-04-21_20-16-56-X1-wave2-s28-tuple-hardening-2026-04-21/S28/` |
+| `X1 / S29` | `.scratch/v2-cohort-runs/2026-04-21_20-16-58-X1-wave2-s29-tuple-hardening-2026-04-21/S29/` |
+| `X1 / N05` | `.scratch/v2-cohort-runs/2026-04-21_20-17-01-X1-wave2-n05-tuple-hardening-2026-04-21/N05/` |
+| `X1 / N07` | `.scratch/v2-cohort-runs/2026-04-21_20-17-03-X1-wave2-n07-tuple-hardening-2026-04-21/N07/` |
+| `X3 batch (all 5)` | `.scratch/v2-cohort-runs/2026-04-21_20-16-10-X3-wave2-tuple-hardening-2026-04-21/{S27,S28,S29,N05,N07}/` |
+
+### Observed tuple deltas (binary gates tied; qualitative differences)
+
+Binary gates tie on all five cells; qualitative review of the reports shows:
+
+- `S27 F3` wildcard `postMessage`: `X1` cited line `9` in a single concise Evidence cell; `X3`
+  cited line `9` and described lines `7`–`10` with explicit `||` JS snippet in a richer
+  Evidence cell that exercised the parser pipe-escape fix.
+- `S29 F3` focus-order: `X1` cited line `53` (the `tabindex="1"` on `Sharing policy`); `X3`
+  cited line `22` (the `tabindex="2"` on the close button) and discussed both tabindex values
+  together. Both lines are in `acceptable_lines = [22, 53]`.
+- Across all five scenarios, `X3` reports carried richer Evidence prose, more `## False
+  Positives Avoided` bullets (for example, `5` for `S29 X3` versus `2` for `S29 X1`), and more
+  explicitly disciplined exclusions (for example, `S29 X3` explicitly excluded the
+  visually-hidden `scope-hint` and the body-text contrast as non-findings, even though the
+  verifier only required the two minimum false-positive mentions).
+
+None of these qualitative deltas flip the binary gate. They are the same anti-double-counting
+pattern first observed in `N06 X3`.
+
+### Wave-2 Verdict
+
+`binary tie remains` across all five hardened cells. Combined with the `N06` pilot, the
+tuple-exact hardening template now covers `6` review cells in the core `12+1` surface, every
+one of which is a legitimate `PASS` for both `X1` and `X3`. The hardening succeeded
+structurally — the verifier rejects paraphrase-only candidates, because the candidate cannot
+guess the real `(file, line)` tuples without actually reading the code — but the near-ceiling
+separation was not broken by leak removal alone. Both models actually read the code and
+produce correct tuples.
+
+### Post-Wave-2 Options
+
+With six near-ceiling-capable review cells now hardened and still tied, the next separator
+direction should shift away from structured-review tasks. The separator audit flagged three
+under-explored surface classes that could still separate near-ceiling models:
+
+- **Harder tests inside the already-functional implementation scenarios** (`S15`–`S24`,
+  `N08`–`N10`). They already run real `pytest` / `node --test` / JSON-equality checks, but
+  near-ceiling models pass them reliably. Tightening the tests with more adversarial inputs
+  or property-based checks could turn the functional bar into a binary separator.
+- **Rebuilding `S06` analyst-repository-fact-memo** with fewer enumerated repo anchors. The
+  audit classified it `high leak, high separation potential` and it sits in a different
+  reasoning surface (multi-hop repository investigation, not single-file review); a rebuild
+  without enumerated paths forces real slice investigation.
+- **A new multi-file code patch scenario** with hidden dependency coupling and tuple-exact
+  `(file, line, category)` findings on adversarial decoy defects. No current cell exercises
+  that surface.
+
+These are strategic choices, not part of wave 2. They are the next admission decision for the
+operator.
+
+## 2026-04-21 Follow-Up: Wave 3 S06 Tuple-Exact Hardening (Repository Investigation)
+
+With the six review cells now hardened and still tied, wave 3 applied the tuple-exact template
+to `S06 analyst-repository-fact-memo` — a different reasoning surface (multi-hop repository
+investigation instead of structured review). The separator audit had classified `S06` as
+`high leak, high separation potential` on different grounds from the review-class cells:
+`S06` has no answer-leak file enumerating findings, but `inputs/noisy-intake-notes.md`
+directly named three of the four false-lead files (`legacy-routing-notes.md`,
+`legacy_score_profiles.py`, `role_matrix.yaml`), and the previous verifier used
+keyword-substring matching across a 12-section prose memo with a fixed list of required
+anchor paths.
+
+### In-place hardening delta
+
+| Path | Change |
+|---|---|
+| `inputs/noisy-intake-notes.md` | rewritten to five abstract themes with no filenames — the candidate must discover the actual files through investigation rather than copy names from the notes |
+| `inputs/task.md` | rewritten to require three structured tables (`## Confirmed Facts`, `## False Leads Rejected`, `## Explicit Unknowns`) with per-column rules and no answer enumeration |
+| `oracle/fact-contract.json` | replaced keyword-substring shape with tuple shape for three match tables: `required_confirmed_facts[]` with `{id, question_values, file, acceptable_lines, symbol_keywords, fact_terms}`; `required_false_leads[]` with `{id, theme_keywords, file, rejection_terms}`; `required_unknowns[]` with `{id, term_keywords, why_terms}`; plus exact counts; preserved disallowed markers/headings; preserved `expected_gate_decision: PASS` |
+| `oracle/expected-findings.md` | rewritten to tuple-table ground truth mirroring the new contract |
+| `verifiers/check_factual_memo.py` | rewrote `check_completed_memo` to parse all three tables (reusing the wave-2 `\|` escape and trailing-cells merge parser), match each oracle tuple against one distinct candidate row, enforce exact counts, preserve `--bundle-shape-only` |
+| `candidate/repository-fact-memo.md` | placeholder refreshed to the new three-table schema with `## Investigation goal` header |
+| `candidate/repo-snapshot/**` | unchanged — preserves the real codebase the memo investigates |
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse of `oracle/fact-contract.json` | `PASS` (4 confirmed facts, 4 false leads, 2 unknowns) |
+| `--bundle-shape-only` on hardened bundle | `S06 verifier PASS (bundle shape)` |
+| dry-run valid synthesized memo (first attempt) | `L3` failed because my synthesis used `scenario metadata` instead of the required substring `scenario.yaml` |
+| dry-run valid synthesized memo (after wording fix) | `S06 verifier PASS (completed factual memo)` |
+
+The `L3` miss exercised the intended signal: the oracle insists on `scenario.yaml` as a literal
+substring because citing that filename is direct evidence the reviewer looked at
+`collect_scenarios.py:13`'s `glob("*/scenario.yaml")` rather than hand-waving about
+"metadata". A model that only reads the abstract `noisy-intake-notes.md` cannot produce that
+substring without investigating `candidate/repo-snapshot/`.
+
+### X1 and X3 runs
+
+| Row | Run root | Wrapper exit | Verifier | Binary read |
+|---|---|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-21_20-56-02-X1-wave3-s06-tuple-hardening-2026-04-21/S06/` | `0` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-21_20-56-04-X3-wave3-s06-tuple-hardening-2026-04-21/S06/` | `0` | `PASS` | `1 / 1` |
+
+Both models produced the four correct confirmed facts with correct `(file, line, symbol)`
+tuples, the four correct false leads mapped to the real repo-snapshot files, and the two
+correct unknowns — despite the abstract `noisy-intake-notes.md` giving them no filenames.
+Both investigated `candidate/repo-snapshot/` to locate each piece of evidence.
+
+### Candidate tuple reads (X1 vs X3)
+
+| Section | X1 | X3 | Notes |
+|---|---|---|---|
+| `F1` line | `15` | `13` | both in `acceptable_lines = [7, 13, 15, 19]` |
+| `F2` line | `15` | `15` | same |
+| `F3` line | `21` | `21` | same |
+| `F4` line | `5` | `5` | same |
+| False-lead file mapping | all 4 correct | all 4 correct | identical file set |
+| Unknown `U1` phrasing | `Requested surface caller` | `Upstream caller or scheduler CLI entrypoint supplying the requested surface id` | `X3` cell is more specific; both match |
+| Unknown `U2` phrasing | `External publication runtime logs` | `Other consumer of the legacy profile module outside the visible writer` | different emphasis; both match |
+
+`X3` wrote longer and more structured prose across `Investigation goal`, fact and rejection
+cells; `X1` wrote compact cells. Same qualitative pattern as `N06` and wave 2 — richer
+anti-double-counting and richer evidence prose on `X3`. None of the deltas flip the binary
+gate.
+
+### S06 Verdict
+
+`binary tie remains` on hardened `S06`. Combined with the `N06` pilot and wave 2's five cells,
+seven near-ceiling-capable cells are now tuple-exact hardened and every one of them
+legitimately ties PASS/PASS. The hardening successfully rules out the compliance-retelling
+path on both review-class and factual-investigation surfaces, but near-ceiling separation is
+not unlocked by leak removal on either surface class.
+
+### Post-Wave-3 Options
+
+The two remaining surface classes that could plausibly separate near-ceiling models are:
+
+- **Harder tests inside the already-functional implementation scenarios** (`S15`–`S24`,
+  `N08`–`N10`). They already run real `pytest` / `node --test` / JSON-equality checks and both
+  models pass them reliably. Tightening the tests with adversarial inputs or property-based
+  checks could turn the functional bar into a binary separator.
+- **A new multi-file code patch scenario** with hidden dependency coupling and tuple-exact
+  `(file, line, category)` findings on adversarial decoy defects. No current cell exercises
+  that surface.
+
+Seven hardened cells now form a stable `compliance-retelling-resistant anchor set` inside the
+`12+1` baseline — they do not separate the top pair, but they are honest about why they do
+not, and they are the correct cells to retain in any final publication as ceiling-legitimacy
+indicators.
+
+## 2026-04-21 Follow-Up: Wave 4 S22 Adversarial Geometry Hardening
+
+Wave 4 tested the cheapest remaining separator path after review-class and factual-investigation
+hardening both tied: functional test tightening inside an existing implementation cell.
+`S22 geometry-predicate-patch` was selected because its verifier already evaluates a deterministic
+truth-table oracle (`orientation_cases[]` and `segment_cases[]`) against real candidate code.
+
+### In-place hardening delta
+
+| Path | Change |
+|---|---|
+| `Scenarios-v2/S22-geometry-predicate-patch/oracle/truth-table.json` | added 12 adversarial geometry cases: 6 orientation cases and 6 segment-intersection cases; total oracle coverage is now 23 cases (`11` orientation, `12` segment) |
+| `Scenarios-v2/S22-geometry-predicate-patch/oracle/geometry-contract.json` | updated `expected_start_state_failures` from 3 to 7 so `--expect-start-state` remains coherent after the oracle extension |
+| `candidate/**` | unchanged in the mainline bundle; dry-run valid implementation was synthesized only under `.scratch/verifier-probes/2026-04-21-s22-adversarial/` |
+
+### Added adversarial cases
+
+| Class | Case IDs | Purpose |
+|---|---|---|
+| orientation | `degenerate-duplicate-start`, `small-scale-near-collinear-negative` | degenerate triangle and near-zero signed-area collapse |
+|  | `small-scale-not-collinear`, `large-scale-near-collinear-negative` | distinguish fixed global epsilon from scale-aware area tolerance |
+|  | `right-handed-swapped-negative`, `large-scale-left-handed-not-collinear` | preserve right-handed sign convention and left-handed negative orientation |
+| segment | `zero-length-point-on-segment`, `zero-length-point-near-segment-end` | point/zero-length segment boundary contact, including coordinate tolerance at endpoint |
+|  | `zero-length-point-outside-tolerance`, `near-endpoint-diagonal-outside-tolerance` | prevent tolerance inflation from turning clearly outside points into intersections |
+|  | `near-endpoint-diagonal-within-tolerance`, `shared-endpoint-reversed-boundary` | span-scaled endpoint tolerance and reversed shared-endpoint boundary contact |
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse of `oracle/truth-table.json` | `PASS` (`11` orientation cases, `12` segment cases) |
+| JSON parse of `oracle/geometry-contract.json` | `PASS` (`7` expected start-state failures) |
+| `python Scenarios-v2/S22-geometry-predicate-patch/verifiers/run_geometry_checks.py --bundle-shape-only` | `S22 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/S22-geometry-predicate-patch/verifiers/run_geometry_checks.py --expect-start-state` | `S22 verifier PASS (start state)` |
+| dry-run valid synthesized candidate at `.scratch/verifier-probes/2026-04-21-s22-adversarial/S22/` | `S22 verifier PASS (completed run)` |
+| `git diff --check` before launch | exit `0` |
+
+The synthesized dry-run implementation used the oracle tolerance formulas directly:
+`base_area_epsilon * max(|ab|^2, |ac|^2, |bc|^2, 1.0)` for orientation and
+`base_coordinate_epsilon * max(abs(dx), abs(dy), 1.0)` for on-segment bounds. This confirmed the
+new oracle cases are internally consistent and not over-tightened.
+
+### X1 and X3 runs
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-21_21-38-17-X1-wave4-s22-adversarial-geometry-2026-04-21/S22/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-21_21-38-16-X3-wave4-s22-adversarial-geometry-2026-04-21/S22/` | `0` | `PASS` | `PASS` | `1 / 1` |
+
+Launch notes:
+
+- `X1` used the admitted stdin-safe pattern:
+  `cmd /c "pwsh -ExecutionPolicy Bypass -File ...run-v2-cohort-batch.ps1 -RowId X1 -BatchName wave4-s22-adversarial-geometry-2026-04-21 -ScenarioIds S22 < NUL"`.
+- `X3` used direct PowerShell invocation:
+  `& "...run-v2-cohort-batch.ps1" -RowId X3 -BatchName wave4-s22-adversarial-geometry-2026-04-21 -ScenarioIds S22`.
+- `X4` and `X5` were intentionally `NOT-RUN` for this pilot; their route/runtime caveats remain unchanged as of `2026-04-21`.
+
+### Truth-table reads
+
+| Row | Orientation cases | Segment cases | Total truth cases | Verifier failures |
+|---|---:|---:|---:|---:|
+| `X1 / gpt-5.4` | `11 / 11` | `12 / 12` | `23 / 23` | `0` |
+| `X3 / opus 4.7max` | `11 / 11` | `12 / 12` | `23 / 23` | `0` |
+
+Both models repaired the same underlying defect class: fixed absolute epsilon was replaced by a
+scale-aware signed-area tolerance for `orientation`, and `on_segment` gained segment-span coordinate
+tolerance. Both changed only the two allowed benchmark paths:
+
+- `candidate/geometry-owned/src/geometry/predicates.py`
+- `candidate/geometry-owned/tests/test_predicates.py`
+
+Qualitative delta: `X1` produced a compact implementation and 4 direct tests; `X3` separated
+area and coordinate constants more explicitly and produced 20 direct tests. The oracle verifier
+does not score direct-test breadth, and both candidate implementations matched every truth-table
+case. This is not a binary correctness difference.
+
+### S22 Verdict
+
+`binary tie remains` on hardened `S22`. The adversarial geometry extension closed additional
+near-miss functional paths, but both near-ceiling models solved the tolerance policy correctly.
+This means the cheapest remaining functional-test pilot did not produce an honest binary
+separator.
+
+### Next-session handoff
+
+Because `S22` tied after adversarial functional tightening, the next admitted separator route is
+Option (c): a net-new multi-file code patch scenario. Suggested next-session prompt:
+
+```text
+Working directory: D:\dev\Orchestrator\benchmarks
+
+Continue X1/X3 separation after Wave 4. Do not touch the admitted anchor set
+N06/S27/S28/S29/N05/N07/S06 or the hardened S22 oracle unless explicitly requested.
+
+Current result: Wave 4 S22 adversarial geometry hardening added 12 truth-table cases,
+validated the extended oracle with a synthesized correct candidate, then ran X1 and X3.
+Both wrapperExitCode=0, both verifier PASS, both 23/23 truth cases; binary tie remains.
+
+Next task: design Option (c), a new multi-file code patch scenario that tests cross-file
+dependency reasoning with real defects and adversarial decoy defects. Keep it as a new
+scenario root rather than mutating review-class/factual-investigation cells. The design
+should specify candidate/review-target files, real defect tuples, forbidden decoys,
+verifier shape, pre-run protocol, and expected X1/X3 separator hypothesis.
+```
+
+## 2026-04-21 Follow-Up: Option (c) N14 Multi-file Dependency Patch
+
+Option (c) materialized a new implementation scenario instead of further tightening the tied
+review/factual/geometry surfaces. `N14 multi-file-dependency-patch` tests whether a model can fix
+one coupled behavior across profile resolution, attempt classification, score denominators, and
+report rendering while ignoring plausible but forbidden decoy files.
+
+### Scenario materialization
+
+| Path | Change |
+|---|---|
+| `Scenarios-v2/N14-multi-file-dependency-patch/scenario.yaml` | new `N14` scenario on diagnostic surface `E4`; role class `implementation`; allowed change surface restricted to four source files and one test file |
+| `inputs/task.md` and `inputs/decoy-map.md` | task asks for a real multi-file patch and names decoy regions that must not be edited |
+| `candidate/workspace/src/routing_eval/` | buggy start state spans `config.py`, `status.py`, `scorecard.py`, and `render.py`; `api.py` is intentionally protected |
+| `candidate/workspace/docs/`, `legacy/`, `ui/` | adversarial decoys for stale profile advice, legacy denominator logic, and UI-label wording |
+| `oracle/behavior-cases.json` | 3 behavior cases covering active-profile precedence, route-unavailable rows, wrapper-zero verifier failures, timeouts, and missing worker output |
+| `verifiers/check_multi_file_dependency_patch.py` | completed-run oracle verifier with exact JSON-equality against the three behavior cases and hardcoded-oracle-literal guards |
+| `verifiers/check_scope.py` | scope guard for benchmark changed paths |
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse of `oracle/behavior-cases.json` | `PASS` (`3` cases) |
+| JSON parse of `oracle/multi-file-contract.json` | `PASS` (`3` expected start-state failures) |
+| `python Scenarios-v2/N14-multi-file-dependency-patch/verifiers/check_multi_file_dependency_patch.py --bundle-shape-only` | `N14 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N14-multi-file-dependency-patch/verifiers/check_multi_file_dependency_patch.py --expect-start-state` | `N14 verifier PASS (start state)` |
+| direct start-state unit tests | expected failing start state: existing candidate still fails before patching |
+| dry-run valid synthesized candidate at `.scratch/verifier-probes/2026-04-21-n14-multifile-reference/N14/` | `N14 verifier PASS (completed run)` |
+| `python Scenarios-v2/N14-multi-file-dependency-patch/verifiers/check_scope.py --bundle-root .scratch/verifier-probes/2026-04-21-n14-multifile-reference/N14 --changed-path ...` | `N14 scope PASS (changed paths are in bounds)` |
+| `git diff --check` before launch | exit `0` |
+
+### X1 and X3 runs
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-21_22-08-32-X1-optionc-n14-multifile-dependency-2026-04-21/N14/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-21_22-08-32-X3-optionc-n14-multifile-dependency-2026-04-21/N14/` | `0` | `PASS` | `PASS` | `1 / 1` |
+
+Both summaries are scoreable: `verificationPassed=true`; `python check_multi_file_dependency_patch.py`
+exited `0`; `python check_scope.py` exited `0`.
+
+### Behavior-case reads
+
+| Row | Behavior cases | Source/code paths changed | Test path changed | Verifier failures |
+|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `3 / 3` | `config.py`, `status.py`, `scorecard.py`, `render.py` | yes | `0` |
+| `X3 / opus 4.7max` | `3 / 3` | `config.py`, `status.py`, `scorecard.py`, `render.py` | no | `0` |
+
+Qualitative delta: `X1` made the broader local patch by also extending `tests/test_routing_eval.py`
+to four tests and used a slightly richer runtime-reason normalization helper. `X3` left the tests
+unchanged and produced a more compact source-only patch. Both matched all three oracle behavior
+cases and stayed inside the allowed benchmark paths, so this is not a binary correctness difference.
+
+`X1` worker output included unrelated Cloudflare/plugin fetch noise before its final patch summary;
+the admitted result uses `summary.json` and verifier logs, not free-form stdout, as the scoreable
+source of truth.
+
+### Calibration rows
+
+After the `X1`/`X3` top-pair read, calibration rows were launched on the same `N14` bundle.
+
+| Row | Run root | Wrapper / tool status | Verifier | Scope guard | Binary read |
+|---|---|---|---|---|---:|
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-21_22-20-40-X2-optionc-n14-calibration-2026-04-21/N14/` | wrapper `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X5 / gemini3.1pro` | `.scratch/v2-cohort-runs/2026-04-21_22-20-39-X5-optionc-n14-calibration-2026-04-21/N14/` | shell timeout `900s` | not invoked | no summary | `0 / 0` |
+|  | `.scratch/v2-cohort-runs/2026-04-21_22-37-36-X5-optionc-n14-calibration-stdin-null-2026-04-21/N14/` | shell timeout `600s` | not invoked | no summary | `0 / 0` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-21_22-20-39-X6-optionc-n14-calibration-2026-04-21/N14/` | shell timeout `900s` | not invoked | no summary | `0 / 0` |
+|  | `.scratch/v2-cohort-runs/2026-04-21_22-37-36-X6-optionc-n14-calibration-stdin-null-2026-04-21/N14/` | shell timeout `600s` | not invoked | no summary | `0 / 0` |
+
+`X2` is a scoreable verifier failure, not runtime: `summary.json` exists,
+`wrapperExitCode=0`, `worker-output.txt` exists, benchmark changed paths were in bounds, and the
+scope guard passed. The verifier failed with:
+
+```text
+ERROR: Top-level bundle entries drifted: ['.reports', 'README.md', 'candidate', 'inputs', 'oracle', 'scenario.yaml', 'verifiers']
+```
+
+The worker wrote a disposable-run `.reports/2026-04/report-implementation-2026-04-21_22-20-40-N14-X2-row.md`
+inside the bundle. That extra top-level entry is enough to fail the N14 bundle-shape contract even
+though the model also patched the intended source/test files.
+
+`X5` and `X6` are not scoreable on `N14` in this calibration attempt. Direct PowerShell launch and
+stdin-null retry both reached Gemini CLI processes with `--prompt=` but produced no
+`worker-output.txt`, no `summary.json`, and no verifier logs before timeout. The leftover Gemini
+`cmd`/`node`/`pwsh` processes for both batch IDs were stopped after timeout. This is recorded as
+runtime `NOT-RUN`, not model `FAIL`.
+
+### N14 Verdict
+
+`binary tie remains` on `N14`. The new multi-file dependency scenario is a valid hardened cell and
+it closed a more implementation-shaped surface than the review/factual/geometry pilots, but it did
+not separate `X1` and `X3` by binary verification.
+
+Calibration does separate `X2` lower (`0 / 1`) and leaves Gemini rows runtime-blocked (`0 / 0`
+scoreable). The remaining top-pair decision is to design a materially harder implementation surface
+with stateful sequencing, larger owned code, and hidden mutation/order coupling. Do not count
+qualitative test breadth as a separator unless the verifier or rubric is explicitly upgraded to
+score it.
+
+## 2026-04-21 Follow-Up: N15 Stateful System Gauntlet
+
+After `N14` still tied the top pair, the separator surface was changed more radically instead of
+adding more small cases. `N15-stateful-batch-rollback-gauntlet` materializes a stateful execution
+system with journal, checkpoint, retry, rollback, planner, executor, report, and in-memory store
+ownership boundaries.
+
+### Scenario materialization
+
+| Path | Change |
+|---|---|
+| `Work/next-upgraded-pack/Planning/next-phase/n15-stateful-gauntlet-design-2026-04-21.md` | compact approved design note for the new stateful gauntlet |
+| `Scenarios-v2/N15-stateful-batch-rollback-gauntlet/scenario.yaml` | new diagnostic `E5` implementation scenario with `top-pair-separator` and `stateful-gauntlet` flags |
+| `candidate/workspace/src/batchflow/` | 10-file Python package: protected public API plus owned state machine modules |
+| `candidate/workspace/docs/`, `legacy/`, `ui/` | protected decoys for stale rollback advice, sorted retry archives, and UI-only status labels |
+| `oracle/stateful-contract.json` | exact bundle metadata, allowed surfaces, prohibited literals, and calibrated start-state failure set |
+| `verifiers/check_stateful_batch_gauntlet.py` | deterministic sequence verifier covering 9 stateful invariants |
+| `verifiers/check_scope.py` | changed-path scope guard |
+
+The verifier pressure is materially different from `N14`: it checks behavior across repeated API
+calls, not one local output. Covered invariants include input immutability, causal plan order,
+idempotent completed reruns, per-batch checkpoint isolation, crash resume, current-attempt rollback,
+retry queue causal order, global journal sequence, and event-log based reporting.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse of `oracle/stateful-contract.json` | `PASS` |
+| `python Scenarios-v2/N15-stateful-batch-rollback-gauntlet/verifiers/check_stateful_batch_gauntlet.py --bundle-shape-only` | `N15 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N15-stateful-batch-rollback-gauntlet/verifiers/check_stateful_batch_gauntlet.py --expect-start-state` | `N15 verifier PASS (start state)` |
+| direct start-state unit tests | expected failing start state: `2` visible failures before patching |
+| scratch reference at `.scratch/verifier-probes/2026-04-21-n15-stateful-reference/N15/` | `N15 verifier PASS (completed run)` |
+| scratch reference scope guard | `N15 scope PASS (changed paths are in bounds)` |
+| `git diff --check` before launch | exit `0` |
+
+The start-state failure set is calibrated, not accidental: the supplied candidate fails state
+mutation/order/checkpoint/rollback/retry/report invariants while the scratch reference passes the
+full verifier.
+
+### X1 and X3 runs
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-21_23-07-21-X1-n15-stateful-gauntlet-2026-04-21/N15/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-21_23-07-21-X3-n15-stateful-gauntlet-2026-04-21/N15/` | `0` | `PASS` | `PASS` | `1 / 1` |
+
+`X1` exceeded the outer shell timeout at `1204s`, but the underlying Codex process was still
+actively writing output and later produced `summary.json` with `wrapperExitCode=0` and
+`verificationPassed=true`. The admitted result is therefore the runner summary and verifier logs,
+not the outer shell timeout.
+
+### Invariant reads
+
+| Row | Stateful invariant suite | Benchmark paths changed | Tests changed | Verifier failures |
+|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `9 / 9` | 7 source files | yes | `0` |
+| `X3 / opus 4.7max` | `9 / 9` | 7 source files | no | `0` |
+
+Both models repaired the core ownership boundaries:
+
+- planner copies without mutating or reordering caller input
+- journal sequence is global
+- checkpoints are keyed by `batch_id`
+- retry queue preserves arrival order
+- rollback is attempt-scoped
+- executor rewinds checkpoint after rolled-back failed attempt
+- report derives summary counts from journal events
+
+Qualitative delta: `X1` added broader local regression tests and took materially longer; `X3`
+produced a compact source-only patch. The binary verifier does not score runtime duration or
+test breadth, and both candidates matched the full stateful invariant suite.
+
+### N15 Verdict
+
+`binary tie remains` on `N15`. This was a real step-change in task class, not incremental
+hardening, and both top models still passed. The current evidence says binary patch/verifier tasks
+may no longer be a productive way to separate `X1` and `X3` unless the next task adds a larger
+long-horizon planning surface, hidden-scale system integration, or a non-binary quality rubric.
+
+## 2026-04-22 Follow-Up: N16 Long-Horizon Integration Rubric
+
+After `N15` still tied the top pair, the separator surface moved from binary-only patch success to
+a larger long-horizon integration task plus a separate diagnostic rubric.
+`N16-release-lane-integration-gauntlet` materializes a release-lane execution package with config,
+intake, dedupe, planning, scheduling, ledger, notification, rollback, audit, report, executor, and
+store seams.
+
+### Scenario materialization
+
+| Path | Change |
+|---|---|
+| `Work/next-upgraded-pack/Planning/next-phase/n16-long-horizon-integration-rubric-design-2026-04-22.md` | compact design note for the long-horizon integration task and score layer |
+| `Scenarios-v2/N16-release-lane-integration-gauntlet/scenario.yaml` | new diagnostic `E6` implementation scenario with `top-pair-separator`, `long-horizon`, and `scored-rubric` flags |
+| `candidate/workspace/src/releaseflow/` | multi-module Python package with protected public API/models and eleven editable implementation seams |
+| `candidate/workspace/docs/`, `legacy/`, `ui/` | protected decoys for migration advice, stale dedupe helper, and UI-only badge changes |
+| `oracle/integration-contract.json` | exact bundle metadata, allowed surfaces, prohibited literals, and calibrated start-state failure set |
+| `verifiers/check_release_lane_integration.py` | deterministic integration verifier covering 10 long-horizon invariants |
+| `verifiers/check_scope.py` | changed-path scope guard |
+| `Work/next-upgraded-pack/Tooling/score-n16-integration-rubric.py` | post-run scorer for correctness, patch quality, elapsed proxy, and output-size cost proxy |
+| `Work/next-upgraded-pack/Evidence/n16-long-horizon-rubric-2026-04-22.json` | machine-readable score output for the admitted `X1` and `X3` runs |
+
+Covered invariants include active profile precedence, caller input immutability, semantic dedupe
+idempotency, dependency order, canary-before-prod order, frozen lane deferral, exactly-once
+notifications, rollback scoping, source trace preservation, and ledger/audit-based reporting.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse of `oracle/integration-contract.json` | `PASS` |
+| `python Scenarios-v2/N16-release-lane-integration-gauntlet/verifiers/check_release_lane_integration.py --bundle-shape-only` | `N16 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N16-release-lane-integration-gauntlet/verifiers/check_release_lane_integration.py --expect-start-state` | `N16 verifier PASS (start state)` |
+| direct start-state unit tests | expected failing start state: `4` visible failures before patching |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n16-integration-reference/N16/` | `N16 verifier PASS (completed run)` |
+| scratch reference direct unit tests | `Ran 4 tests ... OK` |
+| scratch reference scope guard | `N16 scope PASS (changed paths are in bounds)` |
+| scorer missing-summary smoke | `NOT-RUN` row with total `0` |
+| `git diff --check` before launch | exit `0` |
+
+### X1 and X3 runs
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_00-33-10-X1-n16-long-horizon-integration-2026-04-22/N16/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_00-33-09-X3-n16-long-horizon-integration-2026-04-22/N16/` | `0` | `PASS` | `PASS` | `1 / 1` |
+
+Both rows are scoreable: `summary.json` exists, `wrapperExitCode=0`, `verificationPassed=true`,
+the integration verifier passed, and the scope guard passed.
+
+### Rubric read
+
+| Row | Binary | Rubric | Correctness | Patch quality | Time | Cost | Elapsed proxy | Output bytes | Notes |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `89 / 100` | `40` | `30` | `15` | `4` | `338.689s` | `393174` | changed 12 benchmark paths, including tests; `173` added, `29` deleted |
+| `X3 / opus 4.7max` | `PASS` | `95 / 100` | `40` | `25` | `15` | `15` | `502.532s` | `2829` | changed 11 benchmark paths, tests unchanged; `99` added, `25` deleted |
+
+The rubric is diagnostic, not a replacement for the binary gate. It separates on cost/compactness:
+`X3` wins the admitted N16 rubric by `6` points because it produced a much smaller worker output
+while still passing the full integration verifier. `X1` receives the stronger patch-quality score
+because it changed tests in addition to source.
+
+### N16 Verdict
+
+`binary tie remains` on `N16`, but the non-binary scored read gives a measurable `X3` diagnostic
+edge on long-horizon integration efficiency: `95 / 100` versus `89 / 100`. This should be kept as
+an `E6` diagnostic rubric result, not merged into the old full-v2 denominator and not promoted into
+a routing lane without an explicit scoring-policy decision.
+
+## 2026-04-22 Follow-Up: N17 Owner Orchestration Routing Rubric
+
+After the first role-fit scorecard identified owner/orchestration as an evidence gap,
+`N17-owner-orchestration-routing-gauntlet` was added as diagnostic `E7`. It tests whether a row can
+preserve the primary lane-fit task, classify interruptions, keep diagnostic evidence separate from
+routing policy, order owner/QA/architecture gates correctly, and define bounded `X2`/`X5`/`X6`
+calibration policy.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse of `oracle/owner-routing-contract.json` | `PASS` |
+| `python Scenarios-v2/N17-owner-orchestration-routing-gauntlet/verifiers/check_owner_routing.py --bundle-shape-only` | `N17 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N17-owner-orchestration-routing-gauntlet/verifiers/check_owner_routing.py --expect-start-state` | `N17 verifier PASS (start state)` |
+| scorer missing-summary smoke | `NOT-RUN` row with total `0` |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n17-owner-reference/N17/` | `N17 verifier PASS (completed packet)` |
+| scratch reference scope guard | `N17 scope PASS (changed paths are in bounds)` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_01-37-48-X1-n17-owner-routing-2026-04-22/N17/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_01-37-48-X3-n17-owner-routing-2026-04-22/N17/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-22_01-40-22-X2-n17-owner-routing-calibration-2026-04-22/N17/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-22_01-43-32-X6-n17-owner-routing-calibration-2026-04-22/N17/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X5 / gemini3.1pro` | `.scratch/gemini-smoke-n17-2026-04-22/` | timeout `180s` | not launched | no semantic run | `NOT-RUN` |
+
+`X5` stayed out of the semantic N17 run because the required direct smoke did not write
+`x5-output.txt` before timeout. `X6` smoke wrote `OK` and was admitted for semantic calibration.
+
+### Rubric read
+
+| Row | Binary | Rubric | Primary | Diagnostic | Routing | Calibration | Interruptions | Elapsed proxy | Output bytes |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `X1 / gpt-5.4` | `PASS` | `100 / 100` | `20` | `20` | `20` | `20` | `20` | `121.745s` | `97344` |
+| `X3 / opus 4.7max` | `PASS` | `100 / 100` | `20` | `20` | `20` | `20` | `20` | `116.485s` | `1965` |
+| `X2 / gpt-5.3-codex-spark` | `PASS` | `100 / 100` | `20` | `20` | `20` | `20` | `20` | `33.741s` | `81627` |
+| `X6 / gemini3.1flash-lite-preview` | `PASS` | `100 / 100` | `20` | `20` | `20` | `20` | `20` | `58.275s` | `977` |
+
+### N17 Verdict
+
+`binary tie remains` on owner/orchestration routing; the exact owner-boundary task is not a
+top-pair separator. However, it is useful for role-fit calibration: `X1`, `X3`, `X2`, and `X6` can
+all preserve the required owner routing boundaries on this constrained packet. The strongest
+non-binary signal is again output compactness: `X3` and `X6` are far smaller than `X1` and `X2`.
+`X5` remains runtime-blocked for this pilot and is not a model failure.
+
+## 2026-04-22 Follow-Up: N18 Scientist Constraints Decision Rubric
+
+`N18-scientist-constraints-decision-gauntlet` was added as diagnostic `E8` for the
+scientist/constraint lane. It forces a release decision across conflicting security,
+performance, reliability, and stale-advice evidence. The correct answer is `Option C - keyed index
+plus exact ledger replay`; candidates must reject faster-looking but inadmissible options, preserve
+exact measured values, write a non-claim ledger, define falsification checks, and assign residual
+risk owners.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse of `oracle/constraint-contract.json` | `PASS` |
+| `python Scenarios-v2/N18-scientist-constraints-decision-gauntlet/verifiers/check_constraint_decision.py --bundle-shape-only` | `N18 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N18-scientist-constraints-decision-gauntlet/verifiers/check_constraint_decision.py --expect-start-state` | `N18 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n18-constraints-reference/N18/` | `N18 verifier PASS (completed memo)` |
+| scratch reference scope guard | `N18 scope PASS` |
+| scorer missing-summary smoke | `NOT-RUN` row with total `0` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_02-09-59-X1-n18-scientist-constraints-2026-04-22/N18/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_02-09-59-X3-n18-scientist-constraints-2026-04-22/N18/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-22_02-14-52-X2-n18-scientist-constraints-calibration-2026-04-22/N18/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-22_02-14-51-X6-n18-scientist-constraints-calibration-2026-04-22/N18/` | `1` | `FAIL` | `PASS` | `ROUTE-FAIL` |
+| `X5 / gemini3.1pro` | `.scratch/v2-cohort-runs/2026-04-22_02-50-07-X5-n18-scientist-constraints-calibration-2026-04-22-rerun/N18/` | timeout `900s` | no summary | no semantic output | `NOT-RUN` |
+
+`X5` direct smoke first wrote `X5_SMOKE_OK` with exit `0`, so a semantic run was admitted. The
+semantic run then timed out at `900s` without `summary.json` or `worker-output.txt`, so it remains
+runtime `NOT-RUN`, not a model failure. `X6` produced a partial candidate but the Gemini CLI route
+hit missing `run_shell_command` tool errors and `AbortError`; it is recorded as `ROUTE-FAIL`, with
+partial artifact rubric retained only as a diagnostic.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Decision | Evidence | Non-claim | Falsification | Risk | Elapsed proxy | Output bytes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `100 / 100` | `20` | `20` | `20` | `20` | `20` | `124.214s` | `93786` |
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `100 / 100` | `20` | `20` | `20` | `20` | `20` | `181.701s` | `2122` |
+| `X2 / gpt-5.3-codex-spark` | `PASS` | `scoreable` | `100 / 100` | `20` | `20` | `20` | `20` | `20` | `36.402s` | `67739` |
+| `X6 / gemini3.1flash-lite-preview` | `ROUTE-FAIL` | `runtime-route` | `60 / 100` | `20` | `0` | `20` | `20` | `20` | `46.079s` | `1579` |
+| `X5 / gemini3.1pro` | `NOT-RUN` | `runtime-no-summary` | `0 / 100` | `0` | `0` | `0` | `0` | `0` | `n/a` | `n/a` |
+
+### N18 Verdict
+
+`binary tie remains` for `X1` and `X3` on scientist/constraint reasoning. The lane-fit signal is
+style/cost rather than correctness: `X3` gives the same scoreable `100 / 100` with a much smaller
+output footprint, while `X1` is also correct and more verbose. `X2` unexpectedly passes this
+bounded scientist packet and should stay as cheap calibration, not primary routing evidence. `X6`
+and `X5` remain runtime-route caveats for this lane.
+
+## 2026-04-22 Follow-Up: N19 Systems Toolchain Rubric
+
+`N19-systems-toolchain-cache-gauntlet` was added as diagnostic `E9` for the
+systems/toolchain lane. It tests profile/env precedence, cross-platform build-root validation,
+portable cache keys, dependency ordering, feature-conflict rejection, cache-hit reporting, source
+trace, and lock cleanup after failure.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse of `oracle/toolchain-contract.json` | `PASS` |
+| `python Scenarios-v2/N19-systems-toolchain-cache-gauntlet/verifiers/check_toolchain_systems.py --bundle-shape-only` | `N19 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N19-systems-toolchain-cache-gauntlet/verifiers/check_toolchain_systems.py --expect-start-state` | `N19 verifier PASS (start state)` |
+| local start-state unit tests from `candidate/workspace` | expected `3` failing tests |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n19-toolchain-reference/N19/` | `N19 verifier PASS (completed run)` |
+| scratch reference local unit tests | `Ran 3 tests ... OK` |
+| scratch reference scope guard | `N19 scope PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_03-16-13-X1-n19-systems-toolchain-2026-04-22/N19/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_03-16-13-X3-n19-systems-toolchain-2026-04-22/N19/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-22_03-21-39-X2-n19-systems-toolchain-calibration-2026-04-22/N19/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-22_03-21-38-X6-n19-systems-toolchain-calibration-2026-04-22/N19/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X5 / gemini3.1pro` | not launched | n/a | n/a | n/a | `NOT-RUN` |
+
+`X6` is a scoreable model/verifier fail on N19: it changed only source files and stayed in scope,
+but missed portable cache-key equality and source-trace reporting. `X5` was not relaunched for N19
+after the immediately preceding N18 semantic run timed out at `900s` without summary or worker
+output.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Correctness | Patch quality | Time | Cost | Elapsed proxy | Output bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `86 / 100` | `40` | `30` | `12` | `4` | `295.278s` | `281440` | changed 7 paths including tests; `133` added, `26` deleted |
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `95 / 100` | `40` | `25` | `15` | `15` | `201.068s` | `2786` | changed 6 source paths; tests unchanged; `93` added, `30` deleted |
+| `X2 / gpt-5.3-codex-spark` | `PASS` | `scoreable` | `84 / 100` | `40` | `25` | `15` | `4` | `63.006s` | `215440` | changed 5 source paths; tests unchanged; `96` added, `36` deleted |
+| `X6 / gemini3.1flash-lite-preview` | `FAIL` | `scoreable` | `65 / 100` | `10` | `25` | `15` | `15` | `74.852s` | `1655` | missed cache-key portability and source-trace report |
+
+### N19 Verdict
+
+`binary tie remains` for `X1` and `X3`, but N19 gives a stronger role-fit signal than N18:
+systems/toolchain routing should prefer `X3` for compact, low-output production patches and keep
+`X1` as secondary when test augmentation is explicitly valuable. `X2` is a passing calibration row
+but not better than the top pair. `X6` separates lower with a scoreable verifier failure.
+
+## 2026-04-22 Follow-Up: N20 UI Interaction Implementation Rubric
+
+`N20-ui-command-palette-interaction-gauntlet` was added as diagnostic `E10` for the UI
+implementation lane. It uses executable Node interaction tests plus Python verifier checks for
+keyboard navigation, filtering, disabled-action handling, focus recovery, ARIA rendering, visible
+return cues, and CSS stability.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse of `oracle/ui-contract.json` | `PASS` |
+| `python Scenarios-v2/N20-ui-command-palette-interaction-gauntlet/verifiers/check_ui_palette.py --bundle-shape-only` | `N20 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N20-ui-command-palette-interaction-gauntlet/verifiers/check_ui_palette.py --expect-start-state` | `N20 verifier PASS (start state)` |
+| local start-state Node test from `candidate/workspace` | expected assertion failure on disabled focus |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n20-ui-reference/N20/` | `N20 verifier PASS (completed run)` |
+| scratch reference local Node contract | `PASS` |
+| scratch reference scope guard | `N20 scope PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_03-29-41-X1-n20-ui-interaction-2026-04-22/N20/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_03-29-41-X3-n20-ui-interaction-2026-04-22/N20/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-22_03-34-20-X2-n20-ui-interaction-calibration-2026-04-22/N20/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-22_03-34-20-X6-n20-ui-interaction-calibration-2026-04-22/N20/` | `1` | `FAIL` | `PASS` | `ROUTE-FAIL` |
+| `X5 / gemini3.1pro` | not launched | n/a | n/a | n/a | `NOT-RUN` |
+
+`X2` is a scoreable verifier failure because it created a top-level `.reports/` entry inside the
+benchmark bundle, causing bundle-shape drift despite staying within the benchmark changed-path
+scope. `X6` hit the Gemini route/tool-loop path and left a partial candidate that still missed
+disabled focus skipping, filter stability, escape restore, visible return-cue text, and CSS
+stability.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Correctness | Patch quality | Time | Cost | Elapsed proxy | Output bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `87 / 100` | `40` | `28` | `15` | `4` | `155.955s` | `126621` | changed 3 source/CSS paths; tests unchanged; `60` added, `11` deleted |
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `95 / 100` | `40` | `28` | `12` | `15` | `250.417s` | `1406` | changed 3 source/CSS paths; tests unchanged; `97` added, `15` deleted |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `57 / 100` | `10` | `28` | `15` | `4` | `51.658s` | `144661` | created forbidden top-level `.reports/`; source/CSS patch otherwise in scope |
+| `X6 / gemini3.1flash-lite-preview` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | `0` | `24` | `15` | `15` | `38.598s` | `2097` | route/tool abort with partial state/render patch |
+
+### N20 Verdict
+
+`binary tie remains` for `X1` and `X3`, but the UI implementation lane now has a useful routing
+signal: prefer `X3` for compact UI state/render patches, keep `X1` as a safe top-pair secondary,
+and do not promote `X2` or `X6` for this lane. `X2` failed the benchmark control-plane rule, while
+`X6` did not complete a scoreable route and its partial patch missed multiple UI invariants.
+
+## 2026-04-22 Follow-Up: W2 / N22 Numerical Stability Constraint Rubric
+
+`N22-numerical-stability-constraint-gauntlet` was added as diagnostic `E12` for the
+scientist/numerical-constraints lane. It replaces the easier N18 option-selection ceiling with
+machine-checkable witnesses: exact bounded-histogram p95, population variance after Welford/Chan
+style shard merge, p95 boundary traps, stale benchmark rejection, and a structured
+`witness-ledger.json`.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `inputs/cases.json`, `oracle/numerical-contract.json`, and starter witness | `PASS` |
+| `python Scenarios-v2/N22-numerical-stability-constraint-gauntlet/verifiers/check_numerical_stability_decision.py --bundle-shape-only` | `N22 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N22-numerical-stability-constraint-gauntlet/verifiers/check_numerical_stability_decision.py --expect-start-state` | `N22 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n22-numerical-reference/` | `N22 verifier PASS (completed packet)` |
+| scratch reference scope guard | `N22 scope PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_03-52-19-X1-wave-w2-n22-numerical-2026-04-22/N22/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_03-52-19-X3-wave-w2-n22-numerical-2026-04-22/N22/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-22_03-57-40-X2-wave-w2-n22-numerical-2026-04-22/N22/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-22_03-57-40-X6-wave-w2-n22-numerical-2026-04-22/N22/` | `1` | `FAIL` | `PASS` | `ROUTE-FAIL` |
+| `X5 / gemini3.1pro` | not launched | n/a | n/a | n/a | `NOT-RUN` |
+
+`X2` is a scoreable verifier failure: `wrapperExitCode=0`, no candidate files changed, and the
+verifier still saw the starter-state failures. `X6` produced a partial candidate, but the Gemini
+CLI route hit missing `run_shell_command` tool-loop errors and `AbortError`; record it as
+runtime `ROUTE-FAIL`, not a model-quality failure.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Correct | Role | Scope | Synthesis | Verify | Runtime | Elapsed proxy | Output bytes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `100 / 100` | `30` | `20` | `15` | `20` | `10` | `5` | `161.522s` | `135379` |
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `99 / 100` | `30` | `20` | `15` | `20` | `10` | `4` | `280.685s` | `2266` |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `10 / 100` | `0` | `0` | `5` | `0` | `0` | `5` | `9.230s` | `37081` |
+| `X6 / gemini3.1flash-lite-preview` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | `30` | `20` | `15` | `12` | `10` | `0` | `45.672s` | `2097` |
+
+### N22 Verdict
+
+`binary tie remains` for `X1` and `X3`; both top-pair rows solved the exact witness gauntlet.
+The scored read gives `X1` a narrow `100 / 100` versus `X3 99 / 100` edge only because of elapsed
+proxy, while `X3` keeps the much stronger output compactness signal (`2266` bytes versus `135379`).
+For `worker.reasoning-constraints`, the current practical read is still top-pair co-primary:
+prefer `X1` for trace-heavy numerical evidence and `X3` for compact exact decision packets.
+`X2` separates lower scoreably on this harder numerical packet; `X6` remains a runtime-route caveat.
+
+## 2026-04-22 Follow-Up: W3 / N23 Owner Recovery Stale-Source Routing Rubric
+
+`N23-owner-recovery-stale-source-routing-gauntlet` was added as diagnostic `E13` for the owner
+recovery/orchestration lane. It tightens N17 by forcing current-source selection, stale-source
+rejection, interruption continuity, next-owner/gate routing, bounded calibration policy, and exact
+path:line anchors. Its scorer does not award `100` merely for binary verifier pass.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse of `oracle/owner-recovery-contract.json` | `PASS` |
+| `python Scenarios-v2/N23-owner-recovery-stale-source-routing-gauntlet/verifiers/check_owner_recovery.py --bundle-shape-only` | `N23 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N23-owner-recovery-stale-source-routing-gauntlet/verifiers/check_owner_recovery.py --expect-start-state` | `N23 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n23-owner-reference/` | `N23 verifier PASS (completed packet)` |
+| scratch reference scope guard | `N23 scope PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_04-06-09-X1-wave-w3-n23-owner-recovery-2026-04-22/N23/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_04-06-08-X3-wave-w3-n23-owner-recovery-2026-04-22/N23/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-22_04-10-41-X2-wave-w3-n23-owner-recovery-2026-04-22/N23/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-22_04-10-41-X6-wave-w3-n23-owner-recovery-2026-04-22/N23/` | `1` | `FAIL` | `PASS` | `ROUTE-FAIL` |
+| `X5 / gemini3.1pro` | not launched | n/a | n/a | n/a | `NOT-RUN` |
+
+`X2` is a scoreable verifier failure. It produced a strong-looking owner packet but also created a
+top-level `.reports/` entry inside the disposable benchmark bundle, so bundle-shape validation
+failed. `X6` again followed the Gemini missing-tool/AbortError route failure path and left only a
+partial artifact; keep it as runtime `ROUTE-FAIL`.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Source | Continuity | Routing | Calibration | Citations | Compact | Elapsed proxy | Output bytes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `90 / 100` | `25` | `18` | `20` | `15` | `10` | `2` | `124.862s` | `89826` |
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `100 / 100` | `25` | `20` | `20` | `15` | `10` | `10` | `239.588s` | `1994` |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `70 / 100` | `25` | `18` | `20` | `15` | `10` | `2` | `45.798s` | `130952` |
+| `X6 / gemini3.1flash-lite-preview` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | `15` | `0` | `0` | `0` | `8` | `10` | `36.577s` | `1827` |
+
+### N23 Verdict
+
+`binary tie remains` for `X1` and `X3`, but W3/N23 gives a clear owner-lane scored separation:
+`X3 100 / 100` versus `X1 90 / 100`. The decisive difference is compact, complete recovery output:
+`X3` preserved every source, stale-source, routing, calibration, and citation requirement in a
+small artifact; `X1` passed the binary verifier but was much larger and lost two continuity rubric
+points. For owner/recovery packets, prefer `X3` as primary and keep `X1` as secondary when verbose
+trace narration is explicitly desired. `X2` and `X6` should not be promoted for owner recovery:
+`X2` scoreably failed bundle-shape discipline, and `X6` did not complete a scoreable route.
+
+## 2026-04-22 Follow-Up: W1 / N21 Visual Raster Provider-Fit Rubric
+
+`N21-visual-provider-fit-raster-gauntlet` was added as diagnostic `E11` for visual/graphics
+implementation work. It uses a deterministic raster oracle rather than prose review: transparent
+grid gaps, selected-cell focus layering, zero-centered legend color order, annotation pixels, and
+PPM metadata are checked from actual rendered frame state.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `inputs/panel-cases.json` and `oracle/visual-contract.json` | `PASS` |
+| `python Scenarios-v2/N21-visual-provider-fit-raster-gauntlet/verifiers/check_visual_panel.py --bundle-shape-only` | `N21 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N21-visual-provider-fit-raster-gauntlet/verifiers/check_visual_panel.py --expect-start-state` | `N21 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n21-visual-reference/` | `N21 verifier PASS (completed run)` |
+| scratch reference scope guard | `N21 scope PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_11-07-41-X1-wave-w1-n21-visual-provider-2026-04-22/N21/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_11-07-41-X3-wave-w1-n21-visual-provider-2026-04-22/N21/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-22_11-11-53-X2-wave-w1-n21-visual-provider-calibration-2026-04-22/N21/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X5 / gemini3.1pro` | `.scratch/v2-cohort-runs/2026-04-22_11-43-33-X5-wave-w1-n21-visual-provider-calibration-2026-04-22/N21/` | timeout | no summary | n/a | `RUNTIME-FAIL` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-22_11-11-53-X6-wave-w1-n21-visual-provider-calibration-2026-04-22/N21/` | timeout | no summary | n/a | `RUNTIME-FAIL` |
+
+`X5` was admitted to launch only after a same-session smoke wrote
+`.scratch/gemini-smoke-n21-2026-04-22/x5-output.txt` with `X5_SMOKE_OK`. Both Gemini semantic N21
+runs timed out at the controller boundary without `summary.json` or `worker-output.txt`; classify
+those as runtime no-summary events, not model-quality failures.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Visual | Patch | Tests | Runtime | Cost | Elapsed proxy | Output bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `89 / 100` | `45` | `25` | `10` | `5` | `4` | `143.817s` | `113449` | tests changed; `72` added, `6` deleted |
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `100 / 100` | `45` | `25` | `10` | `5` | `15` | `191.406s` | `2175` | tests changed; `64` added, `13` deleted |
+| `X2 / gpt-5.3-codex-spark` | `PASS` | `scoreable` | `85 / 100` | `45` | `25` | `6` | `5` | `4` | `38.988s` | `80821` | source-only patch; tests unchanged |
+| `X5 / gemini3.1pro` | `RUNTIME-FAIL` | `runtime-no-summary` | `0 / 100` | `0` | `0` | `0` | `0` | `0` | `0.0s` | n/a | no `summary.json` after launch |
+| `X6 / gemini3.1flash-lite-preview` | `RUNTIME-FAIL` | `runtime-no-summary` | `0 / 100` | `0` | `0` | `0` | `0` | `0` | `0.0s` | n/a | no `summary.json` after launch |
+
+### N21 Verdict
+
+`binary tie remains` for `X1` and `X3`; both top-pair rows solved the visual raster state oracle.
+The diagnostic read favors `X3 100 / 100` versus `X1 89 / 100`, but the split is an efficiency and
+compactness split rather than a visual-correctness split: visual correctness, scope, patch quality,
+tests, and runtime all tie, while output-size cost separates strongly. `X2` passes as a useful
+calibration row but does not beat the top pair. The intended Gemini visual-provider preference is
+not benchmark-proven by N21 because both Gemini semantic runs timed out after a successful direct
+smoke.

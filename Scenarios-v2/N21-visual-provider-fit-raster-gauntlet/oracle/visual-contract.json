@@ -1,0 +1,90 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N21",
+    "surface_id": "E11",
+    "pack_id": "E11",
+    "role_class": "implementation",
+    "artifact_type": "visual raster renderer patch plus validation",
+    "modality_family": "visual graphics raster state",
+    "allowed_change_surface": [
+      "candidate/visual-owned/src/visual_panel/renderer.py",
+      "candidate/visual-owned/tests/test_renderer.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/visual-owned/README.md",
+      "candidate/visual-owned/src/visual_panel/__init__.py",
+      "candidate/legacy-preview/**",
+      "candidate/drafts/**",
+      "candidate/reference-assets/**"
+    ],
+    "score_profile": "implementation, visual, graphics, top-pair-role-fit",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "visual-provider-fit",
+      "scored-rubric",
+      "raster-oracle"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/render-intent.md",
+    "inputs/panel-cases.json",
+    "candidate/README.md",
+    "candidate/visual-owned/README.md",
+    "candidate/visual-owned/src/visual_panel/__init__.py",
+    "candidate/visual-owned/src/visual_panel/renderer.py",
+    "candidate/visual-owned/tests/test_renderer.py",
+    "candidate/legacy-preview/README.md",
+    "candidate/drafts/README.md",
+    "candidate/reference-assets/README.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/visual-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_visual_panel.py",
+    "verifiers/check_scope.py"
+  ],
+  "required_candidate_paths": [
+    "candidate/visual-owned/src/visual_panel/renderer.py",
+    "candidate/visual-owned/tests/test_renderer.py"
+  ],
+  "scope_guard_roots": [
+    "candidate/legacy-preview",
+    "candidate/drafts",
+    "candidate/reference-assets"
+  ],
+  "expected_start_state_failures": [
+    "legend-not-zero-centered",
+    "missing-focus-annotation",
+    "missing-transparent-gap",
+    "ppm-metadata",
+    "wrong-selected-layer"
+  ]
+}

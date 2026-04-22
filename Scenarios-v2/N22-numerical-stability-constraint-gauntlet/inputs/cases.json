@@ -1,0 +1,68 @@
+{
+  "variance_kind": "population",
+  "required_invariants": [
+    "I-P95-UPPER-RANK",
+    "I-BOUNDED-HISTOGRAM-EXACT",
+    "I-WELFORD-CHAN-MERGE"
+  ],
+  "cases": [
+    {
+      "case_id": "p95-boundary-flip",
+      "description": "Rounded-rank p95 can pass this case, but the declared upper-rank convention fails it.",
+      "latency_counts_ms": {
+        "199": 19,
+        "201": 2
+      },
+      "variance_shards": [
+        [1000000000, 1000000001],
+        [1000000000, 1000000001]
+      ]
+    },
+    {
+      "case_id": "sparse-tail-pass",
+      "description": "Exact upper-rank p95 passes even though the tail has five high values.",
+      "latency_counts_ms": {
+        "120": 95,
+        "450": 5
+      },
+      "variance_shards": [
+        [50, 50, 50, 50, 50],
+        [51, 51, 51, 51, 51]
+      ]
+    },
+    {
+      "case_id": "shard-imbalance-variance-fail",
+      "description": "Averaging per-shard variances would hide the between-shard variance.",
+      "latency_counts_ms": {
+        "150": 10
+      },
+      "variance_shards": [
+        [10, 10, 10, 10, 10, 10, 10, 10, 10],
+        [20]
+      ]
+    },
+    {
+      "case_id": "large-offset-cancellation",
+      "description": "Naive sum/sum_sq variance is cancellation-prone on large-offset samples.",
+      "latency_counts_ms": {
+        "180": 95,
+        "200": 5
+      },
+      "variance_shards": [
+        [1000000000000, 1000000000001],
+        [999999999999, 1000000000000]
+      ]
+    },
+    {
+      "case_id": "zero-spread-degenerate",
+      "description": "Degenerate spread must produce exact zero variance without special-case drift.",
+      "latency_counts_ms": {
+        "200": 1
+      },
+      "variance_shards": [
+        [42],
+        [42]
+      ]
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_11-07-41-X1-wave-w1-n21-visual-provider-2026-04-22\\N21",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 89,
+      "visual_correctness": 45,
+      "patch_quality": 25,
+      "tests": 10,
+      "runtime": 5,
+      "cost": 4,
+      "elapsed_proxy_seconds": 143.817,
+      "output_bytes": 113449,
+      "changed_paths": [
+        "candidate/visual-owned/src/visual_panel/renderer.py",
+        "candidate/visual-owned/tests/test_renderer.py"
+      ],
+      "diff": {
+        "added": 72,
+        "deleted": 6
+      },
+      "notes": [
+        "tests changed",
+        "changed=2 add=72 del=6"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_11-07-41-X3-wave-w1-n21-visual-provider-2026-04-22\\N21",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "visual_correctness": 45,
+      "patch_quality": 25,
+      "tests": 10,
+      "runtime": 5,
+      "cost": 15,
+      "elapsed_proxy_seconds": 191.406,
+      "output_bytes": 2175,
+      "changed_paths": [
+        "candidate/visual-owned/src/visual_panel/renderer.py",
+        "candidate/visual-owned/tests/test_renderer.py"
+      ],
+      "diff": {
+        "added": 64,
+        "deleted": 13
+      },
+      "notes": [
+        "tests changed",
+        "changed=2 add=64 del=13"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_11-11-53-X2-wave-w1-n21-visual-provider-calibration-2026-04-22\\N21",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 85,
+      "visual_correctness": 45,
+      "patch_quality": 25,
+      "tests": 6,
+      "runtime": 5,
+      "cost": 4,
+      "elapsed_proxy_seconds": 38.988,
+      "output_bytes": 80821,
+      "changed_paths": [
+        "candidate/visual-owned/src/visual_panel/renderer.py"
+      ],
+      "diff": {
+        "added": 34,
+        "deleted": 7
+      },
+      "notes": [
+        "tests unchanged",
+        "changed=1 add=34 del=7"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_11-43-33-X5-wave-w1-n21-visual-provider-calibration-2026-04-22\\N21",
+      "row": "X5",
+      "binary": "RUNTIME-FAIL",
+      "scoreability": "runtime-no-summary",
+      "total": 0,
+      "elapsed_proxy_seconds": 0.0,
+      "output_bytes": null,
+      "notes": [
+        "missing summary.json after launch"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_11-11-53-X6-wave-w1-n21-visual-provider-calibration-2026-04-22\\N21",
+      "row": "X6",
+      "binary": "RUNTIME-FAIL",
+      "scoreability": "runtime-no-summary",
+      "total": 0,
+      "elapsed_proxy_seconds": 0.0,
+      "output_bytes": null,
+      "notes": [
+        "missing summary.json after launch"
+      ]
+    }
+  ]
+}

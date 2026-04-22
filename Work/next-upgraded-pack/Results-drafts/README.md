@@ -23,4 +23,13 @@ Only admitted later packages should become new dated snapshots under `Archive/`.
 | `v2-core12-tie-hardened-results-2026-04-20.md` | targeted hardening result for weak-separator core lanes; `X1` and `X3` tied, `X5` separated lower with timeout caveats |
 | `v2-top-pair-separators-n11-n13-results-2026-04-20.md` | diagnostic `E2` result; initial and hardened2 runs still tie `X1` and `X3` |
 | `v2-top-pair-rubric-e3-results-2026-04-20.md` | diagnostic E3 rubric over fresh 2026-04-21 `N11..N13` outputs; narrow `X1 60 / 60` vs `X3 59 / 60` read |
+| `role-fit-scorecard-v1-2026-04-22.md` | current lane-fit routing read; maps `X1`/`X3` plus calibration rows to role/lane recommendations, with compactness-only winners marked `provisional-primary` |
+| `../Planning/next-phase/hardening-wave-roadmap-2026-04-22.md` | live roadmap for subsequent hardening waves and spawn usage |
+| `../Evidence/n17-owner-routing-rubric-2026-04-22.json` | machine-readable E7 owner/orchestration calibration read for `X1`, `X2`, `X3`, and `X6` |
+| `../Evidence/n18-scientist-constraints-rubric-2026-04-22.json` | machine-readable E8 scientist/constraints calibration read for `X1`, `X2`, `X3`, `X5`, and `X6` |
+| `../Evidence/n19-systems-toolchain-rubric-2026-04-22.json` | machine-readable E9 systems/toolchain calibration read for `X1`, `X2`, `X3`, and `X6` |
+| `../Evidence/n20-ui-interaction-rubric-2026-04-22.json` | machine-readable E10 UI interaction calibration read for `X1`, `X2`, `X3`, and `X6` |
+| `../Evidence/n21-visual-raster-rubric-2026-04-22.json` | machine-readable E11 visual-raster calibration read for `X1`, `X2`, `X3`, `X5`, and `X6` launch attempts |
+| `../Evidence/n22-numerical-stability-rubric-2026-04-22.json` | machine-readable E12 numerical-stability calibration read for `X1`, `X2`, `X3`, and `X6` |
+| `../Evidence/n23-owner-recovery-rubric-2026-04-22.json` | machine-readable E13 owner-recovery calibration read for `X1`, `X2`, `X3`, and `X6` |
 | `short-results-current-2026-04-18.md` | compact operator-facing short table for the current six-row live state |

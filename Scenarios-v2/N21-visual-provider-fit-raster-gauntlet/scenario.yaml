@@ -1,0 +1,25 @@
+id: N21
+surface_id: E11
+pack_id: E11
+role_class: implementation
+artifact_type: visual raster renderer patch plus validation
+modality_family: visual graphics raster state
+allowed_change_surface:
+  - candidate/visual-owned/src/visual_panel/renderer.py
+  - candidate/visual-owned/tests/test_renderer.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/visual-owned/README.md
+  - candidate/visual-owned/src/visual_panel/__init__.py
+  - candidate/legacy-preview/**
+  - candidate/drafts/**
+  - candidate/reference-assets/**
+score_profile: "implementation, visual, graphics, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - visual-provider-fit
+  - scored-rubric
+  - raster-oracle

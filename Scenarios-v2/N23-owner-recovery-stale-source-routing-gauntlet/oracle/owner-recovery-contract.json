@@ -1,0 +1,140 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N23",
+    "surface_id": "E13",
+    "pack_id": "E13",
+    "role_class": "owner",
+    "artifact_type": "owner recovery stale-source routing packet plus scored rubric",
+    "modality_family": "owner orchestration, stale-source recovery, and routing continuity",
+    "allowed_change_surface": [
+      "candidate/owner-recovery-routing-decision.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/archive/**",
+      "candidate/stale-results/**"
+    ],
+    "score_profile": "owner, recovery, stale-source, calibration, top-pair-role-fit",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "owner-orchestration",
+      "scored-rubric",
+      "stale-source-recovery"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/source-excerpts.md",
+    "inputs/stale-sources.md",
+    "inputs/interruption-log.md",
+    "inputs/policy-rules.md",
+    "candidate/README.md",
+    "candidate/owner-recovery-routing-decision.md",
+    "candidate/archive/README.md",
+    "candidate/stale-results/old-winner-table.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/owner-recovery-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_owner_recovery.py",
+    "verifiers/check_scope.py"
+  ],
+  "required_sections": [
+    "## Source Of Truth Ledger",
+    "## Stale Source Rejection Ledger",
+    "## Primary Task Continuity Ledger",
+    "## Interruption Classification",
+    "## Next Owner And Gates",
+    "## Calibration Row Policy",
+    "## Resume Point"
+  ],
+  "required_exact_phrases": [
+    "Current source of truth: Work/next-upgraded-pack/Results-drafts/role-fit-scorecard-v1-2026-04-22.md",
+    "No global winner is admitted",
+    "N16 is diagnostic E6, not a routing lane",
+    "N17 did not split owner correctness",
+    "W3 / E13 / N23 is the admitted next wave",
+    "Next owner now: $lead",
+    "QA gate only after N23 bundle, verifier, scorer, and reference pass validate",
+    "Architecture-reviewer gate only after routing-policy surface changes",
+    "X1 and X3 run first",
+    "X2 and X6 calibrate only when lane policy may change",
+    "X5 requires same-session smoke that writes worker-output.txt before semantic run",
+    "Runtime failures stay NOT-RUN or ROUTE-FAIL, not model FAIL",
+    "Resume from Work/next-upgraded-pack/Planning/next-phase/hardening-wave-roadmap-2026-04-22.md"
+  ],
+  "required_citations": [
+    "Work/next-upgraded-pack/Results-drafts/role-fit-scorecard-v1-2026-04-22.md:49",
+    "Work/next-upgraded-pack/Results-drafts/role-fit-scorecard-v1-2026-04-22.md:80",
+    "Work/next-upgraded-pack/Planning/next-phase/hardening-wave-roadmap-2026-04-22.md:38",
+    "Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md:12",
+    "Work/next-upgraded-pack/Evidence/n22-numerical-stability-rubric-2026-04-22.json:1"
+  ],
+  "required_table_headers": [
+    "| Source | Classification | Use now | Citation |",
+    "| Stale source | Rejection reason | Boundary |",
+    "| Interruption | Classification | Continuity decision | Visible return cue |",
+    "| Request | Row policy | Runtime guard |"
+  ],
+  "expected_interruption_ids": [
+    "I1",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6"
+  ],
+  "expected_stale_ids": [
+    "ST1",
+    "ST2",
+    "ST3",
+    "ST4",
+    "ST5"
+  ],
+  "disallowed_markers": [
+    "X3 is the global winner",
+    "X1 is the global winner",
+    "N16 proves the global winner",
+    "promote N16 into routing policy",
+    "Run X2, X5, and X6 on every scenario",
+    "$product-manager owns the next step",
+    "QA owns the next design",
+    "architecture reviewer should decide next",
+    "runtime failures are model failures"
+  ],
+  "expected_start_state_failures": [
+    "contains-disallowed-markers",
+    "missing-citations",
+    "missing-interruption-classification",
+    "missing-required-phrases",
+    "missing-required-sections",
+    "missing-required-tables",
+    "missing-stale-classification"
+  ]
+}

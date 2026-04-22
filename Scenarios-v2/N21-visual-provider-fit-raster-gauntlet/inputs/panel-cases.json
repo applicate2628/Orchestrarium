@@ -1,0 +1,50 @@
+{
+  "palette": {
+    "-2": "#1d4ed8",
+    "-1": "#93c5fd",
+    "0": "#f8fafc",
+    "1": "#fca5a5",
+    "2": "#dc2626"
+  },
+  "cases": [
+    {
+      "case_id": "heatmap-layering-panel",
+      "width": 22,
+      "height": 15,
+      "background": "#111318",
+      "grid": {
+        "x": 1,
+        "y": 1,
+        "cell": 3,
+        "gap": 1
+      },
+      "values": [
+        [-2, -1, 0, 1],
+        [2, null, -1, 2],
+        [0, 1, -2, null]
+      ],
+      "selected": {
+        "col": 3,
+        "row": 1
+      },
+      "legend": {
+        "x": 18,
+        "y": 1,
+        "width": 2,
+        "values": [-2, -1, 0, 1, 2]
+      },
+      "annotations": [
+        {
+          "x": 20,
+          "y": 2,
+          "color": "#22c55e"
+        },
+        {
+          "x": 0,
+          "y": 0,
+          "color": "#facc15"
+        }
+      ]
+    }
+  ]
+}

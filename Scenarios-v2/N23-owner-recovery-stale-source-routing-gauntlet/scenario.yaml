@@ -1,0 +1,21 @@
+id: N23
+surface_id: E13
+pack_id: E13
+role_class: owner
+artifact_type: owner recovery stale-source routing packet plus scored rubric
+modality_family: owner orchestration, stale-source recovery, and routing continuity
+allowed_change_surface:
+  - candidate/owner-recovery-routing-decision.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/archive/**
+  - candidate/stale-results/**
+score_profile: "owner, recovery, stale-source, calibration, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - owner-orchestration
+  - scored-rubric
+  - stale-source-recovery

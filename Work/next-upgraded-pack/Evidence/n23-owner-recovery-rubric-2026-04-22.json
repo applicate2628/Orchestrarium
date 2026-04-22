@@ -1,0 +1,88 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_04-06-09-X1-wave-w3-n23-owner-recovery-2026-04-22\\N23",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 90,
+      "source_discrimination": 25,
+      "continuity": 18,
+      "routing": 20,
+      "calibration": 15,
+      "citations": 10,
+      "compactness": 2,
+      "elapsed_proxy_seconds": 124.862,
+      "output_bytes": 89826,
+      "changed_paths": [
+        "candidate/owner-recovery-routing-decision.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_04-10-41-X2-wave-w3-n23-owner-recovery-2026-04-22\\N23",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 70,
+      "source_discrimination": 25,
+      "continuity": 18,
+      "routing": 20,
+      "calibration": 15,
+      "citations": 10,
+      "compactness": 2,
+      "elapsed_proxy_seconds": 45.798,
+      "output_bytes": 130952,
+      "changed_paths": [
+        "candidate/owner-recovery-routing-decision.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_04-06-08-X3-wave-w3-n23-owner-recovery-2026-04-22\\N23",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "source_discrimination": 25,
+      "continuity": 20,
+      "routing": 20,
+      "calibration": 15,
+      "citations": 10,
+      "compactness": 10,
+      "elapsed_proxy_seconds": 239.588,
+      "output_bytes": 1994,
+      "changed_paths": [
+        "candidate/owner-recovery-routing-decision.md"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_04-10-41-X6-wave-w3-n23-owner-recovery-2026-04-22\\N23",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "ROUTE-FAIL",
+      "scoreability": "runtime-route",
+      "wrapper_exit_code": 1,
+      "verification_passed": false,
+      "total": 0,
+      "source_discrimination": 15,
+      "continuity": 0,
+      "routing": 0,
+      "calibration": 0,
+      "citations": 8,
+      "compactness": 10,
+      "elapsed_proxy_seconds": 36.577,
+      "output_bytes": 1827,
+      "changed_paths": [
+        "candidate/owner-recovery-routing-decision.md"
+      ]
+    }
+  ]
+}

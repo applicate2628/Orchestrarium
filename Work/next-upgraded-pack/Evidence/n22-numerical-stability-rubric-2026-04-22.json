@@ -1,0 +1,103 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-52-19-X1-wave-w2-n22-numerical-2026-04-22\\N22",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "correctness": 30,
+      "role_fidelity": 20,
+      "scope": 15,
+      "synthesis": 20,
+      "verification": 10,
+      "runtime": 5,
+      "elapsed_proxy_seconds": 161.522,
+      "output_bytes": 135379,
+      "changed_paths": [
+        "candidate/numerical-stability-decision-memo.md",
+        "candidate/witness-ledger.json"
+      ],
+      "notes": [
+        "changed=2"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-57-40-X2-wave-w2-n22-numerical-2026-04-22\\N22",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 10,
+      "correctness": 0,
+      "role_fidelity": 0,
+      "scope": 5,
+      "synthesis": 0,
+      "verification": 0,
+      "runtime": 5,
+      "elapsed_proxy_seconds": 9.23,
+      "output_bytes": 37081,
+      "changed_paths": [],
+      "notes": [
+        "case count 0",
+        "changed=0",
+        "scope not clean"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-52-19-X3-wave-w2-n22-numerical-2026-04-22\\N22",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 99,
+      "correctness": 30,
+      "role_fidelity": 20,
+      "scope": 15,
+      "synthesis": 20,
+      "verification": 10,
+      "runtime": 4,
+      "elapsed_proxy_seconds": 280.685,
+      "output_bytes": 2266,
+      "changed_paths": [
+        "candidate/numerical-stability-decision-memo.md",
+        "candidate/witness-ledger.json"
+      ],
+      "notes": [
+        "changed=2"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_03-57-40-X6-wave-w2-n22-numerical-2026-04-22\\N22",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "ROUTE-FAIL",
+      "scoreability": "runtime-route",
+      "wrapper_exit_code": 1,
+      "verification_passed": false,
+      "total": 0,
+      "correctness": 30,
+      "role_fidelity": 20,
+      "scope": 15,
+      "synthesis": 12,
+      "verification": 10,
+      "runtime": 0,
+      "elapsed_proxy_seconds": 45.672,
+      "output_bytes": 2097,
+      "changed_paths": [
+        "candidate/numerical-stability-decision-memo.md",
+        "candidate/witness-ledger.json"
+      ],
+      "notes": [
+        "changed=2"
+      ]
+    }
+  ]
+}
