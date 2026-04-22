@@ -1350,3 +1350,63 @@ can move from `X3 provisional-primary` to `X3 primary` versus `X1` for compact r
 packets. `X5` also passes N26 and ties X3 at `100 / 100` after a healthy smoke-gated route, so it is
 a serious owner-recovery contender; keep it behind `X3` until another owner-family pass confirms
 the signal. `X2` and `X6` separate lower with scoreable verifier failures.
+
+## 2026-04-22 Follow-Up: W7 / N27 Release Train Long-Horizon Repeat
+
+`N27-release-train-governor-long-horizon-repeat-gauntlet` was added as diagnostic `E17` to repeat
+the long-horizon integration signal from `N16` on a new `deploygrid` domain. The verifier checks
+active profile precedence, request immutability, latest-wins semantic dedupe, dependency ordering,
+cycle blocking, canary-before-prod policy, frozen-scope deferral, idempotent repeat, crash/resume
+without replay, current-attempt rollback, source trace preservation, and report derivation from
+ledger/audit rather than notifications.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/deploygrid-contract.json` | `PASS` |
+| `python Scenarios-v2/N27-release-train-governor-long-horizon-repeat-gauntlet/verifiers/check_release_train_governor.py --bundle-shape-only` | `N27 verifier PASS (bundle shape)` |
+| `python Scenarios-v2/N27-release-train-governor-long-horizon-repeat-gauntlet/verifiers/check_release_train_governor.py --expect-start-state` | `N27 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-22-n27-deploygrid-reference/` | `N27 verifier PASS (completed run)` |
+| scratch reference scope guard | `N27 scope PASS` |
+| sidecar anti-hardcoding audit | `REVISE` accepted; `prohibited_candidate_terms` expanded from `4` to all `12` case IDs before launch |
+| `python -m py_compile` for verifier, scope checker, and scorer | `PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-22_22-52-11-X1-wave-w7-n27-release-train-repeat-2026-04-22/N27/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-22_22-52-11-X3-wave-w7-n27-release-train-repeat-2026-04-22/N27/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-22_23-06-21-X2-wave-w7-n27-release-train-repeat-2026-04-22/N27/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-22_23-06-20-X6-wave-w7-n27-release-train-repeat-2026-04-22/N27/` | `1` | `FAIL` | `PASS` | `ROUTE-FAIL` |
+| `X5 / gemini3.1pro` | smoke only: `.scratch/gemini-smoke-n27-2026-04-22/x5-output.txt` | `1` | n/a | n/a | `REQUEUE` |
+
+`X5` was not admitted to the semantic N27 run because the same-session smoke did not write
+`X5_SMOKE_OK`; the Gemini Pro route returned quota exhaustion after retries. This is a
+`REQUEUE/runtime-quota` event, not model-quality evidence. `X6` produced a partial bundle and
+summary, but `wrapperExitCode=1` with Gemini quota/tool-loop/`AbortError` route noise; classify it
+as `ROUTE-FAIL/runtime-route`, not scoreable model `FAIL`.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Correct | Stateful | Patch | Tests | Time | Cost | Elapsed proxy | Output bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `92 / 100` | `50` | `15` | `13` | `4` | `5` | `5` | `821.310s` | `3537` | tests unchanged; `361` added, `43` deleted |
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `88 / 100` | `50` | `15` | `13` | `4` | `5` | `1` | `438.414s` | `487950` | tests unchanged; `321` added, `37` deleted |
+| `X2 / gpt-5.3-codex-spark` | `PASS` | `scoreable` | `88 / 100` | `50` | `15` | `13` | `4` | `5` | `1` | `125.729s` | `660126` | tests unchanged; `299` added, `30` deleted |
+| `X6 / gemini3.1flash-lite-preview` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | `0` | `0` | `0` | `0` | `0` | `0` | `218.718s` | `3935` | route failure; partial candidate missed all verifier invariants |
+| `X5 / gemini3.1pro` | `REQUEUE` | `runtime-quota` | n/a | n/a | n/a | n/a | n/a | n/a | n/a | smoke only | n/a | smoke failed with quota; semantic run not launched |
+
+### N27 Verdict
+
+`binary tie remains` for `X1` and `X3`; the long-horizon integration repeat again does not produce a
+semantic correctness separator. The scored read still favors `X3` (`92 / 100`) over `X1` (`88 / 100`)
+through output-size cost and compactness, matching the direction of `N16` (`X3 95 / 100`, `X1 89 /
+100`). With `N16` and `N27` both favoring `X3` on independent long-horizon integration tasks, the
+long-horizon integration routing read can move from `X3 provisional-primary` to `X3 primary` for
+compact production integration patches, with `X1` retained when explicit self-added regression
+tests or verbose trace are more valuable. `X2` is a useful calibration pass on N27 but is not
+promoted because other implementation repeats still separate it lower. `X5` has no N27 semantic
+evidence due quota-gated smoke failure, and `X6` remains a route-health caveat.

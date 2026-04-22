@@ -1,0 +1,180 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_22-52-11-X1-wave-w7-n27-release-train-repeat-2026-04-22\\N27",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 88,
+      "correctness": 50,
+      "stateful_recovery": 15,
+      "patch_quality": 13,
+      "tests_points": 4,
+      "time_points": 5,
+      "cost_points": 1,
+      "elapsed_proxy_seconds": 438.414,
+      "cost_proxy_output_bytes": 487950,
+      "changed_paths": [
+        "candidate/workspace/src/deploygrid/audit.py",
+        "candidate/workspace/src/deploygrid/config.py",
+        "candidate/workspace/src/deploygrid/dedupe.py",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/intake.py",
+        "candidate/workspace/src/deploygrid/ledger.py",
+        "candidate/workspace/src/deploygrid/notifier.py",
+        "candidate/workspace/src/deploygrid/planner.py",
+        "candidate/workspace/src/deploygrid/policy.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/src/deploygrid/rollback.py",
+        "candidate/workspace/src/deploygrid/scheduler.py",
+        "candidate/workspace/src/deploygrid/store.py"
+      ],
+      "diff": {
+        "added": 321,
+        "deleted": 37
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests unchanged",
+        "changed=13 source=13 add=321 del=37"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_23-06-21-X2-wave-w7-n27-release-train-repeat-2026-04-22\\N27",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 88,
+      "correctness": 50,
+      "stateful_recovery": 15,
+      "patch_quality": 13,
+      "tests_points": 4,
+      "time_points": 5,
+      "cost_points": 1,
+      "elapsed_proxy_seconds": 125.729,
+      "cost_proxy_output_bytes": 660126,
+      "changed_paths": [
+        "candidate/workspace/src/deploygrid/audit.py",
+        "candidate/workspace/src/deploygrid/config.py",
+        "candidate/workspace/src/deploygrid/dedupe.py",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/intake.py",
+        "candidate/workspace/src/deploygrid/ledger.py",
+        "candidate/workspace/src/deploygrid/notifier.py",
+        "candidate/workspace/src/deploygrid/planner.py",
+        "candidate/workspace/src/deploygrid/policy.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/src/deploygrid/rollback.py",
+        "candidate/workspace/src/deploygrid/scheduler.py",
+        "candidate/workspace/src/deploygrid/store.py"
+      ],
+      "diff": {
+        "added": 299,
+        "deleted": 30
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests unchanged",
+        "changed=13 source=13 add=299 del=30"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_22-52-11-X3-wave-w7-n27-release-train-repeat-2026-04-22\\N27",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 92,
+      "correctness": 50,
+      "stateful_recovery": 15,
+      "patch_quality": 13,
+      "tests_points": 4,
+      "time_points": 5,
+      "cost_points": 5,
+      "elapsed_proxy_seconds": 821.31,
+      "cost_proxy_output_bytes": 3537,
+      "changed_paths": [
+        "candidate/workspace/src/deploygrid/audit.py",
+        "candidate/workspace/src/deploygrid/config.py",
+        "candidate/workspace/src/deploygrid/dedupe.py",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/intake.py",
+        "candidate/workspace/src/deploygrid/ledger.py",
+        "candidate/workspace/src/deploygrid/notifier.py",
+        "candidate/workspace/src/deploygrid/planner.py",
+        "candidate/workspace/src/deploygrid/policy.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/src/deploygrid/rollback.py",
+        "candidate/workspace/src/deploygrid/scheduler.py",
+        "candidate/workspace/src/deploygrid/store.py"
+      ],
+      "diff": {
+        "added": 361,
+        "deleted": 43
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests unchanged",
+        "changed=13 source=13 add=361 del=43"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-22_23-06-20-X6-wave-w7-n27-release-train-repeat-2026-04-22\\N27",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "ROUTE-FAIL",
+      "scoreability": "runtime-route",
+      "wrapper_exit_code": 1,
+      "verification_passed": false,
+      "total": 0,
+      "correctness": 0,
+      "stateful_recovery": 0,
+      "patch_quality": 0,
+      "tests_points": 0,
+      "time_points": 0,
+      "cost_points": 0,
+      "elapsed_proxy_seconds": 218.718,
+      "cost_proxy_output_bytes": 3935,
+      "changed_paths": [
+        "candidate/workspace/src/deploygrid/config.py",
+        "candidate/workspace/src/deploygrid/dedupe.py",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/intake.py",
+        "candidate/workspace/src/deploygrid/planner.py",
+        "candidate/workspace/src/deploygrid/policy.py",
+        "candidate/workspace/src/deploygrid/scheduler.py"
+      ],
+      "diff": {
+        "added": 69,
+        "deleted": 23
+      },
+      "failed_invariants": [
+        "active-profile-precedence",
+        "canary-before-prod",
+        "crash-resume-no-replay",
+        "cycle-blocked",
+        "dependency-order",
+        "frozen-scope-deferred",
+        "idempotent-repeat",
+        "report-from-ledger-audit",
+        "request-input-immutability",
+        "rollback-current-attempt-only",
+        "semantic-dedupe-latest-wins",
+        "source-trace-preserved"
+      ],
+      "notes": [
+        "tests unchanged",
+        "failed invariants: active-profile-precedence, canary-before-prod, crash-resume-no-replay, cycle-blocked, dependency-order, frozen-scope-deferred, idempotent-repeat, report-from-ledger-audit, request-input-immutability, rollback-current-attempt-only, semantic-dedupe-latest-wins, source-trace-preserved",
+        "changed=7 source=7 add=69 del=23"
+      ]
+    }
+  ]
+}
