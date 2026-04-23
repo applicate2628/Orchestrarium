@@ -2007,3 +2007,236 @@ and architecture tasks that are single-shot, compact, and ordinary can still rou
 multi-session source arbitration, ADR traceability, exact finding/non-claim ledgers, and response
 gate closure should route to `X1 primary`. `X2` is a credible calibration pass on this staged
 review shape; Gemini rows remain route-caveated for this wave.
+
+## 2026-04-23 Follow-Up: W18 / N38 Staged UI/Visual/State Integration
+
+`N38-deterministic-ui-visual-state-integration-gauntlet` was added as diagnostic `E28` to test
+whether the staged/re-entry split also applies to UI work when command state, dirty navigation,
+ARIA/status cues, layout geometry, and raster pixels must stay coherent across fresh sessions.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for the staged UI contract/oracle | `PASS` |
+| `python verifiers/check_deterministic_ui_visual_state.py --bundle-shape-only` | `PASS` |
+| `python verifiers/check_deterministic_ui_visual_state.py --expect-start-state` | `PASS` |
+| scratch reference verifier and scope simulation | `PASS` |
+| scorer compile and `git diff --check` before launch | `PASS` |
+| `mcp-free` before/after the batch | `STATS kill: none`; active parent-owned MCP processes skipped |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier / summary | Binary read |
+|---|---|---:|---|---|
+| `X1 / gpt-5.4` | `.scratch/v2-staged-runs/2026-04-23_16-57-40-X1-wave-w18-w21-staged-queued-2026-04-23/N38/` | `0` | final `summary.json` present; verifier `PASS` | `PASS` |
+| `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-23_17-56-36-X3-wave-w18-w21-staged-rerun-n38-2026-04-23/N38/` | no final summary | phase `01..03` completed; phase `04` stalled without worker output; original queued run also ended without final summary | `NOT-RUN`; repeated runtime no-summary |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-23_18-28-55-X2-wave-w18-w21-staged-queued-2026-04-23/N38/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
+| `X5 / gemini3.1pro` | `.scratch/v2-staged-runs/2026-04-23_18-37-13-X5-wave-w18-w21-staged-queued-2026-04-23/N38/` | `1` | final `summary.json` present; repeated Gemini capacity exhaustion | `ROUTE-FAIL`; runtime-route |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-23_18-57-00-X6-wave-w18-w21-staged-queued-2026-04-23/N38/` | `1` | final `summary.json` present; route/tool failure | `ROUTE-FAIL`; runtime-route |
+
+X3 is not scoreable on N38. Both the original queued run and the bounded rerun reached late phases,
+but neither produced a final `summary.json`. X5 and X6 are runtime-route caveats rather than model
+quality failures.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Notes |
+|---|---|---|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `94 / 100` | staged UI/visual/state packet completed cleanly |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `78 / 100` | missed exact staged scope requirements |
+| `X3 / opus 4.7max` | `NOT-RUN` | `runtime-no-summary` | `0 / 100` | repeated phase-4 stall without final summary |
+| `X5 / gemini3.1pro` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | Gemini capacity exhaustion during staged run |
+| `X6 / gemini3.1flash-lite-preview` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | route/tool failure, not scoreable |
+
+Machine-readable rubric: `Work/next-upgraded-pack/Evidence/n38-ui-visual-state-rubric-2026-04-23.json`.
+
+X2 failed scorer invariants:
+
+| Invariant | Detail |
+|---|---|
+| `scope-contract` | staged packet failed the exact required change surface |
+| `scope-missing-required-paths` | required candidate paths were not all present |
+
+### N38 Verdict
+
+`X1 PASS 94 / 100` is useful positive evidence that X1 handles the staged UI/visual/state packet,
+but `X3` never produced a scoreable final result. This row therefore does not currently separate
+`X1` versus `X3` semantically; the honest read is `X1 PASS`, `X3 NOT-RUN`, `X2 scoreable FAIL`,
+and Gemini runtime-route caveats.
+
+## 2026-04-23 Follow-Up: W19 / N39 Staged Systems/Toolchain Recovery Re-entry
+
+`N39-staged-systems-toolchain-reentry-gauntlet` was added as diagnostic `E29` to test whether the
+systems/toolchain `X3` edge from `N19` and `N24` survives fresh staged invocations, stale-source
+recovery, runtime-status discipline, implementation ledger, closeout, and exact scope.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for the staged toolchain contract/oracle | `PASS` |
+| `python verifiers/check_staged_toolchain_reentry.py --bundle-shape-only` | `PASS` |
+| `python verifiers/check_staged_toolchain_reentry.py --expect-start-state` | `PASS` |
+| scratch reference verifier and scope simulation | `PASS` |
+| scorer compile and `git diff --check` before launch | `PASS` |
+| `mcp-free` before/after the batch | `STATS kill: none`; active parent-owned MCP processes skipped |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier / summary | Binary read |
+|---|---|---:|---|---|
+| `X1 / gpt-5.4` | `.scratch/v2-staged-runs/2026-04-23_16-57-40-X1-wave-w18-w21-staged-queued-2026-04-23/N39/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
+| `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-23_17-22-44-X3-wave-w18-w21-staged-queued-2026-04-23/N39/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-23_18-28-55-X2-wave-w18-w21-staged-queued-2026-04-23/N39/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
+| `X5 / gemini3.1pro` | `.scratch/v2-staged-runs/2026-04-23_18-37-13-X5-wave-w18-w21-staged-queued-2026-04-23/N39/` | `1` | final `summary.json` present; repeated Gemini capacity exhaustion | `ROUTE-FAIL`; runtime-route |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-23_18-57-00-X6-wave-w18-w21-staged-queued-2026-04-23/N39/` | no final summary | no final `summary.json` | `NOT-RUN`; runtime no-summary |
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Notes |
+|---|---|---|---:|---|
+| `X1 / gpt-5.4` | `FAIL` | `scoreable` | `78 / 100` | exact staged scope / changed-path budget miss |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `78 / 100` | same exact staged scope failure class |
+| `X3 / opus 4.7max` | `FAIL` | `scoreable` | `78 / 100` | same exact staged scope failure class |
+| `X5 / gemini3.1pro` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | runtime-route / quota caveat |
+| `X6 / gemini3.1flash-lite-preview` | `NOT-RUN` | `runtime-no-summary` | `0 / 100` | no final summary |
+
+Machine-readable rubric: `Work/next-upgraded-pack/Evidence/n39-staged-toolchain-rubric-2026-04-23.json`.
+
+Shared scoreable failure signature for `X1`, `X2`, and `X3`:
+
+| Invariant | Detail |
+|---|---|
+| `scope-contract` | staged toolchain packet missed the exact admitted change surface |
+| `scope-missing-required-paths` | one or more required candidate files were absent |
+
+### N39 Verdict
+
+N39 is not a usable separator. All three scoreable rows (`X1`, `X2`, `X3`) fail with the same
+exact-scope / changed-path-budget signature at `78 / 100`, while Gemini rows remain runtime
+caveats. The honest read is that N39 is currently over-tightened and should not be promoted as a
+routing basis until the scope contract is relaxed or redesigned.
+
+## 2026-04-23 Follow-Up: W20 / N40 Staged Owner Recovery Re-entry
+
+`N40-staged-owner-recovery-reentry-gauntlet` was added as diagnostic `E30` to test whether the
+owner-recovery `X3` edge from `N23` and `N26` survives four staged packets: source ledger, route
+decision, runtime policy, and closeout.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/staged-owner-recovery-contract.json` | `PASS` |
+| `python verifiers/check_staged_owner_recovery.py --bundle-shape-only` | `PASS` |
+| `python verifiers/check_staged_owner_recovery.py --expect-start-state` | `PASS` |
+| scratch reference at `.scratch/verifier-probes/2026-04-23-n40-staged-owner-reference/` | verifier `PASS`; scope `PASS` |
+| scorer compile and `git diff --check` before launch | `PASS` |
+| `mcp-free` before/after the batch | `STATS kill: none`; active parent-owned MCP processes skipped |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier / summary | Binary read |
+|---|---|---:|---|---|
+| `X1 / gpt-5.4` | `.scratch/v2-staged-runs/2026-04-23_16-57-40-X1-wave-w18-w21-staged-queued-2026-04-23/N40/` | `0` | final `summary.json` present; verifier `PASS` | `PASS` |
+| `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-23_17-22-44-X3-wave-w18-w21-staged-queued-2026-04-23/N40/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-23_18-28-55-X2-wave-w18-w21-staged-queued-2026-04-23/N40/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
+| `X5 / gemini3.1pro` | `.scratch/v2-staged-runs/2026-04-23_18-37-13-X5-wave-w18-w21-staged-queued-2026-04-23/N40/` | `1` | final `summary.json` present; repeated Gemini capacity exhaustion | `ROUTE-FAIL`; runtime-route |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-23_18-57-00-X6-wave-w18-w21-staged-queued-2026-04-23/N40/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Notes |
+|---|---|---|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `98 / 100` | exact staged owner packet |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `78 / 100` | exact packet incompleteness |
+| `X3 / opus 4.7max` | `FAIL` | `scoreable` | `55 / 100` | missed core staged owner packet fields |
+| `X5 / gemini3.1pro` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | quota / route caveat |
+| `X6 / gemini3.1flash-lite-preview` | `FAIL` | `scoreable` | `40 / 100` | scoreable low-quality fail, not route-only |
+
+Machine-readable rubric: `Work/next-upgraded-pack/Evidence/n40-staged-owner-rubric-2026-04-23.json`.
+
+X3 failed scorer invariants:
+
+| Invariant | Detail |
+|---|---|
+| `closure-complete` | closeout markers incomplete |
+| `phase-ledger-complete` | staged owner phase ledger incomplete |
+| `route-decision-complete` | route-decision packet incomplete |
+| `runtime-policy-complete` | runtime-policy packet incomplete |
+
+### N40 Verdict
+
+`X1 PASS 98 / 100` versus `X3 scoreable FAIL 55 / 100` is an honest staged owner-recovery
+separator. This flips the lane read by execution shape: compact single-session owner recovery still
+favors `X3` from `N23` and `N26`, but staged owner recovery with explicit source ledger, route
+decision, runtime-policy packet, and closeout now routes to `X1 primary`.
+
+## 2026-04-23 Follow-Up: W21 / N41 Staged Incident-Budget Re-entry
+
+`N41-staged-incident-budget-reentry-gauntlet` was added as diagnostic `E31` to test whether the
+long-horizon / cross-role / ownership-budget `X3` edge from `N16`, `N27`, `N28`, and `N29`
+survives staged runtime repair, repair ledger, reentry state, exact six-path budget, and closeout.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/staged-incident-budget-contract.json` | `PASS` |
+| `python verifiers/check_staged_incident_budget.py --bundle-shape-only` | `PASS` |
+| `python verifiers/check_staged_incident_budget.py --expect-start-state` | `PASS` |
+| scratch reference at `.scratch/verifier-probes/2026-04-23-n41-staged-incident-budget-reference/` | direct tests `PASS`; verifier `PASS`; scope `PASS` |
+| scorer compile and `git diff --check` before launch | `PASS` |
+| `mcp-free` before/after the batch | `STATS kill: none`; active parent-owned MCP processes skipped |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier / summary | Binary read |
+|---|---|---:|---|---|
+| `X1 / gpt-5.4` | `.scratch/v2-staged-runs/2026-04-23_16-57-40-X1-wave-w18-w21-staged-queued-2026-04-23/N41/` | `0` | final `summary.json` present; verifier `PASS` | `PASS` |
+| `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-23_17-22-44-X3-wave-w18-w21-staged-queued-2026-04-23/N41/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-23_18-28-55-X2-wave-w18-w21-staged-queued-2026-04-23/N41/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
+| `X5 / gemini3.1pro` | `.scratch/v2-staged-runs/2026-04-23_18-37-13-X5-wave-w18-w21-staged-queued-2026-04-23/N41/` | `1` | final `summary.json` present; repeated Gemini capacity exhaustion | `ROUTE-FAIL`; runtime-route |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-23_18-57-00-X6-wave-w18-w21-staged-queued-2026-04-23/N41/` | no final summary | no final `summary.json` | `NOT-RUN`; runtime no-summary |
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Notes |
+|---|---|---|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `100 / 100` | exact staged incident-budget packet |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `78 / 100` | partial staged incident packet |
+| `X3 / opus 4.7max` | `FAIL` | `scoreable` | `78 / 100` | missed required staged repair / closeout ledgers |
+| `X5 / gemini3.1pro` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | quota / route caveat |
+| `X6 / gemini3.1flash-lite-preview` | `NOT-RUN` | `runtime-no-summary` | `0 / 100` | no final summary |
+
+Machine-readable rubric: `Work/next-upgraded-pack/Evidence/n41-staged-incident-budget-rubric-2026-04-23.json`.
+
+X3 failed scorer invariants:
+
+| Invariant | Detail |
+|---|---|
+| `closeout-markers` | closeout markers incomplete |
+| `reentry-phase-ledger` | reentry phase ledger incomplete |
+| `reentry-runtime-classification` | runtime classification packet incomplete |
+| `repair-ledger-schema` | repair ledger schema incomplete |
+| `review-response-ledger` | review-response ledger incomplete |
+| `source-decisions-ledger` | source-decisions ledger incomplete |
+
+X2 failed scorer invariants:
+
+| Invariant | Detail |
+|---|---|
+| `crash-resume-no-replay` | replay handling incomplete |
+| `idempotent-repeat` | repeat/idempotency semantics incomplete |
+| `report-from-ledger-audit` | closeout report did not match ledger audit requirements |
+| `review-response-ledger` | review-response ledger incomplete |
+| `semantic-dedupe-latest-wins` | stale-result dedupe semantics incomplete |
+| `source-decisions-ledger` | source-decisions ledger incomplete |
+
+### N41 Verdict
+
+`X1 PASS 100 / 100` versus `X3 scoreable FAIL 78 / 100` is the strongest new staged separator in
+this wave. It extends `X1 primary` beyond staged delivery/API/review into staged long-horizon,
+cross-role, and ownership-budget incident repair when reentry state, repair ledger, exact patch
+budget, and closeout must all survive fresh-session handoff.

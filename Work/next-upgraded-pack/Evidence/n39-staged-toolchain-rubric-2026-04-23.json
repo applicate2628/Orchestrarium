@@ -1,0 +1,172 @@
+[
+  {
+    "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_16-57-40-X1-wave-w18-w21-staged-queued-2026-04-23\\N39",
+    "row": "X1",
+    "model": "gpt-5.4",
+    "binary": "FAIL",
+    "scoreability": "scoreable",
+    "wrapper_exit_code": 0,
+    "verification_passed": false,
+    "rubric": 78,
+    "systems": 25,
+    "cache_trace": 20,
+    "recovery": 20,
+    "phase": 5,
+    "patch": 0,
+    "tests": 5,
+    "time": 3,
+    "output": 1,
+    "elapsedSeconds": 1240.514,
+    "outputBytes": 761628,
+    "changedCount": 10,
+    "changedPaths": [
+      "candidate/workspace/closure.json",
+      "candidate/workspace/implementation-ledger.json",
+      "candidate/workspace/src/stagegate/config.py",
+      "candidate/workspace/src/stagegate/executor.py",
+      "candidate/workspace/src/stagegate/fingerprint.py",
+      "candidate/workspace/src/stagegate/paths.py",
+      "candidate/workspace/src/stagegate/planner.py",
+      "candidate/workspace/src/stagegate/recovery.py",
+      "candidate/workspace/src/stagegate/report.py",
+      "candidate/workspace/tests/test_stagegate.py"
+    ],
+    "failed_invariants": [
+      "scope-contract",
+      "scope-missing-required-paths"
+    ],
+    "notes": [
+      "failed invariants: scope-contract, scope-missing-required-paths",
+      "changed paths not exact"
+    ],
+    "summaryPath": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_16-57-40-X1-wave-w18-w21-staged-queued-2026-04-23\\N39\\meta\\summary.json"
+  },
+  {
+    "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_18-28-55-X2-wave-w18-w21-staged-queued-2026-04-23\\N39",
+    "row": "X2",
+    "model": "gpt-5.3-codex-spark",
+    "binary": "FAIL",
+    "scoreability": "scoreable",
+    "wrapper_exit_code": 0,
+    "verification_passed": false,
+    "rubric": 78,
+    "systems": 25,
+    "cache_trace": 20,
+    "recovery": 20,
+    "phase": 4,
+    "patch": 0,
+    "tests": 5,
+    "time": 5,
+    "output": 1,
+    "elapsedSeconds": 415.189,
+    "outputBytes": 678155,
+    "changedCount": 9,
+    "changedPaths": [
+      "candidate/workspace/closure.json",
+      "candidate/workspace/implementation-ledger.json",
+      "candidate/workspace/src/stagegate/config.py",
+      "candidate/workspace/src/stagegate/executor.py",
+      "candidate/workspace/src/stagegate/fingerprint.py",
+      "candidate/workspace/src/stagegate/planner.py",
+      "candidate/workspace/src/stagegate/recovery.py",
+      "candidate/workspace/src/stagegate/report.py",
+      "candidate/workspace/tests/test_stagegate.py"
+    ],
+    "failed_invariants": [
+      "scope-contract",
+      "scope-missing-required-paths"
+    ],
+    "notes": [
+      "failed invariants: scope-contract, scope-missing-required-paths",
+      "04-tests-closeout path rule miss: changed=['candidate/workspace/closure.json', 'candidate/workspace/implementation-ledger.json', 'candidate/workspace/src/stagegate/recovery.py', 'candidate/workspace/tests/test_stagegate.py']",
+      "changed paths not exact"
+    ],
+    "summaryPath": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_18-28-55-X2-wave-w18-w21-staged-queued-2026-04-23\\N39\\meta\\summary.json"
+  },
+  {
+    "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_17-22-44-X3-wave-w18-w21-staged-queued-2026-04-23\\N39",
+    "row": "X3",
+    "model": "opus 4.7max",
+    "binary": "FAIL",
+    "scoreability": "scoreable",
+    "wrapper_exit_code": 0,
+    "verification_passed": false,
+    "rubric": 78,
+    "systems": 25,
+    "cache_trace": 20,
+    "recovery": 20,
+    "phase": 5,
+    "patch": 0,
+    "tests": 5,
+    "time": 3,
+    "output": 5,
+    "elapsedSeconds": 1516.973,
+    "outputBytes": 10387,
+    "changedCount": 9,
+    "changedPaths": [
+      "candidate/workspace/closure.json",
+      "candidate/workspace/implementation-ledger.json",
+      "candidate/workspace/src/stagegate/config.py",
+      "candidate/workspace/src/stagegate/executor.py",
+      "candidate/workspace/src/stagegate/fingerprint.py",
+      "candidate/workspace/src/stagegate/lease.py",
+      "candidate/workspace/src/stagegate/planner.py",
+      "candidate/workspace/src/stagegate/report.py",
+      "candidate/workspace/tests/test_stagegate.py"
+    ],
+    "failed_invariants": [
+      "scope-contract",
+      "scope-missing-required-paths"
+    ],
+    "notes": [
+      "failed invariants: scope-contract, scope-missing-required-paths",
+      "changed paths not exact"
+    ],
+    "summaryPath": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_17-22-44-X3-wave-w18-w21-staged-queued-2026-04-23\\N39\\meta\\summary.json"
+  },
+  {
+    "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_18-37-13-X5-wave-w18-w21-staged-queued-2026-04-23\\N39",
+    "row": "X5",
+    "model": "gemini3.1pro",
+    "binary": "ROUTE-FAIL",
+    "scoreability": "runtime-route",
+    "wrapper_exit_code": 1,
+    "verification_passed": false,
+    "rubric": 0,
+    "systems": 25,
+    "cache_trace": 20,
+    "recovery": 20,
+    "phase": 0,
+    "patch": 0,
+    "tests": 0,
+    "time": 3,
+    "output": 5,
+    "elapsedSeconds": 1148.618,
+    "outputBytes": 11016,
+    "changedCount": 0,
+    "changedPaths": [],
+    "failed_invariants": [
+      "scope-contract",
+      "scope-missing-required-paths"
+    ],
+    "notes": [
+      "failed invariants: scope-contract, scope-missing-required-paths",
+      "01-source-plan path rule miss: changed=[]",
+      "02-fingerprint-plan path rule miss: changed=[]",
+      "03-execute-report path rule miss: changed=[]",
+      "04-tests-closeout path rule miss: changed=[]",
+      "changed paths not exact"
+    ],
+    "summaryPath": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_18-37-13-X5-wave-w18-w21-staged-queued-2026-04-23\\N39\\meta\\summary.json"
+  },
+  {
+    "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_18-57-00-X6-wave-w18-w21-staged-queued-2026-04-23\\N39",
+    "row": "X6",
+    "binary": "NOT-RUN",
+    "scoreability": "runtime-no-summary",
+    "rubric": 0,
+    "notes": [
+      "missing staged summary.json"
+    ]
+  }
+]

@@ -129,7 +129,7 @@ def artifact_score(case_root: Path, contract: dict):
     notes = []
     ledger = load_json(case_root / "run" / "candidate" / "repair-ledger.json") or {}
     reentry = load_json(case_root / "run" / "candidate" / "reentry-state.json") or {}
-    closure = load_json(case_root / "run" / "candidate" / "closure.json") or {}
+    closure = load_json(case_root / "run" / "candidate" / "closeout.json") or {}
 
     ledger_text = json.dumps(ledger, sort_keys=True)
     reentry_text = json.dumps(reentry, sort_keys=True)

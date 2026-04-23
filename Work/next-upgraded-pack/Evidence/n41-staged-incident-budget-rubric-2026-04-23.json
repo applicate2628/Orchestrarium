@@ -1,0 +1,178 @@
+{
+  "scenario": "N41",
+  "surface": "E31",
+  "results": [
+    {
+      "run_root": ".scratch/v2-staged-runs/2026-04-23_16-57-40-X1-wave-w18-w21-staged-queued-2026-04-23/N41",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 100,
+      "source": 30,
+      "stale": 20,
+      "route": 15,
+      "runtime": 15,
+      "closure": 10,
+      "phase": 10,
+      "patch": 5,
+      "time": 3,
+      "output": 0,
+      "elapsedSeconds": 710.132,
+      "outputBytes": 446761,
+      "changedPaths": [
+        "candidate/closeout.json",
+        "candidate/reentry-state.json",
+        "candidate/repair-ledger.json",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/tests/test_deploygrid.py"
+      ],
+      "failed_invariants": [],
+      "notes": [],
+      "summaryPath": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_16-57-40-X1-wave-w18-w21-staged-queued-2026-04-23\\N41\\meta\\summary.json"
+    },
+    {
+      "run_root": ".scratch/v2-staged-runs/2026-04-23_18-28-55-X2-wave-w18-w21-staged-queued-2026-04-23/N41",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 78,
+      "source": 30,
+      "stale": 20,
+      "route": 15,
+      "runtime": 15,
+      "closure": 10,
+      "phase": 5,
+      "patch": 0,
+      "time": 3,
+      "output": 0,
+      "elapsedSeconds": 141.197,
+      "outputBytes": 225541,
+      "changedPaths": [
+        "candidate/closeout.json",
+        "candidate/reentry-state.json",
+        "candidate/repair-ledger.json"
+      ],
+      "failed_invariants": [
+        "crash-resume-no-replay",
+        "idempotent-repeat",
+        "report-from-ledger-audit",
+        "review-response-ledger",
+        "semantic-dedupe-latest-wins",
+        "source-decisions-ledger"
+      ],
+      "notes": [
+        "failed invariants: crash-resume-no-replay, idempotent-repeat, report-from-ledger-audit, review-response-ledger, semantic-dedupe-latest-wins, source-decisions-ledger",
+        "01-source-ledger path rule miss: changed=[]",
+        "02-runtime-repair path rule miss: changed=[]"
+      ],
+      "summaryPath": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_18-28-55-X2-wave-w18-w21-staged-queued-2026-04-23\\N41\\meta\\summary.json"
+    },
+    {
+      "run_root": ".scratch/v2-staged-runs/2026-04-23_17-22-44-X3-wave-w18-w21-staged-queued-2026-04-23/N41",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 78,
+      "source": 30,
+      "stale": 20,
+      "route": 0,
+      "runtime": 15,
+      "closure": 0,
+      "phase": 10,
+      "patch": 5,
+      "time": 3,
+      "output": 2,
+      "elapsedSeconds": 732.194,
+      "outputBytes": 5953,
+      "changedPaths": [
+        "candidate/closeout.json",
+        "candidate/reentry-state.json",
+        "candidate/repair-ledger.json",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/tests/test_deploygrid.py"
+      ],
+      "failed_invariants": [
+        "closeout-markers",
+        "reentry-phase-ledger",
+        "reentry-runtime-classification",
+        "repair-ledger-schema",
+        "review-response-ledger",
+        "source-decisions-ledger"
+      ],
+      "notes": [
+        "failed invariants: closeout-markers, reentry-phase-ledger, reentry-runtime-classification, repair-ledger-schema, review-response-ledger, source-decisions-ledger",
+        "reentry state incomplete",
+        "closure incomplete"
+      ],
+      "summaryPath": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_17-22-44-X3-wave-w18-w21-staged-queued-2026-04-23\\N41\\meta\\summary.json"
+    },
+    {
+      "run_root": ".scratch/v2-staged-runs/2026-04-23_18-37-13-X5-wave-w18-w21-staged-queued-2026-04-23/N41",
+      "row": "X5",
+      "model": "gemini3.1pro",
+      "binary": "ROUTE-FAIL",
+      "scoreability": "runtime-route",
+      "wrapper_exit_code": 1,
+      "verification_passed": false,
+      "rubric": 0,
+      "source": 0,
+      "stale": 0,
+      "route": 0,
+      "runtime": 0,
+      "closure": 0,
+      "phase": 0,
+      "patch": 0,
+      "time": 2,
+      "output": 2,
+      "elapsedSeconds": 1138.636,
+      "outputBytes": 11016,
+      "changedPaths": [],
+      "failed_invariants": [
+        "closeout-schema",
+        "crash-resume-no-replay",
+        "idempotent-repeat",
+        "patch-budget-ledger",
+        "reentry-state-schema",
+        "report-from-ledger-audit",
+        "review-response-ledger",
+        "semantic-dedupe-latest-wins",
+        "source-decisions-ledger",
+        "validation-ledger"
+      ],
+      "notes": [
+        "failed invariants: closeout-schema, crash-resume-no-replay, idempotent-repeat, patch-budget-ledger, reentry-state-schema, report-from-ledger-audit, review-response-ledger, semantic-dedupe-latest-wins, source-decisions-ledger, validation-ledger",
+        "source arbitration incomplete",
+        "review or patch budget incomplete",
+        "reentry state incomplete",
+        "reentry source state incomplete",
+        "closure incomplete",
+        "01-source-ledger path rule miss: changed=[]",
+        "02-runtime-repair path rule miss: changed=[]",
+        "03-review-budget path rule miss: changed=[]",
+        "04-final-closeout path rule miss: changed=[]"
+      ],
+      "summaryPath": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_18-37-13-X5-wave-w18-w21-staged-queued-2026-04-23\\N41\\meta\\summary.json"
+    },
+    {
+      "run_root": ".scratch/v2-staged-runs/2026-04-23_18-57-00-X6-wave-w18-w21-staged-queued-2026-04-23/N41",
+      "row": "X6",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "rubric": 0,
+      "notes": [
+        "missing staged summary.json"
+      ]
+    }
+  ]
+}
