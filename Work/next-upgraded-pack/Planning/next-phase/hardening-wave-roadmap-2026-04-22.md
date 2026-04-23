@@ -46,7 +46,8 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W10` staged delivery re-entry | `DONE` | Does a real multi-invocation staged runner split X1/X3 on persisted phase state and re-entry? | `E20 / N30` staged delivery re-entry | `$lead` integration-owner simulation plus implementation verifier | W10 sidecar accepted only if staged runner exists; materialized as four fresh invocations over one run root | `X1 PASS 96`; `X3 scoreable FAIL 91` after omitting one phase ledger; `X2 scoreable FAIL 66`; `X6 RUNTIME-FAIL`; `X5 REQUEUE` |
 | `W11` scientific computation hardening | `DONE` | Can a real physics analytical-oracle numerical task split X1/X3? | `E21 / N31` MoM PEC-cylinder analytical oracle | `$computational-scientist` / `$algorithm-scientist` style verifier | MoM design superseded easier textbook-potential draft before commit | `X1` and `X3` both pass; `X3 94`, `X1 92`; binary tie remains, but N31 upgrades the lane to real CEM/MoM evidence |
 | `W12` scientific computation repeat | `DONE` | Can a combined real-physics task with MoM plus hydrogenic radial Schrodinger and solver-runtime scoring split the top pair? | `E22 / N32` dual-physics analytical oracle | `$computational-scientist` plus `$performance-engineer` style verifier | no spawn; mainline materialization | `X1` and `X3` both pass; `X3 100`, `X1 97`; `X2` scoreable FAIL 33; `X6` runtime no-summary; `X5` smoke REQUEUE |
-| `W13` high-load scientific performance follow-up | `QUEUED` | If a true runtime separator is still required, do high-N/high-ka CEM and larger tridiagonal radial workloads expose algorithmic speed differences? | N32-v2 or N33 high-load science perf gauntlet | `$computational-scientist` / `$performance-engineer` | no spawn yet | only admit if runtime separation matters more than correctness co-primary evidence |
+| `W13` interface refactor breakage | `DONE` | Does a structured interface refactor with hidden consumers split X1/X3 on call-site migration and compatibility preservation? | `E23 / N33` interface refactor breakage gauntlet | `$backend-engineer` style verifier plus hidden consumer gate | no active spawn; mainline materialization | `X1` and `X3` both pass; `X3 100`, `X1 96`; `X2` scoreable FAIL 5; `X6` runtime no-summary |
+| `W14` high-load scientific performance | `DONE` | Does staged high-load CEM plus radial Schrodinger performance expose runtime/patch-quality differences after N32 tied? | `E24 / N34` high-load science optimizer | `$computational-scientist` / `$performance-engineer` | one worker was stopped after write-race; mainline integration completed | `X1` and `X3` both pass and both read 96; X1 is faster on solver metrics, X3 is much more compact; `X2` scoreable FAIL 27 |
 
 ## Active Spawn Board
 
@@ -79,6 +80,8 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W10 / E20` | `N30-staged-delivery-reentry-gauntlet` | first staged runner: four fresh provider invocations over one copied bundle, requiring persisted plan, implementation, review response, and closeout state | `DONE`; first current top-pair binary separator: `X1 PASS 96`, `X3 scoreable FAIL 91`; `X2` scoreable FAIL; Gemini rows runtime caveats |
 | `W11 / E21` | `N31-mom-cylinder-analytic-oracle` | harden generic numerical reasoning with real computational electromagnetics: Method of Moments PEC-cylinder solve against cylindrical-harmonic analytical oracle | `DONE`; `X1` and `X3` both pass; `X3 94`, `X1 92`; binary tie remains |
 | `W12 / E22` | `N32-dual-physics-analytic-oracle` | combine strengthened MoM PEC-cylinder analytical oracle with hydrogenic radial Schrodinger finite-difference analytical oracle and score measured solver runtime | `DONE`; `X1` and `X3` both pass; `X3 100`, `X1 97`; `X2` scoreable FAIL 33; `X6` runtime no-summary; `X5` smoke REQUEUE |
+| `W13 / E23` | `N33-interface-refactor-breakage-gauntlet` | test interface-refactor fragility through structured result objects, hidden consumers, legacy wrapper removal, migration ledger, and exact patch scope | `DONE`; `X1` and `X3` both pass; `X3 100`, `X1 96`; `X2` scoreable FAIL 5; `X6` runtime no-summary |
+| `W14 / E24` | `N34-high-load-science-optimizer-gauntlet` | combine staged re-entry, high-load MoM PEC-cylinder cases, hydrogenic radial grids, runtime scoring, perf ledger, and optimization report | `DONE`; `X1` and `X3` both pass and both read 96; X1 faster, X3 much more compact; `X2` scoreable FAIL 27 |
 
 ## Current Admission Decision
 
@@ -117,6 +120,12 @@ analytical oracles and measured solver-runtime scoring. `X1` and `X3` both pass;
 still has no top-pair binary separator, but `X2` separates lower scoreably and Gemini rows remain
 route/runtime caveats.
 
+W13 tests the user's interface-refactor hypothesis directly. It separates `X2` lower scoreably but
+does not split the top pair: both `X1` and `X3` migrate the structured interfaces and hidden
+consumers. W14 then combines staged state plus high-load scientific performance. It also ties by
+binary, but exposes a useful non-binary tradeoff: `X1` is faster on measured solver runtime while
+`X3` is much more compact.
+
 ## Execution Order
 
 1. Collect read-only spawn proposals for `W1..W3`. `DONE` on 2026-04-22.
@@ -148,6 +157,8 @@ route/runtime caveats.
 14. Materialize `N30-staged-delivery-reentry` with staged runner and time/cost/patch-quality scoring. `DONE` on 2026-04-23.
 15. Materialize `N31-mom-cylinder-analytic-oracle` as W11/E21. `DONE` on 2026-04-23.
 16. Materialize `N32-dual-physics-analytic-oracle` as W12/E22. `DONE` on 2026-04-23.
+17. Materialize `N33-interface-refactor-breakage-gauntlet` as W13/E23. `DONE` on 2026-04-23.
+18. Materialize `N34-high-load-science-optimizer-gauntlet` as W14/E24. `DONE` on 2026-04-23.
 
 ## Current Routing Impact
 
@@ -157,7 +168,8 @@ route/runtime caveats.
 | staged delivery / multi-session re-entry | `X1 primary` after `N30` produced `X1 PASS` versus `X3 scoreable FAIL` on persisted phase-ledger completeness | repeat only if this becomes a hard global default; otherwise use as routing evidence |
 | systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `X2/X5/X6` lower on N24 | no immediate repeat needed unless a new systems subdomain becomes policy-critical |
 | UI implementation | `X3` primary versus `X1` after `N20` and `N25`; `X5` is a route-healthy contender after `N25 PASS 98`, but needs another UI-family pass before policy promotion | one more UI-family `X5` check only if deciding between `X3` and `X5` |
-| scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, `N31`, and `N32`; N31 adds real CEM/MoM evidence and N32 combines MoM with hydrogenic radial Schrodinger plus measured solver-runtime scoring; `X3 100`, `X1 97` on N32 | optional W13 high-load science performance gauntlet only if runtime separation matters more than correctness co-primary evidence |
+| scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, `N31`, `N32`, and `N34`; N31 adds real CEM/MoM evidence, N32 combines MoM with hydrogenic radial Schrodinger, and N34 adds high-load staged performance; `X1` is faster on N34, `X3` is more compact | co-primary; choose X1 for runtime-sensitive scientific solver work and X3 for compact output |
+| interface refactor / migration | `X1/X3` correctness tie on `N33`; `X3 100`, `X1 96`; `X2` scoreably fails | no top-pair binary split; use as lower-row calibration and as a template for future real-repo interface migration trials |
 | owner/orchestration | `X3` primary versus `X1` after `N23` and `N26`; `X5` is a route-healthy owner contender after `N26 PASS 100`, but needs another owner-family pass before policy promotion | one more owner-family `X5` check only if deciding between `X3` and `X5`; otherwise move to long-horizon repeat |
 | visual/graphics | geometry tied on `S22`; `N21` ties X1/X3 on visual correctness and favors X3 on compactness; Gemini preference not proven | repeat only after Gemini semantic route health is fixed |
 
@@ -169,12 +181,12 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume after the `W10 / N30` closeout commit. Systems/toolchain, UI
+If interrupted now, resume after the `W14 / N34` closeout commit. Systems/toolchain, UI
 implementation, owner recovery, compact long-horizon integration, cross-role incident repair, and
 ownership-budget repair are confirmed as `X3 primary` versus `X1` by scored lane-fit evidence, while
 `N30` makes `X1 primary` for staged delivery re-entry and persisted phase-ledger accountability.
 `X5` is a live UI and owner-recovery contender after route-healthy `N25` and `N26` wins/ties, but
-N27/N28/N29/N30/N32 produced only smoke-gated `REQUEUE`; N31 intentionally did not launch Gemini
-calibration rows after the updated rule. The next optional scientific item is `W13`: a high-load
-science performance gauntlet only if the N32 correctness tie is insufficient and runtime separation
-is policy-relevant.
+N27/N28/N29/N30/N32/N33/N34 produced only smoke-gated or route-gated caveats. The newest read is:
+N33 did not split X1/X3 on interface refactoring, and N34 did not split X1/X3 on high-load science
+binary correctness; N34 does support X1 for runtime-sensitive scientific solver work and X3 for
+compact output.

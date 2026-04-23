@@ -1709,3 +1709,99 @@ scoreably. Gemini rows remain route/runtime caveats.
 If a true scientific runtime separator is required next, the follow-up should not be another
 ordinary oracle; it should raise the workload into a high-load performance gauntlet, for example
 higher `ka`/larger MoM panel counts and larger radial grids with stricter solver-runtime scoring.
+
+## 2026-04-23 Follow-Up: W13 / N33 Interface Refactor Breakage Gauntlet
+
+`N33-interface-refactor-breakage-gauntlet` was added as diagnostic `E23` after the user identified
+interface refactoring as a likely failure mode. The task requires replacing three ambiguous public
+interfaces with structured result objects, migrating hidden consumers, removing legacy wrappers,
+preserving error/retry semantics, updating visible tests, and recording a migration ledger.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/interface-refactor-contract.json` | `PASS` |
+| `python verifiers/check_interface_refactor.py --bundle-shape-only` | `N33 verifier PASS (bundle shape)` |
+| `python verifiers/check_interface_refactor.py --expect-start-state` | `N33 verifier PASS (expected start-state failures present)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-23-n33-interface-reference/N33/` | completed verifier `PASS` |
+| `score-n33-interface-refactor-rubric.py --help` | `PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-23_07-05-51-X1-wave-w13-n33-interface-refactor-2026-04-23/N33/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-23_07-19-58-X3-wave-w13-n33-interface-refactor-2026-04-23/N33/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-23_07-55-42-X2-wave-w13-n33-interface-refactor-calibration-2026-04-23/N33/` | `0` | `FAIL` | `PASS` | scoreable `FAIL` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-23_07-56-42-X6-wave-w13-n33-interface-refactor-calibration-2026-04-23/N33/` | timeout | no `summary.json` | n/a | `NOT-RUN` runtime no-summary |
+| `X5 / gemini3.1pro` | not launched | n/a | n/a | n/a | `REQUEUE` route caveat |
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Interface | Hidden | Ledger | Tests | Patch | Output | Bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `96 / 100` | `30` | `30` | `15` | `10` | `10` | `1` | `380247` | exact but high-output |
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `100 / 100` | `30` | `30` | `15` | `10` | `10` | `5` | `2984` | compact exact |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `5 / 100` | `0` | `0` | `0` | `0` | `0` | `5` | `1387` | no candidate edits; starter failures remain |
+| `X6 / gemini3.1flash-lite-preview` | `NOT-RUN` | `runtime-no-summary` | `0 / 100` | `0` | `0` | `0` | `0` | `0` | `0` | n/a | controller timeout without `summary.json` |
+
+Machine-readable rubric: `Work/next-upgraded-pack/Evidence/n33-interface-refactor-rubric-2026-04-23.json`.
+
+### N33 Verdict
+
+`binary tie remains` for `X1` and `X3`. The interface-refactor hypothesis is valid for separating
+lower calibration rows (`X2` failed scoreably), but not for the current top pair under this bundle.
+The top-pair split is again cost/compactness only: X3 solved the same contract with much smaller
+worker output. N33 does not supersede N30 as the only current binary separator.
+
+## 2026-04-23 Follow-Up: W14 / N34 High-Load Science Optimizer
+
+`N34-high-load-science-optimizer-gauntlet` was added as diagnostic `E24`. It combines the N30
+staged/re-entry artifact shape with the N32 dual-physics domain and a heavier performance workload:
+larger MoM PEC-cylinder cases, higher hydrogenic radial grids, explicit phase state, performance
+ledger, optimization report, and measured solver-runtime rubric.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/optimizer-contract.json` | `PASS` |
+| `python verifiers/check_science_optimizer.py --bundle-shape-only` | `N34 verifier PASS (bundle shape)` |
+| `python verifiers/check_science_optimizer.py --expect-start-state` | `N34 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-23-n34-science-optimizer-reference/N34/` | completed verifier `PASS` |
+| `score-n34-science-optimizer-rubric.py --help` | `PASS` |
+| `git diff --check` before launch | exit `0` |
+
+The first X1/N33 launch attempt in this session used bad shell quoting and failed before worker
+launch; it is not admitted evidence. N34 runtime caps were also adjusted before launch to avoid
+host-load flakes in the binary gate; actual speed separation is scored by verifier metrics.
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-23_07-30-16-X1-wave-w14-n34-science-optimizer-2026-04-23/N34/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-23_07-43-08-X3-wave-w14-n34-science-optimizer-2026-04-23/N34/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-23_07-56-13-X2-wave-w14-n34-science-optimizer-calibration-2026-04-23/N34/` | `0` | `FAIL` | `PASS` | scoreable `FAIL` |
+| `X6 / gemini3.1flash-lite-preview` | not launched after N33 route timeout | n/a | n/a | n/a | `NOT-RUN` route caveat |
+| `X5 / gemini3.1pro` | not launched | n/a | n/a | n/a | `REQUEUE` route caveat |
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Correct | Runtime | Runtime seconds | Staged | Report | Notes | Scope | Output | Bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `96 / 100` | `40` | `20` | `0.319s` | `15` | `5` | `5` | `10` | `1` | `540758` | fastest measured solver metrics, high output |
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `96 / 100` | `40` | `16` | `3.448s` | `15` | `5` | `5` | `10` | `5` | `2411` | slower solver metrics, much smaller output |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `27 / 100` | `2` | `20` | `1.089s` | `0` | `0` | `0` | `0` | `5` | `1382` | no candidate edits; starter defects remain |
+
+Machine-readable rubric: `Work/next-upgraded-pack/Evidence/n34-science-optimizer-rubric-2026-04-23.json`.
+
+### N34 Verdict
+
+`binary tie remains` for `X1` and `X3`, but N34 gives a clearer non-binary lane tradeoff than N32:
+X1 is materially faster on measured solver metrics, while X3 is materially more compact. Current
+scientist/performance read should be `near-tie`: prefer X1 when measured runtime is the dominant
+constraint; prefer X3 when output/cost compactness is dominant. This still does not beat N30's
+staged delivery binary separator.
