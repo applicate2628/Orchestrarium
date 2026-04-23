@@ -321,6 +321,24 @@ def contains_all(text: str, markers: list[str]):
     return all(marker.lower() in lower for marker in markers)
 
 
+def changed_paths_match_scope(changed_paths: list[str], contract: dict):
+    observed = {path.replace("\\", "/") for path in changed_paths}
+    allowed = set(contract["allowedChangedPaths"])
+    required_core = set(contract["requiredChangedCorePaths"])
+    any_groups = [set(group) for group in contract.get("requiredChangedAnyOf", [])]
+
+    missing_core = sorted(required_core - observed)
+    extra = sorted(observed - allowed)
+    if missing_core:
+        return False, f"missing required core changed paths: {missing_core}"
+    for group in any_groups:
+        if not observed & group:
+            return False, f"missing required one-of changed paths: {sorted(group)}"
+    if extra:
+        return False, f"changed paths outside bounded surface: {extra}"
+    return True, ""
+
+
 def evaluate_ledger(root: Path, contract: dict):
     try:
         ledger = load_json(root / "candidate" / "workspace" / "implementation-ledger.json")
@@ -355,8 +373,9 @@ def evaluate_closure(root: Path, contract: dict):
         return [{"id": "closure-complete", "detail": "contractId mismatch"}]
     if closure.get("planFingerprint") != contract["planFingerprint"]:
         return [{"id": "closure-complete", "detail": "plan fingerprint missing"}]
-    if sorted(closure.get("changedPaths", [])) != sorted(contract["requiredChangedPaths"]):
-        return [{"id": "closure-complete", "detail": "changed paths mismatch"}]
+    matches_scope, detail = changed_paths_match_scope(closure.get("changedPaths", []), contract)
+    if not matches_scope:
+        return [{"id": "closure-complete", "detail": detail}]
     if not closure.get("outcome") or "residualRisk" not in closure:
         return [{"id": "closure-complete", "detail": "outcome or residualRisk missing"}]
     if not contains_all(text, contract["requiredLedgerMarkers"][-3:]):

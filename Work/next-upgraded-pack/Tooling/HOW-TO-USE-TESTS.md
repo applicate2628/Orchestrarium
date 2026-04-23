@@ -65,7 +65,7 @@ It copies `broken/` into ignored scratch storage and runs there.
 
 | Row | Current label | Current use |
 |---|---|---|
-| `X1` | `gpt-5.4` | main active row |
+| `X1` | `gpt-5.5` | main active row |
 | `X2` | `gpt-spark` | main active row |
 | `X3` | `opus 4.7max` | main active row |
 | `X4` | `Claude China` | full-v2 row on the repo-canonical secret-backed Claude path, with the same current `opus` `max` profile as `X3` |

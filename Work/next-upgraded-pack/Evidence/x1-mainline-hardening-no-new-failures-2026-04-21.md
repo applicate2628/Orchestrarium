@@ -2030,14 +2030,14 @@ ARIA/status cues, layout geometry, and raster pixels must stay coherent across f
 | Row | Run root | Wrapper exit | Verifier / summary | Binary read |
 |---|---|---:|---|---|
 | `X1 / gpt-5.4` | `.scratch/v2-staged-runs/2026-04-23_16-57-40-X1-wave-w18-w21-staged-queued-2026-04-23/N38/` | `0` | final `summary.json` present; verifier `PASS` | `PASS` |
-| `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-23_17-56-36-X3-wave-w18-w21-staged-rerun-n38-2026-04-23/N38/` | no final summary | phase `01..03` completed; phase `04` stalled without worker output; original queued run also ended without final summary | `NOT-RUN`; repeated runtime no-summary |
+| `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-23_21-17-20-X3-wave-w18-n38-x3-rerun-2026-04-23/N38/` | no final summary | phase `01..03` completed; phase `04` stalled without worker output; original queued run and prior bounded rerun also ended without final summary | `NOT-RUN`; repeated runtime no-summary |
 | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-23_18-28-55-X2-wave-w18-w21-staged-queued-2026-04-23/N38/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
 | `X5 / gemini3.1pro` | `.scratch/v2-staged-runs/2026-04-23_18-37-13-X5-wave-w18-w21-staged-queued-2026-04-23/N38/` | `1` | final `summary.json` present; repeated Gemini capacity exhaustion | `ROUTE-FAIL`; runtime-route |
 | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-23_18-57-00-X6-wave-w18-w21-staged-queued-2026-04-23/N38/` | `1` | final `summary.json` present; route/tool failure | `ROUTE-FAIL`; runtime-route |
 
-X3 is not scoreable on N38. Both the original queued run and the bounded rerun reached late phases,
-but neither produced a final `summary.json`. X5 and X6 are runtime-route caveats rather than model
-quality failures.
+X3 is not scoreable on N38. The original queued run, the bounded rerun, and the later solo rerun
+all reached late phases, but none produced a final `summary.json`. X5 and X6 are runtime-route
+caveats rather than model quality failures.
 
 ### Rubric read
 
@@ -2045,7 +2045,7 @@ quality failures.
 |---|---|---|---:|---|
 | `X1 / gpt-5.4` | `PASS` | `scoreable` | `94 / 100` | staged UI/visual/state packet completed cleanly |
 | `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `78 / 100` | missed exact staged scope requirements |
-| `X3 / opus 4.7max` | `NOT-RUN` | `runtime-no-summary` | `0 / 100` | repeated phase-4 stall without final summary |
+| `X3 / opus 4.7max` | `NOT-RUN` | `runtime-no-summary` | `0 / 100` | three phase-4 stalls without final summary |
 | `X5 / gemini3.1pro` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | Gemini capacity exhaustion during staged run |
 | `X6 / gemini3.1flash-lite-preview` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | route/tool failure, not scoreable |
 
@@ -2061,15 +2061,15 @@ X2 failed scorer invariants:
 ### N38 Verdict
 
 `X1 PASS 94 / 100` is useful positive evidence that X1 handles the staged UI/visual/state packet,
-but `X3` never produced a scoreable final result. This row therefore does not currently separate
-`X1` versus `X3` semantically; the honest read is `X1 PASS`, `X3 NOT-RUN`, `X2 scoreable FAIL`,
-and Gemini runtime-route caveats.
+but `X3` never produced a scoreable final result across three attempts. This row therefore does not
+currently separate `X1` versus `X3` semantically; the honest read is `X1 PASS`, `X3 NOT-RUN`,
+`X2 scoreable FAIL`, and Gemini runtime-route caveats.
 
 ## 2026-04-23 Follow-Up: W19 / N39 Staged Systems/Toolchain Recovery Re-entry
 
 `N39-staged-systems-toolchain-reentry-gauntlet` was added as diagnostic `E29` to test whether the
 systems/toolchain `X3` edge from `N19` and `N24` survives fresh staged invocations, stale-source
-recovery, runtime-status discipline, implementation ledger, closeout, and exact scope.
+recovery, runtime-status discipline, implementation ledger, closeout, and bounded scope.
 
 ### Pre-run validation
 
@@ -2081,42 +2081,46 @@ recovery, runtime-status discipline, implementation ledger, closeout, and exact 
 | scratch reference verifier and scope simulation | `PASS` |
 | scorer compile and `git diff --check` before launch | `PASS` |
 | `mcp-free` before/after the batch | `STATS kill: none`; active parent-owned MCP processes skipped |
+| bounded-scope redesign JSON, verifier compile, reference verifier, and scope probe | `PASS` |
 
 ### Runs and calibration
 
 | Row | Run root | Wrapper exit | Verifier / summary | Binary read |
 |---|---|---:|---|---|
-| `X1 / gpt-5.4` | `.scratch/v2-staged-runs/2026-04-23_16-57-40-X1-wave-w18-w21-staged-queued-2026-04-23/N39/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
-| `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-23_17-22-44-X3-wave-w18-w21-staged-queued-2026-04-23/N39/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
-| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-23_18-28-55-X2-wave-w18-w21-staged-queued-2026-04-23/N39/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
-| `X5 / gemini3.1pro` | `.scratch/v2-staged-runs/2026-04-23_18-37-13-X5-wave-w18-w21-staged-queued-2026-04-23/N39/` | `1` | final `summary.json` present; repeated Gemini capacity exhaustion | `ROUTE-FAIL`; runtime-route |
-| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-23_18-57-00-X6-wave-w18-w21-staged-queued-2026-04-23/N39/` | no final summary | no final `summary.json` | `NOT-RUN`; runtime no-summary |
+| `X1 / gpt-5.4` | `.scratch/v2-staged-runs/2026-04-23_20-49-15-X1-wave-w19-n39-bounded-scope-rerun-2026-04-23/N39/` | `0` | final `summary.json` present; verifier `PASS` | `PASS` |
+| `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-23_20-22-31-X3-wave-w19-n39-bounded-scope-rerun-2026-04-23/N39/` | `0` | final `summary.json` present; scope `PASS`; stagegate verifier `FAIL` | scoreable `FAIL` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-23_20-49-15-X2-wave-w19-n39-bounded-scope-rerun-2026-04-23/N39/` | `0` | final `summary.json` present; verifier `FAIL`; extra top-level `reports/` paths | scoreable `FAIL` |
+| `X5 / gemini3.1pro` | `.scratch/v2-staged-runs/2026-04-23_20-22-31-X5-wave-w19-n39-bounded-scope-rerun-2026-04-23/N39/` | `1` | final `summary.json` present; repeated Gemini capacity exhaustion | `ROUTE-FAIL`; runtime-route |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-23_20-22-31-X6-wave-w19-n39-bounded-scope-rerun-2026-04-23/N39/` | `0` | final `summary.json` present; verifier `FAIL` | scoreable `FAIL` |
 
 ### Rubric read
 
 | Row | Binary | Scoreability | Rubric | Notes |
 |---|---|---|---:|---|
-| `X1 / gpt-5.4` | `FAIL` | `scoreable` | `78 / 100` | exact staged scope / changed-path budget miss |
-| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `78 / 100` | same exact staged scope failure class |
-| `X3 / opus 4.7max` | `FAIL` | `scoreable` | `78 / 100` | same exact staged scope failure class |
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `94 / 100` | bounded staged systems/toolchain packet completed cleanly |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `76 / 100` | bundle drift through top-level `reports/` paths and phase-path misses |
+| `X3 / opus 4.7max` | `FAIL` | `scoreable` | `78 / 100` | semantic stagegate failures after scope passed |
 | `X5 / gemini3.1pro` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | runtime-route / quota caveat |
-| `X6 / gemini3.1flash-lite-preview` | `NOT-RUN` | `runtime-no-summary` | `0 / 100` | no final summary |
+| `X6 / gemini3.1flash-lite-preview` | `FAIL` | `scoreable` | `78 / 100` | omitted required test path and failed functional stagegate invariants |
 
 Machine-readable rubric: `Work/next-upgraded-pack/Evidence/n39-staged-toolchain-rubric-2026-04-23.json`.
 
-Shared scoreable failure signature for `X1`, `X2`, and `X3`:
+Main scoreable failure signatures after bounded-scope redesign:
 
 | Invariant | Detail |
 |---|---|
-| `scope-contract` | staged toolchain packet missed the exact admitted change surface |
-| `scope-missing-required-paths` | one or more required candidate files were absent |
+| `X3 stagegate` | selected stale recovery source, used `$product-manager` instead of `$lead`, classified quota as `FAIL`, missed cache restore source phrase, and left ledger/closure markers incomplete |
+| `X2 scope-contract` | wrote top-level `reports/` paths and missed required staged phase path rules |
+| `X6 scope-contract` | omitted `candidate/workspace/tests/test_stagegate.py` and also failed direct functional stagegate tests |
 
 ### N39 Verdict
 
-N39 is not a usable separator. All three scoreable rows (`X1`, `X2`, `X3`) fail with the same
-exact-scope / changed-path-budget signature at `78 / 100`, while Gemini rows remain runtime
-caveats. The honest read is that N39 is currently over-tightened and should not be promoted as a
-routing basis until the scope contract is relaxed or redesigned.
+The bounded-scope redesign removed the exact-scope artifact. N39 is now a usable staged
+systems/toolchain separator: `X1 PASS 94 / 100` versus `X3 scoreable FAIL 78 / 100`.
+This does not overturn the single-session systems/toolchain read from `N19` and `N24`, but it adds
+an execution-shape split: use `X3 primary` for compact single-session systems/toolchain patches and
+`X1 primary` for staged systems/toolchain recovery, source arbitration, runtime-status discipline,
+and closeout.
 
 ## 2026-04-23 Follow-Up: W20 / N40 Staged Owner Recovery Re-entry
 

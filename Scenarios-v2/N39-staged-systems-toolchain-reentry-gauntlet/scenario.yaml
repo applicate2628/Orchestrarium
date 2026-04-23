@@ -26,13 +26,13 @@ must_not_touch:
   - candidate/workspace/src/stagegate/models.py
   - candidate/workspace/docs/**
   - candidate/workspace/legacy/**
-score_profile: "staged-systems-toolchain, re-entry, exact-scope, scored-rubric"
+score_profile: "staged-systems-toolchain, re-entry, bounded-scope, scored-rubric"
 overlay_flags:
   - top-pair-role-fit
   - systems-toolchain
   - staged-runner
   - reentry
-  - exact-scope
+  - bounded-scope
   - source-binding
   - stale-source-recovery
   - scored-rubric

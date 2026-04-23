@@ -286,7 +286,7 @@ def markdown_report(result: dict) -> str:
         "",
         "| Row | Score | Read |",
         "|---|---:|---|",
-        f"| `X1 / gpt-5.4` | `{x1['score']} / {x1['max']}` | {'wins E3' if winner == 'X1' else 'tied' if winner == 'tie' else 'below X3 on E3'} |",
+        f"| `X1 / gpt-5.5` | `{x1['score']} / {x1['max']}` | {'wins E3' if winner == 'X1' else 'tied' if winner == 'tie' else 'below X3 on E3'} |",
         f"| `X3 / opus 4.7max` | `{x3['score']} / {x3['max']}` | {'wins E3' if winner == 'X3' else 'tied' if winner == 'tie' else 'below X1 on E3'} |",
         "",
         f"E3 verdict: `{winner}`.",
@@ -348,7 +348,7 @@ def main() -> int:
         "rubric": "E3 top-pair-rubric",
         "generated_on": date.today().isoformat(),
         "rows": [
-            score_row(args.x1_root, "X1 / gpt-5.4"),
+            score_row(args.x1_root, "X1 / gpt-5.5"),
             score_row(args.x3_root, "X3 / opus 4.7max"),
         ],
     }

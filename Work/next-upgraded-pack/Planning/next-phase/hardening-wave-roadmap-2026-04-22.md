@@ -51,8 +51,8 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W15` staged interface migration | `DONE` | Does combining interface refactor breakage with four fresh invocations split X1/X3? | `E25 / N35` staged interface migration re-entry | `$backend-engineer` plus staged re-entry verifier | no active spawn; mainline materialization | `X1 PASS 96`; `X3 scoreable FAIL 71`; `X2 PASS 91`; Gemini rows route-fail |
 | `W16` real-repo staged API migration | `DONE` | Does the staged migration split repeat on a fresh BillingMesh-style API domain? | `E26 / N36` real-repo staged API migration | `$backend-engineer` plus staged re-entry verifier | no active spawn; mainline materialization | `X1 PASS 97`; `X3 scoreable FAIL 74`; `X2 scoreable FAIL 70`; X6 runtime no-summary; X5 smoke-gated |
 | `W17` staged adversarial review gate | `DONE` | Does the staged/re-entry split also apply to advisory architecture and review-gate lanes? | `E27 / N37` staged adversarial review gate | `$architecture-reviewer` / `$qa-engineer` style verifier plus staged response gate | read-only sidecar recommended review/advisory staged gauntlet; mainline materialization | `X1 PASS 98`; `X3 scoreable FAIL 35`; `X2 PASS 97`; `X6 ROUTE-FAIL`; `X5` smoke timeout |
-| `W18` staged UI/visual/state integration | `DONE` | Does the staged/re-entry split apply to UI implementation when state, ARIA, layout, and raster pixels must stay coherent together? | `E28 / N38` deterministic UI/visual/state integration | `$frontend-engineer` plus `$visualization-engineer` style verifier | read-only sidecar recommended N38; mainline materialized and reference-validated | `X1 PASS 94`; `X2 FAIL 78`; `X3` repeated runtime no-summary; `X5/X6` route caveats; not a top-pair semantic separator |
-| `W19` staged systems/toolchain recovery re-entry | `DONE` | Does the systems/toolchain `X3 primary` single-shot edge survive staged fresh invocations, recovery source arbitration, runtime-status discipline, ledger, and exact closeout? | `E29 / N39` staged systems/toolchain reentry | `$toolchain-engineer` plus staged re-entry and recovery verifier | mainline materialized from N24 and hardened with N23/N26-style stale-source and owner-continuity traps | `X1/X2/X3` all scoreable `FAIL 78`; row is currently over-tightened and non-separating |
+| `W18` staged UI/visual/state integration | `DONE` | Does the staged/re-entry split apply to UI implementation when state, ARIA, layout, and raster pixels must stay coherent together? | `E28 / N38` deterministic UI/visual/state integration | `$frontend-engineer` plus `$visualization-engineer` style verifier | read-only sidecar recommended N38; mainline materialized and reference-validated | `X1 PASS 94`; `X2 FAIL 78`; `X3` repeated runtime no-summary after three attempts; `X5/X6` route caveats; not a top-pair semantic separator |
+| `W19` staged systems/toolchain recovery re-entry | `DONE` | Does the systems/toolchain `X3 primary` single-shot edge survive staged fresh invocations, recovery source arbitration, runtime-status discipline, ledger, and bounded closeout? | `E29 / N39` staged systems/toolchain reentry | `$toolchain-engineer` plus staged re-entry and recovery verifier | mainline materialized from N24 and hardened with N23/N26-style stale-source and owner-continuity traps; bounded-scope redesign removed exact-scope artifact | `X1 PASS 94`; `X3 scoreable FAIL 78`; `X2 FAIL 76`; `X6 FAIL 78`; `X5` route-fail; staged systems/toolchain now reads `X1 primary` |
 | `W20` staged owner recovery re-entry | `DONE` | Does the owner-recovery `X3 primary` single-shot edge survive staged source recovery, runtime policy, and closeout? | `E30 / N40` staged owner recovery reentry | `$lead` owner-recovery verifier | mainline materialized while X3 quota was unavailable | `X1 PASS 98`; `X3 FAIL 55`; `X2 FAIL 78`; `X6 FAIL 40`; `X5` route-fail; staged owner recovery now reads `X1 primary` |
 | `W21` staged incident-budget re-entry | `DONE` | Does the long-horizon/cross-role/ownership-budget `X3 primary` single-shot edge survive staged runtime repair, repair ledger, exact patch budget, and closeout? | `E31 / N41` staged incident-budget reentry | `$backend-engineer` plus staged re-entry and patch-budget verifier | mainline materialized while X3 quota was unavailable | `X1 PASS 100`; `X3 FAIL 78`; `X2 FAIL 78`; `X5` route-fail; `X6` no-summary; staged incident-budget re-entry now reads `X1 primary` |
 
@@ -71,7 +71,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | N29 ownership-budget sidecar | inspect W9 route and N29 risks | none | semantic budget design memo | `DONE`; recommended near-pass baseline, structured ledger, and exact changed-path budget |
 | W17 review-gate sidecar | inspect remaining lane gaps after N36 | none | next-wave ordering proposal | `DONE`; recommended staged ADR/review gate first, then UX and harder numerical repeats |
 | W18 UI/visual sidecar | inspect N20/N21/N25 UI and visual patterns | none | deterministic UI/visual/state gauntlet proposal | `DONE`; N38 materialized and reference-validated |
-| W19 next-lane sidecar | inspect N19/N24 and N23/N26 for next staged target | none | next staged gauntlet proposal | `DONE`; N39 materialized locally as staged systems/toolchain recovery candidate while X3 quota is unavailable |
+| W19 next-lane sidecar | inspect N19/N24 and N23/N26 for next staged target | none | next staged gauntlet proposal | `DONE`; N39 materialized as staged systems/toolchain recovery candidate and later rerun under bounded scope |
 
 ## Spawn Proposal Results
 
@@ -95,8 +95,8 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W15 / E25` | `N35-staged-interface-migration-reentry-gauntlet` | combine N33 interface migration with N30 staged runner: persisted plan, implementation, review response, closeout, hidden consumers, exact scope | `DONE`; `X1 PASS 96`, `X3 scoreable FAIL 71`, `X2 PASS 91`; Gemini rows route-fail |
 | `W16 / E26` | `N36-realrepo-staged-api-migration-gauntlet` | repeat N35 on a real-repo-style BillingMesh API migration: account lookup, entitlement policy, usage publisher, service/API/reporting consumers, review response, exact scope | `DONE`; `X1 PASS 97`, `X3 scoreable FAIL 74`, `X2 scoreable FAIL 70`; `X6` runtime no-summary; `X5` smoke-gated |
 | `W17 / E27` | `N37-staged-adversarial-review-gate-gauntlet` | extend the staged separator into advisory/review: source ledger, source-bound ADR, exact findings, false-positive rejection, response gate, and closure | `DONE`; `X1 PASS 98`, `X3 scoreable FAIL 35`, `X2 PASS 97`; `X6 ROUTE-FAIL`; `X5` smoke timeout |
-| `W18 / E28` | `N38-deterministic-ui-visual-state-integration-gauntlet` | combine N20 UI state, N25 dirty-state/accessibility, and N21 deterministic raster pixels into one staged UI/visual/state integration task | `DONE`; pre-run gates passed; `X1 PASS 94`, `X2 FAIL 78`, `X3` repeated no-summary runtime stall, `X5/X6` route caveats; useful X1 evidence but not a scoreable top-pair separator |
-| `W19 / E29` | `N39-staged-systems-toolchain-reentry-gauntlet` | convert N24 systems/toolchain staging into a four-phase re-entry task with N23/N26-style stale-source recovery, runtime-status discipline, implementation ledger, closeout, exact scope, and functional toolchain oracle | `DONE`; pre-run gates passed; `X1/X2/X3` all scoreable `FAIL 78` on the same exact-scope gate; row is over-tightened and should not drive routing policy |
+| `W18 / E28` | `N38-deterministic-ui-visual-state-integration-gauntlet` | combine N20 UI state, N25 dirty-state/accessibility, and N21 deterministic raster pixels into one staged UI/visual/state integration task | `DONE`; pre-run gates passed; `X1 PASS 94`, `X2 FAIL 78`, `X3` repeated no-summary runtime stall across three attempts, `X5/X6` route caveats; useful X1 evidence but not a scoreable top-pair separator |
+| `W19 / E29` | `N39-staged-systems-toolchain-reentry-gauntlet` | convert N24 systems/toolchain staging into a four-phase re-entry task with N23/N26-style stale-source recovery, runtime-status discipline, implementation ledger, closeout, bounded scope, and functional toolchain oracle | `DONE`; bounded-scope rerun passed pre-run gates and produced `X1 PASS 94` versus `X3 scoreable FAIL 78`; staged systems/toolchain recovery is now an X1-over-X3 separator |
 | `W20 / E30` | `N40-staged-owner-recovery-reentry-gauntlet` | convert owner recovery into a four-phase source-ledger, route-decision, runtime-policy, and closeout packet | `DONE`; pre-run gates passed; `X1 PASS 98`, `X3 FAIL 55`, `X2 FAIL 78`, `X6 FAIL 40`, `X5` route-fail; staged owner recovery becomes an X1 lane |
 | `W21 / E31` | `N41-staged-incident-budget-reentry-gauntlet` | convert the N28/N29 DeployGrid incident repair family into a four-phase staged runtime repair, repair ledger, reentry state, exact six-path budget, and closeout | `DONE`; pre-run gates passed; `X1 PASS 100`, `X3 FAIL 78`, `X2 FAIL 78`, `X5` route-fail, `X6` no-summary; staged incident-budget re-entry becomes an X1 lane |
 
@@ -104,8 +104,8 @@ a roadmap, and use spawns when that accelerates independent work.
 
 `W4 / N24`, `W4 / N25`, and `W6..W21 / N26..N41` are now complete. The staged follow-up batch
 closed four queued rows in one pass: `N38` is useful positive X1 evidence but unresolved for the
-top pair because X3 never produced a scoreable final summary; `N39` is over-tightened and not
-usable as a separator; `N40` and `N41` are new scoreable top-pair separators in favor of X1.
+top pair because X3 never produced a scoreable final summary; bounded `N39`, `N40`, and `N41` are
+scoreable top-pair separators in favor of X1.
 
 Reason: `N19` and `N24` independently read `X3 95 / 100` versus `X1 86 / 100`, with both top
 pair rows passing the binary verifier and calibration rows separating lower. This moves
@@ -156,17 +156,19 @@ finding/source-id tuples, non-claim markers, response cues, and closure validati
 review ledgers; ordinary single-shot tuple-exact review remains an `X1/X3` near-tie.
 
 W18 tested the same staged hypothesis on UI/visual/state integration. `X1` passed at `94 / 100`,
-but X3 twice stalled without a final `summary.json`, so the row does not currently separate the top
-pair semantically. W19 tested staged systems/toolchain recovery and over-tightened: `X1`, `X2`, and
-`X3` all fail the same exact-scope gate at `78 / 100`, so N39 should be treated as a contract
-problem rather than a routing signal.
+but X3 stalled without a final `summary.json` across three attempts, so the row does not currently
+separate the top pair semantically. W19 tested staged systems/toolchain recovery. The initial exact
+scope was too tight, but the bounded-scope rerun removed that artifact and produced `X1 PASS
+94 / 100` versus `X3 scoreable FAIL 78 / 100`.
 
-W20 and W21 are the important routing changes. W20 turns owner recovery into a staged packet and
-produces `X1 PASS 98 / 100` versus `X3 FAIL 55 / 100`. W21 turns the incident-budget family into a
-staged repair-ledger/reentry-state/closeout packet and produces `X1 PASS 100 / 100` versus
-`X3 FAIL 78 / 100`. Current policy split is now explicit by execution shape: `X3 primary` for
-compact single-session owner and incident repair packets, `X1 primary` for staged owner and staged
-incident-budget re-entry.
+W19, W20, and W21 are the important routing changes. W19 turns systems/toolchain recovery into a
+staged packet and produces `X1 PASS 94 / 100` versus `X3 FAIL 78 / 100`. W20 turns owner recovery
+into a staged packet and produces `X1 PASS 98 / 100` versus `X3 FAIL 55 / 100`. W21 turns the
+incident-budget family into a staged repair-ledger/reentry-state/closeout packet and produces
+`X1 PASS 100 / 100` versus `X3 FAIL 78 / 100`. Current policy split is now explicit by execution
+shape: `X3 primary` for compact single-session systems/toolchain, owner, and incident repair
+packets; `X1 primary` for staged systems recovery, staged owner, and staged incident-budget
+re-entry.
 
 ## Execution Order
 
@@ -205,10 +207,10 @@ incident-budget re-entry.
 20. Materialize `N36-realrepo-staged-api-migration-gauntlet` as W16/E26. `DONE` on 2026-04-23.
 21. Materialize `N37-staged-adversarial-review-gate-gauntlet` as W17/E27. `DONE` on 2026-04-23.
 22. Materialize `N38-deterministic-ui-visual-state-integration-gauntlet` as W18/E28. `DONE` on 2026-04-23.
-23. Materialize `N39-staged-systems-toolchain-reentry-gauntlet` as W19/E29 with recovery source-arbitration hardening. `DONE` on 2026-04-23.
+23. Materialize `N39-staged-systems-toolchain-reentry-gauntlet` as W19/E29 with recovery source-arbitration hardening and bounded-scope rerun. `DONE` on 2026-04-23.
 24. Materialize `N40-staged-owner-recovery-reentry-gauntlet` as W20/E30. `DONE` on 2026-04-23.
 25. Materialize `N41-staged-incident-budget-reentry-gauntlet` as W21/E31. `DONE` on 2026-04-23.
-26. Run `N38,N39,N40,N41` on `X1` and `X3`, then add `X2`, `X5`, and `X6` as calibration rows where routes are healthy. `DONE` on 2026-04-23; honest results: `N38` unresolved because X3 had repeated no-summary runtime stalls, `N39` over-tightened, `N40` and `N41` are X1 separators.
+26. Run `N38,N39,N40,N41` on `X1` and `X3`, then add `X2`, `X5`, and `X6` as calibration rows where routes are healthy. `DONE` on 2026-04-23; honest results: `N38` unresolved because X3 had repeated no-summary runtime stalls; bounded `N39`, `N40`, and `N41` are X1 separators.
 
 ## Current Routing Impact
 
@@ -218,7 +220,7 @@ incident-budget re-entry.
 | staged delivery / multi-session re-entry | `X1 primary` after `N30`, `N35`, and `N36` produced `X1 PASS` versus `X3 scoreable FAIL` on persisted phase-ledger / re-entry accountability | strong enough for staged-lane routing; next repeat should be a real repo trial, not another synthetic bundle |
 | staged review / advisory gate | `X1 primary` after `N37` produced `X1 PASS 98 / 100` versus `X3 scoreable FAIL 35 / 100` on source-bound ADR, exact findings/non-claims, response cues, and closure | strong enough for staged review-gate routing; next repeat should be a real repo review trial or a UX/visual lane where policy remains unresolved |
 | systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `X2/X5/X6` lower on N24 | no immediate repeat needed unless a new systems subdomain becomes policy-critical |
-| systems/toolchain staged recovery re-entry | `N39` is not policy-grade evidence: every scoreable row (`X1/X2/X3`) failed the same exact-scope gate at `78 / 100` | redesign or relax the staged scope contract before using this lane for routing |
+| systems/toolchain staged recovery re-entry | `X1 primary` after bounded `N39` produced `X1 PASS 94 / 100` versus `X3 FAIL 78 / 100`; `X2` and `X6` also fail scoreably and `X5` is route-fail | strong enough for staged systems/toolchain routing; next repeat should be a real repo toolchain workflow only if policy needs extra confirmation |
 | UI implementation | `X3` primary versus `X1` after `N20` and `N25`; `X5` is still a route-healthy contender after `N25 PASS 98`; `N38` adds an `X1` staged UI pass but leaves the top pair unresolved because X3 never completed scoreably | if staged UI policy matters, rerun N38 under a more reliable X3 wrapper/timeout strategy; otherwise keep the single-session UI read |
 | owner recovery staged re-entry | `X1 primary` after `N40` produced `X1 PASS 98 / 100` versus `X3 FAIL 55 / 100` | strong enough for staged owner routing; next repeat should be a real repo owner workflow only if policy needs extra confirmation |
 | incident-budget staged re-entry | `X1 primary` after `N41` produced `X1 PASS 100 / 100` versus `X3 FAIL 78 / 100` | strong enough for staged incident-budget routing; next repeat should be a real repo repair workflow only if policy needs extra confirmation |
@@ -240,7 +242,7 @@ Single-session systems/toolchain, UI implementation, owner recovery, compact lon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`
 versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), staged owner recovery
 (`N40`), and staged incident-budget re-entry (`N41`) now all read `X1 primary` versus `X3`.
-`N38` remains unresolved because X3 twice failed to produce a final summary, and `N39` should be
-treated as an over-tightened contract rather than a routing result. `X5` remains a live UI and
-single-session owner contender after route-healthy `N25` and `N26`, but the newer staged waves
-still produced only Gemini route or quota caveats.
+`N38` remains unresolved because X3 failed to produce a final summary across three attempts.
+Bounded `N39` is now a staged systems/toolchain routing result in favor of X1. `X5` remains a live
+UI and single-session owner contender after route-healthy `N25` and `N26`, but the newer staged
+waves still produced only Gemini route or quota caveats.

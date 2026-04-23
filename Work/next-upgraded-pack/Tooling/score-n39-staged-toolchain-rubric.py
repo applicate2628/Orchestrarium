@@ -112,6 +112,24 @@ def failed_invariants(summary: dict):
     return sorted(set(failed))
 
 
+def changed_paths_match_scope(changed_paths: list[str], contract: dict):
+    observed = {path.replace("\\", "/") for path in changed_paths}
+    allowed = set(contract["allowedChangedPaths"])
+    required_core = set(contract["requiredChangedCorePaths"])
+    any_groups = [set(group) for group in contract.get("requiredChangedAnyOf", [])]
+
+    missing_core = sorted(required_core - observed)
+    extra = sorted(observed - allowed)
+    if missing_core:
+        return False, f"missing core paths: {missing_core}"
+    for group in any_groups:
+        if not observed & group:
+            return False, f"missing one-of paths: {sorted(group)}"
+    if extra:
+        return False, f"extra paths: {extra}"
+    return True, ""
+
+
 def proportional_score(max_points: int, failures: set[str], group: set[str]):
     missed = len(failures & group)
     if not group:
@@ -185,7 +203,7 @@ def score_one(case_root: Path, contract: dict):
     binary, scoreability = classify_binary(summary, worker_text)
     failed = set(failed_invariants(summary))
     changed = list(summary.get("benchmarkChangedPaths", []))
-    changed_exact = sorted(changed) == sorted(contract["requiredChangedPaths"])
+    changed_matches_scope, changed_scope_note = changed_paths_match_scope(changed, contract)
     scope_pass = any(
         result.get("passed") and "check_scope.py" in result.get("command", "")
         for result in summary.get("verificationResults", [])
@@ -195,7 +213,7 @@ def score_one(case_root: Path, contract: dict):
     cache_trace = proportional_score(20, failed, CACHE_TRACE_FAILURES)
     recovery = proportional_score(20, failed, RECOVERY_FAILURES)
     phase, phase_notes = phase_rule_score(summary, contract)
-    patch = 15 if changed_exact and scope_pass else 8 if scope_pass else 0
+    patch = 15 if changed_matches_scope and scope_pass else 8 if scope_pass else 0
     tests = 5 if "candidate/workspace/tests/test_stagegate.py" in changed else 0
     time_score, elapsed = score_time(summary)
     output_score, output_bytes, output_notes = score_output(summary)
@@ -213,8 +231,8 @@ def score_one(case_root: Path, contract: dict):
         notes.append("failed invariants: " + ", ".join(sorted(failed)))
     notes.extend(phase_notes)
     notes.extend(output_notes)
-    if not changed_exact:
-        notes.append("changed paths not exact")
+    if not changed_matches_scope and changed_scope_note:
+        notes.append(changed_scope_note)
 
     return {
         "run_root": str(case_root),

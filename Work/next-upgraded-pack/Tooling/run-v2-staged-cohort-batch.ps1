@@ -476,10 +476,10 @@ $scratchRoot = Join-Path $repoRoot '.scratch\v2-staged-runs'
 $rowConfigs = @{
     X1 = @{
         RowId = 'X1'
-        ModelLabel = 'gpt-5.4'
+        ModelLabel = 'gpt-5.5'
         Provider = 'codex'
         WrapperPath = Join-Path $archiveToolingRoot 'codex-isolated-worker.ps1'
-        CodexArgs = @('--model', 'gpt-5.4', '-c', 'model_reasoning_effort="xhigh"')
+        CodexArgs = @('--model', 'gpt-5.5', '-c', 'model_reasoning_effort="xhigh"')
     }
     X2 = @{
         RowId = 'X2'

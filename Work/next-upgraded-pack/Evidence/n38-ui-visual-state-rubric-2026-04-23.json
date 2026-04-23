@@ -79,7 +79,7 @@
       "summaryPath": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-23_18-28-55-X2-wave-w18-w21-staged-queued-2026-04-23\\N38\\meta\\summary.json"
     },
     {
-      "run_root": ".scratch/v2-staged-runs/2026-04-23_17-56-36-X3-wave-w18-w21-staged-rerun-n38-2026-04-23/N38",
+      "run_root": ".scratch/v2-staged-runs/2026-04-23_21-17-20-X3-wave-w18-n38-x3-rerun-2026-04-23/N38",
       "row": "X3",
       "binary": "NOT-RUN",
       "scoreability": "runtime-no-summary",

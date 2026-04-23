@@ -52,13 +52,13 @@
       "candidate/workspace/docs/**",
       "candidate/workspace/legacy/**"
     ],
-    "score_profile": "staged-systems-toolchain, re-entry, exact-scope, scored-rubric",
+    "score_profile": "staged-systems-toolchain, re-entry, bounded-scope, scored-rubric",
     "overlay_flags": [
       "top-pair-role-fit",
       "systems-toolchain",
       "staged-runner",
       "reentry",
-      "exact-scope",
+      "bounded-scope",
       "source-binding",
       "stale-source-recovery",
       "scored-rubric",
@@ -125,7 +125,7 @@
     "03-execute-report",
     "04-tests-closeout"
   ],
-  "requiredChangedPaths": [
+  "allowedChangedPaths": [
     "candidate/workspace/src/stagegate/config.py",
     "candidate/workspace/src/stagegate/paths.py",
     "candidate/workspace/src/stagegate/fingerprint.py",
@@ -137,6 +137,23 @@
     "candidate/workspace/tests/test_stagegate.py",
     "candidate/workspace/implementation-ledger.json",
     "candidate/workspace/closure.json"
+  ],
+  "requiredChangedCorePaths": [
+    "candidate/workspace/src/stagegate/config.py",
+    "candidate/workspace/src/stagegate/fingerprint.py",
+    "candidate/workspace/src/stagegate/planner.py",
+    "candidate/workspace/src/stagegate/executor.py",
+    "candidate/workspace/src/stagegate/report.py",
+    "candidate/workspace/tests/test_stagegate.py",
+    "candidate/workspace/implementation-ledger.json",
+    "candidate/workspace/closure.json"
+  ],
+  "requiredChangedAnyOf": [
+    [
+      "candidate/workspace/src/stagegate/paths.py",
+      "candidate/workspace/src/stagegate/recovery.py",
+      "candidate/workspace/src/stagegate/lease.py"
+    ]
   ],
   "phasePathRules": {
     "01-source-plan": {
