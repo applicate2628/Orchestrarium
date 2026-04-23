@@ -1,0 +1,45 @@
+id: N41
+surface_id: E31
+pack_id: E31
+role_class: implementation
+artifact_type: staged ownership-bounded incident repair patch plus re-entry state and closeout
+modality_family: cross-role incident repair, source reconciliation, patch-budget discipline, staged re-entry, and closeout
+allowed_change_surface:
+  - candidate/workspace/src/deploygrid/config.py
+  - candidate/workspace/src/deploygrid/intake.py
+  - candidate/workspace/src/deploygrid/dedupe.py
+  - candidate/workspace/src/deploygrid/planner.py
+  - candidate/workspace/src/deploygrid/policy.py
+  - candidate/workspace/src/deploygrid/scheduler.py
+  - candidate/workspace/src/deploygrid/ledger.py
+  - candidate/workspace/src/deploygrid/notifier.py
+  - candidate/workspace/src/deploygrid/rollback.py
+  - candidate/workspace/src/deploygrid/audit.py
+  - candidate/workspace/src/deploygrid/report.py
+  - candidate/workspace/src/deploygrid/executor.py
+  - candidate/workspace/src/deploygrid/store.py
+  - candidate/workspace/tests/test_deploygrid.py
+  - candidate/repair-ledger.json
+  - candidate/reentry-state.json
+  - candidate/closeout.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/src/deploygrid/__init__.py
+  - candidate/workspace/src/deploygrid/api.py
+  - candidate/workspace/src/deploygrid/models.py
+  - candidate/workspace/docs/**
+  - candidate/workspace/legacy/**
+  - candidate/workspace/ui/**
+score_profile: "staged-implementation, cross-role-repair, repair-ledger, patch-budget, re-entry, scored-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - long-horizon
+  - cross-role
+  - staged-runner
+  - reentry
+  - patch-budget
+  - scored-rubric
+  - binary-separator-candidate

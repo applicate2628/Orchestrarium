@@ -1,0 +1,238 @@
+{
+  "contractId": "N41-staged-incident-budget-reentry-gauntlet",
+  "planFingerprint": "n41-staged-incident-budget-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N41",
+    "surface_id": "E31",
+    "pack_id": "E31",
+    "role_class": "implementation",
+    "artifact_type": "staged ownership-bounded incident repair patch plus re-entry state and closeout",
+    "modality_family": "cross-role incident repair, source reconciliation, patch-budget discipline, staged re-entry, and closeout",
+    "allowed_change_surface": [
+      "candidate/workspace/src/deploygrid/config.py",
+      "candidate/workspace/src/deploygrid/intake.py",
+      "candidate/workspace/src/deploygrid/dedupe.py",
+      "candidate/workspace/src/deploygrid/planner.py",
+      "candidate/workspace/src/deploygrid/policy.py",
+      "candidate/workspace/src/deploygrid/scheduler.py",
+      "candidate/workspace/src/deploygrid/ledger.py",
+      "candidate/workspace/src/deploygrid/notifier.py",
+      "candidate/workspace/src/deploygrid/rollback.py",
+      "candidate/workspace/src/deploygrid/audit.py",
+      "candidate/workspace/src/deploygrid/report.py",
+      "candidate/workspace/src/deploygrid/executor.py",
+      "candidate/workspace/src/deploygrid/store.py",
+      "candidate/workspace/tests/test_deploygrid.py",
+      "candidate/repair-ledger.json",
+      "candidate/reentry-state.json",
+      "candidate/closeout.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/src/deploygrid/__init__.py",
+      "candidate/workspace/src/deploygrid/api.py",
+      "candidate/workspace/src/deploygrid/models.py",
+      "candidate/workspace/docs/**",
+      "candidate/workspace/legacy/**",
+      "candidate/workspace/ui/**"
+    ],
+    "score_profile": "staged-implementation, cross-role-repair, repair-ledger, patch-budget, re-entry, scored-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "long-horizon",
+      "cross-role",
+      "staged-runner",
+      "reentry",
+      "patch-budget",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/decoy-map.md",
+    "inputs/incident-log.md",
+    "inputs/stale-requirements.md",
+    "inputs/review-feedback.md",
+    "inputs/phases/01-source-ledger.md",
+    "inputs/phases/02-runtime-repair.md",
+    "inputs/phases/03-review-budget.md",
+    "inputs/phases/04-final-closeout.md",
+    "candidate/README.md",
+    "candidate/repair-ledger.json",
+    "candidate/reentry-state.json",
+    "candidate/closeout.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/deploygrid/__init__.py",
+    "candidate/workspace/src/deploygrid/api.py",
+    "candidate/workspace/src/deploygrid/models.py",
+    "candidate/workspace/src/deploygrid/store.py",
+    "candidate/workspace/src/deploygrid/config.py",
+    "candidate/workspace/src/deploygrid/intake.py",
+    "candidate/workspace/src/deploygrid/dedupe.py",
+    "candidate/workspace/src/deploygrid/planner.py",
+    "candidate/workspace/src/deploygrid/policy.py",
+    "candidate/workspace/src/deploygrid/scheduler.py",
+    "candidate/workspace/src/deploygrid/ledger.py",
+    "candidate/workspace/src/deploygrid/notifier.py",
+    "candidate/workspace/src/deploygrid/rollback.py",
+    "candidate/workspace/src/deploygrid/audit.py",
+    "candidate/workspace/src/deploygrid/report.py",
+    "candidate/workspace/src/deploygrid/executor.py",
+    "candidate/workspace/tests/test_deploygrid.py",
+    "candidate/workspace/docs/freeze-window-migration.md",
+    "candidate/workspace/legacy/dedupe_v1.py",
+    "candidate/workspace/ui/release_badges.py",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/integration-invariants.md",
+    "oracle/staged-incident-budget-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_staged_incident_budget.py",
+    "verifiers/check_scope.py"
+  ],
+  "expectedPhaseIds": [
+    "01-source-ledger",
+    "02-runtime-repair",
+    "03-review-budget",
+    "04-final-closeout"
+  ],
+  "expectedSourceIds": [
+    "INC-742",
+    "review-feedback"
+  ],
+  "expectedStaleIds": [
+    "stale-ui-note",
+    "legacy-helper",
+    "notification-count"
+  ],
+  "expectedReviewIds": [
+    "R1",
+    "R2",
+    "R3",
+    "R4",
+    "R5"
+  ],
+  "requiredChangedPaths": [
+    "candidate/workspace/src/deploygrid/executor.py",
+    "candidate/workspace/src/deploygrid/report.py",
+    "candidate/workspace/tests/test_deploygrid.py",
+    "candidate/repair-ledger.json",
+    "candidate/reentry-state.json",
+    "candidate/closeout.json"
+  ],
+  "phasePathRules": {
+    "01-source-ledger": {
+      "allowed": [
+        "candidate/reentry-state.json"
+      ],
+      "requiredAny": [
+        "candidate/reentry-state.json"
+      ]
+    },
+    "02-runtime-repair": {
+      "allowed": [
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/tests/test_deploygrid.py",
+        "candidate/reentry-state.json"
+      ],
+      "requiredAny": [
+        "candidate/workspace/tests/test_deploygrid.py"
+      ]
+    },
+    "03-review-budget": {
+      "allowed": [
+        "candidate/repair-ledger.json",
+        "candidate/reentry-state.json",
+        "candidate/workspace/tests/test_deploygrid.py"
+      ],
+      "requiredAny": [
+        "candidate/repair-ledger.json"
+      ]
+    },
+    "04-final-closeout": {
+      "allowed": [
+        "candidate/reentry-state.json",
+        "candidate/closeout.json"
+      ],
+      "requiredAny": [
+        "candidate/closeout.json"
+      ]
+    }
+  },
+  "expected_start_state_failures": [
+    "semantic-dedupe-latest-wins",
+    "idempotent-repeat",
+    "crash-resume-no-replay",
+    "report-from-ledger-audit",
+    "source-decisions-ledger",
+    "review-response-ledger",
+    "validation-ledger",
+    "patch-budget-ledger",
+    "reentry-state-schema",
+    "closeout-schema"
+  ],
+  "runtimeClassificationMarkers": [
+    "scoreable fail",
+    "quota",
+    "wrapper timeout",
+    "route failure",
+    "missing summary"
+  ],
+  "closeoutMarkers": [
+    "N38,N39,N40,N41",
+    "live surfaces in place",
+    "python verifiers/check_staged_incident_budget.py",
+    "python verifiers/check_scope.py"
+  ],
+  "prohibited_candidate_terms": [
+    "active-profile-precedence",
+    "request-input-immutability",
+    "semantic-dedupe-latest-wins",
+    "dependency-order",
+    "cycle-blocked",
+    "canary-before-prod",
+    "frozen-scope-deferred",
+    "idempotent-repeat",
+    "crash-resume-no-replay",
+    "rollback-current-attempt-only",
+    "source-trace-preserved",
+    "report-from-ledger-audit",
+    "repair-ledger-schema",
+    "source-decisions-ledger",
+    "review-response-ledger",
+    "validation-ledger",
+    "patch-budget-ledger",
+    "ownership-budget-contract",
+    "staged-incident-budget-contract",
+    "deploygrid-contract",
+    "oracle/"
+  ]
+}
