@@ -1,0 +1,14 @@
+{
+  "scenario_id": "N34",
+  "plan_fingerprint": "n34-staged-high-load-science-optimizer-v1",
+  "measurements": [
+    {
+      "phase": "01-diagnose-baseline",
+      "case_id": "starter-smoke",
+      "status": "not-optimized"
+    }
+  ],
+  "budgets": {},
+  "scaling": {},
+  "commands": []
+}

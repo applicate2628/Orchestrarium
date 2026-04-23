@@ -1,0 +1,30 @@
+id: N34
+surface_id: E24
+pack_id: E24
+role_class: scientist-performance
+artifact_type: staged high-load dual physics optimizer patch plus phase ledger
+modality_family: computational electromagnetics, quantum bound states, numerical optimization, staged re-entry
+allowed_change_surface:
+  - candidate/stage-state.json
+  - candidate/optimization-report.json
+  - candidate/workspace/dual_physics.py
+  - candidate/workspace/perf-ledger.json
+  - candidate/workspace/validation-notes.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/tests/**
+score_profile: "scientist, computational-physics, analytical-oracle, staged-reentry, solver-runtime, patch-quality"
+overlay_flags:
+  - top-pair-role-fit
+  - scientist-constraints
+  - scored-rubric
+  - numerical-witness
+  - computational-physics
+  - method-of-moments
+  - hydrogenic-schrodinger
+  - runtime-scoreable
+  - staged-reentry
+  - high-load-optimizer

@@ -1,0 +1,22 @@
+{
+  "scenario_id": "N34",
+  "plan_fingerprint": "n34-staged-high-load-science-optimizer-v1",
+  "phases": [
+    {
+      "id": "01-diagnose-baseline",
+      "status": "started",
+      "owner": "scientist-performance",
+      "source_cues": [
+        "starter solver is known incomplete"
+      ],
+      "affected_artifacts": [
+        "candidate/workspace/dual_physics.py"
+      ],
+      "visible_return_cue": "diagnosis not yet complete"
+    }
+  ],
+  "reentry": {
+    "last_completed_phase": "none",
+    "preserved_artifacts": []
+  }
+}

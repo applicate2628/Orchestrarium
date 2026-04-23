@@ -1,0 +1,9 @@
+{
+  "scenario_id": "N34",
+  "method": "starter report",
+  "oracle_use": "not validated",
+  "cases": [],
+  "performance": {},
+  "stage_trace": [],
+  "residual_risk": "starter state has not completed high-load validation"
+}
