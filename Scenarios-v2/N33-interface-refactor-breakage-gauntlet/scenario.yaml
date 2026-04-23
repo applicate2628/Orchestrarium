@@ -1,0 +1,32 @@
+id: N33
+surface_id: E23
+pack_id: E23
+role_class: implementation
+artifact_type: interface refactor patch plus migration ledger
+modality_family: multi-module API refactor, compatibility preservation, hidden consumer tests
+allowed_change_surface:
+  - candidate/refactor-ledger.json
+  - candidate/workspace/src/interfaceflow/__init__.py
+  - candidate/workspace/src/interfaceflow/models.py
+  - candidate/workspace/src/interfaceflow/session_store.py
+  - candidate/workspace/src/interfaceflow/policy.py
+  - candidate/workspace/src/interfaceflow/router.py
+  - candidate/workspace/src/interfaceflow/orchestrator.py
+  - candidate/workspace/src/interfaceflow/report.py
+  - candidate/workspace/src/interfaceflow/api.py
+  - candidate/workspace/tests/test_interfaceflow.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+score_profile: "interface-refactor, hidden-consumer, compatibility-preservation, patch-quality-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - interface-refactor
+  - hidden-consumer
+  - compatibility-preservation
+  - scored-rubric
+  - binary-separator-candidate

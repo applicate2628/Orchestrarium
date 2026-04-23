@@ -1,0 +1,13 @@
+{
+  "contractId": "N33-interface-refactor-breakage-gauntlet",
+  "interfaceMap": [],
+  "callSiteMigration": [],
+  "compatibilityMatrix": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 10,
+    "requiredChangedPaths": []
+  }
+}

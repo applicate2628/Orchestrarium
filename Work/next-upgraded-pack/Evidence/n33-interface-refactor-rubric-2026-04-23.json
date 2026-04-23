@@ -1,0 +1,113 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-23_07-05-51-X1-wave-w13-n33-interface-refactor-2026-04-23/N33",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 96,
+      "interface": 30,
+      "hidden": 30,
+      "ledger": 15,
+      "tests": 10,
+      "patch": 10,
+      "output": 1,
+      "output_bytes": 380247,
+      "changed_paths": [
+        "candidate/refactor-ledger.json",
+        "candidate/workspace/src/interfaceflow/__init__.py",
+        "candidate/workspace/src/interfaceflow/api.py",
+        "candidate/workspace/src/interfaceflow/models.py",
+        "candidate/workspace/src/interfaceflow/orchestrator.py",
+        "candidate/workspace/src/interfaceflow/policy.py",
+        "candidate/workspace/src/interfaceflow/report.py",
+        "candidate/workspace/src/interfaceflow/router.py",
+        "candidate/workspace/src/interfaceflow/session_store.py",
+        "candidate/workspace/tests/test_interfaceflow.py"
+      ],
+      "failed_invariants": [],
+      "notes": []
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-23_07-19-58-X3-wave-w13-n33-interface-refactor-2026-04-23/N33",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 100,
+      "interface": 30,
+      "hidden": 30,
+      "ledger": 15,
+      "tests": 10,
+      "patch": 10,
+      "output": 5,
+      "output_bytes": 2984,
+      "changed_paths": [
+        "candidate/refactor-ledger.json",
+        "candidate/workspace/src/interfaceflow/__init__.py",
+        "candidate/workspace/src/interfaceflow/api.py",
+        "candidate/workspace/src/interfaceflow/models.py",
+        "candidate/workspace/src/interfaceflow/orchestrator.py",
+        "candidate/workspace/src/interfaceflow/policy.py",
+        "candidate/workspace/src/interfaceflow/report.py",
+        "candidate/workspace/src/interfaceflow/router.py",
+        "candidate/workspace/src/interfaceflow/session_store.py",
+        "candidate/workspace/tests/test_interfaceflow.py"
+      ],
+      "failed_invariants": [],
+      "notes": []
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-23_07-55-42-X2-wave-w13-n33-interface-refactor-calibration-2026-04-23/N33",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 5,
+      "interface": 0,
+      "hidden": 0,
+      "ledger": 0,
+      "tests": 0,
+      "patch": 0,
+      "output": 5,
+      "output_bytes": 1387,
+      "changed_paths": [],
+      "failed_invariants": [
+        "integration-contract",
+        "legacy-interface-removed",
+        "legacy-interface-static",
+        "policy-contract",
+        "refactor-ledger-call-sites",
+        "refactor-ledger-compatibility",
+        "refactor-ledger-interface-map",
+        "refactor-ledger-patch-budget",
+        "refactor-ledger-validation",
+        "report-contract",
+        "result-models",
+        "router-contract",
+        "session-lookup-contract",
+        "visible-test-markers"
+      ],
+      "notes": [
+        "failed invariants: integration-contract, legacy-interface-removed, legacy-interface-static, policy-contract, refactor-ledger-call-sites, refactor-ledger-compatibility, refactor-ledger-interface-map, refactor-ledger-patch-budget, refactor-ledger-validation, report-contract, result-models, router-contract, session-lookup-contract, visible-test-markers"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-23_07-56-42-X6-wave-w13-n33-interface-refactor-calibration-2026-04-23/N33",
+      "row": "X6",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "rubric": 0,
+      "notes": [
+        "missing summary.json"
+      ]
+    }
+  ]
+}
