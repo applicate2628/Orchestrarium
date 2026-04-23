@@ -1,0 +1,92 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-23_05-32-15-X3-wave-w12-n32-dual-physics-2026-04-23/N32",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "correctness": 50,
+      "em_correctness": 25,
+      "hydrogen_correctness": 25,
+      "solver_runtime": 25,
+      "solver_runtime_seconds": 0.334,
+      "report": 5,
+      "notes_score": 5,
+      "scope": 10,
+      "output": 5,
+      "output_bytes": 2012,
+      "changed_paths": [
+        "candidate/workspace/dual_physics.py",
+        "candidate/workspace/validation-notes.md",
+        "candidate/workspace/validation-report.json"
+      ],
+      "notes": []
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-23_05-43-09-X1-wave-w12-n32-dual-physics-2026-04-23/N32",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 97,
+      "correctness": 50,
+      "em_correctness": 25,
+      "hydrogen_correctness": 25,
+      "solver_runtime": 25,
+      "solver_runtime_seconds": 0.466,
+      "report": 5,
+      "notes_score": 5,
+      "scope": 10,
+      "output": 2,
+      "output_bytes": 345404,
+      "changed_paths": [
+        "candidate/workspace/dual_physics.py",
+        "candidate/workspace/validation-notes.md",
+        "candidate/workspace/validation-report.json"
+      ],
+      "notes": []
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-23_05-50-58-X2-wave-w12-n32-dual-physics-calibration-2026-04-23/N32",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 33,
+      "correctness": 1,
+      "em_correctness": 0,
+      "hydrogen_correctness": 1,
+      "solver_runtime": 25,
+      "solver_runtime_seconds": 0.09,
+      "report": 0,
+      "notes_score": 0,
+      "scope": 3,
+      "output": 4,
+      "output_bytes": 57206,
+      "changed_paths": [],
+      "notes": [
+        "failures=em-case-em-convergence-coarse,em-case-em-ka2-refined,em-case-em-ka8-hidden-fast,em-convergence-failed,em-density-em-convergence-coarse,em-density-em-ka2-refined,em-density-em-ka8-hidden-fast,hydrogen-case-h-2p-reference,hydrogen-case-h-4p-highgrid,hydrogen-case-he-3d-hidden,notes-missing-phrases,report-convergence,report-method,report-missing-cases,report-oracle-use,report-performance",
+        "boundary residual 0.97281338",
+        "relative field error 0.45399558"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-23_05-50-58-X6-wave-w12-n32-dual-physics-calibration-2026-04-23/N32",
+      "row": "X6",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "total": 0,
+      "notes": [
+        "missing summary.json"
+      ]
+    }
+  ]
+}

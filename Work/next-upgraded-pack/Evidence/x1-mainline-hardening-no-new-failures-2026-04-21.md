@@ -1645,3 +1645,67 @@ analytical oracle. N31 is still useful: it upgrades the scientist/numerical lane
 statistics constraints into a real numerical integral-equation solve. The routing read remains
 co-primary for correctness; prefer `X3` when compactness/output cost matters and `X1` when faster
 elapsed time or more verbose trace is desired. N31 is not a new binary separator.
+
+## 2026-04-23 Follow-Up: W12 / N32 Dual Physics Analytical Oracle
+
+`N32-dual-physics-analytic-oracle` was added as diagnostic `E22` after N31 showed that a single
+MoM cylinder solve was real physics evidence but not a top-pair separator. N32 combines the
+requested ideas into one task: computational electromagnetics plus hydrogenic radial Schrodinger,
+both solved numerically and checked against analytical oracles. Runtime is scoreable from measured
+solver wall time, not only from provider elapsed time.
+
+### N32 hardening shape
+
+| Domain | Numerical solve required | Analytical oracle | Runtime gate |
+|---|---|---|---|
+| CEM / MoM | pulse-basis TMz EFIE solve for PEC circular cylinder | cylindrical-harmonic exterior field plus surface-density Fourier coefficients | per-case `max_runtime_seconds`, including hidden `ka=8` case |
+| Quantum radial solve | finite-difference tridiagonal Hamiltonian for hydrogenic bound states | exact hydrogenic energy and radial wavefunction | per-case `max_runtime_seconds`, including `1800` point high-grid case |
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/dual-physics-contract.json` | `PASS` |
+| `python verifiers/check_dual_physics_oracle.py --bundle-shape-only` | `N32 verifier PASS (bundle shape)` |
+| `python verifiers/check_dual_physics_oracle.py --expect-start-state` | `N32 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-23-n32-dual-physics-reference/N32/` | completed verifier `PASS`; scope `PASS` |
+| local smoke `candidate/workspace/tests/test_dual_physics.py` | `N32 dual physics local smoke PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root / smoke root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---|
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-23_05-32-15-X3-wave-w12-n32-dual-physics-2026-04-23/N32/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-23_05-43-09-X1-wave-w12-n32-dual-physics-2026-04-23/N32/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-23_05-50-58-X2-wave-w12-n32-dual-physics-calibration-2026-04-23/N32/` | `0` | `FAIL` | `PASS` | scoreable `FAIL` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-23_05-50-58-X6-wave-w12-n32-dual-physics-calibration-2026-04-23/` | timeout | no summary | n/a | `NOT-RUN` runtime no-summary |
+| `X5 / gemini3.1pro` | `.scratch/gemini-smoke-n32-2026-04-23/` | timeout | n/a | n/a | `REQUEUE`; smoke did not write `X5_SMOKE_OK` |
+
+The first X1 launch attempt used bad `cmd`/`pwsh -File` quoting and failed before worker launch; it
+is an invocation error and is not admitted as model evidence. The admitted X1 run is the later
+`cmd /c 'pwsh ... < NUL'` root above.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Correct | EM | Hydrogen | Solver runtime | Solver seconds | Report | Notes | Scope | Output | Output bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `100 / 100` | `50` | `25` | `25` | `25` | `0.334s` | `5` | `5` | `10` | `5` | `2012` | compact exact output; analytical-oracle gates pass |
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `97 / 100` | `50` | `25` | `25` | `25` | `0.466s` | `5` | `5` | `10` | `2` | `345404` | analytical-oracle gates pass; much larger output |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `33 / 100` | `1` | `0` | `1` | `25` | `0.090s` | `0` | `0` | `3` | `4` | `57206` | no benchmark edits; verifier saw starter defects |
+| `X6 / gemini3.1flash-lite-preview` | `NOT-RUN` | `runtime-no-summary` | `0 / 100` | `0` | `0` | `0` | `0` | n/a | `0` | `0` | `0` | `0` | n/a | controller timeout without `summary.json` |
+| `X5 / gemini3.1pro` | `REQUEUE` | `runtime-timeout` | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | smoke timeout, semantic run not admitted |
+
+Machine-readable rubric: `Work/next-upgraded-pack/Evidence/n32-dual-physics-rubric-2026-04-23.json`.
+
+### N32 Verdict
+
+`binary tie remains` for `X1` and `X3` on the combined real-physics task. N32 is still stronger than
+N31 as lane evidence because it forces two independent numerical physics solvers in one patch and
+makes solver runtime scoreable. The top pair both solved it; `X3` keeps the output-compactness edge,
+while both rows achieved full solver-runtime points under the current workload. `X2` separates lower
+scoreably. Gemini rows remain route/runtime caveats.
+
+If a true scientific runtime separator is required next, the follow-up should not be another
+ordinary oracle; it should raise the workload into a high-load performance gauntlet, for example
+higher `ka`/larger MoM panel counts and larger radial grids with stricter solver-runtime scoring.

@@ -45,7 +45,8 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W9` ownership-budget incident repair | `DONE` | Does a near-pass localized repair plus exact patch-budget gate split X1/X3? | `E19 / N29` ownership-budget incident repair | `$backend-engineer` plus machine-ledger/scope gate | N29 read-only sidecar recommended near-pass semantic budget design | `X1` and `X3` pass exact four-path budget; `X3 100`, `X1 96`; `X2 scoreable FAIL 42`; `X6 RUNTIME-FAIL`; `X5 REQUEUE` |
 | `W10` staged delivery re-entry | `DONE` | Does a real multi-invocation staged runner split X1/X3 on persisted phase state and re-entry? | `E20 / N30` staged delivery re-entry | `$lead` integration-owner simulation plus implementation verifier | W10 sidecar accepted only if staged runner exists; materialized as four fresh invocations over one run root | `X1 PASS 96`; `X3 scoreable FAIL 91` after omitting one phase ledger; `X2 scoreable FAIL 66`; `X6 RUNTIME-FAIL`; `X5 REQUEUE` |
 | `W11` scientific computation hardening | `DONE` | Can a real physics analytical-oracle numerical task split X1/X3? | `E21 / N31` MoM PEC-cylinder analytical oracle | `$computational-scientist` / `$algorithm-scientist` style verifier | MoM design superseded easier textbook-potential draft before commit | `X1` and `X3` both pass; `X3 94`, `X1 92`; binary tie remains, but N31 upgrades the lane to real CEM/MoM evidence |
-| `W12` scientific computation repeat | `QUEUED` | If scientist/numerical routing needs more evidence, does a second real-physics numerical task split the top pair? | hydrogenic radial Schrodinger or comparable analytical-oracle physics solve | `$computational-scientist` style verifier | no spawn yet | admit only if N31 tie is insufficient for policy |
+| `W12` scientific computation repeat | `DONE` | Can a combined real-physics task with MoM plus hydrogenic radial Schrodinger and solver-runtime scoring split the top pair? | `E22 / N32` dual-physics analytical oracle | `$computational-scientist` plus `$performance-engineer` style verifier | no spawn; mainline materialization | `X1` and `X3` both pass; `X3 100`, `X1 97`; `X2` scoreable FAIL 33; `X6` runtime no-summary; `X5` smoke REQUEUE |
+| `W13` high-load scientific performance follow-up | `QUEUED` | If a true runtime separator is still required, do high-N/high-ka CEM and larger tridiagonal radial workloads expose algorithmic speed differences? | N32-v2 or N33 high-load science perf gauntlet | `$computational-scientist` / `$performance-engineer` | no spawn yet | only admit if runtime separation matters more than correctness co-primary evidence |
 
 ## Active Spawn Board
 
@@ -77,6 +78,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W9 / E19` | `N29-ownership-budget-incident-repair-gauntlet` | start from a near-pass deploy runtime and require a localized runtime fix, tests, structured source/review/validation ledger, and exact four-path patch budget | `DONE`; `X3 PASS 100`, `X1 PASS 96`, `X2 scoreable FAIL 42`, `X6 RUNTIME-FAIL`; `X5 REQUEUE` because smoke timed out |
 | `W10 / E20` | `N30-staged-delivery-reentry-gauntlet` | first staged runner: four fresh provider invocations over one copied bundle, requiring persisted plan, implementation, review response, and closeout state | `DONE`; first current top-pair binary separator: `X1 PASS 96`, `X3 scoreable FAIL 91`; `X2` scoreable FAIL; Gemini rows runtime caveats |
 | `W11 / E21` | `N31-mom-cylinder-analytic-oracle` | harden generic numerical reasoning with real computational electromagnetics: Method of Moments PEC-cylinder solve against cylindrical-harmonic analytical oracle | `DONE`; `X1` and `X3` both pass; `X3 94`, `X1 92`; binary tie remains |
+| `W12 / E22` | `N32-dual-physics-analytic-oracle` | combine strengthened MoM PEC-cylinder analytical oracle with hydrogenic radial Schrodinger finite-difference analytical oracle and score measured solver runtime | `DONE`; `X1` and `X3` both pass; `X3 100`, `X1 97`; `X2` scoreable FAIL 33; `X6` runtime no-summary; `X5` smoke REQUEUE |
 
 ## Current Admission Decision
 
@@ -109,6 +111,12 @@ admitted task is computational electromagnetics rather than a textbook potential
 for a PEC circular cylinder, with the exact cylindrical-harmonic series as analytical oracle. Both
 top-pair rows pass; the lane gains real physics evidence but not a binary separator.
 
+W12 combines the previously discussed scientific hardening ideas into one task: MoM PEC-cylinder
+surface-density/field checks plus hydrogenic radial Schrodinger finite-difference checks, both with
+analytical oracles and measured solver-runtime scoring. `X1` and `X3` both pass; the scientific lane
+still has no top-pair binary separator, but `X2` separates lower scoreably and Gemini rows remain
+route/runtime caveats.
+
 ## Execution Order
 
 1. Collect read-only spawn proposals for `W1..W3`. `DONE` on 2026-04-22.
@@ -139,6 +147,7 @@ top-pair rows pass; the lane gains real physics evidence but not a binary separa
 13. Materialize `N29-ownership-budget-incident-repair`. `DONE` on 2026-04-23.
 14. Materialize `N30-staged-delivery-reentry` with staged runner and time/cost/patch-quality scoring. `DONE` on 2026-04-23.
 15. Materialize `N31-mom-cylinder-analytic-oracle` as W11/E21. `DONE` on 2026-04-23.
+16. Materialize `N32-dual-physics-analytic-oracle` as W12/E22. `DONE` on 2026-04-23.
 
 ## Current Routing Impact
 
@@ -148,7 +157,7 @@ top-pair rows pass; the lane gains real physics evidence but not a binary separa
 | staged delivery / multi-session re-entry | `X1 primary` after `N30` produced `X1 PASS` versus `X3 scoreable FAIL` on persisted phase-ledger completeness | repeat only if this becomes a hard global default; otherwise use as routing evidence |
 | systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `X2/X5/X6` lower on N24 | no immediate repeat needed unless a new systems subdomain becomes policy-critical |
 | UI implementation | `X3` primary versus `X1` after `N20` and `N25`; `X5` is a route-healthy contender after `N25 PASS 98`, but needs another UI-family pass before policy promotion | one more UI-family `X5` check only if deciding between `X3` and `X5` |
-| scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, and `N31`; N31 adds real CEM/MoM analytical-oracle evidence with `X3 94`, `X1 92` | optional W12 hydrogenic radial Schrodinger repeat only if this lane needs more evidence |
+| scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, `N31`, and `N32`; N31 adds real CEM/MoM evidence and N32 combines MoM with hydrogenic radial Schrodinger plus measured solver-runtime scoring; `X3 100`, `X1 97` on N32 | optional W13 high-load science performance gauntlet only if runtime separation matters more than correctness co-primary evidence |
 | owner/orchestration | `X3` primary versus `X1` after `N23` and `N26`; `X5` is a route-healthy owner contender after `N26 PASS 100`, but needs another owner-family pass before policy promotion | one more owner-family `X5` check only if deciding between `X3` and `X5`; otherwise move to long-horizon repeat |
 | visual/graphics | geometry tied on `S22`; `N21` ties X1/X3 on visual correctness and favors X3 on compactness; Gemini preference not proven | repeat only after Gemini semantic route health is fixed |
 
@@ -165,7 +174,7 @@ implementation, owner recovery, compact long-horizon integration, cross-role inc
 ownership-budget repair are confirmed as `X3 primary` versus `X1` by scored lane-fit evidence, while
 `N30` makes `X1 primary` for staged delivery re-entry and persisted phase-ledger accountability.
 `X5` is a live UI and owner-recovery contender after route-healthy `N25` and `N26` wins/ties, but
-N27/N28/N29/N30 produced only smoke-gated `REQUEUE`; N31 intentionally did not launch Gemini
-calibration rows after the updated rule. The next optional scientific item is `W12`: hydrogenic
-radial Schrodinger or comparable real-physics analytical-oracle numerical solve, only if the N31
-binary tie is not enough for lane policy.
+N27/N28/N29/N30/N32 produced only smoke-gated `REQUEUE`; N31 intentionally did not launch Gemini
+calibration rows after the updated rule. The next optional scientific item is `W13`: a high-load
+science performance gauntlet only if the N32 correctness tie is insufficient and runtime separation
+is policy-relevant.

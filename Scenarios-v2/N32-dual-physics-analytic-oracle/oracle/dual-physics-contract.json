@@ -1,0 +1,216 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N32",
+    "surface_id": "E22",
+    "pack_id": "E22",
+    "role_class": "scientist",
+    "artifact_type": "dual computational physics solver patch plus validation report",
+    "modality_family": "computational electromagnetics, quantum bound states, numerical performance",
+    "allowed_change_surface": [
+      "candidate/workspace/dual_physics.py",
+      "candidate/workspace/validation-report.json",
+      "candidate/workspace/validation-notes.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/tests/**"
+    ],
+    "score_profile": "scientist, computational-physics, analytical-oracle, solver-runtime, top-pair-role-fit",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "scientist-constraints",
+      "scored-rubric",
+      "numerical-witness",
+      "computational-physics",
+      "method-of-moments",
+      "hydrogenic-schrodinger",
+      "runtime-scoreable"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/physics-brief.md",
+    "inputs/numerical-requirements.md",
+    "inputs/task.md",
+    "candidate/README.md",
+    "candidate/workspace/dual_physics.py",
+    "candidate/workspace/validation-report.json",
+    "candidate/workspace/validation-notes.md",
+    "candidate/workspace/tests/test_dual_physics.py",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/dual-physics-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_dual_physics_oracle.py",
+    "verifiers/check_scope.py"
+  ],
+  "em_solver_api": "solve_cylinder_mom",
+  "hydrogen_solver_api": "solve_hydrogen_radial",
+  "em_cases": [
+    {
+      "case_id": "em-ka2-refined",
+      "radius": 0.5,
+      "wavenumber": 4.0,
+      "segments": 96,
+      "incident_angle": 0.35,
+      "observation_radius": 2.0,
+      "sample_count": 14,
+      "matrix_quadrature_order": 10,
+      "field_quadrature_order": 12,
+      "series_terms": 90,
+      "density_modes": 10,
+      "max_boundary_residual_l2": 0.006,
+      "max_relative_field_error": 0.005,
+      "max_density_mode_error": 0.08,
+      "max_runtime_seconds": 3.5
+    },
+    {
+      "case_id": "em-ka8-hidden-fast",
+      "radius": 0.4,
+      "wavenumber": 20.0,
+      "segments": 160,
+      "incident_angle": -0.55,
+      "observation_radius": 1.15,
+      "sample_count": 16,
+      "matrix_quadrature_order": 8,
+      "field_quadrature_order": 10,
+      "series_terms": 140,
+      "density_modes": 26,
+      "max_boundary_residual_l2": 0.018,
+      "max_relative_field_error": 0.035,
+      "max_density_mode_error": 0.18,
+      "max_runtime_seconds": 5.5
+    }
+  ],
+  "em_convergence": {
+    "coarse": {
+      "radius": 0.5,
+      "wavenumber": 4.0,
+      "segments": 64,
+      "incident_angle": 0.35,
+      "observation_radius": 2.0,
+      "sample_count": 14,
+      "matrix_quadrature_order": 10,
+      "field_quadrature_order": 12,
+      "series_terms": 90
+    },
+    "refined_case_id": "em-ka2-refined",
+    "min_field_error_improvement_ratio": 1.15
+  },
+  "hydrogen_cases": [
+    {
+      "case_id": "h-2p-reference",
+      "z": 1.0,
+      "n": 2,
+      "l": 1,
+      "r_max": 45.0,
+      "grid_points": 900,
+      "sample_count": 18,
+      "max_energy_abs_error": 0.00008,
+      "max_wave_l2_error": 0.045,
+      "max_residual_l2": 0.004,
+      "max_runtime_seconds": 1.5
+    },
+    {
+      "case_id": "he-3d-hidden",
+      "z": 2.0,
+      "n": 3,
+      "l": 2,
+      "r_max": 36.0,
+      "grid_points": 1200,
+      "sample_count": 18,
+      "max_energy_abs_error": 0.00012,
+      "max_wave_l2_error": 0.055,
+      "max_residual_l2": 0.006,
+      "max_runtime_seconds": 1.8
+    },
+    {
+      "case_id": "h-4p-highgrid",
+      "z": 1.0,
+      "n": 4,
+      "l": 1,
+      "r_max": 90.0,
+      "grid_points": 1800,
+      "sample_count": 20,
+      "max_energy_abs_error": 0.00012,
+      "max_wave_l2_error": 0.08,
+      "max_residual_l2": 0.006,
+      "max_runtime_seconds": 2.2
+    }
+  ],
+  "required_report_fields": [
+    "method",
+    "oracle_use",
+    "cases",
+    "performance",
+    "convergence"
+  ],
+  "required_report_cases": [
+    "em-ka2-refined",
+    "em-ka8-hidden-fast",
+    "h-2p-reference",
+    "he-3d-hidden",
+    "h-4p-highgrid"
+  ],
+  "required_notes_phrases": [
+    "Method of Moments",
+    "PEC circular cylinder",
+    "TMz EFIE",
+    "outgoing Green function",
+    "surface density Fourier coefficients",
+    "finite-difference radial Schrodinger",
+    "tridiagonal Hamiltonian",
+    "hydrogenic analytical oracle",
+    "solver runtime",
+    "convergence"
+  ],
+  "forbidden_solver_markers": [
+    "sympy",
+    "eval_genlaguerre",
+    "genlaguerre",
+    "assoc_laguerre",
+    "scipy.special import eval",
+    "np.linalg.eig(",
+    "np.linalg.eigh(",
+    "scipy.linalg.eigh("
+  ],
+  "expected_start_state_failures": [
+    "em-case-em-ka2-refined",
+    "em-density-em-ka2-refined",
+    "em-case-em-ka8-hidden-fast",
+    "em-density-em-ka8-hidden-fast",
+    "em-convergence-failed",
+    "hydrogen-case-h-2p-reference",
+    "hydrogen-case-he-3d-hidden",
+    "hydrogen-case-h-4p-highgrid",
+    "report-method",
+    "report-oracle-use",
+    "report-missing-cases",
+    "notes-missing-phrases"
+  ]
+}

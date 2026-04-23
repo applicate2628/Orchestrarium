@@ -1,0 +1,7 @@
+{
+  "method": "starter-stale",
+  "oracle_use": "starter report has not validated either physics solver",
+  "cases": [],
+  "performance": {},
+  "convergence": {}
+}

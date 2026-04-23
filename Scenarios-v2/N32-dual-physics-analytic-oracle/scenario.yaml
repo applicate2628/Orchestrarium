@@ -1,0 +1,26 @@
+id: N32
+surface_id: E22
+pack_id: E22
+role_class: scientist
+artifact_type: dual computational physics solver patch plus validation report
+modality_family: computational electromagnetics, quantum bound states, numerical performance
+allowed_change_surface:
+  - candidate/workspace/dual_physics.py
+  - candidate/workspace/validation-report.json
+  - candidate/workspace/validation-notes.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/tests/**
+score_profile: "scientist, computational-physics, analytical-oracle, solver-runtime, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - scientist-constraints
+  - scored-rubric
+  - numerical-witness
+  - computational-physics
+  - method-of-moments
+  - hydrogenic-schrodinger
+  - runtime-scoreable
