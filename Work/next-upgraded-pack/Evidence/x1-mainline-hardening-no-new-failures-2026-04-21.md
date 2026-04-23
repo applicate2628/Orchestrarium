@@ -1872,3 +1872,71 @@ refactor breakage with staged re-entry. Current routing impact: keep `X1 primary
 interface migrations, multi-session re-entry, and phase-ledger accountability. Keep `X3 primary`
 for compact single-session implementation and ordinary interface migration only when a staged
 ledger/re-entry contract is not part of the job.
+
+## 2026-04-23 Follow-Up: W16 / N36 Real-Repo Staged API Migration
+
+`N36-realrepo-staged-api-migration-gauntlet` was added as diagnostic `E26` as the real-repo repeat
+of the N35 separator. The domain changed from abstract interface migration to BillingMesh-style API
+migration across account lookup, entitlement decisioning, usage publishing, API/service/reporting
+consumers, review response, and final re-entry closeout.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/staged-api-contract.json` | `PASS` |
+| `python verifiers/check_staged_api_migration.py --bundle-shape-only` | `N36 verifier PASS (bundle shape)` |
+| `python verifiers/check_staged_api_migration.py --expect-start-state` | `N36 verifier PASS (expected start-state failures present)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-23-n36-realrepo-api-reference/` | visible tests `PASS`; verifier `PASS`; scope `PASS` |
+| `score-n36-staged-api-rubric.py` | `py_compile PASS` |
+| `git diff --check` before launch | exit `0` |
+| `mcp-free` before launch | `STATS kill: none`; active parent-owned MCP processes skipped |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---|
+| `X1 / gpt-5.4` | `.scratch/v2-staged-runs/2026-04-23_14-00-23-X1-wave-w16-n36-realrepo-api-2026-04-23/N36/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-23_14-00-23-X3-wave-w16-n36-realrepo-api-2026-04-23/N36/` | `0` | `FAIL` | `PASS` | scoreable `FAIL` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-23_14-19-15-X2-wave-w16-n36-realrepo-api-calibration-2026-04-23/N36/` | `0` | `FAIL` | `FAIL` | scoreable `FAIL` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-23_14-19-15-X6-wave-w16-n36-realrepo-api-calibration-2026-04-23/N36/` | no final summary | n/a | n/a | `NOT-RUN`; runtime no-summary after phase-2 quota/stall |
+| `X5 / gemini3.1pro` | not launched | n/a | n/a | n/a | `REQUEUE`; Pro route remained smoke-gated |
+
+X3 is a scoreable model failure because `wrapperExitCode=0` and the verifier ran and failed. X2 is
+also scoreable because the wrapper completed and verifier/scope gates failed. X6 is not scoreable:
+phase 1 completed, phase 2 hit Gemini capacity retry messages, then stalled without final
+`summary.json`; the process tree was closed as runtime no-summary.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Interface | Hidden | Phase | Ledger | Review | Patch | Tests | Time | Output | Bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `97 / 100` | `15` | `25` | `15` | `14` | `10` | `10` | `5` | `3` | `0` | `762929` | exact real-repo staged API migration; high output |
+| `X3 / opus 4.7max` | `FAIL` | `scoreable` | `74 / 100` | `15` | `5` | `15` | `10` | `10` | `10` | `5` | `2` | `2` | `7995` | missed hidden API semantics and ledger details |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `70 / 100` | `15` | `25` | `12` | `0` | `10` | `0` | `5` | `3` | `0` | `612512` | created forbidden `.reports`, missed closeout/API path budget |
+| `X6 / gemini3.1flash-lite-preview` | `NOT-RUN` | `runtime-no-summary` | `0 / 100` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | `0` | n/a | phase-2 quota/stall; no final summary |
+
+Machine-readable rubric: `Work/next-upgraded-pack/Evidence/n36-staged-api-rubric-2026-04-23.json`.
+
+X3 failed verifier invariants:
+
+| Invariant | Detail |
+|---|---|
+| `account-lookup-contract` | `acct-pro.reason` was `None` instead of `active` |
+| `entitlement-contract` | `acct-pro.source_ids` was missing or empty |
+| `publisher-contract` | denied publish status was `denied` instead of `rejected` |
+| `reporting-contract` | retryable summary count was absent |
+| `phase-ledger-complete` | phase owner missing for `01-intake-plan` |
+| `migration-interfaceMap` | missing `AccountDirectory.get_account -> AccountDirectory.lookup_account` |
+| `migration-callSites` | missing `service.process_usage_request` |
+| `migration-compatibilityCases` | missing `denied-event-no-publish` |
+| `migration-validation` | missing `check_staged_api_migration.py` validation marker |
+
+### N36 Verdict
+
+`X1 PASS` versus `X3 scoreable FAIL`: N36 is the third current hardened top-pair binary separator
+and confirms that the N35 split is not domain-specific to the original interfaceflow fixture. The
+role-fit read is now stronger: staged API/interface migrations with fresh-session re-entry, hidden
+consumer contracts, and phase-ledger accountability should route to `X1 primary`. `X3` remains
+better suited to compact single-session implementation and ordinary interface refactors when staged
+re-entry is not required.

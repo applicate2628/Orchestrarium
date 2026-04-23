@@ -49,6 +49,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W13` interface refactor breakage | `DONE` | Does a structured interface refactor with hidden consumers split X1/X3 on call-site migration and compatibility preservation? | `E23 / N33` interface refactor breakage gauntlet | `$backend-engineer` style verifier plus hidden consumer gate | no active spawn; mainline materialization | `X1` and `X3` both pass; `X3 100`, `X1 96`; `X2` scoreable FAIL 5; `X6` runtime no-summary |
 | `W14` high-load scientific performance | `DONE` | Does staged high-load CEM plus radial Schrodinger performance expose runtime/patch-quality differences after N32 tied? | `E24 / N34` high-load science optimizer | `$computational-scientist` / `$performance-engineer` | one worker was stopped after write-race; mainline integration completed | `X1` and `X3` both pass and both read 96; X1 is faster on solver metrics, X3 is much more compact; `X2` scoreable FAIL 27 |
 | `W15` staged interface migration | `DONE` | Does combining interface refactor breakage with four fresh invocations split X1/X3? | `E25 / N35` staged interface migration re-entry | `$backend-engineer` plus staged re-entry verifier | no active spawn; mainline materialization | `X1 PASS 96`; `X3 scoreable FAIL 71`; `X2 PASS 91`; Gemini rows route-fail |
+| `W16` real-repo staged API migration | `DONE` | Does the staged migration split repeat on a fresh BillingMesh-style API domain? | `E26 / N36` real-repo staged API migration | `$backend-engineer` plus staged re-entry verifier | no active spawn; mainline materialization | `X1 PASS 97`; `X3 scoreable FAIL 74`; `X2 scoreable FAIL 70`; X6 runtime no-summary; X5 smoke-gated |
 
 ## Active Spawn Board
 
@@ -84,6 +85,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W13 / E23` | `N33-interface-refactor-breakage-gauntlet` | test interface-refactor fragility through structured result objects, hidden consumers, legacy wrapper removal, migration ledger, and exact patch scope | `DONE`; `X1` and `X3` both pass; `X3 100`, `X1 96`; `X2` scoreable FAIL 5; `X6` runtime no-summary |
 | `W14 / E24` | `N34-high-load-science-optimizer-gauntlet` | combine staged re-entry, high-load MoM PEC-cylinder cases, hydrogenic radial grids, runtime scoring, perf ledger, and optimization report | `DONE`; `X1` and `X3` both pass and both read 96; X1 faster, X3 much more compact; `X2` scoreable FAIL 27 |
 | `W15 / E25` | `N35-staged-interface-migration-reentry-gauntlet` | combine N33 interface migration with N30 staged runner: persisted plan, implementation, review response, closeout, hidden consumers, exact scope | `DONE`; `X1 PASS 96`, `X3 scoreable FAIL 71`, `X2 PASS 91`; Gemini rows route-fail |
+| `W16 / E26` | `N36-realrepo-staged-api-migration-gauntlet` | repeat N35 on a real-repo-style BillingMesh API migration: account lookup, entitlement policy, usage publisher, service/API/reporting consumers, review response, exact scope | `DONE`; `X1 PASS 97`, `X3 scoreable FAIL 74`, `X2 scoreable FAIL 70`; `X6` runtime no-summary; `X5` smoke-gated |
 
 ## Current Admission Decision
 
@@ -127,7 +129,8 @@ W13 tests the user's interface-refactor hypothesis directly as a single-shot tas
 scientific performance; it ties by binary but exposes a useful non-binary tradeoff: `X1` is faster
 on measured solver runtime while `X3` is much more compact. W15 then combines the interface
 migration hypothesis with the staged runner and produces a second top-pair binary separator:
-`X1 PASS` versus `X3 scoreable FAIL`.
+`X1 PASS` versus `X3 scoreable FAIL`. W16 repeats that split on a fresh BillingMesh-style API
+migration, so staged API/interface migration is now confirmed as an `X1 primary` lane.
 
 ## Execution Order
 
@@ -163,17 +166,18 @@ migration hypothesis with the staged runner and produces a second top-pair binar
 17. Materialize `N33-interface-refactor-breakage-gauntlet` as W13/E23. `DONE` on 2026-04-23.
 18. Materialize `N34-high-load-science-optimizer-gauntlet` as W14/E24. `DONE` on 2026-04-23.
 19. Materialize `N35-staged-interface-migration-reentry-gauntlet` as W15/E25. `DONE` on 2026-04-23.
+20. Materialize `N36-realrepo-staged-api-migration-gauntlet` as W16/E26. `DONE` on 2026-04-23.
 
 ## Current Routing Impact
 
 | Lane | Current Read | Next Need |
 |---|---|---|
 | long-horizon / cross-role / ownership-budget integration | `X3 primary` for compact integration and incident repair after `N16`, `N27`, `N28`, and `N29` all favor X3 over X1 while binary correctness ties | no more synthetic single-scenario repeat needed; use real-repo lane trial or multi-session delivery simulation if binary separation is required |
-| staged delivery / multi-session re-entry | `X1 primary` after `N30` and `N35` both produced `X1 PASS` versus `X3 scoreable FAIL` on persisted phase-ledger / re-entry accountability | strong enough for staged-lane routing; next repeat should be real-repo only |
+| staged delivery / multi-session re-entry | `X1 primary` after `N30`, `N35`, and `N36` produced `X1 PASS` versus `X3 scoreable FAIL` on persisted phase-ledger / re-entry accountability | strong enough for staged-lane routing; next repeat should be a real repo trial, not another synthetic bundle |
 | systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `X2/X5/X6` lower on N24 | no immediate repeat needed unless a new systems subdomain becomes policy-critical |
 | UI implementation | `X3` primary versus `X1` after `N20` and `N25`; `X5` is a route-healthy contender after `N25 PASS 98`, but needs another UI-family pass before policy promotion | one more UI-family `X5` check only if deciding between `X3` and `X5` |
 | scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, `N31`, `N32`, and `N34`; N31 adds real CEM/MoM evidence, N32 combines MoM with hydrogenic radial Schrodinger, and N34 adds high-load staged performance; `X1` is faster on N34, `X3` is more compact | co-primary; choose X1 for runtime-sensitive scientific solver work and X3 for compact output |
-| interface refactor / migration | single-shot `N33` ties and favors X3 compactness; staged `N35` splits `X1 PASS` versus `X3 scoreable FAIL` | route staged API/interface migrations to X1; keep X3 for compact single-session refactors |
+| interface refactor / migration | single-shot `N33` ties and favors X3 compactness; staged `N35` and `N36` split `X1 PASS` versus `X3 scoreable FAIL` | route staged API/interface migrations to X1; keep X3 for compact single-session refactors |
 | owner/orchestration | `X3` primary versus `X1` after `N23` and `N26`; `X5` is a route-healthy owner contender after `N26 PASS 100`, but needs another owner-family pass before policy promotion | one more owner-family `X5` check only if deciding between `X3` and `X5`; otherwise move to long-horizon repeat |
 | visual/graphics | geometry tied on `S22`; `N21` ties X1/X3 on visual correctness and favors X3 on compactness; Gemini preference not proven | repeat only after Gemini semantic route health is fixed |
 
@@ -185,12 +189,12 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume after the `W15 / N35` closeout commit. Systems/toolchain, UI
+If interrupted now, resume after the `W16 / N36` closeout commit. Systems/toolchain, UI
 implementation, owner recovery, compact long-horizon integration, cross-role incident repair, and
 ownership-budget repair are confirmed as `X3 primary` versus `X1` by scored lane-fit evidence, while
-`N30` and `N35` make `X1 primary` for staged delivery re-entry, staged interface migration, and
+`N30`, `N35`, and `N36` make `X1 primary` for staged delivery re-entry, staged API/interface migration, and
 persisted phase-ledger accountability.
 `X5` is a live UI and owner-recovery contender after route-healthy `N25` and `N26` wins/ties, but
-N27/N28/N29/N30/N32/N33/N34/N35 produced only smoke-gated or route-gated Gemini caveats. The newest
-read is: N35 is a scoreable top-pair binary split in favor of X1 for staged interface migration;
+N27/N28/N29/N30/N32/N33/N34/N35/N36 produced only smoke-gated or route-gated Gemini caveats. The newest
+read is: N36 is a scoreable top-pair binary split in favor of X1 for real-repo staged API migration;
 N34 remains the current scientific/performance near-tie evidence.
