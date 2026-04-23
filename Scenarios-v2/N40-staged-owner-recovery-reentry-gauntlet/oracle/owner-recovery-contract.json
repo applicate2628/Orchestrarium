@@ -1,0 +1,163 @@
+{
+  "contractId": "N40-staged-owner-recovery-reentry-gauntlet",
+  "planFingerprint": "n40-staged-owner-recovery-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N40",
+    "surface_id": "E30",
+    "pack_id": "E30",
+    "role_class": "owner",
+    "artifact_type": "staged owner recovery reentry packet plus scored rubric",
+    "modality_family": "multi-session owner recovery, stale-source rejection, lane routing, runtime policy, source binding, and closeout",
+    "allowed_change_surface": [
+      "candidate/source-ledger.json",
+      "candidate/route-decision.md",
+      "candidate/runtime-policy.json",
+      "candidate/closure.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/archive/**",
+      "candidate/stale-results/**"
+    ],
+    "score_profile": "staged-owner-recovery, source-binding, denominator-discipline, re-entry, scored-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "owner-orchestration",
+      "staged-runner",
+      "reentry",
+      "stale-source-recovery",
+      "source-binding",
+      "runtime-classification",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "candidate/README.md",
+    "candidate/source-ledger.json",
+    "candidate/route-decision.md",
+    "candidate/runtime-policy.json",
+    "candidate/closure.json",
+    "candidate/archive/README.md",
+    "candidate/stale-results/old-winner-table.md",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/source-map.md",
+    "inputs/stale-sources.md",
+    "inputs/interruption-log.md",
+    "inputs/phases/01-source-ledger.md",
+    "inputs/phases/02-route-decision.md",
+    "inputs/phases/03-runtime-policy.md",
+    "inputs/phases/04-closeout.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/owner-recovery-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_staged_owner_recovery.py",
+    "verifiers/check_scope.py"
+  ],
+  "expectedSourceIds": ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10"],
+  "expectedStaleIds": ["ST1", "ST2", "ST3", "ST4", "ST5", "ST6", "ST7"],
+  "expectedPhaseIds": ["01-source-ledger", "02-route-decision", "03-runtime-policy", "04-closeout"],
+  "requiredChangedPaths": [
+    "candidate/source-ledger.json",
+    "candidate/route-decision.md",
+    "candidate/runtime-policy.json",
+    "candidate/closure.json"
+  ],
+  "phasePathRules": {
+    "01-source-ledger": {
+      "allowed": ["candidate/source-ledger.json"],
+      "requiredAny": ["candidate/source-ledger.json"]
+    },
+    "02-route-decision": {
+      "allowed": ["candidate/source-ledger.json", "candidate/route-decision.md"],
+      "requiredAny": ["candidate/route-decision.md"]
+    },
+    "03-runtime-policy": {
+      "allowed": ["candidate/source-ledger.json", "candidate/runtime-policy.json"],
+      "requiredAny": ["candidate/runtime-policy.json"]
+    },
+    "04-closeout": {
+      "allowed": ["candidate/source-ledger.json", "candidate/closure.json"],
+      "requiredAny": ["candidate/closure.json"]
+    }
+  },
+  "routeDecisionRequiredSections": [
+    "## Current Source Ledger",
+    "## Stale Source Rejection Ledger",
+    "## Lane Routing Matrix",
+    "## Queued Task Boundary",
+    "## Owner Decision"
+  ],
+  "routeDecisionMarkers": [
+    "staged delivery/re-entry: X1 primary",
+    "staged API/interface migration: X1 primary",
+    "staged review/advisory gate: X1 primary",
+    "systems/toolchain single-shot: X3 primary, staged N39 pending",
+    "UI implementation single-shot: X3 primary, staged N38 pending, X5 contender only",
+    "owner recovery single-shot: X3 primary, staged N40 pending",
+    "no global winner",
+    "N38,N39,N40 are queued tasks, not admitted result evidence"
+  ],
+  "runtimePolicyMarkers": [
+    "X1",
+    "X3",
+    "N38",
+    "N39",
+    "N40",
+    "X2",
+    "X5",
+    "X6",
+    "X4",
+    "NOT-RUN",
+    "quota",
+    "route failure",
+    "wrapper timeout",
+    "missing summary",
+    "runtime caveat",
+    "scoreable fail requires completed wrapper plus verifier"
+  ],
+  "closureMarkers": [
+    "N38,N39,N40",
+    "X3 quota",
+    "17:10",
+    "live surfaces in place",
+    "python verifiers/check_staged_owner_recovery.py",
+    "python verifiers/check_scope.py",
+    "resume from Work/next-upgraded-pack/Planning/next-phase/hardening-wave-roadmap-2026-04-22.md"
+  ],
+  "expected_start_state_failures": [
+    "source-ledger-complete",
+    "stale-rejection-complete",
+    "phase-ledger-complete",
+    "route-decision-complete",
+    "runtime-policy-complete",
+    "closure-complete"
+  ]
+}

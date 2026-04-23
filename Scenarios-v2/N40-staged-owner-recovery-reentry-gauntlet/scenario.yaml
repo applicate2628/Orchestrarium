@@ -1,0 +1,29 @@
+id: N40
+surface_id: E30
+pack_id: E30
+role_class: owner
+artifact_type: staged owner recovery reentry packet plus scored rubric
+modality_family: multi-session owner recovery, stale-source rejection, lane routing, runtime policy, source binding, and closeout
+allowed_change_surface:
+  - candidate/source-ledger.json
+  - candidate/route-decision.md
+  - candidate/runtime-policy.json
+  - candidate/closure.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/archive/**
+  - candidate/stale-results/**
+score_profile: "staged-owner-recovery, source-binding, denominator-discipline, re-entry, scored-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - owner-orchestration
+  - staged-runner
+  - reentry
+  - stale-source-recovery
+  - source-binding
+  - runtime-classification
+  - scored-rubric
+  - binary-separator-candidate

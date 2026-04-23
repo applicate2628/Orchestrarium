@@ -53,6 +53,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W17` staged adversarial review gate | `DONE` | Does the staged/re-entry split also apply to advisory architecture and review-gate lanes? | `E27 / N37` staged adversarial review gate | `$architecture-reviewer` / `$qa-engineer` style verifier plus staged response gate | read-only sidecar recommended review/advisory staged gauntlet; mainline materialization | `X1 PASS 98`; `X3 scoreable FAIL 35`; `X2 PASS 97`; `X6 ROUTE-FAIL`; `X5` smoke timeout |
 | `W18` staged UI/visual/state integration | `READY-TO-RUN` | Does the staged/re-entry split apply to UI implementation when state, ARIA, layout, and raster pixels must stay coherent together? | `E28 / N38` deterministic UI/visual/state integration | `$frontend-engineer` plus `$visualization-engineer` style verifier | read-only sidecar recommended N38; mainline materialized and reference-validated | queued until X3 quota window clears; pre-run gates PASS |
 | `W19` staged systems/toolchain recovery re-entry | `READY-TO-RUN` | Does the systems/toolchain `X3 primary` single-shot edge survive staged fresh invocations, recovery source arbitration, runtime-status discipline, ledger, and exact closeout? | `E29 / N39` staged systems/toolchain reentry | `$toolchain-engineer` plus staged re-entry and recovery verifier | mainline materialized from N24 and hardened with N23/N26-style stale-source and owner-continuity traps | queued with N38 until X3 quota window clears; pre-run gates PASS |
+| `W20` staged owner recovery re-entry | `READY-TO-RUN` | Does the owner-recovery `X3 primary` single-shot edge survive staged source recovery, runtime policy, and closeout? | `E30 / N40` staged owner recovery reentry | `$lead` owner-recovery verifier | mainline materialized while X3 quota was unavailable | queued with N38/N39 until X3 quota window clears; pre-run gates PASS |
 
 ## Active Spawn Board
 
@@ -95,11 +96,12 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W17 / E27` | `N37-staged-adversarial-review-gate-gauntlet` | extend the staged separator into advisory/review: source ledger, source-bound ADR, exact findings, false-positive rejection, response gate, and closure | `DONE`; `X1 PASS 98`, `X3 scoreable FAIL 35`, `X2 PASS 97`; `X6 ROUTE-FAIL`; `X5` smoke timeout |
 | `W18 / E28` | `N38-deterministic-ui-visual-state-integration-gauntlet` | combine N20 UI state, N25 dirty-state/accessibility, and N21 deterministic raster pixels into one staged UI/visual/state integration task | `READY-TO-RUN`; JSON parse, `--bundle-shape-only`, `--expect-start-state`, scratch reference verifier, scope simulation, scorer compile, and `git diff --check` passed |
 | `W19 / E29` | `N39-staged-systems-toolchain-reentry-gauntlet` | convert N24 systems/toolchain staging into a four-phase re-entry task with N23/N26-style stale-source recovery, runtime-status discipline, implementation ledger, closeout, exact scope, and functional toolchain oracle | `READY-TO-RUN`; JSON parse, `--bundle-shape-only`, `--expect-start-state`, scratch reference verifier, scope simulation, scorer compile, and `git diff --check` passed |
+| `W20 / E30` | `N40-staged-owner-recovery-reentry-gauntlet` | convert owner recovery into a four-phase source-ledger, route-decision, runtime-policy, and closeout packet | `READY-TO-RUN`; JSON parse, `--bundle-shape-only`, `--expect-start-state`, scratch reference verifier, scope simulation, scorer compile, and `git diff --check` passed |
 
 ## Current Admission Decision
 
-`W4 / N24`, `W4 / N25`, and `W6..W17 / N26..N37` are complete. `W18 / N38` and
-`W19 / N39` are prepared but not yet scored; they are intentionally held until the X3 quota window
+`W4 / N24`, `W4 / N25`, and `W6..W17 / N26..N37` are complete. `W18 / N38`, `W19 / N39`, and
+`W20 / N40` are prepared but not yet scored; they are intentionally held until the X3 quota window
 clears so the next X1/X3 batch can run together.
 
 Reason: `N19` and `N24` independently read `X3 95 / 100` versus `X1 86 / 100`, with both top
@@ -188,7 +190,8 @@ review ledgers; ordinary single-shot tuple-exact review remains an `X1/X3` near-
 21. Materialize `N37-staged-adversarial-review-gate-gauntlet` as W17/E27. `DONE` on 2026-04-23.
 22. Materialize `N38-deterministic-ui-visual-state-integration-gauntlet` as W18/E28. `READY-TO-RUN` on 2026-04-23.
 23. Materialize `N39-staged-systems-toolchain-reentry-gauntlet` as W19/E29 with recovery source-arbitration hardening. `READY-TO-RUN` on 2026-04-23.
-24. After the X3 quota window clears, run `N38,N39` together on `X1` and `X3`, then add `X2`, `X5`, and `X6` only as calibration rows if routes are healthy.
+24. Materialize `N40-staged-owner-recovery-reentry-gauntlet` as W20/E30. `READY-TO-RUN` on 2026-04-23.
+25. After the X3 quota window clears, run `N38,N39,N40` together on `X1` and `X3`, then add `X2`, `X5`, and `X6` only as calibration rows if routes are healthy.
 
 ## Current Routing Impact
 
@@ -200,6 +203,7 @@ review ledgers; ordinary single-shot tuple-exact review remains an `X1/X3` near-
 | systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `X2/X5/X6` lower on N24 | no immediate repeat needed unless a new systems subdomain becomes policy-critical |
 | systems/toolchain staged recovery re-entry | `N39` is prepared to test whether the N19/N24 `X3` single-shot edge survives staged re-entry plus N23/N26-style stale-source and runtime-status traps | run queued N39 before changing systems/toolchain staged policy |
 | UI implementation | `X3` primary versus `X1` after `N20` and `N25`; `X5` is a route-healthy contender after `N25 PASS 98`, but needs another UI-family pass before policy promotion | run queued N38 before changing UI/visual staged policy or X5 promotion |
+| owner recovery staged re-entry | `N40` is prepared to test whether the N23/N26 `X3` single-shot edge survives staged owner recovery | run queued N40 before changing owner staged policy |
 | scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, `N31`, `N32`, and `N34`; N31 adds real CEM/MoM evidence, N32 combines MoM with hydrogenic radial Schrodinger, and N34 adds high-load staged performance; `X1` is faster on N34, `X3` is more compact | co-primary; choose X1 for runtime-sensitive scientific solver work and X3 for compact output |
 | interface refactor / migration | single-shot `N33` ties and favors X3 compactness; staged `N35` and `N36` split `X1 PASS` versus `X3 scoreable FAIL` | route staged API/interface migrations to X1; keep X3 for compact single-session refactors |
 | owner/orchestration | `X3` primary versus `X1` after `N23` and `N26`; `X5` is a route-healthy owner contender after `N26 PASS 100`, but needs another owner-family pass before policy promotion | one more owner-family `X5` check only if deciding between `X3` and `X5`; otherwise move to long-horizon repeat |
@@ -213,7 +217,7 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume with the queued `N38,N39` staged batch after the X3 quota window clears.
+If interrupted now, resume with the queued `N38,N39,N40` staged batch after the X3 quota window clears.
 Systems/toolchain, UI
 implementation, owner recovery, compact long-horizon integration, cross-role incident repair, and
 ownership-budget repair are confirmed as `X3 primary` versus `X1` by scored lane-fit evidence, while
@@ -223,4 +227,4 @@ gate work with source-bound ADR, exact finding/non-claim ledgers, response cues,
 `X5` is a live UI and owner-recovery contender after route-healthy `N25` and `N26` wins/ties, but
 N27/N28/N29/N30/N32/N33/N34/N35/N36/N37 produced only smoke-gated or route-gated Gemini caveats. The
 newest scored read remains: N37 is a scoreable top-pair binary split in favor of X1 for staged review/advisory gates;
-N38 and N39 are prepared but not yet scored.
+N38, N39, and N40 are prepared but not yet scored.
