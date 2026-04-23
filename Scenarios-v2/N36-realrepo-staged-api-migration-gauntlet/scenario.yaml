@@ -1,0 +1,37 @@
+id: N36
+surface_id: E26
+pack_id: E26
+role_class: implementation
+artifact_type: staged real-repo API migration patch plus persisted re-entry ledgers
+modality_family: multi-session API contract migration, scattered consumers, review response, hidden repo-style tests, and patch-quality discipline
+allowed_change_surface:
+  - candidate/migration-state.json
+  - candidate/review-response.json
+  - candidate/closure.json
+  - candidate/workspace/src/billingmesh/__init__.py
+  - candidate/workspace/src/billingmesh/models.py
+  - candidate/workspace/src/billingmesh/account_directory.py
+  - candidate/workspace/src/billingmesh/entitlement_policy.py
+  - candidate/workspace/src/billingmesh/usage_publisher.py
+  - candidate/workspace/src/billingmesh/service.py
+  - candidate/workspace/src/billingmesh/reporting.py
+  - candidate/workspace/src/billingmesh/api.py
+  - candidate/workspace/tests/test_billingmesh.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+score_profile: "staged-api-migration, re-entry, review-response, hidden-consumer, patch-quality-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - staged-runner
+  - reentry
+  - implementation
+  - api-migration
+  - hidden-consumer
+  - compatibility-preservation
+  - review-response
+  - scored-rubric
+  - binary-separator-candidate
