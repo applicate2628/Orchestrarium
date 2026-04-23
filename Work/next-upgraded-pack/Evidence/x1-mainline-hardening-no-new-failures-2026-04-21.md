@@ -1805,3 +1805,70 @@ X1 is materially faster on measured solver metrics, while X3 is materially more 
 scientist/performance read should be `near-tie`: prefer X1 when measured runtime is the dominant
 constraint; prefer X3 when output/cost compactness is dominant. This still does not beat N30's
 staged delivery binary separator.
+
+## 2026-04-23 Follow-Up: W15 / N35 Staged Interface Migration Re-entry
+
+`N35-staged-interface-migration-reentry-gauntlet` was added as diagnostic `E25` after N33 showed
+that a single-shot interface refactor did not split the top pair. N35 combines the interface
+migration hypothesis with the N30 staged runner: four fresh invocations over one copied bundle,
+requiring persisted migration plan, implementation, review response, and final closeout state.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/staged-interface-contract.json` | `PASS` |
+| `python verifiers/check_staged_interface_migration.py --bundle-shape-only` | `N35 verifier PASS (bundle shape)` |
+| `python verifiers/check_staged_interface_migration.py --expect-start-state` | `N35 verifier PASS (expected start-state failures present)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-23-n35-staged-interface-reference/` | completed verifier `PASS`; scope `PASS` |
+| `score-n35-staged-interface-rubric.py` | `py_compile PASS` |
+| `git diff --check` before launch | exit `0` |
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---|
+| `X1 / gpt-5.4` | `.scratch/v2-staged-runs/2026-04-23_12-31-05-X1-wave-w15-n35-staged-interface-2026-04-23/N35/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-23_12-31-05-X3-wave-w15-n35-staged-interface-2026-04-23/N35/` | `0` | `FAIL` | `PASS` | scoreable `FAIL` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-23_12-47-58-X2-wave-w15-n35-staged-interface-2026-04-23-calibration/N35/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X5 / gemini3.1pro` | `.scratch/v2-staged-runs/2026-04-23_12-47-57-X5-wave-w15-n35-staged-interface-2026-04-23-calibration/N35/` | `1` | n/a | n/a | `ROUTE-FAIL`; Gemini capacity exhausted |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-23_12-47-57-X6-wave-w15-n35-staged-interface-2026-04-23-calibration/N35/` | `1` | n/a | n/a | `ROUTE-FAIL`; Gemini quota/tool-loop/AbortError |
+
+X3 is a scoreable model failure because `wrapperExitCode=0` and the verifier ran and failed. X5 and
+X6 are runtime-route failures because the provider path hit quota/tool-loop/abort behavior before a
+clean staged candidate could be admitted.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Interface | Hidden | Phase | Ledger | Review | Patch | Tests | Time | Output | Bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `96 / 100` | `15` | `25` | `15` | `14` | `10` | `10` | `5` | `2` | `0` | `882122` | exact staged migration; high output |
+| `X3 / opus 4.7max` | `FAIL` | `scoreable` | `71 / 100` | `15` | `0` | `15` | `12` | `10` | `10` | `5` | `2` | `2` | `8387` | missed hidden runtime semantics and several migration-ledger details |
+| `X2 / gpt-5.3-codex-spark` | `PASS` | `scoreable` | `91 / 100` | `15` | `25` | `9` | `14` | `10` | `10` | `5` | `3` | `0` | `1237712` | final artifact passes, but implementation landed in review phase, so phase discipline loses points |
+| `X5 / gemini3.1pro` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | `11016` | quota/capacity exhausted on every phase |
+| `X6 / gemini3.1flash-lite-preview` | `ROUTE-FAIL` | `runtime-route` | `0 / 100` | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | `8971` | partial edits plus tool-loop/AbortError; not scoreable model fail |
+
+Machine-readable rubric: `Work/next-upgraded-pack/Evidence/n35-staged-interface-rubric-2026-04-23.json`.
+
+X3 failed verifier invariants:
+
+| Invariant | Detail |
+|---|---|
+| `session-lookup-contract` | `active-admin.reason` was `ok` instead of `active` |
+| `policy-contract` | policy decisions missed non-empty `source_ids` |
+| `router-contract` | denied dispatch reason was `blocked` instead of `blocked-tenant` |
+| `integration-contract` | blocked API result kept the same reason drift |
+| `report-contract` | queued retryable summary count was absent |
+| `phase-ledger-complete` | phase owner missing for `01-intake-plan` |
+| `migration-callSites` | missing `orchestrator.process_request` call-site row |
+| `migration-validation` | missing `check_staged_interface_migration.py` validation marker |
+| `migration-patch-budget` | required changed-path budget mismatch |
+
+### N35 Verdict
+
+`X1 PASS` versus `X3 scoreable FAIL`: N35 is a second current hardened top-pair binary separator
+and is stronger than N30 for the user's stated failure hypothesis because it combines interface
+refactor breakage with staged re-entry. Current routing impact: keep `X1 primary` for staged
+interface migrations, multi-session re-entry, and phase-ledger accountability. Keep `X3 primary`
+for compact single-session implementation and ordinary interface migration only when a staged
+ledger/re-entry contract is not part of the job.
