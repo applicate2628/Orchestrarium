@@ -1,0 +1,36 @@
+id: N30
+surface_id: E20
+pack_id: E20
+role_class: implementation
+artifact_type: staged multi-session delivery patch plus persisted delivery ledgers
+modality_family: staged delivery, re-entry, review response, and patch-quality discipline
+allowed_change_surface:
+  - candidate/delivery-state.json
+  - candidate/review-response.json
+  - candidate/closure.json
+  - candidate/workspace/src/releaseflow/config.py
+  - candidate/workspace/src/releaseflow/planner.py
+  - candidate/workspace/src/releaseflow/executor.py
+  - candidate/workspace/src/releaseflow/report.py
+  - candidate/workspace/tests/test_releaseflow.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/src/releaseflow/__init__.py
+  - candidate/workspace/src/releaseflow/models.py
+  - candidate/workspace/src/releaseflow/store.py
+  - candidate/workspace/docs/**
+  - candidate/workspace/legacy/**
+  - candidate/workspace/ui/**
+score_profile: "staged-delivery, multi-session, review-response, patch-budget-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - staged-runner
+  - reentry
+  - review-response
+  - patch-budget
+  - scored-rubric
+  - binary-separator-candidate

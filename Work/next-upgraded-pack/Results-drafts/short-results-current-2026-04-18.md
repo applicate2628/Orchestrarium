@@ -326,6 +326,7 @@ failures as `PASS`.
 | `31` | `N27` was added on `2026-04-22` as W7/E17 long-horizon release-train repeat; it is not merged into the old full-v2 denominator; `X1`, `X2`, and `X3` pass; `X3` reads `92 / 100`, `X1` and `X2` read `88 / 100`; `X6` route-fails and `X5` requeues after quota-gated smoke | `N27 long-horizon repeat` |
 | `32` | `N28` was added on `2026-04-22` as W8/E18 incident-driven cross-role integration repair; it is not merged into the old full-v2 denominator; `X1` and `X3` pass; `X3` reads `99 / 100`, `X1` reads `93 / 100`; `X2` scoreably fails, `X6` route-fails, and `X5` requeues after smoke timeouts | `N28 incident repair` |
 | `33` | `N29` was added on `2026-04-23` as W9/E19 ownership-budget incident repair; it is not merged into the old full-v2 denominator; `X1` and `X3` pass exact runtime and patch-budget gates; `X3` reads `100 / 100`, `X1` reads `96 / 100`; `X2` scoreably fails, `X6` times out without summary, and `X5` requeues after smoke timeout | `N29 ownership budget` |
+| `34` | `N30` was added on `2026-04-23` as W10/E20 staged delivery re-entry; it is not merged into the old full-v2 denominator; `X1` passes, `X3` scoreably fails by omitting the `03-review-response` persisted phase ledger, `X2` scoreably fails after forbidden `.reports` bundle drift, `X6` times out without final summary, and `X5` requeues after smoke timeout | `N30 staged re-entry` |
 
 ## Source
 
@@ -363,3 +364,4 @@ failures as `PASS`.
 | `../Evidence/n27-release-train-rubric-2026-04-22.json` | machine-readable N27 long-horizon release-train scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs; `X5` stayed smoke-gated `REQUEUE` |
 | `../Evidence/n28-incident-repair-rubric-2026-04-22.json` | machine-readable N28 incident-driven integration repair scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs; `X5` stayed smoke-gated `REQUEUE` |
 | `../Evidence/n29-ownership-budget-rubric-2026-04-23.json` | machine-readable N29 ownership-budget incident repair scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` launch roots; `X5` stayed smoke-gated `REQUEUE` |
+| `../Evidence/n30-staged-delivery-rubric-2026-04-23.json` | machine-readable N30 staged delivery re-entry scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` launch roots; `X5` stayed smoke-gated `REQUEUE` |

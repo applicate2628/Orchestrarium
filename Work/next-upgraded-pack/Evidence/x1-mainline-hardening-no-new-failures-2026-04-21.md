@@ -1527,3 +1527,70 @@ patch-budget gate. This is useful negative evidence: near-pass ownership-budget 
 binary separator for the top pair. The role-fit read still favors `X3` (`100 / 100`) over `X1` (`96
 / 100`) by output cost only; both solved the runtime defect, updated tests, and matched the exact
 patch budget. `X2` separates lower scoreably, and Gemini rows remain runtime-route/timeout caveats.
+
+## 2026-04-23 Follow-Up: W10 / N30 Staged Delivery Re-Entry
+
+`N30-staged-delivery-reentry-gauntlet` was added as diagnostic `E20` after N29 showed that
+single-invocation synthetic patches were exhausted as top-pair binary separators. N30 changes the
+execution shape: `run-v2-staged-cohort-batch.ps1` copies the bundle once, then launches four fresh
+provider invocations against the same run root. The worker must persist plan, implementation,
+review-response, and final closeout state in files, then pass a final verifier and exact cumulative
+changed-path budget.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/delivery-contract.json` and seeded candidate ledgers | `PASS` |
+| `python verifiers/check_staged_delivery.py --bundle-shape-only` from N30 root | `N30 verifier PASS (bundle shape)` |
+| `python verifiers/check_staged_delivery.py --expect-start-state` from N30 root | `N30 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-23-n30-staged-reference/` | tests `PASS`; completed verifier `PASS`; exact scope `PASS` |
+| staged runner PowerShell parser check | `PASS` |
+| `python -m py_compile` for verifier, scope checker, and scorer | `PASS` |
+| `git diff --check` before launch | exit `0` |
+| `mcp-free` between long provider runs | `STATS kill: none`; active parent-owned MCP processes skipped |
+
+The first X1/X3 staged launch exposed an over-strict verifier field-name issue:
+`phaseId`/`reviewId`/`ownerPath` were semantically valid but the verifier accepted only
+`id`/`owner`, and `reportSource: ledger` was treated as failure even when the report ignored
+notifications. The verifier and scorer were relaxed to semantic aliases before admission; the
+admitted top-pair result is the rerun batch below.
+
+### Runs and calibration
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-staged-runs/2026-04-23_02-42-46-X1-wave-w10-n30-staged-delivery-rerun-2026-04-23/N30/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-23_02-42-47-X3-wave-w10-n30-staged-delivery-rerun-2026-04-23/N30/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-23_03-01-47-X2-wave-w10-n30-staged-delivery-calibration-2026-04-23/N30/` | `0` | `FAIL` | `PASS` | `0 / 1` |
+| `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-23_03-01-46-X6-wave-w10-n30-staged-delivery-calibration-2026-04-23/N30/` | timeout | no final summary | n/a | `RUNTIME-FAIL` |
+| `X5 / gemini3.1pro` | smoke only: `.scratch/gemini-smoke-n30-2026-04-23/x5-output.txt` | timeout | n/a | n/a | `REQUEUE` |
+
+`X3` is a scoreable fail: all four phases exited `0`, the cumulative changed-path scope was exact,
+runtime code/tests/review response were mostly correct, but the persisted `delivery-state.json`
+omitted the `03-review-response` phase ledger, so the final staged re-entry verifier failed
+`phase-ledger-complete`. `X2` is also a scoreable fail: all phases exited `0`, but it created a
+forbidden top-level `.reports/` bundle entry, causing bundle-shape verification failure. `X6`
+timed out after Gemini quota/tool-loop errors and no final `summary.json`; classify as
+`runtime-no-summary`, not model-quality fail. `X5` was not admitted to semantic N30 because the
+same-session smoke timed out without writing `X5_SMOKE_OK`.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Semantic | Phase | Resume | Review | Patch | Tests | Time | Output | Stale | Elapsed proxy | Output bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `96 / 100` | `30` | `15` | `15` | `10` | `10` | `5` | `5` | `1` | `5` | `824.673s` | `429795` | passed staged re-entry and exact budget |
+| `X3 / opus 4.7max` | `FAIL` | `scoreable` | `91 / 100` | `25` | `15` | `11` | `10` | `10` | `5` | `5` | `5` | `5` | `646.525s` | `6618` | omitted `03-review-response` from persisted phase ledger |
+| `X2 / gpt-5.3-codex-spark` | `FAIL` | `scoreable` | `66 / 100` | `0` | `15` | `15` | `10` | `10` | `5` | `5` | `1` | `5` | `288.981s` | `612935` | forbidden `.reports/` top-level drift |
+| `X6 / gemini3.1flash-lite-preview` | `RUNTIME-FAIL` | `runtime-no-summary` | `0 / 100` | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | Gemini quota/tool-loop timeout before final summary |
+| `X5 / gemini3.1pro` | `REQUEUE` | `runtime-timeout` | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | n/a | smoke only | n/a | smoke timed out with no `X5_SMOKE_OK` |
+
+### N30 Verdict
+
+N30 is the first current hardened wave to produce a top-pair scoreable binary separator:
+`X1 PASS`, `X3 FAIL`. The separator is not basic coding correctness; X3 kept the patch compact and
+passed scope but failed the multi-session delivery contract by dropping one persisted phase ledger.
+Routing impact: use `X1 primary` for staged/multi-session delivery, re-entry, and phase-ledger
+accountability. Keep `X3 primary` for compact single-invocation implementation surfaces already
+covered by N16/N19/N20/N23/N24/N25/N26/N27/N28/N29, and keep X3 as secondary for staged work when
+output cost is critical but phase-ledger loss is acceptable risk.

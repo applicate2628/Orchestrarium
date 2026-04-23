@@ -1,0 +1,75 @@
+{
+  "schema": "n30.delivery-contract.v1",
+  "planFingerprint": "n30-plan-active-profile-ledger-audit-v1",
+  "expectedSourceIds": ["S1", "S2", "S3", "S4", "S5", "S6", "S7"],
+  "expectedPhaseIds": [
+    "01-intake-plan",
+    "02-implementation",
+    "03-review-response",
+    "04-final-reentry-closeout"
+  ],
+  "requiredChangedPaths": [
+    "candidate/delivery-state.json",
+    "candidate/review-response.json",
+    "candidate/closure.json",
+    "candidate/workspace/src/releaseflow/config.py",
+    "candidate/workspace/src/releaseflow/planner.py",
+    "candidate/workspace/src/releaseflow/executor.py",
+    "candidate/workspace/src/releaseflow/report.py",
+    "candidate/workspace/tests/test_releaseflow.py"
+  ],
+  "phasePathRules": {
+    "01-intake-plan": {
+      "allowed": ["candidate/delivery-state.json"],
+      "requiredAny": ["candidate/delivery-state.json"]
+    },
+    "02-implementation": {
+      "allowed": [
+        "candidate/delivery-state.json",
+        "candidate/workspace/src/releaseflow/config.py",
+        "candidate/workspace/src/releaseflow/planner.py",
+        "candidate/workspace/src/releaseflow/executor.py",
+        "candidate/workspace/src/releaseflow/report.py",
+        "candidate/workspace/tests/test_releaseflow.py"
+      ],
+      "requiredAny": ["candidate/workspace/tests/test_releaseflow.py"]
+    },
+    "03-review-response": {
+      "allowed": [
+        "candidate/review-response.json",
+        "candidate/delivery-state.json",
+        "candidate/workspace/src/releaseflow/executor.py",
+        "candidate/workspace/src/releaseflow/report.py",
+        "candidate/workspace/tests/test_releaseflow.py"
+      ],
+      "requiredAny": ["candidate/review-response.json"]
+    },
+    "04-final-reentry-closeout": {
+      "allowed": ["candidate/closure.json", "candidate/delivery-state.json"],
+      "requiredAny": ["candidate/closure.json"]
+    }
+  },
+  "reviewDecisions": {
+    "R1-stable-idempotency": "accept",
+    "R2-report-source": "accept",
+    "R3-tests-cover-stale-profile": "accept",
+    "R4-ui-badge-decoy": "reject",
+    "R5-legacy-helper-decoy": "reject"
+  },
+  "testMarkers": [
+    "test_active_profile_wins_over_legacy_profile",
+    "test_latest_change_wins_and_dependency_order",
+    "test_crash_resume_is_idempotent",
+    "test_report_uses_ledger_audit"
+  ],
+  "forbiddenCandidateTerms": [
+    "delivery-contract.json",
+    "integration-invariants.md",
+    "active-profile-wins",
+    "latest-change-wins",
+    "blocked-env-excluded",
+    "dependency-order",
+    "resume-idempotent",
+    "report-from-ledger-audit"
+  ]
+}

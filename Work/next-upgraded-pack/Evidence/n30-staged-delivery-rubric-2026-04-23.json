@@ -1,0 +1,111 @@
+{
+  "scenario": "N30",
+  "surface": "E20",
+  "contract": "D:\\dev\\Orchestrator\\benchmarks\\Scenarios-v2\\N30-staged-delivery-reentry-gauntlet\\oracle\\delivery-contract.json",
+  "rows": [
+    {
+      "row": "X1",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "rubric": 96,
+      "semantic": 30,
+      "phase": 15,
+      "resume": 15,
+      "review": 10,
+      "patch": 10,
+      "tests": 5,
+      "time": 5,
+      "output": 1,
+      "stale": 5,
+      "elapsedSeconds": 824.673,
+      "outputBytes": 429795,
+      "changedCount": 8,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/delivery-state.json",
+        "candidate/review-response.json",
+        "candidate/workspace/src/releaseflow/config.py",
+        "candidate/workspace/src/releaseflow/executor.py",
+        "candidate/workspace/src/releaseflow/planner.py",
+        "candidate/workspace/src/releaseflow/report.py",
+        "candidate/workspace/tests/test_releaseflow.py"
+      ],
+      "notes": [],
+      "summaryPath": ".scratch\\v2-staged-runs\\2026-04-23_02-42-46-X1-wave-w10-n30-staged-delivery-rerun-2026-04-23\\N30\\meta\\summary.json"
+    },
+    {
+      "row": "X2",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "rubric": 66,
+      "semantic": 0,
+      "phase": 15,
+      "resume": 15,
+      "review": 10,
+      "patch": 10,
+      "tests": 5,
+      "time": 5,
+      "output": 1,
+      "stale": 5,
+      "elapsedSeconds": 288.981,
+      "outputBytes": 612935,
+      "changedCount": 8,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/delivery-state.json",
+        "candidate/review-response.json",
+        "candidate/workspace/src/releaseflow/config.py",
+        "candidate/workspace/src/releaseflow/executor.py",
+        "candidate/workspace/src/releaseflow/planner.py",
+        "candidate/workspace/src/releaseflow/report.py",
+        "candidate/workspace/tests/test_releaseflow.py"
+      ],
+      "notes": [
+        "verifier failed without invariant detail"
+      ],
+      "summaryPath": ".scratch\\v2-staged-runs\\2026-04-23_03-01-47-X2-wave-w10-n30-staged-delivery-calibration-2026-04-23\\N30\\meta\\summary.json"
+    },
+    {
+      "row": "X3",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "rubric": 91,
+      "semantic": 25,
+      "phase": 15,
+      "resume": 11,
+      "review": 10,
+      "patch": 10,
+      "tests": 5,
+      "time": 5,
+      "output": 5,
+      "stale": 5,
+      "elapsedSeconds": 646.525,
+      "outputBytes": 6618,
+      "changedCount": 8,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/delivery-state.json",
+        "candidate/review-response.json",
+        "candidate/workspace/src/releaseflow/config.py",
+        "candidate/workspace/src/releaseflow/executor.py",
+        "candidate/workspace/src/releaseflow/planner.py",
+        "candidate/workspace/src/releaseflow/report.py",
+        "candidate/workspace/tests/test_releaseflow.py"
+      ],
+      "notes": [
+        "failed invariants: phase-ledger-complete",
+        "phase ledger incomplete"
+      ],
+      "summaryPath": ".scratch\\v2-staged-runs\\2026-04-23_02-42-47-X3-wave-w10-n30-staged-delivery-rerun-2026-04-23\\N30\\meta\\summary.json"
+    },
+    {
+      "row": "N30",
+      "binary": "RUNTIME-FAIL",
+      "scoreability": "runtime-no-summary",
+      "rubric": 0,
+      "notes": [
+        "missing staged summary.json"
+      ]
+    }
+  ]
+}
