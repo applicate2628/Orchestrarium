@@ -1,0 +1,220 @@
+{
+  "contractId": "N35-staged-interface-migration-reentry-gauntlet",
+  "planFingerprint": "n35-staged-interface-migration-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N35",
+    "surface_id": "E25",
+    "pack_id": "E25",
+    "role_class": "implementation",
+    "artifact_type": "staged interface migration patch plus persisted re-entry ledgers",
+    "modality_family": "multi-session interface refactor, review response, hidden consumer tests, and patch-quality discipline",
+    "allowed_change_surface": [
+      "candidate/migration-state.json",
+      "candidate/review-response.json",
+      "candidate/closure.json",
+      "candidate/workspace/src/interfaceflow/__init__.py",
+      "candidate/workspace/src/interfaceflow/models.py",
+      "candidate/workspace/src/interfaceflow/session_store.py",
+      "candidate/workspace/src/interfaceflow/policy.py",
+      "candidate/workspace/src/interfaceflow/router.py",
+      "candidate/workspace/src/interfaceflow/orchestrator.py",
+      "candidate/workspace/src/interfaceflow/report.py",
+      "candidate/workspace/src/interfaceflow/api.py",
+      "candidate/workspace/tests/test_interfaceflow.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md"
+    ],
+    "score_profile": "staged-interface-refactor, re-entry, review-response, hidden-consumer, patch-quality-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "staged-runner",
+      "reentry",
+      "implementation",
+      "interface-refactor",
+      "hidden-consumer",
+      "compatibility-preservation",
+      "review-response",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "candidate/README.md",
+    "candidate/migration-state.json",
+    "candidate/review-response.json",
+    "candidate/closure.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/interfaceflow/__init__.py",
+    "candidate/workspace/src/interfaceflow/models.py",
+    "candidate/workspace/src/interfaceflow/session_store.py",
+    "candidate/workspace/src/interfaceflow/policy.py",
+    "candidate/workspace/src/interfaceflow/router.py",
+    "candidate/workspace/src/interfaceflow/orchestrator.py",
+    "candidate/workspace/src/interfaceflow/report.py",
+    "candidate/workspace/src/interfaceflow/api.py",
+    "candidate/workspace/tests/test_interfaceflow.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/review-feedback.md",
+    "inputs/decoy-map.md",
+    "inputs/phases/01-intake-plan.md",
+    "inputs/phases/02-interface-migration.md",
+    "inputs/phases/03-review-response.md",
+    "inputs/phases/04-final-reentry-closeout.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/staged-interface-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_staged_interface_migration.py",
+    "verifiers/check_scope.py"
+  ],
+  "expectedSourceIds": ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9"],
+  "expectedPhaseIds": [
+    "01-intake-plan",
+    "02-interface-migration",
+    "03-review-response",
+    "04-final-reentry-closeout"
+  ],
+  "requiredChangedPaths": [
+    "candidate/migration-state.json",
+    "candidate/review-response.json",
+    "candidate/closure.json",
+    "candidate/workspace/src/interfaceflow/__init__.py",
+    "candidate/workspace/src/interfaceflow/models.py",
+    "candidate/workspace/src/interfaceflow/session_store.py",
+    "candidate/workspace/src/interfaceflow/policy.py",
+    "candidate/workspace/src/interfaceflow/router.py",
+    "candidate/workspace/src/interfaceflow/orchestrator.py",
+    "candidate/workspace/src/interfaceflow/report.py",
+    "candidate/workspace/src/interfaceflow/api.py",
+    "candidate/workspace/tests/test_interfaceflow.py"
+  ],
+  "phasePathRules": {
+    "01-intake-plan": {
+      "allowed": ["candidate/migration-state.json"],
+      "requiredAny": ["candidate/migration-state.json"]
+    },
+    "02-interface-migration": {
+      "allowed": [
+        "candidate/migration-state.json",
+        "candidate/workspace/src/interfaceflow/__init__.py",
+        "candidate/workspace/src/interfaceflow/models.py",
+        "candidate/workspace/src/interfaceflow/session_store.py",
+        "candidate/workspace/src/interfaceflow/policy.py",
+        "candidate/workspace/src/interfaceflow/router.py",
+        "candidate/workspace/src/interfaceflow/orchestrator.py",
+        "candidate/workspace/src/interfaceflow/report.py",
+        "candidate/workspace/src/interfaceflow/api.py",
+        "candidate/workspace/tests/test_interfaceflow.py"
+      ],
+      "requiredAny": ["candidate/workspace/tests/test_interfaceflow.py"]
+    },
+    "03-review-response": {
+      "allowed": [
+        "candidate/migration-state.json",
+        "candidate/review-response.json",
+        "candidate/workspace/src/interfaceflow/policy.py",
+        "candidate/workspace/src/interfaceflow/router.py",
+        "candidate/workspace/src/interfaceflow/orchestrator.py",
+        "candidate/workspace/src/interfaceflow/report.py",
+        "candidate/workspace/tests/test_interfaceflow.py"
+      ],
+      "requiredAny": ["candidate/review-response.json"]
+    },
+    "04-final-reentry-closeout": {
+      "allowed": ["candidate/migration-state.json", "candidate/closure.json"],
+      "requiredAny": ["candidate/closure.json"]
+    }
+  },
+  "legacyPublicMethods": {
+    "SessionStore": "get",
+    "PolicyEvaluator": "evaluate",
+    "EventRouter": "dispatch"
+  },
+  "requiredResultModels": {
+    "SessionLookup": ["found", "session_id", "record", "reason", "owner"],
+    "PolicyDecision": ["allowed", "reason", "owner", "source_ids"],
+    "DispatchResult": ["accepted", "status", "retryable", "event_id", "error_code", "owner", "reason"]
+  },
+  "requiredLedgerRows": {
+    "interfaceMap": [
+      "SessionStore.get -> SessionStore.lookup",
+      "PolicyEvaluator.evaluate -> PolicyEvaluator.evaluate_policy",
+      "EventRouter.dispatch -> EventRouter.dispatch_event"
+    ],
+    "callSites": [
+      "orchestrator.process_request",
+      "api.handle_event",
+      "report.build_audit_summary",
+      "tests.test_interfaceflow"
+    ],
+    "compatibilityCases": [
+      "missing-session",
+      "expired-session",
+      "revoked-session",
+      "blocked-tenant",
+      "requires-admin",
+      "transport-timeout",
+      "duplicate-event",
+      "denied-event-no-dispatch",
+      "accepted-event"
+    ],
+    "validationMarkers": [
+      "python candidate/workspace/tests/test_interfaceflow.py",
+      "check_staged_interface_migration.py"
+    ],
+    "staleRejections": [
+      "docs/stale-interface-map.md",
+      "legacy/session_adapter.py",
+      "docs/api-compatibility-note.md"
+    ]
+  },
+  "reviewDecisions": {
+    "R1-legacy-wrapper-request": "reject",
+    "R2-denied-event-no-dispatch": "accept",
+    "R3-owner-source-boundary": "accept",
+    "R4-report-queued-retryable": "accept",
+    "R5-readme-sync-decoy": "reject",
+    "R6-admin-action-boundary": "accept"
+  },
+  "requiredTestMarkers": [
+    "test_lookup_missing_session_contract",
+    "test_router_timeout_is_retryable",
+    "test_legacy_methods_removed",
+    "test_denied_policy_does_not_dispatch",
+    "test_report_counts_retryable_and_owners"
+  ],
+  "forbiddenStaticMarkers": [
+    "def get(",
+    "def evaluate(",
+    "def dispatch("
+  ],
+  "sessionNow": 50
+}

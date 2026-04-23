@@ -1,0 +1,17 @@
+{
+  "contractId": "N35-staged-interface-migration-reentry-gauntlet",
+  "planFingerprint": "",
+  "phases": [],
+  "sourceBindings": [],
+  "staleSourceRejections": [],
+  "interfaceMap": [],
+  "callSiteMigration": [],
+  "compatibilityMatrix": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 12,
+    "requiredChangedPaths": []
+  }
+}

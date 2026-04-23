@@ -1,0 +1,37 @@
+id: N35
+surface_id: E25
+pack_id: E25
+role_class: implementation
+artifact_type: staged interface migration patch plus persisted re-entry ledgers
+modality_family: multi-session interface refactor, review response, hidden consumer tests, and patch-quality discipline
+allowed_change_surface:
+  - candidate/migration-state.json
+  - candidate/review-response.json
+  - candidate/closure.json
+  - candidate/workspace/src/interfaceflow/__init__.py
+  - candidate/workspace/src/interfaceflow/models.py
+  - candidate/workspace/src/interfaceflow/session_store.py
+  - candidate/workspace/src/interfaceflow/policy.py
+  - candidate/workspace/src/interfaceflow/router.py
+  - candidate/workspace/src/interfaceflow/orchestrator.py
+  - candidate/workspace/src/interfaceflow/report.py
+  - candidate/workspace/src/interfaceflow/api.py
+  - candidate/workspace/tests/test_interfaceflow.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+score_profile: "staged-interface-refactor, re-entry, review-response, hidden-consumer, patch-quality-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - staged-runner
+  - reentry
+  - implementation
+  - interface-refactor
+  - hidden-consumer
+  - compatibility-preservation
+  - review-response
+  - scored-rubric
+  - binary-separator-candidate
