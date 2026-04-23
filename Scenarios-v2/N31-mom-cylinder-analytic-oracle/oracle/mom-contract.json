@@ -1,0 +1,174 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N31",
+    "surface_id": "E21",
+    "pack_id": "E21",
+    "role_class": "scientist",
+    "artifact_type": "computational electromagnetics MoM solver patch plus validation report",
+    "modality_family": "computational theoretical electromagnetics and numerical integral equations",
+    "allowed_change_surface": [
+      "candidate/workspace/mom_solver.py",
+      "candidate/workspace/validation-report.json",
+      "candidate/workspace/validation-notes.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/tests/**"
+    ],
+    "score_profile": "scientist, computational-em, method-of-moments, analytical-oracle, top-pair-role-fit",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "scientist-constraints",
+      "scored-rubric",
+      "numerical-witness",
+      "computational-physics",
+      "method-of-moments"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/physics-brief.md",
+    "inputs/numerical-requirements.md",
+    "inputs/task.md",
+    "candidate/README.md",
+    "candidate/workspace/mom_solver.py",
+    "candidate/workspace/validation-report.json",
+    "candidate/workspace/validation-notes.md",
+    "candidate/workspace/tests/test_mom_solver.py",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/mom-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_mom_cylinder_solver.py",
+    "verifiers/check_scope.py"
+  ],
+  "solver_api": "solve_cylinder_mom",
+  "required_result_keys": [
+    "radius",
+    "wavenumber",
+    "segments",
+    "incident_angle",
+    "observation_radius",
+    "method",
+    "panel_angles",
+    "density",
+    "boundary_residual_l2",
+    "field_samples",
+    "runtime_seconds"
+  ],
+  "cases": [
+    {
+      "case_id": "ka2-primary-coarse",
+      "radius": 0.5,
+      "wavenumber": 4.0,
+      "segments": 64,
+      "incident_angle": 0.35,
+      "observation_radius": 2.0,
+      "sample_count": 12,
+      "matrix_quadrature_order": 10,
+      "field_quadrature_order": 12,
+      "series_terms": 80,
+      "max_boundary_residual_l2": 0.01,
+      "max_relative_field_error": 0.008,
+      "max_runtime_seconds": 8.0
+    },
+    {
+      "case_id": "ka2-primary-refined",
+      "radius": 0.5,
+      "wavenumber": 4.0,
+      "segments": 96,
+      "incident_angle": 0.35,
+      "observation_radius": 2.0,
+      "sample_count": 12,
+      "matrix_quadrature_order": 10,
+      "field_quadrature_order": 12,
+      "series_terms": 80,
+      "max_boundary_residual_l2": 0.007,
+      "max_relative_field_error": 0.005,
+      "max_runtime_seconds": 12.0
+    },
+    {
+      "case_id": "ka1925-hidden-angle",
+      "radius": 0.35,
+      "wavenumber": 5.5,
+      "segments": 80,
+      "incident_angle": 0.7,
+      "observation_radius": 1.6,
+      "sample_count": 10,
+      "matrix_quadrature_order": 10,
+      "field_quadrature_order": 12,
+      "series_terms": 90,
+      "max_boundary_residual_l2": 0.01,
+      "max_relative_field_error": 0.007,
+      "max_runtime_seconds": 10.0
+    }
+  ],
+  "convergence": {
+    "coarse_case_id": "ka2-primary-coarse",
+    "refined_case_id": "ka2-primary-refined",
+    "min_field_error_improvement_ratio": 1.2
+  },
+  "required_report_cases": [
+    "ka2-primary-coarse",
+    "ka2-primary-refined"
+  ],
+  "required_report_fields": [
+    "method",
+    "oracle_use",
+    "cases",
+    "convergence"
+  ],
+  "required_notes_phrases": [
+    "Method of Moments",
+    "PEC circular cylinder",
+    "TMz EFIE",
+    "outgoing Green function",
+    "pulse basis",
+    "point matching",
+    "self-panel quadrature",
+    "complex linear system",
+    "cylindrical-harmonic analytic oracle",
+    "convergence",
+    "incident angle"
+  ],
+  "forbidden_solver_markers": [
+    "sympy",
+    "mpmath",
+    "hardcoded field",
+    "hard-coded field",
+    "return []"
+  ],
+  "expected_start_state_failures": [
+    "solver-case-ka2-primary-coarse",
+    "solver-case-ka2-primary-refined",
+    "solver-case-ka1925-hidden-angle",
+    "convergence-failed",
+    "report-missing-cases",
+    "notes-missing-phrases"
+  ]
+}

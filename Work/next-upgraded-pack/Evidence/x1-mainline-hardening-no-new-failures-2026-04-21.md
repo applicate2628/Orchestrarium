@@ -1594,3 +1594,54 @@ Routing impact: use `X1 primary` for staged/multi-session delivery, re-entry, an
 accountability. Keep `X3 primary` for compact single-invocation implementation surfaces already
 covered by N16/N19/N20/N23/N24/N25/N26/N27/N28/N29, and keep X3 as secondary for staged work when
 output cost is critical but phase-ledger loss is acceptable risk.
+
+## 2026-04-23 Follow-Up: W11 / N31 MoM Cylinder Analytical Oracle
+
+`N31-mom-cylinder-analytic-oracle` was added as diagnostic `E21` for the
+scientist/numerical reasoning lane after the earlier uncommitted textbook-potential draft was
+rejected as too easy. The admitted N31 task is computational electromagnetics: repair a
+pulse-basis Method of Moments solver for a TMz plane wave incident on a PEC circular cylinder.
+The verifier uses a clear analytical oracle: the exact cylindrical-harmonic series for the same
+cylinder. Passing requires a real MoM density, an independently rebuilt boundary residual, exterior
+field samples against the analytical oracle, convergence from `64` to `96` panels, and a hidden
+non-default radius/wavenumber/incidence-angle probe.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| JSON parse for `oracle/mom-contract.json` and starter report | `PASS` |
+| `python verifiers/check_mom_cylinder_solver.py --bundle-shape-only` | `N31 verifier PASS (bundle shape)` |
+| `python verifiers/check_mom_cylinder_solver.py --expect-start-state` | `N31 verifier PASS (start state)` |
+| scratch reference at `.scratch/verifier-probes/2026-04-23-n31-mom-cylinder-reference/N31/` | local smoke `PASS`; completed verifier `PASS`; scope `PASS` |
+| `python -m py_compile` for solver/verifier/scope/scorer | `PASS` |
+| `git diff --check` before launch | exit `0` |
+| `mcp-free` before provider launch | `STATS kill: none`; active parent-owned MCP processes skipped |
+
+### Runs
+
+| Row | Run root | Wrapper exit | Verifier | Scope guard | Binary read |
+|---|---|---:|---|---|---:|
+| `X1 / gpt-5.4` | `.scratch/v2-cohort-runs/2026-04-23_04-54-06-X1-wave-w11-n31-mom-cylinder-2026-04-23/N31/` | `0` | `PASS` | `PASS` | `1 / 1` |
+| `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-23_04-54-04-X3-wave-w11-n31-mom-cylinder-2026-04-23/N31/` | `0` | `PASS` | `PASS` | `1 / 1` |
+
+Per the updated calibration rule, `X5` and `X6` were not launched for this run. The earlier
+uncommitted Poschl-Teller scratch runs are not admitted evidence for N31; they were superseded by
+the MoM cylinder bundle before documentation and commit.
+
+### Rubric read
+
+| Row | Binary | Scoreability | Rubric | Correct | Report | Notes | Scope | Runtime | Output | Elapsed proxy | Output bytes | Notes |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| `X3 / opus 4.7max` | `PASS` | `scoreable` | `94 / 100` | `50` | `15` | `10` | `10` | `4` | `5` | `311.085s` | `3353` | compact MoM solution; analytical-oracle gates pass |
+| `X1 / gpt-5.4` | `PASS` | `scoreable` | `92 / 100` | `50` | `15` | `10` | `10` | `5` | `2` | `188.341s` | `163289` | faster but much larger output; analytical-oracle gates pass |
+
+Machine-readable rubric: `Work/next-upgraded-pack/Evidence/n31-mom-cylinder-rubric-2026-04-23.json`.
+
+### N31 Verdict
+
+`binary tie remains` for `X1` and `X3` on a real computational-electromagnetics task with a clear
+analytical oracle. N31 is still useful: it upgrades the scientist/numerical lane from memo and
+statistics constraints into a real numerical integral-equation solve. The routing read remains
+co-primary for correctness; prefer `X3` when compactness/output cost matters and `X1` when faster
+elapsed time or more verbose trace is desired. N31 is not a new binary separator.

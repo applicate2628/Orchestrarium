@@ -22,7 +22,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | one live roadmap | update this file in place; do not create competing stale roadmaps |
 | result source of truth | classify from `summary.json`, verifier logs, and scorer JSON, not noisy stdout |
 | top-pair runs | every admitted wave runs `X1` and `X3` first |
-| calibration rows | run `X2` and `X6` when the result may affect lane policy; run `X5` only after a same-session smoke writes output |
+| calibration rows | run `X2`, `X5`, and `X6` only after global/lane-relevant changes; `X5` still requires a same-session smoke that writes output |
 | route failures | keep quota, wrapper timeout, missing summary, and Gemini tool-loop failures separate from model FAIL |
 | X4 | keep `NOT-RUN` until the secret-backed Claude route stops returning provider errors |
 | write scope | main agent owns roadmap, scenario materialization, scorers, live result surfaces, and session logs |
@@ -44,7 +44,8 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W8` cross-role incident repair | `DONE` | Does adding incident source arbitration, stale requirements, review response, tests, and final reconciliation finally split X1/X3? | `E18 / N28` incident-driven integration repair | `$backend-engineer` plus review/reconciliation gate | N28 read-only sidecar accepted verifier/scorer gate before launch | `X1` and `X3` pass; `X3 99`, `X1 93`; `X2 scoreable FAIL 16`; `X6 ROUTE-FAIL`; `X5 REQUEUE` after smoke timeouts |
 | `W9` ownership-budget incident repair | `DONE` | Does a near-pass localized repair plus exact patch-budget gate split X1/X3? | `E19 / N29` ownership-budget incident repair | `$backend-engineer` plus machine-ledger/scope gate | N29 read-only sidecar recommended near-pass semantic budget design | `X1` and `X3` pass exact four-path budget; `X3 100`, `X1 96`; `X2 scoreable FAIL 42`; `X6 RUNTIME-FAIL`; `X5 REQUEUE` |
 | `W10` staged delivery re-entry | `DONE` | Does a real multi-invocation staged runner split X1/X3 on persisted phase state and re-entry? | `E20 / N30` staged delivery re-entry | `$lead` integration-owner simulation plus implementation verifier | W10 sidecar accepted only if staged runner exists; materialized as four fresh invocations over one run root | `X1 PASS 96`; `X3 scoreable FAIL 91` after omitting one phase ledger; `X2 scoreable FAIL 66`; `X6 RUNTIME-FAIL`; `X5 REQUEUE` |
-| `W11` scientific computation hardening | `ADMITTED` | Can a known analytic theoretical-physics solution separate top models when solved numerically under speed/tolerance/convergence gates? | `E21 / N31` analytic-oracle computational physics solver | `$computational-scientist` / `$algorithm-scientist` style verifier | pending; no spawn yet | gate: numerical output must match analytic observables, dimensionless invariants, convergence ratio, and runtime budget without symbolic shortcut |
+| `W11` scientific computation hardening | `DONE` | Can a real physics analytical-oracle numerical task split X1/X3? | `E21 / N31` MoM PEC-cylinder analytical oracle | `$computational-scientist` / `$algorithm-scientist` style verifier | MoM design superseded easier textbook-potential draft before commit | `X1` and `X3` both pass; `X3 94`, `X1 92`; binary tie remains, but N31 upgrades the lane to real CEM/MoM evidence |
+| `W12` scientific computation repeat | `QUEUED` | If scientist/numerical routing needs more evidence, does a second real-physics numerical task split the top pair? | hydrogenic radial Schrodinger or comparable analytical-oracle physics solve | `$computational-scientist` style verifier | no spawn yet | admit only if N31 tie is insufficient for policy |
 
 ## Active Spawn Board
 
@@ -75,7 +76,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W8 / E18` | `N28-incident-driven-integration-repair-gauntlet` | extend N27 into cross-role incident repair: runtime patch, source arbitration, stale-source rejection, review response, tests, and final reconciliation | `DONE`; `X3 PASS 99`, `X1 PASS 93`, `X2 scoreable FAIL 16`, `X6 ROUTE-FAIL`; `X5 REQUEUE` because same-session smoke timed out |
 | `W9 / E19` | `N29-ownership-budget-incident-repair-gauntlet` | start from a near-pass deploy runtime and require a localized runtime fix, tests, structured source/review/validation ledger, and exact four-path patch budget | `DONE`; `X3 PASS 100`, `X1 PASS 96`, `X2 scoreable FAIL 42`, `X6 RUNTIME-FAIL`; `X5 REQUEUE` because smoke timed out |
 | `W10 / E20` | `N30-staged-delivery-reentry-gauntlet` | first staged runner: four fresh provider invocations over one copied bundle, requiring persisted plan, implementation, review response, and closeout state | `DONE`; first current top-pair binary separator: `X1 PASS 96`, `X3 scoreable FAIL 91`; `X2` scoreable FAIL; Gemini rows runtime caveats |
-| `W11 / E21` | `N31-scientific-computation-analytic-oracle` | harden generic numerical reasoning with computational theoretical physics: known analytic solution, numerical solver under speed/tolerance/convergence gates | `ADMITTED`; materialization next |
+| `W11 / E21` | `N31-mom-cylinder-analytic-oracle` | harden generic numerical reasoning with real computational electromagnetics: Method of Moments PEC-cylinder solve against cylindrical-harmonic analytical oracle | `DONE`; `X1` and `X3` both pass; `X3 94`, `X1 92`; binary tie remains |
 
 ## Current Admission Decision
 
@@ -103,10 +104,10 @@ first current top-pair binary separator, `X1 PASS` versus `X3 scoreable FAIL`, b
 single-session long-horizon/cross-role implementation, `X1 primary` for staged delivery re-entry and
 phase-ledger accountability.
 
-Next admitted branch: add a scientific computation hardening wave to the generic numerical reasoning
-lane. The user explicitly requested a difficult computational theoretical physics task with a known
-analytic solution, solved numerically and quickly, so the result can separate actual numerical
-competence from prose.
+W11 added a scientific computation hardening wave to the generic numerical reasoning lane. The
+admitted task is computational electromagnetics rather than a textbook potential: Method of Moments
+for a PEC circular cylinder, with the exact cylindrical-harmonic series as analytical oracle. Both
+top-pair rows pass; the lane gains real physics evidence but not a binary separator.
 
 ## Execution Order
 
@@ -137,7 +138,7 @@ competence from prose.
 12. Materialize `N28-cross-role-incident-repair`. `DONE` on 2026-04-22.
 13. Materialize `N29-ownership-budget-incident-repair`. `DONE` on 2026-04-23.
 14. Materialize `N30-staged-delivery-reentry` with staged runner and time/cost/patch-quality scoring. `DONE` on 2026-04-23.
-15. Materialize `N31-scientific-computation-analytic-oracle` as W11/E21.
+15. Materialize `N31-mom-cylinder-analytic-oracle` as W11/E21. `DONE` on 2026-04-23.
 
 ## Current Routing Impact
 
@@ -147,7 +148,7 @@ competence from prose.
 | staged delivery / multi-session re-entry | `X1 primary` after `N30` produced `X1 PASS` versus `X3 scoreable FAIL` on persisted phase-ledger completeness | repeat only if this becomes a hard global default; otherwise use as routing evidence |
 | systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `X2/X5/X6` lower on N24 | no immediate repeat needed unless a new systems subdomain becomes policy-critical |
 | UI implementation | `X3` primary versus `X1` after `N20` and `N25`; `X5` is a route-healthy contender after `N25 PASS 98`, but needs another UI-family pass before policy promotion | one more UI-family `X5` check only if deciding between `X3` and `X5` |
-| scientist/constraints | `X1/X3` correctness tie on `N18`; `N22` also ties by binary, with `X1 100`, `X3 99`, and `X3` far more compact | W11 admitted: computational theoretical physics analytic-oracle numerical solver |
+| scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, and `N31`; N31 adds real CEM/MoM analytical-oracle evidence with `X3 94`, `X1 92` | optional W12 hydrogenic radial Schrodinger repeat only if this lane needs more evidence |
 | owner/orchestration | `X3` primary versus `X1` after `N23` and `N26`; `X5` is a route-healthy owner contender after `N26 PASS 100`, but needs another owner-family pass before policy promotion | one more owner-family `X5` check only if deciding between `X3` and `X5`; otherwise move to long-horizon repeat |
 | visual/graphics | geometry tied on `S22`; `N21` ties X1/X3 on visual correctness and favors X3 on compactness; Gemini preference not proven | repeat only after Gemini semantic route health is fixed |
 
@@ -164,5 +165,7 @@ implementation, owner recovery, compact long-horizon integration, cross-role inc
 ownership-budget repair are confirmed as `X3 primary` versus `X1` by scored lane-fit evidence, while
 `N30` makes `X1 primary` for staged delivery re-entry and persisted phase-ledger accountability.
 `X5` is a live UI and owner-recovery contender after route-healthy `N25` and `N26` wins/ties, but
-N27/N28/N29/N30 produced only smoke-gated `REQUEUE`. The next useful work item is `W11 / N31`:
-scientific computation hardening with a known analytic physics oracle and fast numerical solve.
+N27/N28/N29/N30 produced only smoke-gated `REQUEUE`; N31 intentionally did not launch Gemini
+calibration rows after the updated rule. The next optional scientific item is `W12`: hydrogenic
+radial Schrodinger or comparable real-physics analytical-oracle numerical solve, only if the N31
+binary tie is not enough for lane policy.

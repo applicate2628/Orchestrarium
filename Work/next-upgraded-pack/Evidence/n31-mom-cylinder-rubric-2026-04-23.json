@@ -1,0 +1,52 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-23_04-54-06-X1-wave-w11-n31-mom-cylinder-2026-04-23/N31",
+      "row": "X1",
+      "model": "gpt-5.4",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 92,
+      "correctness": 50,
+      "report": 15,
+      "notes_score": 10,
+      "scope": 10,
+      "runtime": 5,
+      "output": 2,
+      "elapsed_proxy_seconds": 188.341,
+      "output_bytes": 163289,
+      "changed_paths": [
+        "candidate/workspace/mom_solver.py",
+        "candidate/workspace/validation-notes.md",
+        "candidate/workspace/validation-report.json"
+      ],
+      "notes": []
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-23_04-54-04-X3-wave-w11-n31-mom-cylinder-2026-04-23/N31",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 94,
+      "correctness": 50,
+      "report": 15,
+      "notes_score": 10,
+      "scope": 10,
+      "runtime": 4,
+      "output": 5,
+      "elapsed_proxy_seconds": 311.085,
+      "output_bytes": 3353,
+      "changed_paths": [
+        "candidate/workspace/mom_solver.py",
+        "candidate/workspace/validation-notes.md",
+        "candidate/workspace/validation-report.json"
+      ],
+      "notes": []
+    }
+  ]
+}

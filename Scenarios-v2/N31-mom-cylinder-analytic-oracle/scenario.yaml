@@ -1,0 +1,24 @@
+id: N31
+surface_id: E21
+pack_id: E21
+role_class: scientist
+artifact_type: computational electromagnetics MoM solver patch plus validation report
+modality_family: computational theoretical electromagnetics and numerical integral equations
+allowed_change_surface:
+  - candidate/workspace/mom_solver.py
+  - candidate/workspace/validation-report.json
+  - candidate/workspace/validation-notes.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/tests/**
+score_profile: "scientist, computational-em, method-of-moments, analytical-oracle, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - scientist-constraints
+  - scored-rubric
+  - numerical-witness
+  - computational-physics
+  - method-of-moments

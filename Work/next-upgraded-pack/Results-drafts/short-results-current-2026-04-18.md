@@ -327,6 +327,7 @@ failures as `PASS`.
 | `32` | `N28` was added on `2026-04-22` as W8/E18 incident-driven cross-role integration repair; it is not merged into the old full-v2 denominator; `X1` and `X3` pass; `X3` reads `99 / 100`, `X1` reads `93 / 100`; `X2` scoreably fails, `X6` route-fails, and `X5` requeues after smoke timeouts | `N28 incident repair` |
 | `33` | `N29` was added on `2026-04-23` as W9/E19 ownership-budget incident repair; it is not merged into the old full-v2 denominator; `X1` and `X3` pass exact runtime and patch-budget gates; `X3` reads `100 / 100`, `X1` reads `96 / 100`; `X2` scoreably fails, `X6` times out without summary, and `X5` requeues after smoke timeout | `N29 ownership budget` |
 | `34` | `N30` was added on `2026-04-23` as W10/E20 staged delivery re-entry; it is not merged into the old full-v2 denominator; `X1` passes, `X3` scoreably fails by omitting the `03-review-response` persisted phase ledger, `X2` scoreably fails after forbidden `.reports` bundle drift, `X6` times out without final summary, and `X5` requeues after smoke timeout | `N30 staged re-entry` |
+| `35` | `N31` was added on `2026-04-23` as W11/E21 computational electromagnetics hardening; it is not merged into the old full-v2 denominator; `X1` and `X3` both pass the MoM PEC-cylinder solver with cylindrical-harmonic analytical oracle; `X3` reads `94 / 100`, `X1` reads `92 / 100`; `X5` and `X6` were not launched under the updated calibration rule | `N31 MoM analytical oracle` |
 
 ## Source
 
@@ -365,3 +366,4 @@ failures as `PASS`.
 | `../Evidence/n28-incident-repair-rubric-2026-04-22.json` | machine-readable N28 incident-driven integration repair scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs; `X5` stayed smoke-gated `REQUEUE` |
 | `../Evidence/n29-ownership-budget-rubric-2026-04-23.json` | machine-readable N29 ownership-budget incident repair scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` launch roots; `X5` stayed smoke-gated `REQUEUE` |
 | `../Evidence/n30-staged-delivery-rubric-2026-04-23.json` | machine-readable N30 staged delivery re-entry scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` launch roots; `X5` stayed smoke-gated `REQUEUE` |
+| `../Evidence/n31-mom-cylinder-rubric-2026-04-23.json` | machine-readable N31 Method of Moments PEC-cylinder analytical-oracle scored-rubric output for admitted `X1` and `X3` runs |
