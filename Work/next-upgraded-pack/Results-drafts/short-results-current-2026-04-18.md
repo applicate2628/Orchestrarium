@@ -333,6 +333,7 @@ failures as `PASS`.
 | `38` | `N34` was added on `2026-04-23` as W14/E24 high-load science optimizer hardening; it is not merged into the old full-v2 denominator; `X1` and `X3` both pass the staged MoM plus hydrogenic radial Schrodinger performance verifier, both read `96 / 100`; X1 is faster on measured solver runtime, X3 is much more compact; `X2` scoreably fails at `27 / 100`; Gemini rows stayed route caveats | `N34 high-load science optimizer` |
 | `39` | `N35` was added on `2026-04-23` as W15/E25 staged interface-migration re-entry hardening; it is not merged into the old full-v2 denominator; `X1 PASS 96 / 100`, `X3 scoreable FAIL 71 / 100`, and `X2 PASS 91 / 100`; X3 failed hidden runtime semantics plus migration-ledger details with `wrapperExitCode=0`; `X5` and `X6` are runtime-route failures from Gemini quota/tool-loop/AbortError | `N35 staged interface migration` |
 | `40` | `N36` was added on `2026-04-23` as W16/E26 real-repo staged API migration hardening; it is not merged into the old full-v2 denominator; `X1 PASS 97 / 100`, `X3 scoreable FAIL 74 / 100`, and `X2 scoreable FAIL 70 / 100`; X3 failed hidden API semantics plus migration-ledger details with `wrapperExitCode=0`; `X6` is runtime no-summary after phase-2 Gemini quota/stall and `X5` stayed smoke-gated | `N36 staged API migration` |
+| `41` | `N37` was added on `2026-04-23` as W17/E27 staged adversarial review-gate hardening; it is not merged into the old full-v2 denominator; `X1 PASS 98 / 100`, `X3 scoreable FAIL 35 / 100`, and `X2 PASS 97 / 100`; X3 failed ADR source binding, exact finding/source-id tuples, non-claim ledger, response cues, and closure markers with `wrapperExitCode=0`; `X6` is runtime-route from Gemini quota/tool-loop/AbortError and `X5` stayed smoke-gated after direct Pro smoke timeout | `N37 staged review gate` |
 
 ## Source
 
@@ -355,7 +356,7 @@ failures as `PASS`.
 | `../Evidence/x1-x3-top-pair-rubric-e3-2026-04-20.md` | diagnostic `E3` rubric evidence |
 | `../Evidence/x1-control-plane-override-rerun-s16-s19-s20-2026-04-20.md` | targeted `X1` rerun evidence for `S16`, `S19`, and `S20` |
 | `../Evidence/separator-audit-2026-04-21.md` | factual audit of answer-leakage, verifier strictness, and separation potential across all 43 scenarios; motivates the N06 tuple-exact hardening |
-| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, Option (c) N14, N15 stateful gauntlet, and N16 long-horizon rubric sections |
+| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, and N14..N37 hardening sections |
 | `../Evidence/n16-long-horizon-rubric-2026-04-22.json` | machine-readable N16 scored-rubric output for admitted `X1` and `X3` runs |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` | machine-readable N17 owner-orchestration scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs |
 | `../Evidence/n18-scientist-constraints-rubric-2026-04-22.json` | machine-readable N18 scientist/constraints scored-rubric output for admitted `X1`, `X2`, `X3`, partial-route `X6`, and timeout `X5` runs |
@@ -377,3 +378,4 @@ failures as `PASS`.
 | `../Evidence/n34-science-optimizer-rubric-2026-04-23.json` | machine-readable N34 high-load science optimizer scored-rubric output for admitted `X1`, `X2`, and `X3`; Gemini rows stayed route caveats |
 | `../Evidence/n35-staged-interface-rubric-2026-04-23.json` | machine-readable N35 staged interface-migration re-entry scored-rubric output for admitted `X1`, `X2`, and `X3`; `X5` and `X6` are runtime-route failures, not model-quality failures |
 | `../Evidence/n36-staged-api-rubric-2026-04-23.json` | machine-readable N36 real-repo staged API migration scored-rubric output for admitted `X1`, `X2`, and `X3`; `X6` is runtime no-summary and `X5` stayed smoke-gated |
+| `../Evidence/n37-staged-review-rubric-2026-04-23.json` | machine-readable N37 staged adversarial review-gate scored-rubric output for admitted `X1`, `X2`, `X3`, `X5`, and `X6`; X3 is a scoreable top-pair fail, X5/X6 are runtime-route caveats |
