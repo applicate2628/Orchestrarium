@@ -1,0 +1,36 @@
+id: N38
+surface_id: E28
+pack_id: E28
+role_class: implementation
+artifact_type: staged deterministic UI visual state integration patch
+modality_family: multi-session UI state machine, accessibility rendering, responsive layout, deterministic raster pixels, and patch-quality discipline
+allowed_change_surface:
+  - candidate/workspace/src/console-state.mjs
+  - candidate/workspace/src/console-view.mjs
+  - candidate/workspace/src/console-layout.mjs
+  - candidate/workspace/src/console-raster.mjs
+  - candidate/workspace/src/console.css
+  - candidate/workspace/tests/console-contract.test.mjs
+  - candidate/workspace/implementation-ledger.json
+  - candidate/workspace/closure.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/docs/**
+  - candidate/workspace/src/protected-copy.mjs
+score_profile: "staged-ui-visual-state, accessibility, raster-oracle, re-entry, scored-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - staged-runner
+  - reentry
+  - ui-interaction
+  - visual-provider-fit
+  - accessibility
+  - raster-oracle
+  - layout-geometry
+  - source-binding
+  - scored-rubric
+  - binary-separator-candidate

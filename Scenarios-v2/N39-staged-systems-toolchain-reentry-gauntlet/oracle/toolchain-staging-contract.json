@@ -1,0 +1,234 @@
+{
+  "contractId": "N39-staged-systems-toolchain-reentry-gauntlet",
+  "planFingerprint": "n39-staged-toolchain-reentry-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N39",
+    "surface_id": "E29",
+    "pack_id": "E29",
+    "role_class": "implementation",
+    "artifact_type": "staged systems toolchain reentry patch plus scored rubric",
+    "modality_family": "multi-session systems toolchain path, cache, fingerprint, dependency, lease, report, ledger, and closeout correctness",
+    "allowed_change_surface": [
+      "candidate/workspace/src/stagegate/config.py",
+      "candidate/workspace/src/stagegate/paths.py",
+      "candidate/workspace/src/stagegate/fingerprint.py",
+      "candidate/workspace/src/stagegate/lease.py",
+      "candidate/workspace/src/stagegate/planner.py",
+      "candidate/workspace/src/stagegate/executor.py",
+      "candidate/workspace/src/stagegate/recovery.py",
+      "candidate/workspace/src/stagegate/report.py",
+      "candidate/workspace/tests/test_stagegate.py",
+      "candidate/workspace/implementation-ledger.json",
+      "candidate/workspace/closure.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/src/stagegate/__init__.py",
+      "candidate/workspace/src/stagegate/api.py",
+      "candidate/workspace/src/stagegate/models.py",
+      "candidate/workspace/docs/**",
+      "candidate/workspace/legacy/**"
+    ],
+    "score_profile": "staged-systems-toolchain, re-entry, exact-scope, scored-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "systems-toolchain",
+      "staged-runner",
+      "reentry",
+      "exact-scope",
+      "source-binding",
+      "stale-source-recovery",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "candidate/README.md",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/stagegate/__init__.py",
+    "candidate/workspace/src/stagegate/api.py",
+    "candidate/workspace/src/stagegate/models.py",
+    "candidate/workspace/src/stagegate/config.py",
+    "candidate/workspace/src/stagegate/paths.py",
+    "candidate/workspace/src/stagegate/fingerprint.py",
+    "candidate/workspace/src/stagegate/lease.py",
+    "candidate/workspace/src/stagegate/planner.py",
+    "candidate/workspace/src/stagegate/executor.py",
+    "candidate/workspace/src/stagegate/recovery.py",
+    "candidate/workspace/src/stagegate/report.py",
+    "candidate/workspace/tests/test_stagegate.py",
+    "candidate/workspace/implementation-ledger.json",
+    "candidate/workspace/closure.json",
+    "candidate/workspace/docs/stale-staging-runbook.md",
+    "candidate/workspace/legacy/old_stage.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/current-failure.md",
+    "inputs/owner-map.md",
+    "inputs/recovery-sources.md",
+    "inputs/stale-advice.md",
+    "inputs/phases/01-source-plan.md",
+    "inputs/phases/02-fingerprint-plan.md",
+    "inputs/phases/03-execute-report.md",
+    "inputs/phases/04-tests-closeout.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/toolchain-staging-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_stagegate_systems.py",
+    "verifiers/check_scope.py"
+  ],
+  "expectedSourceIds": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6",
+    "S7",
+    "S8",
+    "S9",
+    "S10",
+    "S11",
+    "S12",
+    "ST1",
+    "ST2"
+  ],
+  "expectedPhaseIds": [
+    "01-source-plan",
+    "02-fingerprint-plan",
+    "03-execute-report",
+    "04-tests-closeout"
+  ],
+  "requiredChangedPaths": [
+    "candidate/workspace/src/stagegate/config.py",
+    "candidate/workspace/src/stagegate/paths.py",
+    "candidate/workspace/src/stagegate/fingerprint.py",
+    "candidate/workspace/src/stagegate/lease.py",
+    "candidate/workspace/src/stagegate/planner.py",
+    "candidate/workspace/src/stagegate/executor.py",
+    "candidate/workspace/src/stagegate/recovery.py",
+    "candidate/workspace/src/stagegate/report.py",
+    "candidate/workspace/tests/test_stagegate.py",
+    "candidate/workspace/implementation-ledger.json",
+    "candidate/workspace/closure.json"
+  ],
+  "phasePathRules": {
+    "01-source-plan": {
+      "allowed": [
+        "candidate/workspace/implementation-ledger.json",
+        "candidate/workspace/src/stagegate/config.py",
+        "candidate/workspace/src/stagegate/paths.py",
+        "candidate/workspace/src/stagegate/recovery.py"
+      ],
+      "requiredAny": ["candidate/workspace/src/stagegate/config.py", "candidate/workspace/src/stagegate/paths.py"]
+    },
+    "02-fingerprint-plan": {
+      "allowed": [
+        "candidate/workspace/implementation-ledger.json",
+        "candidate/workspace/src/stagegate/fingerprint.py",
+        "candidate/workspace/src/stagegate/planner.py"
+      ],
+      "requiredAny": ["candidate/workspace/src/stagegate/fingerprint.py", "candidate/workspace/src/stagegate/planner.py"]
+    },
+    "03-execute-report": {
+      "allowed": [
+        "candidate/workspace/implementation-ledger.json",
+        "candidate/workspace/src/stagegate/lease.py",
+        "candidate/workspace/src/stagegate/executor.py",
+        "candidate/workspace/src/stagegate/recovery.py",
+        "candidate/workspace/src/stagegate/report.py"
+      ],
+      "requiredAny": ["candidate/workspace/src/stagegate/executor.py", "candidate/workspace/src/stagegate/report.py"]
+    },
+    "04-tests-closeout": {
+      "allowed": [
+        "candidate/workspace/tests/test_stagegate.py",
+        "candidate/workspace/implementation-ledger.json",
+        "candidate/workspace/closure.json"
+      ],
+      "requiredAny": ["candidate/workspace/closure.json"]
+    }
+  },
+  "expected_start_state_failures": [
+    "active-channel-precedence",
+    "invalid-env-fallback",
+    "dependency-order",
+    "fingerprint-portable",
+    "mode-conflict-rejected",
+    "lease-release-on-failure",
+    "cache-restore-source-trace",
+    "summary-source-trace",
+    "recovery-source-arbitration",
+    "resume-continuity",
+    "runtime-failure-classification",
+    "ledger-complete",
+    "closure-complete"
+  ],
+  "prohibited_candidate_terms": [
+    "D:/dev",
+    "D:\\\\dev",
+    "C:/Users",
+    "C:\\\\Users",
+    "legacyChannel wins",
+    "relative stage roots allowed",
+    "keep failed leases",
+    "X3 is the global winner",
+    "runtime failures are model failures",
+    "$product-manager owns"
+  ],
+  "requiredLedgerMarkers": [
+    "n39-staged-toolchain-reentry-v1",
+    "inputs/stale-advice.md",
+    "candidate/workspace/docs/stale-staging-runbook.md",
+    "legacy channel",
+    "relative env roots",
+    "workspace path",
+    "failed leases",
+    "cache restore reason",
+    "old winner table",
+    "$lead remains recovery owner",
+    "runtime failures stay route/runtime status",
+    "python verifiers/check_stagegate_systems.py",
+    "python verifiers/check_scope.py",
+    "python -m unittest discover -s tests"
+  ],
+  "requiredClosureMarkers": [
+    "active channel precedence",
+    "absolute STAGEGATE_ROOT override",
+    "portable fingerprint",
+    "dependency order",
+    "mode conflict rejection",
+    "lease release on failure",
+    "cache restore source trace",
+    "summary source trace",
+    "stale-source rejection",
+    "resume owner remains $lead",
+    "runtime failures are not model failures"
+  ]
+}

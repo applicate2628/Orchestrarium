@@ -1,0 +1,220 @@
+{
+  "contractId": "N38-deterministic-ui-visual-state-integration-gauntlet",
+  "planFingerprint": "n38-ui-visual-state-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N38",
+    "surface_id": "E28",
+    "pack_id": "E28",
+    "role_class": "implementation",
+    "artifact_type": "staged deterministic UI visual state integration patch",
+    "modality_family": "multi-session UI state machine, accessibility rendering, responsive layout, deterministic raster pixels, and patch-quality discipline",
+    "allowed_change_surface": [
+      "candidate/workspace/src/console-state.mjs",
+      "candidate/workspace/src/console-view.mjs",
+      "candidate/workspace/src/console-layout.mjs",
+      "candidate/workspace/src/console-raster.mjs",
+      "candidate/workspace/src/console.css",
+      "candidate/workspace/tests/console-contract.test.mjs",
+      "candidate/workspace/implementation-ledger.json",
+      "candidate/workspace/closure.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md",
+      "candidate/workspace/docs/**",
+      "candidate/workspace/src/protected-copy.mjs"
+    ],
+    "score_profile": "staged-ui-visual-state, accessibility, raster-oracle, re-entry, scored-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "staged-runner",
+      "reentry",
+      "ui-interaction",
+      "visual-provider-fit",
+      "accessibility",
+      "raster-oracle",
+      "layout-geometry",
+      "source-binding",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "candidate/README.md",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/console-state.mjs",
+    "candidate/workspace/src/console-view.mjs",
+    "candidate/workspace/src/console-layout.mjs",
+    "candidate/workspace/src/console-raster.mjs",
+    "candidate/workspace/src/console.css",
+    "candidate/workspace/src/protected-copy.mjs",
+    "candidate/workspace/tests/console-contract.test.mjs",
+    "candidate/workspace/docs/stale-note.md",
+    "candidate/workspace/implementation-ledger.json",
+    "candidate/workspace/closure.json",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/state-transition-ledger.md",
+    "inputs/accessibility-contract.md",
+    "inputs/visual-layout-contract.md",
+    "inputs/stale-visual-advice.md",
+    "inputs/visual-cases.json",
+    "inputs/phases/01-state-machine.md",
+    "inputs/phases/02-render-accessibility.md",
+    "inputs/phases/03-raster-layout.md",
+    "inputs/phases/04-tests-closeout.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/ui-visual-state-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_ui_visual_state.py",
+    "verifiers/check_scope.py"
+  ],
+  "expectedSourceIds": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6",
+    "S7",
+    "S8",
+    "S9",
+    "S10",
+    "S11",
+    "S12"
+  ],
+  "expectedPhaseIds": [
+    "01-state-machine",
+    "02-render-accessibility",
+    "03-raster-layout",
+    "04-tests-closeout"
+  ],
+  "requiredChangedPaths": [
+    "candidate/workspace/src/console-state.mjs",
+    "candidate/workspace/src/console-view.mjs",
+    "candidate/workspace/src/console-layout.mjs",
+    "candidate/workspace/src/console-raster.mjs",
+    "candidate/workspace/src/console.css",
+    "candidate/workspace/tests/console-contract.test.mjs",
+    "candidate/workspace/implementation-ledger.json",
+    "candidate/workspace/closure.json"
+  ],
+  "phasePathRules": {
+    "01-state-machine": {
+      "allowed": [
+        "candidate/workspace/src/console-state.mjs",
+        "candidate/workspace/implementation-ledger.json"
+      ],
+      "requiredAny": ["candidate/workspace/src/console-state.mjs"]
+    },
+    "02-render-accessibility": {
+      "allowed": [
+        "candidate/workspace/src/console-view.mjs",
+        "candidate/workspace/src/console.css",
+        "candidate/workspace/implementation-ledger.json"
+      ],
+      "requiredAny": ["candidate/workspace/src/console-view.mjs"]
+    },
+    "03-raster-layout": {
+      "allowed": [
+        "candidate/workspace/src/console-layout.mjs",
+        "candidate/workspace/src/console-raster.mjs",
+        "candidate/workspace/src/console.css",
+        "candidate/workspace/implementation-ledger.json"
+      ],
+      "requiredAny": [
+        "candidate/workspace/src/console-layout.mjs",
+        "candidate/workspace/src/console-raster.mjs"
+      ]
+    },
+    "04-tests-closeout": {
+      "allowed": [
+        "candidate/workspace/tests/console-contract.test.mjs",
+        "candidate/workspace/implementation-ledger.json",
+        "candidate/workspace/closure.json"
+      ],
+      "requiredAny": ["candidate/workspace/closure.json"]
+    }
+  },
+  "expected_start_state_failures": [
+    "command-focus-skip",
+    "command-filter-owner",
+    "dirty-state-per-record",
+    "navigation-guard-target",
+    "validation-and-save",
+    "focus-return",
+    "render-accessibility",
+    "layout-responsive-containment",
+    "layout-target-overlap",
+    "raster-transparent-gap",
+    "raster-selected-alert-layer",
+    "raster-legend-order",
+    "ppm-metadata",
+    "css-stability",
+    "ledger-complete",
+    "closure-complete"
+  ],
+  "required_css_markers": [
+    ":focus-visible",
+    "min-inline-size",
+    "overflow-wrap",
+    "button[disabled]",
+    "[aria-selected=\"true\"]",
+    "@media (max-width: 480px)"
+  ],
+  "prohibited_candidate_terms": [
+    "mouse-only",
+    "position: absolute",
+    "letter-spacing: -",
+    "expected_start_state",
+    "verifiers/check_ui_visual_state.py",
+    "ui-visual-state-contract.json"
+  ],
+  "requiredLedgerMarkers": [
+    "n38-ui-visual-state-v1",
+    "inputs/stale-visual-advice.md",
+    "disabled destructive actions",
+    "one global dirty flag",
+    "neutral zero values",
+    "desktop-only column",
+    "python verifiers/check_ui_visual_state.py",
+    "python verifiers/check_scope.py",
+    "node tests/console-contract.test.mjs"
+  ],
+  "requiredClosureMarkers": [
+    "command key ownership",
+    "per-record dirty navigation guard",
+    "validation and failed save preserve dirty state",
+    "accessible return cues",
+    "responsive layout geometry",
+    "raster gap and overlay order",
+    "zero-centered legend",
+    "valid P3 PPM"
+  ]
+}

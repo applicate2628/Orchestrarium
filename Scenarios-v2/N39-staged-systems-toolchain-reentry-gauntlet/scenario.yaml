@@ -1,0 +1,39 @@
+id: N39
+surface_id: E29
+pack_id: E29
+role_class: implementation
+artifact_type: staged systems toolchain reentry patch plus scored rubric
+modality_family: multi-session systems toolchain path, cache, fingerprint, dependency, lease, report, ledger, and closeout correctness
+allowed_change_surface:
+  - candidate/workspace/src/stagegate/config.py
+  - candidate/workspace/src/stagegate/paths.py
+  - candidate/workspace/src/stagegate/fingerprint.py
+  - candidate/workspace/src/stagegate/lease.py
+  - candidate/workspace/src/stagegate/planner.py
+  - candidate/workspace/src/stagegate/executor.py
+  - candidate/workspace/src/stagegate/recovery.py
+  - candidate/workspace/src/stagegate/report.py
+  - candidate/workspace/tests/test_stagegate.py
+  - candidate/workspace/implementation-ledger.json
+  - candidate/workspace/closure.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/src/stagegate/__init__.py
+  - candidate/workspace/src/stagegate/api.py
+  - candidate/workspace/src/stagegate/models.py
+  - candidate/workspace/docs/**
+  - candidate/workspace/legacy/**
+score_profile: "staged-systems-toolchain, re-entry, exact-scope, scored-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - systems-toolchain
+  - staged-runner
+  - reentry
+  - exact-scope
+  - source-binding
+  - stale-source-recovery
+  - scored-rubric
+  - binary-separator-candidate
