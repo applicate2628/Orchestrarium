@@ -1,0 +1,16 @@
+{
+  "contractId": "N37-staged-adversarial-review-gate-gauntlet",
+  "planFingerprint": "",
+  "phases": [],
+  "sourceBindings": [],
+  "staleSourceRejections": [],
+  "findingLedger": [],
+  "falsePositiveLedger": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 4,
+    "requiredChangedPaths": []
+  }
+}
