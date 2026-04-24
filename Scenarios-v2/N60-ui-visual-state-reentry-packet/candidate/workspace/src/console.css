@@ -1,0 +1,18 @@
+.incident-console {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+
+.command-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.record-tabs button {
+  white-space: nowrap;
+}
+
+.detail-form button {
+  cursor: pointer;
+}

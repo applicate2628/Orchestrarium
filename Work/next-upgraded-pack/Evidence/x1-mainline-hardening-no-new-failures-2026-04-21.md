@@ -2959,3 +2959,47 @@ because it stays compact (`2653` output bytes versus `336382`) and measures fast
 Use this as evidence for `X3 primary` on compact single-session real-repo performance hot-path work
 when low-noise operation matters. Keep `X1` viable when verbose trace or self-explanatory evidence is
 more important than operator cost.
+
+## 2026-04-24 Follow-Up: W40 UI Visual-State Reentry Packet
+
+`N60-ui-visual-state-reentry-packet` converts the unresolved staged `N38` UI/visual/state gauntlet
+into a scoreable single-session reentry packet. It preserves the same hidden UI state, ARIA/status,
+responsive layout, raster-pixel, PPM, stale-source, implementation-ledger, closure, and exact
+changed-path semantics, but removes the four-provider-invocation staged runner boundary that made
+`X3/N38` repeatedly end as runtime no-summary.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N60` JSON parse, verifier compile, bundle-shape, and expected start-state verifier | `PASS` |
+| `N60` reference probe in `.scratch/verifier-probes/2026-04-24-n60-reference` | hidden UI visual-state verifier `PASS`; direct Node test `PASS` |
+| `score-n60-ui-reentry-rubric.py` compile and scorer execution | `PASS` |
+| `mcp-free` before/after runs | pre-run killed none; post-calibration killed orphaned `mcp-language-server.exe` helpers and preserved parent-owned helpers |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N60` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_21-18-42-X1-wave-w40-n60-ui-reentry-2026-04-24/N60/` | `0` | `PASS` | `96 / 100` | `308696` | none; cost score `1 / 5` |
+| `N60` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_21-30-45-X3-wave-w40-n60-ui-reentry-2026-04-24-rerun/N60/` | `0` | `PASS` | `100 / 100` | `3137` | none |
+| `N60` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-24_21-46-30-X2-wave-w40-n60-ui-reentry-2026-04-24-calibration/N60/` | `0` | `FAIL` | `10 / 100` | `1116` | no patch; asked for next action |
+| `N60` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-24_21-46-30-X6-wave-w40-n60-ui-reentry-2026-04-24-calibration/N60/` | n/a | `NOT-RUN` | `0 / 100` | n/a | runtime no-summary timeout |
+
+The first `X3` launch at
+`.scratch/v2-cohort-runs/2026-04-24_21-18-42-X3-wave-w40-n60-ui-reentry-2026-04-24/N60/`
+returned `You've hit your limit - resets 9:30pm (Europe/Moscow)` with no changes. It is recorded as
+`NOT-RUN/runtime-route`, not as a model failure. The admitted `X3` result is the post-reset rerun.
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3` on N60: both rows pass hidden UI state, accessibility,
+layout, raster, ledger, closure, test, and exact-scope gates. N60 therefore does not create a new
+top-pair binary separator.
+
+The role-fit read still favors X3 for compact single-session UI/visual-state reentry work:
+`X3 100 / 100` versus `X1 96 / 100`, entirely from output/cost discipline (`3137` bytes versus
+`308696`). This closes the N38 runtime ambiguity for the single-session branch: staged UI remains
+only an X1 scoreable pass, but compact single-session UI/visual-state work remains X3-primary after
+N20, N25, N47, and now N60.
