@@ -37,21 +37,47 @@ The failure classes are different:
 
 ## Line Summary
 
-| Line | Slots | `X1` | `X3` | Role read |
-|---|---|---:|---:|---|
-| `L00 owner/control` | `N17`, `N26`, `N40`, `N56` | `3 / 4` | `3 / 4` | split by execution shape: compact owner favors `X3`, staged owner favors `X1` |
-| `L01 advisory.repo-understanding` | `S03`, `S04`, `S06` | `3 / 3` | `3 / 3` | near-tie |
-| `L02 advisory.design-adr` | `S05`, `S07`, `S09` | `3 / 3` | `3 / 3` | near-tie for single-shot ADR |
-| `L03 design.ui-ux-structure` | `S08`, `N01`, `N02` | `3 / 3` | `3 / 3` | near-tie |
-| `L04 worker.reasoning-constraints` | `N22`, `N32`, `N58` | `2 / 3` | `3 / 3` | `X3` when compact low-noise output is a hard requirement; correctness remains near-tie |
-| `L05 worker.default-implementation` | `N35`, `N36`, `N57` | `2 / 3` | `1 / 3` | `X1` for staged API/interface migration; `X3` for compact single-shot migration |
-| `L06 worker.systems-performance-implementation` | `N19`, `N39`, `N59` | `3 / 3` | `2 / 3` | `X1` for staged systems recovery; `X3` keeps compact/perf rubric edge |
-| `L07 worker.ui-implementation` | `N25`, `N47`, `N60` | `2 / 3` | `3 / 3` | `X3` for compact UI state/render work |
-| `L08 worker.visual-graphics-visualization` | `S22`, `N21`, `N48` | `2 / 3` | `3 / 3` | `X3` for compact visual/raster work |
-| `L09 review.pre-pr` | `S25`, `N03`, `N04` | `3 / 3` | `3 / 3` | near-tie on tuple-exact single-shot review |
-| `L10 review.security` | `S27`, `N05`, `N06` | `3 / 3` | `3 / 3` | near-tie on tuple-exact security review |
-| `L11 review.performance-architecture` | `S28`, `N07`, `N37` | `3 / 3` | `2 / 3` | `X1` for staged source-bound ADR/review gate |
-| `L12 review.ui-visual-correctness` | `S29`, `S30`, `N43` | `3 / 3` | `3 / 3` | near-tie |
+| Line                                  | Slots             |   `X1` |   `X3` | Read     |
+|---------------------------------------|-------------------|-------:|-------:|----------|
+| `L00 owner/control`                   | `N17,N26,N40,N56` | `3/4`  | `3/4`  | split    |
+| `L01 advisory.repo-understanding`     | `S03,S04,S06`     | `3/3`  | `3/3`  | near-tie |
+| `L02 advisory.design-adr`             | `S05,S07,S09`     | `3/3`  | `3/3`  | near-tie |
+| `L03 design.ui-ux-structure`          | `S08,N01,N02`     | `3/3`  | `3/3`  | near-tie |
+| `L04 worker.reasoning-constraints`    | `N22,N32,N58`     | `2/3`  | `3/3`  | split    |
+| `L05 worker.default-implementation`   | `N35,N36,N57`     | `2/3`  | `1/3`  | split    |
+| `L06 systems/performance-worker`      | `N19,N39,N59`     | `3/3`  | `2/3`  | split    |
+| `L07 worker.ui-implementation`        | `N25,N47,N60`     | `2/3`  | `3/3`  | `X3`     |
+| `L08 worker.visual/graphics`          | `S22,N21,N48`     | `2/3`  | `3/3`  | `X3`     |
+| `L09 review.pre-pr`                   | `S25,N03,N04`     | `3/3`  | `3/3`  | near-tie |
+| `L10 review.security`                 | `S27,N05,N06`     | `3/3`  | `3/3`  | near-tie |
+| `L11 review.performance-architecture` | `S28,N07,N37`     | `3/3`  | `2/3`  | `X1`     |
+| `L12 review.ui-visual-correctness`    | `S29,S30,N43`     | `3/3`  | `3/3`  | near-tie |
+
+## Priority Matrix
+
+Priority is routing priority, not abstract model quality. `P0` changes provider choice today,
+`P1` is a useful preference with close verification, and `P2` is a near-tie or low-yield lane.
+
+| Line                                  | Pri  | Order       | Trigger                      | Follow-up            |
+|---------------------------------------|------|-------------|------------------------------|----------------------|
+| `L00 owner/control`                   | `P0` | `X3 > X1`   | compact owner packet         | rerun `X5` later    |
+|                                       |      | `X1 > X3`   | staged owner/re-entry        |                      |
+| `L01 advisory.repo-understanding`     | `P2` | `X1 = X3`   | repo facts / source inspect  | stop hardening now   |
+|                                       |      | `X5` viable | route healthy only           |                      |
+| `L02 advisory.design-adr`             | `P1` | `X1 = X3`   | single-shot ADR              | use `L11` if staged  |
+| `L03 design.ui-ux-structure`          | `P2` | `X1 = X3`   | static UX / state-flow       | low yield            |
+| `L04 worker.reasoning-constraints`    | `P1` | `X1 = X3`   | science correctness          |                      |
+|                                       |      | `X3 > X1`   | compact science/runtime      | speed split open     |
+| `L05 worker.default-implementation`   | `P0` | `X1 > X3`   | staged API/interface         |                      |
+|                                       |      | `X3 > X1`   | compact single-shot          |                      |
+| `L06 systems/performance-worker`      | `P0` | `X1 > X3`   | staged systems recovery      |                      |
+|                                       |      | `X3 > X1`   | compact perf hot path        | verify turnaround    |
+| `L07 worker.ui-implementation`        | `P0` | `X3 > X1`   | compact UI state/render      | staged X3 gap        |
+| `L08 worker.visual/graphics`          | `P0` | `X3 > X1`   | compact raster/visual        | Gemini unproven      |
+| `L09 review.pre-pr`                   | `P2` | `X1 = X3`   | tuple-exact review           | staged uses `L11`    |
+| `L10 review.security`                 | `P2` | `X1 = X3`   | tuple-exact security         | stop hardening now   |
+| `L11 review.performance-architecture` | `P0` | `X1 > X3`   | staged source-bound review   | strongest review sep |
+| `L12 review.ui-visual-correctness`    | `P2` | `X1 = X3`   | UI/visual review             | low yield            |
 
 ## Slot Matrix
 
