@@ -2742,3 +2742,39 @@ Record the lane meaning as compact long-horizon release-train work: this extends
 operator-budget inverse pattern beyond localized repair/UI/visual probes into a broader
 long-horizon integration line. It does not mean X1 is worse at release-train correctness; both rows
 preserved the hidden stateful integration semantics.
+
+## 2026-04-24 Follow-Up: W35 Incident Compact Operator-Budget
+
+`N55-incident-compact-operator-budget-gauntlet` repeats the explicit low-noise requirement on the
+cross-role incident repair line. It derives from `N28`, preserving the hidden incident integration
+verifier, source/review reconciliation note requirements, exact scope, and rubric, then adds a
+visible `../meta/worker-output.txt <= 40000` operator-output gate.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N55` JSON parse, verifier compile, bundle-shape, start-state verifier, and operator-budget bundle-shape | `PASS` |
+| `N55` reference probe in `.scratch/verifier-probes/2026-04-24-n55-incident-operator-budget` | incident verifier `PASS`; scope `PASS`; operator-budget `PASS` |
+| `score-n55-incident-operator-budget-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N55` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_11-20-27-X1-wave-w35-n55-incident-operator-budget-2026-04-24/N55/` | `0` | `FAIL` | `70 / 100` | `352056` | output budget fail |
+| `N55` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_11-20-27-X3-wave-w35-n55-incident-operator-budget-2026-04-24/N55/` | `0` | `PASS` | `97 / 100` | `1841` | none |
+
+### Verdict
+
+`N55` is the fifth honest compact single-session inverse separator: `X1 FAIL / X3 PASS`.
+It is scoreable because both wrappers exited `0`, both rows produced final summaries, and the only
+X1 failing verifier is the visible operator-output budget: `352056 > 40000`. X1 still passed the
+hidden incident integration/reconciliation verifier and exact scope gate. X3 passed the same gates
+and stayed compact: `1841 <= 40000`.
+
+Record the lane meaning as compact cross-role incident repair. Together with `N46`, `N54`, and
+`N55`, the long-horizon/incident family now has repeated low-noise inverse separators in favor of
+X3 for single-session compact work, while `N41` remains the staged incident-budget separator in
+favor of X1.

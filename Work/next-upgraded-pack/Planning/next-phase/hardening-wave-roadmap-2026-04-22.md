@@ -68,6 +68,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W32` interface refactor compact operator-budget | `DONE` | Does the compact operator-budget split repeat on the N33 pass/pass interface-refactor lane? | `E42 / N52` interface refactor compact operator-budget | hidden interface consumers, migration ledger, exact changed-path set, and visible `40000` byte output budget | mainline materialized from N33 by adding `check_operator_budget.py` | both scoreable `FAIL`: X1 passes hidden interface semantics but fails output budget (`39316689 > 40000`); X3 stays compact but fails `.pytest_cache` scope/shape hygiene |
 | `W33` interface refactor cache-ignored operator-budget | `DONE` | If generated `.pytest_cache/**` is ignored, does interface compactness become a clean `X1 FAIL / X3 PASS` separator? | `E43 / N53` interface refactor cache-ignored operator-budget | hidden interface consumers, migration ledger, exact required-path set, visible `40000` byte output budget, and explicit top-level `.pytest_cache/**` auxiliary ignore | mainline materialized from N52 by isolating generated cache from scored patch scope | `X1 PASS 100`, `X3 PASS 100`; `binary tie remains`; closes N52 ambiguity as cache hygiene, not interface compactness |
 | `W34` release-train compact operator-budget | `DONE` | Does the compact operator-budget split repeat on a broader long-horizon release-train integration lane? | `E44 / N54` release-train compact operator-budget | hidden release-train governor verifier, stateful recovery invariants, exact deploygrid source scope, and visible `40000` byte output budget | mainline materialized from N27 by adding `check_operator_budget.py` | `X1 FAIL 70` from visible operator-budget (`300873 > 40000`) while hidden release-train/scope gates pass; `X3 PASS 92` with `2618 <= 40000`; fourth compact inverse separator |
+| `W35` incident compact operator-budget | `DONE` | Does the compact operator-budget split repeat on cross-role incident repair with source reconciliation? | `E45 / N55` incident compact operator-budget | hidden incident integration/reconciliation verifier, exact scope, and visible `40000` byte output budget | mainline materialized from N28 by adding `check_operator_budget.py` | `X1 FAIL 70` from visible operator-budget (`352056 > 40000`) while hidden incident/scope gates pass; `X3 PASS 97` with `1841 <= 40000`; fifth compact inverse separator |
 
 ## Active Spawn Board
 
@@ -261,6 +262,11 @@ X1 passes hidden semantics and scope but fails the visible budget; X3 passes all
 This extends the compact inverse separator beyond localized repair/UI/visual tasks into a broader
 release-train integration task.
 
+W35 repeats the same pattern on the N28 cross-role incident repair line. `N55` preserves source
+arbitration, stale-requirements rejection, review response, validation evidence, hidden incident
+runtime semantics, and exact scope, then adds the visible operator-output budget. X1 again passes
+semantic/scope gates but fails budget; X3 passes all gates compactly.
+
 ## Execution Order
 
 1. Collect read-only spawn proposals for `W1..W3`. `DONE` on 2026-04-22.
@@ -314,12 +320,13 @@ release-train integration task.
 36. Materialize and run `N52-interface-refactor-compact-operator-budget` as W32/E42. `DONE` on 2026-04-24; both rows scoreably fail. X1 fails visible output budget after hidden interface-refactor semantics pass; X3 passes budget but fails `.pytest_cache` scope/shape hygiene.
 37. Materialize and run `N53-interface-refactor-cache-ignored-operator-budget` as W33/E43. `DONE` on 2026-04-24; `X1 PASS 100`, `X3 PASS 100`, `binary tie remains`; generated-cache isolation turns N52's both-fail into clean negative inverse evidence.
 38. Materialize and run `N54-release-train-compact-operator-budget` as W34/E44. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 92`; fourth compact inverse separator by visible operator-budget and first on the release-train long-horizon line.
+39. Materialize and run `N55-incident-compact-operator-budget` as W35/E45. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 97`; fifth compact inverse separator by visible operator-budget and first on the cross-role incident line.
 
 ## Current Routing Impact
 
 | Lane | Current Read | Next Need |
 |---|---|---|
-| long-horizon / cross-role / ownership-budget integration | split by execution shape: `X3 primary` for compact single-session integration and incident repair after `N16`, `N27`, `N28`, `N29`, and `N45`; `X3 primary` specifically for low-noise operator-budget compact repair and release-train work after `N46` and `N54`; `X1 primary` for staged incident-budget re-entry after `N41 PASS 100` versus `X3 FAIL 78` | compact inverse separator is now repeated on both repair and release-train long-horizon lines; next work should target a different pass/pass lane or a real-repo compact workflow |
+| long-horizon / cross-role / ownership-budget integration | split by execution shape: `X3 primary` for compact single-session integration and incident repair after `N16`, `N27`, `N28`, `N29`, and `N45`; `X3 primary` specifically for low-noise operator-budget compact repair, release-train, and incident work after `N46`, `N54`, and `N55`; `X1 primary` for staged incident-budget re-entry after `N41 PASS 100` versus `X3 FAIL 78` | compact inverse separator is now repeated on repair, release-train, and incident long-horizon lines; next work should target a different pass/pass lane or a real-repo compact workflow |
 | staged delivery / multi-session re-entry | `X1 primary` after `N30`, `N35`, and `N36` produced `X1 PASS` versus `X3 scoreable FAIL` on persisted phase-ledger / re-entry accountability | strong enough for staged-lane routing; next repeat should be a real repo trial, not another synthetic bundle |
 | staged review / advisory gate | `X1 primary` after `N37` produced `X1 PASS 98 / 100` versus `X3 scoreable FAIL 35 / 100` on source-bound ADR, exact findings/non-claims, response cues, and closure | strong enough for staged review-gate routing; next repeat should be a real repo review trial or a UX/visual lane where policy remains unresolved |
 | systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `N42` and `N50` confirm immutable-CI plus explicit output budget still tie top pair by binary; `N51` shows hard compact+turnaround systems hotfixes can make both top rows fail for different reasons; `X2/X5/X6` lower on N24 | for hard compact systems hotfixes, require both semantic and budget gates; if a clean inverse separator is needed, move to a different pass/pass lane rather than tightening N51 further |
@@ -340,7 +347,7 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume from the scored `N54` release-train operator-budget closeout rather than from a queued batch.
+If interrupted now, resume from the scored `N55` incident operator-budget closeout rather than from a queued batch.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`
 versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), staged owner recovery
@@ -354,11 +361,11 @@ extend it to systems/toolchain output budget: both top rows pass the explicit bu
 `N51` then tests first-class turnaround on systems/toolchain and produces `both scoreable FAIL`, not
 an inverse pass/fail separator. `N52` tests interface-refactor compactness and also produces
 `both scoreable FAIL`: X1 is semantically correct but too verbose, while X3 is compact but leaves
-`.pytest_cache` drift. `N53` isolates that cache drift and ties again at PASS/PASS. `N54` then
-extends the compact inverse pattern to release-train long-horizon integration: X1 preserves hidden
-semantics but fails output budget, X3 passes all gates. Next concrete work should switch to another
-pass/pass lane or a real-repo compact workflow rather than tightening the same release-train budget
-probe again.
+`.pytest_cache` drift. `N53` isolates that cache drift and ties again at PASS/PASS. `N54` and `N55`
+then extend the compact inverse pattern to release-train long-horizon integration and cross-role
+incident repair: X1 preserves hidden semantics but fails output budget, X3 passes all gates. Next
+concrete work should switch to another pass/pass lane or a real-repo compact workflow rather than
+tightening the same long-horizon operator-budget family again.
 Bounded `N39` is now a staged systems/toolchain routing result in favor of X1. `X5` remains a live
 UI and single-session owner contender after route-healthy `N25` and `N26`, but the newer staged
 waves still produced only Gemini route or quota caveats.

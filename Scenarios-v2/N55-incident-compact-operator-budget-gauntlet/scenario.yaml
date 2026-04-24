@@ -1,0 +1,41 @@
+id: N55
+surface_id: E45
+pack_id: E45
+role_class: implementation
+artifact_type: incident-driven compact operator-budget repair patch plus reconciliation note
+modality_family: cross-role incident repair, source reconciliation, and low-noise operator budget
+allowed_change_surface:
+  - candidate/workspace/src/deploygrid/config.py
+  - candidate/workspace/src/deploygrid/intake.py
+  - candidate/workspace/src/deploygrid/dedupe.py
+  - candidate/workspace/src/deploygrid/planner.py
+  - candidate/workspace/src/deploygrid/policy.py
+  - candidate/workspace/src/deploygrid/scheduler.py
+  - candidate/workspace/src/deploygrid/ledger.py
+  - candidate/workspace/src/deploygrid/notifier.py
+  - candidate/workspace/src/deploygrid/rollback.py
+  - candidate/workspace/src/deploygrid/audit.py
+  - candidate/workspace/src/deploygrid/report.py
+  - candidate/workspace/src/deploygrid/executor.py
+  - candidate/workspace/src/deploygrid/store.py
+  - candidate/workspace/tests/test_deploygrid.py
+  - candidate/reconciliation-note.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/src/deploygrid/__init__.py
+  - candidate/workspace/src/deploygrid/api.py
+  - candidate/workspace/src/deploygrid/models.py
+  - candidate/workspace/docs/**
+  - candidate/workspace/legacy/**
+  - candidate/workspace/ui/**
+score_profile: "implementation, cross-role-repair, reconciliation-rubric, operator-budget"
+overlay_flags:
+  - top-pair-role-fit
+  - long-horizon
+  - cross-role
+  - scored-rubric
+  - binary-separator-candidate
+  - low-noise-operator-budget

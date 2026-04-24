@@ -1,0 +1,97 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-24_11-20-27-X1-wave-w35-n55-incident-operator-budget-2026-04-24\\N55",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 70,
+      "correctness": 45,
+      "stateful_recovery": 10,
+      "reconciliation": 20,
+      "patch_quality": 10,
+      "tests_points": 0,
+      "time_points": 5,
+      "cost_points": 1,
+      "elapsed_proxy_seconds": 337.774,
+      "cost_proxy_output_bytes": 352056,
+      "operator_budget_pass": false,
+      "changed_paths": [
+        "candidate/reconciliation-note.md",
+        "candidate/workspace/src/deploygrid/audit.py",
+        "candidate/workspace/src/deploygrid/config.py",
+        "candidate/workspace/src/deploygrid/dedupe.py",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/intake.py",
+        "candidate/workspace/src/deploygrid/ledger.py",
+        "candidate/workspace/src/deploygrid/notifier.py",
+        "candidate/workspace/src/deploygrid/planner.py",
+        "candidate/workspace/src/deploygrid/policy.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/src/deploygrid/rollback.py",
+        "candidate/workspace/src/deploygrid/scheduler.py"
+      ],
+      "diff": {
+        "added": 285,
+        "deleted": 45
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests unchanged",
+        "note changed",
+        "operator budget fail",
+        "changed=13 source=12 add=285 del=45"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-24_11-20-27-X3-wave-w35-n55-incident-operator-budget-2026-04-24\\N55",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 97,
+      "correctness": 45,
+      "stateful_recovery": 10,
+      "reconciliation": 20,
+      "patch_quality": 10,
+      "tests_points": 2,
+      "time_points": 5,
+      "cost_points": 5,
+      "elapsed_proxy_seconds": 774.969,
+      "cost_proxy_output_bytes": 1841,
+      "operator_budget_pass": true,
+      "changed_paths": [
+        "candidate/reconciliation-note.md",
+        "candidate/workspace/src/deploygrid/audit.py",
+        "candidate/workspace/src/deploygrid/config.py",
+        "candidate/workspace/src/deploygrid/dedupe.py",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/intake.py",
+        "candidate/workspace/src/deploygrid/ledger.py",
+        "candidate/workspace/src/deploygrid/notifier.py",
+        "candidate/workspace/src/deploygrid/planner.py",
+        "candidate/workspace/src/deploygrid/policy.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/src/deploygrid/rollback.py",
+        "candidate/workspace/src/deploygrid/scheduler.py",
+        "candidate/workspace/src/deploygrid/store.py"
+      ],
+      "diff": {
+        "added": 457,
+        "deleted": 61
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests unchanged",
+        "note changed",
+        "operator budget pass",
+        "changed=14 source=13 add=457 del=61"
+      ]
+    }
+  ]
+}
