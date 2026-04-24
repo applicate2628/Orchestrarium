@@ -1,0 +1,101 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N48",
+    "surface_id": "E38",
+    "pack_id": "E38",
+    "role_class": "implementation",
+    "artifact_type": "visual raster renderer-only compact operator-budget patch",
+    "modality_family": "visual graphics raster state low-noise operator budget",
+    "allowed_change_surface": [
+      "candidate/visual-owned/src/visual_panel/renderer.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/visual-owned/README.md",
+      "candidate/visual-owned/src/visual_panel/__init__.py",
+      "candidate/visual-owned/tests/test_renderer.py",
+      "candidate/legacy-preview/**",
+      "candidate/drafts/**",
+      "candidate/reference-assets/**"
+    ],
+    "score_profile": "implementation, visual, graphics, top-pair-role-fit, operator-budget",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "visual-provider-fit",
+      "scored-rubric",
+      "raster-oracle",
+      "immutable-visible-tests",
+      "low-noise-operator-budget"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/render-intent.md",
+    "inputs/panel-cases.json",
+    "candidate/README.md",
+    "candidate/visual-owned/README.md",
+    "candidate/visual-owned/src/visual_panel/__init__.py",
+    "candidate/visual-owned/src/visual_panel/renderer.py",
+    "candidate/visual-owned/tests/test_renderer.py",
+    "candidate/legacy-preview/README.md",
+    "candidate/drafts/README.md",
+    "candidate/reference-assets/README.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/visual-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_visual_panel.py",
+    "verifiers/check_scope.py",
+    "verifiers/check_operator_budget.py"
+  ],
+  "required_candidate_paths": [
+    "candidate/visual-owned/src/visual_panel/renderer.py"
+  ],
+  "protected_file_hashes": {
+    "candidate/visual-owned/tests/test_renderer.py": "f55325ab797c5f58f321af7acab0c55461249567f18462efe798062b02adbcee"
+  },
+  "operator_budget": {
+    "max_worker_output_bytes": 40000,
+    "budget_source": "../meta/worker-output.txt",
+    "failure_class": "scoreable",
+    "rationale": "This compact visual hotfix lane is scoreable for low-noise operator behavior; verbose transcripts can block operator review even when pixel semantics pass."
+  },
+  "scope_guard_roots": [
+    "candidate/legacy-preview",
+    "candidate/drafts",
+    "candidate/reference-assets"
+  ],
+  "expected_start_state_failures": [
+    "legend-not-zero-centered",
+    "missing-focus-annotation",
+    "missing-transparent-gap",
+    "ppm-metadata",
+    "wrong-selected-layer"
+  ]
+}

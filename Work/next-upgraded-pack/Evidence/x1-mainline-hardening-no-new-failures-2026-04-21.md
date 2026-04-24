@@ -2485,3 +2485,40 @@ Record the lane meaning narrowly but more broadly than `N46`: low-noise/operator
 separates both compact DeployGrid repair and compact UI dirty-state repair. This supports `X3
 primary` for compact UI hotfixes when operator-facing output budget is part of the task. It does not
 mean X1 is worse at UI dirty-state semantics; both rows passed the semantic verifier.
+
+## 2026-04-24 Follow-Up: W28 Visual Raster Compact Operator-Budget Hotfix
+
+`N48-visual-compact-operator-budget-hotfix` repeats the low-noise/operator-budget gate on the visual
+graphics raster line. It derives from `N21`, but tightens the task to a renderer-only patch:
+`candidate/visual-owned/tests/test_renderer.py` is protected by hash, only
+`candidate/visual-owned/src/visual_panel/renderer.py` is in the allowed change surface, the hidden
+visual verifier checks exact raster semantics, and `../meta/worker-output.txt` must stay at or below
+`40000` bytes.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N48` JSON parse, verifier compile, bundle-shape, start-state verifier, and operator-budget bundle-shape | `PASS` |
+| `N48` renderer-only reference in `.scratch/verifier-probes/2026-04-24-n48-visual-operator-budget-reference` | visual verifier `PASS`; scope `PASS`; operator-budget `PASS` |
+| `score-n48-visual-operator-budget-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Benchmark changed paths | Output bytes |
+|---|---|---|---:|---|---:|---:|---:|
+| `N48` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_07-58-51-X1-wave-w28-n48-visual-operator-budget-2026-04-24/N48/` | `0` | `FAIL` | `70 / 100` | `1` | `77825` |
+| `N48` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_07-58-51-X3-wave-w28-n48-visual-operator-budget-2026-04-24/N48/` | `0` | `PASS` | `100 / 100` | `1` | `813` |
+
+### Verdict
+
+`N48` is the third compact single-session inverse separator: `X1 FAIL / X3 PASS`.
+It is scoreable because both wrappers exited `0`, both rows passed exact visual raster semantics and
+renderer-only scope, and X1 failed only the visible operator-budget gate: `77825 > 40000`. X3 passed
+the same semantic/scope gates and stayed far under budget: `813 <= 40000`.
+
+Record the lane meaning narrowly: this separates low-noise compact visual raster hotfix behavior,
+not pixel correctness. Both top rows repaired the raster renderer correctly without changing the
+visible test. Together with `N46` and `N47`, the operator-budget inverse pattern now repeats across
+repair, UI, and visual graphics lines.
