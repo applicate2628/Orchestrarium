@@ -2816,3 +2816,48 @@ Calibration rows do not change the top-pair conclusion. `X2` is a scoreable lowe
 it stayed compact but left the semantic packet unchanged/missing. `X6` is `runtime-no-summary`
 after timeout and is not a model fail. `X5` remains quota-deferred; `X4` is reserved for the final
 full closing run.
+
+## 2026-04-24 Follow-Up: W37 Real-Repo Compact API Migration Operator-Budget
+
+`N57-realrepo-compact-api-migration-operator-budget` moves the compact operator-budget test back
+onto the interface/API migration lane, but with a real-repo BillingMesh-style domain rather than
+the smaller InterfaceFlow fixture. It is a single-run compact task derived from `N36`: hidden API
+runtime semantics, source-bound migration ledger, review-response decisions, closeout, exact patch
+scope, generated-cache isolation, and a visible `../meta/worker-output.txt <= 40000` gate.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N57` JSON parse, verifier compile, bundle-shape, start-state verifier, and operator-budget bundle-shape | `PASS` |
+| `N57` reference probe in `.scratch/verifier-probes/2026-04-24-n57-compact-api` | compact API verifier `PASS`; scope `PASS`; operator-budget `PASS`; visible tests `PASS` |
+| `score-n57-compact-api-migration-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N57` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_13-42-06-X1-wave-w37-n57-compact-api-migration-2026-04-24/N57/` | `0` | `FAIL` | `70 / 100` | `3792275` | output budget fail |
+| `N57` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-24_13-58-42-X2-wave-w37-n57-compact-api-migration-calibration-2026-04-24/N57/` | `0` | `FAIL` | `11 / 100` | `1112` | no migration patch |
+| `N57` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_13-42-06-X3-wave-w37-n57-compact-api-migration-2026-04-24/N57/` | `0` | `PASS` | `100 / 100` | `2313` | none |
+| `N57` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-24_13-58-42-X6-wave-w37-n57-compact-api-migration-calibration-2026-04-24/N57/` | n/a | `NOT-RUN` | `0 / 100` | n/a | runtime no-summary timeout |
+
+### Verdict
+
+`N57` is the seventh honest compact single-session inverse separator: `X1 FAIL / X3 PASS`.
+It is scoreable because both wrappers exited `0`, both rows produced final summaries, and the only
+X1 failing verifier is the visible operator-output budget: `3792275 > 40000`. X1 still passed the
+hidden real-repo API migration verifier and exact scope gate. X3 passed the same hidden verifier,
+scope gate, and operator budget with `2313 <= 40000`.
+
+This changes the interface/API compact-lane read: after `N53` closed the small InterfaceFlow
+fixture as `binary tie remains`, `N57` shows that the larger real-repo compact API migration shape
+does separate by low-noise operator budget. Staged API/interface migrations remain `X1 primary`
+after `N35` and `N36`; compact real-repo API migrations with explicit low-noise budget now read
+`X3 primary`.
+
+Calibration rows do not change the top-pair conclusion. `X2` is a scoreable lower calibration fail:
+it stayed compact but made no migration patch and left legacy API, model, ledger, review, closure,
+test, and scope invariants failing. `X6` is `runtime-no-summary` after timeout and is not a model
+fail. `X5` remains quota-deferred; `X4` is reserved for the final full closing run.

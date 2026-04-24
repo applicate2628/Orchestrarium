@@ -1,0 +1,158 @@
+{
+  "scenario": "N57",
+  "surface": "E47",
+  "results": [
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_13-42-06-X1-wave-w37-n57-compact-api-migration-2026-04-24/N57",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 70,
+      "interface": 25,
+      "hidden": 30,
+      "ledger": 25,
+      "tests": 5,
+      "patch": 10,
+      "operator_budget": 0,
+      "output_bytes": 3792275,
+      "changed_paths": [
+        "candidate/closure.json",
+        "candidate/migration-state.json",
+        "candidate/review-response.json",
+        "candidate/workspace/src/billingmesh/__init__.py",
+        "candidate/workspace/src/billingmesh/account_directory.py",
+        "candidate/workspace/src/billingmesh/api.py",
+        "candidate/workspace/src/billingmesh/entitlement_policy.py",
+        "candidate/workspace/src/billingmesh/models.py",
+        "candidate/workspace/src/billingmesh/reporting.py",
+        "candidate/workspace/src/billingmesh/service.py",
+        "candidate/workspace/src/billingmesh/usage_publisher.py",
+        "candidate/workspace/tests/test_billingmesh.py"
+      ],
+      "scored_changed_paths": [
+        "candidate/closure.json",
+        "candidate/migration-state.json",
+        "candidate/review-response.json",
+        "candidate/workspace/src/billingmesh/__init__.py",
+        "candidate/workspace/src/billingmesh/account_directory.py",
+        "candidate/workspace/src/billingmesh/api.py",
+        "candidate/workspace/src/billingmesh/entitlement_policy.py",
+        "candidate/workspace/src/billingmesh/models.py",
+        "candidate/workspace/src/billingmesh/reporting.py",
+        "candidate/workspace/src/billingmesh/service.py",
+        "candidate/workspace/src/billingmesh/usage_publisher.py",
+        "candidate/workspace/tests/test_billingmesh.py"
+      ],
+      "failed_invariants": [],
+      "notes": [
+        "operator budget fail"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_13-58-42-X2-wave-w37-n57-compact-api-migration-calibration-2026-04-24/N57",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 11,
+      "interface": 1,
+      "hidden": 5,
+      "ledger": 0,
+      "tests": 0,
+      "patch": 0,
+      "operator_budget": 5,
+      "output_bytes": 1112,
+      "changed_paths": [],
+      "scored_changed_paths": [],
+      "failed_invariants": [
+        "account-lookup-contract",
+        "closure-complete",
+        "entitlement-contract",
+        "integration-contract",
+        "legacy-api-removed",
+        "legacy-api-static",
+        "migration-callSites",
+        "migration-compatibilityCases",
+        "migration-interfaceMap",
+        "migration-patch-budget",
+        "migration-validation",
+        "phase-ledger-complete",
+        "publisher-contract",
+        "reporting-contract",
+        "result-models",
+        "review-response-complete",
+        "source-binding-complete",
+        "stale-source-rejection",
+        "visible-test-markers"
+      ],
+      "notes": [
+        "operator budget pass",
+        "failed invariants: account-lookup-contract, closure-complete, entitlement-contract, integration-contract, legacy-api-removed, legacy-api-static, migration-callSites, migration-compatibilityCases, migration-interfaceMap, migration-patch-budget, migration-validation, phase-ledger-complete, publisher-contract, reporting-contract, result-models, review-response-complete, source-binding-complete, stale-source-rejection, visible-test-markers"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_13-42-06-X3-wave-w37-n57-compact-api-migration-2026-04-24/N57",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 100,
+      "interface": 25,
+      "hidden": 30,
+      "ledger": 25,
+      "tests": 5,
+      "patch": 10,
+      "operator_budget": 5,
+      "output_bytes": 2313,
+      "changed_paths": [
+        "candidate/closure.json",
+        "candidate/migration-state.json",
+        "candidate/review-response.json",
+        "candidate/workspace/src/billingmesh/__init__.py",
+        "candidate/workspace/src/billingmesh/account_directory.py",
+        "candidate/workspace/src/billingmesh/api.py",
+        "candidate/workspace/src/billingmesh/entitlement_policy.py",
+        "candidate/workspace/src/billingmesh/models.py",
+        "candidate/workspace/src/billingmesh/reporting.py",
+        "candidate/workspace/src/billingmesh/service.py",
+        "candidate/workspace/src/billingmesh/usage_publisher.py",
+        "candidate/workspace/tests/test_billingmesh.py"
+      ],
+      "scored_changed_paths": [
+        "candidate/closure.json",
+        "candidate/migration-state.json",
+        "candidate/review-response.json",
+        "candidate/workspace/src/billingmesh/__init__.py",
+        "candidate/workspace/src/billingmesh/account_directory.py",
+        "candidate/workspace/src/billingmesh/api.py",
+        "candidate/workspace/src/billingmesh/entitlement_policy.py",
+        "candidate/workspace/src/billingmesh/models.py",
+        "candidate/workspace/src/billingmesh/reporting.py",
+        "candidate/workspace/src/billingmesh/service.py",
+        "candidate/workspace/src/billingmesh/usage_publisher.py",
+        "candidate/workspace/tests/test_billingmesh.py"
+      ],
+      "failed_invariants": [],
+      "notes": [
+        "operator budget pass"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_13-58-42-X6-wave-w37-n57-compact-api-migration-calibration-2026-04-24/N57",
+      "row": "X6",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "rubric": 0,
+      "notes": [
+        "missing summary.json"
+      ]
+    }
+  ]
+}

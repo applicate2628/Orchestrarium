@@ -1,0 +1,38 @@
+id: N57
+surface_id: E47
+pack_id: E47
+role_class: implementation
+artifact_type: compact real-repo API migration patch plus source-bound ledgers and operator budget
+modality_family: single-session API contract migration, scattered consumers, hidden repo-style tests, low-noise operator budget, generated cache isolation
+allowed_change_surface:
+  - .pytest_cache/**
+  - candidate/migration-state.json
+  - candidate/review-response.json
+  - candidate/closure.json
+  - candidate/workspace/src/billingmesh/__init__.py
+  - candidate/workspace/src/billingmesh/models.py
+  - candidate/workspace/src/billingmesh/account_directory.py
+  - candidate/workspace/src/billingmesh/entitlement_policy.py
+  - candidate/workspace/src/billingmesh/usage_publisher.py
+  - candidate/workspace/src/billingmesh/service.py
+  - candidate/workspace/src/billingmesh/reporting.py
+  - candidate/workspace/src/billingmesh/api.py
+  - candidate/workspace/tests/test_billingmesh.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+score_profile: "compact-api-migration, hidden-consumer, source-bound-ledger, review-response, patch-quality-rubric, operator-budget, cache-ignored"
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - api-migration
+  - hidden-consumer
+  - compatibility-preservation
+  - review-response
+  - scored-rubric
+  - binary-separator-candidate
+  - low-noise-operator-budget
+  - generated-cache-ignored
