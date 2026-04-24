@@ -1,0 +1,13 @@
+{
+  "contractId": "N52-interface-refactor-compact-operator-budget",
+  "interfaceMap": [],
+  "callSiteMigration": [],
+  "compatibilityMatrix": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 10,
+    "requiredChangedPaths": []
+  }
+}

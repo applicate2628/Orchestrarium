@@ -1,0 +1,74 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_09-56-10-X1-wave-w32-n52-interface-operator-budget-2026-04-24/N52",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 70,
+      "interface": 30,
+      "hidden": 30,
+      "ledger": 15,
+      "tests": 10,
+      "patch": 10,
+      "operator_budget": 0,
+      "output_bytes": 39316689,
+      "changed_paths": [
+        "candidate/refactor-ledger.json",
+        "candidate/workspace/src/interfaceflow/__init__.py",
+        "candidate/workspace/src/interfaceflow/api.py",
+        "candidate/workspace/src/interfaceflow/models.py",
+        "candidate/workspace/src/interfaceflow/orchestrator.py",
+        "candidate/workspace/src/interfaceflow/policy.py",
+        "candidate/workspace/src/interfaceflow/report.py",
+        "candidate/workspace/src/interfaceflow/router.py",
+        "candidate/workspace/src/interfaceflow/session_store.py",
+        "candidate/workspace/tests/test_interfaceflow.py"
+      ],
+      "failed_invariants": [],
+      "notes": [
+        "operator budget fail"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_09-56-10-X3-wave-w32-n52-interface-operator-budget-2026-04-24/N52",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 70,
+      "interface": 30,
+      "hidden": 30,
+      "ledger": 15,
+      "tests": 10,
+      "patch": 0,
+      "operator_budget": 5,
+      "output_bytes": 2573,
+      "changed_paths": [
+        ".pytest_cache/.gitignore",
+        ".pytest_cache/CACHEDIR.TAG",
+        ".pytest_cache/README.md",
+        ".pytest_cache/v/cache/nodeids",
+        "candidate/refactor-ledger.json",
+        "candidate/workspace/src/interfaceflow/__init__.py",
+        "candidate/workspace/src/interfaceflow/api.py",
+        "candidate/workspace/src/interfaceflow/models.py",
+        "candidate/workspace/src/interfaceflow/orchestrator.py",
+        "candidate/workspace/src/interfaceflow/policy.py",
+        "candidate/workspace/src/interfaceflow/report.py",
+        "candidate/workspace/src/interfaceflow/router.py",
+        "candidate/workspace/src/interfaceflow/session_store.py",
+        "candidate/workspace/tests/test_interfaceflow.py"
+      ],
+      "failed_invariants": [],
+      "notes": [
+        "operator budget pass"
+      ]
+    }
+  ]
+}

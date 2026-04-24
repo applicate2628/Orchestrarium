@@ -2630,3 +2630,41 @@ mode conflict rejection, cache restore reason/source trace, and summary source t
 `both scoreable FAIL`, not as a top-pair binary separator. For hard compact systems hotfixes, require
 an explicit semantic gate plus an output budget; neither row is cleanly dominant under both
 constraints.
+
+## 2026-04-24 Follow-Up: W32 Interface Refactor Compact Operator-Budget
+
+`N52-interface-refactor-compact-operator-budget` tests the strongest remaining pass/pass inverse
+candidate from `N33`: both top rows passed the hidden interface-refactor semantics there, but X1's
+visible output was much larger than X3's. `N52` keeps the N33 hidden consumer verifier, migration
+ledger, required changed-path set, and scope gate, then adds `../meta/worker-output.txt <= 40000`.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N52` JSON parse, verifier compile, bundle-shape, start-state verifier, and operator-budget bundle-shape | `PASS` |
+| `N52` reference candidate in `.scratch/verifier-probes/2026-04-24-n52-interface-operator-budget` | interface-refactor verifier `PASS`; scope `PASS`; operator-budget `PASS` |
+| `score-n52-interface-refactor-operator-budget-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N52` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_09-56-10-X1-wave-w32-n52-interface-operator-budget-2026-04-24/N52/` | `0` | `FAIL` | `70 / 100` | `39316689` | output budget fail |
+| `N52` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_09-56-10-X3-wave-w32-n52-interface-operator-budget-2026-04-24/N52/` | `0` | `FAIL` | `70 / 100` | `2573` | `.pytest_cache` scope/shape drift |
+
+### Verdict
+
+`N52` is not a clean inverse `X1 FAIL / X3 PASS` separator. Both rows are scoreable failures because
+both wrappers exited `0` and final summaries/verifier logs exist.
+
+The useful signal is split by failure type. X1 passed the hidden interface-refactor verifier and
+exact required changed-path scope, but failed the visible operator budget massively
+(`39316689 > 40000`). X3 stayed compact (`2573 <= 40000`) but created top-level `.pytest_cache`
+files, which failed the runner changed-path gate, bundle-shape verifier, and scenario scope verifier.
+This repeats the N44 patch-hygiene failure signature rather than proving an interface semantic miss.
+
+If the next goal is to isolate only compact operator behavior for interface refactors, the honest
+next wave is a new cache-ignored variant that explicitly treats `.pytest_cache/**` as auxiliary
+test-run cache. Do not reinterpret this N52 result as `X3 PASS`.
