@@ -2668,3 +2668,40 @@ This repeats the N44 patch-hygiene failure signature rather than proving an inte
 If the next goal is to isolate only compact operator behavior for interface refactors, the honest
 next wave is a new cache-ignored variant that explicitly treats `.pytest_cache/**` as auxiliary
 test-run cache. Do not reinterpret this N52 result as `X3 PASS`.
+
+## 2026-04-24 Follow-Up: W33 Interface Refactor Cache-Ignored Operator-Budget
+
+`N53-interface-refactor-cache-ignored-operator-budget` isolates the question raised by `N52`.
+It keeps the N33/N52 hidden interface-refactor semantics, migration ledger, required changed-path
+set, and `../meta/worker-output.txt <= 40000`, but explicitly treats top-level `.pytest_cache/**`
+as generated test cache rather than as semantic patch drift. Other changed-path drift remains
+scoreable.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N53` JSON parse, verifier compile, bundle-shape, start-state verifier, and operator-budget bundle-shape | `PASS` |
+| `N53` reference probe in `.scratch/verifier-probes/2026-04-24-n53-interface-cache-ignored` | interface-refactor verifier `PASS`; scope `PASS` with `.pytest_cache/v/cache/nodeids`; operator-budget `PASS` |
+| `score-n53-interface-refactor-cache-ignored-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N53` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_10-18-35-X1-wave-w33-n53-interface-cache-ignored-2026-04-24/N53/` | `0` | `PASS` | `100 / 100` | `948` | none |
+| `N53` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_10-18-34-X3-wave-w33-n53-interface-cache-ignored-2026-04-24/N53/` | `0` | `PASS` | `100 / 100` | `2922` | none |
+
+### Verdict
+
+`binary tie remains` for `N53`: this is negative inverse-separator evidence. Both wrappers exited
+`0`, both rows passed the hidden interface-refactor verifier, the visible operator-budget gate,
+and exact required-path scope after top-level `.pytest_cache/**` was explicitly ignored as generated
+test cache.
+
+This closes the N52 ambiguity. The N52 X3 failure was patch/cache hygiene, not hidden interface
+semantics and not low-noise operator behavior. For ordinary compact single-session interface
+refactors with generated cache isolated, both top rows are viable; keep the role-fit distinction at
+execution shape: X3 for compact single-session refactor style, X1 for staged API/interface migration
+and phase-ledger accountability.

@@ -66,6 +66,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W30` systems compact operator-budget hotfix | `DONE` | Does the compact operator-budget split repeat on the systems/toolchain immutable-CI line? | `E40 / N50` systems compact operator-budget hotfix | `$toolchain-engineer` style verifier plus hidden stagegate semantics, protected CI hash, exact scope, and visible `40000` byte operator budget | mainline materialized from N42 by preserving immutable-CI semantics and adding `check_operator_budget.py` | `X1 PASS 99`, `X3 PASS 99`; `binary tie remains`; explicit compactness did not split systems/toolchain, but X3 finished faster (`260.449s` vs `395.714s`) |
 | `W31` systems turnaround-budget hotfix | `DONE` | Does a hard prompt-to-output turnaround SLA split the systems/toolchain compact-hotfix line? | `E41 / N51` systems turnaround-budget hotfix | `$toolchain-engineer` style verifier plus hidden stagegate semantics, protected CI hash, exact scope, visible `40000` byte output budget, and `360s` prompt-to-output budget | mainline materialized from N50 by adding `check_turnaround_budget.py` | both scoreable `FAIL`: X1 preserves hidden semantics but fails output budget (`987540 > 40000`); X3 stays compact/fast but fails hidden stagegate semantics |
 | `W32` interface refactor compact operator-budget | `DONE` | Does the compact operator-budget split repeat on the N33 pass/pass interface-refactor lane? | `E42 / N52` interface refactor compact operator-budget | hidden interface consumers, migration ledger, exact changed-path set, and visible `40000` byte output budget | mainline materialized from N33 by adding `check_operator_budget.py` | both scoreable `FAIL`: X1 passes hidden interface semantics but fails output budget (`39316689 > 40000`); X3 stays compact but fails `.pytest_cache` scope/shape hygiene |
+| `W33` interface refactor cache-ignored operator-budget | `DONE` | If generated `.pytest_cache/**` is ignored, does interface compactness become a clean `X1 FAIL / X3 PASS` separator? | `E43 / N53` interface refactor cache-ignored operator-budget | hidden interface consumers, migration ledger, exact required-path set, visible `40000` byte output budget, and explicit top-level `.pytest_cache/**` auxiliary ignore | mainline materialized from N52 by isolating generated cache from scored patch scope | `X1 PASS 100`, `X3 PASS 100`; `binary tie remains`; closes N52 ambiguity as cache hygiene, not interface compactness |
 
 ## Active Spawn Board
 
@@ -247,6 +248,12 @@ but fails output budget massively; X3 stays compact but fails exact scope/bundle
 top-level `.pytest_cache`. This is both-fail evidence and suggests a separate cache-ignored probe if
 the desired signal is operator budget rather than patch-hygiene.
 
+W33 runs that cache-ignored probe. `N53` keeps N52's hidden interface-refactor verifier,
+migration-ledger checks, exact required-path scope, and visible operator budget, but treats top-level
+`.pytest_cache/**` as generated auxiliary cache. Both top rows pass at `100 / 100`, so
+`binary tie remains`. This closes the N52 ambiguity: the X3 N52 failure was patch/cache hygiene,
+not interface semantics and not low-noise operator behavior.
+
 ## Execution Order
 
 1. Collect read-only spawn proposals for `W1..W3`. `DONE` on 2026-04-22.
@@ -298,6 +305,7 @@ the desired signal is operator budget rather than patch-hygiene.
 34. Materialize and run `N50-systems-compact-operator-budget-hotfix` as W30/E40. `DONE` on 2026-04-24; `X1 PASS 99`, `X3 PASS 99`, `binary tie remains`; explicit compactness did not split systems/toolchain, but elapsed time favors X3.
 35. Materialize and run `N51-systems-turnaround-budget-hotfix` as W31/E41. `DONE` on 2026-04-24; both rows scoreably fail. X1 fails visible output budget after preserving hidden semantics; X3 passes output and turnaround budgets but fails hidden systems semantics.
 36. Materialize and run `N52-interface-refactor-compact-operator-budget` as W32/E42. `DONE` on 2026-04-24; both rows scoreably fail. X1 fails visible output budget after hidden interface-refactor semantics pass; X3 passes budget but fails `.pytest_cache` scope/shape hygiene.
+37. Materialize and run `N53-interface-refactor-cache-ignored-operator-budget` as W33/E43. `DONE` on 2026-04-24; `X1 PASS 100`, `X3 PASS 100`, `binary tie remains`; generated-cache isolation turns N52's both-fail into clean negative inverse evidence.
 
 ## Current Routing Impact
 
@@ -312,7 +320,7 @@ the desired signal is operator budget rather than patch-hygiene.
 | owner recovery staged re-entry | `X1 primary` after `N40` produced `X1 PASS 98 / 100` versus `X3 FAIL 55 / 100` | strong enough for staged owner routing; next repeat should be a real repo owner workflow only if policy needs extra confirmation |
 | incident-budget staged re-entry | `X1 primary` after `N41` produced `X1 PASS 100 / 100` versus `X3 FAIL 78 / 100` | strong enough for staged incident-budget routing; next repeat should be a real repo repair workflow only if policy needs extra confirmation |
 | scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, `N31`, `N32`, `N34`, and `N49`; N31 adds real CEM/MoM evidence, N32 combines MoM with hydrogenic radial Schrodinger, N34 adds high-load staged performance, and N49 shows explicit compactness does not split the lane | co-primary; choose by fresh measured runtime and artifact style rather than binary correctness |
-| interface refactor / migration | single-shot `N33` ties and favors X3 compactness; `N44` adds an X1-over-X3 exact patch-hygiene signal while hidden sourceId semantics tie; staged `N35` and `N36` split `X1 PASS` versus `X3 scoreable FAIL` | route staged API/interface migrations to X1; keep X3 for compact single-session refactors unless exact patch budget hygiene is the dominant risk |
+| interface refactor / migration | single-shot `N33` ties and favors X3 compactness; `N44` adds an X1-over-X3 exact patch-hygiene signal while hidden sourceId semantics tie; `N52` both-fails from X1 output budget and X3 cache drift; `N53` ignores generated cache and ties again at PASS/PASS; staged `N35` and `N36` split `X1 PASS` versus `X3 scoreable FAIL` | route staged API/interface migrations to X1; keep X3 for compact single-session refactor style when patch/cache hygiene is controlled, but do not claim interface compactness as a binary separator |
 | owner/orchestration | `X3` primary versus `X1` after `N23` and `N26`; `X5` is a route-healthy owner contender after `N26 PASS 100`, but needs another owner-family pass before policy promotion | one more owner-family `X5` check only if deciding between `X3` and `X5`; otherwise move to long-horizon repeat |
 | visual/graphics | geometry tied on `S22`; `N21` ties X1/X3 on visual correctness and favors X3 on compactness; `N48` makes low-noise renderer-only raster hotfixes a binary `X1 FAIL / X3 PASS` separator; Gemini preference not proven | use X3 for compact single-session low-noise raster work; repeat Gemini only after semantic route health is fixed |
 
@@ -324,7 +332,7 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume from the scored `N52` interface-refactor operator-budget closeout rather than from a queued batch.
+If interrupted now, resume from the scored `N53` interface-refactor cache-ignored operator-budget closeout rather than from a queued batch.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`
 versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), staged owner recovery
@@ -338,8 +346,9 @@ extend it to systems/toolchain output budget: both top rows pass the explicit bu
 `N51` then tests first-class turnaround on systems/toolchain and produces `both scoreable FAIL`, not
 an inverse pass/fail separator. `N52` tests interface-refactor compactness and also produces
 `both scoreable FAIL`: X1 is semantically correct but too verbose, while X3 is compact but leaves
-`.pytest_cache` drift. Next concrete work should either create a cache-ignored N52 variant to isolate
-operator budget or switch to another pass/pass lane.
+`.pytest_cache` drift. `N53` isolates that cache drift and ties again at PASS/PASS. Next concrete
+work should switch to another pass/pass lane or a real-repo compact workflow rather than tightening
+the same interface-refactor probe again.
 Bounded `N39` is now a staged systems/toolchain routing result in favor of X1. `X5` remains a live
 UI and single-session owner contender after route-healthy `N25` and `N26`, but the newer staged
 waves still produced only Gemini route or quota caveats.

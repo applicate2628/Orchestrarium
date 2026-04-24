@@ -1,0 +1,13 @@
+{
+  "contractId": "N53-interface-refactor-cache-ignored-operator-budget",
+  "interfaceMap": [],
+  "callSiteMigration": [],
+  "compatibilityMatrix": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 10,
+    "requiredChangedPaths": []
+  }
+}
