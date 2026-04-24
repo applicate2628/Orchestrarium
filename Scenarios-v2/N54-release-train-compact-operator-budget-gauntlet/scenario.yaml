@@ -1,0 +1,40 @@
+id: N54
+surface_id: E44
+pack_id: E44
+role_class: implementation
+artifact_type: release train governor compact operator-budget patch plus scored rubric
+modality_family: long-horizon integration reasoning repeat with visible low-noise operator budget
+allowed_change_surface:
+  - candidate/workspace/src/deploygrid/config.py
+  - candidate/workspace/src/deploygrid/intake.py
+  - candidate/workspace/src/deploygrid/dedupe.py
+  - candidate/workspace/src/deploygrid/planner.py
+  - candidate/workspace/src/deploygrid/policy.py
+  - candidate/workspace/src/deploygrid/scheduler.py
+  - candidate/workspace/src/deploygrid/ledger.py
+  - candidate/workspace/src/deploygrid/notifier.py
+  - candidate/workspace/src/deploygrid/rollback.py
+  - candidate/workspace/src/deploygrid/audit.py
+  - candidate/workspace/src/deploygrid/report.py
+  - candidate/workspace/src/deploygrid/executor.py
+  - candidate/workspace/src/deploygrid/store.py
+  - candidate/workspace/tests/test_deploygrid.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/src/deploygrid/__init__.py
+  - candidate/workspace/src/deploygrid/api.py
+  - candidate/workspace/src/deploygrid/models.py
+  - candidate/workspace/docs/**
+  - candidate/workspace/legacy/**
+  - candidate/workspace/ui/**
+score_profile: "implementation, long-horizon-repeat, stateful-recovery-rubric, operator-budget"
+overlay_flags:
+  - top-pair-role-fit
+  - long-horizon
+  - scored-rubric
+  - repeat-confirmation
+  - low-noise-operator-budget
+  - binary-separator-candidate

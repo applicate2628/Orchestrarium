@@ -1,0 +1,92 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-24_10-46-52-X1-wave-w34-n54-release-train-operator-budget-2026-04-24\\N54",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 70,
+      "correctness": 50,
+      "stateful_recovery": 15,
+      "patch_quality": 13,
+      "tests_points": 0,
+      "time_points": 5,
+      "cost_points": 1,
+      "elapsed_proxy_seconds": 353.467,
+      "cost_proxy_output_bytes": 300873,
+      "operator_budget_pass": false,
+      "changed_paths": [
+        "candidate/workspace/src/deploygrid/audit.py",
+        "candidate/workspace/src/deploygrid/config.py",
+        "candidate/workspace/src/deploygrid/dedupe.py",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/intake.py",
+        "candidate/workspace/src/deploygrid/ledger.py",
+        "candidate/workspace/src/deploygrid/notifier.py",
+        "candidate/workspace/src/deploygrid/planner.py",
+        "candidate/workspace/src/deploygrid/policy.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/src/deploygrid/rollback.py",
+        "candidate/workspace/src/deploygrid/scheduler.py",
+        "candidate/workspace/src/deploygrid/store.py"
+      ],
+      "diff": {
+        "added": 292,
+        "deleted": 43
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests unchanged",
+        "operator budget fail",
+        "changed=13 source=13 add=292 del=43"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-24_10-46-52-X3-wave-w34-n54-release-train-operator-budget-2026-04-24\\N54",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 92,
+      "correctness": 50,
+      "stateful_recovery": 15,
+      "patch_quality": 13,
+      "tests_points": 4,
+      "time_points": 5,
+      "cost_points": 5,
+      "elapsed_proxy_seconds": 818.014,
+      "cost_proxy_output_bytes": 2618,
+      "operator_budget_pass": true,
+      "changed_paths": [
+        "candidate/workspace/src/deploygrid/audit.py",
+        "candidate/workspace/src/deploygrid/config.py",
+        "candidate/workspace/src/deploygrid/dedupe.py",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/intake.py",
+        "candidate/workspace/src/deploygrid/ledger.py",
+        "candidate/workspace/src/deploygrid/notifier.py",
+        "candidate/workspace/src/deploygrid/planner.py",
+        "candidate/workspace/src/deploygrid/policy.py",
+        "candidate/workspace/src/deploygrid/report.py",
+        "candidate/workspace/src/deploygrid/rollback.py",
+        "candidate/workspace/src/deploygrid/scheduler.py",
+        "candidate/workspace/src/deploygrid/store.py"
+      ],
+      "diff": {
+        "added": 243,
+        "deleted": 44
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests unchanged",
+        "operator budget pass",
+        "changed=13 source=13 add=243 del=44"
+      ]
+    }
+  ]
+}

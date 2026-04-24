@@ -2705,3 +2705,40 @@ semantics and not low-noise operator behavior. For ordinary compact single-sessi
 refactors with generated cache isolated, both top rows are viable; keep the role-fit distinction at
 execution shape: X3 for compact single-session refactor style, X1 for staged API/interface migration
 and phase-ledger accountability.
+
+## 2026-04-24 Follow-Up: W34 Release Train Compact Operator-Budget
+
+`N54-release-train-compact-operator-budget-gauntlet` tests the same explicit low-noise requirement
+on the long-horizon release-train line rather than on UI/visual/interface probes. It derives from
+`N27`, preserving the hidden release-train governor verifier, exact deploygrid source scope, stateful
+recovery invariants, and scoring rubric, then adds a visible `../meta/worker-output.txt <= 40000`
+operator-output gate.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N54` JSON parse, verifier compile, bundle-shape, start-state verifier, and operator-budget bundle-shape | `PASS` |
+| `N54` reference probe in `.scratch/verifier-probes/2026-04-24-n54-release-train-operator-budget` | release-train verifier `PASS`; scope `PASS`; operator-budget `PASS` |
+| `score-n54-release-train-operator-budget-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N54` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_10-46-52-X1-wave-w34-n54-release-train-operator-budget-2026-04-24/N54/` | `0` | `FAIL` | `70 / 100` | `300873` | output budget fail |
+| `N54` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_10-46-52-X3-wave-w34-n54-release-train-operator-budget-2026-04-24/N54/` | `0` | `PASS` | `92 / 100` | `2618` | none |
+
+### Verdict
+
+`N54` is the fourth honest compact single-session inverse separator: `X1 FAIL / X3 PASS`.
+It is scoreable because both wrappers exited `0`, both rows produced final summaries, and the only
+X1 failing verifier is the visible operator-output budget: `300873 > 40000`. X1 still passed the
+hidden release-train semantic verifier and exact scope gate. X3 passed the same semantic/scope gates
+and stayed compact: `2618 <= 40000`.
+
+Record the lane meaning as compact long-horizon release-train work: this extends the low-noise
+operator-budget inverse pattern beyond localized repair/UI/visual probes into a broader
+long-horizon integration line. It does not mean X1 is worse at release-train correctness; both rows
+preserved the hidden stateful integration semantics.
