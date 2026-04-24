@@ -1,0 +1,171 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_17-16-26-X1-wave-w38-n58-mom-batch-runtime-2026-04-24/N58",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 70,
+      "correctness": 50,
+      "em_correctness": 15,
+      "hydrogen_correctness": 15,
+      "mom_batch": 20,
+      "mom_batch_pass": true,
+      "runtime": 16,
+      "runtime_seconds": 2.664,
+      "mom_batch_runtime_seconds": 3.296,
+      "staged": 10,
+      "report": 5,
+      "notes_score": 5,
+      "scope": 5,
+      "operator_budget": 0,
+      "operator_budget_pass": false,
+      "output_bytes": 2530582,
+      "changed_paths": [
+        "candidate/optimization-report.json",
+        "candidate/stage-state.json",
+        "candidate/workspace/dual_physics.py",
+        "candidate/workspace/perf-ledger.json",
+        "candidate/workspace/validation-notes.md"
+      ],
+      "failure_buckets": [
+        "operator-budget"
+      ],
+      "mom_batch_evidence_sources": [
+        "import",
+        "metrics-json",
+        "verifier-log"
+      ],
+      "failure_ids": [],
+      "notes": [
+        "operator budget fail",
+        "mom batch evidence=import,metrics-json,verifier-log",
+        "mom batch runtime=3.296s",
+        "mom batch verifier log pass"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_17-16-26-X3-wave-w38-n58-mom-batch-runtime-2026-04-24/N58",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 100,
+      "correctness": 50,
+      "em_correctness": 15,
+      "hydrogen_correctness": 15,
+      "mom_batch": 20,
+      "mom_batch_pass": true,
+      "runtime": 20,
+      "runtime_seconds": 0.95,
+      "mom_batch_runtime_seconds": 1.691,
+      "staged": 10,
+      "report": 5,
+      "notes_score": 5,
+      "scope": 5,
+      "operator_budget": 5,
+      "operator_budget_pass": true,
+      "output_bytes": 2818,
+      "changed_paths": [
+        "candidate/optimization-report.json",
+        "candidate/stage-state.json",
+        "candidate/workspace/dual_physics.py",
+        "candidate/workspace/perf-ledger.json",
+        "candidate/workspace/validation-notes.md"
+      ],
+      "failure_buckets": [],
+      "mom_batch_evidence_sources": [
+        "import",
+        "metrics-json",
+        "verifier-log"
+      ],
+      "failure_ids": [],
+      "notes": [
+        "operator budget pass",
+        "mom batch evidence=import,metrics-json,verifier-log",
+        "mom batch runtime=1.691s",
+        "mom batch verifier log pass"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_17-33-10-X2-wave-w38-n58-mom-batch-runtime-2026-04-24-general/N58",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 25,
+      "correctness": 0,
+      "em_correctness": 0,
+      "hydrogen_correctness": 0,
+      "mom_batch": 0,
+      "mom_batch_pass": false,
+      "runtime": 20,
+      "runtime_seconds": 0.273,
+      "mom_batch_runtime_seconds": null,
+      "staged": 0,
+      "report": 0,
+      "notes_score": 0,
+      "scope": 0,
+      "operator_budget": 5,
+      "operator_budget_pass": true,
+      "output_bytes": 1407,
+      "changed_paths": [],
+      "failure_buckets": [
+        "mom-batch-api"
+      ],
+      "mom_batch_evidence_sources": [
+        "import",
+        "verifier-log"
+      ],
+      "failure_ids": [
+        "em-case-em-convergence-coarse",
+        "em-case-em-ka11-scale",
+        "em-case-em-ka14-load",
+        "em-case-em-ka6-wide",
+        "em-convergence-failed",
+        "em-density-em-convergence-coarse",
+        "em-density-em-ka11-scale",
+        "em-density-em-ka14-load",
+        "em-density-em-ka6-wide",
+        "hydrogen-case-h-4p-highgrid",
+        "hydrogen-case-he-5d-scale",
+        "hydrogen-case-li-6f-load",
+        "mom-batch-api-missing",
+        "notes-missing-phrases",
+        "perf-ledger-incomplete",
+        "report-method",
+        "report-missing-cases",
+        "report-oracle-use",
+        "report-performance",
+        "report-stage-trace",
+        "solver-missing-marker-em_batch_factor_reuse",
+        "solver-missing-marker-hydrogen_tridiagonal",
+        "stage-ledger-incomplete"
+      ],
+      "notes": [
+        "failures=em-case-em-convergence-coarse,em-case-em-ka11-scale,em-case-em-ka14-load,em-case-em-ka6-wide,em-convergence-failed,em-density-em-convergence-coarse,em-density-em-ka11-scale,em-density-em-ka14-load,em-density-em-ka6-wide,hydrogen-case-h-4p-highgrid,hydrogen-case-he-5d-scale,hydrogen-case-li-6f-load,mom-batch-api-missing,notes-missing-phrases,perf-ledger-incomplete,report-method,report-missing-cases,report-oracle-use,report-performance,report-stage-trace,solver-missing-marker-em_batch_factor_reuse,solver-missing-marker-hydrogen_tridiagonal,stage-ledger-incomplete",
+        "operator budget pass",
+        "mom batch evidence=import,verifier-log",
+        "eigh_tridiagonal, scipy.sparse.linalg, eigsh",
+        "lu_factor, lu_solve, np.linalg.solve(matrix, rhs_matrix, np.linalg.solve(matrix,rhs_matrix"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_17-33-09-X6-wave-w38-n58-mom-batch-runtime-2026-04-24-general/N58",
+      "row": "X6",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "rubric": 0,
+      "notes": [
+        "missing summary.json"
+      ]
+    }
+  ]
+}

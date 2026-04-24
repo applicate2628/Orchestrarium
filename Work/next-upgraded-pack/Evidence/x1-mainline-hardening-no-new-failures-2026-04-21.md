@@ -2861,3 +2861,52 @@ Calibration rows do not change the top-pair conclusion. `X2` is a scoreable lowe
 it stayed compact but made no migration patch and left legacy API, model, ledger, review, closure,
 test, and scope invariants failing. `X6` is `runtime-no-summary` after timeout and is not a model
 fail. `X5` remains quota-deferred; `X4` is reserved for the final full closing run.
+
+## 2026-04-24 Follow-Up: W38 MoM Batch Runtime Analytical Oracle
+
+`N58-mom-batch-runtime-analytic-oracle` replaces the earlier too-noisy science runtime probe with a
+repeated-RHS Method-of-Moments cylinder-scattering task. It preserves the `N49` dual-physics
+regression checks for PEC-cylinder MoM and hydrogenic radial Schrodinger, then adds
+`solve_cylinder_batch_mom(...)`: one MoM matrix per geometry/frequency, LU/factorization reuse across
+many incident-angle RHS vectors, Mie-series analytical validation, density Fourier checks, measured
+batch runtime, exact five-file scope, and the visible `../meta/worker-output.txt <= 40000` gate.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N58` JSON parse, verifier compile, bundle-shape, start-state science verifier, and start-state batch verifier | `PASS` |
+| `N58` reference probe in `.scratch/verifier-probes/2026-04-24-n58-mom-batch-reference` | science regression verifier `PASS`; MoM batch runtime verifier `PASS`; reference total batch runtime about `0.663s` versus `13.0s` budget |
+| `score-n58-mom-batch-runtime-rubric.py` compile and scorer execution | `PASS` |
+| `mcp-free` before and after runs | no kills; parent-owned command helpers skipped |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N58` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_17-16-26-X1-wave-w38-n58-mom-batch-runtime-2026-04-24/N58/` | `0` | `FAIL` | `70 / 100` | `2530582` | output budget fail |
+| `N58` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-24_17-33-10-X2-wave-w38-n58-mom-batch-runtime-2026-04-24-general/N58/` | `0` | `FAIL` | `25 / 100` | `1407` | no batch API / solver markers |
+| `N58` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_17-16-26-X3-wave-w38-n58-mom-batch-runtime-2026-04-24/N58/` | `0` | `PASS` | `100 / 100` | `2818` | none |
+| `N58` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-24_17-33-09-X6-wave-w38-n58-mom-batch-runtime-2026-04-24-general/N58/` | n/a | `NOT-RUN` | `0 / 100` | n/a | runtime no-summary timeout |
+
+### Verdict
+
+`N58` is the eighth honest compact single-session inverse separator: `X1 FAIL / X3 PASS`.
+It is scoreable for the top pair because both wrappers exited `0`, both rows produced final
+summaries, and both rows passed the science regression verifier, the new repeated-RHS MoM batch
+runtime verifier, and exact scope. X1's only failing gate is the visible operator-output budget:
+`2530582 > 40000`. X3 passed the same physics/runtime/scope gates and stayed compact:
+`2818 <= 40000`.
+
+This changes the science/runtime read. `N49` showed that explicit compactness alone did not split
+the high-load science optimizer. `N58` shows that a real repeated-RHS CEM task with analytical oracle
+and low-noise operator-budget requirement does split the compact science/runtime lane in favor of
+X3. The split is still not a physics-correctness split: X1 solved the MoM batch and hydrogenic
+regressions correctly, with runtime gates passing, but failed the operator-budget role requirement.
+
+Calibration rows do not change the top-pair conclusion. `X2` is a scoreable lower calibration fail:
+it stayed compact but left the starter mostly unchanged, including missing `solve_cylinder_batch_mom`,
+missing factorization-reuse marker, missing hydrogen tridiagonal marker, and failing EM/hydrogen
+regressions. `X6` is `runtime-no-summary` after a one-hour timeout and is not a model fail. `X5`
+remains quota-deferred; `X4` is reserved for the final full closing run.

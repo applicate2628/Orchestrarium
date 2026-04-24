@@ -1,0 +1,30 @@
+id: N58
+surface_id: E48
+pack_id: E48
+role_class: scientist-performance
+artifact_type: MoM repeated-RHS batch runtime optimizer with analytical cylinder oracle
+modality_family: computational electromagnetics, method of moments, repeated RHS factorization reuse, analytical Mie oracle, runtime-scoreable low-noise operator budget
+allowed_change_surface:
+  - candidate/stage-state.json
+  - candidate/optimization-report.json
+  - candidate/workspace/dual_physics.py
+  - candidate/workspace/perf-ledger.json
+  - candidate/workspace/validation-notes.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/tests/**
+score_profile: "scientist, computational-physics, method-of-moments, analytical-oracle, repeated-rhs-runtime, patch-quality, operator-budget"
+overlay_flags:
+  - top-pair-role-fit
+  - scientist-constraints
+  - scored-rubric
+  - numerical-witness
+  - computational-physics
+  - method-of-moments
+  - radiating-structure
+  - repeated-rhs
+  - runtime-scoreable
+  - low-noise-operator-budget
