@@ -1,0 +1,130 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-24_19-02-57-X1-wave-w39-n59-perf-cache-2026-04-24\\N59",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 90,
+      "correctness": 40,
+      "runtime": 25,
+      "patch_quality": 15,
+      "evidence": 10,
+      "cost": 0,
+      "runtime_seconds": 0.037078,
+      "max_seconds": 0.7,
+      "output_bytes": 336382,
+      "changed_paths": [
+        "candidate/closure.json",
+        "candidate/optimization-state.json",
+        "candidate/perf-ledger.json",
+        "candidate/workspace/src/quoteperf/engine.py",
+        "candidate/workspace/tests/test_quote_engine.py"
+      ],
+      "failure_buckets": [],
+      "failure_ids": [],
+      "notes": [
+        "runtime=0.037078s <= 0.7s",
+        "output_bytes=336382"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-24_19-02-57-X3-wave-w39-n59-perf-cache-2026-04-24\\N59",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 100,
+      "correctness": 40,
+      "runtime": 25,
+      "patch_quality": 15,
+      "evidence": 10,
+      "cost": 10,
+      "runtime_seconds": 0.009349,
+      "max_seconds": 0.7,
+      "output_bytes": 2653,
+      "changed_paths": [
+        "candidate/closure.json",
+        "candidate/optimization-state.json",
+        "candidate/perf-ledger.json",
+        "candidate/workspace/src/quoteperf/engine.py",
+        "candidate/workspace/tests/test_quote_engine.py"
+      ],
+      "failure_buckets": [],
+      "failure_ids": [],
+      "notes": [
+        "runtime=0.009349s <= 0.7s",
+        "output_bytes=2653"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-24_19-11-22-X2-wave-w39-n59-perf-cache-2026-04-24-general\\N59",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 50,
+      "correctness": 40,
+      "runtime": 0,
+      "patch_quality": 0,
+      "evidence": 0,
+      "cost": 10,
+      "runtime_seconds": 2.921684,
+      "max_seconds": 0.7,
+      "output_bytes": 1296,
+      "changed_paths": [],
+      "failure_buckets": [
+        "runtime",
+        "evidence",
+        "scope"
+      ],
+      "failure_ids": [
+        "performance-budget",
+        "state-status",
+        "state-missing-phrases",
+        "ledger-budget-id",
+        "ledger-missing-phrases",
+        "closure-status",
+        "closure-missing-phrases",
+        "tests-missing-hot-path"
+      ],
+      "notes": [
+        "runtime=2.921684s > 0.7s",
+        "performance verifier failed",
+        "scope verifier failed",
+        "output_bytes=1296"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-24_19-11-21-X6-wave-w39-n59-perf-cache-2026-04-24-general\\N59",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "wrapper_exit_code": null,
+      "verification_passed": false,
+      "rubric": 0,
+      "correctness": 0,
+      "runtime": 0,
+      "patch_quality": 0,
+      "evidence": 0,
+      "cost": 0,
+      "runtime_seconds": null,
+      "max_seconds": null,
+      "output_bytes": null,
+      "changed_paths": [],
+      "failure_buckets": [],
+      "failure_ids": [],
+      "notes": [
+        "summary.json missing"
+      ]
+    }
+  ]
+}

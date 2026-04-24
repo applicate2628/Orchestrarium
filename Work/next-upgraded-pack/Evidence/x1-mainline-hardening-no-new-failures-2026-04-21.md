@@ -2910,3 +2910,52 @@ it stayed compact but left the starter mostly unchanged, including missing `solv
 missing factorization-reuse marker, missing hydrogen tridiagonal marker, and failing EM/hydrogen
 regressions. `X6` is `runtime-no-summary` after a one-hour timeout and is not a model fail. `X5`
 remains quota-deferred; `X4` is reserved for the final full closing run.
+
+## 2026-04-24 Follow-Up: W39 Real-Repo Performance Cache Budget
+
+`N59-realrepo-perf-cache-budget` adds a real-repo-style performance-sensitive implementation task.
+The starter `QuoteEngine.quote_many(...)` is semantically correct for small cases but performs a full
+rule scan per quote. The hardened bundle requires preserving pricing semantics while adding an
+owning-boundary cache/index fast path that passes a hidden `6200` request / `5200` rule batch under
+`0.70s`.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N59` JSON parse, verifier compile, bundle-shape verifier, and scope bundle-shape verifier | `PASS` |
+| `N59` start-state verifier | `PASS`; expected failures include `performance-budget`, incomplete state/ledger/closure evidence, and missing hot-path test |
+| `N59` reference probe in `.scratch/verifier-probes/2026-04-24-n59-reference` | performance-cache verifier `PASS`; scope verifier `PASS`; reference runtime about `0.014s` versus `0.70s` budget |
+| `score-n59-perf-cache-rubric.py` compile and scorer execution | `PASS` |
+| `mcp-free` before/after provider runs | no kills; parent-owned command helpers skipped |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Runtime | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---:|---|
+| `N59` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_19-02-57-X1-wave-w39-n59-perf-cache-2026-04-24/N59/` | `0` | `PASS` | `90 / 100` | `0.037078s` | `336382` | none; cost score `0` |
+| `N59` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-24_19-11-22-X2-wave-w39-n59-perf-cache-2026-04-24-general/N59/` | `0` | `FAIL` | `50 / 100` | `2.921684s` | `1296` | runtime/evidence/scope |
+| `N59` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_19-02-57-X3-wave-w39-n59-perf-cache-2026-04-24/N59/` | `0` | `PASS` | `100 / 100` | `0.009349s` | `2653` | none |
+| `N59` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-24_19-11-21-X6-wave-w39-n59-perf-cache-2026-04-24-general/N59/` | n/a | `NOT-RUN` | `0 / 100` | n/a | n/a | runtime no-summary timeout |
+
+### X5 quota probe
+
+After the N59 runs, `X5 / gemini3.1pro` was checked with two minimal probes: the benchmark
+`gemini-isolated-worker.ps1` wrapper and a direct `gemini -m gemini-3-pro-high-explicit -p ...`
+call. Both timed out without producing worker output, JSON, or an explicit quota-exceeded message.
+The direct probe left a Gemini node/cmd process pair, which was stopped by exact PID/command-line
+match. Current X5 status is therefore `route/runtime unhealthy`, not `quota clear` and not a
+scoreable model failure.
+
+### Verdict
+
+`N59` is a useful real-repo performance lane result, but it is not a binary X1/X3 separator:
+`binary tie remains`. Both top rows preserve hidden correctness, pass the batch runtime budget,
+update required evidence artifacts, and stay inside exact patch scope.
+
+The routing signal is scored, not binary. X3 wins the role-fit rubric (`100 / 100` versus `90 / 100`)
+because it stays compact (`2653` output bytes versus `336382`) and measures faster in scorer rechecks.
+Use this as evidence for `X3 primary` on compact single-session real-repo performance hot-path work
+when low-noise operation matters. Keep `X1` viable when verbose trace or self-explanatory evidence is
+more important than operator cost.

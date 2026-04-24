@@ -1,0 +1,34 @@
+id: N59
+surface_id: E49
+pack_id: E49
+role_class: implementation
+artifact_type: real-repo performance cache patch with hidden correctness and patch-quality budget
+modality_family: single-session performance-sensitive implementation, hidden consumer semantics, runtime budget, patch-quality rubric
+allowed_change_surface:
+  - .pytest_cache/**
+  - candidate/optimization-state.json
+  - candidate/perf-ledger.json
+  - candidate/closure.json
+  - candidate/workspace/src/quoteperf/__init__.py
+  - candidate/workspace/src/quoteperf/models.py
+  - candidate/workspace/src/quoteperf/catalog.py
+  - candidate/workspace/src/quoteperf/engine.py
+  - candidate/workspace/src/quoteperf/reporting.py
+  - candidate/workspace/tests/test_quote_engine.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+score_profile: "realrepo-performance-cache, hidden-correctness, runtime-budget, patch-quality, cost-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - performance-sensitive
+  - real-repo-workflow
+  - hidden-consumer
+  - runtime-budget
+  - patch-quality-rubric
+  - scored-rubric
+  - binary-separator-candidate

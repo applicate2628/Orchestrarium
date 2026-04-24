@@ -1,0 +1,133 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N59",
+    "surface_id": "E49",
+    "pack_id": "E49",
+    "role_class": "implementation",
+    "artifact_type": "real-repo performance cache patch with hidden correctness and patch-quality budget",
+    "modality_family": "single-session performance-sensitive implementation, hidden consumer semantics, runtime budget, patch-quality rubric",
+    "allowed_change_surface": [
+      ".pytest_cache/**",
+      "candidate/optimization-state.json",
+      "candidate/perf-ledger.json",
+      "candidate/closure.json",
+      "candidate/workspace/src/quoteperf/__init__.py",
+      "candidate/workspace/src/quoteperf/models.py",
+      "candidate/workspace/src/quoteperf/catalog.py",
+      "candidate/workspace/src/quoteperf/engine.py",
+      "candidate/workspace/src/quoteperf/reporting.py",
+      "candidate/workspace/tests/test_quote_engine.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md"
+    ],
+    "score_profile": "realrepo-performance-cache, hidden-correctness, runtime-budget, patch-quality, cost-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "performance-sensitive",
+      "real-repo-workflow",
+      "hidden-consumer",
+      "runtime-budget",
+      "patch-quality-rubric",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/optimization-state.json",
+    "candidate/perf-ledger.json",
+    "candidate/closure.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/quoteperf/__init__.py",
+    "candidate/workspace/src/quoteperf/models.py",
+    "candidate/workspace/src/quoteperf/catalog.py",
+    "candidate/workspace/src/quoteperf/engine.py",
+    "candidate/workspace/src/quoteperf/reporting.py",
+    "candidate/workspace/tests/test_quote_engine.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/performance-brief.md",
+    "inputs/decoy-advice.md",
+    "oracle/README.md",
+    "oracle/perf-cache-contract.json",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_performance_cache.py",
+    "verifiers/check_scope.py"
+  ],
+  "required_changed_paths": [
+    "candidate/optimization-state.json",
+    "candidate/perf-ledger.json",
+    "candidate/closure.json",
+    "candidate/workspace/src/quoteperf/engine.py",
+    "candidate/workspace/tests/test_quote_engine.py"
+  ],
+  "optional_changed_paths": [
+    "candidate/workspace/src/quoteperf/__init__.py",
+    "candidate/workspace/src/quoteperf/models.py",
+    "candidate/workspace/src/quoteperf/catalog.py",
+    "candidate/workspace/src/quoteperf/reporting.py"
+  ],
+  "ignored_changed_path_prefixes": [
+    ".pytest_cache/",
+    "candidate/workspace/.pytest_cache/",
+    "candidate/workspace/src/quoteperf/__pycache__/",
+    "candidate/workspace/tests/__pycache__/",
+    "verifiers/__pycache__/"
+  ],
+  "performance_budget": {
+    "budget_id": "quote_many_batch_runtime",
+    "rule_count": 5200,
+    "request_count": 6200,
+    "max_seconds": 0.70,
+    "sample_check_count": 96
+  },
+  "metadata_requirements": {
+    "state_status": "complete",
+    "closure_status": "closed",
+    "required_state_phrases": [
+      "QuoteEngine.quote_many",
+      "tier",
+      "region",
+      "quantity",
+      "effective"
+    ],
+    "required_ledger_phrases": [
+      "quote_many_batch_runtime",
+      "0.70",
+      "hidden",
+      "runtime"
+    ],
+    "required_closure_phrases": [
+      "check_performance_cache.py",
+      "check_scope.py",
+      "runtime budget"
+    ]
+  }
+}

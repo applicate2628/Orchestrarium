@@ -72,6 +72,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W36` owner recovery compact operator-budget | `DONE` | Does the compact operator-budget split repeat on owner-recovery/orchestration packets after N26 tied by binary? | `E46 / N56` owner recovery compact operator-budget | hidden owner recovery/source-stale/interruption verifier, exact scope, visible `40000` byte output budget, and X2/X6 calibration | mainline materialized from N26 by adding `check_operator_budget.py` and updating source anchors to the current post-N55 read | `X1 FAIL 70` from visible operator-budget (`135621 > 40000`) while hidden owner/scope gates pass; `X3 PASS 100` with `1220 <= 40000`; `X2 FAIL 10`; `X6` runtime no-summary; sixth compact inverse separator |
 | `W37` real-repo compact API migration operator-budget | `DONE` | Does the compact operator-budget split repeat on a larger real-repo API migration after N53 tied on the smaller cache-ignored interface fixture? | `E47 / N57` compact BillingMesh API migration operator-budget | hidden API migration verifier, source-bound ledger, review response, closeout, exact scope, generated-cache isolation, and visible `40000` byte output budget | mainline materialized from N36 by removing staged runner prompts and converting the same BillingMesh domain into a compact single-run migration | `X1 FAIL 70` from visible operator-budget (`3792275 > 40000`) while hidden API/scope gates pass; `X3 PASS 100` with `2313 <= 40000`; `X2 FAIL 11`; `X6` runtime no-summary; seventh compact inverse separator and first compact real-repo API migration inverse |
 | `W38` repeated-RHS MoM batch runtime | `DONE` | Does a real science/runtime task with analytical oracle and repeated-RHS factorization reuse split X1/X3 after N49 tied? | `E48 / N58` repeated-RHS MoM batch runtime analytical oracle | dual-physics regression verifier, new Mie-series MoM batch verifier, density Fourier checks, measured batch runtime, exact five-file scope, and visible `40000` byte output budget | mainline materialized from N49 by adding `solve_cylinder_batch_mom(...)` contract and batch verifier; scorer sidecar adapted N58 rubric | `X1 FAIL 70` only from visible operator-budget (`2530582 > 40000`) while physics/runtime/scope gates pass; `X3 PASS 100` with `2818 <= 40000`; `X2 FAIL 25`; `X6` runtime no-summary; eighth compact inverse separator and first science/runtime inverse |
+| `W39` real-repo performance-cache budget | `DONE` | Does a real-repo hot-path optimization with hidden correctness and measured batch runtime split X1/X3 without relying on operator-output failure? | `E49 / N59` real-repo performance-cache budget | hidden pricing semantics, batch runtime `0.70s` budget, exact patch-quality scope, evidence artifacts, and cost rubric | mainline materialized as QuotePerf mini-repo with deliberately slow `QuoteEngine.quote_many` baseline and reference-validated cache/index oracle | `X1 PASS 90`, `X3 PASS 100`; `binary tie remains`, but X3 wins scored role fit through compact output (`2653` vs `336382`) and faster measured runtime; `X2 FAIL 50`; `X6` runtime no-summary; X5 quota probe timed out without explicit quota error |
 
 ## Active Spawn Board
 
@@ -90,6 +91,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | W18 UI/visual sidecar | inspect N20/N21/N25 UI and visual patterns | none | deterministic UI/visual/state gauntlet proposal | `DONE`; N38 materialized and reference-validated |
 | W19 next-lane sidecar | inspect N19/N24 and N23/N26 for next staged target | none | next staged gauntlet proposal | `DONE`; N39 materialized as staged systems/toolchain recovery candidate and later rerun under bounded scope |
 | N58 scorer sidecar | adapt copied N49 scorer to N58 | `Work/next-upgraded-pack/Tooling/score-n58-mom-batch-runtime-rubric.py` only | scorer with MoM batch evidence/buckets | `DONE`; py_compile PASS and scorer JSON emitted |
+| N59 scorer sidecar | score real-repo performance-cache runs | `Work/next-upgraded-pack/Tooling/score-n59-perf-cache-rubric.py` only | scorer with runtime/evidence/scope/cost buckets | `DONE`; py_compile PASS and scorer JSON emitted |
 
 ## Spawn Proposal Results
 
@@ -334,6 +336,7 @@ model fail.
 40. Materialize and run `N56-owner-recovery-compact-operator-budget` as W36/E46. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 100`; sixth compact inverse separator by visible operator-budget and first on the compact owner-recovery line. `X2` fails scoreably and `X6` is runtime no-summary; `X5` remains quota-deferred.
 41. Materialize and run `N57-realrepo-compact-api-migration-operator-budget` as W37/E47. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 100`; seventh compact inverse separator by visible operator-budget and first on compact real-repo API migration. `X2` fails scoreably and `X6` is runtime no-summary; `X5` remains quota-deferred.
 42. Materialize and run `N58-mom-batch-runtime-analytic-oracle` as W38/E48. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 100`; eighth compact inverse separator by visible operator-budget and first on science/runtime repeated-RHS MoM batch work. `X1` passes physics/runtime/scope, so this is not a physics-correctness fail. `X2` fails scoreably and `X6` is runtime no-summary; `X5` remains quota-deferred.
+43. Materialize and run `N59-realrepo-perf-cache-budget` as W39/E49. `DONE` on 2026-04-24; `X1 PASS 90`, `X3 PASS 100`; `binary tie remains` on hidden semantics, runtime budget, exact scope, and evidence gates, but X3 wins cost/compactness and measured scorer runtime. `X2` fails scoreably (`50 / 100`), `X6` is runtime no-summary, and X5 Gemini Pro quota probes timed out without an explicit quota error.
 
 ## Current Routing Impact
 
@@ -343,6 +346,7 @@ model fail.
 | staged delivery / multi-session re-entry | `X1 primary` after `N30`, `N35`, and `N36` produced `X1 PASS` versus `X3 scoreable FAIL` on persisted phase-ledger / re-entry accountability | strong enough for staged-lane routing; next repeat should be a real repo trial, not another synthetic bundle |
 | staged review / advisory gate | `X1 primary` after `N37` produced `X1 PASS 98 / 100` versus `X3 scoreable FAIL 35 / 100` on source-bound ADR, exact findings/non-claims, response cues, and closure | strong enough for staged review-gate routing; next repeat should be a real repo review trial or a UX/visual lane where policy remains unresolved |
 | systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `N42` and `N50` confirm immutable-CI plus explicit output budget still tie top pair by binary; `N51` shows hard compact+turnaround systems hotfixes can make both top rows fail for different reasons; `X2/X5/X6` lower on N24 | for hard compact systems hotfixes, require both semantic and budget gates; if a clean inverse separator is needed, move to a different pass/pass lane rather than tightening N51 further |
+| real-repo performance hot path | `X1` and `X3` both pass `N59` hidden correctness, runtime, scope, and evidence gates; X3 wins scored fit (`100` vs `90`) because it stays compact (`2653` vs `336382` output bytes) and measures faster in scorer rechecks | use X3 for compact single-session performance patches when low-noise operation matters; keep X1 viable when verbose trace and self-explanation are desired |
 | systems/toolchain staged recovery re-entry | `X1 primary` after bounded `N39` produced `X1 PASS 94 / 100` versus `X3 FAIL 78 / 100`; `X2` and `X6` also fail scoreably and `X5` is route-fail | strong enough for staged systems/toolchain routing; next repeat should be a real repo toolchain workflow only if policy needs extra confirmation |
 | UI implementation | `X3` primary versus `X1` after `N20` and `N25`; `N43` confirms immutable visible-test constraints still tie top pair by binary; `N47` makes low-noise compact UI hotfixes a binary `X1 FAIL / X3 PASS` separator; `X5` is still a route-healthy contender after `N25 PASS 98`; `N38` adds an `X1` staged UI pass but leaves the top pair unresolved because X3 never completed scoreably | if staged UI policy matters, rerun N38 under a more reliable X3 wrapper/timeout strategy; otherwise use X3 for compact single-session UI, especially when operator budget is explicit |
 | owner recovery staged re-entry | `X1 primary` after `N40` produced `X1 PASS 98 / 100` versus `X3 FAIL 55 / 100` | strong enough for staged owner routing; next repeat should be a real repo owner workflow only if policy needs extra confirmation |
@@ -360,7 +364,7 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume from the scored `N58` repeated-RHS MoM batch runtime closeout rather than from a queued batch.
+If interrupted now, resume from the scored `N59` real-repo performance-cache closeout rather than from a queued batch.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`
 versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), staged owner recovery
@@ -381,9 +385,12 @@ fails output budget, while X3 passes all gates. `N57` extends the same pattern t
 API migration: X1 passes hidden BillingMesh migration semantics and exact scope but fails the visible
 operator budget, while X3 passes all gates. `N58` extends the pattern to science/runtime repeated-RHS
 MoM batch work: X1 passes the physical/runtimes oracles and exact scope but fails visible operator
-budget, while X3 passes all gates compactly. Next concrete work should switch to ordinary
-systems/toolchain, unresolved staged UI/visual-state, or a real-repo performance workflow rather than
-tightening the same operator-budget family again.
+budget, while X3 passes all gates compactly. `N59` then switches away from operator-budget binary
+failure: both top rows pass hidden real-repo performance semantics and runtime, but X3 wins the
+scored role-fit read on compactness and measured runtime. Next concrete work should switch to
+unresolved staged UI/visual-state or another non-operator-budget lane rather than tightening the
+same operator-budget family again.
 Bounded `N39` is now a staged systems/toolchain routing result in favor of X1. `X5` remains a live
 UI and single-session owner contender after route-healthy `N25` and `N26`, but `X5` is currently
-quota-deferred and the newer staged waves still produced only Gemini route or quota caveats.
+route/runtime unhealthy: the latest Gemini Pro wrapper and direct quota probes timed out without an
+explicit quota error.
