@@ -60,7 +60,7 @@ Priority is routing priority, not abstract model quality. `P0` changes provider 
 
 | Line                                  | Pri  | Order       | Trigger                      | Follow-up            |
 |---------------------------------------|------|-------------|------------------------------|----------------------|
-| `L00 owner/control`                   | `P0` | `X3 > X1`   | compact owner packet         | rerun `X5` later    |
+| `L00 owner/control`                   | `P0` | `X3 > X1`   | compact owner packet         | rerun `X5` later     |
 |                                       |      | `X1 > X3`   | staged owner/re-entry        |                      |
 | `L01 advisory.repo-understanding`     | `P2` | `X1 = X3`   | repo facts / source inspect  | stop hardening now   |
 |                                       |      | `X5` viable | route healthy only           |                      |
