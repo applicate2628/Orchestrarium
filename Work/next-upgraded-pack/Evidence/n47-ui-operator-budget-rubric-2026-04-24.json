@@ -1,0 +1,68 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_07-34-56-X1-wave-w27-n47-ui-operator-budget-2026-04-24/N47",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 70,
+      "correctness": 40,
+      "patch_quality": 28,
+      "operator_budget": 0,
+      "time_points": 10,
+      "cost_points": 1,
+      "elapsed_proxy_seconds": 234.64,
+      "cost_proxy_output_bytes": 169913,
+      "changed_paths": [
+        "candidate/workspace/src/editor-panel.mjs",
+        "candidate/workspace/src/editor-state.mjs",
+        "candidate/workspace/src/editor.css"
+      ],
+      "diff": {
+        "added": 176,
+        "deleted": 24
+      },
+      "notes": [
+        "operator budget fail",
+        "tests unchanged",
+        "css changed",
+        "changed=3 source=3 add=176 del=24"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_07-34-56-X3-wave-w27-n47-ui-operator-budget-2026-04-24/N47",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 94,
+      "correctness": 40,
+      "patch_quality": 26,
+      "operator_budget": 10,
+      "time_points": 8,
+      "cost_points": 10,
+      "elapsed_proxy_seconds": 338.233,
+      "cost_proxy_output_bytes": 2467,
+      "changed_paths": [
+        "candidate/workspace/src/editor-panel.mjs",
+        "candidate/workspace/src/editor-state.mjs",
+        "candidate/workspace/src/editor.css"
+      ],
+      "diff": {
+        "added": 193,
+        "deleted": 30
+      },
+      "notes": [
+        "operator budget pass",
+        "tests unchanged",
+        "css changed",
+        "changed=3 source=3 add=193 del=30"
+      ]
+    }
+  ]
+}

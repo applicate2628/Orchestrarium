@@ -60,6 +60,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W24` interface sourceId hidden consumer | `DONE` | Can a hidden public-result consumer expose interface-refactor breakage, and can it find the requested inverse separator? | `E34 / N44` interface-refactor sourceId hidden consumer | `$backend-engineer` style verifier plus hidden consumer and exact scope gate | mainline materialized from N33 with immutable visible test and sourceId/report invariant | `X1 PASS 96`; `X3 scoreable FAIL 72` from `.pytest_cache` changed-path drift; not an inverse separator and not a hidden sourceId semantic fail |
 | `W25` ownership-budget immutable report consumer | `DONE` | Can the compact single-session ownership-budget `X3` edge become an honest `X1 FAIL / X3 PASS` when visible tests are immutable and a hidden public report consumer checks replay/source semantics? | `E35 / N45` ownership-budget immutable report consumer | `$backend-engineer` style verifier plus protected visible-test hash, hidden replay gate, and report-consumer gate | read-only W25 sidecar recommended N29-derived probe as least-bad remaining inverse candidate | `X1 PASS 96`; `X3 PASS 100`; `binary tie remains`; X3 wins only by output-cost bucket |
 | `W26` operator-budget compact hotfix | `DONE` | Can the compact single-session X3 cost edge become an honest `X1 FAIL / X3 PASS` if low-noise/output budget is a visible role requirement instead of a post-hoc metric? | `E36 / N46` operator-budget compact hotfix | `$backend-engineer` style verifier plus hidden ownership/report checks, exact scope gate, and visible `40000` byte operator budget | mainline materialized from N45 by adding `check_operator_budget.py` and preserving the hidden repair semantics | `X1 FAIL 70` from visible operator-budget (`210369 > 40000`) while hidden repair/scope gates pass; `X3 PASS 100` with `2378 <= 40000`; first compact inverse separator |
+| `W27` UI compact operator-budget hotfix | `DONE` | Does the compact `X1 FAIL / X3 PASS` operator-budget split repeat outside DeployGrid on a UI dirty-state lane? | `E37 / N47` UI compact operator-budget hotfix | `$frontend-engineer` style verifier plus hidden dirty-state checks, exact scope gate, protected visible test, and visible `40000` byte operator budget | mainline materialized from N43 by adding `check_operator_budget.py` and preserving hidden UI semantics | `X1 FAIL 70` from visible operator-budget (`169913 > 40000`) while hidden UI/scope gates pass; `X3 PASS 94` with `2467 <= 40000`; second compact inverse separator and first on UI |
 
 ## Active Spawn Board
 
@@ -112,14 +113,15 @@ a roadmap, and use spawns when that accelerates independent work.
 
 ## Current Admission Decision
 
-`W4 / N24`, `W4 / N25`, and `W6..W26 / N26..N46` are now complete. The staged follow-up batch
+`W4 / N24`, `W4 / N25`, and `W6..W27 / N26..N47` are now complete. The staged follow-up batch
 closed four queued rows in one pass: `N38` is useful positive X1 evidence but unresolved for the
 top pair because X3 never produced a scoreable final summary; bounded `N39`, `N40`, and `N41` are
 scoreable top-pair separators in favor of X1. Follow-up inverse probes `N42`, `N43`, and `N45` tied
 top pair under immutable visible-test or hidden-consumer constraints; `N44` went in the opposite
 direction, producing X1-over-X3 patch-hygiene separation rather than the requested
 `X1 FAIL / X3 PASS` line. `N46` then produced the first compact single-session inverse separator by
-making low-noise/operator-budget behavior a visible role gate.
+making low-noise/operator-budget behavior a visible role gate, and `N47` repeated that split on a UI
+dirty-state compact hotfix.
 
 Reason: `N19` and `N24` independently read `X3 95 / 100` versus `X1 86 / 100`, with both top
 pair rows passing the binary verifier and calibration rows separating lower. This moves
@@ -202,6 +204,13 @@ The new `N46` keeps N45's hidden semantic gates but adds a visible `40000` byte 
 budget (`210369 > 40000`); X3 passes all gates (`2378 <= 40000`). This is an honest `X1 FAIL / X3
 PASS` separator for low-noise compact hotfix work.
 
+W27 repeats the same admitted role requirement on the UI dirty-state line rather than on DeployGrid.
+`N47` keeps the hidden UI semantic verifier and exact three-file UI scope from `N43`, protects the
+visible test by hash, and adds the same visible `40000` byte operator budget. X1 preserves hidden UI
+semantics and exact scope but fails the budget (`169913 > 40000`); X3 passes all gates (`2467 <=
+40000`). This confirms that the compact inverse separator is not limited to the N45/N46 ownership
+repair family.
+
 ## Execution Order
 
 1. Collect read-only spawn proposals for `W1..W3`. `DONE` on 2026-04-22.
@@ -247,6 +256,7 @@ PASS` separator for low-noise compact hotfix work.
 28. Materialize hidden interface-consumer inverse probe `N44`. `DONE` on 2026-04-24; X1 passed, X3 failed exact patch hygiene, not hidden sourceId semantics.
 29. Materialize and run `N45-ownership-budget-immutable-report-consumer` as W25/E35. `DONE` on 2026-04-24; `X1 PASS 96`, `X3 PASS 100`, `binary tie remains`.
 30. Materialize and run `N46-operator-budget-compact-hotfix` as W26/E36. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 100`, first compact inverse separator by visible operator-budget.
+31. Materialize and run `N47-ui-compact-operator-budget-hotfix` as W27/E37. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 94`, second compact inverse separator by visible operator-budget and first on the UI lane.
 
 ## Current Routing Impact
 
@@ -257,7 +267,7 @@ PASS` separator for low-noise compact hotfix work.
 | staged review / advisory gate | `X1 primary` after `N37` produced `X1 PASS 98 / 100` versus `X3 scoreable FAIL 35 / 100` on source-bound ADR, exact findings/non-claims, response cues, and closure | strong enough for staged review-gate routing; next repeat should be a real repo review trial or a UX/visual lane where policy remains unresolved |
 | systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `N42` confirms immutable visible-test constraints still tie top pair by binary; `X2/X5/X6` lower on N24 | no immediate repeat needed unless a new systems subdomain becomes policy-critical |
 | systems/toolchain staged recovery re-entry | `X1 primary` after bounded `N39` produced `X1 PASS 94 / 100` versus `X3 FAIL 78 / 100`; `X2` and `X6` also fail scoreably and `X5` is route-fail | strong enough for staged systems/toolchain routing; next repeat should be a real repo toolchain workflow only if policy needs extra confirmation |
-| UI implementation | `X3` primary versus `X1` after `N20` and `N25`; `N43` confirms immutable visible-test constraints still tie top pair by binary; `X5` is still a route-healthy contender after `N25 PASS 98`; `N38` adds an `X1` staged UI pass but leaves the top pair unresolved because X3 never completed scoreably | if staged UI policy matters, rerun N38 under a more reliable X3 wrapper/timeout strategy; otherwise keep the single-session UI read |
+| UI implementation | `X3` primary versus `X1` after `N20` and `N25`; `N43` confirms immutable visible-test constraints still tie top pair by binary; `N47` makes low-noise compact UI hotfixes a binary `X1 FAIL / X3 PASS` separator; `X5` is still a route-healthy contender after `N25 PASS 98`; `N38` adds an `X1` staged UI pass but leaves the top pair unresolved because X3 never completed scoreably | if staged UI policy matters, rerun N38 under a more reliable X3 wrapper/timeout strategy; otherwise use X3 for compact single-session UI, especially when operator budget is explicit |
 | owner recovery staged re-entry | `X1 primary` after `N40` produced `X1 PASS 98 / 100` versus `X3 FAIL 55 / 100` | strong enough for staged owner routing; next repeat should be a real repo owner workflow only if policy needs extra confirmation |
 | incident-budget staged re-entry | `X1 primary` after `N41` produced `X1 PASS 100 / 100` versus `X3 FAIL 78 / 100` | strong enough for staged incident-budget routing; next repeat should be a real repo repair workflow only if policy needs extra confirmation |
 | scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, `N31`, `N32`, and `N34`; N31 adds real CEM/MoM evidence, N32 combines MoM with hydrogenic radial Schrodinger, and N34 adds high-load staged performance; `X1` is faster on N34, `X3` is more compact | co-primary; choose X1 for runtime-sensitive scientific solver work and X3 for compact output |
@@ -273,16 +283,17 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume from the scored `N46` operator-budget closeout rather than from a queued batch.
+If interrupted now, resume from the scored `N47` UI operator-budget closeout rather than from a queued batch.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`
 versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), staged owner recovery
 (`N40`), and staged incident-budget re-entry (`N41`) now all read `X1 primary` versus `X3`.
 `N38` remains unresolved because X3 failed to produce a final summary across three attempts.
-The first honest compact `X1 FAIL / X3 PASS` line is now `N46`: X1 preserved hidden repair semantics
-but failed the visible operator-budget gate, while X3 passed all gates compactly. Next concrete work
-should move to a different pass/pass lane or a real-repo compact single-session trial where
-over-production is objectively harmful, rather than restating transcript cost as a post-hoc metric.
+The compact `X1 FAIL / X3 PASS` line now has two admitted cells: `N46` on DeployGrid repair and
+`N47` on UI dirty-state repair. In both, X1 preserved hidden semantics and exact scope but failed the
+visible operator-budget gate, while X3 passed all gates compactly. Next concrete work should move to
+another pass/pass lane or a real-repo compact single-session trial where over-production is
+objectively harmful, rather than restating transcript cost as a post-hoc metric.
 Bounded `N39` is now a staged systems/toolchain routing result in favor of X1. `X5` remains a live
 UI and single-session owner contender after route-healthy `N25` and `N26`, but the newer staged
 waves still produced only Gemini route or quota caveats.

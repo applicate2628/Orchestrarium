@@ -96,6 +96,7 @@ failures as `PASS`.
 | `16` | W22/W23/W24 inverse-separator search on immutable tests and hidden interface consumers | `X1 / gpt-5.5`: `N42 PASS`, `N43 PASS`, `N44 PASS 96` | `X3 / opus 4.7max`: `N42 PASS`, `N43 PASS`, `N44 FAIL 72` |  |  |  | no honest `X1 FAIL / X3 PASS`; `N44` X3 failure is `.pytest_cache` changed-path scope hygiene, not hidden `sourceIds` semantics |
 | `17` | W25 ownership-budget immutable report-consumer inverse probe | `X1 / gpt-5.5`: `N45 PASS 96` | `X3 / opus 4.7max`: `N45 PASS 100` |  |  |  | `binary tie remains`; X3 wins only by cost/output (`2628` bytes versus `180549`), not hidden replay/report semantics |
 | `18` | W26 operator-budget compact hotfix | `X1 / gpt-5.5`: `N46 FAIL 70` | `X3 / opus 4.7max`: `N46 PASS 100` |  |  |  | first honest compact single-session `X1 FAIL / X3 PASS`; X1 preserves hidden repair semantics but fails the visible operator-budget gate (`210369 > 40000`) |
+| `19` | W27 UI compact operator-budget hotfix | `X1 / gpt-5.5`: `N47 FAIL 70` | `X3 / opus 4.7max`: `N47 PASS 94` |  |  |  | second honest compact single-session `X1 FAIL / X3 PASS`; both pass hidden UI dirty-state semantics and exact scope, while X1 fails the visible operator-budget gate (`169913 > 40000`) |
 
 | `#` | Current rows note | Current state |
 |---|---|---|
@@ -353,6 +354,7 @@ failures as `PASS`.
 | `48` | `N44` was added on `2026-04-24` as W24/E34 interface-refactor sourceId hidden-consumer hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` passes at `96 / 100`, while `X3 / opus 4.7max` scoreably fails at `72 / 100` because `.pytest_cache` files drift into the exact changed-path budget. Hidden interface/sourceId/report semantics pass for X3, so this is patch-hygiene separation, not an inverse semantic separator | `N44 interface sourceId hidden consumer` |
 | `49` | `N45` was added on `2026-04-24` as W25/E35 ownership-budget immutable report-consumer hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass hidden replay/report-consumer gates with exact three-path budget. Rubric reads `X3 100 / 100` versus `X1 96 / 100` only from output cost; `binary tie remains` | `N45 ownership report consumer` |
 | `50` | `N46` was added on `2026-04-24` as W26/E36 operator-budget compact hotfix hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` scoreably fails the visible operator-budget gate (`210369 > 40000`) while passing hidden ownership and exact-scope gates, and `X3 / opus 4.7max` passes all gates (`2378 <= 40000`). This is the first honest compact single-session `X1 FAIL / X3 PASS` separator, scoped to low-noise/operator-budget behavior rather than semantic repair correctness | `N46 operator-budget compact hotfix` |
+| `51` | `N47` was added on `2026-04-24` as W27/E37 UI compact operator-budget hotfix hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` scoreably fails the visible operator-budget gate (`169913 > 40000`) while passing hidden UI dirty-state semantics and exact-scope gates, and `X3 / opus 4.7max` passes all gates (`2467 <= 40000`). This is the second honest compact single-session `X1 FAIL / X3 PASS` separator and the first on the UI implementation lane | `N47 UI operator-budget compact hotfix` |
 
 ## Source
 
@@ -375,7 +377,7 @@ failures as `PASS`.
 | `../Evidence/x1-x3-top-pair-rubric-e3-2026-04-20.md` | diagnostic `E3` rubric evidence |
 | `../Evidence/x1-control-plane-override-rerun-s16-s19-s20-2026-04-20.md` | targeted `X1` rerun evidence for `S16`, `S19`, and `S20` |
 | `../Evidence/separator-audit-2026-04-21.md` | factual audit of answer-leakage, verifier strictness, and separation potential across all 43 scenarios; motivates the N06 tuple-exact hardening |
-| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, and N14..N46 hardening sections |
+| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, and N14..N47 hardening sections |
 | `../Evidence/n16-long-horizon-rubric-2026-04-22.json` | machine-readable N16 scored-rubric output for admitted `X1` and `X3` runs |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` | machine-readable N17 owner-orchestration scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs |
 | `../Evidence/n18-scientist-constraints-rubric-2026-04-22.json` | machine-readable N18 scientist/constraints scored-rubric output for admitted `X1`, `X2`, `X3`, partial-route `X6`, and timeout `X5` runs |
@@ -404,3 +406,4 @@ failures as `PASS`.
 | `../Evidence/n41-staged-incident-budget-rubric-2026-04-23.json` | machine-readable N41 staged incident-budget re-entry scored-rubric output for admitted `X1`, `X2`, `X3`, `X5`, and `X6` launch roots; X1 is the only pass among scoreable rows and X3 is a staged incident-budget fail |
 | `../Evidence/n45-ownership-report-rubric-2026-04-24.json` | machine-readable N45 ownership-budget immutable report-consumer scored-rubric output for admitted `X1` and `X3` launch roots; both pass and X3 wins only by output-cost points |
 | `../Evidence/n46-operator-budget-rubric-2026-04-24.json` | machine-readable N46 operator-budget compact-hotfix scored-rubric output for admitted `X1` and `X3` launch roots; X1 scoreably fails the visible output budget while preserving hidden repair semantics, and X3 passes all gates compactly |
+| `../Evidence/n47-ui-operator-budget-rubric-2026-04-24.json` | machine-readable N47 UI compact operator-budget scored-rubric output for admitted `X1` and `X3` launch roots; X1 scoreably fails the visible output budget while preserving hidden UI dirty-state semantics, and X3 passes all gates compactly |

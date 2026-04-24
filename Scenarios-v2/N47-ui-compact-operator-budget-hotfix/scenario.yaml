@@ -1,0 +1,27 @@
+id: N47
+surface_id: E37
+pack_id: E37
+role_class: implementation
+artifact_type: UI compact operator-budget dirty-state hotfix patch
+modality_family: UI implementation, form state, navigation guard, accessibility rendering, production-only patch discipline, and low-noise operator budget
+allowed_change_surface:
+  - candidate/workspace/src/editor-state.mjs
+  - candidate/workspace/src/editor-panel.mjs
+  - candidate/workspace/src/editor.css
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/docs/**
+  - candidate/workspace/src/protected-copy.mjs
+  - candidate/workspace/tests/editor-contract.test.mjs
+score_profile: "implementation, ui-dirty-state-immutable-test-hotfix, top-pair-role-fit, operator-budget"
+overlay_flags:
+  - top-pair-role-fit
+  - ui-interaction
+  - immutable-ci
+  - production-only-patch
+  - low-noise-operator-budget
+  - scored-rubric
+  - binary-separator-candidate

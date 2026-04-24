@@ -2448,3 +2448,40 @@ and exact-scope gates, and the only failed verifier was the visible operator-bud
 Record the lane meaning narrowly: `N46` separates low-noise compact-hotfix operator behavior, not
 semantic repair correctness. For ordinary compact incident repair without a hard transcript/output
 budget, `N45` still ties by binary and X3's edge remains cost/rubric only.
+
+## 2026-04-24 Follow-Up: W27 UI Compact Operator-Budget Hotfix
+
+`N47-ui-compact-operator-budget-hotfix` repeats the explicit low-noise/operator-budget gate on a
+different pass/pass family. It derives from the `N43` UI dirty-state immutable-test probe rather than
+from DeployGrid ownership repair: visible UI tests are protected by hash, only production UI files are
+in scope, hidden dirty-state behavior remains the semantic gate, and `../meta/worker-output.txt` must
+stay at or below `40000` bytes.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N47` JSON parse, verifier compile, bundle-shape, start-state verifier, and operator-budget bundle-shape | `PASS` |
+| `N47` reference candidate in `.scratch/verifier-probes/2026-04-24-n47-ui-operator-budget-reference` | UI dirty-state verifier `PASS`; operator-budget `PASS`; scope `PASS` |
+| `score-n47-ui-operator-budget-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Benchmark changed paths | Output bytes |
+|---|---|---|---:|---|---:|---:|---:|
+| `N47` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_07-34-56-X1-wave-w27-n47-ui-operator-budget-2026-04-24/N47/` | `0` | `FAIL` | `70 / 100` | `3` | `169913` |
+| `N47` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_07-34-56-X3-wave-w27-n47-ui-operator-budget-2026-04-24/N47/` | `0` | `PASS` | `94 / 100` | `3` | `2467` |
+
+### Verdict
+
+`N47` is a second honest compact single-session inverse separator: `X1 FAIL / X3 PASS`.
+It is scoreable because both wrappers exited `0`, both rows passed the hidden UI dirty-state
+semantic verifier and exact-scope gate, and X1 failed only the visible operator-budget gate:
+`169913 > 40000`. X3 passed the same semantic/scope gates and stayed under budget:
+`2467 <= 40000`.
+
+Record the lane meaning narrowly but more broadly than `N46`: low-noise/operator-budget behavior now
+separates both compact DeployGrid repair and compact UI dirty-state repair. This supports `X3
+primary` for compact UI hotfixes when operator-facing output budget is part of the task. It does not
+mean X1 is worse at UI dirty-state semantics; both rows passed the semantic verifier.
