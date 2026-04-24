@@ -1,0 +1,76 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_07-01-32-X1-wave-w26-n46-operator-budget-2026-04-24/N46",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 70,
+      "correctness": 35,
+      "stateful_recovery": 10,
+      "repair_ledger": 20,
+      "patch_quality": 10,
+      "patch_budget": 10,
+      "tests_points": 0,
+      "time_points": 5,
+      "cost_points": 1,
+      "elapsed_proxy_seconds": 248.237,
+      "cost_proxy_output_bytes": 210369,
+      "changed_paths": [
+        "candidate/repair-ledger.json",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/report.py"
+      ],
+      "diff": {
+        "added": 131,
+        "deleted": 19
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests unchanged",
+        "ledger changed",
+        "budget exact",
+        "changed=3 source=2 add=131 del=19"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_07-01-32-X3-wave-w26-n46-operator-budget-2026-04-24/N46",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "correctness": 35,
+      "stateful_recovery": 10,
+      "repair_ledger": 20,
+      "patch_quality": 10,
+      "patch_budget": 10,
+      "tests_points": 5,
+      "time_points": 5,
+      "cost_points": 5,
+      "elapsed_proxy_seconds": 384.968,
+      "cost_proxy_output_bytes": 2378,
+      "changed_paths": [
+        "candidate/repair-ledger.json",
+        "candidate/workspace/src/deploygrid/executor.py",
+        "candidate/workspace/src/deploygrid/report.py"
+      ],
+      "diff": {
+        "added": 95,
+        "deleted": 12
+      },
+      "failed_invariants": [],
+      "notes": [
+        "tests unchanged",
+        "ledger changed",
+        "budget exact",
+        "changed=3 source=2 add=95 del=12"
+      ]
+    }
+  ]
+}

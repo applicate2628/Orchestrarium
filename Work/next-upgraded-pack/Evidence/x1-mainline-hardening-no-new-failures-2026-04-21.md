@@ -2413,3 +2413,38 @@ The useful signal is cost/compactness, not semantic correctness. X3 wins the rub
 cost bucket (`2628` output bytes versus `180549` for X1). If the next inverse wave tries to separate
 this same single-session family, low-noise/cost budget must be an explicit hard requirement rather than
 a post-hoc interpretation of raw provider transcript size.
+
+## 2026-04-24 Follow-Up: W26 Operator-Budget Compact Hotfix
+
+`N46-operator-budget-compact-hotfix` converts the strongest W25 signal into a first-class gate rather
+than a post-hoc metric. The task remains the same compact DeployGrid repair family with protected
+visible test, hidden double-run replay, public report-consumer checks, and exact three-path production
+/ ledger budget, but it adds a visible operator budget: `../meta/worker-output.txt` must stay at or
+below `40000` bytes.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N46` JSON parse, bundle-shape, start-state verifier, and operator-budget bundle-shape | `PASS` |
+| `N46` reference candidate in `.scratch/verifier-probes/2026-04-24-n46-operator-budget-reference` | ownership verifier `PASS`; operator-budget `PASS`; scope `PASS` |
+| `score-n46-operator-budget-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Benchmark changed paths | Output bytes |
+|---|---|---|---:|---|---:|---:|---:|
+| `N46` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_07-01-32-X1-wave-w26-n46-operator-budget-2026-04-24/N46/` | `0` | `FAIL` | `70 / 100` | `3` | `210369` |
+| `N46` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_07-01-32-X3-wave-w26-n46-operator-budget-2026-04-24/N46/` | `0` | `PASS` | `100 / 100` | `3` | `2378` |
+
+### Verdict
+
+This is the first honest inverse separator found in the compact single-session family:
+`X1 FAIL / X3 PASS`. It is scoreable because both wrappers exited `0`, X1 passed the hidden ownership
+and exact-scope gates, and the only failed verifier was the visible operator-budget gate:
+`210369 > 40000`. X3 passed the same semantic gates and stayed under budget: `2378 <= 40000`.
+
+Record the lane meaning narrowly: `N46` separates low-noise compact-hotfix operator behavior, not
+semantic repair correctness. For ordinary compact incident repair without a hard transcript/output
+budget, `N45` still ties by binary and X3's edge remains cost/rubric only.
