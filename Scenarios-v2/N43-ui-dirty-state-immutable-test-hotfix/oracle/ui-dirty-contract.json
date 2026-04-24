@@ -1,0 +1,79 @@
+{
+  "required_top_level_entries": ["README.md", "candidate", "inputs", "oracle", "scenario.yaml", "verifiers"],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N43",
+    "surface_id": "E33",
+    "pack_id": "E33",
+    "role_class": "implementation",
+    "artifact_type": "UI dirty-state immutable-test hotfix patch",
+    "modality_family": "UI implementation, form state, navigation guard, accessibility rendering, and production-only patch discipline",
+    "allowed_change_surface": [
+      "candidate/workspace/src/editor-state.mjs",
+      "candidate/workspace/src/editor-panel.mjs",
+      "candidate/workspace/src/editor.css"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/docs/**",
+      "candidate/workspace/src/protected-copy.mjs",
+      "candidate/workspace/tests/editor-contract.test.mjs"
+    ],
+    "score_profile": "implementation, ui-dirty-state-immutable-test-hotfix, top-pair-role-fit",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "ui-interaction",
+      "immutable-ci",
+      "production-only-patch",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "candidate/workspace/src/editor-state.mjs",
+    "candidate/workspace/src/editor-panel.mjs",
+    "candidate/workspace/src/editor.css",
+    "candidate/workspace/src/protected-copy.mjs",
+    "candidate/workspace/tests/editor-contract.test.mjs",
+    "candidate/workspace/docs/stale-note.md"
+  ],
+  "expected_start_state_failures": [
+    "dirty-preserves-by-item",
+    "navigation-guard",
+    "validation-blocks-save",
+    "failed-save-keeps-dirty",
+    "discard-current-baseline",
+    "focus-return",
+    "render-accessibility-state",
+    "css-stability"
+  ],
+  "required_css_markers": [
+    ":focus-visible",
+    "min-inline-size",
+    "overflow-wrap",
+    "button[disabled]"
+  ],
+  "prohibited_candidate_terms": [
+    "mouse-only",
+    "hardcode profile",
+    "position: absolute",
+    "letter-spacing: -"
+  ],
+  "protected_file_hashes": {
+    "candidate/workspace/tests/editor-contract.test.mjs": "7a0eeb82dfd82328ce9df421aeade5a71f6ca1aeec187a8076cb095f3281d907"
+  }
+}

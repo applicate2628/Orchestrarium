@@ -1,0 +1,13 @@
+{
+  "contractId": "N44-interface-refactor-sourceid-hidden-consumer",
+  "interfaceMap": [],
+  "callSiteMigration": [],
+  "compatibilityMatrix": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 10,
+    "requiredChangedPaths": []
+  }
+}

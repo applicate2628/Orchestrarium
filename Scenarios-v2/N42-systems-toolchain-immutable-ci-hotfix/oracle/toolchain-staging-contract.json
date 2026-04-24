@@ -1,0 +1,89 @@
+{
+  "required_top_level_entries": ["README.md", "candidate", "inputs", "oracle", "scenario.yaml", "verifiers"],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N42",
+    "surface_id": "E32",
+    "pack_id": "E32",
+    "role_class": "implementation",
+    "artifact_type": "systems toolchain immutable-CI hotfix patch",
+    "modality_family": "systems, toolchain, staging path, fingerprint, dependency, lease correctness, and production-only patch discipline",
+    "allowed_change_surface": [
+      "candidate/workspace/src/stagegate/config.py",
+      "candidate/workspace/src/stagegate/paths.py",
+      "candidate/workspace/src/stagegate/fingerprint.py",
+      "candidate/workspace/src/stagegate/lease.py",
+      "candidate/workspace/src/stagegate/planner.py",
+      "candidate/workspace/src/stagegate/executor.py",
+      "candidate/workspace/src/stagegate/report.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/src/stagegate/__init__.py",
+      "candidate/workspace/src/stagegate/api.py",
+      "candidate/workspace/src/stagegate/models.py",
+      "candidate/workspace/tests/test_stagegate.py",
+      "candidate/workspace/docs/**",
+      "candidate/workspace/legacy/**"
+    ],
+    "score_profile": "implementation, systems-toolchain-immutable-ci-hotfix, top-pair-role-fit",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "systems-toolchain",
+      "immutable-ci",
+      "production-only-patch",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "candidate/workspace/src/stagegate/api.py",
+    "candidate/workspace/src/stagegate/models.py",
+    "candidate/workspace/src/stagegate/config.py",
+    "candidate/workspace/src/stagegate/paths.py",
+    "candidate/workspace/src/stagegate/fingerprint.py",
+    "candidate/workspace/src/stagegate/lease.py",
+    "candidate/workspace/src/stagegate/planner.py",
+    "candidate/workspace/src/stagegate/executor.py",
+    "candidate/workspace/src/stagegate/report.py",
+    "candidate/workspace/tests/test_stagegate.py",
+    "candidate/workspace/docs/stale-staging-runbook.md",
+    "candidate/workspace/legacy/old_stage.py"
+  ],
+  "expected_start_state_failures": [
+    "active-channel-precedence",
+    "invalid-env-fallback",
+    "dependency-order",
+    "fingerprint-portable",
+    "mode-conflict-rejected",
+    "lease-release-on-failure",
+    "cache-restore-source-trace",
+    "summary-source-trace"
+  ],
+  "prohibited_candidate_terms": [
+    "D:/dev",
+    "D:\\\\dev",
+    "C:/Users",
+    "C:\\\\Users",
+    "legacyChannel wins",
+    "relative stage roots allowed",
+    "keep failed leases"
+  ],
+  "protected_file_hashes": {
+    "candidate/workspace/tests/test_stagegate.py": "7db028522ac3565682ec9e8e86f68c7100725db898dfe26cbca1449cec8f87ba"
+  }
+}

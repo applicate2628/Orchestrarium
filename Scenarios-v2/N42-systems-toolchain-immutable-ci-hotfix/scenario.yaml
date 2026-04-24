@@ -1,0 +1,33 @@
+id: N42
+surface_id: E32
+pack_id: E32
+role_class: implementation
+artifact_type: systems toolchain immutable-CI hotfix patch
+modality_family: systems, toolchain, staging path, fingerprint, dependency, lease correctness, and production-only patch discipline
+allowed_change_surface:
+  - candidate/workspace/src/stagegate/config.py
+  - candidate/workspace/src/stagegate/paths.py
+  - candidate/workspace/src/stagegate/fingerprint.py
+  - candidate/workspace/src/stagegate/lease.py
+  - candidate/workspace/src/stagegate/planner.py
+  - candidate/workspace/src/stagegate/executor.py
+  - candidate/workspace/src/stagegate/report.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/src/stagegate/__init__.py
+  - candidate/workspace/src/stagegate/api.py
+  - candidate/workspace/src/stagegate/models.py
+  - candidate/workspace/tests/test_stagegate.py
+  - candidate/workspace/docs/**
+  - candidate/workspace/legacy/**
+score_profile: "implementation, systems-toolchain-immutable-ci-hotfix, top-pair-role-fit"
+overlay_flags:
+  - top-pair-role-fit
+  - systems-toolchain
+  - immutable-ci
+  - production-only-patch
+  - scored-rubric
+  - binary-separator-candidate

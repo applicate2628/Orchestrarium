@@ -2273,6 +2273,7 @@ re-entry.
 | Row / model | `N35` | `N36` | `N37` | `N39` | `N41` | PASS |
 |---|---|---|---|---|---|---:|
 | `X1 / gpt-5.5` | `PASS` | `PASS` | `PASS` | `PASS` | `PASS` | `5 / 5` |
+| `X1 / gpt-5.4 xhigh` | `PASS` | `PASS` | `PASS` | `PASS` | `PASS` | `5 / 5` |
 | `X3 / opus 4.7max` | `FAIL 71 / 100` | `FAIL 74 / 100` | `FAIL 35 / 100` | `FAIL 78 / 100` | `FAIL 78 / 100` | `0 / 5` |
 | `X4 / Claude China opus max` | `FAIL` | `FAIL` | `FAIL` | `PASS` | `FAIL` | `1 / 5` |
 | `official opus 4.5 max` | `FAIL` | `FAIL` | `FAIL` | `FAIL` | `FAIL` | `0 / 5` |
@@ -2298,6 +2299,12 @@ Hard-5 failure signatures:
 used only to run official Claude model aliases through `claude.exe` on the same hard-5 staged
 surface; it does not change default `X3` or `X4` routing.
 
+`Work/next-upgraded-pack/Tooling/run-v2-cohort-batch.ps1` and
+`Work/next-upgraded-pack/Tooling/run-v2-staged-cohort-batch.ps1` also honor
+`BENCHMARK_CODEX_MODEL_OVERRIDE` plus optional `BENCHMARK_MODEL_LABEL_OVERRIDE` for Codex rows.
+This is a comparison-only override used for explicit model refreshes such as `gpt-5.4` versus the
+active `X1 / gpt-5.5` row.
+
 ### 2026-04-24 Verdict
 
 The active `X1 / gpt-5.5` row is now cleanly refreshed on the live binary surface and preserves the
@@ -2305,3 +2312,71 @@ staged-separator pattern: `5 / 5` on hard-5 versus `0 / 5` for admitted `X3 / op
 `1 / 5` for the secret-backed `X4` opus route. The staged integration/refactor/re-entry lane remains
 `X1 primary`; compact single-session lanes keep their earlier rubric reads until separately
 refreshed.
+
+The explicit `X1 / gpt-5.4 xhigh` comparison rerun also passed `5 / 5` on the same hard-5 staged
+subset (`wrapperExitCode=0`, verifier `PASS` for `N35`, `N36`, `N37`, `N39`, and `N41`). The staged
+separator pattern is therefore not solely a `gpt-5.5` refresh artifact.
+
+## 2026-04-24 Follow-Up: W22/W23 Immutable-Test Inverse-Separator Probes
+
+`N42-systems-toolchain-immutable-ci-hotfix` and `N43-ui-dirty-state-immutable-test-hotfix` were
+added to test whether the earlier single-session `X3` edge on systems/toolchain and UI could be
+converted into an honest `X1 FAIL / X3 PASS` separator by protecting visible tests and requiring a
+production-only patch. This avoids treating provider transcript size as a semantic model failure.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N42` JSON parse, bundle-shape, and start-state verifier | `PASS` |
+| `N42` production-only reference from prior `X3/N24` source patch | verifier `PASS`; scope `PASS`; tests untouched |
+| `N43` JSON parse, bundle-shape, and start-state verifier | `PASS` |
+| `N43` production-only reference from prior `X3/N25` source patch | verifier `PASS`; scope `PASS`; tests untouched |
+| PowerShell parser checks for cohort/staged runners and `git diff --check` | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Changed production paths | Output bytes |
+|---|---|---|---:|---|---:|---:|
+| `N42` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_04-56-52-X1-wave-w20-n42-immutable-ci-2026-04-24/N42/` | `0` | `PASS` | `5` | `183114` |
+| `N42` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_04-54-29-X3-wave-w20-n42-immutable-ci-2026-04-24/N42/` | `0` | `PASS` | `5` | `3289` |
+| `N43` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_05-04-59-X1-wave-w21-n43-ui-immutable-test-2026-04-24/N43/` | `0` | `PASS` | `3` | `157951` |
+| `N43` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_05-05-00-X3-wave-w21-n43-ui-immutable-test-2026-04-24/N43/` | `0` | `PASS` | `3` | `1956` |
+
+### Verdict
+
+`binary tie remains` on both inverse-separator probes. Explicit immutable-test constraints closed the
+suspected X1 over-edit path: `X1 / gpt-5.5` changed only production files on both scenarios. The
+remaining difference is output/runtime cost, not semantic correctness. Do not record raw
+`worker-output.txt` size as a model-quality fail because the provider CLIs expose different transcript
+surfaces; keep it as a cost/route signal in the lane-fit scorecard.
+
+## 2026-04-24 Follow-Up: W24 Interface SourceId Hidden Consumer
+
+`N44-interface-refactor-sourceid-hidden-consumer` extends the earlier `N33` interface-refactor line
+with an immutable visible test and a hidden public-result consumer invariant. The visible test stays
+outside the allowed change surface; the allowed production/ledger budget is exactly the nine
+interfaceflow source and ledger paths.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N44` JSON parse, bundle-shape, and start-state verifier | `PASS` |
+| `N44` production-only reference from prior `X1/N33` source patch plus sourceId report extension | verifier `PASS`; scope `PASS`; visible test untouched |
+| `score-n44-interface-sourceid-rubric.py` compile and scorer execution | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Changed paths | Output bytes |
+|---|---|---|---:|---|---:|---:|---:|
+| `N44` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_05-48-04-X1-wave-w24-n44-interface-sourceid-2026-04-24/N44/` | `0` | `PASS` | `96 / 100` | `9` | `315371` |
+| `N44` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_05-37-21-X3-wave-w24-n44-interface-sourceid-2026-04-24/N44/` | `0` | `FAIL` | `72 / 100` | `13` | `3524` |
+
+### Verdict
+
+No inverse `X1 FAIL / X3 PASS` separator was found. `N44` is an `X1`-over-`X3` patch-hygiene
+separator, but not a hidden `sourceIds` semantic separator: X3 preserved the interface and hidden
+sourceId/report invariants, then failed the exact patch/scope gate by leaving `.pytest_cache` files in
+the changed-path set. Record this as scoreable because `wrapperExitCode=0` and the verifier failed,
+but keep the failure reason precise.

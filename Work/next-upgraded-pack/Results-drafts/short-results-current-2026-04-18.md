@@ -7,8 +7,9 @@ Status: `PASS`
 This is the current compact operator read for the live benchmark state.
 
 2026-04-24 update: active `X1` is now `gpt-5.5`. The fresh binary rerun over
-`S01..S33 + N01..N41` passes `74 / 74` unique scenarios. Older `gpt-5.4` score and rubric rows remain
-model-of-run historical evidence unless explicitly refreshed.
+`S01..S33 + N01..N41` passes `74 / 74` unique scenarios. The explicit `gpt-5.4 xhigh` hard-5
+comparison also passes `5 / 5`; older `gpt-5.4` score and rubric rows otherwise remain model-of-run
+historical evidence unless explicitly refreshed.
 
 The old upgraded-pack tables remain the last full execution checkpoint for the legacy
 upgraded-pack architecture only.
@@ -91,7 +92,8 @@ failures as `PASS`.
 | `12` | `N16` long-horizon release-lane integration rubric | `opus 4.7max` diagnostic edge | `gpt-5.4` second by rubric |  | `Claude China` `NOT-RUN` | Gemini rows `NOT-RUN` | binary top pair both `PASS`; rubric `X3 95 / 100`, `X1 89 / 100` |
 | `13` | `N17` owner orchestration routing rubric | `gpt-5.4` tied with `opus 4.7max` | `opus 4.7max` tied with `gpt-5.4` | `gpt-spark` calibration `PASS` | `Claude China` `NOT-RUN` | `gemini3.1flash-lite-preview` calibration `PASS`; `gemini3.1pro` smoke `NOT-RUN` | all scoreable rows `100 / 100`; compactness favors `X3` and `X6` |
 | `14` | `X1 / gpt-5.5` binary refresh on `S01..S33 + N01..N41` | `gpt-5.5` |  |  |  |  | `74 / 74` unique verifier PASS; `S13` clean retry supersedes earlier wrapper caveat; `N30` verifier PASS with wrapper caveat |
-| `15` | hard-5 staged separator probe `N35,N36,N37,N39,N41` | `gpt-5.5` with `5 / 5` | `Claude China` with `1 / 5` | `opus 4.7max`, official opus 4.5, and official opus 4.6 all `0 / 5` | official sonnet `0 / 3 scoreable` | official haiku `0 / 4 scoreable` | Sonnet/Haiku missing-summary cells are runtime-route, not model FAIL |
+| `15` | hard-5 staged separator probe `N35,N36,N37,N39,N41` | `gpt-5.5` with `5 / 5`; explicit `gpt-5.4 xhigh` comparison also `5 / 5` | `Claude China` with `1 / 5` | `opus 4.7max`, official opus 4.5, and official opus 4.6 all `0 / 5` | official sonnet `0 / 3 scoreable` | official haiku `0 / 4 scoreable` | Sonnet/Haiku missing-summary cells are runtime-route, not model FAIL |
+| `16` | W22/W23/W24 inverse-separator search on immutable tests and hidden interface consumers | `X1 / gpt-5.5`: `N42 PASS`, `N43 PASS`, `N44 PASS 96` | `X3 / opus 4.7max`: `N42 PASS`, `N43 PASS`, `N44 FAIL 72` |  |  |  | no honest `X1 FAIL / X3 PASS`; `N44` X3 failure is `.pytest_cache` changed-path scope hygiene, not hidden `sourceIds` semantics |
 
 | `#` | Current rows note | Current state |
 |---|---|---|
@@ -344,6 +346,9 @@ failures as `PASS`.
 | `43` | `N39` was added on `2026-04-23` as W19/E29 staged systems/toolchain recovery re-entry hardening; it is not merged into the old full-v2 denominator; bounded-scope rerun reads `X1 PASS 94 / 100`, `X3` scoreable `FAIL 78 / 100`, `X2` scoreable `FAIL 76 / 100`, `X6` scoreable `FAIL 78 / 100`, and `X5` runtime-route; this is now a staged systems/toolchain separator in favor of `X1` | `N39 staged toolchain re-entry` |
 | `44` | `N40` was added on `2026-04-23` as W20/E30 staged owner-recovery re-entry hardening; it is not merged into the old full-v2 denominator; `X1 PASS 98 / 100` versus `X3 scoreable FAIL 55 / 100`; `X2` scoreably fails at `78 / 100`, `X6` scoreably fails at `40 / 100`, and `X5` is runtime-route; staged owner recovery now reads `X1 primary` while single-session owner recovery still reads `X3 primary` | `N40 staged owner recovery` |
 | `45` | `N41` was added on `2026-04-23` as W21/E31 staged incident-budget re-entry hardening; it is not merged into the old full-v2 denominator; `X1 PASS 100 / 100` versus `X3 scoreable FAIL 78 / 100`; `X2` scoreably fails at `78 / 100`; `X5` is runtime-route and `X6` is runtime no-summary; staged long-horizon / ownership-budget incident repair now reads `X1 primary` while compact single-session incident repair still reads `X3 primary` | `N41 staged incident-budget re-entry` |
+| `46` | `N42` was added on `2026-04-24` as W22/E32 systems/toolchain immutable-CI hotfix; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass, both change only five production `src/stagegate/*.py` files, and visible tests are protected by scope/hash gates; `binary tie remains` | `N42 systems immutable-CI` |
+| `47` | `N43` was added on `2026-04-24` as W23/E33 UI dirty-state immutable-test hotfix; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass, both change only three production UI files, and visible tests are protected by scope/hash gates; `binary tie remains` | `N43 UI immutable-test` |
+| `48` | `N44` was added on `2026-04-24` as W24/E34 interface-refactor sourceId hidden-consumer hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` passes at `96 / 100`, while `X3 / opus 4.7max` scoreably fails at `72 / 100` because `.pytest_cache` files drift into the exact changed-path budget. Hidden interface/sourceId/report semantics pass for X3, so this is patch-hygiene separation, not an inverse semantic separator | `N44 interface sourceId hidden consumer` |
 
 ## Source
 
@@ -366,7 +371,7 @@ failures as `PASS`.
 | `../Evidence/x1-x3-top-pair-rubric-e3-2026-04-20.md` | diagnostic `E3` rubric evidence |
 | `../Evidence/x1-control-plane-override-rerun-s16-s19-s20-2026-04-20.md` | targeted `X1` rerun evidence for `S16`, `S19`, and `S20` |
 | `../Evidence/separator-audit-2026-04-21.md` | factual audit of answer-leakage, verifier strictness, and separation potential across all 43 scenarios; motivates the N06 tuple-exact hardening |
-| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, and N14..N41 hardening sections |
+| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, and N14..N43 hardening sections |
 | `../Evidence/n16-long-horizon-rubric-2026-04-22.json` | machine-readable N16 scored-rubric output for admitted `X1` and `X3` runs |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` | machine-readable N17 owner-orchestration scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs |
 | `../Evidence/n18-scientist-constraints-rubric-2026-04-22.json` | machine-readable N18 scientist/constraints scored-rubric output for admitted `X1`, `X2`, `X3`, partial-route `X6`, and timeout `X5` runs |

@@ -589,6 +589,15 @@ if (-not $rowConfigs.ContainsKey($RowId)) {
 }
 
 $rowConfig = $rowConfigs[$RowId]
+if ($rowConfig.Provider -eq 'codex' -and -not [string]::IsNullOrWhiteSpace($env:BENCHMARK_CODEX_MODEL_OVERRIDE)) {
+    $rowConfig = $rowConfig.Clone()
+    $rowConfig.ModelLabel = if ([string]::IsNullOrWhiteSpace($env:BENCHMARK_MODEL_LABEL_OVERRIDE)) {
+        $env:BENCHMARK_CODEX_MODEL_OVERRIDE
+    } else {
+        $env:BENCHMARK_MODEL_LABEL_OVERRIDE
+    }
+    $rowConfig.CodexArgs = @('--model', $env:BENCHMARK_CODEX_MODEL_OVERRIDE, '-c', 'model_reasoning_effort="xhigh"')
+}
 if (-not (Test-Path -LiteralPath $rowConfig.WrapperPath -PathType Leaf)) {
     throw "Wrapper not found: $($rowConfig.WrapperPath)"
 }
