@@ -19,12 +19,12 @@ surface as hardened scenario evidence is admitted.
 
 `Scenarios-v2` is quota-aware across the expanded full `S01..S33 + N01..N07` surface for
 `X1`, `X2`, `X3`, `X4`, `X5`, and `X6`. Explicit provider quota / usage-limit failures are
-`NOT-RUN` / `REQUEUE`, not scoreable `FAIL`. `X5` is no longer quota-pending; the former
-`S12` timeout reran into a scoreable verifier-level `FAIL`.
+`NOT-RUN` / `REQUEUE`, not scoreable `FAIL`. `X5` is currently quota-deferred for new hardening
+waves; older admitted scoreable `X5` cells remain historical evidence.
 
 `worker.long-autonomous` is now materialized as reference extra lane `E1` with `N08..N10`.
-It is scored separately from the core `12` routing lanes. `X4` is `NOT-RUN` on this extra slice
-because the required secret-backed Claude route returned provider `502`.
+It is scored separately from the core `12` routing lanes. `X4` is held for the final closing
+comparison run rather than per-wave hardening probes.
 
 The previously tied core-12 lanes now also have a hardened targeted tiebreaker for `X1`, `X3`,
 and `X5`. That tiebreaker separates `X5` lower on hardened review/security cases, but still does
@@ -368,6 +368,7 @@ failures as `PASS`.
 | `57` | `N53` was added on `2026-04-24` as W33/E43 interface-refactor cache-ignored operator-budget hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass hidden interface-refactor semantics, exact required-path scope after top-level `.pytest_cache/**` is ignored as generated test cache, and visible operator budget. Rubric ties at `100 / 100`; `binary tie remains` | `N53 interface-refactor cache-ignored operator-budget` |
 | `58` | `N54` was added on `2026-04-24` as W34/E44 release-train compact operator-budget hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` scoreably fails the visible operator-budget gate (`300873 > 40000`) while passing hidden release-train stateful semantics and exact scope, and `X3 / opus 4.7max` passes all gates (`2618 <= 40000`). This is the fourth compact single-session `X1 FAIL / X3 PASS` separator and the first on the release-train long-horizon line | `N54 release-train operator-budget compact` |
 | `59` | `N55` was added on `2026-04-24` as W35/E45 incident compact operator-budget hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` scoreably fails the visible operator-budget gate (`352056 > 40000`) while passing hidden incident integration/reconciliation semantics and exact scope, and `X3 / opus 4.7max` passes all gates (`1841 <= 40000`). This is the fifth compact single-session `X1 FAIL / X3 PASS` separator and the first on the cross-role incident repair line | `N55 incident operator-budget compact` |
+| `60` | `N56` was added on `2026-04-24` as W36/E46 owner-recovery compact operator-budget hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` scoreably fails the visible operator-budget gate (`135621 > 40000`) while passing hidden owner-recovery semantics and exact scope, and `X3 / opus 4.7max` passes all gates (`1220 <= 40000`). `X2` scoreably fails (`10 / 100`) after leaving the semantic packet missing/unchanged; `X6` is runtime `NOT-RUN` after no-summary timeout; `X5` is quota-deferred and `X4` stays final-only | `N56 owner operator-budget compact` |
 
 ## Source
 
@@ -428,3 +429,4 @@ failures as `PASS`.
 | `../Evidence/n53-interface-refactor-cache-ignored-rubric-2026-04-24.json` | machine-readable N53 interface-refactor cache-ignored operator-budget scored-rubric output for admitted `X1` and `X3` launch roots; both pass after top-level `.pytest_cache/**` is explicitly ignored as generated test cache |
 | `../Evidence/n54-release-train-operator-budget-rubric-2026-04-24.json` | machine-readable N54 release-train compact operator-budget scored-rubric output for admitted `X1` and `X3` launch roots; X1 fails only the visible output budget while X3 passes all gates compactly |
 | `../Evidence/n55-incident-operator-budget-rubric-2026-04-24.json` | machine-readable N55 incident compact operator-budget scored-rubric output for admitted `X1` and `X3` launch roots; X1 fails only the visible output budget while X3 passes all gates compactly |
+| `../Evidence/n56-owner-operator-budget-rubric-2026-04-24.json` | machine-readable N56 compact owner-recovery operator-budget scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` launch roots; X1 fails only the visible output budget while X3 passes all gates compactly; X2 is scoreable lower calibration fail and X6 is runtime no-summary |

@@ -22,9 +22,9 @@ a roadmap, and use spawns when that accelerates independent work.
 | one live roadmap | update this file in place; do not create competing stale roadmaps |
 | result source of truth | classify from `summary.json`, verifier logs, and scorer JSON, not noisy stdout |
 | top-pair runs | every admitted wave runs `X1` and `X3` first |
-| calibration rows | run `X2`, `X5`, and `X6` only after global/lane-relevant changes; `X5` still requires a same-session smoke that writes output |
+| calibration rows | run `X2` and `X6` together after completed tasks or lane-relevant changes; keep `X5` quota-deferred until route health returns |
 | route failures | keep quota, wrapper timeout, missing summary, and Gemini tool-loop failures separate from model FAIL |
-| X4 | keep `NOT-RUN` until the secret-backed Claude route stops returning provider errors |
+| X4 | keep `NOT-RUN` during hardening waves; reserve it for the final closing comparison run |
 | write scope | main agent owns roadmap, scenario materialization, scorers, live result surfaces, and session logs |
 | spawn scope | spawned agents may do read-only design/recon or disjoint implementation slices only when explicitly assigned |
 | closeout | each admitted wave updates `x1-mainline-hardening-no-new-failures-2026-04-21.md`, role-fit scorecard, short results, status checkpoint, scorer JSON, and `.reports/2026-04/` |
@@ -69,6 +69,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W33` interface refactor cache-ignored operator-budget | `DONE` | If generated `.pytest_cache/**` is ignored, does interface compactness become a clean `X1 FAIL / X3 PASS` separator? | `E43 / N53` interface refactor cache-ignored operator-budget | hidden interface consumers, migration ledger, exact required-path set, visible `40000` byte output budget, and explicit top-level `.pytest_cache/**` auxiliary ignore | mainline materialized from N52 by isolating generated cache from scored patch scope | `X1 PASS 100`, `X3 PASS 100`; `binary tie remains`; closes N52 ambiguity as cache hygiene, not interface compactness |
 | `W34` release-train compact operator-budget | `DONE` | Does the compact operator-budget split repeat on a broader long-horizon release-train integration lane? | `E44 / N54` release-train compact operator-budget | hidden release-train governor verifier, stateful recovery invariants, exact deploygrid source scope, and visible `40000` byte output budget | mainline materialized from N27 by adding `check_operator_budget.py` | `X1 FAIL 70` from visible operator-budget (`300873 > 40000`) while hidden release-train/scope gates pass; `X3 PASS 92` with `2618 <= 40000`; fourth compact inverse separator |
 | `W35` incident compact operator-budget | `DONE` | Does the compact operator-budget split repeat on cross-role incident repair with source reconciliation? | `E45 / N55` incident compact operator-budget | hidden incident integration/reconciliation verifier, exact scope, and visible `40000` byte output budget | mainline materialized from N28 by adding `check_operator_budget.py` | `X1 FAIL 70` from visible operator-budget (`352056 > 40000`) while hidden incident/scope gates pass; `X3 PASS 97` with `1841 <= 40000`; fifth compact inverse separator |
+| `W36` owner recovery compact operator-budget | `DONE` | Does the compact operator-budget split repeat on owner-recovery/orchestration packets after N26 tied by binary? | `E46 / N56` owner recovery compact operator-budget | hidden owner recovery/source-stale/interruption verifier, exact scope, visible `40000` byte output budget, and X2/X6 calibration | mainline materialized from N26 by adding `check_operator_budget.py` and updating source anchors to the current post-N55 read | `X1 FAIL 70` from visible operator-budget (`135621 > 40000`) while hidden owner/scope gates pass; `X3 PASS 100` with `1220 <= 40000`; `X2 FAIL 10`; `X6` runtime no-summary; sixth compact inverse separator |
 
 ## Active Spawn Board
 
@@ -267,6 +268,12 @@ arbitration, stale-requirements rejection, review response, validation evidence,
 runtime semantics, and exact scope, then adds the visible operator-output budget. X1 again passes
 semantic/scope gates but fails budget; X3 passes all gates compactly.
 
+W36 repeats the same explicit low-noise gate on the N26 compact owner-recovery line. `N56` preserves
+the hidden owner-recovery packet verifier and exact one-file scope, then adds
+`worker-output <= 40000`. X1 passes hidden owner/scope gates but fails budget; X3 passes all gates
+compactly. X2 is a scoreable lower calibration fail, and X6 is runtime no-summary rather than a
+model fail.
+
 ## Execution Order
 
 1. Collect read-only spawn proposals for `W1..W3`. `DONE` on 2026-04-22.
@@ -321,6 +328,7 @@ semantic/scope gates but fails budget; X3 passes all gates compactly.
 37. Materialize and run `N53-interface-refactor-cache-ignored-operator-budget` as W33/E43. `DONE` on 2026-04-24; `X1 PASS 100`, `X3 PASS 100`, `binary tie remains`; generated-cache isolation turns N52's both-fail into clean negative inverse evidence.
 38. Materialize and run `N54-release-train-compact-operator-budget` as W34/E44. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 92`; fourth compact inverse separator by visible operator-budget and first on the release-train long-horizon line.
 39. Materialize and run `N55-incident-compact-operator-budget` as W35/E45. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 97`; fifth compact inverse separator by visible operator-budget and first on the cross-role incident line.
+40. Materialize and run `N56-owner-recovery-compact-operator-budget` as W36/E46. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 100`; sixth compact inverse separator by visible operator-budget and first on the compact owner-recovery line. `X2` fails scoreably and `X6` is runtime no-summary; `X5` remains quota-deferred.
 
 ## Current Routing Impact
 
@@ -336,7 +344,7 @@ semantic/scope gates but fails budget; X3 passes all gates compactly.
 | incident-budget staged re-entry | `X1 primary` after `N41` produced `X1 PASS 100 / 100` versus `X3 FAIL 78 / 100` | strong enough for staged incident-budget routing; next repeat should be a real repo repair workflow only if policy needs extra confirmation |
 | scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, `N31`, `N32`, `N34`, and `N49`; N31 adds real CEM/MoM evidence, N32 combines MoM with hydrogenic radial Schrodinger, N34 adds high-load staged performance, and N49 shows explicit compactness does not split the lane | co-primary; choose by fresh measured runtime and artifact style rather than binary correctness |
 | interface refactor / migration | single-shot `N33` ties and favors X3 compactness; `N44` adds an X1-over-X3 exact patch-hygiene signal while hidden sourceId semantics tie; `N52` both-fails from X1 output budget and X3 cache drift; `N53` ignores generated cache and ties again at PASS/PASS; staged `N35` and `N36` split `X1 PASS` versus `X3 scoreable FAIL` | route staged API/interface migrations to X1; keep X3 for compact single-session refactor style when patch/cache hygiene is controlled, but do not claim interface compactness as a binary separator |
-| owner/orchestration | `X3` primary versus `X1` after `N23` and `N26`; `X5` is a route-healthy owner contender after `N26 PASS 100`, but needs another owner-family pass before policy promotion | one more owner-family `X5` check only if deciding between `X3` and `X5`; otherwise move to long-horizon repeat |
+| owner/orchestration | `X3` primary versus `X1` after `N23` and `N26`; `N56` adds a binary low-noise compact owner separator (`X1 FAIL 70`, `X3 PASS 100`); `X5` is a route-healthy owner contender after `N26 PASS 100`, but is quota-deferred and still needs another owner-family pass before policy promotion | one more owner-family `X5` check only after quota/route health returns; otherwise move to a different pass/pass lane or real-repo compact workflow |
 | visual/graphics | geometry tied on `S22`; `N21` ties X1/X3 on visual correctness and favors X3 on compactness; `N48` makes low-noise renderer-only raster hotfixes a binary `X1 FAIL / X3 PASS` separator; Gemini preference not proven | use X3 for compact single-session low-noise raster work; repeat Gemini only after semantic route health is fixed |
 
 ## Resume Point
@@ -347,7 +355,7 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume from the scored `N55` incident operator-budget closeout rather than from a queued batch.
+If interrupted now, resume from the scored `N56` owner-recovery operator-budget closeout rather than from a queued batch.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`
 versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), staged owner recovery
@@ -363,9 +371,10 @@ an inverse pass/fail separator. `N52` tests interface-refactor compactness and a
 `both scoreable FAIL`: X1 is semantically correct but too verbose, while X3 is compact but leaves
 `.pytest_cache` drift. `N53` isolates that cache drift and ties again at PASS/PASS. `N54` and `N55`
 then extend the compact inverse pattern to release-train long-horizon integration and cross-role
-incident repair: X1 preserves hidden semantics but fails output budget, X3 passes all gates. Next
-concrete work should switch to another pass/pass lane or a real-repo compact workflow rather than
-tightening the same long-horizon operator-budget family again.
+incident repair. `N56` extends it again to compact owner recovery: X1 preserves hidden semantics but
+fails output budget, while X3 passes all gates. Next concrete work should switch to another
+pass/pass lane or a real-repo compact workflow rather than tightening the same owner/operator-budget
+family again.
 Bounded `N39` is now a staged systems/toolchain routing result in favor of X1. `X5` remains a live
-UI and single-session owner contender after route-healthy `N25` and `N26`, but the newer staged
-waves still produced only Gemini route or quota caveats.
+UI and single-session owner contender after route-healthy `N25` and `N26`, but `X5` is currently
+quota-deferred and the newer staged waves still produced only Gemini route or quota caveats.

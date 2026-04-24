@@ -2778,3 +2778,41 @@ Record the lane meaning as compact cross-role incident repair. Together with `N4
 `N55`, the long-horizon/incident family now has repeated low-noise inverse separators in favor of
 X3 for single-session compact work, while `N41` remains the staged incident-budget separator in
 favor of X1.
+
+## 2026-04-24 Follow-Up: W36 Owner Recovery Compact Operator-Budget
+
+`N56-owner-recovery-compact-operator-budget-gauntlet` repeats the explicit low-noise requirement
+on the compact owner-recovery packet. It derives from `N26`, preserving the source/stale
+classification, interruption continuity, lane-state, gate-order, and denominator-discipline
+verifier, then adds a visible `../meta/worker-output.txt <= 40000` operator-output gate.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N56` JSON parse, verifier compile, bundle-shape, start-state verifier, and operator-budget bundle-shape | `PASS` |
+| `N56` reference probe in `.scratch/verifier-probes/2026-04-24-n56-owner-operator-budget` | owner verifier `PASS`; scope `PASS`; operator-budget `PASS` |
+| `score-n56-owner-operator-budget-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N56` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_12-04-25-X1-wave-w36-n56-owner-operator-budget-2026-04-24/N56/` | `0` | `FAIL` | `70 / 100` | `135621` | output budget fail |
+| `N56` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-24_12-04-25-X2-wave-w36-n56-owner-operator-budget-2026-04-24/N56/` | `0` | `FAIL` | `10 / 100` | `1596` | semantic packet missing |
+| `N56` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_12-04-25-X3-wave-w36-n56-owner-operator-budget-2026-04-24/N56/` | `0` | `PASS` | `100 / 100` | `1220` | none |
+| `N56` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-24_12-04-25-X6-wave-w36-n56-owner-operator-budget-2026-04-24/N56/` | n/a | `NOT-RUN` | `0 / 100` | n/a | runtime no-summary timeout |
+
+### Verdict
+
+`N56` is the sixth honest compact single-session inverse separator: `X1 FAIL / X3 PASS`.
+It is scoreable for the top pair because both wrappers exited `0`, both rows produced final
+summaries, and the only X1 failing verifier is the visible operator-output budget:
+`135621 > 40000`. X1 still passed the hidden owner-recovery packet verifier and exact scope gate.
+X3 passed the same gates and stayed compact: `1220 <= 40000`.
+
+Calibration rows do not change the top-pair conclusion. `X2` is a scoreable lower calibration fail:
+it stayed compact but left the semantic packet unchanged/missing. `X6` is `runtime-no-summary`
+after timeout and is not a model fail. `X5` remains quota-deferred; `X4` is reserved for the final
+full closing run.

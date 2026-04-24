@@ -1,0 +1,84 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-24_12-04-25-X1-wave-w36-n56-owner-operator-budget-2026-04-24\\N56",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 70,
+      "source_stale": 25,
+      "continuity": 20,
+      "routing": 20,
+      "calibration_runtime": 15,
+      "citations_denominator": 10,
+      "compactness": 2,
+      "operator_budget_pass": false,
+      "elapsed_proxy_seconds": 195.87,
+      "output_bytes": 135621,
+      "changed_paths": [
+        "candidate/owner-recovery-wave-roadmap-decision.md"
+      ],
+      "notes": [
+        "operator budget fail"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-24_12-04-25-X2-wave-w36-n56-owner-operator-budget-2026-04-24\\N56",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 10,
+      "source_stale": 0,
+      "continuity": 0,
+      "routing": 0,
+      "calibration_runtime": 0,
+      "citations_denominator": 0,
+      "compactness": 10,
+      "operator_budget_pass": true,
+      "elapsed_proxy_seconds": 6.751,
+      "output_bytes": 1596,
+      "changed_paths": [],
+      "notes": [
+        "operator budget pass"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-24_12-04-25-X3-wave-w36-n56-owner-operator-budget-2026-04-24\\N56",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 100,
+      "source_stale": 25,
+      "continuity": 20,
+      "routing": 20,
+      "calibration_runtime": 15,
+      "citations_denominator": 10,
+      "compactness": 10,
+      "operator_budget_pass": true,
+      "elapsed_proxy_seconds": 307.699,
+      "output_bytes": 1220,
+      "changed_paths": [
+        "candidate/owner-recovery-wave-roadmap-decision.md"
+      ],
+      "notes": [
+        "operator budget pass"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-cohort-runs\\2026-04-24_12-04-25-X6-wave-w36-n56-owner-operator-budget-2026-04-24\\N56",
+      "row": "X6",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "total": 0
+    }
+  ]
+}

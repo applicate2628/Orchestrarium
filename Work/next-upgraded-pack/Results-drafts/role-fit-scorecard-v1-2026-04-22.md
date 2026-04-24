@@ -30,7 +30,9 @@ top-level generated `.pytest_cache/**`; both top rows then pass at `100 / 100`, 
 compactness probe returns to `binary tie remains`. `N54` then moves the same operator-budget gate to
 the release-train long-horizon line and finds a fourth compact inverse separator: X1 preserves hidden
 release-train semantics but fails output budget, while X3 passes all gates compactly. `N55` repeats
-the same split on cross-role incident repair. The explicit
+the same split on cross-role incident repair. `N56` repeats it on compact owner recovery: X1 passes
+hidden owner-recovery semantics and scope but fails the visible output budget, while X3 passes all
+gates compactly. The explicit
 `X1 / gpt-5.4 xhigh` hard-5 comparison also passes `5 / 5`, so the staged X1-over-Claude split is
 not solely a `gpt-5.5` refresh artifact.
 
@@ -50,7 +52,7 @@ It separates:
 | `v2-core12-tie-hardened-results-2026-04-20.md` | hardened `X1` / `X3` / `X5` read for advisory, design, generic review, and security review |
 | `v2-extra-lane-n08-n10-results-2026-04-20.md` | `E1 worker.long-autonomous` extra-lane read |
 | `v2-top-pair-rubric-e3-results-2026-04-20.md` | narrow rubric read over `N11..N13`; `X1 60 / 60`, `X3 59 / 60` |
-| `x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted hardening record for `N06`, wave 2, `S06`, `S22`, and `N14..N55` |
+| `x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted hardening record for `N06`, wave 2, `S06`, `S22`, and `N14..N56` |
 | `n16-long-horizon-rubric-2026-04-22.json` | `E6` long-horizon integration rubric; `X3 95 / 100`, `X1 89 / 100` |
 | `n17-owner-routing-rubric-2026-04-22.json` | `E7` owner/orchestration routing rubric; `X1`, `X2`, `X3`, and `X6` all `100 / 100`; `X5` runtime `NOT-RUN` after failed smoke |
 | `n18-scientist-constraints-rubric-2026-04-22.json` | `E8` scientist/constraints rubric; `X1`, `X2`, and `X3` all `100 / 100`; `X6` route-fails with partial `60 / 100`; `X5` semantic run times out |
@@ -169,6 +171,7 @@ It separates:
 | `E43 interface-refactor cache-ignored operator-budget` | `n53-interface-refactor-cache-ignored-rubric-2026-04-24.json` | negative inverse-separator evidence: both top rows pass hidden interface semantics, exact required-path scope after generated cache ignore, and visible operator budget; `binary tie remains` |
 | `E44 release-train compact operator-budget` | `n54-release-train-operator-budget-rubric-2026-04-24.json` | fourth compact single-session inverse separator: X1 fails only the visible output budget after hidden release-train semantics pass; X3 passes all gates compactly |
 | `E45 incident compact operator-budget` | `n55-incident-operator-budget-rubric-2026-04-24.json` | fifth compact single-session inverse separator: X1 fails only the visible output budget after hidden incident/reconciliation semantics pass; X3 passes all gates compactly |
+| `E46 owner recovery compact operator-budget` | `n56-owner-operator-budget-rubric-2026-04-24.json` | sixth compact single-session inverse separator and first on compact owner recovery: X1 fails only the visible output budget after hidden owner-recovery semantics pass; X3 passes all gates compactly; X2 fails scoreably and X6 is runtime no-summary |
 | `2026-04-24 X1 gpt-5.5 refresh` | `S01..S33 + N01..N41` fresh binary rerun | active `X1 / gpt-5.5` passes `74 / 74` unique scenarios; hard-5 staged subset is `5 / 5` and preserves the staged separator pattern against Claude-family rows |
 | `2026-04-24 X1 gpt-5.4 hard-5 comparison` | `x1-gpt54-hard5-2026-04-24` staged roots | explicit `X1 / gpt-5.4 xhigh` comparison passes `N35`, `N36`, `N37`, `N39`, and `N41` with `wrapperExitCode=0` and verifier `PASS` |
 
@@ -177,7 +180,7 @@ It separates:
 | Rule | Current use |
 |---|---|
 | within-lane comparison | raw rubric scores are usable for `X1` versus `X3` on the same scenario |
-| cross-lane ranking | do not compare `N16`, `N19`, `N20`, `N21`, `N22`, `N23`, `N24`, `N25`, `N26`, `N27`, `N28`, `N29`, `N30`, `N31`, `N32`, `N33`, `N34`, `N35`, `N36`, `N37`, `N38`, `N39`, `N40`, `N41`, `N42`, `N43`, `N44`, `N45`, `N46`, `N47`, `N48`, `N49`, `N50`, `N51`, `N52`, `N53`, `N54`, and `N55` as one global `0..100` leaderboard without splitting semantic and efficiency points |
+| cross-lane ranking | do not compare `N16`, `N19`, `N20`, `N21`, `N22`, `N23`, `N24`, `N25`, `N26`, `N27`, `N28`, `N29`, `N30`, `N31`, `N32`, `N33`, `N34`, `N35`, `N36`, `N37`, `N38`, `N39`, `N40`, `N41`, `N42`, `N43`, `N44`, `N45`, `N46`, `N47`, `N48`, `N49`, `N50`, `N51`, `N52`, `N53`, `N54`, `N55`, and `N56` as one global `0..100` leaderboard without splitting semantic and efficiency points |
 | promotion threshold | promote a row to hard policy only after a semantic edge or an independent same-lane repeat; a one-run output/cost edge stays `provisional-primary` |
 | diagnostic labels | current `X3` edges on compact single-session implementation, systems/toolchain, UI, owner recovery, and visual raster remain useful routing preferences; `N39`, `N40`, and `N41` add semantic staged systems, staged owner, and staged incident separators in favor of `X1`, while `N38` remains unresolved |
 
@@ -185,7 +188,7 @@ It separates:
 
 | Roles | Lane | Primary | Secondary | Confidence | Why |
 |---|---|---|---|---|---|
-| `$product-manager`, `$lead` | owner, excluded from semantic routing lanes | `X3 primary` for compact single-session owner recovery/routing packets; `X1 primary` when the owner packet is staged across recovery, route decision, runtime policy, and closeout | `X5` as a single-session owner contender only after another owner-family pass; `X1` remains the safe verbose fallback | high for staged X1 vs single-session X3; medium for X5 | N23 and N26 favor X3 on single-session owner recovery, but N40 is a scoreable staged-owner separator: `X1 PASS 98`, `X3 FAIL 55` |
+| `$product-manager`, `$lead` | owner, excluded from semantic routing lanes | `X3 primary` for compact single-session owner recovery/routing packets, especially when low-noise operator budget is explicit; `X1 primary` when the owner packet is staged across recovery, route decision, runtime policy, and closeout | `X5` as a single-session owner contender only after another owner-family pass and route health; `X1` remains the safe verbose fallback | high for staged X1 vs compact X3; medium for X5 | N23 and N26 favor X3 on single-session owner recovery, N56 makes compact low-noise owner recovery binary `X1 FAIL / X3 PASS`, and N40 is a scoreable staged-owner separator: `X1 PASS 98`, `X3 FAIL 55` |
 | `$consultant`, `$knowledge-archivist`, `$analyst` | `advisory.repo-understanding` | `X1` / `X3 near-tie` | `X5` | medium | hardened advisory/repo evidence ties top pair and keeps X5 viable |
 | `$product-analyst`, `$architect`, `$planner` | `advisory.design-adr` | `X1` for staged source-bound ADR/review closure | `X3` for compact single-shot ADR when no staged gate is required | high for staged gates, medium for single-shot ADR | E3 only slightly favored X1, but N37 makes staged ADR/review closure a scoreable binary separator: X1 passed and X3 failed |
 | `$ux-designer` | `design.ui-ux-structure` | `X1` / `X3 near-tie` | `X5` | medium | hardened UI/UX structure ties top pair; no proven style-quality separator |
@@ -203,11 +206,11 @@ It separates:
 
 | Trigger | Run X2? | Run X5? | Run X6? | Reason |
 |---|---|---|---|---|
-| new X1/X3 result could change a routing lane | yes | yes, after Gemini smoke | yes | gives lower-bound and alternate-provider context |
-| top pair ties by binary but rubric separates by more than `3` points | yes | optional | optional | checks whether rubric is only top-pair noise or a broader quality gradient |
-| new task is long-horizon / integration / cross-role repair | yes | only if direct smoke writes worker output | only if runner has not recently no-output timed out | Gemini no-output hangs should stay runtime `NOT-RUN`, not model fail |
-| review/security hardening | yes | yes | yes | prior evidence separates X5 lower here; useful to keep calibration fresh |
-| cheap smoke / wrapper validation | yes | yes | yes | validates route health, not semantic quality |
+| completed X1/X3 task could change a routing lane | yes | no while quota-deferred | yes | X2/X6 give paired lower-bound and alternate-provider context |
+| top pair ties by binary but rubric separates by more than `3` points | yes | no while quota-deferred | optional | checks whether rubric is only top-pair noise or a broader quality gradient |
+| new task is long-horizon / integration / cross-role repair | yes | no while quota-deferred | only if runner has not recently no-output timed out | Gemini no-output hangs stay runtime `NOT-RUN`, not model fail |
+| review/security hardening | yes | no while quota-deferred | yes | prior evidence separates X5 lower here, but route quota blocks fresh use |
+| final closing comparison | yes | yes if quota/route health returns | yes | validates the full final comparison set, with X4 reserved for that same closeout |
 
 ## Current Operating Recommendation
 
@@ -224,7 +227,7 @@ It separates:
 | systems/toolchain ownership patch with path/cache/lock/fingerprint semantics | `X3 primary` for ordinary compact single-session patches; `X1 primary` when the same lane is staged across recovery source arbitration, runtime-status discipline, ledger, and closeout; if hard output and turnaround budgets are both mandatory, N51 says verify both because the top pair can fail in opposite ways; avoid `X2/X5/X6` as primary |
 | UI state/render/keyboard/form interaction patch | `X3 primary` for compact single-session work, `X1 secondary`; N47 makes explicit low-noise UI hotfixes `X3 primary` by binary gate; consider `X5` when Gemini Pro route is healthy; N38 leaves staged UI unresolved because X3 never completed scoreably |
 | trace-heavy design memo, source-bound review, denominator/status reporting | `X1 slight primary`, `X3 secondary`; confidence is diagnostic-only |
-| owner recovery under stale-source and interruption traps | `X3 primary` for compact single-session packets, `X1 primary` once the packet is staged/re-entry based; `X5` remains a single-session contender after N26; avoid `X2/X6` as primary |
+| owner recovery under stale-source and interruption traps | `X3 primary` for compact single-session packets, now including explicit low-noise/operator-budget packets after N56; `X1 primary` once the packet is staged/re-entry based; `X5` remains quota-deferred contender after N26; avoid `X2/X6` as primary |
 | scientist/constraint decision memo or numerical physics solve with analytical oracle | `X1` / `X3 near-tie`; choose `X1` for trace-heavy evidence, `X3` for compact exact output, and verify runtime on the actual task |
 | runtime-sensitive scientific solver optimization | `X1` / `X3 near-tie`; N34 favored X1 runtime, N49 favored X3 runtime, so use fresh measured runtime instead of a fixed model preference |
 | ordinary single-session interface refactor / migration patch | `X3 primary` for compact migration style when patch hygiene is controlled; `X1 primary` when exact changed-path budget, staged ledger accountability, and test/source trace are first-class; N33 and N53 tie by binary while favoring compact style, N44 flips to X1 on patch hygiene |
@@ -246,8 +249,8 @@ below is a compact routing view of the same queue.
 | staged review/advisory gate policy | complete for X1 versus X3: N37 splits top pair scoreably and supports X1 primary for staged source arbitration, ADR traceability, response-gate closure, and exact non-claim ledgers |
 | next scientific computation hardening | no immediate synthetic follow-up; if policy needs runtime separation, use a stricter multi-session optimization task or real performance budget in a repo |
 | systems/toolchain lane repeat evidence | complete on both branches: `N19` and `N24` favor `X3 95 / 100` over `X1 86 / 100` for compact single-session work; `N42` and `N50` show immutable-CI plus explicit output budget still tie top pair by binary; `N51` makes hard turnaround first-class and yields both-fail tradeoff evidence; bounded `N39` favors `X1 PASS 94` over `X3 FAIL 78` for staged systems/toolchain recovery |
-| inverse `X1 FAIL / X3 PASS` search | `N46` found the first honest compact single-session inverse separator by making low-noise/operator-budget behavior a visible hard gate; `N47` repeats it on UI, `N48` repeats it on visual raster, `N54` repeats it on release-train long-horizon integration, and `N55` repeats it on cross-role incident repair. `N49`, `N50`, and `N53` do not repeat it on scientific optimizer, systems/toolchain, or cache-ignored interface refactor because both top rows pass the explicit budget. `N51` does not produce inverse separation because both fail under combined compact+turnaround+semantics constraints. `N52` does not produce inverse separation because X3 stays compact but leaks `.pytest_cache`; N53 closes that ambiguity as PASS/PASS after cache ignore. Earlier attempts `N42`, `N43`, and `N45` tied; `N44` went the other way through X3 patch-hygiene drift |
-| next inverse probe | Cache-ignored interface compactness is now closed as `binary tie remains`; continue only in other lanes where pass/pass still hides a real role distinction, especially real-repo compact workflows or unresolved staged UI/visual-state |
+| inverse `X1 FAIL / X3 PASS` search | `N46` found the first honest compact single-session inverse separator by making low-noise/operator-budget behavior a visible hard gate; `N47` repeats it on UI, `N48` repeats it on visual raster, `N54` repeats it on release-train long-horizon integration, `N55` repeats it on cross-role incident repair, and `N56` repeats it on compact owner recovery. `N49`, `N50`, and `N53` do not repeat it on scientific optimizer, systems/toolchain, or cache-ignored interface refactor because both top rows pass the explicit budget. `N51` does not produce inverse separation because both fail under combined compact+turnaround+semantics constraints. `N52` does not produce inverse separation because X3 stays compact but leaks `.pytest_cache`; N53 closes that ambiguity as PASS/PASS after cache ignore. Earlier attempts `N42`, `N43`, and `N45` tied; `N44` went the other way through X3 patch-hygiene drift |
+| next inverse probe | Cache-ignored interface compactness is now closed as `binary tie remains`, and compact owner recovery now has N56; continue only in other lanes where pass/pass still hides a real role distinction, especially real-repo compact workflows or unresolved staged UI/visual-state |
 | UI implementation repeat evidence | single-session evidence is complete for X3 versus X1: `N20` and `N25` both favor `X3`, and `N47` adds a binary `X1 FAIL / X3 PASS` low-noise UI hotfix separator; staged UI remains unresolved because `N38` produced only an `X1` scoreable pass while `X3` timed out without summary; `X5` still needs one more UI-family pass before promotion over X3 |
 | visual provider heuristic is not benchmark-proven | N21 proved top-pair raster correctness and N48 adds an X3-over-X1 low-noise raster separator, but both Gemini semantic rows timed out; repeat Gemini only after semantic route health is fixed |
-| owner/orchestration compactness needs repeat evidence | complete for X3 versus X1 on single-session recovery packets and for X1 versus X3 on staged owner packets; repeat only if deciding between X3 and X5 on the single-session branch or if a real repo owner workflow is admitted |
+| owner/orchestration compactness needs repeat evidence | complete for X3 versus X1 on single-session recovery packets, now including explicit low-noise operator budget via N56, and complete for X1 versus X3 on staged owner packets; repeat only if deciding between X3 and X5 after X5 quota/route health returns or if a real repo owner workflow is admitted |

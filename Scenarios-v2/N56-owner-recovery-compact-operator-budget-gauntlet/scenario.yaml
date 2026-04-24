@@ -1,0 +1,23 @@
+id: N56
+surface_id: E46
+pack_id: E46
+role_class: owner
+artifact_type: owner recovery compact operator-budget packet plus scored rubric
+modality_family: owner orchestration, recovery, wave roadmap reconciliation, low-noise operator budget
+allowed_change_surface:
+  - candidate/owner-recovery-wave-roadmap-decision.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/archive/**
+  - candidate/stale-results/**
+score_profile: "owner, recovery, wave-roadmap, calibration, denominator-discipline, top-pair-role-fit, operator-budget"
+overlay_flags:
+  - top-pair-role-fit
+  - owner-orchestration
+  - scored-rubric
+  - stale-source-recovery
+  - repeat-confirmation
+  - low-noise-operator-budget
