@@ -1,0 +1,70 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_08-24-09-X1-wave-w29-n49-science-operator-budget-2026-04-24/N49",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 96,
+      "correctness": 40,
+      "em_correctness": 20,
+      "hydrogen_correctness": 20,
+      "runtime": 16,
+      "runtime_seconds": 3.147,
+      "staged": 15,
+      "report": 5,
+      "notes_score": 5,
+      "scope": 10,
+      "operator_budget": 5,
+      "operator_budget_pass": true,
+      "output_bytes": 704,
+      "changed_paths": [
+        "candidate/optimization-report.json",
+        "candidate/stage-state.json",
+        "candidate/workspace/dual_physics.py",
+        "candidate/workspace/perf-ledger.json",
+        "candidate/workspace/validation-notes.md"
+      ],
+      "failure_ids": [],
+      "notes": [
+        "operator budget pass"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_08-24-09-X3-wave-w29-n49-science-operator-budget-2026-04-24/N49",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 100,
+      "correctness": 40,
+      "em_correctness": 20,
+      "hydrogen_correctness": 20,
+      "runtime": 20,
+      "runtime_seconds": 2.289,
+      "staged": 15,
+      "report": 5,
+      "notes_score": 5,
+      "scope": 10,
+      "operator_budget": 5,
+      "operator_budget_pass": true,
+      "output_bytes": 1306,
+      "changed_paths": [
+        "candidate/optimization-report.json",
+        "candidate/stage-state.json",
+        "candidate/workspace/dual_physics.py",
+        "candidate/workspace/perf-ledger.json",
+        "candidate/workspace/validation-notes.md"
+      ],
+      "failure_ids": [],
+      "notes": [
+        "operator budget pass"
+      ]
+    }
+  ]
+}

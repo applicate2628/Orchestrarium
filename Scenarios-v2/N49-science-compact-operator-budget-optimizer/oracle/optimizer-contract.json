@@ -1,0 +1,299 @@
+{
+  "schema": "n49.science-operator-budget-contract.v1",
+  "plan_fingerprint": "n49-staged-high-load-science-compact-operator-budget-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N49",
+    "surface_id": "E39",
+    "pack_id": "E39",
+    "role_class": "scientist-performance",
+    "artifact_type": "staged high-load dual physics compact operator-budget optimizer patch plus phase ledger",
+    "modality_family": "computational electromagnetics, quantum bound states, numerical optimization, staged re-entry, low-noise operator budget",
+    "allowed_change_surface": [
+      "candidate/stage-state.json",
+      "candidate/optimization-report.json",
+      "candidate/workspace/dual_physics.py",
+      "candidate/workspace/perf-ledger.json",
+      "candidate/workspace/validation-notes.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/tests/**"
+    ],
+    "score_profile": "scientist, computational-physics, analytical-oracle, staged-reentry, solver-runtime, patch-quality, operator-budget",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "scientist-constraints",
+      "scored-rubric",
+      "numerical-witness",
+      "computational-physics",
+      "method-of-moments",
+      "hydrogenic-schrodinger",
+      "runtime-scoreable",
+      "staged-reentry",
+      "high-load-optimizer",
+      "low-noise-operator-budget"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/performance-requirements.md",
+    "inputs/phases/01-diagnose-baseline.md",
+    "inputs/phases/02-implement-fast-solvers.md",
+    "inputs/phases/03-optimize-scale.md",
+    "inputs/phases/04-closeout-report.md",
+    "candidate/README.md",
+    "candidate/stage-state.json",
+    "candidate/optimization-report.json",
+    "candidate/workspace/dual_physics.py",
+    "candidate/workspace/perf-ledger.json",
+    "candidate/workspace/validation-notes.md",
+    "candidate/workspace/tests/test_dual_physics.py",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/optimizer-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_science_optimizer.py",
+    "verifiers/check_scope.py",
+    "verifiers/check_operator_budget.py"
+  ],
+  "operator_budget": {
+    "max_worker_output_bytes": 40000,
+    "budget_source": "../meta/worker-output.txt",
+    "failure_class": "scoreable",
+    "rationale": "This compact scientific optimizer lane is scoreable for low-noise operator behavior; verbose solver transcripts can block review even when physics and runtime semantics pass."
+  },
+  "em_solver_api": "solve_cylinder_mom",
+  "hydrogen_solver_api": "solve_hydrogen_radial",
+  "required_stage_ids": [
+    "01-diagnose-baseline",
+    "02-implement-fast-solvers",
+    "03-optimize-scale",
+    "04-closeout-report"
+  ],
+  "required_stage_source_cues": [
+    "starter midpoint",
+    "incident angle",
+    "tridiagonal",
+    "perf-ledger.json",
+    "optimization-report.json"
+  ],
+  "required_artifact_paths": [
+    "candidate/stage-state.json",
+    "candidate/optimization-report.json",
+    "candidate/workspace/dual_physics.py",
+    "candidate/workspace/perf-ledger.json",
+    "candidate/workspace/validation-notes.md"
+  ],
+  "em_cases": [
+    {
+      "case_id": "em-ka6-wide",
+      "radius": 0.45,
+      "wavenumber": 13.3333333333,
+      "segments": 144,
+      "incident_angle": 0.25,
+      "observation_radius": 1.4,
+      "sample_count": 18,
+      "matrix_quadrature_order": 8,
+      "field_quadrature_order": 10,
+      "series_terms": 120,
+      "density_modes": 20,
+      "max_boundary_residual_l2": 0.012,
+      "max_relative_field_error": 0.018,
+      "max_density_mode_error": 0.08,
+      "max_runtime_seconds": 5.0
+    },
+    {
+      "case_id": "em-ka11-scale",
+      "radius": 0.35,
+      "wavenumber": 31.4285714286,
+      "segments": 224,
+      "incident_angle": -0.6,
+      "observation_radius": 0.95,
+      "sample_count": 20,
+      "matrix_quadrature_order": 6,
+      "field_quadrature_order": 8,
+      "series_terms": 190,
+      "density_modes": 32,
+      "max_boundary_residual_l2": 0.018,
+      "max_relative_field_error": 0.035,
+      "max_density_mode_error": 0.14,
+      "max_runtime_seconds": 10.0
+    },
+    {
+      "case_id": "em-ka14-load",
+      "radius": 0.32,
+      "wavenumber": 43.75,
+      "segments": 320,
+      "incident_angle": 0.1,
+      "observation_radius": 0.82,
+      "sample_count": 22,
+      "matrix_quadrature_order": 6,
+      "field_quadrature_order": 8,
+      "series_terms": 230,
+      "density_modes": 40,
+      "max_boundary_residual_l2": 0.024,
+      "max_relative_field_error": 0.055,
+      "max_density_mode_error": 0.22,
+      "max_runtime_seconds": 18.0
+    }
+  ],
+  "em_convergence": {
+    "coarse": {
+      "radius": 0.45,
+      "wavenumber": 13.3333333333,
+      "segments": 96,
+      "incident_angle": 0.25,
+      "observation_radius": 1.4,
+      "sample_count": 18,
+      "matrix_quadrature_order": 8,
+      "field_quadrature_order": 10,
+      "series_terms": 120
+    },
+    "refined_case_id": "em-ka6-wide",
+    "min_field_error_improvement_ratio": 1.10
+  },
+  "hydrogen_cases": [
+    {
+      "case_id": "h-4p-highgrid",
+      "z": 1.0,
+      "n": 4,
+      "l": 1,
+      "r_max": 110.0,
+      "grid_points": 3600,
+      "sample_count": 22,
+      "max_energy_abs_error": 0.00008,
+      "max_wave_l2_error": 0.025,
+      "max_residual_l2": 0.003,
+      "max_runtime_seconds": 1.5
+    },
+    {
+      "case_id": "he-5d-scale",
+      "z": 2.0,
+      "n": 5,
+      "l": 2,
+      "r_max": 80.0,
+      "grid_points": 4200,
+      "sample_count": 22,
+      "max_energy_abs_error": 0.00008,
+      "max_wave_l2_error": 0.025,
+      "max_residual_l2": 0.003,
+      "max_runtime_seconds": 1.5
+    },
+    {
+      "case_id": "li-6f-load",
+      "z": 3.0,
+      "n": 6,
+      "l": 3,
+      "r_max": 70.0,
+      "grid_points": 5000,
+      "sample_count": 22,
+      "max_energy_abs_error": 0.00008,
+      "max_wave_l2_error": 0.025,
+      "max_residual_l2": 0.003,
+      "max_runtime_seconds": 1.5
+    }
+  ],
+  "max_total_solver_runtime_seconds": 25.0,
+  "required_report_fields": [
+    "scenario_id",
+    "method",
+    "oracle_use",
+    "cases",
+    "performance",
+    "stage_trace",
+    "residual_risk"
+  ],
+  "required_case_ids": [
+    "em-ka6-wide",
+    "em-ka11-scale",
+    "em-ka14-load",
+    "h-4p-highgrid",
+    "he-5d-scale",
+    "li-6f-load"
+  ],
+  "required_notes_phrases": [
+    "Method of Moments",
+    "PEC circular cylinder",
+    "TMz EFIE",
+    "outgoing Green function",
+    "surface density Fourier coefficients",
+    "finite-difference radial Schrodinger",
+    "tridiagonal Hamiltonian",
+    "hydrogenic analytical oracle",
+    "solver runtime",
+    "high-load scaling",
+    "staged re-entry"
+  ],
+  "required_solver_marker_groups": {
+    "em_linear_solve": [
+      "np.linalg.solve",
+      "scipy.linalg.solve",
+      "linalg.solve"
+    ],
+    "hydrogen_tridiagonal": [
+      "eigh_tridiagonal",
+      "scipy.sparse.linalg",
+      "eigsh"
+    ]
+  },
+  "forbidden_solver_markers": [
+    "sympy",
+    "eval_genlaguerre",
+    "genlaguerre",
+    "assoc_laguerre",
+    "optimizer-contract.json",
+    "check_science_optimizer",
+    "analytic_total_field",
+    "exact_hydrogen",
+    "jv(",
+    "scipy.special import jv",
+    "np.linalg.eig(",
+    "np.linalg.eigh(",
+    "scipy.linalg.eigh("
+  ],
+  "expected_start_state_failures": [
+    "solver-missing-marker-hydrogen_tridiagonal",
+    "em-case-em-ka6-wide",
+    "em-density-em-ka6-wide",
+    "em-case-em-ka11-scale",
+    "em-density-em-ka11-scale",
+    "em-case-em-ka14-load",
+    "em-density-em-ka14-load",
+    "em-convergence-failed",
+    "hydrogen-case-h-4p-highgrid",
+    "hydrogen-case-he-5d-scale",
+    "hydrogen-case-li-6f-load",
+    "stage-ledger-incomplete",
+    "perf-ledger-incomplete",
+    "report-method",
+    "report-oracle-use",
+    "report-missing-cases",
+    "notes-missing-phrases"
+  ]
+}

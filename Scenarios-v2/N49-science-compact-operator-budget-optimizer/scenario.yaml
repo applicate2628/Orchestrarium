@@ -1,0 +1,31 @@
+id: N49
+surface_id: E39
+pack_id: E39
+role_class: scientist-performance
+artifact_type: staged high-load dual physics compact operator-budget optimizer patch plus phase ledger
+modality_family: computational electromagnetics, quantum bound states, numerical optimization, staged re-entry, low-noise operator budget
+allowed_change_surface:
+  - candidate/stage-state.json
+  - candidate/optimization-report.json
+  - candidate/workspace/dual_physics.py
+  - candidate/workspace/perf-ledger.json
+  - candidate/workspace/validation-notes.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/tests/**
+score_profile: "scientist, computational-physics, analytical-oracle, staged-reentry, solver-runtime, patch-quality, operator-budget"
+overlay_flags:
+  - top-pair-role-fit
+  - scientist-constraints
+  - scored-rubric
+  - numerical-witness
+  - computational-physics
+  - method-of-moments
+  - hydrogenic-schrodinger
+  - runtime-scoreable
+  - staged-reentry
+  - high-load-optimizer
+  - low-noise-operator-budget

@@ -2522,3 +2522,39 @@ Record the lane meaning narrowly: this separates low-noise compact visual raster
 not pixel correctness. Both top rows repaired the raster renderer correctly without changing the
 visible test. Together with `N46` and `N47`, the operator-budget inverse pattern now repeats across
 repair, UI, and visual graphics lines.
+
+## 2026-04-24 Follow-Up: W29 Scientific Compact Operator-Budget Optimizer
+
+`N49-science-compact-operator-budget-optimizer` tests whether the compact operator-budget separator
+also holds on the real scientific optimizer lane. It derives from `N34`, preserving the Method of
+Moments PEC cylinder oracle, the hydrogenic radial Schrodinger oracle, staged artifacts, solver
+runtime budgets, and exact five-file allowed change surface. The only added hardening is the visible
+`../meta/worker-output.txt <= 40000` operator-output gate.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N49` JSON parse, verifier compile, bundle-shape, start-state verifier, and operator-budget bundle-shape | `PASS` |
+| `N49` reference candidate in `.scratch/verifier-probes/2026-04-24-n49-science-operator-budget` | science optimizer verifier `PASS`; scope `PASS`; operator-budget `PASS` |
+| `score-n49-science-operator-budget-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Runtime s | Output bytes |
+|---|---|---|---:|---|---:|---:|---:|
+| `N49` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_08-24-09-X1-wave-w29-n49-science-operator-budget-2026-04-24/N49/` | `0` | `PASS` | `96 / 100` | `3.147` | `704` |
+| `N49` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_08-24-09-X3-wave-w29-n49-science-operator-budget-2026-04-24/N49/` | `0` | `PASS` | `100 / 100` | `2.289` | `1306` |
+
+### Verdict
+
+`binary tie remains` for `N49`: this is negative inverse-separator evidence. Both wrappers exited
+`0`, both rows passed the operator-budget gate, the full science optimizer verifier, and exact scope.
+X3 wins the rubric by `4` points on measured solver runtime, but the explicit low-noise gate did not
+separate the top pair on this scientific optimizer lane.
+
+The practical read is narrower than `N46..N48`: when compactness is stated directly in a complex
+scientific task, X1 can adapt and pass. Keep `X3 primary` for compact scientific optimizer work only
+as a rubric/runtime preference, not as a binary separator, while `N34` and `N49` both support that
+both top rows are viable for real computational-physics correctness.
