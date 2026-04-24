@@ -17,6 +17,12 @@ The completed `S01..S33 + N01..N07` full-v2 pass rates exposed a ceiling effect:
 V3 hardening must make pass/fail depend on role-specific reasoning artifacts, not only on section
 presence and keyword coverage.
 
+2026-04-24: the current canonical hardened `/40` publication surface is
+`Results-drafts/full-v2-hard-results-current.md`. It keeps the `12+1` / `40` score-slot shape but
+replaces weak full-v2 slots with admitted hardened equivalents. Rows with quota, route, timeout,
+missing-summary, or missing-output failures stay `NOT-RUN` and do not become scoreable model
+failures.
+
 | Hardening rule | Meaning |
 |---|---|
 | replace stale lines in place | update the current live result/evidence surfaces instead of creating parallel stale copies |

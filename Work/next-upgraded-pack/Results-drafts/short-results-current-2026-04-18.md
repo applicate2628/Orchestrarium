@@ -17,6 +17,18 @@ The expanded full `S01..S33 + N01..N07` surface below is now treated as a `pre-v
 baseline, not as final classification evidence. V3 hardening replaces stale lines in this same live
 surface as hardened scenario evidence is admitted.
 
+Current canonical hardened classification lives in `full-v2-hard-results-current.md`. It preserves
+the same `40` score-slot shape, but replaces the weak full-v2 cells with admitted hardened
+equivalents across `12` routing lines plus one owner/control line.
+
+| Row | Current `full-v2-hard` score | Current read |
+|---|---:|---|
+| `X1 / gpt-5.5` | `35 / 40` | global tie; fails compact operator-budget slots, not hidden correctness |
+| `X3 / opus 4.7max` | `35 / 40` | global tie; fails staged re-entry/source-ledger slots |
+| `X5 / gemini3.1pro` | `14 / 40` | partial only: `17` scoreable slots, `23` `NOT-RUN` |
+| `X2 / gpt-spark` | `5 / 40` | partial calibration only: `19` scoreable slots, `21` `NOT-RUN` |
+| `X6 / flash-lite` | `1 / 40` | partial calibration only: `7` scoreable slots, `33` `NOT-RUN` |
+
 `Scenarios-v2` is quota-aware across the expanded full `S01..S33 + N01..N07` surface for
 `X1`, `X2`, `X3`, `X4`, `X5`, and `X6`. Explicit provider quota / usage-limit failures are
 `NOT-RUN` / `REQUEUE`, not scoreable `FAIL`. `X5` is currently route/runtime unhealthy for new
@@ -379,6 +391,7 @@ failures as `PASS`.
 
 | Source | Role |
 |---|---|
+| `full-v2-hard-results-current.md` | current canonical hardened `/40` surface and slot matrix |
 | `x1-x3-steady-state-core-results-2026-04-17.md` | legacy admitted ranking surface for the old upgraded-pack architecture |
 | `x1-x3-full-registry-results-2026-04-17.md` | legacy widest execution-backed registry surface for the old upgraded-pack architecture |
 | `v2-full-s01-s33-n01-n07-results-2026-04-18.md` | full current expanded v2 result surface for `X1`, `X2`, `X3`, `X4`, `X5`, and `X6` |

@@ -1,5 +1,5 @@
 Date: 2026-04-18
-Updated: 2026-04-20
+Updated: 2026-04-24
 Owner: `$lead`
 Status: `PASS`
 
@@ -7,6 +7,10 @@ Status: `PASS`
 
 This note translates the full role-complete benchmark universe into the frozen `12`-lane routing
 model.
+
+2026-04-24 update: `Results-drafts/full-v2-hard-results-current.md` is now the current canonical
+hardened `/40` surface for this lane model. The older `S01..S33 + N01..N07` full-v2 table remains
+only a pre-v3 ceiling-effect baseline.
 
 The benchmark universe remains `33` surfaces:
 
@@ -125,7 +129,7 @@ The routing layer is narrower by design:
 | UI separation | design, implementation, and visual correctness remain separate |
 | architecture separation | design lane and review lane remain separate |
 | security separation | `review.security` is standalone |
-| execution boundary | core scoreable execution surface remains `S01..S33 + N01..N07`; `N08..N10` are admitted as separate `E1` extra-lane evidence; `N11..N13` are diagnostic `E2` tiebreaker evidence |
+| execution boundary | `full-v2-hard-results-current.md` is the current hardened `/40` execution surface; the legacy `S01..S33 + N01..N07` table is pre-v3 baseline only; `N08..N10` remain separate `E1` evidence and `N11..N13` remain diagnostic `E2` tiebreaker evidence |
 
 ## Consequence
 
