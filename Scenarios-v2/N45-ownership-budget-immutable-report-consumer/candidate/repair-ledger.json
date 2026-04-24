@@ -1,0 +1,18 @@
+{
+  "incidentId": "INC-742",
+  "sourceDecisions": [
+    {
+      "sourceId": "stale-ui-note",
+      "decision": "accepted",
+      "claim": "Use the UI badge as release source of truth."
+    }
+  ],
+  "reviewResponses": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 12,
+    "requiredChangedPaths": []
+  }
+}

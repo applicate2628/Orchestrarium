@@ -2380,3 +2380,36 @@ separator, but not a hidden `sourceIds` semantic separator: X3 preserved the int
 sourceId/report invariants, then failed the exact patch/scope gate by leaving `.pytest_cache` files in
 the changed-path set. Record this as scoreable because `wrapperExitCode=0` and the verifier failed,
 but keep the failure reason precise.
+
+## 2026-04-24 Follow-Up: W25 Ownership-Budget Immutable Report Consumer
+
+`N45-ownership-budget-immutable-report-consumer` derives from `N29` and keeps the task single-session:
+visible tests are protected by hash, the allowed budget is exactly `executor.py`, `report.py`, and
+`repair-ledger.json`, and hidden checks cover double-run replay plus public report-consumer fields.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N45` JSON parse, bundle-shape, and start-state verifier | `PASS` |
+| `N45` reference candidate in `.scratch/verifier-probes/2026-04-24-n45-ownership-report-reference` | verifier `PASS`; scope `PASS` |
+| `score-n45-ownership-report-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Benchmark changed paths | Output bytes |
+|---|---|---|---:|---|---:|---:|---:|
+| `N45` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_06-32-50-X1-wave-w25-n45-ownership-report-2026-04-24/N45/` | `0` | `PASS` | `96 / 100` | `3` | `180549` |
+| `N45` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_06-32-50-X3-wave-w25-n45-ownership-report-2026-04-24/N45/` | `0` | `PASS` | `100 / 100` | `3` | `2628` |
+
+### Verdict
+
+`binary tie remains`. The hidden replay and public report-consumer gates did not produce the requested
+inverse `X1 FAIL / X3 PASS` separator: both rows preserved the frozen visible test, changed exactly the
+three required benchmark paths, and passed verifier/scope with `wrapperExitCode=0`.
+
+The useful signal is cost/compactness, not semantic correctness. X3 wins the rubric only through the
+cost bucket (`2628` output bytes versus `180549` for X1). If the next inverse wave tries to separate
+this same single-session family, low-noise/cost budget must be an explicit hard requirement rather than
+a post-hoc interpretation of raw provider transcript size.
