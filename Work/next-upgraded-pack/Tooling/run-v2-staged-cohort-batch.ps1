@@ -525,6 +525,15 @@ if (-not $rowConfigs.ContainsKey($RowId)) {
 }
 
 $rowConfig = $rowConfigs[$RowId]
+if ($rowConfig.Provider -eq 'claude' -and -not [string]::IsNullOrWhiteSpace($env:BENCHMARK_CLAUDE_MODEL_OVERRIDE)) {
+    $rowConfig = $rowConfig.Clone()
+    $rowConfig.ModelLabel = if ([string]::IsNullOrWhiteSpace($env:BENCHMARK_MODEL_LABEL_OVERRIDE)) {
+        $env:BENCHMARK_CLAUDE_MODEL_OVERRIDE
+    } else {
+        $env:BENCHMARK_MODEL_LABEL_OVERRIDE
+    }
+    $rowConfig.ClaudeArgs = @('--model', $env:BENCHMARK_CLAUDE_MODEL_OVERRIDE, '--effort', 'max')
+}
 if (-not (Test-Path -LiteralPath $rowConfig.WrapperPath -PathType Leaf)) {
     throw "Wrapper not found: $($rowConfig.WrapperPath)"
 }

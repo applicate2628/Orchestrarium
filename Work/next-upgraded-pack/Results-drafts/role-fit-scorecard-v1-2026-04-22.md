@@ -1,11 +1,19 @@
-Date: 2026-04-22
+Date: 2026-04-24
 Owner: `$lead`
 Status: `PASS`
 
 ## Purpose
 
 This is the first role-fit scorecard for choosing which row should be preferred for each benchmark
-lane. It is not a single global leaderboard. It separates:
+lane. It is not a single global leaderboard.
+
+2026-04-24 update: active `X1` is now `gpt-5.5`. The fresh binary refresh passes `74 / 74`
+unique scenarios on `S01..S33 + N01..N41`, and the hard-5 staged probe reads `X1 / gpt-5.5`
+`5 / 5` versus admitted `X3 / opus 4.7max` `0 / 5` and `X4 / Claude China opus max` `1 / 5`.
+Historical rubric values that name `gpt-5.4` remain model-of-run evidence until that rubric is
+explicitly recomputed.
+
+It separates:
 
 - binary correctness winner
 - diagnostic rubric winner
@@ -114,6 +122,7 @@ lane. It is not a single global leaderboard. It separates:
 | `E29 staged systems/toolchain re-entry` | `N39` staged runner roots after bounded-scope redesign | seventh current hardened top-pair binary separator: `X1 PASS 94 / 100`, `X3 scoreable FAIL 78 / 100`; converts staged systems/toolchain recovery into an X1 lane while single-session systems/toolchain remains X3-favored |
 | `E30 staged owner recovery re-entry` | `N40` staged runner roots | fifth current hardened top-pair binary separator: `X1 PASS 98 / 100`, `X3 scoreable FAIL 55 / 100`; converts owner recovery from an X3 single-session edge into an X1 staged re-entry lane |
 | `E31 staged incident-budget re-entry` | `N41` staged runner roots | sixth current hardened top-pair binary separator: `X1 PASS 100 / 100`, `X3 scoreable FAIL 78 / 100`; converts staged long-horizon / ownership-budget incident repair into an X1 lane |
+| `2026-04-24 X1 gpt-5.5 refresh` | `S01..S33 + N01..N41` fresh binary rerun | active `X1 / gpt-5.5` passes `74 / 74` unique scenarios; hard-5 staged subset is `5 / 5` and preserves the staged separator pattern against Claude-family rows |
 
 ## Scorer Normalization Note
 
@@ -156,9 +165,9 @@ lane. It is not a single global leaderboard. It separates:
 
 | Need | Use |
 |---|---|
-| safest general top-pair answer when correctness matters and no style preference exists | `X1` and `X3` as near-tie; choose by availability |
+| safest general top-pair answer when correctness matters and no style preference exists | `X1 / gpt-5.5` and `X3` as near-tie on older single-shot correctness lanes; choose by execution shape and availability |
 | long-horizon / cross-role / ownership-budget repair, compact patch, low output cost | `X3 primary` for single-session work, `X1 secondary`; `X2` remains calibration-only and fails N28/N29/N41 scoreably |
-| staged delivery, multi-session re-entry, phase-ledger accountability | `X1 primary`, `X3 secondary`; N30, N35, and N36 are binary separators, and N40/N41 confirm that the staged-accountability split generalizes beyond delivery |
+| staged delivery, multi-session re-entry, phase-ledger accountability | `X1 / gpt-5.5 primary`, `X3 secondary`; N30, N35, and N36 are binary separators, and N40/N41 confirm that the staged-accountability split generalizes beyond delivery |
 | staged interface/API migration across fresh sessions | `X1 primary`, `X3 secondary`; N35 and N36 are `X1 PASS` versus `X3 scoreable FAIL` |
 | staged source-bound review, ADR, response-gate closure | `X1 primary`, `X3 secondary`; N37 is `X1 PASS 98 / 100` versus `X3 scoreable FAIL 35 / 100` |
 | staged owner recovery / runtime-policy closure | `X1 primary`, `X3 secondary`; N40 is `X1 PASS 98 / 100` versus `X3 scoreable FAIL 55 / 100` |

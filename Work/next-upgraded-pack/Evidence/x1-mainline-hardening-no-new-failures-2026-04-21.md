@@ -2244,3 +2244,64 @@ X2 failed scorer invariants:
 this wave. It extends `X1 primary` beyond staged delivery/API/review into staged long-horizon,
 cross-role, and ownership-budget incident repair when reentry state, repair ledger, exact patch
 budget, and closeout must all survive fresh-session handoff.
+
+## 2026-04-24 Follow-Up: X1 GPT-5.5 Full Rerun And Claude Hard-5 Probe
+
+`X1` was switched to `gpt-5.5` and rerun across `S01..S33 + N01..N41`. The logical unique surface
+is `74` scenarios. The run produced `75` top-level `summary.json` files because `S13` had an earlier
+wrapper-nonzero summary and then a clean retry; the latest `S13` retry is the admitted row.
+
+### X1 GPT-5.5 binary refresh
+
+| Surface | Unique scenarios | Verifier PASS | Verifier FAIL | Runtime caveat |
+|---|---:|---:|---:|---|
+| `S01..S33 + N01..N41` | `74` | `74` | `0` | none in preferred latest summaries |
+
+Wrapper caveats:
+
+| Scenario | Preferred summary | Wrapper exit | Verifier | Classification |
+|---|---|---:|---|---|
+| `N30` | `.scratch/v2-staged-runs/2026-04-24_01-34-03-X1-x1-gpt55-full-rerun-2026-04-23-single/N30/meta/summary.json` | `1` | `PASS` | model `PASS`; wrapper caveat only |
+| `S13` | `.scratch/v2-cohort-runs/2026-04-24_04-08-51-X1-x1-gpt55-full-rerun-2026-04-23-single/S13/meta/summary.json` | `0` | `PASS` | clean retry supersedes earlier wrapper-nonzero summary |
+
+### Hard-5 comparative probe
+
+The hard subset is `N35`, `N36`, `N37`, `N39`, and `N41`: staged interface migration, staged API
+migration, staged review gate, staged systems/toolchain re-entry, and staged incident-budget
+re-entry.
+
+| Row / model | `N35` | `N36` | `N37` | `N39` | `N41` | PASS |
+|---|---|---|---|---|---|---:|
+| `X1 / gpt-5.5` | `PASS` | `PASS` | `PASS` | `PASS` | `PASS` | `5 / 5` |
+| `X3 / opus 4.7max` | `FAIL 71 / 100` | `FAIL 74 / 100` | `FAIL 35 / 100` | `FAIL 78 / 100` | `FAIL 78 / 100` | `0 / 5` |
+| `X4 / Claude China opus max` | `FAIL` | `FAIL` | `FAIL` | `PASS` | `FAIL` | `1 / 5` |
+| `official opus 4.5 max` | `FAIL` | `FAIL` | `FAIL` | `FAIL` | `FAIL` | `0 / 5` |
+| `official opus 4.6 max` | `FAIL` | `FAIL` | `FAIL` | `FAIL` | `FAIL` | `0 / 5` |
+| `official sonnet max` | `FAIL` | `FAIL` | `FAIL` | `NOT-RUN` | `NOT-RUN` | `0 / 3 scoreable` |
+| `official haiku max` | `FAIL` | `FAIL` | `FAIL` | `FAIL` | `NOT-RUN` | `0 / 4 scoreable` |
+
+Hard-5 failure signatures:
+
+| Row / model | Main scoreable failure signature |
+|---|---|
+| `X3 / opus 4.7max` | staged interface/API migration ledger and hidden runtime semantics, exact review tuples/source binding, staged systems stagegate, incident repair/reentry closeout |
+| `X4 / Claude China opus max` | same staged families as X3, but `N39` passes through the secret-backed opus route |
+| `official opus 4.5 max` | scoreable failures on all five hard staged tests; `N35/N36/N39` also hit scope guards |
+| `official opus 4.6 max` | scoreable failures on all five hard staged tests; `N35/N36` hit scope guards |
+| `official sonnet max` | scoreable failures on `N35..N37`; `N39/N41` have no final summary and are runtime-route, not model FAIL |
+| `official haiku max` | scoreable failures on `N35..N37` and `N39`; `N41` timed out without final summary and is runtime-route, not model FAIL |
+
+### Tooling note
+
+`Work/next-upgraded-pack/Tooling/run-v2-staged-cohort-batch.ps1` now honors
+`BENCHMARK_CLAUDE_MODEL_OVERRIDE` and `BENCHMARK_MODEL_LABEL_OVERRIDE` for Claude rows. This was
+used only to run official Claude model aliases through `claude.exe` on the same hard-5 staged
+surface; it does not change default `X3` or `X4` routing.
+
+### 2026-04-24 Verdict
+
+The active `X1 / gpt-5.5` row is now cleanly refreshed on the live binary surface and preserves the
+staged-separator pattern: `5 / 5` on hard-5 versus `0 / 5` for admitted `X3 / opus 4.7max` and
+`1 / 5` for the secret-backed `X4` opus route. The staged integration/refactor/re-entry lane remains
+`X1 primary`; compact single-session lanes keep their earlier rubric reads until separately
+refreshed.

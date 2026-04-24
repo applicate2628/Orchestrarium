@@ -1,10 +1,14 @@
-Date: 2026-04-22
+Date: 2026-04-24
 Owner: `$lead`
 Status: `PASS`
 
 ## Result
 
 This is the current compact operator read for the live benchmark state.
+
+2026-04-24 update: active `X1` is now `gpt-5.5`. The fresh binary rerun over
+`S01..S33 + N01..N41` passes `74 / 74` unique scenarios. Older `gpt-5.4` score and rubric rows remain
+model-of-run historical evidence unless explicitly refreshed.
 
 The old upgraded-pack tables remain the last full execution checkpoint for the legacy
 upgraded-pack architecture only.
@@ -64,7 +68,7 @@ failures as `PASS`.
 
 | ID | Label |
 |---|---|
-| `X1` | `gpt-5.4` |
+| `X1` | `gpt-5.5` active; older rows may cite `gpt-5.4` as model-of-run |
 | `X2` | `gpt-spark` |
 | `X3` | `opus 4.7max` |
 | `X4` | `Claude China` |
@@ -86,10 +90,12 @@ failures as `PASS`.
 | `11` | `N15` stateful batch rollback gauntlet | `gpt-5.4` tied with `opus 4.7max` | `opus 4.7max` tied with `gpt-5.4` | `gpt-spark` `NOT-RUN` | `Claude China` `NOT-RUN` | Gemini rows `NOT-RUN` | top pair both `9 / 9`; `binary tie remains` |
 | `12` | `N16` long-horizon release-lane integration rubric | `opus 4.7max` diagnostic edge | `gpt-5.4` second by rubric |  | `Claude China` `NOT-RUN` | Gemini rows `NOT-RUN` | binary top pair both `PASS`; rubric `X3 95 / 100`, `X1 89 / 100` |
 | `13` | `N17` owner orchestration routing rubric | `gpt-5.4` tied with `opus 4.7max` | `opus 4.7max` tied with `gpt-5.4` | `gpt-spark` calibration `PASS` | `Claude China` `NOT-RUN` | `gemini3.1flash-lite-preview` calibration `PASS`; `gemini3.1pro` smoke `NOT-RUN` | all scoreable rows `100 / 100`; compactness favors `X3` and `X6` |
+| `14` | `X1 / gpt-5.5` binary refresh on `S01..S33 + N01..N41` | `gpt-5.5` |  |  |  |  | `74 / 74` unique verifier PASS; `S13` clean retry supersedes earlier wrapper caveat; `N30` verifier PASS with wrapper caveat |
+| `15` | hard-5 staged separator probe `N35,N36,N37,N39,N41` | `gpt-5.5` with `5 / 5` | `Claude China` with `1 / 5` | `opus 4.7max`, official opus 4.5, and official opus 4.6 all `0 / 5` | official sonnet `0 / 3 scoreable` | official haiku `0 / 4 scoreable` | Sonnet/Haiku missing-summary cells are runtime-route, not model FAIL |
 
 | `#` | Current rows note | Current state |
 |---|---|---|
-| `1` | `X1 / gpt-5.4` | pre-v3 expanded full-v2 score was `39 / 40`; treat as ceiling-effect baseline until hardened reruns replace it |
+| `1` | `X1 / gpt-5.5` | fresh 2026-04-24 binary refresh is `74 / 74` unique verifier PASS on `S01..S33 + N01..N41`; older `gpt-5.4` `39 / 40` full-v2 score is pre-v3 ceiling-effect baseline only |
 | `2` | `X2 / gpt-spark` | usage-limit cells reran into scoreable results (`10 / 40`) |
 | `3` | `X3 / opus 4.7max` | pre-v3 expanded full-v2 score was `40 / 40`; treat as ceiling-effect baseline, not final classification |
 | `4` | `X4 / Claude China` | secret-backed route only; core quota cells reran as verifier-level failures (`10 / 40`); extra-lane `N08..N10` is deferred as `NOT-RUN` while route returns provider `502` |
