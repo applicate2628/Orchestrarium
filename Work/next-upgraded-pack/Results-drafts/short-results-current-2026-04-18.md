@@ -100,6 +100,7 @@ failures as `PASS`.
 | `20` | W28 visual raster compact operator-budget hotfix | `X1 / gpt-5.5`: `N48 FAIL 70` | `X3 / opus 4.7max`: `N48 PASS 100` |  |  |  | third honest compact single-session `X1 FAIL / X3 PASS`; both pass exact raster semantics and renderer-only scope, while X1 fails the visible operator-budget gate (`77825 > 40000`) |
 | `21` | W29 scientific compact operator-budget optimizer | `X1 / gpt-5.5`: `N49 PASS 96` | `X3 / opus 4.7max`: `N49 PASS 100` |  |  |  | `binary tie remains`; explicit operator budget did not separate the real MoM plus hydrogenic Schrodinger optimizer lane; X3 wins rubric by measured runtime only |
 | `22` | W30 systems compact operator-budget hotfix | `X1 / gpt-5.5`: `N50 PASS 99` | `X3 / opus 4.7max`: `N50 PASS 99` |  |  |  | `binary tie remains`; explicit operator budget did not separate systems/toolchain immutable-CI hotfix, but X3 finished faster (`260.449s` versus `395.714s`) |
+| `23` | W31 systems turnaround-budget hotfix | `X1 / gpt-5.5`: `N51 FAIL 70` | `X3 / opus 4.7max`: `N51 FAIL 55` |  |  |  | both scoreable `FAIL`; X1 preserves hidden systems semantics but fails output budget (`987540 > 40000`), while X3 stays compact/fast but fails hidden stagegate semantics |
 
 | `#` | Current rows note | Current state |
 |---|---|---|
@@ -361,6 +362,7 @@ failures as `PASS`.
 | `52` | `N48` was added on `2026-04-24` as W28/E38 visual raster compact operator-budget hotfix hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` scoreably fails the visible operator-budget gate (`77825 > 40000`) while passing exact visual raster semantics and renderer-only scope, and `X3 / opus 4.7max` passes all gates (`813 <= 40000`). This is the third honest compact single-session `X1 FAIL / X3 PASS` separator and the first on the visual graphics lane | `N48 visual operator-budget compact hotfix` |
 | `53` | `N49` was added on `2026-04-24` as W29/E39 scientific compact operator-budget optimizer hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass the full MoM PEC-cylinder plus hydrogenic radial Schrodinger optimizer verifier, exact scope, and visible operator budget. Rubric reads `X3 100 / 100` versus `X1 96 / 100` from measured solver runtime; `binary tie remains` | `N49 science operator-budget optimizer` |
 | `54` | `N50` was added on `2026-04-24` as W30/E40 systems compact operator-budget hotfix hardening; it is not merged into the old full-v2 denominator; `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass hidden stagegate systems semantics, protected visible CI hash, exact scope, and visible operator budget. Rubric ties at `99 / 100`; elapsed time favors X3 (`260.449s` versus `395.714s`) | `N50 systems operator-budget compact hotfix` |
+| `55` | `N51` was added on `2026-04-24` as W31/E41 systems turnaround-budget hotfix hardening; it is not merged into the old full-v2 denominator; both top rows fail scoreably under the combined hidden semantics, output budget, and `360s` prompt-to-output SLA. `X1 / gpt-5.5` preserves hidden systems semantics but fails output budget at `987540` bytes; `X3 / opus 4.7max` stays compact and fast but fails hidden stagegate semantics. This is tradeoff evidence, not an inverse separator | `N51 systems turnaround-budget hotfix` |
 
 ## Source
 
@@ -383,7 +385,7 @@ failures as `PASS`.
 | `../Evidence/x1-x3-top-pair-rubric-e3-2026-04-20.md` | diagnostic `E3` rubric evidence |
 | `../Evidence/x1-control-plane-override-rerun-s16-s19-s20-2026-04-20.md` | targeted `X1` rerun evidence for `S16`, `S19`, and `S20` |
 | `../Evidence/separator-audit-2026-04-21.md` | factual audit of answer-leakage, verifier strictness, and separation potential across all 43 scenarios; motivates the N06 tuple-exact hardening |
-| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, and N14..N50 hardening sections |
+| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, and N14..N51 hardening sections |
 | `../Evidence/n16-long-horizon-rubric-2026-04-22.json` | machine-readable N16 scored-rubric output for admitted `X1` and `X3` runs |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` | machine-readable N17 owner-orchestration scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs |
 | `../Evidence/n18-scientist-constraints-rubric-2026-04-22.json` | machine-readable N18 scientist/constraints scored-rubric output for admitted `X1`, `X2`, `X3`, partial-route `X6`, and timeout `X5` runs |
@@ -416,3 +418,4 @@ failures as `PASS`.
 | `../Evidence/n48-visual-operator-budget-rubric-2026-04-24.json` | machine-readable N48 visual raster compact operator-budget scored-rubric output for admitted `X1` and `X3` launch roots; X1 scoreably fails the visible output budget while preserving exact visual semantics, and X3 passes all gates compactly |
 | `../Evidence/n49-science-operator-budget-rubric-2026-04-24.json` | machine-readable N49 scientific compact operator-budget scored-rubric output for admitted `X1` and `X3` launch roots; both pass full computational-physics semantics, exact scope, and visible output budget; X3 wins only by runtime rubric points |
 | `../Evidence/n50-systems-operator-budget-rubric-2026-04-24.json` | machine-readable N50 systems compact operator-budget scored-rubric output for admitted `X1` and `X3` launch roots; both pass hidden stagegate semantics, protected test hash, exact scope, and visible output budget; X3 wins only by elapsed time |
+| `../Evidence/n51-systems-turnaround-budget-rubric-2026-04-24.json` | machine-readable N51 systems turnaround-budget scored-rubric output for admitted `X1` and `X3` launch roots; both fail scoreably under combined semantics, output budget, and turnaround constraints |

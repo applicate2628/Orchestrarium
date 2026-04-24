@@ -1,0 +1,78 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_09-24-07-X1-wave-w31-n51-turnaround-budget-2026-04-24/N51",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 70,
+      "correctness": 45,
+      "patch_quality": 20,
+      "tests": 10,
+      "operator_budget": 0,
+      "turnaround_budget": 10,
+      "time_points": 4,
+      "cost_points": 1,
+      "elapsed_proxy_seconds": 357.185,
+      "turnaround_elapsed_seconds": 356.406,
+      "cost_proxy_output_bytes": 987540,
+      "changed_paths": [
+        "candidate/workspace/src/stagegate/config.py",
+        "candidate/workspace/src/stagegate/executor.py",
+        "candidate/workspace/src/stagegate/fingerprint.py",
+        "candidate/workspace/src/stagegate/paths.py",
+        "candidate/workspace/src/stagegate/planner.py",
+        "candidate/workspace/src/stagegate/report.py"
+      ],
+      "diff": {
+        "added": 79,
+        "deleted": 51
+      },
+      "notes": [
+        "operator budget fail",
+        "turnaround budget pass",
+        "tests unchanged",
+        "changed=6 source=6 add=79 del=51"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_09-24-06-X3-wave-w31-n51-turnaround-budget-2026-04-24/N51",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "total": 55,
+      "correctness": 10,
+      "patch_quality": 20,
+      "tests": 0,
+      "operator_budget": 5,
+      "turnaround_budget": 10,
+      "time_points": 5,
+      "cost_points": 5,
+      "elapsed_proxy_seconds": 179.155,
+      "turnaround_elapsed_seconds": 177.885,
+      "cost_proxy_output_bytes": 1628,
+      "changed_paths": [
+        "candidate/workspace/src/stagegate/config.py",
+        "candidate/workspace/src/stagegate/executor.py",
+        "candidate/workspace/src/stagegate/planner.py",
+        "candidate/workspace/src/stagegate/report.py"
+      ],
+      "diff": {
+        "added": 60,
+        "deleted": 37
+      },
+      "notes": [
+        "operator budget pass",
+        "turnaround budget pass",
+        "tests unchanged",
+        "changed=4 source=4 add=60 del=37"
+      ]
+    }
+  ]
+}

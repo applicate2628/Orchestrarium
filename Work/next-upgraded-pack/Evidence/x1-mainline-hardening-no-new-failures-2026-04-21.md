@@ -2592,3 +2592,41 @@ The useful new signal is not output size but elapsed time: X1 needed `395.714s`,
 in `260.449s`. If the systems/toolchain compact-hotfix role requires a hard turnaround budget, the
 next honest separator attempt should make time a first-class verifier gate instead of using
 post-hoc transcript size.
+
+## 2026-04-24 Follow-Up: W31 Systems Turnaround-Budget Hotfix
+
+`N51-systems-turnaround-budget-hotfix` tests the first-class elapsed-time hypothesis raised by
+`N50`. It keeps the same hidden stagegate systems verifier, protected visible CI test hash,
+production-only scope, and `../meta/worker-output.txt <= 40000` output budget, then adds a scoreable
+`prompt.txt -> worker-output.txt <= 360s` turnaround gate.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N51` JSON parse, verifier compile, bundle-shape, start-state verifier, operator-budget shape, and turnaround-budget shape | `PASS` |
+| `N51` reference candidate in `.scratch/verifier-probes/2026-04-24-n51-turnaround-budget` | stagegate verifier `PASS`; scope `PASS`; operator-budget `PASS`; turnaround-budget `PASS` |
+| `score-n51-systems-turnaround-budget-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Turnaround s | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---:|---|
+| `N51` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_09-24-07-X1-wave-w31-n51-turnaround-budget-2026-04-24/N51/` | `0` | `FAIL` | `70 / 100` | `356.406` | `987540` | output budget fail |
+| `N51` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_09-24-06-X3-wave-w31-n51-turnaround-budget-2026-04-24/N51/` | `0` | `FAIL` | `55 / 100` | `177.885` | `1628` | hidden stagegate semantics fail |
+
+### Verdict
+
+`N51` is not an inverse `X1 FAIL / X3 PASS` separator. It is scoreable because both wrappers exited
+`0`, both runs wrote final summaries, and both verifier failures are local benchmark failures rather
+than runtime/quota issues.
+
+The result is still useful role-fit evidence: X1 preserved the hidden systems/toolchain semantics,
+exact scope, protected test hash, and the `360s` turnaround budget, but failed the visible output
+budget badly (`987540 > 40000`). X3 preserved compactness and turnaround (`1628` bytes,
+`177.885s`) but failed hidden stagegate invariants: portable fingerprint equality, signed/unsigned
+mode conflict rejection, cache restore reason/source trace, and summary source trace. Record this as
+`both scoreable FAIL`, not as a top-pair binary separator. For hard compact systems hotfixes, require
+an explicit semantic gate plus an output budget; neither row is cleanly dominant under both
+constraints.
