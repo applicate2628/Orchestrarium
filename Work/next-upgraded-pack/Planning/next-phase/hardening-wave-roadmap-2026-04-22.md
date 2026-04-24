@@ -63,6 +63,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | `W27` UI compact operator-budget hotfix | `DONE` | Does the compact `X1 FAIL / X3 PASS` operator-budget split repeat outside DeployGrid on a UI dirty-state lane? | `E37 / N47` UI compact operator-budget hotfix | `$frontend-engineer` style verifier plus hidden dirty-state checks, exact scope gate, protected visible test, and visible `40000` byte operator budget | mainline materialized from N43 by adding `check_operator_budget.py` and preserving hidden UI semantics | `X1 FAIL 70` from visible operator-budget (`169913 > 40000`) while hidden UI/scope gates pass; `X3 PASS 94` with `2467 <= 40000`; second compact inverse separator and first on UI |
 | `W28` visual raster compact operator-budget hotfix | `DONE` | Does the compact `X1 FAIL / X3 PASS` operator-budget split repeat on the visual graphics/raster lane with exact pixel semantics? | `E38 / N48` visual compact operator-budget hotfix | `$graphics-engineer` style verifier plus exact raster oracle, renderer-only scope, protected visible test, and visible `40000` byte operator budget | mainline materialized from N21 by locking the task to `renderer.py`, adding protected test hash, scope hardening, and `check_operator_budget.py` | `X1 FAIL 70` from visible operator-budget (`77825 > 40000`) while exact raster/scope gates pass; `X3 PASS 100` with `813 <= 40000`; third compact inverse separator and first on visual graphics |
 | `W29` scientific compact operator-budget optimizer | `DONE` | Does the compact operator-budget split repeat on the real high-load computational physics optimizer lane? | `E39 / N49` science compact operator-budget optimizer | `$computational-scientist` plus `$performance-engineer` style verifier with MoM, hydrogenic Schrodinger, runtime, staged artifacts, and visible `40000` byte operator budget | mainline materialized from N34 by preserving physical oracles and adding `check_operator_budget.py` | `X1 PASS 96`, `X3 PASS 100`; `binary tie remains`; explicit compactness did not split the science optimizer lane |
+| `W30` systems compact operator-budget hotfix | `DONE` | Does the compact operator-budget split repeat on the systems/toolchain immutable-CI line? | `E40 / N50` systems compact operator-budget hotfix | `$toolchain-engineer` style verifier plus hidden stagegate semantics, protected CI hash, exact scope, and visible `40000` byte operator budget | mainline materialized from N42 by preserving immutable-CI semantics and adding `check_operator_budget.py` | `X1 PASS 99`, `X3 PASS 99`; `binary tie remains`; explicit compactness did not split systems/toolchain, but X3 finished faster (`260.449s` vs `395.714s`) |
 
 ## Active Spawn Board
 
@@ -226,6 +227,12 @@ the visible `40000` byte operator-output gate. Both top rows pass; `binary tie r
 negative inverse-separator evidence and shows that X1 can adapt to an explicit compactness constraint
 on a complex scientific optimizer.
 
+W30 repeats explicit operator-budget hardening on the systems/toolchain immutable-CI line. `N50`
+preserves `N42` hidden stagegate semantics, protected CI test hash, production-only scope, and exact
+changed-path gate. Both top rows pass; `binary tie remains`. The new actionable signal is elapsed
+time: X3 completed the same compact hotfix materially faster than X1, suggesting that any next
+systems/toolchain inverse probe should make turnaround time a first-class gate.
+
 ## Execution Order
 
 1. Collect read-only spawn proposals for `W1..W3`. `DONE` on 2026-04-22.
@@ -274,6 +281,7 @@ on a complex scientific optimizer.
 31. Materialize and run `N47-ui-compact-operator-budget-hotfix` as W27/E37. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 94`, second compact inverse separator by visible operator-budget and first on the UI lane.
 32. Materialize and run `N48-visual-compact-operator-budget-hotfix` as W28/E38. `DONE` on 2026-04-24; `X1 FAIL 70`, `X3 PASS 100`, third compact inverse separator by visible operator-budget and first on the visual graphics lane.
 33. Materialize and run `N49-science-compact-operator-budget-optimizer` as W29/E39. `DONE` on 2026-04-24; `X1 PASS 96`, `X3 PASS 100`, `binary tie remains`; explicit compactness did not split the high-load computational physics optimizer.
+34. Materialize and run `N50-systems-compact-operator-budget-hotfix` as W30/E40. `DONE` on 2026-04-24; `X1 PASS 99`, `X3 PASS 99`, `binary tie remains`; explicit compactness did not split systems/toolchain, but elapsed time favors X3.
 
 ## Current Routing Impact
 
@@ -282,7 +290,7 @@ on a complex scientific optimizer.
 | long-horizon / cross-role / ownership-budget integration | split by execution shape: `X3 primary` for compact single-session integration and incident repair after `N16`, `N27`, `N28`, `N29`, and `N45`; `X3 primary` specifically for low-noise operator-budget compact hotfixes after `N46`; `X1 primary` for staged incident-budget re-entry after `N41 PASS 100` versus `X3 FAIL 78` | compact inverse separator found; next work should target a different pass/pass lane or a real-repo compact workflow, not another N45-style cost-only restatement |
 | staged delivery / multi-session re-entry | `X1 primary` after `N30`, `N35`, and `N36` produced `X1 PASS` versus `X3 scoreable FAIL` on persisted phase-ledger / re-entry accountability | strong enough for staged-lane routing; next repeat should be a real repo trial, not another synthetic bundle |
 | staged review / advisory gate | `X1 primary` after `N37` produced `X1 PASS 98 / 100` versus `X3 scoreable FAIL 35 / 100` on source-bound ADR, exact findings/non-claims, response cues, and closure | strong enough for staged review-gate routing; next repeat should be a real repo review trial or a UX/visual lane where policy remains unresolved |
-| systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `N42` confirms immutable visible-test constraints still tie top pair by binary; `X2/X5/X6` lower on N24 | no immediate repeat needed unless a new systems subdomain becomes policy-critical |
+| systems/toolchain | `X3` primary after `N19` and `N24` both read `95 / 100` versus `X1 86 / 100`; `N42` and `N50` confirm immutable-CI plus explicit output budget still tie top pair by binary; `X2/X5/X6` lower on N24 | if a binary inverse separator is still needed here, make elapsed turnaround a first-class gate rather than repeating output budget |
 | systems/toolchain staged recovery re-entry | `X1 primary` after bounded `N39` produced `X1 PASS 94 / 100` versus `X3 FAIL 78 / 100`; `X2` and `X6` also fail scoreably and `X5` is route-fail | strong enough for staged systems/toolchain routing; next repeat should be a real repo toolchain workflow only if policy needs extra confirmation |
 | UI implementation | `X3` primary versus `X1` after `N20` and `N25`; `N43` confirms immutable visible-test constraints still tie top pair by binary; `N47` makes low-noise compact UI hotfixes a binary `X1 FAIL / X3 PASS` separator; `X5` is still a route-healthy contender after `N25 PASS 98`; `N38` adds an `X1` staged UI pass but leaves the top pair unresolved because X3 never completed scoreably | if staged UI policy matters, rerun N38 under a more reliable X3 wrapper/timeout strategy; otherwise use X3 for compact single-session UI, especially when operator budget is explicit |
 | owner recovery staged re-entry | `X1 primary` after `N40` produced `X1 PASS 98 / 100` versus `X3 FAIL 55 / 100` | strong enough for staged owner routing; next repeat should be a real repo owner workflow only if policy needs extra confirmation |
@@ -300,7 +308,7 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume from the scored `N49` scientific operator-budget closeout rather than from a queued batch.
+If interrupted now, resume from the scored `N50` systems operator-budget closeout rather than from a queued batch.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`
 versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), staged owner recovery
@@ -309,9 +317,11 @@ versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), stage
 The compact `X1 FAIL / X3 PASS` line has three admitted cells: `N46` on DeployGrid repair,
 `N47` on UI dirty-state repair, and `N48` on visual raster repair. In all three, X1 preserved hidden
 semantics and exact scope but failed the visible operator-budget gate, while X3 passed all gates
-compactly. `N49` does not extend that pattern to the scientific optimizer lane: both top rows pass
-the explicit budget and the full physics verifier. Next concrete work should move to another pass/pass lane or a real-repo compact single-session trial where over-production is
-objectively harmful, rather than restating transcript cost as a post-hoc metric.
+compactly. `N49` does not extend that pattern to the scientific optimizer lane and `N50` does not
+extend it to systems/toolchain output budget: both top rows pass the explicit budget in those lanes.
+Next concrete work should move to a first-class elapsed-time gate or a real-repo compact
+single-session trial where over-production or slow turnaround is objectively harmful, rather than
+restating transcript cost as a post-hoc metric.
 Bounded `N39` is now a staged systems/toolchain routing result in favor of X1. `X5` remains a live
 UI and single-session owner contender after route-healthy `N25` and `N26`, but the newer staged
 waves still produced only Gemini route or quota caveats.

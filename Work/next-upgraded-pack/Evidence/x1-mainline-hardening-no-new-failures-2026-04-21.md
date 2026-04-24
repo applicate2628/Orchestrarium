@@ -2558,3 +2558,37 @@ The practical read is narrower than `N46..N48`: when compactness is stated direc
 scientific task, X1 can adapt and pass. Keep `X3 primary` for compact scientific optimizer work only
 as a rubric/runtime preference, not as a binary separator, while `N34` and `N49` both support that
 both top rows are viable for real computational-physics correctness.
+
+## 2026-04-24 Follow-Up: W30 Systems Compact Operator-Budget Hotfix
+
+`N50-systems-compact-operator-budget-hotfix` tests whether the explicit low-noise budget repeats on
+the systems/toolchain immutable-CI line. It derives from `N42`, preserving the hidden stagegate
+systems verifier, protected visible CI test hash, production-only scope, and exact changed-path gate.
+The added hardening is the visible `../meta/worker-output.txt <= 40000` operator-output gate.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N50` JSON parse, verifier compile, bundle-shape, start-state verifier, and operator-budget bundle-shape | `PASS` |
+| `N50` reference candidate in `.scratch/verifier-probes/2026-04-24-n50-systems-operator-budget` | stagegate verifier `PASS`; scope `PASS`; operator-budget `PASS` |
+| `score-n50-systems-operator-budget-rubric.py` compile and scorer execution | `PASS` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Rubric | Elapsed s | Output bytes |
+|---|---|---|---:|---|---:|---:|---:|
+| `N50` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-24_08-55-28-X1-wave-w30-n50-systems-operator-budget-2026-04-24/N50/` | `0` | `PASS` | `99 / 100` | `395.714` | `131` |
+| `N50` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-24_08-55-28-X3-wave-w30-n50-systems-operator-budget-2026-04-24/N50/` | `0` | `PASS` | `99 / 100` | `260.449` | `1061` |
+
+### Verdict
+
+`binary tie remains` for `N50`: this is negative inverse-separator evidence. Both wrappers exited
+`0`, both rows passed the operator-budget gate, hidden systems/toolchain verifier, protected visible
+test hash, and exact scope. X1 also adapted to the explicit compact-output requirement.
+
+The useful new signal is not output size but elapsed time: X1 needed `395.714s`, while X3 finished
+in `260.449s`. If the systems/toolchain compact-hotfix role requires a hard turnaround budget, the
+next honest separator attempt should make time a first-class verifier gate instead of using
+post-hoc transcript size.

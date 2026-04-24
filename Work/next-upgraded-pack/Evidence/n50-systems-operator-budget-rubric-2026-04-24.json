@@ -1,0 +1,73 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_08-55-28-X1-wave-w30-n50-systems-operator-budget-2026-04-24/N50",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 99,
+      "correctness": 45,
+      "patch_quality": 20,
+      "tests": 10,
+      "operator_budget": 10,
+      "time_points": 4,
+      "cost_points": 10,
+      "elapsed_proxy_seconds": 395.714,
+      "cost_proxy_output_bytes": 131,
+      "changed_paths": [
+        "candidate/workspace/src/stagegate/config.py",
+        "candidate/workspace/src/stagegate/executor.py",
+        "candidate/workspace/src/stagegate/fingerprint.py",
+        "candidate/workspace/src/stagegate/paths.py",
+        "candidate/workspace/src/stagegate/planner.py",
+        "candidate/workspace/src/stagegate/report.py"
+      ],
+      "diff": {
+        "added": 77,
+        "deleted": 38
+      },
+      "notes": [
+        "operator budget pass",
+        "tests unchanged",
+        "changed=6 source=6 add=77 del=38"
+      ]
+    },
+    {
+      "run_root": ".scratch/v2-cohort-runs/2026-04-24_08-55-28-X3-wave-w30-n50-systems-operator-budget-2026-04-24/N50",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "total": 99,
+      "correctness": 45,
+      "patch_quality": 20,
+      "tests": 10,
+      "operator_budget": 10,
+      "time_points": 4,
+      "cost_points": 10,
+      "elapsed_proxy_seconds": 260.449,
+      "cost_proxy_output_bytes": 1061,
+      "changed_paths": [
+        "candidate/workspace/src/stagegate/config.py",
+        "candidate/workspace/src/stagegate/executor.py",
+        "candidate/workspace/src/stagegate/fingerprint.py",
+        "candidate/workspace/src/stagegate/planner.py",
+        "candidate/workspace/src/stagegate/report.py"
+      ],
+      "diff": {
+        "added": 78,
+        "deleted": 41
+      },
+      "notes": [
+        "operator budget pass",
+        "tests unchanged",
+        "changed=5 source=5 add=78 del=41"
+      ]
+    }
+  ]
+}
