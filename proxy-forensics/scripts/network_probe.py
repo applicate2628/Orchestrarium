@@ -11,9 +11,9 @@ Complements fingerprint.py (model-behavior probes) with orthogonal evidence:
 
 Does NOT cost LLM tokens — only TLS handshakes + HTTP requests.
 
-Usage:
-  python network_probe.py --url https://api.claudecodeapi.cloud
-  python network_probe.py --url https://api.anthropic.com --label "direct"
+Usage (run from `proxy-forensics/` root):
+  python scripts/network_probe.py --url https://api.claudecodeapi.cloud
+  python scripts/network_probe.py --url https://api.anthropic.com --label "direct"
 
 Output: structured evidence dict (JSON) — useful alongside fingerprint.py
 output for cross-evidence analysis.

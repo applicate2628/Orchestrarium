@@ -36,8 +36,8 @@ switch to `baseline_method: "anthropic_count_tokens"` for cleaner semantics.
 The `beta` intercept absorbs CLI wrapping overhead; we interpret α + residuals
 + stability, not β, as identity signal.
 
-Usage:
-  python tokenizer_probe.py \\
+Usage (run from `proxy-forensics/` root):
+  python scripts/tokenizer_probe.py \\
     --baseline-cmd "claude" \\
     --gateway-cmd "claude-aw.cmd" \\
     --gateway-shell \\

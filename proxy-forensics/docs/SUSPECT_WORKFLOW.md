@@ -4,8 +4,8 @@ Step-by-step checklist for investigating a new Claude-compatible proxy endpoint.
 
 ## Prerequisites
 
-- [ ] Toolkit is at latest version (`SCORER_VERSION` in `fingerprint.py` matches `scorer_version` in `baselines.json`)
-- [ ] Baselines are not expired (`metadata.expiry_date` in `baselines.json` is in future)
+- [ ] Toolkit is at latest version (`SCORER_VERSION` in `scripts/fingerprint.py` matches `scorer_version` in `scripts/baselines.json`)
+- [ ] Baselines are not expired (`metadata.expiry_date` in `scripts/baselines.json` is in future)
 - [ ] `claude.exe` (v2.1.x) on PATH for official baseline comparison
 - [ ] Target is accessible (manual `curl -I <url>` or a simple `--effort low -p "hi"` call succeeds at least once)
 

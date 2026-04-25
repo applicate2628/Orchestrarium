@@ -3,8 +3,8 @@
 a claude-aw.cmd call through it, captures flows, parses the /v1/messages
 request to reveal gateway-side behavior.
 
-Usage:
-  python mitm_capture.py --cmd "claude-aw.cmd --model opus" --shell --prompt "Reply with '1'."
+Usage (run from `proxy-forensics/` root):
+  python scripts/mitm_capture.py --cmd "claude-aw.cmd --model opus" --shell --prompt "Reply with '1'."
 
 Output:
   - mitm_flows/<timestamp>.flow  — raw mitmproxy flow dump
@@ -88,7 +88,9 @@ def main():
     ap.add_argument("--shell", action="store_true")
     ap.add_argument("--prompt", default="Reply with '1'.")
     ap.add_argument("--listen-port", type=int, default=8080)
-    ap.add_argument("--output-dir", default=".scratch/proxy-forensics/mitm_flows")
+    ap.add_argument("--output-dir", default="mitm_flows",
+                    help="Directory for captured flow files (default: mitm_flows/ relative to cwd; "
+                         "use proxy-forensics root as cwd to keep them inside the toolkit tree)")
     ap.add_argument("--subprocess-timeout", type=int, default=60,
                     help="Seconds to wait for Claude CLI subprocess before killing (default 60)")
     args = ap.parse_args()

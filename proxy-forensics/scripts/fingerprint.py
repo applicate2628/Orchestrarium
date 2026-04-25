@@ -71,13 +71,13 @@ v0.2:
   - Hardened Unicode regex.
   - Baseline expiry check.
 
-Usage:
-  python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
-  python fingerprint.py --label "direct" --cmd "claude --model claude-opus-4-7"
-  python fingerprint.py --list-probes
-  python fingerprint.py --label "X" --cmd "..." --repeats 2
+Usage (run from `proxy-forensics/` root):
+  python scripts/fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
+  python scripts/fingerprint.py --label "direct" --cmd "claude --model claude-opus-4-7"
+  python scripts/fingerprint.py --list-probes
+  python scripts/fingerprint.py --label "X" --cmd "..." --repeats 2
 
-Dependencies: Python 3.9+, baselines.json co-located with this script.
+Dependencies: Python 3.9+, baselines.json co-located with this script (scripts/).
 """
 
 import argparse
