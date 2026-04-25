@@ -1,0 +1,22 @@
+id: N61
+surface_id: E51
+pack_id: E51
+role_class: diagnostic
+artifact_type: visual pixel localization answer
+modality_family: image perception, tiny-target localization, UI hit target geometry
+allowed_change_surface:
+  - candidate/answer.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - README.md
+  - scenario.yaml
+score_profile: "visual-perception, tiny-target-localization, ui-image-fit, scored-rubric"
+overlay_flags:
+  - visual-provider-fit
+  - image-localization
+  - ui-hit-target
+  - point-distance-oracle
+  - scored-rubric
+  - binary-separator-candidate

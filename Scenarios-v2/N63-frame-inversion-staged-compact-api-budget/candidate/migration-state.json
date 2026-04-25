@@ -1,0 +1,17 @@
+{
+  "contractId": "N63-frame-inversion-staged-compact-api-budget",
+  "planFingerprint": "",
+  "phases": [],
+  "sourceBindings": [],
+  "staleSourceRejections": [],
+  "interfaceMap": [],
+  "callSiteMigration": [],
+  "compatibilityMatrix": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 12,
+    "requiredChangedPaths": []
+  }
+}

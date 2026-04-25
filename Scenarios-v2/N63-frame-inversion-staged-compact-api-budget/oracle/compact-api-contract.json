@@ -1,0 +1,225 @@
+{
+  "contractId": "N63-frame-inversion-staged-compact-api-budget",
+  "planFingerprint": "n63-frame-inversion-staged-compact-api-budget-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N63",
+    "surface_id": "E53",
+    "pack_id": "E53",
+    "role_class": "implementation",
+    "artifact_type": "staged-frame real-repo API migration patch with compact operator budget",
+    "modality_family": "frame-inversion staged prompt frame, API contract migration, scattered consumers, hidden repo-style tests, low-noise operator budget, generated cache isolation",
+    "allowed_change_surface": [
+      ".pytest_cache/**",
+      "candidate/migration-state.json",
+      "candidate/review-response.json",
+      "candidate/closure.json",
+      "candidate/workspace/src/billingmesh/__init__.py",
+      "candidate/workspace/src/billingmesh/models.py",
+      "candidate/workspace/src/billingmesh/account_directory.py",
+      "candidate/workspace/src/billingmesh/entitlement_policy.py",
+      "candidate/workspace/src/billingmesh/usage_publisher.py",
+      "candidate/workspace/src/billingmesh/service.py",
+      "candidate/workspace/src/billingmesh/reporting.py",
+      "candidate/workspace/src/billingmesh/api.py",
+      "candidate/workspace/tests/test_billingmesh.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md"
+    ],
+    "score_profile": "frame-inversion-staged-prompt, compact-api-migration, hidden-consumer, source-bound-ledger, review-response, patch-quality-rubric, operator-budget, cache-ignored",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "frame-inversion",
+      "staged-prompt-frame",
+      "implementation",
+      "api-migration",
+      "hidden-consumer",
+      "compatibility-preservation",
+      "review-response",
+      "scored-rubric",
+      "binary-separator-candidate",
+      "low-noise-operator-budget",
+      "generated-cache-ignored"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "candidate/README.md",
+    "candidate/migration-state.json",
+    "candidate/review-response.json",
+    "candidate/closure.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/billingmesh/__init__.py",
+    "candidate/workspace/src/billingmesh/models.py",
+    "candidate/workspace/src/billingmesh/account_directory.py",
+    "candidate/workspace/src/billingmesh/entitlement_policy.py",
+    "candidate/workspace/src/billingmesh/usage_publisher.py",
+    "candidate/workspace/src/billingmesh/service.py",
+    "candidate/workspace/src/billingmesh/reporting.py",
+    "candidate/workspace/src/billingmesh/api.py",
+    "candidate/workspace/tests/test_billingmesh.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/review-feedback.md",
+    "inputs/decoy-map.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/compact-api-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_compact_api_migration.py",
+    "verifiers/check_scope.py",
+    "verifiers/check_operator_budget.py"
+  ],
+  "expectedSourceIds": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6",
+    "S7",
+    "S8",
+    "S9",
+    "S10"
+  ],
+  "expectedPhaseIds": [
+    "01-intake-plan",
+    "02-api-migration",
+    "03-review-response",
+    "04-final-reentry-closeout"
+  ],
+  "requiredChangedPaths": [
+    "candidate/migration-state.json",
+    "candidate/review-response.json",
+    "candidate/closure.json",
+    "candidate/workspace/src/billingmesh/__init__.py",
+    "candidate/workspace/src/billingmesh/models.py",
+    "candidate/workspace/src/billingmesh/account_directory.py",
+    "candidate/workspace/src/billingmesh/entitlement_policy.py",
+    "candidate/workspace/src/billingmesh/usage_publisher.py",
+    "candidate/workspace/src/billingmesh/service.py",
+    "candidate/workspace/src/billingmesh/reporting.py",
+    "candidate/workspace/src/billingmesh/api.py",
+    "candidate/workspace/tests/test_billingmesh.py"
+  ],
+  "legacyPublicMethods": {
+    "AccountDirectory": "get_account",
+    "EntitlementPolicy": "check",
+    "UsagePublisher": "publish"
+  },
+  "requiredResultModels": {
+    "AccountLookup": [
+      "found",
+      "account_id",
+      "account",
+      "reason",
+      "owner"
+    ],
+    "EntitlementDecision": [
+      "allowed",
+      "reason",
+      "owner",
+      "source_ids"
+    ],
+    "PublishResult": [
+      "accepted",
+      "status",
+      "retryable",
+      "usage_id",
+      "error_code",
+      "owner",
+      "reason"
+    ]
+  },
+  "requiredLedgerRows": {
+    "interfaceMap": [
+      "AccountDirectory.get_account -> AccountDirectory.lookup_account",
+      "EntitlementPolicy.check -> EntitlementPolicy.evaluate_entitlement",
+      "UsagePublisher.publish -> UsagePublisher.publish_usage"
+    ],
+    "callSites": [
+      "service.process_usage_request",
+      "api.handle_usage_event",
+      "reporting.build_usage_summary",
+      "tests.test_billingmesh"
+    ],
+    "compatibilityCases": [
+      "missing-account",
+      "suspended-account",
+      "plan-expired",
+      "tenant-disabled",
+      "feature-not-entitled",
+      "usage-publish-timeout",
+      "duplicate-usage",
+      "denied-event-no-publish",
+      "accepted-usage"
+    ],
+    "validationMarkers": [
+      "python candidate/workspace/tests/test_billingmesh.py",
+      "check_compact_api_migration.py"
+    ],
+    "staleRejections": [
+      "docs/stale-billing-api.md",
+      "legacy/billing_adapter.py",
+      "docs/reporting-compatibility-note.md"
+    ]
+  },
+  "reviewDecisions": {
+    "R1-legacy-shim-request": "reject",
+    "R2-denied-usage-no-publish": "accept",
+    "R3-owner-boundary": "accept",
+    "R4-report-queued-duplicate": "accept",
+    "R5-doc-only-decoy": "reject",
+    "R6-read-feature-boundary": "accept"
+  },
+  "requiredTestMarkers": [
+    "test_lookup_missing_account_contract",
+    "test_publisher_timeout_is_retryable",
+    "test_legacy_methods_removed",
+    "test_denied_entitlement_does_not_publish",
+    "test_report_counts_queued_duplicate_and_owners"
+  ],
+  "forbiddenStaticMarkers": [
+    "def get_account(",
+    "def check(",
+    "def publish("
+  ],
+  "currentTick": 50,
+  "operator_budget": {
+    "max_worker_output_bytes": 40000,
+    "budget_source": "../meta/worker-output.txt",
+    "failure_class": "scoreable",
+    "rationale": "This compact real-repo API migration lane is scoreable for low-noise operator behavior; excessive transcript output blocks migration review even when hidden runtime semantics pass."
+  },
+  "ignored_top_level_entries": [
+    ".pytest_cache"
+  ],
+  "ignored_changed_path_prefixes": [
+    ".pytest_cache/"
+  ]
+}

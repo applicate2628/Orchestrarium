@@ -1,0 +1,39 @@
+id: N62
+surface_id: E52
+pack_id: E52
+role_class: implementation
+artifact_type: compact-frame interface migration patch with staged re-entry requirements
+modality_family: frame-inversion interface refactor, compact prompt frame, hidden consumer tests, staged durable ledgers, and patch-quality discipline
+allowed_change_surface:
+  - candidate/migration-state.json
+  - candidate/review-response.json
+  - candidate/closure.json
+  - candidate/workspace/src/interfaceflow/__init__.py
+  - candidate/workspace/src/interfaceflow/models.py
+  - candidate/workspace/src/interfaceflow/session_store.py
+  - candidate/workspace/src/interfaceflow/policy.py
+  - candidate/workspace/src/interfaceflow/router.py
+  - candidate/workspace/src/interfaceflow/orchestrator.py
+  - candidate/workspace/src/interfaceflow/report.py
+  - candidate/workspace/src/interfaceflow/api.py
+  - candidate/workspace/tests/test_interfaceflow.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+score_profile: "frame-inversion-compact-prompt, staged-interface-refactor, re-entry, review-response, hidden-consumer, patch-quality-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - frame-inversion
+  - compact-prompt-frame
+  - staged-runner
+  - reentry
+  - implementation
+  - interface-refactor
+  - hidden-consumer
+  - compatibility-preservation
+  - review-response
+  - scored-rubric
+  - binary-separator-candidate

@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["image_id", "points"],
+  "properties": {
+    "image_id": {
+      "type": "string",
+      "const": "N61-visual-localization-canvas-v1"
+    },
+    "points": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["red", "cyan", "lime", "magenta", "amber", "blue"],
+      "properties": {
+        "red": {
+          "$ref": "#/$defs/point"
+        },
+        "cyan": {
+          "$ref": "#/$defs/point"
+        },
+        "lime": {
+          "$ref": "#/$defs/point"
+        },
+        "magenta": {
+          "$ref": "#/$defs/point"
+        },
+        "amber": {
+          "$ref": "#/$defs/point"
+        },
+        "blue": {
+          "$ref": "#/$defs/point"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2199
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1599
+        }
+      }
+    }
+  }
+}

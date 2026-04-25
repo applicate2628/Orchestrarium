@@ -1,0 +1,98 @@
+{
+  "scenario_id": "N61",
+  "image_id": "N61-visual-localization-canvas-v1",
+  "image": {
+    "path": "inputs/visual-localization-canvas.png",
+    "width": 2200,
+    "height": 1600,
+    "origin": "top-left",
+    "grid": {
+      "minor_px": 20,
+      "major_px": 100
+    }
+  },
+  "targets": [
+    {
+      "id": "red",
+      "center": {
+        "x": 1876,
+        "y": 231
+      },
+      "size_px": 13,
+      "color_rgb": [
+        239,
+        68,
+        68
+      ]
+    },
+    {
+      "id": "cyan",
+      "center": {
+        "x": 342,
+        "y": 1274
+      },
+      "size_px": 13,
+      "color_rgb": [
+        6,
+        182,
+        212
+      ]
+    },
+    {
+      "id": "lime",
+      "center": {
+        "x": 1187,
+        "y": 822
+      },
+      "size_px": 13,
+      "color_rgb": [
+        132,
+        204,
+        22
+      ]
+    },
+    {
+      "id": "magenta",
+      "center": {
+        "x": 2011,
+        "y": 1439
+      },
+      "size_px": 13,
+      "color_rgb": [
+        217,
+        70,
+        239
+      ]
+    },
+    {
+      "id": "amber",
+      "center": {
+        "x": 742,
+        "y": 356
+      },
+      "size_px": 13,
+      "color_rgb": [
+        245,
+        158,
+        11
+      ]
+    },
+    {
+      "id": "blue",
+      "center": {
+        "x": 1544,
+        "y": 1129
+      },
+      "size_px": 13,
+      "color_rgb": [
+        37,
+        99,
+        235
+      ]
+    }
+  ],
+  "thresholds": {
+    "pass_mean_px": 5.0,
+    "pass_max_px": 8.0
+  }
+}

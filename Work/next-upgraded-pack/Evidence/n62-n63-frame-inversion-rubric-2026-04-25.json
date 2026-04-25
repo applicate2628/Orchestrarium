@@ -1,0 +1,114 @@
+{
+  "date": "2026-04-25",
+  "diagnostic_id": "W41",
+  "title": "Frame-inversion audit for compact-vs-staged X1/X3 split",
+  "status": "admitted-diagnostic",
+  "denominator_policy": {
+    "full_v2_hard_slot": false,
+    "reason": "N62/N63 are frame-inversion diagnostics. They validate interpretation of existing split slots but do not replace a /40 slot yet."
+  },
+  "scenarios": {
+    "N62": {
+      "name": "frame-inversion compact staged interface",
+      "intent": "compact prompt frame over N35-class staged interface-migration hidden requirements",
+      "results": {
+        "X1": {
+          "model": "gpt-5.5",
+          "route_class": "scoreable",
+          "wrapperExitCode": 0,
+          "verificationPassed": true,
+          "verdict": "PASS",
+          "runRoot": ".scratch/v2-cohort-runs/2026-04-25_03-48-55-X1-w41-frame-inversion-n62-2026-04-25/N62/",
+          "primary_failure": null
+        },
+        "X3": {
+          "model": "opus 4.7max",
+          "route_class": "scoreable",
+          "wrapperExitCode": 0,
+          "verificationPassed": true,
+          "verdict": "PASS",
+          "runRoot": ".scratch/v2-cohort-runs/2026-04-25_03-48-55-X3-w41-frame-inversion-n62-2026-04-25/N62/",
+          "primary_failure": null
+        },
+        "X2": {
+          "model": "gpt-5.3-codex-spark",
+          "route_class": "scoreable",
+          "wrapperExitCode": 0,
+          "verificationPassed": false,
+          "verdict": "FAIL",
+          "runRoot": ".scratch/v2-cohort-runs/2026-04-25_04-07-45-X2-w41-frame-inversion-n62-2026-04-25/N62/",
+          "primary_failure": "scope verifier: missing required changed path candidate/workspace/src/interfaceflow/api.py"
+        },
+        "X6": {
+          "model": "gemini3.1flash-lite-preview",
+          "route_class": "runtime",
+          "wrapperExitCode": 124,
+          "verificationPassed": null,
+          "verdict": "NOT-RUN",
+          "runRoot": ".scratch/v2-cohort-runs/2026-04-25_04-07-45-X6-w41-frame-inversion-n62-2026-04-25/N62/",
+          "primary_failure": "shell timeout before worker-output.txt or summary.json"
+        }
+      }
+    },
+    "N63": {
+      "name": "frame-inversion staged compact API budget",
+      "intent": "staged prompt frame over N57-class compact BillingMesh API migration plus visible operator budget",
+      "operator_budget_bytes": 40000,
+      "results": {
+        "X1": {
+          "model": "gpt-5.5",
+          "route_class": "scoreable",
+          "wrapperExitCode": 0,
+          "verificationPassed": false,
+          "verdict": "FAIL",
+          "runRoot": ".scratch/v2-cohort-runs/2026-04-25_03-59-21-X1-w41-frame-inversion-n63-2026-04-25/N63/",
+          "operator_output_bytes": 545831,
+          "primary_failure": "operator budget exceeded: 545831 > 40000 bytes; compact API verifier and scope verifier passed"
+        },
+        "X3": {
+          "model": "opus 4.7max",
+          "route_class": "scoreable",
+          "wrapperExitCode": 0,
+          "verificationPassed": true,
+          "verdict": "PASS",
+          "runRoot": ".scratch/v2-cohort-runs/2026-04-25_03-59-21-X3-w41-frame-inversion-n63-2026-04-25/N63/",
+          "operator_output_bytes": 3190,
+          "primary_failure": null
+        },
+        "X2": {
+          "model": "gpt-5.3-codex-spark",
+          "route_class": "scoreable",
+          "wrapperExitCode": 0,
+          "verificationPassed": false,
+          "verdict": "FAIL",
+          "runRoot": ".scratch/v2-cohort-runs/2026-04-25_04-07-45-X2-w41-frame-inversion-n63-2026-04-25/N63/",
+          "operator_output_bytes": 125688,
+          "primary_failure": "operator budget exceeded: 125688 > 40000 bytes; compact API verifier and scope verifier passed"
+        },
+        "X6": {
+          "model": "gemini3.1flash-lite-preview",
+          "route_class": "runtime",
+          "wrapperExitCode": 124,
+          "verificationPassed": null,
+          "verdict": "NOT-RUN",
+          "runRoot": ".scratch/v2-cohort-runs/2026-04-25_04-07-45-X6-w41-frame-inversion-n63-2026-04-25/N63/",
+          "primary_failure": "shell timeout before worker-output.txt or summary.json"
+        }
+      }
+    }
+  },
+  "x5_probe": {
+    "model": "gemini3.1pro",
+    "route_class": "runtime",
+    "verdict": "NOT-RUN",
+    "timeout_seconds": 180,
+    "output_file": ".scratch/x5-quota-check-2026-04-25_0440.txt",
+    "observed_output_file": false,
+    "interpretation": "No explicit quota/reset message was observed. Current status is Gemini wrapper/CLI timeout before worker output, not quota-clear and not a scoreable model failure."
+  },
+  "interpretation": {
+    "n62": "X3 can satisfy N35-class interface-migration semantics in a compact single-pass frame, so the original N35/N36 failures should be read as staged re-entry/multi-session accountability failures, not general inability to perform the migration.",
+    "n63": "X1's visible operator-budget failure persists under staged wording, so the compact low-noise separator is not merely caused by compact prompt wording.",
+    "routing": "Keep execution-shape routing: X1 primary for staged re-entry and phase-ledger accountability; X3 primary for compact low-noise/operator-budget implementation."
+  }
+}

@@ -1,0 +1,181 @@
+{
+  "scenarioId": "N61",
+  "diagnosticId": "E51",
+  "label": "visual-pixel-localization-gauntlet",
+  "date": "2026-04-25",
+  "surfaceStatus": "diagnostic-not-promoted",
+  "scoreSlotStatus": "not part of full-v2-hard /40 denominator",
+  "image": {
+    "imageId": "N61-visual-localization-canvas-v1",
+    "path": "Scenarios-v2/N61-visual-pixel-localization-gauntlet/inputs/visual-localization-canvas.png",
+    "width": 2200,
+    "height": 1600,
+    "targetCount": 6,
+    "targetSizePx": 13,
+    "oraclePath": "Scenarios-v2/N61-visual-pixel-localization-gauntlet/oracle/localization-oracle.json"
+  },
+  "thresholds": {
+    "passMeanPx": 5.0,
+    "passMaxPx": 8.0,
+    "note": "Relaxed after initial probe so PASS allows several pixels of localization error rather than exact-center matching."
+  },
+  "promptSchemaRevision": {
+    "reason": "The first prompt/schema allowed array answers with duplicate ids, which made X1's candidate-list output hard to interpret.",
+    "currentShape": "points is now an object keyed by red/cyan/lime/magenta/amber/blue, so post-fix runs must provide exactly one coordinate per target id.",
+    "diagnosticMetrics": "The verifier now reports best_duplicate_* metrics for legacy array outputs to separate local pixel precision from coverage/format failures."
+  },
+  "scoreRubric": {
+    "binaryGate": "PASS still requires all six ids exactly once, mean <= 5.0 px, and max <= 8.0 px.",
+    "secondaryScore": "score0To100 is a softer lane-fit score: coverage 20, format 20, within-window count 20, mean-error gradient 25, max-error gradient 15."
+  },
+  "preRunValidation": {
+    "bundleShape": "PASS",
+    "oracleJsonParse": "PASS",
+    "answerSchemaJsonParse": "PASS",
+    "referenceAnswer": "PASS exact centers: mean=0.0 max=0.0 score=100.0",
+    "toleranceWindowAnswer": "PASS shifted centers: mean=4.472 max=4.472 score=99.2 under passMeanPx=5.0 and passMaxPx=8.0",
+    "gitDiffCheck": "PASS"
+  },
+  "runs": [
+    {
+      "rowId": "X1",
+      "model": "gpt-5.5",
+      "routeClassification": "scoreable-fail",
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_02-30-14-n61-visual-pixel-localization-2026-04-25-postfix2-x1",
+      "wrapperExitCode": 0,
+      "verifierExitCode": 1,
+      "verdict": "FAIL",
+      "score0To100": 65.1,
+      "meanErrorPx": 77.065,
+      "maxErrorPx": 106.231,
+      "bestDuplicateMeanErrorPx": 77.065,
+      "bestDuplicateMaxErrorPx": 106.231,
+      "matchedIdCount": 6,
+      "withinWindowIds": [],
+      "elapsedSeconds": 18.36,
+      "outputBytes": 219,
+      "errorsById": {
+        "red": 88.566,
+        "cyan": 67.03,
+        "lime": 106.231,
+        "magenta": 68.476,
+        "amber": 38.484,
+        "blue": 93.6
+      },
+      "failureSummary": "Post-fix object-map JSON was produced with all six ids and no format errors. It still failed the strict pixel gate because every target was outside the 8 px max window, but errors were bounded rather than decoy-level."
+    },
+    {
+      "rowId": "X3",
+      "model": "opus 4.7max",
+      "routeClassification": "scoreable-fail",
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_02-30-14-n61-visual-pixel-localization-2026-04-25-postfix2-x3",
+      "wrapperExitCode": 0,
+      "verifierExitCode": 1,
+      "verdict": "FAIL",
+      "score0To100": 50.0,
+      "meanErrorPx": 344.406,
+      "maxErrorPx": 1981.709,
+      "bestDuplicateMeanErrorPx": 344.406,
+      "bestDuplicateMaxErrorPx": 1981.709,
+      "matchedIdCount": 6,
+      "withinWindowIds": ["lime", "amber", "blue"],
+      "elapsedSeconds": 92.8,
+      "outputBytes": 298,
+      "errorsById": {
+        "red": 19.416,
+        "cyan": 1981.709,
+        "lime": 7.28,
+        "magenta": 54.378,
+        "amber": 2.236,
+        "blue": 1.414
+      },
+      "failureSummary": "Post-fix object-map JSON was produced with all six ids and no format errors. Three targets were within the 8 px window, but cyan was again localized to a decoy region and magenta/red exceeded the strict pass window."
+    },
+    {
+      "rowId": "X5",
+      "model": "gemini-3-pro-high-explicit",
+      "routeClassification": "not-run-runtime-timeout",
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_01-38-23-n61-visual-pixel-localization-2026-04-25-x5-nomcp-timeboxed2",
+      "wrapperExitCode": 124,
+      "verifierExitCode": 1,
+      "verdict": "NOT-RUN",
+      "score0To100": null,
+      "meanErrorPx": null,
+      "maxErrorPx": null,
+      "elapsedSeconds": 600.128,
+      "outputBytes": 223,
+      "timedOut": true,
+      "failureSummary": "Official X5 route timed out before producing JSON; worker output contains only the no-MCP Gemini wrapper banner, so this is runtime NOT-RUN, not a model-quality fail."
+    },
+    {
+      "rowId": "X6",
+      "model": "gemini-3.1-flash-lite-preview",
+      "routeClassification": "scoreable-fail",
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_03-03-26-n61-visual-pixel-localization-2026-04-25-x6",
+      "wrapperExitCode": 0,
+      "verifierExitCode": 1,
+      "verdict": "FAIL",
+      "score0To100": 40.0,
+      "meanErrorPx": 363.604,
+      "maxErrorPx": 1973.736,
+      "bestDuplicateMeanErrorPx": 363.604,
+      "bestDuplicateMaxErrorPx": 1973.736,
+      "matchedIdCount": 6,
+      "withinWindowIds": [],
+      "elapsedSeconds": 13.726,
+      "outputBytes": 1854,
+      "errorsById": {
+        "red": 23.854,
+        "cyan": 1973.736,
+        "lime": 34.015,
+        "magenta": 72.014,
+        "amber": 10.0,
+        "blue": 68.007
+      },
+      "failureSummary": "X6 quota and visual route were live: wrapperExitCode=0 and JSON was produced. It failed scoreably after choosing the cyan decoy and placing every target outside the strict 8 px max window."
+    }
+  ],
+  "supersededRuns": [
+    {
+      "rowId": "X1",
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_01-48-52-n61-visual-pixel-localization-2026-04-25-x1-final",
+      "reason": "Superseded by post-fix object-map rerun; useful only for diagnosing the original array prompt/schema defect."
+    },
+    {
+      "rowId": "X3",
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_01-23-24-n61-visual-pixel-localization-2026-04-25-x3-nomcp",
+      "reason": "Superseded by post-fix object-map rerun; kept as raw pre-revision comparison evidence only."
+    }
+  ],
+  "excludedRuns": [
+    {
+      "rowId": "X3",
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_00-55-15-n61-visual-pixel-localization-2026-04-25-rerun1",
+      "reason": "Excluded from final read because the run loaded MCP/Playwright and was contaminated by non-benchmark tooling."
+    },
+    {
+      "rowId": "X5",
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_01-13-02-n61-visual-pixel-localization-2026-04-25-x5",
+      "reason": "Excluded from final read because the route emitted MCP/path/quota noise and no scoreable JSON answer."
+    }
+  ],
+  "fallbackDiagnostics": [
+    {
+      "rowId": "X5-diagnostic",
+      "model": "gemini-3-flash-preview",
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_01-55-59-n61-visual-pixel-localization-2026-04-25-gemini-flash-diagnostic",
+      "wrapperExitCode": 124,
+      "verifierExitCode": 1,
+      "verdict": "NOT-RUN",
+      "elapsedSeconds": 240.099,
+      "timedOut": true,
+      "reason": "Fallback Gemini visual route also timed out before JSON output; this is diagnostic route evidence only and is not counted as official X5."
+    }
+  ],
+  "verdict": {
+    "binaryRead": "No X1/X3 winner: both top rows scoreably fail this pure pixel-localization diagnostic.",
+    "roleFitRead": "Post-fix object-map rerun makes this a scored X1-over-X3 edge for pure pixel localization: X1 has lower mean/max error and score 65.1, while X3 has three exact-window hits but one catastrophic cyan decoy and score 50.0. Keep L08 code-patch routing on N48/N60 evidence; do not promote N61 into /40 until the slot replacement policy is explicit.",
+    "x5Read": "Official Gemini Pro route remains runtime-unhealthy for fresh waves.",
+    "x6Read": "X6 quota/route is live for N61, but its current scoreable output is weaker than X1/X3 at 40.0 / 100."
+  }
+}

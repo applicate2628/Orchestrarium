@@ -1,0 +1,29 @@
+{
+  "image_id": "N61-visual-localization-canvas-v1",
+  "points": {
+    "red": {
+      "x": 0,
+      "y": 0
+    },
+    "cyan": {
+      "x": 0,
+      "y": 0
+    },
+    "lime": {
+      "x": 0,
+      "y": 0
+    },
+    "magenta": {
+      "x": 0,
+      "y": 0
+    },
+    "amber": {
+      "x": 0,
+      "y": 0
+    },
+    "blue": {
+      "x": 0,
+      "y": 0
+    }
+  }
+}
