@@ -1,0 +1,25 @@
+### Summary (3 sentences)
+
+The round-4 `inconsistent_intercept` blocker is fixed in `fingerprint.py`. v0.5 is not shippable because `baselines.json` is syntactically invalid at lines 229-230, and `fingerprint.py` loads it with `json.load()` before normal execution. The distill+middleware framing is improved in code/RESULTS, but not consistently managed across README/METHODOLOGY/baselines docs.
+
+### Round-4 blocker → v0.5 status
+
+FIXED — `A-clean` now gates on `not any_intercept_signal`, including `inconsistent_intercept`, `schema_mismatch`, `single_run_intercept_unverified`, `hard_intercept`, and `variable_intercept`; the new tests cover the reported failure mode.
+
+### Other Round-4 items → v0.5 status
+
+- `baselines.json` scorer_version / known gaps: PARTIAL — version is `0.5.0`, but `baselines.json` is invalid JSON due a missing comma after the distill+middleware gap entry.
+- argparse description: FIXED — now says v0.5.
+- scorer-version drift enforcement: PARTIAL — major mismatch is enforced, but `0.3.0` vs `0.5.0` would not be blocked because both major segments are `0`.
+- `model.startswith("claude")`: FIXED — tightened to `claude-`, with tests.
+- Pope Leo XIV April/May regex: FIXED — May-only pattern, with test.
+- hypothesis names / RESULTS wording: PARTIAL — executable labels now say `Claude-like`, and RESULTS is mostly softened, but README/METHODOLOGY still contain v0.4 and “real frontier Claude” framing.
+
+### Any NEW issues in v0.5
+
+- `baselines.json` invalid JSON, HIGH/BLOCKER — runtime cannot load baselines.
+- Stale docs, MEDIUM — README/METHODOLOGY still advertise v0.4 and old “real Claude” framing, so the documented-gap story is inconsistent.
+
+### Verdict
+
+RED — exact blocker: fix `baselines.json` syntax so the tool can load baselines and run.

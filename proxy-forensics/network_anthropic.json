@@ -1,0 +1,73 @@
+{
+  "target": "anthropic-direct",
+  "url": "https://api.anthropic.com",
+  "timestamp": "2026-04-24T19:07:23.319368+00:00",
+  "probe_version": "0.1.0",
+  "tls": {
+    "hostname": "api.anthropic.com",
+    "port": 443,
+    "tls_version": "TLSv1.3",
+    "cipher_suite": "TLS_AES_256_GCM_SHA384",
+    "cipher_bits": 256,
+    "cert_der_size_bytes": 931,
+    "cert_parsed": null,
+    "handshake_success": true
+  },
+  "headers": {
+    "status_code": 405,
+    "headers": {
+      "date": "Fri, 24 Apr 2026 19:07:21 GMT",
+      "content-type": "application/json",
+      "content-length": "112",
+      "connection": "close",
+      "cache-control": "private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0",
+      "expires": "Thu, 01 Jan 1970 00:00:01 GMT",
+      "referrer-policy": "same-origin",
+      "x-frame-options": "SAMEORIGIN",
+      "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
+      "x-robots-tag": "none",
+      "server": "cloudflare",
+      "cf-ray": "9f1763f2b90a6dde-HAM"
+    },
+    "elapsed_ms": 334.1,
+    "url_final": "https://api.anthropic.com:443/v1/messages"
+  },
+  "timing": {
+    "samples_ms": [
+      380.7,
+      354.4,
+      389.6,
+      379.7,
+      413.1
+    ],
+    "valid_count": 5,
+    "median_ms": 380.7,
+    "min_ms": 354.4,
+    "max_ms": 413.1,
+    "jitter_ms": 58.7
+  },
+  "proxy_matches": [
+    {
+      "software": "Cloudflare",
+      "confidence": 0.95,
+      "matched_signature": "cf-ray",
+      "notes": "CF-Ray ID header"
+    }
+  ],
+  "summary": {
+    "tls_ok": true,
+    "reached_endpoint": true,
+    "http_status": 405,
+    "latency_median_ms": 380.7,
+    "proxy_software_detected": [
+      "Cloudflare"
+    ],
+    "high_confidence_proxy": [
+      "Cloudflare"
+    ],
+    "anthropic_direct_headers": false,
+    "cdn_detected": true,
+    "middleware_detected": false,
+    "notes": []
+  }
+}

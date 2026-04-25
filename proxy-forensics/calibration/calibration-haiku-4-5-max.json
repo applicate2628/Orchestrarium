@@ -1,0 +1,250 @@
+{
+  "target": "calibration-haiku-4-5-max",
+  "command": "claude --model claude-haiku-4-5-20251001",
+  "scorer_version": "0.6.1",
+  "timestamp": "2026-04-25T01:13:31.711751Z",
+  "findings": {
+    "stylometric_717": {
+      "probe_id": "stylometric_717",
+      "run_count": 2,
+      "signals": {},
+      "notes": [],
+      "unique_output_hashes": 2,
+      "providers_observed": [
+        "anthropic-direct"
+      ],
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "853b22fff8e0a354",
+          "raw_bytes": 14818,
+          "text_head": "Reasoning: 7^4 = 2401 ≡ 1 (mod 100), so 7^17 = 7^(4·4+1) ≡ (7^4)^4 · 7 ≡ 1 · 7 ≡ 7 (mod 100).\n\nAnswer: 07",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 416,
+          "reported_model": "claude-haiku-4-5-20251001",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "5378d5ac37b4f59f",
+          "raw_bytes": 14565,
+          "text_head": "Reasoning: 7^4 = 2401 ≡ 1 (mod 100), so 7^17 = 7^(4·4+1) = (7^4)^4 · 7 ≡ 1^4 · 7 ≡ 7 (mod 100)\n\nAnswer: 07",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 389,
+          "reported_model": "claude-haiku-4-5-20251001",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    },
+    "temporal_cutoff": {
+      "probe_id": "temporal_cutoff",
+      "run_count": 2,
+      "signals": {
+        "no_verified_2025": 0.3
+      },
+      "notes": [
+        "No verifiable 2025 events detected — any 2025 mentions present were generic month references that could be hallucinated."
+      ],
+      "unique_output_hashes": 2,
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "305e14d3c6670a62",
+          "raw_bytes": 20785,
+          "text_head": "I cannot comply with this request as written. My knowledge cutoff is February 2025, which means I lack reliable information about events through the end of calendar year 2025. Providing three specific",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 776,
+          "reported_model": "claude-haiku-4-5-20251001",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "abd78e8a317c6e9f",
+          "raw_bytes": 19265,
+          "text_head": "I can't comply with this request as stated. My knowledge was trained through February 2025, so I don't have reliable information about events that occurred in most of 2025. Providing fabricated events",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 613,
+          "reported_model": "claude-haiku-4-5-20251001",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    },
+    "tight_reasoning_crt": {
+      "probe_id": "tight_reasoning_crt",
+      "run_count": 2,
+      "signals": {
+        "format_rigor_pass": 0.8
+      },
+      "notes": [
+        "All 2 valid runs satisfy format constraints"
+      ],
+      "unique_output_hashes": 2,
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "815125932370374e",
+          "raw_bytes": 18563,
+          "text_head": "Any prime p > 3 must be odd (not divisible by 2) and not divisible by 3, which means p² ≡ 1 (mod 8) and p² ≡ 1 (mod 3) respectively. By the Chinese Remainder Theorem, since 24 = 8 × 3 with gcd(8,3) = ",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 1154,
+          "reported_model": "claude-haiku-4-5-20251001",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "55a0fb4966cef67b",
+          "raw_bytes": 22973,
+          "text_head": "Any prime p > 3 is coprime to both 2 and 3. Since 24 = 8 × 3 with coprime factors, the Chinese Remainder Theorem shows that p² ≡ 1 (mod 24) if and only if p² ≡ 1 (mod 8) and p² ≡ 1 (mod 3). Therefore,",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 2455,
+          "reported_model": "claude-haiku-4-5-20251001",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    },
+    "self_introspection_json": {
+      "probe_id": "self_introspection_json",
+      "run_count": 2,
+      "signals": {
+        "clean_introspection": 0.6
+      },
+      "notes": [
+        "All runs schema-match; 1/2 wrapped in codefence (format wart, not gateway filter)"
+      ],
+      "unique_output_hashes": 2,
+      "reported_architecture_family": [
+        "Claude",
+        "Haiku"
+      ],
+      "reported_knowledge_cutoff_month": [
+        "February 2025",
+        "February 2025"
+      ],
+      "reported_supports_extended_thinking": [
+        false,
+        false
+      ],
+      "reported_can_use_prompt_caching": [
+        false,
+        true
+      ],
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "eea0364ad6dcd02a",
+          "raw_bytes": 21633,
+          "text_head": "```json\n{\n  \"architecture_family\": \"Claude\",\n  \"supports_extended_thinking\": false,\n  \"can_use_prompt_caching\": false,\n  \"knowledge_cutoff_month\": \"February 2025\"\n}\n```",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 1153,
+          "reported_model": "claude-haiku-4-5-20251001",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "7272cb4e68daaf78",
+          "raw_bytes": 20018,
+          "text_head": "{\"architecture_family\": \"Haiku\", \"supports_extended_thinking\": false, \"can_use_prompt_caching\": true, \"knowledge_cutoff_month\": \"February 2025\"}",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 848,
+          "reported_model": "claude-haiku-4-5-20251001",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    },
+    "anti_euler_override": {
+      "probe_id": "anti_euler_override",
+      "run_count": 2,
+      "signals": {
+        "soft_override_success": 0.85
+      },
+      "notes": [
+        "All 2 valid runs: ban-compliant + canonical opening + correct answer."
+      ],
+      "unique_output_hashes": 2,
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "67aa8f8426dd3e22",
+          "raw_bytes": 15753,
+          "text_head": "Reasoning: 7^2 = 49, 7^4 = 2401 ≡ 1 (mod 100). Since 17 = 4·4 + 1, we have 7^17 = (7^4)^4 · 7 ≡ 1 · 7 ≡ 7 (mod 100).\n\nAnswer: 7",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 624,
+          "reported_model": "claude-haiku-4-5-20251001",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "11c720ea502fe7a0",
+          "raw_bytes": 15286,
+          "text_head": "Reasoning:\nComputing directly: 7² = 49, and 7⁴ = 49² = 2401 ≡ 1 (mod 100). Since 17 = 4·4 + 1, we have 7¹⁷ = (7⁴)⁴ · 7¹ ≡ 1⁴ · 7 = 7 (mod 100).\n\nAnswer:\n7",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 533,
+          "reported_model": "claude-haiku-4-5-20251001",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    }
+  },
+  "classification": {
+    "primary_hypothesis": "A-clean (Claude-like backend, no detectable middleware)",
+    "primary_score": 0.55,
+    "confidence": "medium",
+    "gap_to_second": 0.198,
+    "ranked_hypotheses": [
+      [
+        "A-clean (Claude-like backend, no detectable middleware)",
+        0.55
+      ],
+      [
+        "ambiguous / insufficient evidence",
+        0.353
+      ],
+      [
+        "A+Middleware (Claude-like backend + active gateway)",
+        0.3
+      ],
+      [
+        "C (distilled student, no middleware)",
+        0.0
+      ],
+      [
+        "distill+middleware (non-Claude backend + active gateway)",
+        0.0
+      ]
+    ],
+    "evidence_weights": {
+      "middleware": 0.0,
+      "capable_base": 1.295,
+      "distill": 0.0,
+      "recent_cutoff": 0.0,
+      "feature_strip": 0.0,
+      "suspicious_intercept": 0.0,
+      "network_support": 0.0,
+      "tokenizer_non_claude": 0.0,
+      "tokenizer_claude": 0.0
+    },
+    "gates_passed": {
+      "A+Middleware": false,
+      "A-clean": true,
+      "C": false,
+      "distill+middleware": false
+    },
+    "annotations": [],
+    "notes": [
+      "Capable-base: clean_introspection +0.24",
+      "Capable-base: soft_override_success (no prior bias; weak signal) +0.26",
+      "Capable-base: format_rigor_pass +0.80"
+    ]
+  },
+  "scorer_version_note": "Bumped 0.6.0→0.6.1 post-calibration; classification reflects v0.6.1 fixes (codefence, april_2025, ambig divisor 2.0)."
+}

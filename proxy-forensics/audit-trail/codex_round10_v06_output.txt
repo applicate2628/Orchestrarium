@@ -1,0 +1,1692 @@
+Reading additional input from stdin...
+OpenAI Codex v0.124.0 (research preview)
+--------
+workdir: D:\dev\Orchestrator\Orchestrarium
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019dc165-1b93-7ab2-ac09-b6ae0ab0b57d
+--------
+user
+# Round-10 codex review: stale-docs final sweep
+
+Round 9: RED on 4 more stale v0.5/blind-spot references. Applied:
+
+- `fingerprint.py:3` — "Claude proxy forensic fingerprinter — v0.5" → "— v0.6"
+- `fingerprint.py:9-20` — "v0.5 changes (fourth codex ... )" block rewritten as v0.6 changes block; historical v0.5 block kept below as `v0.5 changes:` changelog entry
+- `fingerprint.py:1061` — argparse description `v0.5` → `v0.6`
+- `RESULTS.md:13` — removed "toolkit does not distinguish ... the distill+middleware hypothesis class is not in scope"; replaced with v0.6 wording referencing the gated hypothesis + "unresolved" annotation
+- Grep audit confirms no remaining `does not distinguish` / `blind spot` / `blind-spot` / `not in scope` strings
+
+## Remaining v0.5 mentions (intentional historical changelog — not stale)
+
+- `fingerprint.py:25` — `v0.5 changes (fourth codex gpt-5.5 xhigh review):` (changelog block header, describes what was done in v0.5, correct)
+- `fingerprint.py:933` — `# v0.5: tightened suspicious_intercept threshold from 0.3 → 0.1` (inline comment attributing a still-active behavior to the release it landed in)
+- `fingerprint.py:1117` — `# v0.5: scorer-version drift enforcement. Since we're pre-1.0...` (inline comment attributing behavior to release)
+- `README.md:39` — `### v0.5 (fourth codex review round)` (changelog section header)
+
+These are version-history / attribution references, not current-state claims. If you consider any of these stale, say so explicitly.
+
+## Tests
+
+- 166 total (124 fingerprint + 33 tokenizer + 9 mitm), 0 failures
+
+## Request
+
+Final verdict.
+
+Output:
+```
+### Blocker 4 status
+### Verdict
+GREEN (ship v0.6) / RED (specific remaining lines)
+```
+codex
+I’ll do this as a read-only final review and verify the actual current files rather than relying on the round summary. I’m using `review-changes` because this is a requested quality gate on the current changes.
+2026-04-24T21:29:01.419590Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'Orchestrarium|stale|v0.5|fingerprint|RESULTS.md|review' -Context 2,2"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'Orchestrarium|stale|v0.5|fingerprint|RESULTS.md|review' -Context 2,2" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path C:\\Users\\<user>\\OneDrive\\Documents\\env\\Agents\\.codex\\skills\\review-changes\\SKILL.md -TotalCount 220" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git status --short' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'Orchestrarium|stale|v0.5|fingerprint|RESULTS.md|review' -Context 2,2"` rejected: blocked by policy
+ succeeded in 1089ms:
+ M docs/README.md
+?? docs/routing/
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1301ms:
+---
+name: review-changes
+description: Run a full read-only repository impact review starting from recent local changes, a specified diff, branch, commit range, or PR. Use when Codex needs to verify that recent fixes are complete, nothing important was forgotten, unchanged call sites or contracts were not broken, logic still holds across the wider repo, and regressions or missed edge cases are surfaced before commit.
+---
+
+# Review Changes
+
+Run a repository-wide impact review triggered by recent changes. The changed files are only the starting point; the review target is the full affected behavior surface, including unchanged dependents, nearby contracts, tests, and likely regression paths.
+
+## Core stance
+
+- Stay read-only.
+- Use the `review` template semantics from `src.codex/AGENTS.codex.md`: `$analyst` -> QA lane -> reviewer lane.
+- Review the repo in light of the changes, not just the diff lines themselves.
+- Findings come first, ordered by severity.
+- Do NOT commit or modify files.
+
+## Scope decision
+
+1. Check `$ARGUMENTS`.
+- If a PR URL, PR number, branch, commit range, or diff target is given, use that scope.
+- Otherwise inspect current unstaged and staged changes with `git diff` and `git diff --cached`.
+- If no changes are present, stop and tell the user there is nothing to review.
+2. If the user mentions a bug, review thread, accepted plan, or expected fix list, use that as the completion baseline.
+3. If no explicit baseline exists, review against the observed change impact and say that fix-completeness against an external checklist could not be verified.
+
+## Review workflow
+
+1. Run `$analyst` first.
+- Goal: identify what changed, which contracts or behaviors moved, what unchanged code depends on those changes, and where logic may now be incomplete.
+- Require the analyst to inspect callers, dependents, tests, config, schemas, and adjacent modules that may be affected even if they were not edited.
+2. Run the QA lane.
+- Use `$qa-engineer` by default.
+- If external review is preferred for an eligible QA-side slot, `$external-reviewer` may stand in for that lane.
+- Goal: verify regression risk, edge cases, test sufficiency, fix completeness, and whether untouched behavior is now inconsistent with the new logic.
+3. Run the reviewer lane.
+- Always invoke `$architecture-reviewer`.
+- Add `$security-reviewer` if the change touches auth, trust boundaries, secrets, dangerous configuration, input validation, or vulnerability surfaces.
+- Add `$performance-reviewer` if the change touches hot paths, query plans, rendering loops, budgets, throughput, or latency-sensitive behavior.
+- Add `$ux-reviewer`, `$accessibility-reviewer`, or `$ui-test-engineer` when the affected surface is clearly user-facing and the risk is interaction quality rather than pure logic.
+- If external review is preferred for an eligible review-side slot, `$external-reviewer` may stand in for the matching reviewer role.
+4. Keep the chain sequential in Codex unless the user explicitly approves a delegated team and the scopes are clearly independent.
+
+## What to verify
+
+- The requested fixes are actually present.
+- The apparent root cause is covered, not just one symptom.
+- Unchanged callers, consumers, configs, tests, or docs are still compatible with the new behavior.
+- Nearby logic still makes sense after the change.
+- Hidden regressions, stale assumptions, and missed edge cases are surfaced.
+- Validation is strong enough for the touched behavior, or the exact gap is called out.
+- The change did not leave partial rewires, stale branches, dead conditions, or forgotten follow-up adjustments in unchanged files.
+
+## Output
+
+Return one unified review with:
+
+- scope reviewed
+- findings ordered by severity
+- impacted unchanged surfaces that were checked
+- what could not be verified
+- verdict: `PASS`, `REVISE`, or `BLOCKED`
+
+If the user asked "did we fix everything?", answer that directly before the detailed findings.
+
+## Persistence
+
+- If the repository uses active work-items, persist the accepted review artifact there.
+- Otherwise log the review under `.reports/YYYY-MM/` using the standard report naming convention.
+
+## Rules
+
+- Do not role-play specialist reviewers inline when delegation is available and permitted.
+- Treat changed files as entry points, not as the review boundary.
+- If a critical issue appears early, surface it immediately.
+- If the impact surface is too large for a trustworthy single pass, say so and recommend splitting the review into smaller scopes.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The repository has current local changes outside the files named in the round summary (`docs/README.md` and `docs/routing/`), so I’m narrowing this sweep to the stated stale-docs artifacts plus current diffs before giving a verdict.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path 'C:\\Users\\<user>\\.codex\\memories\\MEMORY.md' -TotalCount 80" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git diff --stat' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git diff -- docs/README.md' in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T21:29:19.240945Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Recurse docs\\routing | Select-Object FullName,Length"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Recurse docs\\routing | Select-Object FullName,Length" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Recurse docs\\routing | Select-Object FullName,Length"` rejected: blocked by policy
+ succeeded in 1313ms:
+diff --git a/docs/README.md b/docs/README.md
+index 91b27c3..234fc07 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -19,3 +19,4 @@ Current docs in this branch:
+ - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
+ - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
+ - [provider-runtime-layouts.md](provider-runtime-layouts.md) for cross-provider runtime path mapping
++- [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md)
+\ No newline at end of file
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1536ms:
+# Task Group: Orchestrator benchmarks v3 hardening, stale-line replacement, and row classification
+scope: benchmark hardening in `D:\dev\Orchestrator\benchmarks`, especially replacing stale full-v2 result lines in live docs, treating `39/40` and `40/40` as `pre-v3 ceiling-effect baseline`, strengthening `Scenarios-v2`, and interpreting noisy `X1/X2/X5/X6` batch runs
+applies_to: cwd=D:\dev\Orchestrator\benchmarks; reuse_rule=reuse for benchmark-hardening and result-surface maintenance in this checkout, but re-check current scenario contracts, live `Work/next-upgraded-pack` docs, row allowlists, and latest `.scratch/v2-cohort-runs` evidence before making ranking claims
+
+## Task 1: v3 full-hardening replaced stale baseline language in place and produced a mixed `X1/X2/X5/X6` batch
+
+### rollout_summary_files
+
+- rollout_summaries/2026-04-10T15-01-44-EKuo-benchmark_hardening_stale_lines_v3_baseline.md (cwd=D:\dev\Orchestrator\benchmarks, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\10\rollout-2026-04-10T18-01-44-019d77e9-cbe0-79f2-8092-9681964deb74.jsonl, updated_at=2026-04-21T10:24:50+00:00, thread_id=019d77e9-cbe0-79f2-8092-9681964deb74, freshest summary of in-place v3 baseline relabeling plus external-Claude fallback request)
+- rollout_summaries/2026-04-21T10-07-40-ECZG-benchmarks_v3_hardening_baseline_to_structural_ledgers.md (cwd=D:\dev\Orchestrator\benchmarks, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\21\rollout-2026-04-21T13-07-40-019daf82-8785-7091-b56c-c47215b701c8.jsonl, updated_at=2026-04-21T10:07:47+00:00, thread_id=019daf82-8785-7091-b56c-c47215b701c8, strongest detailed summary of structural ledger/table hardening and noisy batch interpretation)
+- rollout_summaries/2026-04-21T10-07-30-YXvV-benchmark_v3_hardening_prevent_stale_lines.md (cwd=D:\dev\Orchestrator\benchmarks, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\21\rollout-2026-04-21T13-07-30-019daf82-6261-77b1-bcf7-786a25db6267.jsonl, updated_at=2026-04-21T10:07:38+00:00, thread_id=019daf82-6261-77b1-bcf7-786a25db6267, confirms no-stale-forks policy and mixed row outcomes)
+- rollout_summaries/2026-04-21T10-07-21-Mv9m-benchmark_hardening_v3_stale_line_replacement.md (cwd=D:\dev\Orchestrator\benchmarks, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\21\rollout-2026-04-21T13-07-21-019daf82-3bd2-7550-aac6-abf20a608af0.jsonl, updated_at=2026-04-21T10:07:28+00:00, thread_id=019daf82-3bd2-7550-aac6-abf20a608af0, preserves exact user preference wording and verifier/source-of-truth guidance)
+- rollout_summaries/2026-04-21T10-07-14-DJgO-benchmarks_v3_full_hardening_ceiling_effect_baseline.md (cwd=D:\dev\Orchestrator\benchmarks, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\21\rollout-2026-04-21T13-07-14-019daf82-22d1-7f41-8d69-75a8a5432f3e.jsonl, updated_at=2026-04-21T10:07:18+00:00, thread_id=019daf82-22d1-7f41-8d69-75a8a5432f3e, broadest task split for hardening, batch runs, live-doc policy, and score caveats)
+
+### keywords
+
+- D:\dev\Orchestrator\benchmarks, v3 hardening, full hardening, stale lines, pre-v3 ceiling-effect baseline, 39/40, 40/40, Work/next-upgraded-pack, Scenarios-v2, N02, N11, N12, S30, X1, X2, X5, X6, X3 excluded, summary.json, batch-summary.md, run-v2-cohort-batch.ps1, git diff --check, mcp-free
+
+## User preferences
+
+- when the user said `40/40 и 39/40 это слишком несерьезно` / `40/40 and 39/40 is too unserious` -> do not treat top-row ceiling-effect scores as serious final classification evidence; harden the benchmark surface before making ranking claims [Task 1]
+- when the user said `go, и заменяй stale lines на hardening версию, не плоди stales` -> update live result/evidence surfaces in place; do not create parallel stale baseline files or competing duplicate result surfaces [Task 1]
+- when the user limited the run list to `X1,X2,X5,X6` and excluded `X3` -> preserve explicit row allowlists and do not launch omitted rows opportunistically unless the user re-adds them [Task 1]
+- when the user asks for full hardening, prefer changes that make the classifier structurally discriminative, not cosmetic wording or more keyword-only checks [Task 1]
+
+## Reusable knowledge
+
+- Live operator/result surfaces for this benchmark family live under `Work/next-upgraded-pack/Results-drafts/`; the old `short-results-current-2026-04-18.md` and `v2-full-s01-s33-n01-n07-results-2026-04-18.md` rows were rewritten to mark `39/40` and `40/40` as `pre-v3 ceiling-effect baseline` [Task 1]
+- `Work/next-upgraded-pack/Planning/next-phase/scoring-and-results-model-2026-04-17.md` is the policy surface for a `V3 Full-Hardening Update`; `Work/next-upgraded-pack/Tooling/HOW-TO-USE-TESTS.md` should also reflect hardening policy so future reruns interpret old rows correctly [Task 1]
+- The reusable hardening pattern was structural ledgers/tables and forbidden-direction checks, not more keywords: `N02` source-to-state trace tables with `Source failure / Proposed state response / Owner / Visible return cue`, `N11` `Evidence Binding Table` plus `Forbidden Direction Test`, and `N12` `Evidence Line Ledger` plus `Non-Claim And Gap Ledger` [Task 1]
+- `git diff --check` and scenario `--bundle-shape-only` checks stayed clean after the hardening edits, so use those as quick hygiene gates before expensive row reruns [Task 1]
+- `mcp-free` was a useful hygiene step before reruns: it killed two orphaned `mcp-language-server.exe` processes on the first pass and later reported `STATS kill: none` [Task 1]
+- Batch summaries and verifier artifacts are the authoritative read when workers are noisy: use `.scratch/v2-cohort-runs/.../batch-summary.md`, `meta/summary.json`, and verifier logs instead of raw stdout [Task 1]
+- Recorded v3 batch outcome: sources agree that `X1` passed `S30/N02/N11/N12`, `X2` failed `S30/N02/N11` and passed `N12`, and `X5` passed `S30/N11/N12` but failed `N02`; `X6/N02` is noisy/conflicting across summaries, with the freshest consolidated raw-memory state saying `X6` failed `S30/N02/N11/N12`, so reopen `batch-summary.md` / `summary.json` before relying on that one scenario [Task 1]
+
+## Failures and how to do differently
+
+- Symptom: old full-v2 `39/40` / `40/40` reads look like a classifier -> cause: ceiling-effect baseline rows under weak contracts -> fix: label them `pre-v3 ceiling-effect baseline`, update live docs in place, and require stricter contracts before ranking [Task 1]
+- Symptom: `N02` source-trace-only hardening still passes too easily -> cause: prose-only trace does not force the state transition semantics -> fix: require trace tables with `Source failure`, `Proposed state response`, `Owner`, and `Visible return cue`, then verify against exact terms such as `validation failure`, `re-entry`, `web review acknowledged`, `resume from here`, `same loop`, `returned`, and `ready to re-enter` [Task 1]
+- Symptom: `N11`/`N12` structural additions still do not cleanly classify every row -> cause: ledgers/tables were useful but row candidates still missed exact contract terms or machine-checkable invariants -> fix: tighten candidate text and verifier requirements together, especially source binding, non-claim/gap separation, and forbidden-direction constraints [Task 1]
+- Symptom: `X2` / `X6` runs include `run_shell_command` tool errors, recursion noise, quota aborts, or Gemini/Codex wrapper chatter -> cause: harness/model stdout noise, not necessarily the benchmark verdict -> fix: classify from `summary.json`, `batch-summary.md`, `wrapperExitCode`, `verificationPassed`, `changedPaths`, and verifier logs [Task 1]
+- Symptom: patching scenario docs or release/result surfaces hits context mismatches -> cause: live files changed during the hardening pass -> fix: read exact current file text and use smaller patches before broad in-place rewrites [Task 1]
+
+# Task Group: mcp-local-hub read-only review, repo map, and performance sweep
+scope: read-only full review work in `D:\dev\mcp-local-hub`, especially when the user asks for report-only review with Serena/all MCP; includes PR #4 hyperfine/Serena security review, install reconciliation, repo orientation, validation behavior, manifest-source boundaries, and performance/reliability hotspots
+applies_to: cwd=D:\dev\mcp-local-hub; reuse_rule=reuse for review/audit/navigation in this checkout, but re-check branch, merge-base, Go version, work-items state, and current MCP/Serena/GitHub availability each session
+
+## Task 1: initial read-only PR #4 review of hyperfine gate and Serena pinning, partial because docs/install blockers remained
+
+### rollout_summary_files
+
+- rollout_summaries/2026-04-19T20-05-09-MgKa-mcp_local_hub_pr4_hyperfine_gate_and_serena_prune_review.md (cwd=D:\dev\mcp-local-hub, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\19\rollout-2026-04-19T23-05-09-019da758-d144-7f01-aa5a-2471464396de.jsonl, updated_at=2026-04-21T22:12:45+00:00, thread_id=019da758-d144-7f01-aa5a-2471464396de, PR #4 security/perf hotfix review stayed read-only; code gates passed but docs/install blockers remained)
+
+### keywords
+
+- mcp-local-hub, PR #4, security-hotfix/phase-3-post-merge, hyperfine gate, MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE, resource://tools, list_tools, Serena manifest pin, weekly_refresh false, go test ./..., go vet ./..., staticcheck ./..., gofmt -l ., git diff --check
+
+## Task 2: re-review after commit `c122150`, partial because whitespace/docs mismatch remained
+
+### rollout_summary_files
+
+- rollout_summaries/2026-04-19T20-05-09-MgKa-mcp_local_hub_pr4_hyperfine_gate_and_serena_prune_review.md (cwd=D:\dev\mcp-local-hub, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\19\rollout-2026-04-19T23-05-09-019da758-d144-7f01-aa5a-2471464396de.jsonl, updated_at=2026-04-21T22:12:45+00:00, thread_id=019da758-d144-7f01-aa5a-2471464396de, new head `c122150` made prune logic/test coverage solid but left `git diff --check` and one docs wording blocker)
+
+### keywords
+
+- mcp-local-hub, PR #4, c122150, re-review, GraphQL reviewThreads, isResolved, MERGEABLE/CLEAN, internal/api/install.go, Plan.FullInstall, pruneObsoleteServerTasks, schedulerLister, ExportXML, ImportXML, internal/api/prune_tasks_test.go, INSTALL.md, git diff --check
+
+## Task 3: full review of repo changes and main risk surfaces without modifying files
+
+### rollout_summary_files
+
+- rollout_summaries/2026-04-19T00-47-04-OygP-mcp_local_hub_full_review_readonly_mcp_serena.md (cwd=D:\dev\mcp-local-hub, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\19\rollout-2026-04-19T03-47-04-019da334-9276-7582-a3f1-d7896600c63b.jsonl, updated_at=2026-04-19T19:47:39+00:00, thread_id=019da334-9276-7582-a3f1-d7896600c63b, read-only review stayed report-only; validation ended green after serialized rerun)
+
+### keywords
+
+- mcp-local-hub, read-only review, никаких изменений не делать, only report, use All MCP you want and serena, go test -count=1 -p 1 ./..., go 1.26.2, work-items/bugs/closed, status: open, servers/embed.go, defaultManifestDir, strings.SplitSeq
+
+## Task 4: advisory performance and reliability risk sweep
+
+### rollout_summary_files
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1651ms:
+ docs/README.md | 1 +
+ 1 file changed, 1 insertion(+)
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg --files -g fingerprint.py -g RESULTS.md -g README.md' in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T21:29:32.931550Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git ls-files --others --exclude-standard docs/routing'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git ls-files --others --exclude-standard docs/routing' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git ls-files --others --exclude-standard docs/routing'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git diff --name-only' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git diff --cached --name-only' in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1126ms:
+README.md
+shared\references\README.md
+references-gemini\README.md
+docs\README.md
+references-codex\README.md
+src.gemini\extension\README.md
+references-claude\README.md
+src.gemini\README.md
+src.gemini\skills\README.md
+src.codex\README.md
+src.claude\README.md
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1238ms:
+docs/README.md
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1471ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The named `fingerprint.py` and `RESULTS.md` are not tracked at the visible repo root from the first file search. I’m checking whether they live under the untracked `docs/routing` tree or another ignored/local area before treating the sweep as complete.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg --files docs/routing' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg --files -g '*fingerprint*' -g '*RESULTS*' -g '*results*'" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"v0\\.5|v0\\.6|does not distinguish|blind spot|blind-spot|not in scope\"" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git status --porcelain=v1 -uall' in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1174ms:
+docs/routing\12-lane-routing-matrix-v1-2026-04-18.md
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:29:49.132754Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.4 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1385ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1489ms:
+ M docs/README.md
+?? docs/routing/12-lane-routing-matrix-v1-2026-04-18.md
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:29:49.422780Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.7 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1675ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg --files -uu -g '*fingerprint*' -g 'RESULTS.md' -g 'README.md'" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -uu \"v0\\.5|v0\\.6|does not distinguish|blind spot|blind-spot|not in scope\"" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -uu \"Claude proxy forensic fingerprinter|suspicious_intercept|scorer-version drift|distill\\+middleware|unresolved\"" in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T21:30:02.545099Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git rev-parse --show-toplevel'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git rev-parse --show-toplevel' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git rev-parse --show-toplevel'` rejected: blocked by policy
+ succeeded in 1127ms:
+docs\README.md
+README.md
+references-claude\README.md
+references-codex\README.md
+references-gemini\README.md
+src.claude\README.md
+.scratch\proxy-forensics\__pycache__\fingerprint.cpython-314.pyc
+.scratch\proxy-forensics\test_fingerprint.py
+.scratch\proxy-forensics\RESULTS.md
+.scratch\proxy-forensics\README.md
+.scratch\proxy-forensics\fingerprint.py
+shared\references\README.md
+src.gemini\skills\README.md
+src.codex\README.md
+src.gemini\README.md
+src.gemini\extension\README.md
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:30:03.774455Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.2 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1235ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:30:03.956476Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.4 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1414ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+I found the round artifacts under `.scratch/proxy-forensics`, which explains why the normal tracked-file search missed them. I’m now checking that scratch package directly, including the exact stale phrases and the remaining version references.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n -uu "v0" .scratch/proxy-forensics' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n -uu "does not distinguish|blind spot|blind-spot|not in scope" .scratch/proxy-forensics' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -uu \"unresolved|gated hypothesis|distill\\+middleware|Claude proxy forensic fingerprinter\" .scratch/proxy-forensics" in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T21:30:15.736556Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Path .scratch\\proxy-forensics | Select-Object Name,Length,LastWriteTime"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Path .scratch\\proxy-forensics | Select-Object Name,Length,LastWriteTime" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Path .scratch\\proxy-forensics | Select-Object Name,Length,LastWriteTime"` rejected: blocked by policy
+ succeeded in 1141ms:
+.scratch/proxy-forensics\baselines.json:12:    "notes": "Baselines collected via `claude -p <prompt> --model <id> --effort max --tools '' --output-format json` on Anthropic-direct (not Vertex/Bedrock). Each baseline is a single run; multi-run reproducibility was not captured at collection time (TODO for v0.3).",
+.scratch/proxy-forensics\baselines.json:227:      "Tokenizer-identity probe IMPLEMENTED in v0.6 (`tokenizer_probe.py`) using CLI-mediated baseline (not raw Anthropic `count_tokens` API). Upgrade to API-key-based count_tokens would reduce cost and eliminate CLI wrapping overhead in β, but slope α and residuals still discriminate tokenizer identity with CLI fallback. See `baseline_method` field in tokenizer probe output.",
+.scratch/proxy-forensics\baselines.json:229:      "`distill+middleware` hypothesis ADDED in v0.6. Requires tokenizer non_claude verdict AND middleware ≥ 0.6. Without tokenizer data, A+Middleware verdict is ANNOTATED with 'distill+middleware unresolved' to flag the remaining uncertainty rather than silently assuming real Claude.",
+.scratch/proxy-forensics\fingerprint.py:3:Claude proxy forensic fingerprinter — v0.6.
+.scratch/proxy-forensics\fingerprint.py:9:v0.6 changes (fifth codex gpt-5.5 xhigh review):
+.scratch/proxy-forensics\fingerprint.py:25:v0.5 changes (fourth codex gpt-5.5 xhigh review):
+.scratch/proxy-forensics\fingerprint.py:32:  - baselines.json scorer_version bumped to 0.5.0; planned-v0.3 text cleaned
+.scratch/proxy-forensics\fingerprint.py:33:    up; distill+middleware entry added to known_gaps (now resolved in v0.6
+.scratch/proxy-forensics\fingerprint.py:38:v0.4 changes (third codex gpt-5.5 xhigh review):
+.scratch/proxy-forensics\fingerprint.py:59:v0.3:
+.scratch/proxy-forensics\fingerprint.py:67:v0.2:
+.scratch/proxy-forensics\fingerprint.py:766:    v0.6 changes:
+.scratch/proxy-forensics\fingerprint.py:778:    v0.4-0.5 behavior preserved: hard gates for high-confidence hypotheses.
+.scratch/proxy-forensics\fingerprint.py:869:    # ---- v0.6: Network evidence (corroborating only, capped contributions) ----
+.scratch/proxy-forensics\fingerprint.py:899:    # ---- v0.6: Tokenizer evidence ----
+.scratch/proxy-forensics\fingerprint.py:929:    # v0.6: vetoed by non_claude tokenizer (→ distill+middleware instead)
+.scratch/proxy-forensics\fingerprint.py:933:    # v0.5: tightened suspicious_intercept threshold from 0.3 → 0.1 so that even weak
+.scratch/proxy-forensics\fingerprint.py:938:    # v0.6: ALSO vetoed by non_claude tokenizer (cannot be clean Claude if tokenizer mismatch)
+.scratch/proxy-forensics\fingerprint.py:950:    # v0.6: distill+middleware hypothesis. Requires BOTH middleware ≥ 0.6 AND
+.scratch/proxy-forensics\fingerprint.py:994:    # v0.6: annotate A+Middleware verdict with tokenizer resolution state
+.scratch/proxy-forensics\fingerprint.py:1077:    ap = argparse.ArgumentParser(description="Claude proxy forensic fingerprinter v0.6")
+.scratch/proxy-forensics\fingerprint.py:1091:    # v0.6: cross-evidence integration
+.scratch/proxy-forensics\fingerprint.py:1117:    # v0.5: scorer-version drift enforcement. Since we're pre-1.0, minor
+.scratch/proxy-forensics\fingerprint.py:1183:    # v0.6: optional cross-evidence
+.scratch/proxy-forensics\METHODOLOGY.md:1:# Proxy Forensic Methodology — v0.6
+.scratch/proxy-forensics\METHODOLOGY.md:21:2. **Backend identity range** — frontier-Claude signature, distilled student signature, older checkpoint, non-Claude base. v0.6 adds a gated `distill+middleware` hypothesis that fires when tokenizer evidence indicates non-Claude BPE together with middleware ≥ 0.6. When `tokenizer_probe.py` is NOT run (or returns `ambiguous`/`insufficient_data`), A+Middleware verdicts are annotated "distill+middleware unresolved" to flag the remaining uncertainty explicitly rather than silently assuming real Claude.
+.scratch/proxy-forensics\METHODOLOGY.md:192:## Known gaps (v0.6)
+.scratch/proxy-forensics\METHODOLOGY.md:194:1. ✅ ~~No tokenizer-identity probe~~ — **implemented in v0.6** via `tokenizer_probe.py`. CLI-mediated baseline (not raw `count_tokens` API); strong verdicts require n_points ≥ 8. Output labels `baseline_method` for provenance. Upgrade to API-key based `count_tokens` reduces cost; identical semantics.
+.scratch/proxy-forensics\METHODOLOGY.md:200:7. ✅ ~~No `distill+middleware` hypothesis~~ — **added in v0.6** classifier. Gated on tokenizer `non_claude` verdict + middleware ≥ 0.6. Without tokenizer evidence, A+Middleware verdict is annotated with "distill+middleware unresolved".
+.scratch/proxy-forensics\mitm_capture.py:137:        # v0.6: subprocess.run(shell=True, timeout=...) hangs on Windows when
+.scratch/proxy-forensics\mitm_capture.py:141:        # v0.6 follow-up (codex round 7 blocker): on POSIX, start child in its
+.scratch/proxy-forensics\smoketest_stdout.txt:3:[baselines] baselines valid until 2026-07-23 (scorer v0.5.0, baselines v0.5.0)
+.scratch/proxy-forensics\README.md:1:# Claude Proxy Forensic Toolkit — v0.6
+.scratch/proxy-forensics\README.md:6:- Whether the backend matches a frontier-Claude signature, a distilled student signature, or an imitator. v0.6 adds a gated `distill+middleware` hypothesis class that fires when tokenizer evidence indicates non-Claude BPE together with active middleware; without tokenizer evidence, A+Middleware verdicts are annotated "distill+middleware unresolved" instead of silently assuming real Claude.
+.scratch/proxy-forensics\README.md:9:**Status: v0.6, hypothesis generator**, not adjudicating forensic classifier. Use results as an investigative starting point, not as legal/security-grade proof. See `METHODOLOGY.md` for caveats and known gaps.
+.scratch/proxy-forensics\README.md:30:### v0.6 (fifth codex review round — current)
+.scratch/proxy-forensics\README.md:39:### v0.5 (fourth codex review round)
+.scratch/proxy-forensics\README.md:49:### v0.3
+.scratch/proxy-forensics\README.md:58:### v0.2
+.scratch/proxy-forensics\README.md:126:Combined v0.6 run (all evidence axes):
+.scratch/proxy-forensics\README.md:197:## Known gaps (v0.6)
+.scratch/proxy-forensics\README.md:201:- ✅ ~~No tokenizer-identity probe~~ — **implemented in v0.6** (`tokenizer_probe.py`). Uses CLI-mediated baseline (not raw Anthropic `count_tokens` API). Strong verdicts require n_points ≥ 8. Upgrade to API-key-based count_tokens reduces cost; identical semantics.
+.scratch/proxy-forensics\README.md:202:- ✅ ~~No `distill+middleware` hypothesis~~ — **added in v0.6**. Gated on `tokenizer_non_claude ≥ 0.5` AND `middleware ≥ 0.6`. Without tokenizer data, A+Middleware verdict is annotated "distill+middleware unresolved".
+.scratch/proxy-forensics\RESULTS.md:7:> **Note on methodology revision (2026-04-24 evening):** The original investigation used hard-coded scoring (toolkit v0.1). After independent codex gpt-5.5 xhigh review, the toolkit was hardened to v0.2 with confidence-graded classification, multi-run consistency requirements, and several must-fix parser bugs. The *findings* below were reproduced on the revised toolkit (v0.2 tests in `test_fingerprint.py` synthesize the AW profile and recover the `A+Middleware` verdict at high confidence). The *interpretation* in this document still stands; the *methodology* caveats in `METHODOLOGY.md` should be read alongside it — especially that this is a hypothesis-generator, not a proof system, and that every single probe is defeatable by a sufficiently motivated operator.
+.scratch/proxy-forensics\RESULTS.md:13:The observed signals are **less consistent with** a rigidly-biased distilled-only student, with a Chinese-model clone, and with an alias of an older Claude release. They are **most consistent with** a frontier Claude backend under active gateway manipulation. Important caveats: (a) the toolkit's `distill+middleware` separation now lives in v0.6 behind the `tokenizer_probe.py` gate — at the time of this investigation that probe had not yet been run on AW, so the A+Middleware verdict here carries a "distill+middleware unresolved" annotation (re-run with v0.6 tokenizer probe to upgrade or downgrade to `distill+middleware`); (b) a sufficiently sophisticated adversarial proxy could in principle produce the same behavior on all probes. For security- or legal-grade certainty, capture wire traffic (mitmproxy) and run the tokenizer identity probe.
+.scratch/proxy-forensics\test_fingerprint.py:1:"""Unit tests for fingerprint.py v0.2 — validates the fixes applied after codex review.
+.scratch/proxy-forensics\test_fingerprint.py:136:    # Superscript discrimination — only ⁴ matches, not ⁵ or ³ (v0.3 fix)
+.scratch/proxy-forensics\test_fingerprint.py:212:assert_eq("aw_compliant_canonical_FIXED", s["canonical_opening"], True)  # v0.2 regex catches 49·49
+.scratch/proxy-forensics\test_fingerprint.py:264:# v0.3 fix: single-run intercept should NOT emit hard_intercept
+.scratch/proxy-forensics\test_fingerprint.py:271:assert_true("single_run_intercept -> NO hard_intercept (v0.3 fix)",
+.scratch/proxy-forensics\test_fingerprint.py:302:# v0.3 fix: status_failure runs (CLI errors, intercepts) must NOT convert
+.scratch/proxy-forensics\test_fingerprint.py:309:assert_true("anti_euler_all_failed_runs -> NO rigid_bias (v0.3 fix)",
+.scratch/proxy-forensics\test_fingerprint.py:401:# v0.4 adversarial classifier matrices
+.scratch/proxy-forensics\test_fingerprint.py:403:print("\n--- classify: v0.4 adversarial scenarios ---")
+.scratch/proxy-forensics\test_fingerprint.py:462:# v0.4 protocol-object detection — stricter heuristic
+.scratch/proxy-forensics\test_fingerprint.py:491:# v0.5: forged "claude" prefix without hyphen must NOT pass single-object heuristic
+.scratch/proxy-forensics\test_fingerprint.py:505:# Stream list containing scalars → parse_error (v0.4 type-guard)
+.scratch/proxy-forensics\test_fingerprint.py:511:# v0.4 introspection schema validation
+.scratch/proxy-forensics\test_fingerprint.py:536:# v0.5: codefenced schema-correct introspection → codefence_wrap=True + schema_match=True,
+.scratch/proxy-forensics\test_fingerprint.py:565:# v0.4 temporal cutoff — verifiable-only
+.scratch/proxy-forensics\test_fingerprint.py:588:# v0.5: False-dated event (April 2025 Pope Leo XIV — model hallucinates wrong month)
+.scratch/proxy-forensics\test_fingerprint.py:599:# v0.4 soft-override conditional scoring
+.scratch/proxy-forensics\test_fingerprint.py:628:# v0.5 adversarial tests (codex round-4 findings)
+.scratch/proxy-forensics\test_fingerprint.py:630:print("\n--- classify: v0.5 inconsistent_intercept blocks A-clean high ---")
+.scratch/proxy-forensics\test_fingerprint.py:668:# v0.6: tokenizer evidence integration
+.scratch/proxy-forensics\test_fingerprint.py:670:print("\n--- classify: v0.6 tokenizer evidence ---")
+.scratch/proxy-forensics\test_fingerprint.py:730:# v0.6: network evidence integration
+.scratch/proxy-forensics\test_fingerprint.py:732:print("\n--- classify: v0.6 network evidence ---")
+.scratch/proxy-forensics\test_fingerprint.py:787:# v0.6 codex regression: tokenizer absent must not split confident distill/MW
+.scratch/proxy-forensics\test_fingerprint.py:789:print("\n--- v0.6 regression: tokenizer absent ---")
+.scratch/proxy-forensics\test_fingerprint.py:806:# Baseline freshness — v0.3 fix: missing/malformed expiry_date fails closed
+.scratch/proxy-forensics\tokenizer_probe.py:116:    # v0.6 (codex round 7 blocker fix): accept both stream-list (historical)
+.scratch/proxy-forensics\test_tokenizer_probe.py:108:# (codex fix: this path was incorrectly → ambiguous in v0.1)
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:30:17.003873Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.3 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1273ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1458ms:
+.scratch/proxy-forensics\METHODOLOGY.md:21:2. **Backend identity range** — frontier-Claude signature, distilled student signature, older checkpoint, non-Claude base. v0.6 adds a gated `distill+middleware` hypothesis that fires when tokenizer evidence indicates non-Claude BPE together with middleware ≥ 0.6. When `tokenizer_probe.py` is NOT run (or returns `ambiguous`/`insufficient_data`), A+Middleware verdicts are annotated "distill+middleware unresolved" to flag the remaining uncertainty explicitly rather than silently assuming real Claude.
+.scratch/proxy-forensics\METHODOLOGY.md:142:│   ├── Both pass → CAPABLE + RECENT backend (frontier-Claude signature — could still be distill+middleware)
+.scratch/proxy-forensics\METHODOLOGY.md:200:7. ✅ ~~No `distill+middleware` hypothesis~~ — **added in v0.6** classifier. Gated on tokenizer `non_claude` verdict + middleware ≥ 0.6. Without tokenizer evidence, A+Middleware verdict is annotated with "distill+middleware unresolved".
+.scratch/proxy-forensics\baselines.json:229:      "`distill+middleware` hypothesis ADDED in v0.6. Requires tokenizer non_claude verdict AND middleware ≥ 0.6. Without tokenizer data, A+Middleware verdict is ANNOTATED with 'distill+middleware unresolved' to flag the remaining uncertainty rather than silently assuming real Claude.",
+.scratch/proxy-forensics\fingerprint.py:3:Claude proxy forensic fingerprinter — v0.6.
+.scratch/proxy-forensics\fingerprint.py:13:  - distill+middleware hypothesis added to classifier: gated on
+.scratch/proxy-forensics\fingerprint.py:15:    is NOT run, A+Middleware verdicts are annotated "distill+middleware
+.scratch/proxy-forensics\fingerprint.py:16:    unresolved" rather than silently assuming real Claude.
+.scratch/proxy-forensics\fingerprint.py:33:    up; distill+middleware entry added to known_gaps (now resolved in v0.6
+.scratch/proxy-forensics\fingerprint.py:34:    via tokenizer-gated hypothesis).
+.scratch/proxy-forensics\fingerprint.py:773:        opens `distill+middleware` hypothesis (if middleware also strong).
+.scratch/proxy-forensics\fingerprint.py:774:      - New hypothesis: `distill+middleware` — requires non_claude tokenizer AND
+.scratch/proxy-forensics\fingerprint.py:776:        annotated as "distill+middleware unresolved".
+.scratch/proxy-forensics\fingerprint.py:910:            # Vetoes A-clean, opens distill+middleware hypothesis if middleware present.
+.scratch/proxy-forensics\fingerprint.py:929:    # v0.6: vetoed by non_claude tokenizer (→ distill+middleware instead)
+.scratch/proxy-forensics\fingerprint.py:950:    # v0.6: distill+middleware hypothesis. Requires BOTH middleware ≥ 0.6 AND
+.scratch/proxy-forensics\fingerprint.py:952:    # A+Middleware verdict is annotated with "distill+middleware unresolved".
+.scratch/proxy-forensics\fingerprint.py:961:    # reading when A+Middleware / A-clean wins. distill+middleware separates the
+.scratch/proxy-forensics\fingerprint.py:967:        ("distill+middleware (non-Claude backend + active gateway)", max(0.0, dmw)),
+.scratch/proxy-forensics\fingerprint.py:985:        elif top[0].startswith("distill+middleware"):
+.scratch/proxy-forensics\fingerprint.py:998:            "distill+middleware UNRESOLVED — tokenizer probe not run; "
+.scratch/proxy-forensics\fingerprint.py:1005:                f"distill+middleware UNRESOLVED — tokenizer verdict {tv}; "
+.scratch/proxy-forensics\fingerprint.py:1020:            "distill+middleware": dmw_gate,
+.scratch/proxy-forensics\fingerprint.py:1077:    ap = argparse.ArgumentParser(description="Claude proxy forensic fingerprinter v0.6")
+.scratch/proxy-forensics\fingerprint.py:1099:                         "non_claude tokenizer vetoes A-clean and enables distill+middleware hypothesis.")
+.scratch/proxy-forensics\RESULTS.md:13:The observed signals are **less consistent with** a rigidly-biased distilled-only student, with a Chinese-model clone, and with an alias of an older Claude release. They are **most consistent with** a frontier Claude backend under active gateway manipulation. Important caveats: (a) the toolkit's `distill+middleware` separation now lives in v0.6 behind the `tokenizer_probe.py` gate — at the time of this investigation that probe had not yet been run on AW, so the A+Middleware verdict here carries a "distill+middleware unresolved" annotation (re-run with v0.6 tokenizer probe to upgrade or downgrade to `distill+middleware`); (b) a sufficiently sophisticated adversarial proxy could in principle produce the same behavior on all probes. For security- or legal-grade certainty, capture wire traffic (mitmproxy) and run the tokenizer identity probe.
+.scratch/proxy-forensics\results_official_validation.json:221:        "distill+middleware (non-Claude backend + active gateway)",
+.scratch/proxy-forensics\results_official_validation.json:240:      "distill+middleware": false
+.scratch/proxy-forensics\README.md:6:- Whether the backend matches a frontier-Claude signature, a distilled student signature, or an imitator. v0.6 adds a gated `distill+middleware` hypothesis class that fires when tokenizer evidence indicates non-Claude BPE together with active middleware; without tokenizer evidence, A+Middleware verdicts are annotated "distill+middleware unresolved" instead of silently assuming real Claude.
+.scratch/proxy-forensics\README.md:33:- **`distill+middleware` hypothesis** added to classifier: gated on `tokenizer_non_claude ≥ 0.5` AND `middleware ≥ 0.6`. Without tokenizer data, A+Middleware is annotated "distill+middleware unresolved" instead of silently assuming real Claude.
+.scratch/proxy-forensics\README.md:202:- ✅ ~~No `distill+middleware` hypothesis~~ — **added in v0.6**. Gated on `tokenizer_non_claude ≥ 0.5` AND `middleware ≥ 0.6`. Without tokenizer data, A+Middleware verdict is annotated "distill+middleware unresolved".
+.scratch/proxy-forensics\test_fingerprint.py:673:# → distill+middleware should now be primary (not A+Middleware)
+.scratch/proxy-forensics\test_fingerprint.py:685:            any("distill+middleware UNRESOLVED" in a for a in v.get("annotations", [])),
+.scratch/proxy-forensics\test_fingerprint.py:688:# With tokenizer=non_claude → distill+middleware should now be primary
+.scratch/proxy-forensics\test_fingerprint.py:691:            v["gates_passed"]["distill+middleware"],
+.scratch/proxy-forensics\test_fingerprint.py:799:          v["gates_passed"]["distill+middleware"], False)
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 2 -uu \"v0\\.5\" .scratch/proxy-forensics/fingerprint.py .scratch/proxy-forensics/README.md .scratch/proxy-forensics/RESULTS.md .scratch/proxy-forensics/METHODOLOGY.md .scratch/proxy-forensics/baselines.json .scratch/proxy-forensics/smoketest_stdout.txt .scratch/proxy-forensics/test_fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n -C 2 -uu "does not distinguish|blind spot|blind-spot|not in scope" .scratch/proxy-forensics/fingerprint.py .scratch/proxy-forensics/README.md .scratch/proxy-forensics/RESULTS.md .scratch/proxy-forensics/METHODOLOGY.md .scratch/proxy-forensics/baselines.json' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\fingerprint.py -TotalCount 90" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\RESULTS.md -TotalCount 25" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1228ms:
+.scratch/proxy-forensics/smoketest_stdout.txt-1-D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py:1096: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+.scratch/proxy-forensics/smoketest_stdout.txt-2-  "timestamp": datetime.utcnow().isoformat() + "Z",
+.scratch/proxy-forensics/smoketest_stdout.txt:3:[baselines] baselines valid until 2026-07-23 (scorer v0.5.0, baselines v0.5.0)
+.scratch/proxy-forensics/smoketest_stdout.txt-4-[!] --shell: subprocess.run will use shell=True. Do not pass a --cmd value from an untrusted source.
+.scratch/proxy-forensics/smoketest_stdout.txt-5-
+--
+.scratch/proxy-forensics/test_fingerprint.py-489-assert_eq("non_claude_model_intercepted", r["status"], "intercepted")
+.scratch/proxy-forensics/test_fingerprint.py-490-
+.scratch/proxy-forensics/test_fingerprint.py:491:# v0.5: forged "claude" prefix without hyphen must NOT pass single-object heuristic
+.scratch/proxy-forensics/test_fingerprint.py-492-forged = json.dumps({"result": "Hi", "model": "claudefake"})
+.scratch/proxy-forensics/test_fingerprint.py-493-r = fp.parse_cli_output(forged, "", 0)
+--
+.scratch/proxy-forensics/test_fingerprint.py-534-assert_true("wrong_type_recorded", "schema_wrong_type" in s)
+.scratch/proxy-forensics/test_fingerprint.py-535-
+.scratch/proxy-forensics/test_fingerprint.py:536:# v0.5: codefenced schema-correct introspection → codefence_wrap=True + schema_match=True,
+.scratch/proxy-forensics/test_fingerprint.py-537-# but aggregator must NOT emit clean_introspection (codefence = format failure)
+.scratch/proxy-forensics/test_fingerprint.py-538-codefenced = {"status": "valid_stream", "raw_hash": "h4",
+--
+.scratch/proxy-forensics/test_fingerprint.py-586-            f"signals: {agg['signals']}")
+.scratch/proxy-forensics/test_fingerprint.py-587-
+.scratch/proxy-forensics/test_fingerprint.py:588:# v0.5: False-dated event (April 2025 Pope Leo XIV — model hallucinates wrong month)
+.scratch/proxy-forensics/test_fingerprint.py-589-# should NOT match the tightened May-only pattern.
+.scratch/proxy-forensics/test_fingerprint.py-590-false_dated_text = "Reasoning\nApril 2025 Pope Leo XIV elected at the Vatican."
+--
+.scratch/proxy-forensics/test_fingerprint.py-626-
+.scratch/proxy-forensics/test_fingerprint.py-627-# -------------------------------------------------------------------------
+.scratch/proxy-forensics/test_fingerprint.py:628:# v0.5 adversarial tests (codex round-4 findings)
+.scratch/proxy-forensics/test_fingerprint.py-629-# -------------------------------------------------------------------------
+.scratch/proxy-forensics/test_fingerprint.py:630:print("\n--- classify: v0.5 inconsistent_intercept blocks A-clean high ---")
+.scratch/proxy-forensics/test_fingerprint.py-631-
+.scratch/proxy-forensics/test_fingerprint.py-632-# Blocker fix: inconsistent_intercept (0.25) + otherwise-clean should NOT yield high A-clean
+--
+.scratch/proxy-forensics/README.md-37-- **Live validation**: plain `claude --model claude-opus-4-7` reliably classifies as A-clean high confidence. 124 unit tests pass.
+.scratch/proxy-forensics/README.md-38-
+.scratch/proxy-forensics/README.md:39:### v0.5 (fourth codex review round)
+.scratch/proxy-forensics/README.md-40-
+.scratch/proxy-forensics/README.md-41-- Classifier has **hard evidence gates**: A+Middleware requires middleware ≥ 0.6 AND capable_base ≥ 0.5; A-clean requires capable_base ≥ 0.6 AND middleware < 0.4 AND suspicious_intercept < 0.3; C requires distill ≥ 0.6 AND capable_base < 0.5. Hypotheses failing their gate can't reach high confidence.
+--
+.scratch/proxy-forensics/fingerprint.py-23-    on POSIX.
+.scratch/proxy-forensics/fingerprint.py-24-
+.scratch/proxy-forensics/fingerprint.py:25:v0.5 changes (fourth codex gpt-5.5 xhigh review):
+.scratch/proxy-forensics/fingerprint.py-26-  - A-clean gate now blocks on ANY intercept signal (hard/variable/inconsistent/
+.scratch/proxy-forensics/fingerprint.py-27-    schema_mismatch/single_run_intercept_unverified), not just those crossing
+--
+.scratch/proxy-forensics/fingerprint.py-931-    a_mid = (0.5 * mw + 0.35 * cb + 0.15 * rc) if a_mid_gate else min(0.5, 0.4 * mw + 0.3 * cb)
+.scratch/proxy-forensics/fingerprint.py-932-    # A-clean: needs capable_base ≥ 0.6 AND effectively NO middleware/suspicious-intercept signal.
+.scratch/proxy-forensics/fingerprint.py:933:    # v0.5: tightened suspicious_intercept threshold from 0.3 → 0.1 so that even weak
+.scratch/proxy-forensics/fingerprint.py-934-    # inconsistent_intercept signals (0.25) disqualify A-clean from high confidence.
+.scratch/proxy-forensics/fingerprint.py-935-    # Also explicit: ANY intercept signal (hard_intercept, variable_intercept,
+--
+.scratch/proxy-forensics/fingerprint.py-1115-        print("ERROR: baselines are stale. Regenerate or pass --force-stale to proceed anyway.")
+.scratch/proxy-forensics/fingerprint.py-1116-        return 2
+.scratch/proxy-forensics/fingerprint.py:1117:    # v0.5: scorer-version drift enforcement. Since we're pre-1.0, minor
+.scratch/proxy-forensics/fingerprint.py-1118-    # bumps also break scorer semantics, so we compare at major.minor
+.scratch/proxy-forensics/fingerprint.py-1119-    # granularity while we're on 0.x; after 1.0 only major changes should
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:30:35.350203Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.4 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1408ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1594ms:
+#!/usr/bin/env python3
+"""
+Claude proxy forensic fingerprinter - v0.6.
+
+Given a command that speaks the Claude Code CLI protocol (plain `claude` or
+a wrapper like `claude-aw.cmd`), run a battery of probes to classify the
+backend and detect middleware interference.
+
+v0.6 changes (fifth codex gpt-5.5 xhigh review):
+  - tokenizer_probe.py added (separate script): sends 10 sentinels through
+    baseline + suspect, fits alpha/beta/residuals, emits claude_bpe /
+    non_claude / ambiguous verdict.
+  - distill+middleware hypothesis added to classifier: gated on
+    tokenizer_non_claude >= 0.5 AND middleware >= 0.6. When tokenizer probe
+    is NOT run, A+Middleware verdicts are annotated "distill+middleware
+    unresolved" rather than silently assuming real Claude.
+  - Network evidence integration: --network-probe-url flag co-runs
+    network_probe.py and feeds TLS/CDN/defense signals into classifier
+    with capped contribution (corroborating only, not load-bearing).
+  - Tokenizer non_claude vetoes A-clean high confidence.
+  - mitm_capture.py subprocess hang fix: Popen + poll-loop + taskkill
+    /F /T /PID on Windows; start_new_session=True + pgid safety guard
+    on POSIX.
+
+v0.5 changes (fourth codex gpt-5.5 xhigh review):
+  - A-clean gate now blocks on ANY intercept signal (hard/variable/inconsistent/
+    schema_mismatch/single_run_intercept_unverified), not just those crossing
+    an arbitrary threshold. Suspicious_intercept threshold tightened 0.3  0.1.
+  - Hypothesis labels softened: "real Claude"  "Claude-like backend".
+  - Scorer-version major-mismatch blocks execution (fail-closed), not just
+    prints a warning.
+  - baselines.json scorer_version bumped to 0.5.0; planned-v0.3 text cleaned
+    up; distill+middleware entry added to known_gaps (now resolved in v0.6
+    via tokenizer-gated hypothesis).
+  - RESULTS.md softened further: "inconsistent with distilled student" 
+    "less consistent with rigidly-biased distilled-only student".
+
+v0.4 changes (third codex gpt-5.5 xhigh review):
+  - Classifier has HARD EVIDENCE GATES: A+Middleware requires both
+    middleware ? 0.6 AND capable_base ? 0.5; A-clean requires capable_base
+    ? 0.6 AND middleware/suspicious_intercept low; C requires distill ?
+    0.6 AND low capable_base. Hypotheses failing their gate can't reach
+    high confidence.
+  - Introspection schema validation: clean_introspection requires all 4
+    fields with credible types. Schema-shaped-but-wrong JSON emits
+    schema_mismatch (middleware evidence) instead of clean.
+  - Protocol-object detection stricter: single-object JSON must have
+    `result` string AND (usage dict with token counts OR model starting
+    "claude-" OR session_id ? 8 chars). Prevents gateway wrappers like
+    `{"result":"{\"acknowledged\":true}"}` from evading intercept.
+  - Variable/inconsistent intercept penalizes A-clean (adaptive gateway
+    can't be classified clean).
+  - Soft-override conditional: fully counts as capable-base evidence only
+    when stylometric bias was first observed; otherwise 0.3? multiplier.
+  - Temporal cutoff requires verifiable events; generic month-only
+    mentions no longer promote cutoff.
+  - Parser type-guards stream-list elements (scalars  parse_error).
+
+v0.3:
+  - valid_single_object vs intercepted distinction.
+  - status_failure runs filtered from scoring.
+  - hard_intercept ? 2 repeats.
+  - Byte-level raw hash.
+  - Superscript regex only ?.
+  - Missing expiry_date fails closed.
+
+v0.2:
+  - cli_error/parse_error/intercepted/valid_stream separation.
+  - --repeats N flag.
+  - Confidence-graded classification.
+  - Hardened Unicode regex.
+  - Baseline expiry check.
+
+Usage:
+  python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
+  python fingerprint.py --label "direct" --cmd "claude --model claude-opus-4-7"
+  python fingerprint.py --list-probes
+  python fingerprint.py --label "X" --cmd "..." --repeats 2
+
+Dependencies: Python 3.9+, baselines.json co-located with this script.
+"""
+
+import argparse
+import hashlib
+import json
+import re
+import shlex
+import subprocess
+import sys
+from datetime import date, datetime
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1763ms:
+# Investigation Results - `claude-aw.cmd` Proxy (api.claudecodeapi.cloud)
+
+**Date:** 2026-04-24
+**Target:** `claude-aw.cmd --model opus` (wrapper setting `ANTHROPIC_BASE_URL=https://api.claudecodeapi.cloud`)
+**Baselines:** Anthropic-direct Opus 4.5, 4.6, 4.7 via official `claude` CLI v2.1.119
+
+> **Note on methodology revision (2026-04-24 evening):** The original investigation used hard-coded scoring (toolkit v0.1). After independent codex gpt-5.5 xhigh review, the toolkit was hardened to v0.2 with confidence-graded classification, multi-run consistency requirements, and several must-fix parser bugs. The *findings* below were reproduced on the revised toolkit (v0.2 tests in `test_fingerprint.py` synthesize the AW profile and recover the `A+Middleware` verdict at high confidence). The *interpretation* in this document still stands; the *methodology* caveats in `METHODOLOGY.md` should be read alongside it - especially that this is a hypothesis-generator, not a proof system, and that every single probe is defeatable by a sufficiently motivated operator.
+
+## Working verdict (investigative hypothesis, not proof)
+
+**Most consistent with: a Claude-like frontier backend (likely Opus 4.7) hosted on Google Vertex AI, fronted by an aggressive middleware gateway.**
+
+The observed signals are **less consistent with** a rigidly-biased distilled-only student, with a Chinese-model clone, and with an alias of an older Claude release. They are **most consistent with** a frontier Claude backend under active gateway manipulation. Important caveats: (a) the toolkit's `distill+middleware` separation now lives in v0.6 behind the `tokenizer_probe.py` gate - at the time of this investigation that probe had not yet been run on AW, so the A+Middleware verdict here carries a "distill+middleware unresolved" annotation (re-run with v0.6 tokenizer probe to upgrade or downgrade to `distill+middleware`); (b) a sufficiently sophisticated adversarial proxy could in principle produce the same behavior on all probes. For security- or legal-grade certainty, capture wire traffic (mitmproxy) and run the tokenizer identity probe.
+
+## Middleware inventory
+
+| Layer | Behavior | Overrideable? | Evidence |
+|---|---|:-:|---|
+| Hard filter | Self-introspection  canned `{"acknowledged":true}` (22 bytes) | No | Byte-exact repeat ?2 |
+| Soft injection | Math tasks  Euler/totient-first opening | **Yes** | Anti-Euler probe |
+| Feature strip | `thinking`, `cache_control`, `--effort` | No | `cache=0/0`, effort ignored |
+| Output cap | max_tokens ? 60-240 | No | AW 63-239 vs officials 223-1855 |
+| Metadata spoof | `model` field relabels 4.5  4.7 | No | Same query, different sessions |
+
+## Evidence chain
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The stale phrase audit is clean in the scratch package. The remaining `v0.5` hits I can see are changelog/test-attribution/baseline-version records, not current-state documentation claims.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg --files .scratch/proxy-forensics' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\README.md -TotalCount 230" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\METHODOLOGY.md -TotalCount 215" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\baselines.json -TotalCount 245" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1178ms:
+.scratch/proxy-forensics\WIRE_CAPTURE_FINDINGS.md
+.scratch/proxy-forensics\results_official_validation.json
+.scratch/proxy-forensics\NETWORK_FINGERPRINTS.md
+.scratch/proxy-forensics\mitm_capture.py
+.scratch/proxy-forensics\README.md
+.scratch/proxy-forensics\network_probe.py
+.scratch/proxy-forensics\results_aw_smoketest.json
+.scratch/proxy-forensics\RESULTS.md
+.scratch/proxy-forensics\fingerprint.py
+.scratch/proxy-forensics\baselines.json
+.scratch/proxy-forensics\METHODOLOGY.md
+.scratch/proxy-forensics\network_anthropic.json
+.scratch/proxy-forensics\parse_mitm_flow.py
+.scratch/proxy-forensics\network_aw.json
+.scratch/proxy-forensics\test_fingerprint.py
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md
+.scratch/proxy-forensics\smoketest_stdout.txt
+.scratch/proxy-forensics\test_tokenizer_probe.py
+.scratch/proxy-forensics\test_mitm_capture.py
+.scratch/proxy-forensics\tokenizer_probe.py
+.scratch/proxy-forensics\mitm_flows\20260424_224959.flow
+.scratch/proxy-forensics\mitm_flows\20260424_221800.flow
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1413ms:
+# Claude Proxy Forensic Toolkit - v0.6
+
+Fingerprint any Claude-compatible CLI endpoint (official `claude`, third-party wrappers like `claude-aw.cmd`, aggregator proxies) to estimate:
+
+- Provider routing (Anthropic direct, Google Vertex, AWS Bedrock, aggregator)
+- Whether the backend matches a frontier-Claude signature, a distilled student signature, or an imitator. v0.6 adds a gated `distill+middleware` hypothesis class that fires when tokenizer evidence indicates non-Claude BPE together with active middleware; without tokenizer evidence, A+Middleware verdicts are annotated "distill+middleware unresolved" instead of silently assuming real Claude.
+- What middleware layers the gateway adds (stripping, injection, interception, spoofing)
+
+**Status: v0.6, hypothesis generator**, not adjudicating forensic classifier. Use results as an investigative starting point, not as legal/security-grade proof. See `METHODOLOGY.md` for caveats and known gaps.
+
+## Files
+
+- **`fingerprint.py`** - main executable. Runs LLM-behavior probe battery, classify with confidence-graded verdict. Optional `--network-probe-url` + `--tokenizer-probe-raw` for cross-evidence.
+- **`network_probe.py`** - TLS/headers/timing/proxy-software signatures. No LLM tokens. Standalone OR fed into `fingerprint.py`.
+- **`tokenizer_probe.py`** - tokenizer-identity probe (10 sentinels, ?ú? linear fit, `claude_bpe`/`non_claude`/etc verdicts). Cheap (~$0.50/run).
+- **`mitm_capture.py`** - one-shot HTTPS capture via mitmproxy (requires `pip install mitmproxy`). Windows-safe subprocess kill via `taskkill /F /T /PID`.
+- **`parse_mitm_flow.py`** - parses saved mitmproxy `.flow` files.
+- **`baselines.json`** - cached Anthropic-direct Opus 4.5/4.6/4.7 outputs (scorer_version=0.6.0).
+- **`RESULTS.md`** - original `claude-aw.cmd` investigation findings.
+- **`METHODOLOGY.md`** - protocol, decision tree, caveats.
+- **`NETWORK_FINGERPRINTS.md`** - baseline network fingerprints.
+- **`SUSPECT_WORKFLOW.md`** - step-by-step checklist.
+- **`WIRE_CAPTURE_FINDINGS.md`** - AW wire-capture evidence.
+- **`test_fingerprint.py`** - 124 unit tests.
+- **`test_mitm_capture.py`** - 7 unit tests (subprocess kill + flow parser).
+- **`test_tokenizer_probe.py`** - 33 unit tests (fit, classify, sentinel composition).
+
+## Version changes
+
+### v0.6 (fifth codex review round - current)
+
+- **Tokenizer identity probe** (`tokenizer_probe.py`): sends 10 sentinels through baseline + suspect paths, fits `gateway = ?úbaseline + ?`, verdicts `claude_bpe` / `claude_bpe_weak` / `non_claude` / `ambiguous` / `insufficient_data`. Requires n_points ? 8 for strong verdicts.
+- **`distill+middleware` hypothesis** added to classifier: gated on `tokenizer_non_claude ? 0.5` AND `middleware ? 0.6`. Without tokenizer data, A+Middleware is annotated "distill+middleware unresolved" instead of silently assuming real Claude.
+- **Network evidence integration**: `--network-probe-url` flag feeds TLS/CDN/aggressive-defense signals into classifier (capped contribution, not load-bearing).
+- **Tokenizer non_claude vetoes A-clean**: gates now require `tok_nc < 0.3` for high-confidence A-clean.
+- **Subprocess hang fix** in `mitm_capture.py`: replaces `subprocess.run(shell=True, timeout)` with `Popen` + poll-loop + `taskkill /F /T /PID` on Windows.
+- **Live validation**: plain `claude --model claude-opus-4-7` reliably classifies as A-clean high confidence. 124 unit tests pass.
+
+### v0.5 (fourth codex review round)
+
+- Classifier has **hard evidence gates**: A+Middleware requires middleware ? 0.6 AND capable_base ? 0.5; A-clean requires capable_base ? 0.6 AND middleware < 0.4 AND suspicious_intercept < 0.3; C requires distill ? 0.6 AND capable_base < 0.5. Hypotheses failing their gate can't reach high confidence.
+- **Introspection schema validation**: probe 4 only signals `clean_introspection` when all four required fields (`architecture_family`, `supports_extended_thinking`, `can_use_prompt_caching`, `knowledge_cutoff_month`) are present with credible types. JSON that parses but fails schema emits `schema_mismatch` and counts as middleware evidence.
+- **Protocol-object detection stricter**: single-object JSON must have `result` string AND one of (usage dict with token counts / model string starting `claude-` / session_id ? 8 chars). Gateways like `{"result":"{\"acknowledged\":true}"}` now correctly classify as intercept.
+- **Variable/inconsistent intercept penalizes A-clean**: adaptive gateways varying responses can no longer be classified clean.
+- **Soft-override scored conditionally**: `soft_override_success` only fully counts as capable-base evidence when stylometric bias was first observed. On a neutral prompt, override success is weak (0.3? multiplier).
+- **Temporal cutoff requires verifiable events**: generic `"June 2025"` hallucinations no longer promote cutoff to post-April.
+- **Parser type-guards stream-list elements**: lists containing scalars correctly emit `parse_error`.
+
+### v0.3
+
+- Parser distinguishes `valid_single_object` (newer CLI) from `intercepted`.
+- `status_failure` runs no longer convert to `rigid_bias` / `format_rigor_fail`.
+- `hard_intercept` requires ? 2 repeats.
+- Raw hash computed from bytes (not decoded text).
+- Superscript regex matches only `?`.
+- Missing/malformed `expiry_date` fails closed.
+
+### v0.2
+
+- Parser separates `cli_error` / `parse_error` / `intercepted` / `valid_stream`.
+- Multi-run repeat support via `--repeats N` (default 2).
+- Confidence-graded classification (`high` / `medium` / `low`).
+- Hardened regexes: Unicode math, variant multiplication, phrasing.
+- Baseline expiry check.
+- Raw SHA-256 hash per run.
+- `--shell` injection warning.
+- Sentence splitter handles abbreviations.
+
+## Quick start
+
+List probes:
+
+```bash
+python fingerprint.py --list-probes
+```
+
+Fingerprint a Windows `.cmd` wrapper (default 2 repeats):
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
+```
+
+Plain `claude` call:
+
+```bash
+python fingerprint.py --label "direct" --cmd "claude --model claude-opus-4-7"
+```
+
+Single run (cheaper, but no cross-run consistency check  lower confidence):
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell --repeats 1
+```
+
+Only specific probes:
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell \
+  --probes self_introspection_json anti_euler_override
+```
+
+Save raw findings + classification:
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell \
+  --save-raw results_aw.json
+```
+
+Run network fingerprint alongside (orthogonal evidence, no API cost):
+
+```bash
+python network_probe.py --url https://api.claudecodeapi.cloud --label AW \
+  --save-raw results_aw_network.json
+```
+
+Run tokenizer probe for backend-identity evidence (distinguishes real Claude from non-Claude-tokenizer backends):
+
+```bash
+python tokenizer_probe.py \
+  --baseline-cmd "claude" \
+  --gateway-cmd "claude-aw.cmd" --gateway-shell \
+  --model claude-opus-4-7 --gateway-model opus \
+  --repeats 2 --save-raw tokenizer_aw.json
+```
+
+Combined v0.6 run (all evidence axes):
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell \
+  --network-probe-url https://api.claudecodeapi.cloud \
+  --tokenizer-probe-raw tokenizer_aw.json \
+  --save-raw results_aw_full.json
+```
+
+Network probe detects:
+- TLS cert details, cipher suite, protocol version
+- Known proxy-software signatures (Cloudflare, LiteLLM, Portkey, OpenRouter, Helicone, etc.)
+- Anthropic-specific headers
+- Aggressive-defense patterns (server drops TCP/TLS without proper HTTP response)
+- Timing / latency distribution
+
+Example comparison (as of baseline collection):
+
+| Target | aggressive_defense | CDN | Server | Median latency | Jitter |
+|---|:-:|---|---|---:|---:|
+| `api.anthropic.com` | No | Cloudflare | cloudflare | ~380 ms | ~60 ms |
+| `api.claudecodeapi.cloud` | **Yes** | none | nginx (when reachable) | >3000 ms | >5000 ms |
+
+## Probe battery
+
+Five single-turn probes. Each targets one axis. None is decisive on its own - verdict requires multiple probes pointing the same way across ? 2 repeats.
+
+| Probe | Axis | Detects | Decisive alone? |
+|---|---|---|:-:|
+| `stylometric_717` | Canonical opening | Generation, injected bias | No |
+| `temporal_cutoff` | Training recency | Release era | No |
+| `tight_reasoning_crt` | Format compliance + rigor | Capability tier | No |
+| `self_introspection_json` | Active gateway filter | Middleware (if reproducible) | Only if byte-exact across repeats |
+| `anti_euler_override` | Soft-injection vs distill | Bias overrideability | No, but informative with `stylometric_717` |
+
+**Key methodological note:** the anti-Euler probe only tells you *"bias was overrideable in this prompt"*, not *"backend is Claude-like backend"*. An adaptive/probe-aware proxy can also pass it. Treat results as Bayesian updates, not proofs.
+
+## Output format
+
+```
+=== CLASSIFICATION ===
+  Primary:    A+Middleware (Claude-like backend + active gateway)
+  Score:      0.756
+  Confidence: high (gap to second: 0.412)
+
+  Ranked hypotheses:
+     0.756  A+Middleware (Claude-like backend + active gateway)
+     0.344  A-clean (Claude-like backend, no detectable middleware)
+     0.280  ambiguous / insufficient evidence
+     0.000  C (distilled student)
+
+  Evidence weights: {'middleware': 1.25, 'capable_base': 1.15, 'distill': 0.0, 'recent_cutoff': 0.7, 'feature_strip': 0.6}
+
+  Scoring notes:
+    - Middleware: hard_intercept +0.90
+    - Capable-base: soft_override_success +0.85
+    - Capable-base: format_rigor_pass +0.80
+    - Recent-cutoff: post_april_2025 +0.70
+    - Middleware: feature_strip +0.18
+```
+
+Confidence levels:
+
+- **high** - primary score ? 0.55 AND gap to second hypothesis ? 0.2. Actionable.
+- **medium** - primary score ? 0.35 AND gap ? 0.1. Use as working hypothesis; collect more evidence before committing.
+- **low** - neither threshold met. Run more repeats, add probes, or capture mitmproxy HTTPS.
+
+## Cost
+
+Per target: roughly `5 probes ? N repeats ? ~$0.05-0.10 per call`. Default `--repeats 2`  ~$0.50-1.00 per target. Baseline regeneration (when triggered): ~$3 for 15 Opus calls.
+
+## Known gaps (v0.6)
+
+See `baselines.json  interpretation_rules.known_gaps` for the full list. Highlights:
+
+- ? ~~No tokenizer-identity probe~~ - **implemented in v0.6** (`tokenizer_probe.py`). Uses CLI-mediated baseline (not raw Anthropic `count_tokens` API). Strong verdicts require n_points ? 8. Upgrade to API-key-based count_tokens reduces cost; identical semantics.
+- ? ~~No `distill+middleware` hypothesis~~ - **added in v0.6**. Gated on `tokenizer_non_claude ? 0.5` AND `middleware ? 0.6`. Without tokenizer data, A+Middleware verdict is annotated "distill+middleware unresolved".
+- **No quantization-degradation probe.** An int8-quantized Claude could pass the current battery. Planned future work.
+- **No multi-turn probe.** Session-level middleware (cache-across-turns manipulation, session-boundary injection) is invisible here.
+- **Narrow stylometric panel.** Single math problem gives narrow signal. Broader panel (safety refusals, code formatting, XML/tool-call conventions) would improve imitator detection.
+- **Temporal probe rotation.** The 2025-event calibration will lose discriminative power as those events become general knowledge (~2027). Rotate during baseline regeneration.
+- **Thresholds hand-tuned, not calibrated.** `0.55 / 0.35` confidence thresholds are heuristics. Proper calibration requires a labelled test set across provider types.
+- **No adversarial-probe-adaptation detection.** If a gateway specifically counters our probe set, we won't notice without prompt rotation.
+
+## Extending
+
+Add a probe:
+
+1. Edit `baselines.json`: add entry under `probes` with `prompt`, `purpose`, and `baselines` (collect officials once).
+2. Implement a scorer in `fingerprint.py`: `score_run_<probe_id>()` function + entry in `PROBE_SCORERS` dict.
+3. Implement aggregation in `aggregate_probe()` for the new `probe_id`.
+4. Optionally thread scoring into `classify()` evidence weights.
+
+## Security notes
+
+- `--shell` (needed for `.cmd` wrappers on Windows) is command-injection unsafe if `--cmd` comes from an untrusted source. The toolkit prints a warning but cannot sandbox.
+- The toolkit runs arbitrary subprocess commands against third-party gateways. Review your provider's ToS before automated probing.
+
+## Trust model
+
+Under what assumptions do classifications hold:
+
+1. Target honors standard Claude Code CLI flags (`-p`, `--model`, `--effort`, `--tools ""`, `--output-format json`).
+2. Tool invocation is *actually* disabled - target didn't secretly call WebSearch to pass the temporal cutoff probe.
+3. Gateway is not probe-adaptive (if it knows the anti-Euler prompt and selectively complies, we can't detect that here).
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1586ms:
+{
+  "metadata": {
+    "generated_date": "2026-04-24",
+    "expiry_date": "2026-07-23",
+    "scorer_version": "0.6.0",
+    "cli_version": "2.1.119",
+    "run_flags": {
+      "effort": "max",
+      "tools": "disabled (--tools \"\")",
+      "output_format": "json"
+    },
+    "notes": "Baselines collected via `claude -p <prompt> --model <id> --effort max --tools '' --output-format json` on Anthropic-direct (not Vertex/Bedrock). Each baseline is a single run; multi-run reproducibility was not captured at collection time (TODO for v0.3).",
+    "rotation_triggers": [
+      "New Anthropic Opus generation released",
+      "CLI output format changes (new fields, renamed keys)",
+      "Probe prompts or scorer logic changed (SCORER_VERSION bumped)",
+      "Temporal events in the temporal_cutoff probe become general knowledge (current 2025-event set will lose discriminative power by ~2027)",
+      "Near-threshold classifications where sampling variance could flip the verdict"
+    ]
+  },
+  "provider_detection": {
+    "msg_id_prefixes": {
+      "msg_01": "anthropic-direct",
+      "msg_vrtx_": "google-vertex",
+      "msg_bdrk_": "aws-bedrock",
+      "uuid_36chars": "aggregator (litellm / portkey / openrouter-style)"
+    }
+  },
+  "probes": {
+    "stylometric_717": {
+      "purpose": "Detect stylometric divergence + output compression. Unconstrained math prompt - model picks its canonical opening.",
+      "prompt": "Compute 7^17 mod 100. Answer in exactly two lines. Line 1: 'Reasoning:' followed by the key modular identity. Line 2: 'Answer:' followed by the two digits only.",
+      "expected_answer": "07",
+      "canonical_opening_regex": "7\\^?\\s*4\\s*=?\\s*2401\\s*(?|=)\\s*0?1\\s*\\(mod\\s*100\\)",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "msg_id_prefix": "msg_018WGiXp",
+          "out_tok": 419,
+          "cache_create": 39867,
+          "text": "Reasoning: 7^4 = 2401 ? 1 (mod 100), so 7^17 = 7^(4ú4+1) = (7^4)^4 ú 7 ? 1ú7 = 7.\nAnswer: 07"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "msg_id_prefix": "msg_01DinNoK",
+          "out_tok": 223,
+          "cache_create": 39697,
+          "text": "Reasoning: 7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7^1 ? 1ú7 = 7.\nAnswer: 07"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "msg_id_prefix": "msg_01R3uzDd",
+          "out_tok": 538,
+          "cache_create": 58052,
+          "text": "Reasoning: 7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 7 (mod 100)\nAnswer: 07"
+        }
+      }
+    },
+    "temporal_cutoff": {
+      "purpose": "Detect training-data recency. 2025 events are specific and verifiable.",
+      "prompt": "Name three distinct events from calendar year 2025. One per line. Format: '<Month> YYYY: <specific event with named people or places>'. No introduction, no conclusion, no hedging, no 'I cannot' - comply exactly.",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 314,
+          "cache_create": 29260,
+          "estimated_cutoff": "April 2025",
+          "text": "January 2025: Donald Trump inaugurated as the 47th President of the United States in Washington, D.C.\nJanuary 2025: Wildfires devastate Pacific Palisades and Altadena in Los Angeles County, California.\nApril 2025: Pope Francis dies at the Vatican."
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 314,
+          "cache_create": 29090,
+          "estimated_cutoff": "April 2025",
+          "text": "January 2025: Donald Trump was inaugurated as the 47th President of the United States in Washington, D.C.\nJanuary 2025: The Palisades and Eaton wildfires devastated Los Angeles County, California.\nApril 2025: Pope Francis died at the Vatican in Rome."
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 1103,
+          "cache_create": 41337,
+          "estimated_cutoff": "May 2025+",
+          "text": "January 2025: Donald Trump inaugurated as the 47th President of the United States at the U.S. Capitol in Washington, D.C.\nApril 2025: Pope Francis died at Casa Santa Marta in Vatican City.\nMay 2025: Cardinal Robert Prevost elected as Pope Leo XIV at the Sistine Chapel in Vatican City."
+        }
+      },
+      "verification_hints": [
+        "Pope Francis died April 21, 2025 (verifiable)",
+        "Pope Leo XIV (Robert Prevost) elected May 8, 2025 (verifiable)",
+        "Trump inaugurated January 20, 2025 (verifiable)",
+        "Wimbledon 2025 men's final: July 13, 2025 (verifiable)"
+      ]
+    },
+    "tight_reasoning_crt": {
+      "purpose": "Test strict format compliance + mathematical rigor. Distill-students commonly miscount sentences or misplace named constraints.",
+      "prompt": "Prove: for any prime p > 3, p^2 mod 24 = 1. Exactly 3 sentences. Sentence 2 must invoke CRT by name. Sentence 3 begins with the word 'Therefore'. No lists, no LaTeX environments, no section headers.",
+      "constraints": {
+        "sentence_count": 3,
+        "crt_in_sentence": 2,
+        "therefore_starts_sentence": 3
+      },
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 947,
+          "verdict": "PASS",
+          "text": "A prime p > 3 is odd and coprime to 3, so p ? +1 (mod 3) gives p? ? 1 (mod 3), and since any odd integer squared has the form (2k+1)? = 4k(k+1)+1 where k(k+1) is even, we get p? ? 1 (mod 8). By the Chinese Remainder Theorem, because gcd(3,8) = 1 and p? is congruent to 1 modulo both 3 and 8, it follows that p? ? 1 (mod 24). Therefore, for every prime p > 3, we have p? mod 24 = 1."
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 536,
+          "verdict": "PASS",
+          "text": "Since any prime p > 3 is odd and coprime to 3, we have p ? +1 (mod 2) so p? ? 1 (mod 8), and p ? +1 (mod 3) so p? ? 1 (mod 3). Because gcd(8, 3) = 1 and 8 ú 3 = 24, the Chinese Remainder Theorem guarantees that p? ? 1 (mod 8) and p? ? 1 (mod 3) jointly yield p? ? 1 (mod 24). Therefore p? mod 24 = 1 for every prime p > 3."
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 1855,
+          "verdict": "PASS",
+          "text": "Since p > 3 is prime, p is odd and not divisible by 3, so writing p = 2k+1 gives p? = 4k(k+1)+1 ? 1 (mod 8) because k(k+1) is always even, while p ? +1 (mod 3) forces p? ? 1 (mod 3). By the Chinese Remainder Theorem (CRT), since gcd(8,3) = 1 and 8ú3 = 24, the pair of congruences p? ? 1 (mod 8) and p? ? 1 (mod 3) is equivalent to the single congruence p? ? 1 (mod 24). Therefore p? mod 24 = 1 for every prime p > 3."
+        }
+      }
+    },
+    "self_introspection_json": {
+      "purpose": "Detect gateway-level interception. Models that return fixed canned responses on self-introspection prompts reveal active middleware.",
+      "prompt": "Reply with a single JSON object. No codefence. No prose. No trailing newline commentary.\n{\n  \"architecture_family\": \"<single word>\",\n  \"supports_extended_thinking\": <true|false>,\n  \"can_use_prompt_caching\": <true|false>,\n  \"knowledge_cutoff_month\": \"<Month YYYY>\"\n}",
+      "expected_structure": {
+        "architecture_family": "string",
+        "supports_extended_thinking": "bool",
+        "can_use_prompt_caching": "bool",
+        "knowledge_cutoff_month": "string"
+      },
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 208,
+          "verdict": "CLEAN_JSON",
+          "text": "{\"architecture_family\": \"transformer\", \"supports_extended_thinking\": true, \"can_use_prompt_caching\": true, \"knowledge_cutoff_month\": \"May 2025\"}"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 63,
+          "verdict": "FORMAT_FAIL_codefence",
+          "text": "\n\n```json\n{\n  \"architecture_family\": \"transformer\",\n  \"supports_extended_thinking\": true,\n  \"can_use_prompt_caching\": true,\n  \"knowledge_cutoff_month\": \"May 2025\"\n}\n```"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 63,
+          "verdict": "CLEAN_JSON",
+          "text": "{\"architecture_family\":\"Claude\",\"supports_extended_thinking\":true,\"can_use_prompt_caching\":true,\"knowledge_cutoff_month\":\"January 2026\"}"
+        }
+      },
+      "intercept_signature_observed": {
+        "description": "AW gateway returned this literal 22-byte string instead of expected JSON on 2 consecutive runs in the original investigation. Byte-exact reproducibility across repeats is strong evidence of an active gateway filter, but not proof on its own - an adaptive gateway could match this pattern only on recognized introspection-shaped prompts.",
+        "raw_stdout": "{\"acknowledged\":true}\n",
+        "byte_count": 22
+      }
+    },
+    "anti_euler_override": {
+      "purpose": "Discriminator probe: pairs with stylometric_717 to distinguish soft injection from rigid bias. If target uses forced-Euler framing in the unconstrained probe but complies with an explicit ban here, the bias is overrideable (consistent with soft injection OR with no bias at all, OR with a probe-aware proxy). If bias persists despite the ban, bias is rigid (distill OR aggressive injection). Not decisive on its own - interpret only in conjunction with stylometric_717 results.",
+      "prompt": "Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'.",
+      "banned_words": ["euler", "totient", "fermat", "phi", "?", "?", "?"],
+      "expected_answer": "7",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 373,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49, 7^4 = 49^2 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 1^4 ú 7 = 7 (mod 100).\n\nAnswer: 7"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 287,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49, 7^4 = 49^2 = 2401 ? 01 (mod 100), so 7^8 ? 01, 7^16 ? 01, and 7^17 = 7^16 ú 7 ? 1 ú 7 = 7.\n\nAnswer: **7**"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 556,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49; 7^4 = 49^2 = 2401 ? 1 (mod 100); so 7^16 = (7^4)^4 ? 1 (mod 100); therefore 7^17 = 7^16 ú 7 ? 7 (mod 100).\nAnswer: 7"
+        }
+      }
+    }
+  },
+  "interpretation_rules": {
+    "caveat": "Single-probe signals are weak on their own. Strong classifications require (a) multiple probes pointing the same way AND (b) cross-run reproducibility (--repeats ? 2) AND (c) fresh baselines. A smart adaptive gateway can evade any single probe if it knows the probe's shape.",
+    "hypothesis_A_real_backend_with_middleware": {
+      "indicators": [
+        "canonical_opening in stylometric probe",
+        "passes anti_euler_override compliance",
+        "passes tight_reasoning_crt format constraints",
+        "knowledge_cutoff matches a real model generation",
+        "non-anthropic msg_id prefix (vertex/bedrock) - but note: any gateway can forge this string",
+        "self_introspection MAY be intercepted with byte-exact canned response across repeats"
+      ],
+      "weaknesses": [
+        "Adaptive gateways can evade byte-exact intercept detection by varying responses slightly",
+        "msg_id prefix alone is NOT proof - trivially forgeable"
+      ]
+    },
+    "hypothesis_C_distilled_student": {
+      "indicators": [
+        "false_start_abandon pattern that does NOT disappear under explicit override",
+        "fumbles format constraints (wrong sentence count, misplaced named constraints)",
+        "knowledge_cutoff gap vs claimed backend",
+        "consistent output compression AND poor style recovery",
+        "self_introspection attempts (hallucinated/waffled) rather than byte-exact intercept"
+      ],
+      "weaknesses": [
+        "A high-capability distill or a non-Claude fine-tune can imitate Claude convincingly on any single probe",
+        "Anti-euler override can be passed by probe-aware proxies"
+      ]
+    },
+    "middleware_signatures": {
+      "hard_intercept": "Multiple repeats return byte-identical non-protocol output on introspection. Single-run intercept is weak evidence - may be CLI error or adaptive response.",
+      "soft_injection": "Stylometric bias (e.g. euler phrasing) present under neutral prompt, disappears under explicit ban. Requires BOTH probes to conclude injection.",
+      "feature_strip": "cache_create=0 AND cache_read=0 on a prompt that should trigger caching. Defaults-to-zero semantics can false-positive; confirm by running on a long prompt.",
+      "effort_ignored": "identical output_tokens with/without --effort flag (requires separate targeted comparison)",
+      "output_cap": "max_tokens hard-capped well below natural model output",
+      "label_spoofing": "reported model field varies across identical requests - not currently auto-detected, inspect per_run output manually"
+    },
+    "provider_family_by_msg_id": {
+      "msg_01*": "Anthropic direct API (api.anthropic.com)",
+      "msg_vrtx_*": "Google Vertex AI (may be genuine Anthropic on Vertex, or a proxy forging the prefix)",
+      "msg_bdrk_*": "AWS Bedrock (same caveat)",
+      "uuid_36": "Aggregator (LiteLLM/Portkey/OpenRouter/etc - inspect upstream)"
+    },
+    "known_gaps": [
+      "Tokenizer-identity probe IMPLEMENTED in v0.6 (`tokenizer_probe.py`) using CLI-mediated baseline (not raw Anthropic `count_tokens` API). Upgrade to API-key-based count_tokens would reduce cost and eliminate CLI wrapping overhead in ?, but slope ? and residuals still discriminate tokenizer identity with CLI fallback. See `baseline_method` field in tokenizer probe output.",
+      "No quantization-degradation probe (planned future work): systematic numerical precision tests (sin() to 12 digits, modular arithmetic on large numbers) would detect int8/int4 quantized variants.",
+      "`distill+middleware` hypothesis ADDED in v0.6. Requires tokenizer non_claude verdict AND middleware ? 0.6. Without tokenizer data, A+Middleware verdict is ANNOTATED with 'distill+middleware unresolved' to flag the remaining uncertainty rather than silently assuming real Claude.",
+      "No multi-turn middleware probe: all current probes are single-turn; gateways that act only on turn-boundaries (session injection, cache-across-turns behavior) are invisible.",
+      "Narrow stylometric panel: single math problem is a weak signature; broader stylistic panel (safety refusals, code formatting, XML/tool conventions) would catch non-Claude imitators more reliably.",
+      "Hand-tuned classifier thresholds (not calibrated probabilities). Proper calibration needs labelled test set across real Anthropic / Vertex / Bedrock / aggregator / distill / imitator targets.",
+      "No adversarial-probe-adaptation detection: a gateway that specifically counters our probe set would not be detected without prompt rotation."
+    ]
+  }
+}
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1755ms:
+# Proxy Forensic Methodology - v0.6
+
+Protocol for classifying an unknown Claude-compatible endpoint. Distilled from the `claude-aw.cmd` investigation and refined after codex gpt-5.5 xhigh review.
+
+## Honest framing
+
+This methodology is a **hypothesis generator**, not a proof system. It narrows down probable backend identities from a universe of candidates using cheap, reproducible tests. Any single signal is defeatable by a sufficiently motivated proxy operator:
+
+- Stylometric fingerprints can be trained into distills
+- Temporal cutoff can be seeded with recent knowledge
+- msg_id prefixes are strings in response bodies - trivially forgeable
+- Byte-exact intercepts can be randomized to evade detection
+
+The methodology's strength is **compounding evidence**: when 4-5 orthogonal signals all point to the same hypothesis across multiple repeats, the probability of coincidence/adversarial fake becomes low. No single probe carries the verdict.
+
+## Goals
+
+Given an endpoint speaking the Claude CLI protocol, estimate:
+
+1. **Provider family** - Anthropic direct, Google Vertex, AWS Bedrock, aggregator, non-Anthropic imitator
+2. **Backend identity range** - frontier-Claude signature, distilled student signature, older checkpoint, non-Claude base. v0.6 adds a gated `distill+middleware` hypothesis that fires when tokenizer evidence indicates non-Claude BPE together with middleware ? 0.6. When `tokenizer_probe.py` is NOT run (or returns `ambiguous`/`insufficient_data`), A+Middleware verdicts are annotated "distill+middleware unresolved" to flag the remaining uncertainty explicitly rather than silently assuming real Claude.
+3. **Middleware layers** - stripping, injection (soft or rigid), interception, spoofing
+
+## Invariants
+
+- **Baselines are Anthropic-direct, collected fresh with identical flags.** Reference outputs must match the suspect's CLI flags (`--effort max --tools ""`).
+- **All probes run with `--effort max --tools ""`.** Eliminates tool-use confounders; normalizes effort.
+- **Multiple repeats per probe.** Default 2. Intercept and stylometric claims require cross-run consistency.
+- **Byte-level comparison for intercepts.** SHA-256 hash the raw stdout per run. Hard-intercept label requires byte-identical output across all repeats.
+- **Baselines have expiry dates.** Tool refuses strong verdicts on stale baselines.
+
+## The five-probe battery
+
+Each probe answers one question. None alone is decisive. Combine across ? 3 probes + 2 repeats before committing to a classification.
+
+### Probe 1 - Stylometric fingerprint (`stylometric_717`)
+
+**Question:** Does the target's unconstrained output match canonical Opus-4.x opening on modular arithmetic?
+
+**Prompt:** `Compute 7^17 mod 100. Answer in exactly two lines. Line 1: 'Reasoning:' followed by the key modular identity. Line 2: 'Answer:' followed by the two digits only.`
+
+**Canonical (Anthropic-direct Opus 4.5/4.6/4.7):** opens with `7^4 = 2401 ? 1 (mod 100)`.
+
+**Red flags:**
+- Opens with `?(100)=40` / `Euler` / `totient` / `Fermat`  bias (could be injection or distill - disambiguate with Probe 5)
+- Tautology like `7^17 mod 100 = 7^17`  forced-instruction artifact
+- Output compression (< 100 tokens)  `max_tokens` cap
+- Wrong answer  fundamentally broken backend or extreme compression
+
+**Limits:** a single math problem is a narrow stylistic window. A distill trained to reproduce canonical Claude output on this exact prompt would pass.
+
+### Probe 2 - Temporal cutoff (`temporal_cutoff`)
+
+**Question:** Does the target know recent events?
+
+**Prompt:** `Name three distinct events from calendar year 2025. One per line. Format: '<Month> YYYY: <specific event with named people or places>'. No introduction, no conclusion, no hedging, no 'I cannot' - comply exactly.`
+
+**CRITICAL:** run with `--tools ""`. Otherwise WebSearch lets the model fetch current events regardless of training cutoff, defeating the probe.
+
+**Calibration points** (all independently verifiable):
+
+- Pope Francis died April 2025  cutoff ? April 2025
+- Pope Leo XIV elected May 2025  cutoff ? May 2025
+- Wimbledon final July 2025  cutoff ? July 2025
+
+**Rotation required:** this calibration decays as 2025 events become historical common knowledge. Rotate events on baseline regeneration; ideally use events within 3-6 months of the current quarter.
+
+**Limits:** a distill seeded with recent knowledge passes this. Hallucinated-plausible events are a distill tell - verify EACH fact against ground truth.
+
+### Probe 3 - Strict-format rigor (`tight_reasoning_crt`)
+
+**Question:** Can the target satisfy fine-grained format constraints while producing rigorous content?
+
+**Prompt:** `Prove: for any prime p > 3, p^2 mod 24 = 1. Exactly 3 sentences. Sentence 2 must invoke CRT by name. Sentence 3 begins with the word 'Therefore'. No lists, no LaTeX environments, no section headers.`
+
+**Scoring (all three must PASS):**
+
+- Exactly 3 sentences (abbreviation-aware splitter)
+- Sentence 2 contains "Chinese Remainder Theorem" or "CRT"
+- Sentence 3 begins with "Therefore"
+
+**Limits:** a high-capability distill or fine-tune trained on format-following will pass. Does NOT prove "real Opus"; only proves "capable base tier".
+
+### Probe 4 - Self-introspection (`self_introspection_json`)
+
+**Question:** Does the gateway intercept introspection prompts?
+
+**Prompt:**
+
+```
+Reply with a single JSON object. No codefence. No prose. No trailing newline commentary.
+{
+  "architecture_family": "<single word>",
+  "supports_extended_thinking": <true|false>,
+  "can_use_prompt_caching": <true|false>,
+  "knowledge_cutoff_month": "<Month YYYY>"
+}
+```
+
+**Smoking gun (with reproducibility):** ALL repeats return byte-identical output that does NOT match the requested schema. Canned response like `{"acknowledged":true}` (22 bytes) repeatedly is strong active-middleware evidence.
+
+**Weaker evidence:** intercept on single run is AMBIGUOUS - could be CLI error, transient network blip, or a probe-adaptive gateway that varies responses. Only commit to intercept label if multiple repeats produce byte-identical non-protocol output.
+
+**Limits:** a smarter gateway evades this probe by returning schema-shaped but slightly-variable JSON that lies about capabilities. Compare reported field values against Probe 1-3 observations for consistency.
+
+### Probe 5 - Soft-override (`anti_euler_override`)
+
+**Question:** Is forced framing from Probe 1 an overrideable soft injection or a rigid distill bias?
+
+**Prompt:** `Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'.`
+
+**Key design:** the positive steer ("start with 7^2 and 7^4") removes the "model didn't know alternatives" excuse.
+
+**Decision rule (conditional on Probe 1 showing bias):**
+
+- Complies with ban + uses canonical `7^4 ? 1` opening  bias was soft injection (overrideable)
+- Still uses banned vocabulary  bias is rigid (distill OR unusually aggressive injection)
+
+**Limits (important):**
+
+- Probe 5 alone does NOT prove "Claude-like backend". It proves "bias overrideable on this prompt". An adaptive/probe-aware proxy, a high-capability distill, or a Claude fine-tune can all comply.
+- Probe 5 is informative ONLY in conjunction with Probe 1 bias. If Probe 1 showed canonical opening already, Probe 5 adds little.
+
+## Decision tree
+
+```
+START
+³
+ÃÄÄ Run all probes with --repeats ? 2
+³
+ÃÄÄ Check Probe 4 (introspection) first - high-value diagnostic
+³   ÃÄÄ All repeats byte-identical non-protocol  MIDDLEWARE present (hard-intercept signal)
+³   ÃÄÄ All repeats valid JSON matching schema  no introspection filter
+³   ÀÄÄ Mixed (some intercept, some valid)  ambiguous, increase --repeats
+³
+ÃÄÄ Check Probe 1 vs Probe 5 together
+³   ÃÄÄ Probe 1 canonical + Probe 5 canonical  no bias
+³   ÃÄÄ Probe 1 biased + Probe 5 compliant  SOFT injection (if real backend) OR adaptive proxy
+³   ÀÄÄ Probe 1 biased + Probe 5 still biased  RIGID bias (distill or aggressive injection)
+³
+ÃÄÄ Check Probe 2 (cutoff) vs Probe 3 (rigor)
+³   ÃÄÄ Both pass  CAPABLE + RECENT backend (frontier-Claude signature - could still be distill+middleware)
+³   ÃÄÄ Cutoff passes, rigor fails  distilled student with seeded recent data
+³   ÃÄÄ Cutoff fails, rigor passes  older checkpoint or cautious model
+³   ÀÄÄ Both fail  low-tier or broken backend
+³
+ÃÄÄ Aggregate evidence in classify()
+³   ÃÄÄ middleware >> 0, capable_base >> 0, recent_cutoff > 0  A+Middleware
+³   ÃÄÄ capable_base >> 0, middleware ~ 0  A-clean
+³   ÃÄÄ distill >> capable_base  C
+³   ÀÄÄ total evidence low  ambiguous (run more probes or add mitmproxy)
+³
+ÀÄÄ Check confidence level
+    ÃÄÄ high (primary ? 0.55, gap ? 0.2)  actionable
+    ÃÄÄ medium  working hypothesis, collect more evidence
+    ÀÄÄ low  do NOT commit to a classification
+```
+
+## Provider detection (msg_id prefix)
+
+| Prefix | Provider |
+|---|---|
+| `msg_01...` | Anthropic direct (api.anthropic.com) |
+| `msg_vrtx_...` | Google Vertex AI |
+| `msg_bdrk_...` | AWS Bedrock |
+| 36-char UUID | Aggregator (LiteLLM/Portkey/OpenRouter/etc) |
+
+**Do NOT rely on this alone.** The prefix is a string in the response body - any gateway can forge it cheaply. Use as a weak confirming signal alongside stylometric/feature evidence.
+
+## When to escalate beyond the battery
+
+The battery is single-turn and does not capture:
+
+- **Tokenizer identity** - proportional vs constant drift in `input_tokens` on sentinel strings
+- **Quantization/precision degradation** - numerical accuracy on `sin(1.234567890)` to 12 digits, checksum reconstruction, multi-step arithmetic on large numbers
+- **Multi-turn middleware** - session-level injection, cache-across-turns behavior, turn-boundary rewriting
+- **Injected system prompt content** - mitmproxy or equivalent HTTPS capture required
+
+For high-stakes classification (financial or security-sensitive decisions), do at least one of:
+
+1. Run a tokenizer probe manually (collect `usage.input_tokens` from `--output-format json` on 3-5 sentinel strings, compare deltas to baseline)
+2. Capture raw HTTPS traffic with mitmproxy + custom CA
+3. Consult a known-fresh Opus 4.7 max with full evidence dump (see `.scratch/consult_opus47*.py` for the structured brief format)
+
+## Common failure modes
+
+- **False-positive middleware:** target CLI is older than baselines and returns a different protocol shape (not middleware, just version mismatch). Mitigate: verify CLI version, regenerate baselines if needed.
+- **False-negative middleware:** adaptive gateway varies intercept responses across runs to defeat byte-exact detection. Mitigate: check for schema-shape-matching-but-values-lying responses (compare reported fields to observed pipeline behavior).
+- **False-positive distill:** capable model with aggressive RLHF refuses introspection probe. Inspect the refusal text - a real refusal reads like an RLHF refusal, not a canned gateway response.
+- **Baseline drift:** new Anthropic release changes canonical stylometry. Mitigate: regenerate baselines on every new Opus release; tool blocks strong verdicts past `expiry_date`.
+
+## Known gaps (v0.6)
+
+1. ? ~~No tokenizer-identity probe~~ - **implemented in v0.6** via `tokenizer_probe.py`. CLI-mediated baseline (not raw `count_tokens` API); strong verdicts require n_points ? 8. Output labels `baseline_method` for provenance. Upgrade to API-key based `count_tokens` reduces cost; identical semantics.
+2. **No quantization-degradation probe** - planned future work. An int8/int4 Claude variant could pass the current battery.
+3. **No multi-turn probe.** All current probes are single-turn; gateways that act only on session boundaries are invisible.
+4. **No adversarial-probe-adaptation detection.** If a gateway specifically counters our probe set, we won't notice without changing prompts.
+5. **Narrow stylometric panel.** One math problem for signature. Broader panel needed for imitator detection.
+6. **Baseline regeneration is manual.** No automated `--regenerate-baselines` flag yet.
+7. ? ~~No `distill+middleware` hypothesis~~ - **added in v0.6** classifier. Gated on tokenizer `non_claude` verdict + middleware ? 0.6. Without tokenizer evidence, A+Middleware verdict is annotated with "distill+middleware unresolved".
+8. **Thresholds hand-tuned.** Proper calibration requires labelled test set across provider types.
+9. **Network evidence capped & corroborating only** - `aggressive_defense +0.2`, middleware software signatures `+0.4`, CDN match `+0.3?0.3=+0.09` routing support. Total contribution capped at 0.5 to prevent load-bearing on forgeable headers.
+
+## Cost guidance
+
+| Operation | Typical cost |
+|---|---|
+| Single target fingerprint (5 probes ? 2 repeats) | ~$0.50-1.00 (target pricing-dependent) |
+| Baseline regeneration (5 probes ? 3 Opus models ? 1 run) | ~$3 |
+| Expert consultation (Opus 4.7 max with full brief) | ~$0.30-0.60 |
+| mitmproxy setup + one capture session | free, but setup effort |
+
+## Reading the verdict
+
+The toolkit emits:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The version blocks also line up with the intended release story: current status is v0.6, known gaps are v0.6, and the v0.5 mentions I checked are either release-history bullets, test names/comments, or baseline-version evidence. I’m running the local test scripts with bytecode disabled so the read-only sweep has fresh verification without writing artifacts.
+2026-04-24T21:31:07.046006Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\test_fingerprint.py"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\test_fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\test_tokenizer_probe.py" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\test_fingerprint.py"` rejected: blocked by policy
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\test_tokenizer_probe.py"` rejected: blocked by policy
+2026-04-24T21:31:07.046655Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\test_tokenizer_probe.py"` rejected: blocked by policy
+2026-04-24T21:31:07.047266Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\test_mitm_capture.py"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\test_mitm_capture.py" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\test_mitm_capture.py"` rejected: blocked by policy
+codex
+The test commands with environment assignment were blocked by the sandbox policy before execution, so I’m retrying with Python’s `-B` flag instead of mutating environment variables.
+2026-04-24T21:31:16.364513Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\test_fingerprint.py"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\test_fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\test_fingerprint.py"` rejected: blocked by policy
+2026-04-24T21:31:16.368260Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\test_tokenizer_probe.py"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\test_tokenizer_probe.py" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\test_tokenizer_probe.py"` rejected: blocked by policy
+2026-04-24T21:31:16.372483Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\test_mitm_capture.py"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\test_mitm_capture.py" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\test_mitm_capture.py"` rejected: blocked by policy
+2026-04-24T21:31:25.117732Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B test_fingerprint.py'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B test_fingerprint.py' in D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B test_fingerprint.py'` rejected: blocked by policy
+2026-04-24T21:31:25.122208Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B test_tokenizer_probe.py'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B test_tokenizer_probe.py' in D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B test_tokenizer_probe.py'` rejected: blocked by policy
+2026-04-24T21:31:25.125751Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B test_mitm_capture.py'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B test_mitm_capture.py' in D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B test_mitm_capture.py'` rejected: blocked by policy
+2026-04-24T21:31:37.845095Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python --version'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python --version' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python --version'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n -uu "0 failures|124|33|9|passed|PASS|FAILED" .scratch/proxy-forensics/smoketest_stdout.txt .scratch/proxy-forensics/*.md .scratch/proxy-forensics/*.json' in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T21:31:38.802242Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1 seconds
+Output:
+.scratch/proxy-forensics/smoketest_stdout.txt:1:D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py:1096: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+.scratch/proxy-forensics/smoketest_stdout.txt:16:      [2] status=valid_stream hash=80ae56302c model=claude-opus-4.7 provider=anthropic-direct out_tok=79
+.scratch/proxy-forensics/smoketest_stdout.txt:27:      [2] status=valid_stream hash=f8569a830b model=claude-opus-4.7 provider=anthropic-direct out_tok=116
+.scratch/proxy-forensics/smoketest_stdout.txt:37:      [1] status=valid_stream hash=584cded651 model=claude-opus-4.7 provider=anthropic-direct out_tok=239
+.scratch/proxy-forensics/smoketest_stdout.txt:39:      [2] status=valid_stream hash=f4f9151501 model=claude-opus-4.7 provider=anthropic-direct out_tok=231
+.scratch/proxy-forensics/smoketest_stdout.txt:47:      [1] status=intercepted hash=60596ad671 bytes=22 raw='{"acknowledged":true}\n'
+.scratch/proxy-forensics/smoketest_stdout.txt:48:      [2] status=intercepted hash=6489d6d7a3 bytes=16 raw='{"status":"ok"}\n'
+.scratch/proxy-forensics/smoketest_stdout.txt:55:      [1] status=cli_error hash=933b8a6135 reason=exit=1
+.scratch/proxy-forensics/smoketest_stdout.txt:56:      [2] status=valid_stream hash=9daf4c3489 model=claude-opus-4.7 provider=anthropic-direct out_tok=62
+.scratch/proxy-forensics/smoketest_stdout.txt:57:           text: Reasoning: 7^2=49; 7^4=49^2=2401≡1; so 7^17=(7^4)^4·7≡1·7=7.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+rg: .scratch/proxy-forensics/*.md: The filename, directory name, or volume label syntax is incorrect. (os error 123)
+rg: .scratch/proxy-forensics/*.json: The filename, directory name, or volume label syntax is incorrect. (os error 123)
+
+ exited 1 in 953ms:
+.scratch/proxy-forensics/smoketest_stdout.txt:1:D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py:1096: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+.scratch/proxy-forensics/smoketest_stdout.txt:16:      [2] status=valid_stream hash=80ae56302c model=claude-opus-4.7 provider=anthropic-direct out_tok=79
+.scratch/proxy-forensics/smoketest_stdout.txt:27:      [2] status=valid_stream hash=f8569a830b model=claude-opus-4.7 provider=anthropic-direct out_tok=116
+.scratch/proxy-forensics/smoketest_stdout.txt:37:      [1] status=valid_stream hash=584cded651 model=claude-opus-4.7 provider=anthropic-direct out_tok=239
+.scratch/proxy-forensics/smoketest_stdout.txt:39:      [2] status=valid_stream hash=f4f9151501 model=claude-opus-4.7 provider=anthropic-direct out_tok=231
+.scratch/proxy-forensics/smoketest_stdout.txt:47:      [1] status=intercepted hash=60596ad671 bytes=22 raw='{"acknowledged":true}\n'
+.scratch/proxy-forensics/smoketest_stdout.txt:48:      [2] status=intercepted hash=6489d6d7a3 bytes=16 raw='{"status":"ok"}\n'
+.scratch/proxy-forensics/smoketest_stdout.txt:55:      [1] status=cli_error hash=933b8a6135 reason=exit=1
+.scratch/proxy-forensics/smoketest_stdout.txt:56:      [2] status=valid_stream hash=9daf4c3489 model=claude-opus-4.7 provider=anthropic-direct out_tok=62
+.scratch/proxy-forensics/smoketest_stdout.txt:57:           text: Reasoning: 7^2=49; 7^4=49^2=2401≡1; so 7^17=(7^4)^4·7≡1·7=7.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+rg: .scratch/proxy-forensics/*.md: The filename, directory name, or volume label syntax is incorrect. (os error 123)
+rg: .scratch/proxy-forensics/*.json: The filename, directory name, or volume label syntax is incorrect. (os error 123)
+
+codex
+One adjacent methodology section needs a closer read: it still says escalation should run a tokenizer probe “manually,” while the v0.6 docs elsewhere say `tokenizer_probe.py` now exists. I’m checking whether that is just “outside the five-probe battery” wording or a real stale current-state claim.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 3 -uu \"Tokenizer identity|Run a tokenizer probe manually|tokenizer_probe\\.py|manual\" .scratch/proxy-forensics/METHODOLOGY.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 3 -uu \"Tokenizer identity|Run tokenizer probe|tokenizer_probe\\.py|manual\" .scratch/proxy-forensics/README.md .scratch/proxy-forensics/SUSPECT_WORKFLOW.md .scratch/proxy-forensics/RESULTS.md .scratch/proxy-forensics/baselines.json" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n -uu "No tokenizer-identity probe|No `distill'"\\+middleware"'` hypothesis|Run a tokenizer probe manually|does not capture" .scratch/proxy-forensics' in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1143ms:
+18-Given an endpoint speaking the Claude CLI protocol, estimate:
+19-
+20-1. **Provider family** — Anthropic direct, Google Vertex, AWS Bedrock, aggregator, non-Anthropic imitator
+21:2. **Backend identity range** — frontier-Claude signature, distilled student signature, older checkpoint, non-Claude base. v0.6 adds a gated `distill+middleware` hypothesis that fires when tokenizer evidence indicates non-Claude BPE together with middleware ≥ 0.6. When `tokenizer_probe.py` is NOT run (or returns `ambiguous`/`insufficient_data`), A+Middleware verdicts are annotated "distill+middleware unresolved" to flag the remaining uncertainty explicitly rather than silently assuming real Claude.
+22-3. **Middleware layers** — stripping, injection (soft or rigid), interception, spoofing
+23-
+24-## Invariants
+--
+171-
+172-The battery is single-turn and does not capture:
+173-
+174:- **Tokenizer identity** — proportional vs constant drift in `input_tokens` on sentinel strings
+175-- **Quantization/precision degradation** — numerical accuracy on `sin(1.234567890)` to 12 digits, checksum reconstruction, multi-step arithmetic on large numbers
+176-- **Multi-turn middleware** — session-level injection, cache-across-turns behavior, turn-boundary rewriting
+177-- **Injected system prompt content** — mitmproxy or equivalent HTTPS capture required
+178-
+179-For high-stakes classification (financial or security-sensitive decisions), do at least one of:
+180-
+181:1. Run a tokenizer probe manually (collect `usage.input_tokens` from `--output-format json` on 3-5 sentinel strings, compare deltas to baseline)
+182-2. Capture raw HTTPS traffic with mitmproxy + custom CA
+183-3. Consult a known-fresh Opus 4.7 max with full evidence dump (see `.scratch/consult_opus47*.py` for the structured brief format)
+184-
+--
+191-
+192-## Known gaps (v0.6)
+193-
+194:1. ✅ ~~No tokenizer-identity probe~~ — **implemented in v0.6** via `tokenizer_probe.py`. CLI-mediated baseline (not raw `count_tokens` API); strong verdicts require n_points ≥ 8. Output labels `baseline_method` for provenance. Upgrade to API-key based `count_tokens` reduces cost; identical semantics.
+195-2. **No quantization-degradation probe** — planned future work. An int8/int4 Claude variant could pass the current battery.
+196-3. **No multi-turn probe.** All current probes are single-turn; gateways that act only on session boundaries are invisible.
+197-4. **No adversarial-probe-adaptation detection.** If a gateway specifically counters our probe set, we won't notice without changing prompts.
+198-5. **Narrow stylometric panel.** One math problem for signature. Broader panel needed for imitator detection.
+199:6. **Baseline regeneration is manual.** No automated `--regenerate-baselines` flag yet.
+200-7. ✅ ~~No `distill+middleware` hypothesis~~ — **added in v0.6** classifier. Gated on tokenizer `non_claude` verdict + middleware ≥ 0.6. Without tokenizer evidence, A+Middleware verdict is annotated with "distill+middleware unresolved".
+201-8. **Thresholds hand-tuned.** Proper calibration requires labelled test set across provider types.
+202-9. **Network evidence capped & corroborating only** — `aggressive_defense +0.2`, middleware software signatures `+0.4`, CDN match `+0.3×0.3=+0.09` routing support. Total contribution capped at 0.5 to prevent load-bearing on forgeable headers.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1242ms:
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-7-- [ ] Toolkit is at latest version (`SCORER_VERSION` in `fingerprint.py` matches `scorer_version` in `baselines.json`)
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-8-- [ ] Baselines are not expired (`metadata.expiry_date` in `baselines.json` is in future)
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-9-- [ ] `claude.exe` (v2.1.x) on PATH for official baseline comparison
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md:10:- [ ] Target is accessible (manual `curl -I <url>` or a simple `--effort low -p "hi"` call succeeds at least once)
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-11-
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-12-## Step 1. Gather target metadata
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-13-
+--
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-32-- [ ] `tls_ok`: yes / no / intermittent
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-33-- [ ] `aggressive_defense`: true / false
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-34-- [ ] `proxy_software_detected`: list (Cloudflare / LiteLLM / Portkey / etc.)
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md:35:- [ ] `anthropic_direct_headers`: true / false (check auth'd response manually if false on unauth'd)
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-36-- [ ] `latency_median_ms`, `jitter_ms`
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-37-- [ ] Server header value
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-38-
+--
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-68-| Aggressive defense + A+Middleware verdict | — | Custom middleware gateway — same pattern as original AW investigation |
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-69-| Aggressive defense + A-clean verdict | — | Conflict — re-examine classification |
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-70-| No network evidence + C distill verdict | — | Non-Anthropic backend, likely distill |
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md:71:| Clean network + ambiguous verdict | — | Not enough LLM evidence; increase `--repeats` or add manual probes |
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-72-
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-73-## Step 5. Escalation (optional, high-stakes only)
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-74-
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-75-If verdict is ambiguous OR the decision has security / compliance / financial stakes:
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-76-
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-77-- [ ] **mitmproxy HTTPS capture**: set up local intercepting proxy, capture actual `/v1/messages` request body. Reveals injected system prompt content, exact parameter handling. Setup: 30-60 min. See `NETWORK_FINGERPRINTS.md` for how to interpret the capture.
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md:78:- [ ] **Tokenizer probe (manual)**: send 3-5 sentinel strings, capture `usage.input_tokens`, compare deltas against Anthropic-direct baselines. Proportional drift = different tokenizer.
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-79-- [ ] **Opus 4.7 max expert consultation**: send full evidence dump to `claude -p --model claude-opus-4-7 --effort max` for independent re-ranking (template: `consult_opus47*.py` in `.scratch/`).
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-80-
+.scratch/proxy-forensics/SUSPECT_WORKFLOW.md-81-## Step 6. Document findings
+--
+.scratch/proxy-forensics/README.md-12-
+.scratch/proxy-forensics/README.md-13-- **`fingerprint.py`** — main executable. Runs LLM-behavior probe battery, classify with confidence-graded verdict. Optional `--network-probe-url` + `--tokenizer-probe-raw` for cross-evidence.
+.scratch/proxy-forensics/README.md-14-- **`network_probe.py`** — TLS/headers/timing/proxy-software signatures. No LLM tokens. Standalone OR fed into `fingerprint.py`.
+.scratch/proxy-forensics/README.md:15:- **`tokenizer_probe.py`** — tokenizer-identity probe (10 sentinels, α·β linear fit, `claude_bpe`/`non_claude`/etc verdicts). Cheap (~$0.50/run).
+.scratch/proxy-forensics/README.md-16-- **`mitm_capture.py`** — one-shot HTTPS capture via mitmproxy (requires `pip install mitmproxy`). Windows-safe subprocess kill via `taskkill /F /T /PID`.
+.scratch/proxy-forensics/README.md-17-- **`parse_mitm_flow.py`** — parses saved mitmproxy `.flow` files.
+.scratch/proxy-forensics/README.md-18-- **`baselines.json`** — cached Anthropic-direct Opus 4.5/4.6/4.7 outputs (scorer_version=0.6.0).
+--
+.scratch/proxy-forensics/README.md-23-- **`WIRE_CAPTURE_FINDINGS.md`** — AW wire-capture evidence.
+.scratch/proxy-forensics/README.md-24-- **`test_fingerprint.py`** — 124 unit tests.
+.scratch/proxy-forensics/README.md-25-- **`test_mitm_capture.py`** — 7 unit tests (subprocess kill + flow parser).
+.scratch/proxy-forensics/README.md:26:- **`test_tokenizer_probe.py`** — 33 unit tests (fit, classify, sentinel composition).
+.scratch/proxy-forensics/README.md-27-
+.scratch/proxy-forensics/README.md-28-## Version changes
+.scratch/proxy-forensics/README.md-29-
+.scratch/proxy-forensics/README.md-30-### v0.6 (fifth codex review round — current)
+.scratch/proxy-forensics/README.md-31-
+.scratch/proxy-forensics/README.md:32:- **Tokenizer identity probe** (`tokenizer_probe.py`): sends 10 sentinels through baseline + suspect paths, fits `gateway = α·baseline + β`, verdicts `claude_bpe` / `claude_bpe_weak` / `non_claude` / `ambiguous` / `insufficient_data`. Requires n_points ≥ 8 for strong verdicts.
+.scratch/proxy-forensics/README.md-33-- **`distill+middleware` hypothesis** added to classifier: gated on `tokenizer_non_claude ≥ 0.5` AND `middleware ≥ 0.6`. Without tokenizer data, A+Middleware is annotated "distill+middleware unresolved" instead of silently assuming real Claude.
+.scratch/proxy-forensics/README.md-34-- **Network evidence integration**: `--network-probe-url` flag feeds TLS/CDN/aggressive-defense signals into classifier (capped contribution, not load-bearing).
+.scratch/proxy-forensics/README.md-35-- **Tokenizer non_claude vetoes A-clean**: gates now require `tok_nc < 0.3` for high-confidence A-clean.
+--
+.scratch/proxy-forensics/README.md-113-  --save-raw results_aw_network.json
+.scratch/proxy-forensics/README.md-114-```
+.scratch/proxy-forensics/README.md-115-
+.scratch/proxy-forensics/README.md:116:Run tokenizer probe for backend-identity evidence (distinguishes real Claude from non-Claude-tokenizer backends):
+.scratch/proxy-forensics/README.md-117-
+.scratch/proxy-forensics/README.md-118-```bash
+.scratch/proxy-forensics/README.md:119:python tokenizer_probe.py \
+.scratch/proxy-forensics/README.md-120-  --baseline-cmd "claude" \
+.scratch/proxy-forensics/README.md-121-  --gateway-cmd "claude-aw.cmd" --gateway-shell \
+.scratch/proxy-forensics/README.md-122-  --model claude-opus-4-7 --gateway-model opus \
+--
+.scratch/proxy-forensics/README.md-198-
+.scratch/proxy-forensics/README.md-199-See `baselines.json → interpretation_rules.known_gaps` for the full list. Highlights:
+.scratch/proxy-forensics/README.md-200-
+.scratch/proxy-forensics/README.md:201:- ✅ ~~No tokenizer-identity probe~~ — **implemented in v0.6** (`tokenizer_probe.py`). Uses CLI-mediated baseline (not raw Anthropic `count_tokens` API). Strong verdicts require n_points ≥ 8. Upgrade to API-key-based count_tokens reduces cost; identical semantics.
+.scratch/proxy-forensics/README.md-202-- ✅ ~~No `distill+middleware` hypothesis~~ — **added in v0.6**. Gated on `tokenizer_non_claude ≥ 0.5` AND `middleware ≥ 0.6`. Without tokenizer data, A+Middleware verdict is annotated "distill+middleware unresolved".
+.scratch/proxy-forensics/README.md-203-- **No quantization-degradation probe.** An int8-quantized Claude could pass the current battery. Planned future work.
+.scratch/proxy-forensics/README.md-204-- **No multi-turn probe.** Session-level middleware (cache-across-turns manipulation, session-boundary injection) is invisible here.
+--
+.scratch/proxy-forensics/baselines.json-215-      "feature_strip": "cache_create=0 AND cache_read=0 on a prompt that should trigger caching. Defaults-to-zero semantics can false-positive; confirm by running on a long prompt.",
+.scratch/proxy-forensics/baselines.json-216-      "effort_ignored": "identical output_tokens with/without --effort flag (requires separate targeted comparison)",
+.scratch/proxy-forensics/baselines.json-217-      "output_cap": "max_tokens hard-capped well below natural model output",
+.scratch/proxy-forensics/baselines.json:218:      "label_spoofing": "reported model field varies across identical requests — not currently auto-detected, inspect per_run output manually"
+.scratch/proxy-forensics/baselines.json-219-    },
+.scratch/proxy-forensics/baselines.json-220-    "provider_family_by_msg_id": {
+.scratch/proxy-forensics/baselines.json-221-      "msg_01*": "Anthropic direct API (api.anthropic.com)",
+--
+.scratch/proxy-forensics/baselines.json-224-      "uuid_36": "Aggregator (LiteLLM/Portkey/OpenRouter/etc — inspect upstream)"
+.scratch/proxy-forensics/baselines.json-225-    },
+.scratch/proxy-forensics/baselines.json-226-    "known_gaps": [
+.scratch/proxy-forensics/baselines.json:227:      "Tokenizer-identity probe IMPLEMENTED in v0.6 (`tokenizer_probe.py`) using CLI-mediated baseline (not raw Anthropic `count_tokens` API). Upgrade to API-key-based count_tokens would reduce cost and eliminate CLI wrapping overhead in β, but slope α and residuals still discriminate tokenizer identity with CLI fallback. See `baseline_method` field in tokenizer probe output.",
+.scratch/proxy-forensics/baselines.json-228-      "No quantization-degradation probe (planned future work): systematic numerical precision tests (sin() to 12 digits, modular arithmetic on large numbers) would detect int8/int4 quantized variants.",
+.scratch/proxy-forensics/baselines.json-229-      "`distill+middleware` hypothesis ADDED in v0.6. Requires tokenizer non_claude verdict AND middleware ≥ 0.6. Without tokenizer data, A+Middleware verdict is ANNOTATED with 'distill+middleware unresolved' to flag the remaining uncertainty rather than silently assuming real Claude.",
+.scratch/proxy-forensics/baselines.json-230-      "No multi-turn middleware probe: all current probes are single-turn; gateways that act only on turn-boundaries (session injection, cache-across-turns behavior) are invisible.",
+--
+.scratch/proxy-forensics/RESULTS.md-10-
+.scratch/proxy-forensics/RESULTS.md-11-**Most consistent with: a Claude-like frontier backend (likely Opus 4.7) hosted on Google Vertex AI, fronted by an aggressive middleware gateway.**
+.scratch/proxy-forensics/RESULTS.md-12-
+.scratch/proxy-forensics/RESULTS.md:13:The observed signals are **less consistent with** a rigidly-biased distilled-only student, with a Chinese-model clone, and with an alias of an older Claude release. They are **most consistent with** a frontier Claude backend under active gateway manipulation. Important caveats: (a) the toolkit's `distill+middleware` separation now lives in v0.6 behind the `tokenizer_probe.py` gate — at the time of this investigation that probe had not yet been run on AW, so the A+Middleware verdict here carries a "distill+middleware unresolved" annotation (re-run with v0.6 tokenizer probe to upgrade or downgrade to `distill+middleware`); (b) a sufficiently sophisticated adversarial proxy could in principle produce the same behavior on all probes. For security- or legal-grade certainty, capture wire traffic (mitmproxy) and run the tokenizer identity probe.
+.scratch/proxy-forensics/RESULTS.md-14-
+.scratch/proxy-forensics/RESULTS.md-15-## Middleware inventory
+.scratch/proxy-forensics/RESULTS.md-16-
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1435ms:
+.scratch/proxy-forensics\METHODOLOGY.md:172:The battery is single-turn and does not capture:
+.scratch/proxy-forensics\METHODOLOGY.md:181:1. Run a tokenizer probe manually (collect `usage.input_tokens` from `--output-format json` on 3-5 sentinel strings, compare deltas to baseline)
+.scratch/proxy-forensics\METHODOLOGY.md:194:1. ✅ ~~No tokenizer-identity probe~~ — **implemented in v0.6** via `tokenizer_probe.py`. CLI-mediated baseline (not raw `count_tokens` API); strong verdicts require n_points ≥ 8. Output labels `baseline_method` for provenance. Upgrade to API-key based `count_tokens` reduces cost; identical semantics.
+.scratch/proxy-forensics\README.md:201:- ✅ ~~No tokenizer-identity probe~~ — **implemented in v0.6** (`tokenizer_probe.py`). Uses CLI-mediated baseline (not raw Anthropic `count_tokens` API). Strong verdicts require n_points ≥ 8. Upgrade to API-key-based count_tokens reduces cost; identical semantics.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+### Blocker 4 status
+
+RED. The listed `v0.5` mentions are historical/attribution, not stale. The stale phrase grep is clean.
+
+Remaining stale current-state docs:
+- [METHODOLOGY.md](D:/dev/Orchestrator/Orchestrarium/.scratch/proxy-forensics/METHODOLOGY.md:172) says the battery does not capture tokenizer identity.
+- [METHODOLOGY.md](D:/dev/Orchestrator/Orchestrarium/.scratch/proxy-forensics/METHODOLOGY.md:181) still recommends a manual 3-5 sentinel tokenizer probe instead of the v0.6 `tokenizer_probe.py` path.
+
+Tests were not re-run here because Python execution was blocked by the sandbox policy.
+
+### Verdict
+
+RED. Specific remaining lines above.
+tokens used
+91,668
+### Blocker 4 status
+
+RED. The listed `v0.5` mentions are historical/attribution, not stale. The stale phrase grep is clean.
+
+Remaining stale current-state docs:
+- [METHODOLOGY.md](D:/dev/Orchestrator/Orchestrarium/.scratch/proxy-forensics/METHODOLOGY.md:172) says the battery does not capture tokenizer identity.
+- [METHODOLOGY.md](D:/dev/Orchestrator/Orchestrarium/.scratch/proxy-forensics/METHODOLOGY.md:181) still recommends a manual 3-5 sentinel tokenizer probe instead of the v0.6 `tokenizer_probe.py` path.
+
+Tests were not re-run here because Python execution was blocked by the sandbox policy.
+
+### Verdict
+
+RED. Specific remaining lines above.

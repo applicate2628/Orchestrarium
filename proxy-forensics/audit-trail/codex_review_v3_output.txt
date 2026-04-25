@@ -1,0 +1,45 @@
+### Summary (3 sentences)
+v0.3 materially improves the v0.2 failures, especially byte hashing, stale-baseline fail-closed behavior, single-run intercept handling, and status-failure filtering. I would still not ship it as v0.3 stable because the classifier can still emit high-confidence `real Claude` conclusions from insufficient or contradicted evidence, and the docs still contain absolute claims. Test commands were rejected by the sandbox here, so I reviewed the implementation and test file directly rather than freshly verifying the 76/0 run.
+
+### Previously Critical/High → v0.3 status
+
+**Parser treated all non-list JSON as `intercepted`: PARTIAL.** The new `valid_single_object` path is the right direction, but the check is too permissive: any one of `result`, `type`, `subtype`, `session_id`, `total_cost_usd`, or `duration_ms` makes the object protocol-valid. A wrapper/adversarial gateway can return `{"result":"{\"acknowledged\":true}"}` or `{"type":"result","result":"..."}` and avoid intercept classification. Worse, `self_introspection_json` then treats any parseable JSON payload as `clean_introspection`, even if it lacks the required schema fields.
+
+**`status_failure` becomes evidence: PARTIAL.** Direct conversion of failed runs into `rigid_bias` / `format_rigor_fail` is fixed for `anti_euler_override` and `tight_reasoning_crt`. Remaining issue: mixed valid/failure runs still score from the valid subset and can contribute substantial evidence from only one successful run, which conflicts with the stated cross-run consistency requirement.
+
+**`hard_intercept` allowed with 1 repeat: FIXED.** `hard_intercept` now requires `len(run_signals) >= 2` and identical hashes; single-run non-protocol output emits only `single_run_intercept_unverified`.
+
+**Raw hash over decoded text, not bytes: FIXED.** `run_cli` captures bytes with `text=False`, and `parse_cli_output` hashes `stdout_bytes` when provided. The tests only prove ASCII parity, but the implementation itself is correct.
+
+**Superscript regex accepts any superscript: FIXED.** The `7⁴` branch is explicit and tests cover `7⁵` / `7³` negatives.
+
+**Missing `expiry_date` fails open: FIXED.** Missing, malformed, and expired baseline metadata now fail stale. The CLI blocks unless `--force-stale`.
+
+**Docs overclaim language: PARTIAL.** Some softened language landed, but `RESULTS.md` still says “Real Claude Opus ...” and “The underlying model is genuine frontier Claude” as categorical conclusions. That is still too strong for the documented hypothesis-generator scope.
+
+### Any NEW Issues In v0.3
+
+- **High: introspection schema failure can be scored as clean.** `score_run_introspection` marks `json_parse_ok` for any JSON object and `aggregate_probe` turns that into `clean_introspection`; it does not require `architecture_family`, `supports_extended_thinking`, `can_use_prompt_caching`, and `knowledge_cutoff_month`. This can hide a gateway returning schema-shaped or protocol-wrapped junk.
+
+- **High: classifier has no hard evidence gates.** `A+Middleware` can reach high confidence from hard intercept + temporal cutoff without capability evidence, despite the comment that it “needs BOTH middleware + capable_base”. `A-clean` can also win high while variable/inconsistent introspection is present, because those signals are ignored by `classify()`.
+
+- **High: variable/adaptive intercept is emitted but ignored.** `variable_intercept` and `inconsistent_intercept` should at least block a high-confidence `A-clean` conclusion. Right now a proxy that varies introspection intercepts can evade middleware scoring and still be classified clean if other probes pass.
+
+- **Medium: temporal cutoff scoring accepts generic late-2025 mentions.** The “Late-2025 event” regex is marked `verifiable: False`, but aggregation still scores it as `post_april_2025_knowledge`. A hallucinated “June 2025” line can become recent-cutoff evidence.
+
+- **Medium: v0.3 packaging/docs are stale.** `README.md`, `METHODOLOGY.md`, argparse description, test header, and known-gaps text still say v0.2 or “planned v0.3”.
+
+- **Low/Medium: parser assumes stream-list elements are dicts.** A JSON list of scalars can crash at `x.get(...)` instead of becoming `parse_error` or `intercepted`.
+
+### Remaining Calibration / Methodology Concerns
+
+- The `0.55 / 0.35 / 0.2 / 0.1` thresholds are not the main problem; the missing gates are. High confidence should require minimum valid-run counts and specific evidence families, not just additive score plus gap.
+
+- `soft_override_success` is counted as capable-base evidence even when `stylometric_717` did not show the bias that Probe 5 is supposed to disambiguate.
+
+- Tests need adversarial classifier matrices: hard-intercept-only, hard-intercept+temporal-only, variable-intercept+otherwise-clean, one-valid-one-failure, wrong-schema introspection, generic late-2025 hallucination, and fake single-object protocol wrappers.
+
+### Verdict
+**RED.**
+
+Do not ship v0.3 stable yet. Before GREEN is possible, fix the introspection schema validation, make protocol-object detection stricter, make variable/inconsistent intercept block clean-high classifications, add hard gates for high-confidence hypotheses, downgrade partial-valid runs, remove categorical claims from `RESULTS.md`, and update stale v0.2/v0.3 docs.

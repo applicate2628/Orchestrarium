@@ -1,0 +1,352 @@
+Reading additional input from stdin...
+OpenAI Codex v0.124.0 (research preview)
+--------
+workdir: D:\dev\Orchestrator\Orchestrarium
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019dc184-4422-7303-97da-9ec2b70ea290
+--------
+user
+# Calibration scope question
+
+User just stated: "toolkit должен быть откалиброван на всех доступных моделях со всеми доступными efforts" ("toolkit should be calibrated on all available models with all available efforts").
+
+Current calibration state (v0.6, you GREEN'd at round 13):
+- Baseline outputs cached in `baselines.json` for Opus 4.5/4.6/4.7 (5 probes × 1 run each, single effort)
+- Live `fingerprint.py` end-to-end pipeline run on **only** plain `claude --model claude-opus-4-7 --effort max` → A-clean high confidence
+- Other models (Sonnet 4.6, Haiku 4.5) and other efforts (low/medium/high/xhigh) NOT live-validated
+
+Available models on the user's system:
+- claude-opus-4-5 (or `-20251101` date-stamped)
+- claude-opus-4-6
+- claude-opus-4-7
+- claude-sonnet-4-6
+- claude-haiku-4-5-20251001
+
+Available efforts (per Anthropic CLI):
+- low / medium / high / xhigh / max
+- `max` is Opus-tier only (Opus 4.6+); Sonnet/Haiku silently degrade `max`/`xhigh` to high
+
+Toolkit currently hardcoded `--effort max` per scorer-version=0.6.0 normalization choice. I just added `--probe-effort` flag (default "max") to support calibration runs.
+
+## User's standard
+
+"All models × all efforts" = full matrix, ~20 combinations × 10 calls = ~200 API calls = ~$10-20.
+
+## Question for you
+
+Is the user's standard the right calibration discipline for v0.6 toolkit?
+
+Specifically:
+
+1. **Is full {model × effort} matrix necessary**, or is it overkill for a hypothesis-generator scope?
+2. The toolkit's PRIMARY job is to fingerprint suspect endpoints (which we don't control); calibrating against efforts WE choose seems redundant if the toolkit always forces `--effort max` on suspects. Counter-argument or agreement?
+3. What MINIMUM calibration discipline would you require for a "v0.6 stable" stamp on a multi-model toolkit?
+4. What classes of bugs would only show up under specific {model × effort} combos that single-model-max validation would miss?
+5. Practical recommendation: run full matrix (~$15), or a representative subset (~$5), or skip and add to documented gaps?
+
+Output:
+```
+### Summary (2 sentences)
+### Answers to 5 questions
+### Recommended scope
+### Verdict on user's standard
+AGREE / DISAGREE-MINOR (suggest narrower) / DISAGREE-MAJOR (suggest different approach)
+```
+
+Be honest. If full matrix is overkill, say so. If it's the right standard, confirm it.
+2026-04-24T22:02:59.464453Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+[31;1mGet-Content: [0m
+[31;1m[36;1mLine |[0m
+[31;1m[36;1m[36;1m   2 | [0m [36;1mGet-Content -Raw 'C:/Users/<user>/OneDrive/Documents/env/Agents/.codex[0m :[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mCannot find path 'C:\Users\<user>\OneDrive\Documents\env\Agents\.codex\plugins\cache\openai-curated\superpowers\3af3fd9b2133999a685bd81c9e209ddd715456d4\skills\using-superpowers\SKILL.md' because it does not exist.[0m
+
+codex
+Using the consultant-style advisory path here because this is a calibration policy decision, not an implementation step. I’ll also do a quick memory lookup for Orchestrarium/toolkit context, then answer in your requested shape.
+2026-04-24T22:03:03.090280Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path 'C:\\Users\\<user>\\.codex\\memories\\MEMORY.md' -Pattern 'calibration|fingerprint.py|baselines.json|opus|Orchestrarium|external routing|provider' -CaseSensitive:"'$false | Select-Object -First 30'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path 'C:\\Users\\<user>\\.codex\\memories\\MEMORY.md' -Pattern 'calibration|fingerprint.py|baselines.json|opus|Orchestrarium|external routing|provider' -CaseSensitive:"'$false | Select-Object -First 30' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path 'C:\\Users\\<user>\\.codex\\memories\\MEMORY.md' -Pattern 'calibration|fingerprint.py|baselines.json|opus|Orchestrarium|external routing|provider' -CaseSensitive:"'$false | Select-Object -First 30'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path 'C:\\Users\\<user>\\OneDrive\\Documents\\env\\Agents\\.codex\\skills\\consultant\\SKILL.md' -TotalCount 120" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 682ms:
+---
+name: consultant
+description: Provide an independent advisory memo for the lead without becoming a reviewer, approver, or delivery owner. Use when Codex needs a non-blocking second opinion on tradeoffs, ambiguity, or cross-cutting concerns before choosing a route.
+---
+
+# Consultant
+
+## Core stance
+
+- Act as an independent advisor, not as a pipeline owner.
+- Produce one concise second-opinion memo and stop there.
+- Stay advisory-only: do not route work, do not accept artifacts, and do not block progress.
+
+## Toggle file check
+
+Before any invocation, resolve the effective Codex overlay in this order:
+
+- local `.agents/.agents-mode.yaml`
+- local legacy `.agents/.agents-mode`
+- global `~/.codex/.agents-mode.yaml`
+- global legacy `~/.codex/.agents-mode`
+
+- **No file** (default): if neither local nor global overlay exists, consultant is disabled. Notify "Second opinion skipped - consultant disabled (`/second-opinion enable` to activate)" and return `5. Advisory status: NON-BLOCKING` immediately. Do not invent a closeout blocker solely because consultant did not run.
+- **`consultantMode: external`**: external-only. Attempt the selected external CLI. If it fails or is unavailable, return an unavailable memo and require the lead to keep routing honest instead of downgrading to an internal consultant path.
+- **`consultantMode: internal`**: internal-only consultant. Use the internal consultant path for any consultant invocation that is still desired.
+- **`consultantMode: disabled`**: explicitly disabled. Same behavior as the no-file case.
+
+`.agents/.agents-mode.yaml` is the project-local override surface. When it is absent, read-only consultant routing falls back to the global Codex overlay at `~/.codex/.agents-mode.yaml`. Keep any project-local override local-only and do not commit it to git.
+
+The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/external-dispatch.md). Treat the canonical file as the shared routing schema plus the profile, opinion-count, and Codex-only Claude transport/profile keys:
+
+- `consultantMode`
+- `delegationMode`
+- `parallelMode`
+- `mcpMode`
+- `preferExternalWorker`
+- `preferExternalReviewer`
+- `externalProvider`
+- `externalPriorityProfile`
+- `externalPriorityProfiles`
+- `externalOpinionCounts`
+- `externalCodexWorkdirMode`
+- `externalClaudeWorkdirMode`
+- `externalGeminiWorkdirMode`
+- `externalModelMode`
+- `externalGeminiFallbackMode`
+- `externalClaudeApiMode`
+- `externalClaudeProfile`
+
+Read and normalize the effective Codex overlay before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
+If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode`. Normalize whichever file supplied the effective config in place and do not recreate any legacy file.
+
+When changing `consultantMode`, preserve the other keys, including the profile, opinion-count, workdir, model-policy, Gemini-fallback, transport, Claude-profile, and general `parallelMode` fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `externalClaudeApiMode` to `auto`, `delegationMode` to `manual`, `parallelMode` to `auto`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` / `externalGeminiWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, `externalGeminiFallbackMode` to `auto`, and `externalClaudeProfile` to `opus-max` unless the user explicitly requested a different Claude profile override.
+Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
+
+## When to invoke
+
+Use `$consultant` when the lead wants a second opinion for:
+
+- hard planning or complex workspace-modifying tasks
+- cross-cutting tradeoffs spanning multiple specialist roles
+- ambiguity where the strongest factual slice is already available
+- comparing options before choosing a route
+
+Do not invoke for:
+
+- trivial or simple tasks
+- routine git or admin work
+- ordinary read-only investigation
+- work already well covered by a current specialist role
+
+## Input contract
+
+- The lead or main conversation invokes this role explicitly.
+- Take only the canonical brief or the accepted artifact needed for the question at hand.
+- Treat the task as a request for judgment, tradeoff framing, or risk surfacing rather than delivery ownership.
+
+## Return exactly one artifact
+
+- Return one advisory memo covering recommended direction, alternatives considered, major tradeoffs, key risks, assumptions, and confidence level.
+- Every consultant memo must include a provenance header:
+  - **Execution role:** `consultant`
+  - **Assigned / replaced internal role:** `none`
+  - **Requested provider:** <internal | claude | gemini>
+  - **Resolved provider:** <Claude CLI | Gemini CLI | none>
+  - **Requested consultant mode:** <external | internal | disabled>
+  - **Actual execution path:** <internal consultant | external CLI (provider name) | role-play (violation)>
+  - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
+  - **Deviation reason:** <none | external unavailable: [reason]>
+- Every consultant memo must end with an explicit continuation section:
+  - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
+  - The continuation prompt must begin with a direct imperative to continue, for example `Continue working:` or `Proceed with the next batch:`.
+  - It must include the concrete next action or next review target, not just a closing sentence.
+
+## Advisory status
+
+- This role is intentionally non-blocking and non-approving.
+- The lead decides whether to adopt or ignore the memo.
+- If the memo identifies a real blocker, flag it and recommend the proper specialist role instead of acting as that role.
+- If the lead explicitly requests a closeout consultant sweep, the continuation section is still required even when the consultant sees no new blockers; the memo must still end with a reusable second prompt that explicitly continues the next approved work.
+
+## Execution paths
+
+### External provider: selected by `externalProvider`
+
+See the shared dispatch contract in [../lead/external-dispatch.md](../lead/external-dispatch.md) for the canonical config and provider matrix.
+
+Check the selected provider first:
+
+- Claude path: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows)
+- Gemini path: `gemini`
+
+If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfile`, map it as follows:
+
+- `sonnet-high`  `--model sonnet --effort high`
+- `opus-max`  `--model opus --effort max`
+- key missing  use the current default Claude CLI invocation for this pack unless `externalModelMode: pinned-top-pro` requests the stronger Claude path
+
+If `.agents/.agents-mode.yaml` selects Gemini (`externalProvider: gemini`), honor `externalModelMode` first.
+
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The first memory search tripped on PowerShell quoting around a boolean flag; I’m rerunning it with plain default case-insensitive matching and checking the effective consultant overlay path read-only.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path 'C:\\Users\\<user>\\.codex\\memories\\MEMORY.md' -Pattern 'calibration|fingerprint.py|baselines.json|opus|Orchestrarium|external routing|provider' | Select-Object -First 40" in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T22:03:15.991398Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$paths = @('"'.agents/.agents-mode.yaml','.agents/.agents-mode','C:\\Users\\<user>\\.codex\\.agents-mode.yaml','C:\\Users\\<user>\\.codex\\.agents-mode'); foreach ("'$p in $paths) { if (Test-Path -LiteralPath $p) { Write-Output "FOUND $p"; Get-Content -LiteralPath $p -TotalCount 80; break } }; if (-not ($paths | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1)) { Write-Output '"'NO_OVERLAY_FOUND' }"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$paths = @('"'.agents/.agents-mode.yaml','.agents/.agents-mode','C:\\Users\\<user>\\.codex\\.agents-mode.yaml','C:\\Users\\<user>\\.codex\\.agents-mode'); foreach ("'$p in $paths) { if (Test-Path -LiteralPath $p) { Write-Output "FOUND $p"; Get-Content -LiteralPath $p -TotalCount 80; break } }; if (-not ($paths | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1)) { Write-Output '"'NO_OVERLAY_FOUND' }" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$paths = @('"'.agents/.agents-mode.yaml','.agents/.agents-mode','C:\\Users\\<user>\\.codex\\.agents-mode.yaml','C:\\Users\\<user>\\.codex\\.agents-mode'); foreach ("'$p in $paths) { if (Test-Path -LiteralPath $p) { Write-Output "FOUND $p"; Get-Content -LiteralPath $p -TotalCount 80; break } }; if (-not ($paths | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1)) { Write-Output '"'NO_OVERLAY_FOUND' }"` rejected: blocked by policy
+ succeeded in 795ms:
+
+C:\Users\<user>\.codex\memories\MEMORY.md:161:# Task Group: [7mOrchestrarium[0m governance, install surfaces, and repo recover[0m
+[7m[0my[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:162:scope: governance, install, control-plane, and repo-health work under `D:\
+dev\Orchestrator` and `D:\dev\Orchestrator\[7mOrchestrarium[0m`; use when the user asks for `$lead` recovery, execution-recor[0m
+[7m[0md or install-surface changes, global skill installs, policy clarifications, or Git-state forensics in this repo family[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:163:applies_to: cwd=D:\dev\Orchestrator and D:\dev\Orchestrator\[7mOrchestrarium[0m;[0m
+[7m[0m reuse_rule=reuse for this repo family and the linked `C:\Users\<user>\.codex` install/config workflow, but verify curre[0m
+[7m[0mnt work-item ownership, active branch, and installed runtime state before applying specifics[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:179:- rollout_summaries/2026-04-09T15-49-26-RJC8-[7morchestrarium[0m_exec_record_syn[0m
+[7m[0mc_and_gemini_standalone_install.md (cwd=D:\dev\Orchestrator, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\09\rol[0m
+[7m[0mlout-2026-04-09T18-49-26-019d72ef-1e8f-7ae3-aefe-cac6cdf9b0d8.jsonl, updated_at=2026-04-10T15:01:37+00:00, thread_id=01[0m
+[7m[0m9d72ef-1e8f-7ae3-aefe-cac6cdf9b0d8, governance sync plus install-surface verification)[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:183:- AGENTS.shared, RELEASE_NOTES, external-worker-design, Execution role, Re
+quested [7mprovider[0m, Resolved provider, install-gemini.ps1, install-gemini.sh, ORCHESTRARIUM_GEMINI_PACK[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:209:- rollout_summaries/2026-04-16T22-10-33-NMtV-parallelmode_commit_global_in
+stall.md (cwd=D:\dev\Orchestrator\[7mOrchestrarium[0m, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\17\rollout-2026-04[0m
+[7m[0m-17T01-10-33-019d9858-8c5c-71f3-9af2-24849bb79477.jsonl, updated_at=2026-04-17T16:42:01+00:00, thread_id=019d9858-8c5c-[0m
+[7m[0m71f3-9af2-24849bb79477, shared routing-policy change committed and installed globally)[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:219:- rollout_summaries/2026-04-09T00-19-05-axyn-[7morchestrarium[0m_monorepo_merge_[0m
+[7m[0mreview_install_hardening.md (cwd=D:\dev\Orchestrator, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\09\rollout-20[0m
+[7m[0m26-04-09T03-19-05-019d6f9b-5b8e-75b3-8932-3a94a4d90937.jsonl, updated_at=2026-04-09T05:25:09+00:00, thread_id=019d6f9b-[0m
+[7m[0m5b8e-75b3-8932-3a94a4d90937, live install exposed docs and symlink hardening issues)[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:239:- rollout_summaries/2026-04-08T23-36-44-429Z-git_repo_corruption_after_reb
+oot_head_config_zeroed.md (cwd=D:\dev\Orchestrator\[7mOrchestrarium[0m, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\0[0m
+[7m[0m9\rollout-2026-04-09T02-36-44-019d6f74-9307-7fc3-bb36-898cf6a9fdd3.jsonl, updated_at=2026-04-08T23:41:48+00:00, thread_[0m
+[7m[0mid=019d6f74-9307-7fc3-bb36-898cf6a9fdd3, read-only forensics only)[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:249:- rollout_summaries/2026-04-19T22-26-55-ChPv-github_contributors_claude_ca
+che_refresh_and_revert.md (cwd=D:\dev\Orchestrator\[7mOrchestrarium[0m, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\2[0m
+[7m[0m0\rollout-2026-04-20T01-26-55-019da7da-9ca1-7b21-8dfe-65ff64113b9d.jsonl, updated_at=2026-04-19T23:03:48+00:00, thread_[0m
+[7m[0mid=019da7da-9ca1-7b21-8dfe-65ff64113b9d, GitHub API/history already showed only the human author; temporary empty commi[0m
+[7m[0mt was later removed)[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:253:- GitHub contributors, applicate2628/[7mOrchestrarium[0m, stats/contributors, HT[0m
+[7m[0mTP 202, co-authored-by, Claude attribution, ~/.claude/settings.json, attribution commit pr, empty commit, chore: refres[0m
+[7m[0mh GitHub contributors cache, git reset --soft HEAD~1, force-with-lease, origin/main[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:284:- The canonical execution record for [7mprovider[0m-backed work is: `Execution r[0m
+[7m[0mole`, `Assigned / replaced internal role`, `Requested provider`, `Resolved provider`, `Actual execution path`, `Model /[0m
+[7m[0m profile used`, and `Deviation reason`; runtime-default selection should be reported as `Requested provider: internal`,[0m
+[7m[0m not `auto` [Task 2][0m
+C:\Users\<user>\.codex\memories\MEMORY.md:285:- Gemini standalone installs here are reinstall-safe via the managed `<!--
+ [7mORCHESTRARIUM[0m_GEMINI_PACK:START --> ... END -->` block; project installs target `GEMINI.md` plus `.gemini/`, global in[0m
+[7m[0mstalls target `~/.gemini/`, and `src.gemini/scripts/validate-pack.sh` distinguishes source/project/global layouts [Task[0m
+[7m[0m 2][0m
+C:\Users\<user>\.codex\memories\MEMORY.md:294:- For `applicate2628/[7mOrchestrarium[0m`, `D:\dev\Orchestrator` is not the git [0m
+[7m[0mroot; `D:\dev\Orchestrator\Orchestrarium` is the repo root used for contributor/history audits [Task 9][0m
+C:\Users\<user>\.codex\memories\MEMORY.md:485:# Task Group: D:\test native media-surface recovery and [7mprovider[0m/MCP runti[0m
+[7m[0mme diagnostics[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:486:scope: `D:\test` workflows around the OpenGL/shared-surface media pipeline
+ and adjacent [7mprovider[0m/MCP runtime diagnostics; use for lead-orchestrated verification, crash triage, blazing-path reco[0m
+[7m[0mvery, provider wrapper handoff packages, or local Codex/Gemini provenance debugging in this checkout[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:509:## Task 3: [7mprovider[0m MCP isolation handoff package and smoke-tested wrapper[0m
+[7m[0ms[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:513:- rollout_summaries/2026-04-13T01-52-20-juZc-[7mprovider[0m_mcp_handoff_and_smok[0m
+[7m[0me_test_package.md (cwd=D:\test, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\13\rollout-2026-04-13T04-52-20-019d[0m
+[7m[0m848a-283e-78c0-a0b4-8d3b46bc6eb2.jsonl, updated_at=2026-04-13T10:05:18+00:00, thread_id=019d848a-283e-78c0-a0b4-8d3b46b[0m
+[7m[0mc6eb2, reusable fallback package plus smoke evidence)[0m
+C:\Users\<user>\.codex\memories\MEMORY.md:542:- The [7mprovider[0m wrapper package is explicitly a temporary fallback: `codex-[0m
+[7m[0misolated-worker.ps1` disables all non-allowed Codex MCP servers, `claude-isolated-worker.ps1` maps `-NoMcp` to `--bare`[0m
+[7m[0m or `--strict-mcp-config`, and `gemini-isolated-worker.ps1` uses a clean temp `HOME` and temp `cwd` plus `--include-dir[0m
+[7m[0mectories` for verified no-MCP runs [Task 3][0m
+C:\Users\<user>\.codex\memories\MEMORY.md:543:- Smoke evidence already exists for `codex` no-MCP, `claude-api` no-MCP an
+d strict-MCP, and `gemini` no-MCP; the package lives under `work-items/[7mprovider[0m-mcp-templates/` and `work-items/provide[0m
+[7m[0mr-mcp-subagent-summary-2026-04-13.md` [Task 3][0m
+C:\Users\<user>\.codex\memories\MEMORY.md:551:- Symptom: [7mprovider[0m-isolation docs are theoretically correct but operation[0m
+[7m[0mally stale -> cause: wrappers are a temporary workaround tied to current CLI behavior -> fix: re-run the smoke matrix f[0m
+[7m[0mirst whenever upstream provider behavior changes [Task 3][0m
+
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T22:03:33.243830Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 0.7 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+### Summary (2 sentences)
+Single-model `claude-opus-4-7 --effort max` validation is not enough to stamp a multi-model v0.6 toolkit as stable. Full matrix is more than a hypothesis-generator strictly needs, but at ~$15 it is the right release discipline if the toolkit now exposes model/effort as a supported calibration surface.
+
+### Answers to 5 questions
+
+1. **Full matrix necessary?**  
+   Not scientifically mandatory for a hypothesis generator, but necessary if the claim is “calibrated across all available models and efforts.” Otherwise the honest stamp is narrower: “validated on Opus 4.7 max; other lanes unvalidated.”
+
+2. **Is effort calibration redundant if suspects are forced to `max`?**  
+   Partly, for the default suspect path. But not fully: the CLI silently degrades some efforts, endpoints may ignore or reinterpret effort, and `--probe-effort` is now a user-visible dimension. Effort calibration also tests cache keys, scorer normalization, thresholds, parser robustness, and requested-vs-effective effort labeling.
+
+3. **Minimum for `v0.6 stable`:**  
+   I would require live E2E validation on every supported model at its canonical effective effort, plus all-effort validation on at least one Opus model, plus explicit degradation checks for Sonnet/Haiku `xhigh`/`max`. Anything less should be stamped as “default-lane stable,” not “multi-model stable.”
+
+4. **Combo-specific bugs single Opus max can miss:**  
+   Model alias/date-stamp normalization bugs; baseline cache keyed by model but not effort; `--probe-effort` ignored; CLI degradation mislabeled as real `xhigh`/`max`; smaller/low-effort models breaking output schema; confidence thresholds overfitting Opus; timeout/token/cost path issues; false positives caused by effort-induced style shifts.
+
+5. **Practical recommendation:**  
+   Run the full matrix now. Record both `requested_effort` and `effective_effort`, and mark degraded Sonnet/Haiku `xhigh`/`max` lanes as degradation checks, not independent capability.
+
+### Recommended scope
+
+Run full model × effort calibration for v0.6, with 5 probes per combination and at least one repeat on default/canonical lanes. Keep the default scorer normalization at `max`, but make the calibration report explicit about which lanes are default-supported, which are exploratory, and which are CLI-degraded aliases.
+
+### Verdict on user's standard
+
+AGREE
+
+Full matrix is slightly stricter than the minimum hypothesis-generator need, but it is the correct standard for a “v0.6 stable multi-model toolkit” stamp, especially at the stated cost.
+
+
+tokens used
+45,338
+### Summary (2 sentences)
+Single-model `claude-opus-4-7 --effort max` validation is not enough to stamp a multi-model v0.6 toolkit as stable. Full matrix is more than a hypothesis-generator strictly needs, but at ~$15 it is the right release discipline if the toolkit now exposes model/effort as a supported calibration surface.
+
+### Answers to 5 questions
+
+1. **Full matrix necessary?**  
+   Not scientifically mandatory for a hypothesis generator, but necessary if the claim is “calibrated across all available models and efforts.” Otherwise the honest stamp is narrower: “validated on Opus 4.7 max; other lanes unvalidated.”
+
+2. **Is effort calibration redundant if suspects are forced to `max`?**  
+   Partly, for the default suspect path. But not fully: the CLI silently degrades some efforts, endpoints may ignore or reinterpret effort, and `--probe-effort` is now a user-visible dimension. Effort calibration also tests cache keys, scorer normalization, thresholds, parser robustness, and requested-vs-effective effort labeling.
+
+3. **Minimum for `v0.6 stable`:**  
+   I would require live E2E validation on every supported model at its canonical effective effort, plus all-effort validation on at least one Opus model, plus explicit degradation checks for Sonnet/Haiku `xhigh`/`max`. Anything less should be stamped as “default-lane stable,” not “multi-model stable.”
+
+4. **Combo-specific bugs single Opus max can miss:**  
+   Model alias/date-stamp normalization bugs; baseline cache keyed by model but not effort; `--probe-effort` ignored; CLI degradation mislabeled as real `xhigh`/`max`; smaller/low-effort models breaking output schema; confidence thresholds overfitting Opus; timeout/token/cost path issues; false positives caused by effort-induced style shifts.
+
+5. **Practical recommendation:**  
+   Run the full matrix now. Record both `requested_effort` and `effective_effort`, and mark degraded Sonnet/Haiku `xhigh`/`max` lanes as degradation checks, not independent capability.
+
+### Recommended scope
+
+Run full model × effort calibration for v0.6, with 5 probes per combination and at least one repeat on default/canonical lanes. Keep the default scorer normalization at `max`, but make the calibration report explicit about which lanes are default-supported, which are exploratory, and which are CLI-degraded aliases.
+
+### Verdict on user's standard
+
+AGREE
+
+Full matrix is slightly stricter than the minimum hypothesis-generator need, but it is the correct standard for a “v0.6 stable multi-model toolkit” stamp, especially at the stated cost.
+
+

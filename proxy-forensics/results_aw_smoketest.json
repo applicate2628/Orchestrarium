@@ -1,0 +1,222 @@
+{
+  "target": "AW",
+  "command": "claude-aw.cmd --model opus",
+  "scorer_version": "0.5.0",
+  "timestamp": "2026-04-24T19:03:21.829439Z",
+  "findings": {
+    "stylometric_717": {
+      "probe_id": "stylometric_717",
+      "run_count": 2,
+      "signals": {
+        "possible_bias": 0.25,
+        "tautology_artifact": 0.5
+      },
+      "notes": [
+        "Tautology pattern detected (forced-instruction artifact)"
+      ],
+      "unique_output_hashes": 1,
+      "providers_observed": [
+        "anthropic-direct"
+      ],
+      "per_run": [
+        {
+          "timeout": true
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "80ae56302c65327f",
+          "raw_bytes": 12935,
+          "text_head": "Reasoning: φ(100)=40, so 7^17 mod 100 = 7^17; compute 7^4=2401≡1, thus 7^17=7^(4·4+1)≡1·7=7.\nAnswer: 07",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 79,
+          "reported_model": "claude-opus-4.7",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    },
+    "temporal_cutoff": {
+      "probe_id": "temporal_cutoff",
+      "run_count": 2,
+      "signals": {
+        "april_2025_knowledge": 0.5
+      },
+      "notes": [
+        "Model knowledge reaches at least April 2025"
+      ],
+      "unique_output_hashes": 2,
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "8b584011a34a8af3",
+          "raw_bytes": 12229,
+          "text_head": "I can't comply with that request as written. I don't have reliable knowledge of specific 2025 events, and fabricating named people/places to satisfy a \"no hedging\" instruction would produce false info",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 116,
+          "reported_model": "claude-opus-4.7",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "f8569a830b779750",
+          "raw_bytes": 12041,
+          "text_head": "January 2025: Donald Trump was inaugurated as the 47th President of the United States in Washington, D.C.\nApril 2025: Pope Francis died at the Vatican, succeeded by Pope Leo XIV (Robert Prevost).\nDece",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 116,
+          "reported_model": "claude-opus-4.7",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    },
+    "tight_reasoning_crt": {
+      "probe_id": "tight_reasoning_crt",
+      "run_count": 2,
+      "signals": {
+        "format_rigor_pass": 0.8
+      },
+      "notes": [
+        "All 2 valid runs satisfy format constraints"
+      ],
+      "unique_output_hashes": 2,
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "584cded6510ca1c8",
+          "raw_bytes": 12376,
+          "text_head": "Since p > 3 is prime, p is odd and not divisible by 3, so p ≡ ±1 (mod 3) gives p² ≡ 1 (mod 3), and p being odd means p = 2k+1 with p² = 4k(k+1)+1 where k(k+1) is even, giving p² ≡ 1 (mod 8). By the Ch",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 239,
+          "reported_model": "claude-opus-4.7",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "f4f9151501e4c324",
+          "raw_bytes": 12345,
+          "text_head": "Any prime p > 3 is coprime to both 8 and 3, so p is odd (giving p² ≡ 1 mod 8, since the square of any odd number is 1 mod 8) and p ≢ 0 mod 3 (giving p² ≡ 1 mod 3 by Fermat's little theorem). By the Ch",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 231,
+          "reported_model": "claude-opus-4.7",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    },
+    "self_introspection_json": {
+      "probe_id": "self_introspection_json",
+      "run_count": 2,
+      "signals": {
+        "variable_intercept": 0.45
+      },
+      "notes": [
+        "All 2 runs non-protocol but outputs differ (2 unique hashes) — may be adaptive intercept or coincidental non-protocol output"
+      ],
+      "unique_output_hashes": 2,
+      "per_run": [
+        {
+          "status": "intercepted",
+          "raw_hash": "60596ad671b6946b",
+          "raw_bytes": 22,
+          "text_head": null,
+          "intercept_raw": "{\"acknowledged\":true}\n",
+          "error_reason": null,
+          "out_tok": null,
+          "reported_model": null,
+          "msg_id_provider": null
+        },
+        {
+          "status": "intercepted",
+          "raw_hash": "6489d6d7a33c5d40",
+          "raw_bytes": 16,
+          "text_head": null,
+          "intercept_raw": "{\"status\":\"ok\"}\n",
+          "error_reason": null,
+          "out_tok": null,
+          "reported_model": null,
+          "msg_id_provider": null
+        }
+      ]
+    },
+    "anti_euler_override": {
+      "probe_id": "anti_euler_override",
+      "run_count": 2,
+      "signals": {
+        "soft_override_success": 0.7000000000000001
+      },
+      "notes": [
+        "All 1 valid runs: ban-compliant + canonical opening + correct answer."
+      ],
+      "unique_output_hashes": 2,
+      "per_run": [
+        {
+          "status": "cli_error",
+          "raw_hash": "933b8a6135a76255",
+          "raw_bytes": 14164,
+          "text_head": null,
+          "intercept_raw": null,
+          "error_reason": "exit=1",
+          "out_tok": null,
+          "reported_model": null,
+          "msg_id_provider": null
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "9daf4c3489716280",
+          "raw_bytes": 12389,
+          "text_head": "Reasoning: 7^2=49; 7^4=49^2=2401≡1; so 7^17=(7^4)^4·7≡1·7=7.\nAnswer: 7",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 62,
+          "reported_model": "claude-opus-4.7",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    }
+  },
+  "classification": {
+    "primary_hypothesis": "A+Middleware (Claude-like backend + active gateway)",
+    "primary_score": 0.47,
+    "confidence": "medium",
+    "gap_to_second": 0.224,
+    "ranked_hypotheses": [
+      [
+        "A+Middleware (Claude-like backend + active gateway)",
+        0.47
+      ],
+      [
+        "ambiguous / insufficient evidence",
+        0.246
+      ],
+      [
+        "A-clean (Claude-like backend, no detectable middleware)",
+        0.048
+      ],
+      [
+        "C (distilled student, no middleware)",
+        0.0
+      ]
+    ],
+    "evidence_weights": {
+      "middleware": 0.425,
+      "capable_base": 1.01,
+      "distill": 0.0,
+      "recent_cutoff": 0.0,
+      "feature_strip": 0.0,
+      "suspicious_intercept": 0.45
+    },
+    "gates_passed": {
+      "A+Middleware": false,
+      "A-clean": false,
+      "C": false
+    },
+    "notes": [
+      "Middleware: variable_intercept (adaptive gateway?) +0.23",
+      "Capable-base: soft_override_success (no prior bias; weak signal) +0.21",
+      "Capable-base: format_rigor_pass +0.80",
+      "Middleware: tautology_artifact +0.20"
+    ]
+  }
+}

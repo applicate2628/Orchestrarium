@@ -1,0 +1,33 @@
+### Summary (3 sentences)
+
+v0.4 is materially stronger, but I would not mark it GREEN yet. One round-3 High finding is still only partially fixed: `inconsistent_intercept` can still allow a misleading high-confidence `A-clean`. I could not independently execute the Python tests because the shell policy rejected `python` commands, so this is a static review.
+
+### Round-3 findings → v0.4 status
+
+- **Parser single-object too permissive:** FIXED for the reported wrapper attack. Missed edge: code accepts `model.startswith("claude")`, not documented `claude-`, and only checks usage key presence, not token-count types.
+- **Introspection clean for any parseable JSON:** FIXED. Schema mismatch no longer becomes clean introspection.
+- **Classifier has no hard evidence gates:** FIXED for high confidence. Gate-failed hypotheses can still be medium, but not high.
+- **Variable/inconsistent intercept ignored:** PARTIAL. `variable_intercept` blocks `A-clean`; `inconsistent_intercept` is only `0.25`, while the `A-clean` gate permits `suspicious_intercept < 0.3`, so strong capable/recent evidence can still produce high-confidence `A-clean`.
+- **Temporal cutoff accepts generic late-2025:** FIXED for generic late-2025. Edge: the Pope Leo regex also accepts `April 2025 ... Leo XIV` while scoring it as May/post-April knowledge.
+- **Packaging/docs stale:** PARTIAL. README/METHODOLOGY are v0.4, but `baselines.json` still says `scorer_version: 0.3.0` and contains `planned v0.3`; CLI argparse description still says v0.2.
+- **Parser list-of-scalars crashes:** FIXED.
+- **RESULTS categorical claims:** PARTIAL. Better caveats exist, but “inconsistent with a distilled student” is still too strong given the documented `distill+middleware` blind spot.
+- **`soft_override_success` over-counted:** FIXED. It is now conditional on observed stylometric bias.
+
+### Any NEW issues in v0.4
+
+- **High:** `inconsistent_intercept` does not actually disqualify `A-clean` high confidence.
+- **Medium:** Baseline scorer-version drift is only printed, not enforced, despite baseline rotation rules saying scorer changes should trigger regeneration.
+- **Low:** v0.4 docs and code labels still use “real Claude” in hypothesis names, while methodology admits capable distill/probe-aware proxy ambiguity.
+
+### Remaining concerns
+
+- Missing tests: `inconsistent_intercept_blocks_A_clean_high`, scorer-version mismatch handling, forged `model:"claude"` single-object wrapper, false-dated verifiable temporal event, and codefenced correct-schema introspection.
+- Deferred tokenizer, quantization, and multi-turn probes are acceptable documented gaps for a hypothesis generator.
+- `distill+middleware` is the one deferred class that still conflicts with “real Claude” labels.
+
+### Verdict
+
+RED.
+
+Exact blocker: fix `inconsistent_intercept` so any inconsistent introspection intercept prevents high-confidence `A-clean`, either by explicit gate logic or by raising its suspicious score to meet the existing gate threshold.

@@ -1,0 +1,1737 @@
+Reading additional input from stdin...
+OpenAI Codex v0.124.0 (research preview)
+--------
+workdir: D:\dev\Orchestrator\Orchestrarium
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019dc13f-c5c5-7d60-af4e-05e6cd37492a
+--------
+user
+# Checkpoint 2a: Tokenizer probe output schema review
+
+You asked for a checkpoint after Item 2 output schema lands before Items 3, 4, 5 build on it. Here's the schema + implementation.
+
+## Files
+
+- `.scratch/proxy-forensics/tokenizer_probe.py` (~240 lines, new)
+- `.scratch/proxy-forensics/test_tokenizer_probe.py` (28 tests, 0 failures)
+
+## Design adapted from your round-0 feedback
+
+- 10 sentinels (within 8-12 range), paired short/long per character class:
+  - ascii × 2 (short / long)
+  - cyrillic × 2
+  - cjk × 2
+  - emoji × 1 (single — mixed character densities hard to pair meaningfully)
+  - code × 2 (Python + JSON)
+  - high-entropy hex × 1
+- Least-squares fit `gateway_tokens = α · baseline_tokens + β`
+- Classification checks: α ∈ [0.97, 1.03], |β| < 100 (absorbs CLI wrapping), max residual, repeat stability
+- Verdicts: `claude_bpe` / `claude_bpe_weak` / `non_claude` / `ambiguous` / `insufficient_data`
+
+## Design deviation from your recommendation, with rationale
+
+You asked for `messages.count_tokens` API as the Anthropic-direct baseline (free, separate rate limit). I cannot use it: the only Anthropic-side creds on this system are a Claude CLI OAuth token (no API key), and `messages.count_tokens` requires raw API key auth.
+
+**Fallback chosen**: make both baseline and gateway calls through the Claude CLI with minimal `max_tokens` (via `--effort low`). This costs a tiny amount (~$0.001-0.01/call) instead of free. The CLI wraps both paths with identical system-prompt content, so `β` absorbs that wrapping as a constant offset — α still tells us tokenizer match.
+
+Explicit call-out in code header. Doc will note this as a v0.6 limitation: when a raw Anthropic API key is available, switch to `count_tokens` for cleaner baseline. Accepted trade-off?
+
+## Output schema (JSON saved via `--save-raw`)
+
+```json
+{
+  "probe_version": "0.1.0",
+  "baseline_cmd": "claude",
+  "gateway_cmd": "claude-aw.cmd",
+  "model": "claude-opus-4-7",
+  "gateway_model": "opus",
+  "repeats": 2,
+  "per_sentinel": {
+    "ascii_short": {
+      "text_len_chars": 5,
+      "baseline_runs": [
+        {"input_tokens": N, "cache_create": N, "cache_read": N,
+         "total_input": N, "out_tok": N, "model_reported": "claude-opus-4-7",
+         "msg_id_prefix": "msg_01..."}
+      ],
+      "gateway_runs": [...]
+    },
+    ...
+  },
+  "fit": {
+    "labels": ["ascii_short", "ascii_long", ...],
+    "baseline_tokens": [N, N, ...],   // averaged across repeats per sentinel
+    "gateway_tokens": [N, N, ...],
+    "residuals": [R, R, ...],
+    "repeat_variances": [V, V, ...]
+  },
+  "verdict": {
+    "alpha": 1.0,
+    "beta": 7.0,
+    "max_abs_residual": 0.5,
+    "mean_abs_residual": 0.2,
+    "repeat_variance_max": 1,
+    "n_points": 10,
+    "verdict": "claude_bpe",
+    "reason": "alpha=1.000 ≈ 1, residuals ≤ 0.5, repeats stable"
+  }
+}
+```
+
+## Integration surface for Items 3/4/5
+
+The output schema exposes these fields for downstream consumption by `classify()` in `fingerprint.py`:
+
+```python
+tokenizer_findings = tokenizer_probe_output["verdict"]
+signal = tokenizer_findings["verdict"]  # "claude_bpe" | "non_claude" | "ambiguous" | "insufficient_data" | "claude_bpe_weak"
+```
+
+Item 3 (distill+middleware hypothesis) gate design:
+- `distill_plus_middleware` hypothesis requires `tokenizer_findings["verdict"] == "non_claude"` AND middleware ≥ 0.6
+- If tokenizer not run (flag absent, or still `insufficient_data`): emit `"distill+middleware unresolved"` annotation on A+Middleware verdict, not a separate hypothesis
+
+Item 5 (test regression priorities):
+- Test: `classify()` with tokenizer_findings=None must NOT commit to distill+middleware
+- Test: `classify()` with `insufficient_data` must not flip A+Middleware to A-clean or C
+- Test: mock `tokenizer_findings["verdict"]="non_claude"` + middleware=0.8 → correct distill+middleware verdict
+
+## Unit test coverage (28 tests)
+
+- least_squares_fit: exact (alpha=1, beta=7), proportional drift, noisy, degenerate (1 point, 0 points, same-x)
+- classify_fit: 6 scenarios covering each verdict category + boundary cases
+- SENTINELS composition: count, pairing, uniqueness, short/long length thresholds
+- Regression guards: non-claude-like data must NOT be claimed as claude_bpe; claude-near-boundary must NOT escalate to non_claude
+
+## Questions for your review
+
+1. **Fallback CLI-mediated baseline instead of `count_tokens`**: acceptable trade-off given no raw API key, or should I require an API key and block v0.6 until provided?
+2. **Thresholds**: α ∈ [0.97, 1.03] tight enough? |β| < 100 too permissive (absorbs CLI wrapping which could be ~40-60 tokens constant)?
+3. **Sentinel set**: 10 prompts with pairing by class. Should emoji / high-entropy also be paired (currently single)?
+4. **Verdict categories**: 5 categories (`claude_bpe`, `claude_bpe_weak`, `non_claude`, `ambiguous`, `insufficient_data`). Right granularity or collapse some?
+5. **Integration contract for Item 3**: `non_claude` tokenizer + middleware → `distill+middleware`; any other combination should stay `unresolved`. Or should `non_claude` alone (without middleware) also trigger something (pure distill without gateway)?
+6. **Per-sentinel repeat variance max 2 tokens for "stable"**: reasonable cutoff, or too strict?
+
+Output format:
+```
+### Summary (2 sentences)
+### Schema assessment (per field / design choice)
+### Answers to 6 questions
+### Blockers before Items 3, 4, 5 can build on this
+### Verdict
+APPROVE SCHEMA / MODIFY (list specific changes) / BLOCK (explain)
+```
+
+If APPROVE → I proceed to Item 4 (network integration), Item 3 (distill+middleware hypothesis with this schema), then Item 5 (tests), then Item 6 (live validation).
+
+Be strict on schema semantics. Schema changes after Items 3/5 lock in are expensive.
+codex
+I’ll review this as a schema/contract gate, not as an implementation fix. I’m going to verify the local probe/test shape and check Orchestrarium’s relevant control-plane context before giving the verdict.
+2026-04-24T20:48:15.289004Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'Orchestrarium|external|tokenizer|proxy|work-items|lead' -Context 2,2"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'Orchestrarium|external|tokenizer|proxy|work-items|lead' -Context 2,2" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -LiteralPath C:\\Users\\<user>\\OneDrive\\Documents\\env\\Agents\\.codex\\skills\\review-changes\\SKILL.md -TotalCount 200" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -LiteralPath .scratch\\proxy-forensics -Force | Select-Object Name,Length,LastWriteTime" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'Orchestrarium|external|tokenizer|proxy|work-items|lead' -Context 2,2"` rejected: blocked by policy
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -LiteralPath .scratch\\proxy-forensics -Force | Select-Object Name,Length,LastWriteTime"` rejected: blocked by policy
+2026-04-24T20:48:15.289690Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -LiteralPath .scratch\\proxy-forensics -Force | Select-Object Name,Length,LastWriteTime"` rejected: blocked by policy
+ succeeded in 734ms:
+---
+name: review-changes
+description: Run a full read-only repository impact review starting from recent local changes, a specified diff, branch, commit range, or PR. Use when Codex needs to verify that recent fixes are complete, nothing important was forgotten, unchanged call sites or contracts were not broken, logic still holds across the wider repo, and regressions or missed edge cases are surfaced before commit.
+---
+
+# Review Changes
+
+Run a repository-wide impact review triggered by recent changes. The changed files are only the starting point; the review target is the full affected behavior surface, including unchanged dependents, nearby contracts, tests, and likely regression paths.
+
+## Core stance
+
+- Stay read-only.
+- Use the `review` template semantics from `src.codex/AGENTS.codex.md`: `$analyst` -> QA lane -> reviewer lane.
+- Review the repo in light of the changes, not just the diff lines themselves.
+- Findings come first, ordered by severity.
+- Do NOT commit or modify files.
+
+## Scope decision
+
+1. Check `$ARGUMENTS`.
+- If a PR URL, PR number, branch, commit range, or diff target is given, use that scope.
+- Otherwise inspect current unstaged and staged changes with `git diff` and `git diff --cached`.
+- If no changes are present, stop and tell the user there is nothing to review.
+2. If the user mentions a bug, review thread, accepted plan, or expected fix list, use that as the completion baseline.
+3. If no explicit baseline exists, review against the observed change impact and say that fix-completeness against an external checklist could not be verified.
+
+## Review workflow
+
+1. Run `$analyst` first.
+- Goal: identify what changed, which contracts or behaviors moved, what unchanged code depends on those changes, and where logic may now be incomplete.
+- Require the analyst to inspect callers, dependents, tests, config, schemas, and adjacent modules that may be affected even if they were not edited.
+2. Run the QA lane.
+- Use `$qa-engineer` by default.
+- If external review is preferred for an eligible QA-side slot, `$external-reviewer` may stand in for that lane.
+- Goal: verify regression risk, edge cases, test sufficiency, fix completeness, and whether untouched behavior is now inconsistent with the new logic.
+3. Run the reviewer lane.
+- Always invoke `$architecture-reviewer`.
+- Add `$security-reviewer` if the change touches auth, trust boundaries, secrets, dangerous configuration, input validation, or vulnerability surfaces.
+- Add `$performance-reviewer` if the change touches hot paths, query plans, rendering loops, budgets, throughput, or latency-sensitive behavior.
+- Add `$ux-reviewer`, `$accessibility-reviewer`, or `$ui-test-engineer` when the affected surface is clearly user-facing and the risk is interaction quality rather than pure logic.
+- If external review is preferred for an eligible review-side slot, `$external-reviewer` may stand in for the matching reviewer role.
+4. Keep the chain sequential in Codex unless the user explicitly approves a delegated team and the scopes are clearly independent.
+
+## What to verify
+
+- The requested fixes are actually present.
+- The apparent root cause is covered, not just one symptom.
+- Unchanged callers, consumers, configs, tests, or docs are still compatible with the new behavior.
+- Nearby logic still makes sense after the change.
+- Hidden regressions, stale assumptions, and missed edge cases are surfaced.
+- Validation is strong enough for the touched behavior, or the exact gap is called out.
+- The change did not leave partial rewires, stale branches, dead conditions, or forgotten follow-up adjustments in unchanged files.
+
+## Output
+
+Return one unified review with:
+
+- scope reviewed
+- findings ordered by severity
+- impacted unchanged surfaces that were checked
+- what could not be verified
+- verdict: `PASS`, `REVISE`, or `BLOCKED`
+
+If the user asked "did we fix everything?", answer that directly before the detailed findings.
+
+## Persistence
+
+- If the repository uses active work-items, persist the accepted review artifact there.
+- Otherwise log the review under `.reports/YYYY-MM/` using the standard report naming convention.
+
+## Rules
+
+- Do not role-play specialist reviewers inline when delegation is available and permitted.
+- Treat changed files as entry points, not as the review boundary.
+- If a critical issue appears early, surface it immediately.
+- If the impact surface is too large for a trustworthy single pass, say so and recommend splitting the review into smaller scopes.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The review skill applies here because this is a contract gate before downstream items depend on it. The first read batch hit the sandbox policy on a couple of PowerShell reads, so I’m narrowing to repo-local `rg`/`Get-Content` reads and will keep the pass read-only.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg --files .scratch/proxy-forensics' in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 631ms:
+.scratch/proxy-forensics\WIRE_CAPTURE_FINDINGS.md
+.scratch/proxy-forensics\tokenizer_probe.py
+.scratch/proxy-forensics\test_tokenizer_probe.py
+.scratch/proxy-forensics\test_mitm_capture.py
+.scratch/proxy-forensics\test_fingerprint.py
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md
+.scratch/proxy-forensics\smoketest_stdout.txt
+.scratch/proxy-forensics\results_aw_smoketest.json
+.scratch/proxy-forensics\RESULTS.md
+.scratch/proxy-forensics\README.md
+.scratch/proxy-forensics\parse_mitm_flow.py
+.scratch/proxy-forensics\network_probe.py
+.scratch/proxy-forensics\NETWORK_FINGERPRINTS.md
+.scratch/proxy-forensics\network_aw.json
+.scratch/proxy-forensics\network_anthropic.json
+.scratch/proxy-forensics\mitm_flows\20260424_224959.flow
+.scratch/proxy-forensics\mitm_flows\20260424_221800.flow
+.scratch/proxy-forensics\mitm_capture.py
+.scratch/proxy-forensics\METHODOLOGY.md
+.scratch/proxy-forensics\fingerprint.py
+.scratch/proxy-forensics\baselines.json
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"Orchestrarium|external|proxy|tokenizer|work-items|lead\" C:\\Users\\<user>\\.codex\\memories\\MEMORY.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -LiteralPath .scratch\\proxy-forensics\\tokenizer_probe.py -TotalCount 280" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -LiteralPath .scratch\\proxy-forensics\\test_tokenizer_probe.py -TotalCount 260" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 788ms:
+9:- rollout_summaries/2026-04-10T15-01-44-EKuo-benchmark_hardening_stale_lines_v3_baseline.md (cwd=D:\dev\Orchestrator\benchmarks, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\10\rollout-2026-04-10T18-01-44-019d77e9-cbe0-79f2-8092-9681964deb74.jsonl, updated_at=2026-04-21T10:24:50+00:00, thread_id=019d77e9-cbe0-79f2-8092-9681964deb74, freshest summary of in-place v3 baseline relabeling plus external-Claude fallback request)
+46:applies_to: cwd=D:\dev\mcp-local-hub; reuse_rule=reuse for review/audit/navigation in this checkout, but re-check branch, merge-base, Go version, work-items state, and current MCP/Serena/GitHub availability each session
+76:- mcp-local-hub, read-only review, никаких изменений не делать, only report, use All MCP you want and serena, go test -count=1 -p 1 ./..., go 1.26.2, work-items/bugs/closed, status: open, servers/embed.go, defaultManifestDir, strings.SplitSeq
+109:- The checkout had `work-items/bugs/closed/`, but those closed bug files still contained `status: open`; treat that as task-memory metadata drift to clean separately, not as an active recovery item by itself [Task 3]
+161:# Task Group: Orchestrarium governance, install surfaces, and repo recovery
+162:scope: governance, install, control-plane, and repo-health work under `D:\dev\Orchestrator` and `D:\dev\Orchestrator\Orchestrarium`; use when the user asks for `$lead` recovery, execution-record or install-surface changes, global skill installs, policy clarifications, or Git-state forensics in this repo family
+163:applies_to: cwd=D:\dev\Orchestrator and D:\dev\Orchestrator\Orchestrarium; reuse_rule=reuse for this repo family and the linked `C:\Users\<user>\.codex` install/config workflow, but verify current work-item ownership, active branch, and installed runtime state before applying specifics
+165:## Task 1: `$lead` recovery established `work-items/` as the canonical resume surface
+169:- rollout_summaries/2026-04-14T17-55-48-9zkS-lead_task_memory_recovery_check.md (cwd=D:\dev\Orchestrator, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\14\rollout-2026-04-14T20-55-48-019d8d22-9bae-7391-8746-60c401e5bd72.jsonl, updated_at=2026-04-14T17:57:35+00:00, thread_id=019d8d22-9bae-7391-8746-60c401e5bd72, recovery scan ended before a full resume)
+173:- lead, task-memory, work-items, AGENTS.md, roadmap.md, brief.md, status.md, recovery-entry-point, turn_aborted
+183:- AGENTS.shared, RELEASE_NOTES, external-worker-design, Execution role, Requested provider, Resolved provider, install-gemini.ps1, install-gemini.sh, ORCHESTRARIUM_GEMINI_PACK
+209:- rollout_summaries/2026-04-16T22-10-33-NMtV-parallelmode_commit_global_install.md (cwd=D:\dev\Orchestrator\Orchestrarium, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\17\rollout-2026-04-17T01-10-33-019d9858-8c5c-71f3-9af2-24849bb79477.jsonl, updated_at=2026-04-17T16:42:01+00:00, thread_id=019d9858-8c5c-71f3-9af2-24849bb79477, shared routing-policy change committed and installed globally)
+213:- parallelMode, externalOpinionCounts, external-brigade, agents-mode, commit, global install, Codex, Claude Code, Gemini CLI, publication gate, check-publication-gate
+239:- rollout_summaries/2026-04-08T23-36-44-429Z-git_repo_corruption_after_reboot_head_config_zeroed.md (cwd=D:\dev\Orchestrator\Orchestrarium, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\09\rollout-2026-04-09T02-36-44-019d6f74-9307-7fc3-bb36-898cf6a9fdd3.jsonl, updated_at=2026-04-08T23:41:48+00:00, thread_id=019d6f74-9307-7fc3-bb36-898cf6a9fdd3, read-only forensics only)
+249:- rollout_summaries/2026-04-19T22-26-55-ChPv-github_contributors_claude_cache_refresh_and_revert.md (cwd=D:\dev\Orchestrator\Orchestrarium, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\20\rollout-2026-04-20T01-26-55-019da7da-9ca1-7b21-8dfe-65ff64113b9d.jsonl, updated_at=2026-04-19T23:03:48+00:00, thread_id=019da7da-9ca1-7b21-8dfe-65ff64113b9d, GitHub API/history already showed only the human author; temporary empty commit was later removed)
+253:- GitHub contributors, applicate2628/Orchestrarium, stats/contributors, HTTP 202, co-authored-by, Claude attribution, ~/.claude/settings.json, attribution commit pr, empty commit, chore: refresh GitHub contributors cache, git reset --soft HEAD~1, force-with-lease, origin/main
+255:## Task 10: external-Claude limit fallback request identified but not implemented
+264:- external Claude, claude limits, SECRET.md, C:\Users\<user>\.claude\SECRET.md, env block, PATH before call, ANTHROPIC_BASE_URL, ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN, consultant/SKILL.md, external-worker/SKILL.md, external-reviewer/SKILL.md
+268:- when the user sends just `"$lead"` or says `у тебя есть work-items, ты $lead` -> use the lead recovery entrypoint immediately instead of asking for a generic repo scan [Task 1][Task 4]
+275:- when the user asked `если parallelMode = force, то external как себя ведут?` and then `пока не трогаем, коммить и устанавливай глобально` -> answer from the current canon first, defer schema redesign when told to stop, then publish/install the accepted contract without scope creep [Task 5]
+279:- when the user says external Claude should use env from `SECRET.md` as a `light fallback` on limit errors and clarifies `их можно просто добавить в PATH перед вызовом` -> keep any future fix lightweight and process-env/PATH based; do not invent a heavier secret-loading architecture [Task 10]
+283:- In this repo family, `work-items/` is the canonical task-memory root, `work-items/index.md` is the recovery entrypoint, and `roadmap.md`, `brief.md`, `status.md`, and often `plan.md` are the required control-plane files for lead-routed non-trivial work [Task 1][Task 6]
+288:- `parallelMode` is the general helper/subagent fan-out rule across internal and external lanes; `parallelMode: force` is a standing instruction for safe parallel launch, while external-only shaping lives in overlays like `external-brigade` and `externalOpinionCounts` rather than a separate built-in scalar key [Task 5]
+290:- `/.reports/YYYY-MM/` is a required local session-log layer, not canonical storage; project installers should add it to target repo `.gitignore` if absent, while `work-items/` remains canonical and `/.plans/` is plan/log traceability [Task 6]
+294:- For `applicate2628/Orchestrarium`, `D:\dev\Orchestrator` is not the git root; `D:\dev\Orchestrator\Orchestrarium` is the repo root used for contributor/history audits [Task 9]
+299:- The likely surfaces for a future external-Claude fallback are `src.codex/skills/consultant/SKILL.md`, `src.codex/skills/external-worker/SKILL.md`, `src.codex/skills/external-reviewer/SKILL.md`, and corresponding lead external-dispatch docs; the 2026-04-21 rollout did not land or verify the policy [Task 10]
+303:- Symptom: lead recovery is ambiguous or stale -> cause: control-plane files drifted or the active item already claimed completion -> fix: audit `work-items/index.md`, ensure a truthful active owner exists, and keep `roadmap.md`, `brief.md`, `status.md`, and `plan.md` aligned before resuming [Task 1][Task 6]
+304:- Symptom: semantic governance change passes validators but docs still drift -> cause: a downstream explanatory surface like `docs/external-worker-design.md` or `RELEASE_NOTES.md` lagged the canonical contract -> fix: grep for stale field names and sync downstream human-readable surfaces before closeout [Task 2]
+312:- Symptom: future agent assumes the external-Claude fallback is already implemented -> cause: the 2026-04-21 request was interrupted by benchmark hardening -> fix: re-open actual Claude invocation points and implement/verify a small env/PATH preparation step before claiming the fallback exists [Task 10]
+316:applies_to: cwd=D:\dev\Orchestrator, D:\dev\Claudestrator, D:\dev\agent-policy-pack\agent-policy-pack, and D:\dev policy-writing workflows; reuse_rule=reuse for governance audits, external second-opinion provenance, and AGENTS/CLAUDE wording work across these local pack repos, but verify the current contract files and actual external CLI path each session
+328:## Task 2: create and revise `unique-rules-codex.md` with an external consultant
+346:- AGENTS.md, CLAUDE.md, lead, operating-model, subagent-contracts, team-templates, publication-safety, validate-skill-pack, quick-fix, RETURN(role), recovery, policies-catalog
+356:- work-items, roadmap.md, brief.md, status.md, plan.md, review.json, security-reviewer, performance-reviewer, dry-run, allowlist, reparse-point, symlink, manifest verification, uv cache, serena.exe
+381:- when the user explicitly requires `second-opinion external` or says it should be `именно claude-line` / `exactly Claude` -> verify actual CLI provenance and invocation shape; do not pass off an internal memo as equivalent [Task 1][Task 2]
+383:- when the user asks for a full repo review via `$lead` and then says `продолжай ревью` / `прогоняй` -> run the complete lead-style chain, restore missing work-item artifacts if needed, and answer later questions in terms of role-specific scope and remaining closure steps [Task 4]
+394:- In `Claudestrator`, the highest-risk drift is “template says one thing, commands do another”: `security-sensitive` and `performance-sensitive` require `$lead`, `review.json` requires security/performance reviewers, but several command entrypoints did not actually enforce those chains [Task 3][Task 4]
+395:- `references/repository-task-memory.md` is the authority for Claudestrator active-item structure; `roadmap.md`, `brief.md`, `status.md`, `plan.md`, and later `closure.md` are required before non-trivial lead work proceeds [Task 4]
+399:- The intended AGENTS rule shape here is: when relevant and available, the agent must proactively initialize and use MCPs/tools like Serena, Memory, Sequential Thinking, Fetch, and Context7 without waiting for the user to name them, with the usual safety boundary for externally visible or privileged actions [Task 6]
+403:- Symptom: a “Claude-line” or “external consultant” claim is ambiguous -> cause: an internal subagent or contract-level consultant memo was treated as equivalent to a real external CLI run -> fix: separate internal advisory memos from actual `claude.exe` execution and record exact invocation provenance [Task 1][Task 2]
+405:- Symptom: lead-style review stalls unexpectedly -> cause: required work-item artifacts like `roadmap.md` or `plan.md` are missing -> fix: verify the task-memory structure first and restore the required files before launching reviewers [Task 4]
+486:scope: `D:\test` workflows around the OpenGL/shared-surface media pipeline and adjacent provider/MCP runtime diagnostics; use for lead-orchestrated verification, crash triage, blazing-path recovery, provider wrapper handoff packages, or local Codex/Gemini provenance debugging in this checkout
+497:- PreviewWindow.show(), access violation, 0xC0000005, Video_Generation_Complete.mp4, QOpenGLWidget, gl_ready=false, transport_mapped=false, work-items, all mcp go blazing
+532:- when the user says `ты $lead`, `у тебя есть work-items`, and `ты $lead all mcp go blazing!` -> work through the lead/task-memory pipeline and use the available specialist/MCP surfaces rather than ad hoc freeform debugging [Task 1][Task 2]
+543:- Smoke evidence already exists for `codex` no-MCP, `claude-api` no-MCP and strict-MCP, and `gemini` no-MCP; the package lives under `work-items/provider-mcp-templates/` and `work-items/provider-mcp-subagent-summary-2026-04-13.md` [Task 3]
+549:- Symptom: mounted-window verification crashes with `0xC0000005` before video start -> cause: host/runtime failure around `PreviewWindow.show()` and OpenGL host path, not necessarily the media session -> fix: capture file-based traces in `.scratch`, keep `work-items` in sync, and do not treat offscreen success as a substitute for the mounted gate [Task 1]
+631:- when the user asked `нетьу ничего по коду?` -> answer with a direct yes/no evidence status rather than a speculative lead [Task 2]
+694:- The final closeout landed as `f1dcb73 fix(plot): restore runtime hover hit-testing`, and the real publication-safety script path was `C:\Users\<user>\.codex\skills\lead\scripts\check-publication-safety.ps1` [Task 1]
+702:- Symptom: hover tests act flaky at border points -> cause: first-sample search can pick a misleading point -> fix: use the center-out `find_hoverable_trace_point()` approach [Task 1]
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 862ms:
+"""Unit tests for tokenizer_probe.py fit + classification logic.
+
+Run: python test_tokenizer_probe.py
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+import tokenizer_probe as tp
+
+FAILED = []
+PASSED = 0
+
+
+def assert_eq(name, actual, expected):
+    global PASSED
+    if actual == expected:
+        print(f"  [OK] {name}")
+        PASSED += 1
+    else:
+        FAILED.append(name)
+        print(f"  [FAIL] {name}\n       expected: {expected!r}\n       actual:   {actual!r}")
+
+
+def assert_close(name, actual, expected, tol=0.01):
+    global PASSED
+    if abs(actual - expected) <= tol:
+        print(f"  [OK] {name}  ({actual:.4f} ? {expected:.4f})")
+        PASSED += 1
+    else:
+        FAILED.append(name)
+        print(f"  [FAIL] {name}  expected={expected:.4f}+{tol} actual={actual:.4f}")
+
+
+def assert_true(name, cond, detail=""):
+    global PASSED
+    if cond:
+        print(f"  [OK] {name}")
+        PASSED += 1
+    else:
+        FAILED.append(name)
+        print(f"  [FAIL] {name}  {detail}")
+
+
+# -------------------------------------------------------------------------
+# least_squares_fit - correctness on synthetic points
+# -------------------------------------------------------------------------
+print("\n--- least_squares_fit ---")
+
+# Exact line: gateway = baseline + 7 (constant offset, alpha=1)
+xs = [10, 20, 30, 50, 100]
+ys = [17, 27, 37, 57, 107]
+alpha, beta, resid = tp.least_squares_fit(xs, ys)
+assert_close("alpha_exact_1", alpha, 1.0, tol=1e-9)
+assert_close("beta_exact_7", beta, 7.0, tol=1e-9)
+assert_true("residuals_zero_on_exact_fit", all(abs(r) < 1e-9 for r in resid),
+            f"resid={resid}")
+
+# Proportional drift: gateway = 1.2 * baseline (alpha != 1)
+xs = [10, 20, 30, 50, 100]
+ys = [12, 24, 36, 60, 120]
+alpha, beta, resid = tp.least_squares_fit(xs, ys)
+assert_close("alpha_proportional_1_2", alpha, 1.2, tol=1e-9)
+assert_close("beta_zero_on_proportional", beta, 0.0, tol=1e-9)
+
+# Noisy data: should fit but with nonzero residuals
+xs = [10, 20, 30, 50, 100]
+ys = [17, 29, 37, 60, 110]  # same slope 1 + 7, noisy
+alpha, beta, resid = tp.least_squares_fit(xs, ys)
+max_r = max(abs(r) for r in resid)
+assert_true("noisy_residuals_detected", max_r > 0.5, f"max_resid={max_r}")
+
+# Degenerate: 1 point  cannot fit
+alpha, beta, resid = tp.least_squares_fit([10], [17])
+assert_eq("single_point_no_fit", alpha, None)
+
+# Degenerate: 0 points
+alpha, beta, resid = tp.least_squares_fit([], [])
+assert_eq("zero_points_no_fit", alpha, None)
+
+# Degenerate: all baseline values identical  division by zero protection
+alpha, beta, resid = tp.least_squares_fit([10, 10, 10], [17, 17, 17])
+assert_eq("degenerate_same_x_handled", alpha, None)
+
+
+# -------------------------------------------------------------------------
+# classify_fit - verdicts across scenarios
+# -------------------------------------------------------------------------
+print("\n--- classify_fit ---")
+
+# Scenario: Claude BPE (alpha=1, small stable beta, zero residuals, stable repeats)
+v = tp.classify_fit(1.00, 7.0, [0, 0, 0, 0, 0, 0], repeat_variance=0)
+assert_eq("claude_bpe_clean", v["verdict"], "claude_bpe")
+
+# Alpha slightly off but within tolerance
+v = tp.classify_fit(1.02, 12.0, [1, -1, 0, 1, -1, 0], repeat_variance=1)
+assert_eq("claude_bpe_small_drift", v["verdict"], "claude_bpe")
+
+# Non-Claude: alpha significantly != 1
+v = tp.classify_fit(1.25, 0.0, [3, -2, 5, -3, 4, -1], repeat_variance=1)
+assert_eq("non_claude_proportional", v["verdict"], "non_claude")
+
+# Non-Claude: high residuals (class-dependent tokenization)
+v = tp.classify_fit(1.05, 10.0, [20, -15, 18, -25, 30, -10], repeat_variance=2)
+assert_eq("non_claude_high_residuals", v["verdict"], "non_claude")
+
+# Ambiguous: noisy repeats
+v = tp.classify_fit(1.01, 7.0, [1, 2, -1, 1, -2, 0], repeat_variance=10)
+assert_eq("ambiguous_repeat_noise", v["verdict"], "ambiguous")
+
+# Insufficient data: alpha=None
+v = tp.classify_fit(None, None, [], 0)
+assert_eq("insufficient_data_handled", v["verdict"], "insufficient_data")
+
+
+# -------------------------------------------------------------------------
+# Sentinel set basics
+# -------------------------------------------------------------------------
+print("\n--- SENTINELS set composition ---")
+assert_true("sentinel_count_10", len(tp.SENTINELS) == 10,
+            f"got {len(tp.SENTINELS)}")
+names = [s[0] for s in tp.SENTINELS]
+classes = {
+    "ascii": sum(1 for n in names if "ascii" in n),
+    "cyrillic": sum(1 for n in names if "cyrillic" in n),
+    "cjk": sum(1 for n in names if "cjk" in n),
+    "emoji": sum(1 for n in names if "emoji" in n),
+    "code": sum(1 for n in names if "code" in n),
+    "entropy": sum(1 for n in names if "entropy" in n or "hex" in n),
+}
+assert_true("ascii_paired_short_long", classes["ascii"] == 2,
+            f"ascii_count={classes['ascii']}")
+assert_true("cyrillic_paired", classes["cyrillic"] == 2)
+assert_true("cjk_paired", classes["cjk"] == 2)
+assert_true("emoji_present", classes["emoji"] >= 1)
+assert_true("code_present", classes["code"] >= 2)
+assert_true("high_entropy_present", classes["entropy"] >= 1)
+
+# Sentinels unique
+assert_true("sentinels_unique_names", len(set(names)) == len(names))
+texts = [t for _, t in tp.SENTINELS]
+assert_true("sentinels_unique_texts", len(set(texts)) == len(texts))
+
+# Short/long pairing: shorter in pair < 30 chars, longer > 100 chars
+ascii_short = next(t for n, t in tp.SENTINELS if n == "ascii_short")
+ascii_long = next(t for n, t in tp.SENTINELS if n == "ascii_long")
+assert_true("ascii_short_is_short", len(ascii_short) < 30, f"len={len(ascii_short)}")
+assert_true("ascii_long_is_long", len(ascii_long) > 100, f"len={len(ascii_long)}")
+
+
+# -------------------------------------------------------------------------
+# Regression: classify_fit must NOT emit claude_bpe on non-claude-like data
+# -------------------------------------------------------------------------
+print("\n--- regression guards ---")
+
+# A very-high-confidence non-claude pattern must NOT be claimed as claude_bpe
+v = tp.classify_fit(1.5, 50.0, [10, -8, 12, -15, 20, -5], repeat_variance=5)
+assert_true("non_claude_not_misclassified_as_claude",
+            v["verdict"] != "claude_bpe",
+            f"verdict={v['verdict']}")
+
+# Claude-like data with minor repeat noise must not escalate to non_claude
+v = tp.classify_fit(0.99, 8.0, [-1, 0, 1, 0, -1, 1], repeat_variance=2)
+assert_true("claude_near_boundary_not_forced_non_claude",
+            v["verdict"] in ("claude_bpe", "claude_bpe_weak", "ambiguous"),
+            f"verdict={v['verdict']}")
+
+
+# -------------------------------------------------------------------------
+# Summary
+# -------------------------------------------------------------------------
+print(f"\n{'='*60}\nRESULTS: {PASSED} passed, {len(FAILED)} failed")
+if FAILED:
+    print("Failed:")
+    for f in FAILED:
+        print(f"  - {f}")
+    sys.exit(1)
+print("All tests passed.")
+sys.exit(0)
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 997ms:
+#!/usr/bin/env python3
+"""
+Tokenizer-identity probe for Claude-compatible gateways.
+
+Question answered: does the gateway's backend use the same tokenizer (Claude BPE)
+as Anthropic-direct Claude, or a different tokenizer (indicating non-Claude base)?
+
+Method: send each of 8-12 sentinel strings through both a trusted Anthropic-direct
+path and the suspect gateway. For each, capture `usage.input_tokens` from the
+response. Fit `gateway_tokens = alpha * baseline_tokens + beta` via least squares,
+inspect:
+  - `alpha ? 1`: same tokenizer
+  - `beta` stable integer-ish across classes: constant injection offset
+  - low residuals across character classes: tokenizer not drifting per class
+  - repeat stability: run each sentinel twice, consistent counts
+
+Verdict:
+  - `claude_bpe`: alpha ? [0.97, 1.03], |beta| < 50 and stable, max residual < 3
+  - `non_claude`: alpha significantly ? 1 OR high residuals across classes
+  - `ambiguous`: noisy / inconsistent / too few successful data points
+
+NOTE: Anthropic `messages.count_tokens` would be the ideal free baseline per
+codex recommendation, but it requires a raw API key. On systems where only the
+Claude CLI OAuth is available, we fall back to CLI-mediated calls with tiny
+`max_tokens` to minimize cost (~$0.001 per call). The `beta` intercept will
+absorb CLI-wrapping overhead (constant across sentinels) - that's fine, we
+interpret alpha not beta.
+
+Usage:
+  python tokenizer_probe.py \\
+    --baseline-cmd "claude" \\
+    --gateway-cmd "claude-aw.cmd" \\
+    --gateway-shell \\
+    --model claude-opus-4-7 \\
+    --repeats 2 \\
+    --save-raw tokenizer_aw.json
+"""
+
+import argparse
+import json
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+PROBE_VERSION = "0.1.0"
+
+# Sentinel strings: 10 prompts, paired short/long per character class.
+# Crafted to have widely varying tokenization under non-Claude tokenizers
+# (especially byte-level fallback and emoji handling).
+SENTINELS = [
+    ("ascii_short", "hello"),
+    ("ascii_long",
+     "The quick brown fox jumps over the lazy dog. "
+     "Pack my box with five dozen liquor jugs. "
+     "How vexingly quick daft zebras jump."),
+    ("cyrillic_short", "Привет мир"),
+    ("cyrillic_long",
+     "Привет мир! Это развёрнутое сообщение на русском языке для проверки "
+     "того, как токенизатор разбивает кириллические символы и учитывает ли "
+     "различие тона при обработке длинных последовательностей."),
+    ("cjk_short", "??"),
+    ("cjk_long",
+     "??,???????????????????,??????,"
+     "??????????????????????????????"),
+    ("emoji", "????????????????????????????"),
+    ("code_python",
+     "def fib(n):\n"
+     "    \"\"\"Return n-th Fibonacci number.\"\"\"\n"
+     "    return n if n < 2 else fib(n - 1) + fib(n - 2)"),
+    ("code_json",
+     json.dumps({"key": "value", "nested": {"arr": [1, 2, 3, 4, 5], "bool": True},
+                 "mixed": {"a": None, "b": 3.14159, "c": "x" * 40}}, indent=2)),
+    ("high_entropy_hex",
+     "a1b2c3d4e5f60718293a4b5c6d7e8f9011223344556677889900aabbccddeeff"
+     "1122334455667788990011223344556677889900aabbccddeeff00112233"),
+]
+
+
+def run_probe_call(cmd_tokens, shell, sentinel_text, model, timeout=120):
+    """Issue a minimal claude CLI call with sentinel as user prompt, return
+    (input_tokens, out_tok, msg_id_provider) or (None, None, None) on failure.
+    """
+    full_cmd = cmd_tokens + [
+        "-p", sentinel_text,
+        "--model", model,
+        "--tools", "",
+        "--output-format", "json",
+        "--effort", "low",  # minimize cost - input_tokens independent of effort
+    ]
+    try:
+        r = subprocess.run(
+            full_cmd,
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            shell=shell, timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return {"error": "timeout"}
+    if r.returncode != 0 or not r.stdout:
+        return {"error": f"exit={r.returncode}", "stderr_head": (r.stderr or "")[:200]}
+    try:
+        parsed = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return {"error": "not_json", "raw_head": r.stdout[:200]}
+    if not isinstance(parsed, list):
+        return {"error": "intercepted", "raw": r.stdout[:200]}
+    result = next((x for x in parsed if x.get("type") == "result"), {})
+    assistants = [x for x in parsed if x.get("type") == "assistant"]
+    last = assistants[-1].get("message", {}) if assistants else {}
+    msg_id = last.get("id", "")
+    usage = result.get("usage", {})
+    # CLI reports input_tokens; this includes system prompt + user msg overhead.
+    # For a given CLI version, the overhead is constant across sentinels, so
+    # differences across sentinels are due to user-message token count.
+    in_tok = usage.get("input_tokens")
+    cache_create = usage.get("cache_creation_input_tokens") or 0
+    cache_read = usage.get("cache_read_input_tokens") or 0
+    # Effective input tokens = input_tokens + cache_creation + cache_read
+    # (the `input_tokens` field is only the uncached portion)
+    total_input = (in_tok or 0) + cache_create + cache_read
+    return {
+        "input_tokens": in_tok,
+        "cache_create": cache_create,
+        "cache_read": cache_read,
+        "total_input": total_input,
+        "out_tok": usage.get("output_tokens"),
+        "model_reported": last.get("model"),
+        "msg_id_prefix": msg_id[:14],
+    }
+
+
+def least_squares_fit(xs, ys):
+    """Fit y = alpha*x + beta via simple least squares. Returns (alpha, beta, residuals)."""
+    if len(xs) < 2:
+        return None, None, []
+    n = len(xs)
+    sum_x = sum(xs)
+    sum_y = sum(ys)
+    sum_xy = sum(x * y for x, y in zip(xs, ys))
+    sum_xx = sum(x * x for x in xs)
+    denom = n * sum_xx - sum_x * sum_x
+    if denom == 0:
+        return None, None, []
+    alpha = (n * sum_xy - sum_x * sum_y) / denom
+    beta = (sum_y - alpha * sum_x) / n
+    residuals = [y - (alpha * x + beta) for x, y in zip(xs, ys)]
+    return alpha, beta, residuals
+
+
+def classify_fit(alpha, beta, residuals, repeat_variance):
+    """Given fit result, emit verdict."""
+    if alpha is None:
+        return {
+            "verdict": "insufficient_data",
+            "reason": "too few successful probe points to fit",
+        }
+    max_resid = max(abs(r) for r in residuals) if residuals else float("inf")
+    mean_abs_resid = sum(abs(r) for r in residuals) / len(residuals) if residuals else float("inf")
+    findings = {
+        "alpha": round(alpha, 4),
+        "beta": round(beta, 2),
+        "max_abs_residual": round(max_resid, 2),
+        "mean_abs_residual": round(mean_abs_resid, 2),
+        "repeat_variance_max": repeat_variance,
+        "n_points": len(residuals),
+    }
+
+    # Thresholds (pre-1.0 heuristics, to be calibrated later with more suspect data)
+    alpha_ok = 0.97 <= alpha <= 1.03
+    beta_ok = abs(beta) < 100  # generous - absorbs CLI wrapping overhead
+    residual_ok_claude = max_resid < 5
+    residual_ok_ambiguous = max_resid < 15
+    repeat_stable = repeat_variance < 3
+
+    if alpha_ok and beta_ok and residual_ok_claude and repeat_stable:
+        findings["verdict"] = "claude_bpe"
+        findings["reason"] = f"alpha={alpha:.3f} ? 1, residuals ? {max_resid:.1f}, repeats stable"
+    elif not alpha_ok and (max_resid > 5 or abs(alpha - 1) > 0.1):
+        findings["verdict"] = "non_claude"
+        findings["reason"] = f"alpha={alpha:.3f} significantly ? 1, suggests different tokenizer"
+    elif not repeat_stable or not residual_ok_ambiguous:
+        findings["verdict"] = "ambiguous"
+        findings["reason"] = f"noisy data: repeat_var={repeat_variance}, max_resid={max_resid:.1f}"
+    else:
+        findings["verdict"] = "claude_bpe_weak"
+        findings["reason"] = "close to claude but residuals suggest small drift"
+    return findings
+
+
+def main():
+    ap = argparse.ArgumentParser(description=f"Claude tokenizer-identity probe v{PROBE_VERSION}")
+    ap.add_argument("--baseline-cmd", default="claude",
+                    help="Command for trusted Anthropic-direct baseline (default: plain `claude`)")
+    ap.add_argument("--baseline-shell", action="store_true")
+    ap.add_argument("--gateway-cmd", required=True,
+                    help="Command for suspect gateway (e.g. 'claude-aw.cmd')")
+    ap.add_argument("--gateway-shell", action="store_true")
+    ap.add_argument("--model", default="claude-opus-4-7",
+                    help="Model to use (baseline path sends this; gateway may remap internally)")
+    ap.add_argument("--gateway-model", default=None,
+                    help="Model for gateway side (default: same as --model; use 'opus' for AW)")
+    ap.add_argument("--repeats", type=int, default=2,
+                    help="Repeat each sentinel N times for stability check (default 2)")
+    ap.add_argument("--save-raw", help="Path to save raw JSON output")
+    ap.add_argument("--skip-sentinels", nargs="+", default=[],
+                    help="Sentinel names to skip")
+    args = ap.parse_args()
+
+    import shlex
+    baseline_tokens = shlex.split(args.baseline_cmd, posix=False)
+    gateway_tokens = shlex.split(args.gateway_cmd, posix=False)
+    gateway_model = args.gateway_model or args.model
+
+    sentinels = [(name, text) for name, text in SENTINELS if name not in args.skip_sentinels]
+    print(f"=== Tokenizer probe v{PROBE_VERSION} ===")
+    print(f"    baseline: {args.baseline_cmd} (shell={args.baseline_shell})")
+    print(f"    gateway:  {args.gateway_cmd} (shell={args.gateway_shell})")
+    print(f"    model:    {args.model} (gateway: {gateway_model})")
+    print(f"    repeats:  {args.repeats}")
+    print(f"    sentinels: {len(sentinels)}\n")
+
+    per_sentinel = {}
+    for name, text in sentinels:
+        print(f"[probe] {name} ({len(text)} chars)")
+        per_sentinel[name] = {
+            "text_len_chars": len(text),
+            "baseline_runs": [],
+            "gateway_runs": [],
+        }
+        # Baseline runs
+        for i in range(args.repeats):
+            print(f"  baseline run {i+1}/{args.repeats}... ", end="", flush=True)
+            t0 = time.monotonic()
+            r = run_probe_call(baseline_tokens, args.baseline_shell, text, args.model)
+            elapsed = time.monotonic() - t0
+            per_sentinel[name]["baseline_runs"].append({**r, "elapsed_s": round(elapsed, 1)})
+            if "error" in r:
+                print(f"ERROR {r['error']}")
+            else:
+                print(f"in_tok={r['input_tokens']} total={r['total_input']} ({elapsed:.1f}s)")
+        # Gateway runs
+        for i in range(args.repeats):
+            print(f"  gateway  run {i+1}/{args.repeats}... ", end="", flush=True)
+            t0 = time.monotonic()
+            r = run_probe_call(gateway_tokens, args.gateway_shell, text, gateway_model)
+            elapsed = time.monotonic() - t0
+            per_sentinel[name]["gateway_runs"].append({**r, "elapsed_s": round(elapsed, 1)})
+            if "error" in r:
+                print(f"ERROR {r['error']}")
+            else:
+                print(f"in_tok={r['input_tokens']} total={r['total_input']} ({elapsed:.1f}s)")
+
+    # Build data arrays for fit
+    baseline_points = []
+    gateway_points = []
+    point_labels = []
+    repeat_variances = []
+    for name, data in per_sentinel.items():
+        b_runs = [r for r in data["baseline_runs"] if r.get("total_input") is not None]
+        g_runs = [r for r in data["gateway_runs"] if r.get("total_input") is not None]
+        if not b_runs or not g_runs:
+            continue
+        b_tokens = [r["total_input"] for r in b_runs]
+        g_tokens = [r["total_input"] for r in g_runs]
+        b_avg = sum(b_tokens) / len(b_tokens)
+        g_avg = sum(g_tokens) / len(g_tokens)
+        b_var = max(b_tokens) - min(b_tokens)
+        g_var = max(g_tokens) - min(g_tokens)
+        repeat_variances.append(max(b_var, g_var))
+        baseline_points.append(b_avg)
+        gateway_points.append(g_avg)
+        point_labels.append(name)
+
+    print(f"\n=== Fit ===")
+    print(f"Points: {len(baseline_points)}")
+    for lbl, b, g in zip(point_labels, baseline_points, gateway_points):
+        print(f"  {lbl:<20}  baseline={b:>6.1f}  gateway={g:>6.1f}  diff={g-b:+.1f}")
+
+    alpha, beta, residuals = least_squares_fit(baseline_points, gateway_points)
+    max_repeat_var = max(repeat_variances) if repeat_variances else 0
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+I’ve got the local implementation now. One immediate schema-contract issue is visible: the header/comments still state older thresholds (`|beta| < 50`, `max residual < 3`) while the code and proposed schema use `|beta| < 100`, residual `<5`, and weak/ambiguous bands, so the review needs to separate contract approval from docstring drift.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -LiteralPath .scratch\\proxy-forensics\\tokenizer_probe.py | Select-Object -Skip 180 -First 120" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"tokenizer|distill|middleware|classify\\(|A\\+Middleware|non_claude|insufficient_data\" .scratch/proxy-forensics" in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T20:48:39.982270Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python .scratch\\proxy-forensics\\test_tokenizer_probe.py"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python .scratch\\proxy-forensics\\test_tokenizer_probe.py" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python .scratch\\proxy-forensics\\test_tokenizer_probe.py"` rejected: blocked by policy
+ succeeded in 834ms:
+    elif not repeat_stable or not residual_ok_ambiguous:
+        findings["verdict"] = "ambiguous"
+        findings["reason"] = f"noisy data: repeat_var={repeat_variance}, max_resid={max_resid:.1f}"
+    else:
+        findings["verdict"] = "claude_bpe_weak"
+        findings["reason"] = "close to claude but residuals suggest small drift"
+    return findings
+
+
+def main():
+    ap = argparse.ArgumentParser(description=f"Claude tokenizer-identity probe v{PROBE_VERSION}")
+    ap.add_argument("--baseline-cmd", default="claude",
+                    help="Command for trusted Anthropic-direct baseline (default: plain `claude`)")
+    ap.add_argument("--baseline-shell", action="store_true")
+    ap.add_argument("--gateway-cmd", required=True,
+                    help="Command for suspect gateway (e.g. 'claude-aw.cmd')")
+    ap.add_argument("--gateway-shell", action="store_true")
+    ap.add_argument("--model", default="claude-opus-4-7",
+                    help="Model to use (baseline path sends this; gateway may remap internally)")
+    ap.add_argument("--gateway-model", default=None,
+                    help="Model for gateway side (default: same as --model; use 'opus' for AW)")
+    ap.add_argument("--repeats", type=int, default=2,
+                    help="Repeat each sentinel N times for stability check (default 2)")
+    ap.add_argument("--save-raw", help="Path to save raw JSON output")
+    ap.add_argument("--skip-sentinels", nargs="+", default=[],
+                    help="Sentinel names to skip")
+    args = ap.parse_args()
+
+    import shlex
+    baseline_tokens = shlex.split(args.baseline_cmd, posix=False)
+    gateway_tokens = shlex.split(args.gateway_cmd, posix=False)
+    gateway_model = args.gateway_model or args.model
+
+    sentinels = [(name, text) for name, text in SENTINELS if name not in args.skip_sentinels]
+    print(f"=== Tokenizer probe v{PROBE_VERSION} ===")
+    print(f"    baseline: {args.baseline_cmd} (shell={args.baseline_shell})")
+    print(f"    gateway:  {args.gateway_cmd} (shell={args.gateway_shell})")
+    print(f"    model:    {args.model} (gateway: {gateway_model})")
+    print(f"    repeats:  {args.repeats}")
+    print(f"    sentinels: {len(sentinels)}\n")
+
+    per_sentinel = {}
+    for name, text in sentinels:
+        print(f"[probe] {name} ({len(text)} chars)")
+        per_sentinel[name] = {
+            "text_len_chars": len(text),
+            "baseline_runs": [],
+            "gateway_runs": [],
+        }
+        # Baseline runs
+        for i in range(args.repeats):
+            print(f"  baseline run {i+1}/{args.repeats}... ", end="", flush=True)
+            t0 = time.monotonic()
+            r = run_probe_call(baseline_tokens, args.baseline_shell, text, args.model)
+            elapsed = time.monotonic() - t0
+            per_sentinel[name]["baseline_runs"].append({**r, "elapsed_s": round(elapsed, 1)})
+            if "error" in r:
+                print(f"ERROR {r['error']}")
+            else:
+                print(f"in_tok={r['input_tokens']} total={r['total_input']} ({elapsed:.1f}s)")
+        # Gateway runs
+        for i in range(args.repeats):
+            print(f"  gateway  run {i+1}/{args.repeats}... ", end="", flush=True)
+            t0 = time.monotonic()
+            r = run_probe_call(gateway_tokens, args.gateway_shell, text, gateway_model)
+            elapsed = time.monotonic() - t0
+            per_sentinel[name]["gateway_runs"].append({**r, "elapsed_s": round(elapsed, 1)})
+            if "error" in r:
+                print(f"ERROR {r['error']}")
+            else:
+                print(f"in_tok={r['input_tokens']} total={r['total_input']} ({elapsed:.1f}s)")
+
+    # Build data arrays for fit
+    baseline_points = []
+    gateway_points = []
+    point_labels = []
+    repeat_variances = []
+    for name, data in per_sentinel.items():
+        b_runs = [r for r in data["baseline_runs"] if r.get("total_input") is not None]
+        g_runs = [r for r in data["gateway_runs"] if r.get("total_input") is not None]
+        if not b_runs or not g_runs:
+            continue
+        b_tokens = [r["total_input"] for r in b_runs]
+        g_tokens = [r["total_input"] for r in g_runs]
+        b_avg = sum(b_tokens) / len(b_tokens)
+        g_avg = sum(g_tokens) / len(g_tokens)
+        b_var = max(b_tokens) - min(b_tokens)
+        g_var = max(g_tokens) - min(g_tokens)
+        repeat_variances.append(max(b_var, g_var))
+        baseline_points.append(b_avg)
+        gateway_points.append(g_avg)
+        point_labels.append(name)
+
+    print(f"\n=== Fit ===")
+    print(f"Points: {len(baseline_points)}")
+    for lbl, b, g in zip(point_labels, baseline_points, gateway_points):
+        print(f"  {lbl:<20}  baseline={b:>6.1f}  gateway={g:>6.1f}  diff={g-b:+.1f}")
+
+    alpha, beta, residuals = least_squares_fit(baseline_points, gateway_points)
+    max_repeat_var = max(repeat_variances) if repeat_variances else 0
+
+    verdict = classify_fit(alpha, beta, residuals, max_repeat_var)
+
+    print(f"\n=== Verdict ===")
+    for k, v in verdict.items():
+        print(f"  {k}: {v}")
+
+    if args.save_raw:
+        full = {
+            "probe_version": PROBE_VERSION,
+            "baseline_cmd": args.baseline_cmd,
+            "gateway_cmd": args.gateway_cmd,
+            "model": args.model,
+            "gateway_model": gateway_model,
+            "repeats": args.repeats,
+            "per_sentinel": per_sentinel,
+            "fit": {
+                "labels": point_labels,
+                "baseline_tokens": baseline_points,
+                "gateway_tokens": gateway_points,
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 876ms:
+.scratch/proxy-forensics\baselines.json:122:      "purpose": "Detect gateway-level interception. Models that return fixed canned responses on self-introspection prompts reveal active middleware.",
+.scratch/proxy-forensics\baselines.json:157:      "purpose": "Discriminator probe: pairs with stylometric_717 to distinguish soft injection from rigid bias. If target uses forced-Euler framing in the unconstrained probe but complies with an explicit ban here, the bias is overrideable (consistent with soft injection OR with no bias at all, OR with a probe-aware proxy). If bias persists despite the ban, bias is rigid (distill OR aggressive injection). Not decisive on its own — interpret only in conjunction with stylometric_717 results.",
+.scratch/proxy-forensics\baselines.json:185:    "hypothesis_A_real_backend_with_middleware": {
+.scratch/proxy-forensics\baselines.json:199:    "hypothesis_C_distilled_student": {
+.scratch/proxy-forensics\baselines.json:208:        "A high-capability distill or a non-Claude fine-tune can imitate Claude convincingly on any single probe",
+.scratch/proxy-forensics\baselines.json:212:    "middleware_signatures": {
+.scratch/proxy-forensics\baselines.json:227:      "No tokenizer-identity probe (planned future work): reported input_tokens vs locally-computed Claude BPE on sentinel strings would detect non-Claude backends masquerading as Claude.",
+.scratch/proxy-forensics\baselines.json:229:      "No distill+middleware hypothesis class: a distilled student fronted by a middleware gateway would currently classify as A+Middleware. The labels 'Claude-like backend + active gateway' reflect the most-consistent-with reading, not proof that the backend is literally Anthropic's Claude rather than a Claude-like distill behind the same gateway.",
+.scratch/proxy-forensics\baselines.json:230:      "No multi-turn middleware probe: all current probes are single-turn; gateways that act only on turn-boundaries (session injection, cache-across-turns behavior) are invisible.",
+.scratch/proxy-forensics\METHODOLOGY.md:9:- Stylometric fingerprints can be trained into distills
+.scratch/proxy-forensics\METHODOLOGY.md:21:2. **Backend identity range** — frontier-Claude signature, distilled student signature, older checkpoint, non-Claude base. (Note: current toolkit cannot distinguish a real Claude from a high-quality Claude-like distill behind the same middleware gateway — the `distill+middleware` hypothesis class is a documented blind spot.)
+.scratch/proxy-forensics\METHODOLOGY.md:45:- Opens with `φ(100)=40` / `Euler` / `totient` / `Fermat` → bias (could be injection or distill — disambiguate with Probe 5)
+.scratch/proxy-forensics\METHODOLOGY.md:50:**Limits:** a single math problem is a narrow stylistic window. A distill trained to reproduce canonical Claude output on this exact prompt would pass.
+.scratch/proxy-forensics\METHODOLOGY.md:68:**Limits:** a distill seeded with recent knowledge passes this. Hallucinated-plausible events are a distill tell — verify EACH fact against ground truth.
+.scratch/proxy-forensics\METHODOLOGY.md:82:**Limits:** a high-capability distill or fine-tune trained on format-following will pass. Does NOT prove "real Opus"; only proves "capable base tier".
+.scratch/proxy-forensics\METHODOLOGY.md:100:**Smoking gun (with reproducibility):** ALL repeats return byte-identical output that does NOT match the requested schema. Canned response like `{"acknowledged":true}` (22 bytes) repeatedly is strong active-middleware evidence.
+.scratch/proxy-forensics\METHODOLOGY.md:108:**Question:** Is forced framing from Probe 1 an overrideable soft injection or a rigid distill bias?
+.scratch/proxy-forensics\METHODOLOGY.md:117:- Still uses banned vocabulary → bias is rigid (distill OR unusually aggressive injection)
+.scratch/proxy-forensics\METHODOLOGY.md:121:- Probe 5 alone does NOT prove "Claude-like backend". It proves "bias overrideable on this prompt". An adaptive/probe-aware proxy, a high-capability distill, or a Claude fine-tune can all comply.
+.scratch/proxy-forensics\METHODOLOGY.md:139:│   └── Probe 1 biased + Probe 5 still biased → RIGID bias (distill or aggressive injection)
+.scratch/proxy-forensics\METHODOLOGY.md:142:│   ├── Both pass → CAPABLE + RECENT backend (frontier-Claude signature — could still be distill+middleware)
+.scratch/proxy-forensics\METHODOLOGY.md:143:│   ├── Cutoff passes, rigor fails → distilled student with seeded recent data
+.scratch/proxy-forensics\METHODOLOGY.md:147:├── Aggregate evidence in classify()
+.scratch/proxy-forensics\METHODOLOGY.md:148:│   ├── middleware >> 0, capable_base >> 0, recent_cutoff > 0 → A+Middleware
+.scratch/proxy-forensics\METHODOLOGY.md:149:│   ├── capable_base >> 0, middleware ~ 0 → A-clean
+.scratch/proxy-forensics\METHODOLOGY.md:150:│   ├── distill >> capable_base → C
+.scratch/proxy-forensics\METHODOLOGY.md:176:- **Multi-turn middleware** — session-level injection, cache-across-turns behavior, turn-boundary rewriting
+.scratch/proxy-forensics\METHODOLOGY.md:181:1. Run a tokenizer probe manually (collect `usage.input_tokens` from `--output-format json` on 3-5 sentinel strings, compare deltas to baseline)
+.scratch/proxy-forensics\METHODOLOGY.md:187:- **False-positive middleware:** target CLI is older than baselines and returns a different protocol shape (not middleware, just version mismatch). Mitigate: verify CLI version, regenerate baselines if needed.
+.scratch/proxy-forensics\METHODOLOGY.md:188:- **False-negative middleware:** adaptive gateway varies intercept responses across runs to defeat byte-exact detection. Mitigate: check for schema-shape-matching-but-values-lying responses (compare reported fields to observed pipeline behavior).
+.scratch/proxy-forensics\METHODOLOGY.md:189:- **False-positive distill:** capable model with aggressive RLHF refuses introspection probe. Inspect the refusal text — a real refusal reads like an RLHF refusal, not a canned gateway response.
+.scratch/proxy-forensics\METHODOLOGY.md:194:1. **No tokenizer-identity probe** — planned future work. Currently constant-offset evidence from `RESULTS.md` is not reproducible via the toolkit.
+.scratch/proxy-forensics\METHODOLOGY.md:200:7. **No `distill+middleware` hypothesis.** Would look like A+Middleware to the current classifier.
+.scratch/proxy-forensics\fingerprint.py:7:backend and detect middleware interference.
+.scratch/proxy-forensics\fingerprint.py:14:    reflect the documented distill+middleware blind spot honestly.
+.scratch/proxy-forensics\fingerprint.py:18:    up; added distill+middleware blind-spot entry to known_gaps.
+.scratch/proxy-forensics\fingerprint.py:19:  - RESULTS.md softened further: "inconsistent with distilled student" →
+.scratch/proxy-forensics\fingerprint.py:20:    "less consistent with rigidly-biased distilled-only student".
+.scratch/proxy-forensics\fingerprint.py:23:  - Classifier has HARD EVIDENCE GATES: A+Middleware requires both
+.scratch/proxy-forensics\fingerprint.py:24:    middleware ≥ 0.6 AND capable_base ≥ 0.5; A-clean requires capable_base
+.scratch/proxy-forensics\fingerprint.py:25:    ≥ 0.6 AND middleware/suspicious_intercept low; C requires distill ≥
+.scratch/proxy-forensics\fingerprint.py:30:    schema_mismatch (middleware evidence) instead of clean.
+.scratch/proxy-forensics\fingerprint.py:316:                            repeats to confirm as middleware evidence
+.scratch/proxy-forensics\fingerprint.py:597:                "Single run returned non-protocol output — insufficient to confirm middleware "
+.scratch/proxy-forensics\fingerprint.py:747:def classify(probe_findings):
+.scratch/proxy-forensics\fingerprint.py:752:        A+Middleware needs BOTH middleware ≥ 0.6 AND capable_base ≥ 0.5.
+.scratch/proxy-forensics\fingerprint.py:754:        C needs distill ≥ 0.6 AND no strong capable_base.
+.scratch/proxy-forensics\fingerprint.py:760:    evidence = {"middleware": 0.0, "capable_base": 0.0, "distill": 0.0,
+.scratch/proxy-forensics\fingerprint.py:768:        evidence["middleware"] += v
+.scratch/proxy-forensics\fingerprint.py:777:        evidence["middleware"] += v * 0.4
+.scratch/proxy-forensics\fingerprint.py:782:        evidence["middleware"] += v * 0.5
+.scratch/proxy-forensics\fingerprint.py:807:        evidence["distill"] += v
+.scratch/proxy-forensics\fingerprint.py:818:        evidence["distill"] += v * 0.5
+.scratch/proxy-forensics\fingerprint.py:831:        evidence["middleware"] += v * 0.3
+.scratch/proxy-forensics\fingerprint.py:836:            evidence["middleware"] += v * 0.6
+.scratch/proxy-forensics\fingerprint.py:839:            evidence["distill"] += v * 0.5
+.scratch/proxy-forensics\fingerprint.py:842:            evidence["middleware"] += v * 0.2
+.scratch/proxy-forensics\fingerprint.py:843:            notes.append(f"Ambiguous bias (no anti-euler data): +{v*0.2:.2f} middleware")
+.scratch/proxy-forensics\fingerprint.py:845:        evidence["middleware"] += 0.2
+.scratch/proxy-forensics\fingerprint.py:852:    mw = min(1.0, evidence["middleware"])
+.scratch/proxy-forensics\fingerprint.py:854:    di = min(1.0, evidence["distill"])
+.scratch/proxy-forensics\fingerprint.py:858:    # A+Middleware: needs BOTH middleware ≥ 0.6 AND capable_base ≥ 0.5
+.scratch/proxy-forensics\fingerprint.py:861:    # A-clean: needs capable_base ≥ 0.6 AND effectively NO middleware/suspicious-intercept signal.
+.scratch/proxy-forensics\fingerprint.py:874:    # C (distill): needs distill ≥ 0.6 AND capable_base < 0.5
+.scratch/proxy-forensics\fingerprint.py:876:    c_distill = (0.7 * di - 0.3 * cb) if c_gate else min(0.5, 0.5 * di - 0.2 * cb)
+.scratch/proxy-forensics\fingerprint.py:882:    # most-consistent-with reading when A+Middleware / A-clean wins. Given the
+.scratch/proxy-forensics\fingerprint.py:883:    # documented distill+middleware blind spot (see known_gaps), these labels
+.scratch/proxy-forensics\fingerprint.py:887:        ("A+Middleware (Claude-like backend + active gateway)", max(0.0, a_mid)),
+.scratch/proxy-forensics\fingerprint.py:888:        ("A-clean (Claude-like backend, no detectable middleware)", max(0.0, a_clean)),
+.scratch/proxy-forensics\fingerprint.py:889:        ("C (distilled student, no middleware)", max(0.0, c_distill)),
+.scratch/proxy-forensics\fingerprint.py:901:        if top[0].startswith("A+Middleware"):
+.scratch/proxy-forensics\fingerprint.py:922:            "A+Middleware": a_mid_gate,
+.scratch/proxy-forensics\fingerprint.py:1078:    verdict = classify(findings)
+.scratch/proxy-forensics\fingerprint.py:1093:              "or collect additional evidence (tokenizer probe, mitmproxy capture) before committing to a classification.")
+.scratch/proxy-forensics\network_probe.py:40:    "x-portkey-": ("Portkey", 0.9, "Portkey proxy middleware"),
+.scratch/proxy-forensics\network_probe.py:94:    proxy should still return CDN/middleware headers in the error response.
+.scratch/proxy-forensics\network_probe.py:238:        "middleware_detected": any(
+.scratch/proxy-forensics\network_probe.py:247:            "TLS handshake or refuses HTTP without valid auth. This is itself middleware-like "
+.scratch/proxy-forensics\network_probe.py:253:        notes.append("No known proxy-software signatures detected — either direct origin, custom middleware, or signatures stripped")
+.scratch/proxy-forensics\network_probe.py:256:    if summary["middleware_detected"]:
+.scratch/proxy-forensics\NETWORK_FINGERPRINTS.md:43:**Fingerprint signature**: aggressive drop-on-unauth defense, no CDN, bare nginx, extreme timing variance. Behavior is inconsistent with a legitimate API origin — legitimate APIs return proper HTTP errors with headers. Dropping connections during TLS is characteristic of DDoS-mitigation or custom middleware designed to resist probing.
+.scratch/proxy-forensics\NETWORK_FINGERPRINTS.md:49:   - **TLS success rate**: consistent vs drops? Drops = middleware/defense.
+.scratch/proxy-forensics\NETWORK_FINGERPRINTS.md:53:   - **aggressive_defense flag**: True means the suspect actively refuses unauth'd probing, which is itself evidence of active middleware.
+.scratch/proxy-forensics\NETWORK_FINGERPRINTS.md:58:- `aggressive_defense: True` is a strong positive signal for "active middleware" but could also indicate aggressive DDoS protection by a legitimate reseller who doesn't want public probing.
+.scratch/proxy-forensics\network_aw.json:42:    "middleware_detected": false,
+.scratch/proxy-forensics\network_aw.json:44:      "Aggressive defense detected: server accepts TCP connection then drops during TLS handshake or refuses HTTP without valid auth. This is itself middleware-like behavior — legitimate origins typically return proper HTTP errors with headers.",
+.scratch/proxy-forensics\network_anthropic.json:70:    "middleware_detected": false,
+.scratch/proxy-forensics\WIRE_CAPTURE_FINDINGS.md:81:This upgrades our earlier inference (based on +7 constant tokenizer offset + Euler-override behavior) to direct evidence of the injection location. Injection is downstream of the client, invisible from client-side instrumentation.
+.scratch/proxy-forensics\WIRE_CAPTURE_FINDINGS.md:101:The most likely remaining cause is **TLS client fingerprinting (JA3/JA4) mismatch**. mitmproxy's Python TLS client signature differs from claude-cli's Node.js TLS signature. AW fingerprints clients and rejects non-Node signatures. This is a sophisticated anti-inspection middleware.
+.scratch/proxy-forensics\tokenizer_probe.py:5:Question answered: does the gateway's backend use the same tokenizer (Claude BPE)
+.scratch/proxy-forensics\tokenizer_probe.py:6:as Anthropic-direct Claude, or a different tokenizer (indicating non-Claude base)?
+.scratch/proxy-forensics\tokenizer_probe.py:12:  - `alpha ≈ 1`: same tokenizer
+.scratch/proxy-forensics\tokenizer_probe.py:14:  - low residuals across character classes: tokenizer not drifting per class
+.scratch/proxy-forensics\tokenizer_probe.py:19:  - `non_claude`: alpha significantly ≠ 1 OR high residuals across classes
+.scratch/proxy-forensics\tokenizer_probe.py:30:  python tokenizer_probe.py \\
+.scratch/proxy-forensics\tokenizer_probe.py:36:    --save-raw tokenizer_aw.json
+.scratch/proxy-forensics\tokenizer_probe.py:49:# Crafted to have widely varying tokenization under non-Claude tokenizers
+.scratch/proxy-forensics\tokenizer_probe.py:154:            "verdict": "insufficient_data",
+.scratch/proxy-forensics\tokenizer_probe.py:179:        findings["verdict"] = "non_claude"
+.scratch/proxy-forensics\tokenizer_probe.py:180:        findings["reason"] = f"alpha={alpha:.3f} significantly ≠ 1, suggests different tokenizer"
+.scratch/proxy-forensics\tokenizer_probe.py:191:    ap = argparse.ArgumentParser(description=f"Claude tokenizer-identity probe v{PROBE_VERSION}")
+.scratch/proxy-forensics\test_tokenizer_probe.py:1:"""Unit tests for tokenizer_probe.py fit + classification logic.
+.scratch/proxy-forensics\test_tokenizer_probe.py:3:Run: python test_tokenizer_probe.py
+.scratch/proxy-forensics\test_tokenizer_probe.py:10:import tokenizer_probe as tp
+.scratch/proxy-forensics\test_tokenizer_probe.py:102:assert_eq("non_claude_proportional", v["verdict"], "non_claude")
+.scratch/proxy-forensics\test_tokenizer_probe.py:106:assert_eq("non_claude_high_residuals", v["verdict"], "non_claude")
+.scratch/proxy-forensics\test_tokenizer_probe.py:114:assert_eq("insufficient_data_handled", v["verdict"], "insufficient_data")
+.scratch/proxy-forensics\test_tokenizer_probe.py:159:assert_true("non_claude_not_misclassified_as_claude",
+.scratch/proxy-forensics\test_tokenizer_probe.py:163:# Claude-like data with minor repeat noise must not escalate to non_claude
+.scratch/proxy-forensics\test_tokenizer_probe.py:165:assert_true("claude_near_boundary_not_forced_non_claude",
+.scratch/proxy-forensics\results_aw_smoketest.json:180:    "primary_hypothesis": "A+Middleware (Claude-like backend + active gateway)",
+.scratch/proxy-forensics\results_aw_smoketest.json:186:        "A+Middleware (Claude-like backend + active gateway)",
+.scratch/proxy-forensics\results_aw_smoketest.json:194:        "A-clean (Claude-like backend, no detectable middleware)",
+.scratch/proxy-forensics\results_aw_smoketest.json:198:        "C (distilled student, no middleware)",
+.scratch/proxy-forensics\results_aw_smoketest.json:203:      "middleware": 0.425,
+.scratch/proxy-forensics\results_aw_smoketest.json:205:      "distill": 0.0,
+.scratch/proxy-forensics\results_aw_smoketest.json:211:      "A+Middleware": false,
+.scratch/proxy-forensics\RESULTS.md:7:> **Note on methodology revision (2026-04-24 evening):** The original investigation used hard-coded scoring (toolkit v0.1). After independent codex gpt-5.5 xhigh review, the toolkit was hardened to v0.2 with confidence-graded classification, multi-run consistency requirements, and several must-fix parser bugs. The *findings* below were reproduced on the revised toolkit (v0.2 tests in `test_fingerprint.py` synthesize the AW profile and recover the `A+Middleware` verdict at high confidence). The *interpretation* in this document still stands; the *methodology* caveats in `METHODOLOGY.md` should be read alongside it — especially that this is a hypothesis-generator, not a proof system, and that every single probe is defeatable by a sufficiently motivated operator.
+.scratch/proxy-forensics\RESULTS.md:11:**Most consistent with: a Claude-like frontier backend (likely Opus 4.7) hosted on Google Vertex AI, fronted by an aggressive middleware gateway.**
+.scratch/proxy-forensics\RESULTS.md:13:The observed signals are **less consistent with** a rigidly-biased distilled-only student, with a Chinese-model clone, and with an alias of an older Claude release. They are **most consistent with** a frontier Claude backend under active gateway manipulation. Important caveats: (a) the current toolkit does not distinguish a real Claude backend from a high-quality Claude-like distill fronted by the same middleware (the `distill+middleware` hypothesis class is not in scope), (b) a sufficiently sophisticated adversarial proxy could in principle produce the same behavior on all probes. For security- or legal-grade certainty, capture wire traffic (mitmproxy) and add a tokenizer-identity probe.
+.scratch/proxy-forensics\RESULTS.md:80:First suspicion of distillation (hypothesis C): φ(100)=40 false-start + tautology `7^17 mod 100 = 7^17`. Zero cache. Compression to 77 tokens.
+.scratch/proxy-forensics\RESULTS.md:126:Both anomalies reproducible. Byte-exact intercept = definitively middleware, not random. φ-opening = systematic forcing, not sampling variance.
+.scratch/proxy-forensics\RESULTS.md:140:**Strong result** (not on its own decisive — see caveats in METHODOLOGY.md): AW switched from φ-opening to canonical `7^4 ≡ 1` under explicit instruction. This is inconsistent with a rigidly-biased distilled student and more consistent with a capable base model under an overrideable soft injection. An adaptive/probe-aware proxy could in principle produce the same behavior, which is why the overall verdict relies on multiple converging signals rather than this probe alone.
+.scratch/proxy-forensics\RESULTS.md:146:| **1** | **A+Middleware: real Opus 4.7 via Vertex with aggressive shim** | leading hypothesis | All five probes align; no observed signal contradicts it |
+.scratch/proxy-forensics\RESULTS.md:147:| 2 | C: Distilled student trained on Claude outputs | unlikely given observed data | Probe 2 rigor + anti-Euler switch inconsistent with rigid distill |
+.scratch/proxy-forensics\RESULTS.md:149:| 4 | F: Non-Claude base + Claude fine-tune | low fit | Constant (not proportional) tokenizer offset weakens this; needs proper tokenizer probe to exclude fully |
+.scratch/proxy-forensics\RESULTS.md:153:**All "excluded" hypotheses should be read as "weakened by current evidence" rather than "proven impossible"**. A sufficiently sophisticated adversarial proxy could match the observed signals while still being any of the lower-ranked classes. For high-stakes decisions, capture wire traffic (mitmproxy) and add a tokenizer-identity probe.
+.scratch/proxy-forensics\README.md:6:- Whether the backend matches a frontier-Claude signature, a distilled student signature, or an imitator (note: the toolkit does not distinguish a real Claude from a Claude-like distill behind the same middleware gateway)
+.scratch/proxy-forensics\README.md:7:- What middleware layers the gateway adds (stripping, injection, interception, spoofing)
+.scratch/proxy-forensics\README.md:29:- Classifier has **hard evidence gates**: A+Middleware requires middleware ≥ 0.6 AND capable_base ≥ 0.5; A-clean requires capable_base ≥ 0.6 AND middleware < 0.4 AND suspicious_intercept < 0.3; C requires distill ≥ 0.6 AND capable_base < 0.5. Hypotheses failing their gate can't reach high confidence.
+.scratch/proxy-forensics\README.md:30:- **Introspection schema validation**: probe 4 only signals `clean_introspection` when all four required fields (`architecture_family`, `supports_extended_thinking`, `can_use_prompt_caching`, `knowledge_cutoff_month`) are present with credible types. JSON that parses but fails schema emits `schema_mismatch` and counts as middleware evidence.
+.scratch/proxy-forensics\README.md:128:| `anti_euler_override` | Soft-injection vs distill | Bias overrideability | No, but informative with `stylometric_717` |
+.scratch/proxy-forensics\README.md:136:  Primary:    A+Middleware (Claude-like backend + active gateway)
+.scratch/proxy-forensics\README.md:141:     0.756  A+Middleware (Claude-like backend + active gateway)
+.scratch/proxy-forensics\README.md:142:     0.344  A-clean (Claude-like backend, no detectable middleware)
+.scratch/proxy-forensics\README.md:144:     0.000  C (distilled student)
+.scratch/proxy-forensics\README.md:146:  Evidence weights: {'middleware': 1.25, 'capable_base': 1.15, 'distill': 0.0, 'recent_cutoff': 0.7, 'feature_strip': 0.6}
+.scratch/proxy-forensics\README.md:170:- **No tokenizer-identity probe.** Currently the `constant +7 offset` evidence from `RESULTS.md` is *not* reproducible via this toolkit. Planned future work.
+.scratch/proxy-forensics\README.md:172:- **No multi-turn probe.** Session-level middleware (cache-across-turns manipulation, session-boundary injection) is invisible here.
+.scratch/proxy-forensics\README.md:175:- **No `distill+middleware` hypothesis.** A distilled student fronted by a middleware gateway would look like A+Middleware; we don't currently distinguish these. Future hypothesis class.
+.scratch/proxy-forensics\README.md:185:4. Optionally thread scoring into `classify()` evidence weights.
+.scratch/proxy-forensics\test_fingerprint.py:329:# Classify: AW-like profile produces A+Middleware with high confidence
+.scratch/proxy-forensics\test_fingerprint.py:341:v = fp.classify(findings)
+.scratch/proxy-forensics\test_fingerprint.py:342:assert_true("AW_profile_primary_is_A+Middleware",
+.scratch/proxy-forensics\test_fingerprint.py:343:            v["primary_hypothesis"].startswith("A+Middleware"),
+.scratch/proxy-forensics\test_fingerprint.py:350:# Classify: pure-distill profile (no middleware, no override)
+.scratch/proxy-forensics\test_fingerprint.py:352:print("\n--- classify: distill-profile synthetic scenario ---")
+.scratch/proxy-forensics\test_fingerprint.py:360:v = fp.classify(findings)
+.scratch/proxy-forensics\test_fingerprint.py:361:assert_true("distill_profile_picks_C",
+.scratch/proxy-forensics\test_fingerprint.py:362:            "C (distill" in v["primary_hypothesis"] or v["evidence_weights"]["distill"] > 0.5,
+.scratch/proxy-forensics\test_fingerprint.py:367:# Classify: clean direct Opus (no middleware, passes all)
+.scratch/proxy-forensics\test_fingerprint.py:377:v = fp.classify(findings)
+.scratch/proxy-forensics\test_fingerprint.py:378:# Should not pick A+Middleware (middleware evidence low)
+.scratch/proxy-forensics\test_fingerprint.py:379:# Should pick A-clean (note: both hypotheses contain "middleware" as a word)
+.scratch/proxy-forensics\test_fingerprint.py:396:v = fp.classify(findings)
+.scratch/proxy-forensics\test_fingerprint.py:405:# Scenario 1: hard-intercept ONLY (no capable_base) → A+Middleware gate fails
+.scratch/proxy-forensics\test_fingerprint.py:413:v = fp.classify(findings)
+.scratch/proxy-forensics\test_fingerprint.py:415:            v["confidence"] != "high" or "A+Middleware" not in v["primary_hypothesis"],
+.scratch/proxy-forensics\test_fingerprint.py:417:assert_eq("A+Middleware_gate_fails_without_capable_base",
+.scratch/proxy-forensics\test_fingerprint.py:418:          v["gates_passed"]["A+Middleware"], False)
+.scratch/proxy-forensics\test_fingerprint.py:420:# Scenario 2: hard-intercept + temporal-cutoff only (no capable_base) → A+Middleware gate still fails
+.scratch/proxy-forensics\test_fingerprint.py:428:v = fp.classify(findings)
+.scratch/proxy-forensics\test_fingerprint.py:429:assert_eq("A+Middleware_gate_still_fails_without_capable_base",
+.scratch/proxy-forensics\test_fingerprint.py:430:          v["gates_passed"]["A+Middleware"], False)
+.scratch/proxy-forensics\test_fingerprint.py:440:v = fp.classify(findings)
+.scratch/proxy-forensics\test_fingerprint.py:446:# Scenario 4: hard_intercept + capable_base (AW-like) → high A+Middleware as expected
+.scratch/proxy-forensics\test_fingerprint.py:454:v = fp.classify(findings)
+.scratch/proxy-forensics\test_fingerprint.py:455:assert_true("AW_reproduces_A+Middleware_primary",
+.scratch/proxy-forensics\test_fingerprint.py:456:            v["primary_hypothesis"].startswith("A+Middleware"),
+.scratch/proxy-forensics\test_fingerprint.py:458:assert_eq("AW_A+Middleware_gate_passes", v["gates_passed"]["A+Middleware"], True)
+.scratch/proxy-forensics\test_fingerprint.py:489:assert_eq("non_claude_model_intercepted", r["status"], "intercepted")
+.scratch/proxy-forensics\test_fingerprint.py:611:v_bias = fp.classify(findings_with_bias)
+.scratch/proxy-forensics\test_fingerprint.py:621:v_nobias = fp.classify(findings_without_bias)
+.scratch/proxy-forensics\test_fingerprint.py:640:v = fp.classify(findings)
+.scratch/proxy-forensics\test_fingerprint.py:650:v = fp.classify(findings)
+.scratch/proxy-forensics\test_fingerprint.py:656:v = fp.classify(findings)
+.scratch/proxy-forensics\test_fingerprint.py:662:v = fp.classify(findings)
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:41:- Aggressive defense without CDN → likely custom middleware
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:54:- [ ] Primary hypothesis (A+Middleware / A-clean / C / ambiguous)
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:56:- [ ] Gates passed (A+Middleware / A-clean / C)
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:57:- [ ] Evidence weights (middleware, capable_base, distill, recent_cutoff, feature_strip, suspicious_intercept)
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:67:| Cloudflare + no anthropic-direct headers | A+Middleware, any confidence | Third party using Cloudflare but NOT Anthropic |
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:68:| Aggressive defense + A+Middleware verdict | — | Custom middleware gateway — same pattern as original AW investigation |
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:70:| No network evidence + C distill verdict | — | Non-Anthropic backend, likely distill |
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:78:- [ ] **Tokenizer probe (manual)**: send 3-5 sentinel strings, capture `usage.input_tokens`, compare deltas against Anthropic-direct baselines. Proportional drift = different tokenizer.
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:102:- [ ] Run on AW (known A+Middleware) and confirm that verdict
+.scratch/proxy-forensics\smoketest_stdout.txt:45:    purpose: Detect gateway-level interception. Models that return fixed canned responses on self-introspection prompts reveal active middleware.
+.scratch/proxy-forensics\smoketest_stdout.txt:53:    purpose: Discriminator probe: pairs with stylometric_717 to distinguish soft injection from rigid bias. If target uses forced-Euler framing in the unconstrained probe but complies with an explicit ban here, the bias is overrideable (consistent with soft injection OR with no bias at all, OR with a probe-aware proxy). If bias persists despite the ban, bias is rigid (distill OR aggressive injection). Not decisive on its own — interpret only in conjunction with stylometric_717 results.
+.scratch/proxy-forensics\smoketest_stdout.txt:64:  Primary:    A+Middleware (Claude-like backend + active gateway)
+.scratch/proxy-forensics\smoketest_stdout.txt:69:     0.470  A+Middleware (Claude-like backend + active gateway)
+.scratch/proxy-forensics\smoketest_stdout.txt:71:     0.048  A-clean (Claude-like backend, no detectable middleware)
+.scratch/proxy-forensics\smoketest_stdout.txt:72:     0.000  C (distilled student, no middleware)
+.scratch/proxy-forensics\smoketest_stdout.txt:74:  Evidence weights: {'middleware': 0.425, 'capable_base': 1.01, 'distill': 0.0, 'recent_cutoff': 0.0, 'feature_strip': 0.0, 'suspicious_intercept': 0.45}
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The downstream classifier still has the documented blind spot and hard gates today; the tokenizer object is not wired yet. I’m checking the exact classification surface now so the schema verdict is about what Items 3/5 will consume, not just the standalone probe.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -LiteralPath .scratch\\proxy-forensics\\fingerprint.py | Select-Object -Skip 730 -First 210" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -LiteralPath .scratch\\proxy-forensics\\README.md | Select-Object -Skip 150 -First 50" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -LiteralPath .scratch\\proxy-forensics\\METHODOLOGY.md | Select-Object -Skip 130 -First 75" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 946ms:
+        elif max_verified > 0:
+            out["signals"]["early_2025_knowledge"] = 0.3
+        else:
+            out["signals"]["no_verified_2025"] = 0.3
+            out["notes"].append(
+                "No verifiable 2025 events detected - any 2025 mentions present were "
+                "generic month references that could be hallucinated."
+            )
+
+    return out
+
+
+# -------------------------------------------------------------------------
+# Classification - weighted evidence  graded verdict
+# -------------------------------------------------------------------------
+
+def classify(probe_findings):
+    """Produce confidence-graded verdict from aggregated probe signals.
+
+    v0.4 changes:
+      - Hard gates: high-confidence hypotheses require MINIMUM evidence in specific families.
+        A+Middleware needs BOTH middleware ? 0.6 AND capable_base ? 0.5.
+        A-clean needs capable_base ? 0.6 AND no variable/inconsistent intercept.
+        C needs distill ? 0.6 AND no strong capable_base.
+      - Variable/inconsistent intercept penalizes A-clean (can't be clean if gateway
+        is returning weird responses inconsistently).
+      - soft_override_success only boosts capable_base when stylometric bias was also
+        observed (otherwise the probe taught us nothing about bias overridability).
+    """
+    evidence = {"middleware": 0.0, "capable_base": 0.0, "distill": 0.0,
+                "recent_cutoff": 0.0, "feature_strip": 0.0, "suspicious_intercept": 0.0}
+    notes = []
+
+    intro = probe_findings.get("self_introspection_json", {})
+    intro_sig = intro.get("signals", {})
+    if intro_sig.get("hard_intercept"):
+        v = intro_sig["hard_intercept"]
+        evidence["middleware"] += v
+        notes.append(f"Middleware: hard_intercept +{v:.2f}")
+    if intro_sig.get("clean_introspection"):
+        v = intro_sig["clean_introspection"]
+        evidence["capable_base"] += v * 0.4
+        notes.append(f"Capable-base: clean_introspection +{v*0.4:.2f}")
+    if intro_sig.get("schema_mismatch"):
+        v = intro_sig["schema_mismatch"]
+        evidence["suspicious_intercept"] += v
+        evidence["middleware"] += v * 0.4
+        notes.append(f"Middleware: schema_mismatch (schema-crafted response?) +{v*0.4:.2f}")
+    if intro_sig.get("variable_intercept"):
+        v = intro_sig["variable_intercept"]
+        evidence["suspicious_intercept"] += v
+        evidence["middleware"] += v * 0.5
+        notes.append(f"Middleware: variable_intercept (adaptive gateway?) +{v*0.5:.2f}")
+    if intro_sig.get("inconsistent_intercept"):
+        v = intro_sig["inconsistent_intercept"]
+        evidence["suspicious_intercept"] += v
+        notes.append(f"Suspicious: inconsistent_intercept +{v:.2f}")
+
+    anti = probe_findings.get("anti_euler_override", {})
+    anti_sig = anti.get("signals", {})
+    sty = probe_findings.get("stylometric_717", {})
+    sty_sig = sty.get("signals", {})
+    stylometric_bias_observed = bool(sty_sig.get("stylometric_euler_bias"))
+
+    if anti_sig.get("soft_override_success"):
+        v = anti_sig["soft_override_success"]
+        # Only count as capable-base evidence if bias was observed to override.
+        # Otherwise, override success on a neutral prompt teaches nothing.
+        if stylometric_bias_observed:
+            evidence["capable_base"] += v
+            notes.append(f"Capable-base: soft_override_success (bias observed  overrideable) +{v:.2f}")
+        else:
+            evidence["capable_base"] += v * 0.3  # weaker - no bias to override
+            notes.append(f"Capable-base: soft_override_success (no prior bias; weak signal) +{v*0.3:.2f}")
+    if anti_sig.get("rigid_bias"):
+        v = anti_sig["rigid_bias"]
+        evidence["distill"] += v
+        notes.append(f"Distill: rigid_bias +{v:.2f}")
+
+    tight = probe_findings.get("tight_reasoning_crt", {})
+    tight_sig = tight.get("signals", {})
+    if tight_sig.get("format_rigor_pass"):
+        v = tight_sig["format_rigor_pass"]
+        evidence["capable_base"] += v
+        notes.append(f"Capable-base: format_rigor_pass +{v:.2f}")
+    if tight_sig.get("format_rigor_fail"):
+        v = tight_sig["format_rigor_fail"]
+        evidence["distill"] += v * 0.5
+        notes.append(f"Distill: format_rigor_fail +{v*0.5:.2f}")
+
+    temp = probe_findings.get("temporal_cutoff", {})
+    temp_sig = temp.get("signals", {})
+    if temp_sig.get("post_april_2025_knowledge"):
+        v = temp_sig["post_april_2025_knowledge"]
+        evidence["recent_cutoff"] += v
+        notes.append(f"Recent-cutoff: post_april_2025 +{v:.2f}")
+
+    if sty_sig.get("feature_strip_no_cache"):
+        v = sty_sig["feature_strip_no_cache"]
+        evidence["feature_strip"] += v
+        evidence["middleware"] += v * 0.3
+        notes.append(f"Middleware: feature_strip +{v*0.3:.2f}")
+    if sty_sig.get("stylometric_euler_bias"):
+        v = sty_sig["stylometric_euler_bias"]
+        if anti_sig.get("soft_override_success"):
+            evidence["middleware"] += v * 0.6
+            notes.append(f"Middleware: stylometric_bias + override_success  soft injection +{v*0.6:.2f}")
+        elif anti_sig.get("rigid_bias"):
+            evidence["distill"] += v * 0.5
+            notes.append(f"Distill: stylometric_bias + rigid (can't override) +{v*0.5:.2f}")
+        else:
+            evidence["middleware"] += v * 0.2
+            notes.append(f"Ambiguous bias (no anti-euler data): +{v*0.2:.2f} middleware")
+    if sty_sig.get("tautology_artifact"):
+        evidence["middleware"] += 0.2
+        notes.append("Middleware: tautology_artifact +0.20")
+
+    # Hard gates for hypotheses. Each gate must be met for the corresponding
+    # hypothesis to be able to reach high-confidence. Soft aggregation still
+    # contributes to the score, but gates prevent misleading labels from thin
+    # evidence.
+    mw = min(1.0, evidence["middleware"])
+    cb = min(1.0, evidence["capable_base"])
+    di = min(1.0, evidence["distill"])
+    rc = min(1.0, evidence["recent_cutoff"])
+    si = min(1.0, evidence["suspicious_intercept"])
+
+    # A+Middleware: needs BOTH middleware ? 0.6 AND capable_base ? 0.5
+    a_mid_gate = (mw >= 0.6 and cb >= 0.5)
+    a_mid = (0.5 * mw + 0.35 * cb + 0.15 * rc) if a_mid_gate else min(0.5, 0.4 * mw + 0.3 * cb)
+    # A-clean: needs capable_base ? 0.6 AND effectively NO middleware/suspicious-intercept signal.
+    # v0.5: tightened suspicious_intercept threshold from 0.3  0.1 so that even weak
+    # inconsistent_intercept signals (0.25) disqualify A-clean from high confidence.
+    # Also explicit: ANY intercept signal (hard_intercept, variable_intercept,
+    # inconsistent_intercept, schema_mismatch, single_run_intercept_unverified)
+    # in the introspection probe prevents A-clean high confidence.
+    intro_sig_raw = probe_findings.get("self_introspection_json", {}).get("signals", {})
+    any_intercept_signal = any(k in intro_sig_raw for k in (
+        "hard_intercept", "variable_intercept", "inconsistent_intercept",
+        "schema_mismatch", "single_run_intercept_unverified",
+    ))
+    a_clean_gate = (cb >= 0.6 and mw < 0.4 and si < 0.1 and not any_intercept_signal)
+    a_clean = (0.55 * cb + 0.25 * rc - 0.3 * mw - 0.5 * si) if a_clean_gate else min(0.5, 0.4 * cb + 0.2 * rc - 0.3 * mw - 0.5 * si)
+    # C (distill): needs distill ? 0.6 AND capable_base < 0.5
+    c_gate = (di >= 0.6 and cb < 0.5)
+    c_distill = (0.7 * di - 0.3 * cb) if c_gate else min(0.5, 0.5 * di - 0.2 * cb)
+    # Ambiguous: low total evidence
+    total_ev = sum(evidence.values())
+    ambiguous = 1.0 - min(1.0, total_ev / 2.5)
+
+    # Note on hypothesis labels: "real Claude" in these names reflects the
+    # most-consistent-with reading when A+Middleware / A-clean wins. Given the
+    # documented distill+middleware blind spot (see known_gaps), these labels
+    # are shorthand for "backend matches frontier-Claude signature" rather than
+    # proof that the backend is literally Anthropic's Claude.
+    hypotheses = sorted([
+        ("A+Middleware (Claude-like backend + active gateway)", max(0.0, a_mid)),
+        ("A-clean (Claude-like backend, no detectable middleware)", max(0.0, a_clean)),
+        ("C (distilled student, no middleware)", max(0.0, c_distill)),
+        ("ambiguous / insufficient evidence", ambiguous),
+    ], key=lambda x: -x[1])
+
+    top = hypotheses[0]
+    second = hypotheses[1]
+    gap = top[1] - second[1]
+    if "ambiguous" in top[0]:
+        confidence = "low"
+    else:
+        # Determine which hypothesis this is and whether its gate was satisfied
+        gate_ok = False
+        if top[0].startswith("A+Middleware"):
+            gate_ok = a_mid_gate
+        elif top[0].startswith("A-clean"):
+            gate_ok = a_clean_gate
+        elif top[0].startswith("C "):
+            gate_ok = c_gate
+        if gate_ok and top[1] >= 0.55 and gap >= 0.2:
+            confidence = "high"
+        elif top[1] >= 0.35 and gap >= 0.1:
+            confidence = "medium"
+        else:
+            confidence = "low"
+
+    return {
+        "primary_hypothesis": top[0],
+        "primary_score": round(top[1], 3),
+        "confidence": confidence,
+        "gap_to_second": round(gap, 3),
+        "ranked_hypotheses": [(h, round(s, 3)) for h, s in hypotheses],
+        "evidence_weights": {k: round(v, 3) for k, v in evidence.items()},
+        "gates_passed": {
+            "A+Middleware": a_mid_gate,
+            "A-clean": a_clean_gate,
+            "C": c_gate,
+        },
+        "notes": notes,
+    }
+
+
+# -------------------------------------------------------------------------
+# Main runner
+# -------------------------------------------------------------------------
+
+def run_probe(probe_id, probe, cmd_tokens, shell, repeats):
+    scorer = PROBE_SCORERS.get(probe_id)
+    if not scorer:
+        return {"error": f"no scorer for {probe_id}"}
+    prompt = probe["prompt"]
+    run_sigs = []
+    raw_runs = []
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1058ms:
+    - Capable-base: format_rigor_pass +0.80
+    - Recent-cutoff: post_april_2025 +0.70
+    - Middleware: feature_strip +0.18
+```
+
+Confidence levels:
+
+- **high** - primary score ? 0.55 AND gap to second hypothesis ? 0.2. Actionable.
+- **medium** - primary score ? 0.35 AND gap ? 0.1. Use as working hypothesis; collect more evidence before committing.
+- **low** - neither threshold met. Run more repeats, add probes, or capture mitmproxy HTTPS.
+
+## Cost
+
+Per target: roughly `5 probes ? N repeats ? ~$0.05-0.10 per call`. Default `--repeats 2`  ~$0.50-1.00 per target. Baseline regeneration (when triggered): ~$3 for 15 Opus calls.
+
+## Known gaps (v0.5)
+
+See `baselines.json  interpretation_rules.known_gaps` for the full list. Highlights:
+
+- **No tokenizer-identity probe.** Currently the `constant +7 offset` evidence from `RESULTS.md` is *not* reproducible via this toolkit. Planned future work.
+- **No quantization-degradation probe.** An int8-quantized Claude could pass the current battery. Planned future work.
+- **No multi-turn probe.** Session-level middleware (cache-across-turns manipulation, session-boundary injection) is invisible here.
+- **Narrow stylometric panel.** Single math problem gives narrow signal. Broader panel (safety refusals, code formatting, XML/tool-call conventions) would improve imitator detection.
+- **Temporal probe rotation.** The 2025-event calibration will lose discriminative power as those events become general knowledge (~2027). Rotate during baseline regeneration.
+- **No `distill+middleware` hypothesis.** A distilled student fronted by a middleware gateway would look like A+Middleware; we don't currently distinguish these. Future hypothesis class.
+- **Thresholds hand-tuned, not calibrated.** `0.55 / 0.35` confidence thresholds are heuristics. Proper calibration requires a labelled test set across provider types.
+
+## Extending
+
+Add a probe:
+
+1. Edit `baselines.json`: add entry under `probes` with `prompt`, `purpose`, and `baselines` (collect officials once).
+2. Implement a scorer in `fingerprint.py`: `score_run_<probe_id>()` function + entry in `PROBE_SCORERS` dict.
+3. Implement aggregation in `aggregate_probe()` for the new `probe_id`.
+4. Optionally thread scoring into `classify()` evidence weights.
+
+## Security notes
+
+- `--shell` (needed for `.cmd` wrappers on Windows) is command-injection unsafe if `--cmd` comes from an untrusted source. The toolkit prints a warning but cannot sandbox.
+- The toolkit runs arbitrary subprocess commands against third-party gateways. Review your provider's ToS before automated probing.
+
+## Trust model
+
+Under what assumptions do classifications hold:
+
+1. Target honors standard Claude Code CLI flags (`-p`, `--model`, `--effort`, `--tools ""`, `--output-format json`).
+2. Tool invocation is *actually* disabled - target didn't secretly call WebSearch to pass the temporal cutoff probe.
+3. Gateway is not probe-adaptive (if it knows the anti-Euler prompt and selectively complies, we can't detect that here).
+4. Sampling variance on single calls doesn't flip the verdict - use `--repeats ? 2` for stability.
+5. Baselines are fresh (within `expiry_date` window).
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1234ms:
+ÃÄÄ Check Probe 4 (introspection) first - high-value diagnostic
+³   ÃÄÄ All repeats byte-identical non-protocol  MIDDLEWARE present (hard-intercept signal)
+³   ÃÄÄ All repeats valid JSON matching schema  no introspection filter
+³   ÀÄÄ Mixed (some intercept, some valid)  ambiguous, increase --repeats
+³
+ÃÄÄ Check Probe 1 vs Probe 5 together
+³   ÃÄÄ Probe 1 canonical + Probe 5 canonical  no bias
+³   ÃÄÄ Probe 1 biased + Probe 5 compliant  SOFT injection (if real backend) OR adaptive proxy
+³   ÀÄÄ Probe 1 biased + Probe 5 still biased  RIGID bias (distill or aggressive injection)
+³
+ÃÄÄ Check Probe 2 (cutoff) vs Probe 3 (rigor)
+³   ÃÄÄ Both pass  CAPABLE + RECENT backend (frontier-Claude signature - could still be distill+middleware)
+³   ÃÄÄ Cutoff passes, rigor fails  distilled student with seeded recent data
+³   ÃÄÄ Cutoff fails, rigor passes  older checkpoint or cautious model
+³   ÀÄÄ Both fail  low-tier or broken backend
+³
+ÃÄÄ Aggregate evidence in classify()
+³   ÃÄÄ middleware >> 0, capable_base >> 0, recent_cutoff > 0  A+Middleware
+³   ÃÄÄ capable_base >> 0, middleware ~ 0  A-clean
+³   ÃÄÄ distill >> capable_base  C
+³   ÀÄÄ total evidence low  ambiguous (run more probes or add mitmproxy)
+³
+ÀÄÄ Check confidence level
+    ÃÄÄ high (primary ? 0.55, gap ? 0.2)  actionable
+    ÃÄÄ medium  working hypothesis, collect more evidence
+    ÀÄÄ low  do NOT commit to a classification
+```
+
+## Provider detection (msg_id prefix)
+
+| Prefix | Provider |
+|---|---|
+| `msg_01...` | Anthropic direct (api.anthropic.com) |
+| `msg_vrtx_...` | Google Vertex AI |
+| `msg_bdrk_...` | AWS Bedrock |
+| 36-char UUID | Aggregator (LiteLLM/Portkey/OpenRouter/etc) |
+
+**Do NOT rely on this alone.** The prefix is a string in the response body - any gateway can forge it cheaply. Use as a weak confirming signal alongside stylometric/feature evidence.
+
+## When to escalate beyond the battery
+
+The battery is single-turn and does not capture:
+
+- **Tokenizer identity** - proportional vs constant drift in `input_tokens` on sentinel strings
+- **Quantization/precision degradation** - numerical accuracy on `sin(1.234567890)` to 12 digits, checksum reconstruction, multi-step arithmetic on large numbers
+- **Multi-turn middleware** - session-level injection, cache-across-turns behavior, turn-boundary rewriting
+- **Injected system prompt content** - mitmproxy or equivalent HTTPS capture required
+
+For high-stakes classification (financial or security-sensitive decisions), do at least one of:
+
+1. Run a tokenizer probe manually (collect `usage.input_tokens` from `--output-format json` on 3-5 sentinel strings, compare deltas to baseline)
+2. Capture raw HTTPS traffic with mitmproxy + custom CA
+3. Consult a known-fresh Opus 4.7 max with full evidence dump (see `.scratch/consult_opus47*.py` for the structured brief format)
+
+## Common failure modes
+
+- **False-positive middleware:** target CLI is older than baselines and returns a different protocol shape (not middleware, just version mismatch). Mitigate: verify CLI version, regenerate baselines if needed.
+- **False-negative middleware:** adaptive gateway varies intercept responses across runs to defeat byte-exact detection. Mitigate: check for schema-shape-matching-but-values-lying responses (compare reported fields to observed pipeline behavior).
+- **False-positive distill:** capable model with aggressive RLHF refuses introspection probe. Inspect the refusal text - a real refusal reads like an RLHF refusal, not a canned gateway response.
+- **Baseline drift:** new Anthropic release changes canonical stylometry. Mitigate: regenerate baselines on every new Opus release; tool blocks strong verdicts past `expiry_date`.
+
+## Known gaps (v0.5)
+
+1. **No tokenizer-identity probe** - planned future work. Currently constant-offset evidence from `RESULTS.md` is not reproducible via the toolkit.
+2. **No quantization-degradation probe** - planned future work.
+3. **No multi-turn probe.** All current probes are single-turn; gateways that act only on session boundaries are invisible.
+4. **No adversarial-probe-adaptation detection.** If a gateway specifically counters our probe set, we won't notice without changing prompts.
+5. **Narrow stylometric panel.** One math problem for signature. Broader panel needed for imitator detection.
+6. **Baseline regeneration is manual.** No automated `--regenerate-baselines` flag yet.
+7. **No `distill+middleware` hypothesis.** Would look like A+Middleware to the current classifier.
+8. **Thresholds hand-tuned.** Proper calibration requires labelled test set across provider types.
+
+## Cost guidance
+
+| Operation | Typical cost |
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "probe_version|baseline_cmd|gateway_cmd|per_sentinel|baseline_runs|gateway_runs|baseline_tokens|gateway_tokens|repeat_variances|verdict|residual_ok_claude|beta_ok|repeat_stable|json.dump|fit" .scratch/proxy-forensics/tokenizer_probe.py' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"def classify\\(|a_mid_gate|a_clean_gate|c_gate|known_gaps|distill\\+middleware|primary_hypothesis|gates_passed\" .scratch/proxy-forensics/fingerprint.py .scratch/proxy-forensics/README.md .scratch/proxy-forensics/METHODOLOGY.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "SENTINELS|ascii_short|cyrillic_short|cjk_short|emoji|high_entropy_hex|single_point|non_claude_high_residuals|claude_near_boundary" .scratch/proxy-forensics/test_tokenizer_probe.py .scratch/proxy-forensics/tokenizer_probe.py' in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1170ms:
+10:response. Fit `gateway_tokens = alpha * baseline_tokens + beta` via least squares,
+72:     json.dumps({"key": "value", "nested": {"arr": [1, 2, 3, 4, 5], "bool": True},
+132:def least_squares_fit(xs, ys):
+150:def classify_fit(alpha, beta, residuals, repeat_variance):
+151:    """Given fit result, emit verdict."""
+154:            "verdict": "insufficient_data",
+155:            "reason": "too few successful probe points to fit",
+170:    beta_ok = abs(beta) < 100  # generous — absorbs CLI wrapping overhead
+171:    residual_ok_claude = max_resid < 5
+173:    repeat_stable = repeat_variance < 3
+175:    if alpha_ok and beta_ok and residual_ok_claude and repeat_stable:
+176:        findings["verdict"] = "claude_bpe"
+179:        findings["verdict"] = "non_claude"
+181:    elif not repeat_stable or not residual_ok_ambiguous:
+182:        findings["verdict"] = "ambiguous"
+185:        findings["verdict"] = "claude_bpe_weak"
+210:    baseline_tokens = shlex.split(args.baseline_cmd, posix=False)
+211:    gateway_tokens = shlex.split(args.gateway_cmd, posix=False)
+216:    print(f"    baseline: {args.baseline_cmd} (shell={args.baseline_shell})")
+217:    print(f"    gateway:  {args.gateway_cmd} (shell={args.gateway_shell})")
+222:    per_sentinel = {}
+225:        per_sentinel[name] = {
+227:            "baseline_runs": [],
+228:            "gateway_runs": [],
+234:            r = run_probe_call(baseline_tokens, args.baseline_shell, text, args.model)
+236:            per_sentinel[name]["baseline_runs"].append({**r, "elapsed_s": round(elapsed, 1)})
+245:            r = run_probe_call(gateway_tokens, args.gateway_shell, text, gateway_model)
+247:            per_sentinel[name]["gateway_runs"].append({**r, "elapsed_s": round(elapsed, 1)})
+253:    # Build data arrays for fit
+257:    repeat_variances = []
+258:    for name, data in per_sentinel.items():
+259:        b_runs = [r for r in data["baseline_runs"] if r.get("total_input") is not None]
+260:        g_runs = [r for r in data["gateway_runs"] if r.get("total_input") is not None]
+269:        repeat_variances.append(max(b_var, g_var))
+279:    alpha, beta, residuals = least_squares_fit(baseline_points, gateway_points)
+280:    max_repeat_var = max(repeat_variances) if repeat_variances else 0
+282:    verdict = classify_fit(alpha, beta, residuals, max_repeat_var)
+285:    for k, v in verdict.items():
+290:            "probe_version": PROBE_VERSION,
+291:            "baseline_cmd": args.baseline_cmd,
+292:            "gateway_cmd": args.gateway_cmd,
+296:            "per_sentinel": per_sentinel,
+297:            "fit": {
+299:                "baseline_tokens": baseline_points,
+300:                "gateway_tokens": gateway_points,
+302:                "repeat_variances": repeat_variances,
+304:            "verdict": verdict,
+307:            json.dump(full, f, indent=2, ensure_ascii=False)
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1248ms:
+.scratch/proxy-forensics/tokenizer_probe.py:50:# (especially byte-level fallback and emoji handling).
+.scratch/proxy-forensics/tokenizer_probe.py:51:SENTINELS = [
+.scratch/proxy-forensics/tokenizer_probe.py:52:    ("ascii_short", "hello"),
+.scratch/proxy-forensics/tokenizer_probe.py:57:    ("cyrillic_short", "Привет мир"),
+.scratch/proxy-forensics/tokenizer_probe.py:62:    ("cjk_short", "你好"),
+.scratch/proxy-forensics/tokenizer_probe.py:66:    ("emoji", "🚀✨🎉🎊🎈🎁🎀⭐🌟💫🎯🎪🎨🎬🎭"),
+.scratch/proxy-forensics/tokenizer_probe.py:74:    ("high_entropy_hex",
+.scratch/proxy-forensics/tokenizer_probe.py:214:    sentinels = [(name, text) for name, text in SENTINELS if name not in args.skip_sentinels]
+.scratch/proxy-forensics/test_tokenizer_probe.py:76:assert_eq("single_point_no_fit", alpha, None)
+.scratch/proxy-forensics/test_tokenizer_probe.py:106:assert_eq("non_claude_high_residuals", v["verdict"], "non_claude")
+.scratch/proxy-forensics/test_tokenizer_probe.py:120:print("\n--- SENTINELS set composition ---")
+.scratch/proxy-forensics/test_tokenizer_probe.py:121:assert_true("sentinel_count_10", len(tp.SENTINELS) == 10,
+.scratch/proxy-forensics/test_tokenizer_probe.py:122:            f"got {len(tp.SENTINELS)}")
+.scratch/proxy-forensics/test_tokenizer_probe.py:123:names = [s[0] for s in tp.SENTINELS]
+.scratch/proxy-forensics/test_tokenizer_probe.py:128:    "emoji": sum(1 for n in names if "emoji" in n),
+.scratch/proxy-forensics/test_tokenizer_probe.py:136:assert_true("emoji_present", classes["emoji"] >= 1)
+.scratch/proxy-forensics/test_tokenizer_probe.py:142:texts = [t for _, t in tp.SENTINELS]
+.scratch/proxy-forensics/test_tokenizer_probe.py:146:ascii_short = next(t for n, t in tp.SENTINELS if n == "ascii_short")
+.scratch/proxy-forensics/test_tokenizer_probe.py:147:ascii_long = next(t for n, t in tp.SENTINELS if n == "ascii_long")
+.scratch/proxy-forensics/test_tokenizer_probe.py:148:assert_true("ascii_short_is_short", len(ascii_short) < 30, f"len={len(ascii_short)}")
+.scratch/proxy-forensics/test_tokenizer_probe.py:165:assert_true("claude_near_boundary_not_forced_non_claude",
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1471ms:
+.scratch/proxy-forensics/METHODOLOGY.md:21:2. **Backend identity range** — frontier-Claude signature, distilled student signature, older checkpoint, non-Claude base. (Note: current toolkit cannot distinguish a real Claude from a high-quality Claude-like distill behind the same middleware gateway — the `distill+middleware` hypothesis class is a documented blind spot.)
+.scratch/proxy-forensics/METHODOLOGY.md:142:│   ├── Both pass → CAPABLE + RECENT backend (frontier-Claude signature — could still be distill+middleware)
+.scratch/proxy-forensics/METHODOLOGY.md:200:7. **No `distill+middleware` hypothesis.** Would look like A+Middleware to the current classifier.
+.scratch/proxy-forensics/fingerprint.py:14:    reflect the documented distill+middleware blind spot honestly.
+.scratch/proxy-forensics/fingerprint.py:18:    up; added distill+middleware blind-spot entry to known_gaps.
+.scratch/proxy-forensics/fingerprint.py:747:def classify(probe_findings):
+.scratch/proxy-forensics/fingerprint.py:859:    a_mid_gate = (mw >= 0.6 and cb >= 0.5)
+.scratch/proxy-forensics/fingerprint.py:860:    a_mid = (0.5 * mw + 0.35 * cb + 0.15 * rc) if a_mid_gate else min(0.5, 0.4 * mw + 0.3 * cb)
+.scratch/proxy-forensics/fingerprint.py:872:    a_clean_gate = (cb >= 0.6 and mw < 0.4 and si < 0.1 and not any_intercept_signal)
+.scratch/proxy-forensics/fingerprint.py:873:    a_clean = (0.55 * cb + 0.25 * rc - 0.3 * mw - 0.5 * si) if a_clean_gate else min(0.5, 0.4 * cb + 0.2 * rc - 0.3 * mw - 0.5 * si)
+.scratch/proxy-forensics/fingerprint.py:875:    c_gate = (di >= 0.6 and cb < 0.5)
+.scratch/proxy-forensics/fingerprint.py:876:    c_distill = (0.7 * di - 0.3 * cb) if c_gate else min(0.5, 0.5 * di - 0.2 * cb)
+.scratch/proxy-forensics/fingerprint.py:883:    # documented distill+middleware blind spot (see known_gaps), these labels
+.scratch/proxy-forensics/fingerprint.py:902:            gate_ok = a_mid_gate
+.scratch/proxy-forensics/fingerprint.py:904:            gate_ok = a_clean_gate
+.scratch/proxy-forensics/fingerprint.py:906:            gate_ok = c_gate
+.scratch/proxy-forensics/fingerprint.py:915:        "primary_hypothesis": top[0],
+.scratch/proxy-forensics/fingerprint.py:921:        "gates_passed": {
+.scratch/proxy-forensics/fingerprint.py:922:            "A+Middleware": a_mid_gate,
+.scratch/proxy-forensics/fingerprint.py:923:            "A-clean": a_clean_gate,
+.scratch/proxy-forensics/fingerprint.py:924:            "C": c_gate,
+.scratch/proxy-forensics/fingerprint.py:1079:    print(f"  Primary:    {verdict['primary_hypothesis']}")
+.scratch/proxy-forensics/README.md:168:See `baselines.json → interpretation_rules.known_gaps` for the full list. Highlights:
+.scratch/proxy-forensics/README.md:175:- **No `distill+middleware` hypothesis.** A distilled student fronted by a middleware gateway would look like A+Middleware; we don't currently distinguish these. Future hypothesis class.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "claude_bpe|beta|residual|count_tokens|API key|CLI-mediated|max_tokens|effort" .scratch/proxy-forensics/tokenizer_probe.py' in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 877ms:
+10:response. Fit `gateway_tokens = alpha * baseline_tokens + beta` via least squares,
+13:  - `beta` stable integer-ish across classes: constant injection offset
+14:  - low residuals across character classes: tokenizer not drifting per class
+18:  - `claude_bpe`: alpha ∈ [0.97, 1.03], |beta| < 50 and stable, max residual < 3
+19:  - `non_claude`: alpha significantly ≠ 1 OR high residuals across classes
+22:NOTE: Anthropic `messages.count_tokens` would be the ideal free baseline per
+23:codex recommendation, but it requires a raw API key. On systems where only the
+24:Claude CLI OAuth is available, we fall back to CLI-mediated calls with tiny
+25:`max_tokens` to minimize cost (~$0.001 per call). The `beta` intercept will
+27:interpret alpha not beta.
+89:        "--effort", "low",  # minimize cost — input_tokens independent of effort
+133:    """Fit y = alpha*x + beta via simple least squares. Returns (alpha, beta, residuals)."""
+145:    beta = (sum_y - alpha * sum_x) / n
+146:    residuals = [y - (alpha * x + beta) for x, y in zip(xs, ys)]
+147:    return alpha, beta, residuals
+150:def classify_fit(alpha, beta, residuals, repeat_variance):
+157:    max_resid = max(abs(r) for r in residuals) if residuals else float("inf")
+158:    mean_abs_resid = sum(abs(r) for r in residuals) / len(residuals) if residuals else float("inf")
+161:        "beta": round(beta, 2),
+162:        "max_abs_residual": round(max_resid, 2),
+163:        "mean_abs_residual": round(mean_abs_resid, 2),
+165:        "n_points": len(residuals),
+170:    beta_ok = abs(beta) < 100  # generous — absorbs CLI wrapping overhead
+171:    residual_ok_claude = max_resid < 5
+172:    residual_ok_ambiguous = max_resid < 15
+175:    if alpha_ok and beta_ok and residual_ok_claude and repeat_stable:
+176:        findings["verdict"] = "claude_bpe"
+177:        findings["reason"] = f"alpha={alpha:.3f} ≈ 1, residuals ≤ {max_resid:.1f}, repeats stable"
+181:    elif not repeat_stable or not residual_ok_ambiguous:
+185:        findings["verdict"] = "claude_bpe_weak"
+186:        findings["reason"] = "close to claude but residuals suggest small drift"
+279:    alpha, beta, residuals = least_squares_fit(baseline_points, gateway_points)
+282:    verdict = classify_fit(alpha, beta, residuals, max_repeat_var)
+301:                "residuals": residuals,
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T20:49:24.313275Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2.4 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+[31;1mGet-ChildItem: [0m
+[31;1m[36;1mLine |[0m
+[31;1m[36;1m[36;1m   2 | [0m [36;1mGet-ChildItem 'skills' -Recurse -Name[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m     | [31;1m ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+[31;1m[36;1m[36;1m[0m[36;1m[0m[36;1m[31;1m[31;1m[36;1m     | [31;1mCannot find path 'C:\Users\<user>\.codex\memories\skills' because it does not exist.[0m
+
+2026-04-24T20:49:42.895288Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.1 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+### Summary
+
+Schema is directionally good, and the CLI-mediated baseline is acceptable for v0.6 if it is explicitly labeled as a weaker `usage.total_input` probe. I would not let Items 3/5 build on this exact contract yet because a few field names and verdict semantics are too easy to misuse downstream.
+
+### Schema assessment
+
+| Field / design choice | Assessment |
+|---|---|
+| `probe_version` | Keep. Increment if sentinel set or verdict semantics change. |
+| `baseline_cmd`, `gateway_cmd`, `model`, `gateway_model` | Keep, but add `baseline_shell` / `gateway_shell` for reproducibility. |
+|  | Add `baseline_method: "claude_cli_usage_total_input"` now; later can be `"anthropic_count_tokens"`. |
+| `per_sentinel.*_runs` | Good raw evidence surface. Keep `input_tokens`, cache fields, `total_input`, `model_reported`, `msg_id_prefix`. |
+| `fit.baseline_tokens`, `fit.gateway_tokens` | Rename or qualify. These are averaged `total_input`, not raw tokenizer counts. |
+|  | Add `token_metric: "total_input_tokens_avg"` or rename arrays to `baseline_total_input_avg` / `gateway_total_input_avg`. |
+| `fit.repeat_variances` | Misnamed. Current code stores max-min spread, not variance. Rename to `repeat_ranges` / `repeat_spread_tokens`. |
+| `verdict.n_points` | Keep, but enforce it. Strong verdicts should require enough successful sentinel coverage, not just a 2-point fit. |
+| Threshold docs vs code | Must fix before lock-in. Header says `|beta| < 50` and residual `<3`, while code uses `|beta| < 100`, residual `<5`, ambiguous `<15` in [tokenizer_probe.py](D:/dev/Orchestrator/Orchestrarium/.scratch/proxy-forensics/tokenizer_probe.py:18) and [tokenizer_probe.py](D:/dev/Orchestrator/Orchestrarium/.scratch/proxy-forensics/tokenizer_probe.py:170). |
+| `non_claude` semantics | Needs correction. Current implementation only emits `non_claude` when `alpha` is outside tolerance; high residuals with `alpha ~= 1` become `ambiguous`, despite the stated “OR high residuals” rule. |
+|  | See [tokenizer_probe.py](D:/dev/Orchestrator/Orchestrarium/.scratch/proxy-forensics/tokenizer_probe.py:175). Add a stable high-residual path to `non_claude`. |
+
+### Answers to 6 questions
+
+1. **CLI fallback:** acceptable. Do not block v0.6 on an API key, but the JSON must identify this as a CLI `usage.total_input` approximation, not a clean Anthropic tokenizer-count baseline.
+
+2. **Thresholds:** `alpha ∈ [0.97, 1.03]` is fine for `claude_bpe`. `|beta| < 100` is acceptable as a sanity bound for CLI wrapping, but do not let beta drive identity. Use residuals + stability as the real discriminator.
+
+3. **Sentinels:** 10 is acceptable. Emoji and high-entropy pairing is not required before Items 3/5, but if you want the strongest locked set, make it 12: ascii/cyrillic/cjk/emoji/code/hex each short+long.
+
+4. **Verdict categories:** keep all 5. `claude_bpe_weak` is useful because downstream can treat it as “do not flip classification, annotate only.”
+
+5. **Item 3 contract:** `non_claude + middleware >= 0.6` may open the `distill+middleware` hypothesis, but label carefully: tokenizer mismatch proves “non-Claude tokenizer/backend,” not necessarily “distill.” `non_claude` without middleware should not trigger `distill+middleware`, but it should veto high-confidence `A-clean` / literal Claude-backend claims.
+
+6. **Repeat spread <= 2:** reasonable. Since token counts should be deterministic, `0` is expected, `1-2` is tolerable, and `>=3` should go `ambiguous`.
+
+### Blockers before Items 3, 4, 5 can build on this
+
+- Rename `repeat_variances` to a spread/range term, or downstream will encode the wrong statistic.
+
+- Add explicit provenance fields: `baseline_method`, `token_metric`, `baseline_shell`, `gateway_shell`.
+
+- Enforce minimum successful coverage for strong verdicts. My recommendation: strong `claude_bpe` / `non_claude` requires `n_points >= 8`; fewer successful sentinels should be `insufficient_data` or `ambiguous`.
+
+- Fix `non_claude` classification so stable high class-dependent residuals can emit `non_claude` even when fitted `alpha` is near 1.
+
+- Update docstring/header thresholds to match the actual contract.
+
+- In Item 3, make tokenizer `non_claude` a backend-identity signal and A-clean veto, not only a `distill+middleware` add-on.
+
+I could not rerun `test_tokenizer_probe.py`; the sandbox policy rejected executing the Python test command. I inspected the implementation and tests, and treated your “28 tests, 0 failures” as reported evidence rather than fresh local execution.
+
+### Verdict
+
+MODIFY
+
+Required changes: provenance fields, metric/range naming, minimum point enforcement, high-residual `non_claude` semantics, and threshold doc sync. No API-key blocker.
+
+
+tokens used
+74,670
+### Summary
+
+Schema is directionally good, and the CLI-mediated baseline is acceptable for v0.6 if it is explicitly labeled as a weaker `usage.total_input` probe. I would not let Items 3/5 build on this exact contract yet because a few field names and verdict semantics are too easy to misuse downstream.
+
+### Schema assessment
+
+| Field / design choice | Assessment |
+|---|---|
+| `probe_version` | Keep. Increment if sentinel set or verdict semantics change. |
+| `baseline_cmd`, `gateway_cmd`, `model`, `gateway_model` | Keep, but add `baseline_shell` / `gateway_shell` for reproducibility. |
+|  | Add `baseline_method: "claude_cli_usage_total_input"` now; later can be `"anthropic_count_tokens"`. |
+| `per_sentinel.*_runs` | Good raw evidence surface. Keep `input_tokens`, cache fields, `total_input`, `model_reported`, `msg_id_prefix`. |
+| `fit.baseline_tokens`, `fit.gateway_tokens` | Rename or qualify. These are averaged `total_input`, not raw tokenizer counts. |
+|  | Add `token_metric: "total_input_tokens_avg"` or rename arrays to `baseline_total_input_avg` / `gateway_total_input_avg`. |
+| `fit.repeat_variances` | Misnamed. Current code stores max-min spread, not variance. Rename to `repeat_ranges` / `repeat_spread_tokens`. |
+| `verdict.n_points` | Keep, but enforce it. Strong verdicts should require enough successful sentinel coverage, not just a 2-point fit. |
+| Threshold docs vs code | Must fix before lock-in. Header says `|beta| < 50` and residual `<3`, while code uses `|beta| < 100`, residual `<5`, ambiguous `<15` in [tokenizer_probe.py](D:/dev/Orchestrator/Orchestrarium/.scratch/proxy-forensics/tokenizer_probe.py:18) and [tokenizer_probe.py](D:/dev/Orchestrator/Orchestrarium/.scratch/proxy-forensics/tokenizer_probe.py:170). |
+| `non_claude` semantics | Needs correction. Current implementation only emits `non_claude` when `alpha` is outside tolerance; high residuals with `alpha ~= 1` become `ambiguous`, despite the stated “OR high residuals” rule. |
+|  | See [tokenizer_probe.py](D:/dev/Orchestrator/Orchestrarium/.scratch/proxy-forensics/tokenizer_probe.py:175). Add a stable high-residual path to `non_claude`. |
+
+### Answers to 6 questions
+
+1. **CLI fallback:** acceptable. Do not block v0.6 on an API key, but the JSON must identify this as a CLI `usage.total_input` approximation, not a clean Anthropic tokenizer-count baseline.
+
+2. **Thresholds:** `alpha ∈ [0.97, 1.03]` is fine for `claude_bpe`. `|beta| < 100` is acceptable as a sanity bound for CLI wrapping, but do not let beta drive identity. Use residuals + stability as the real discriminator.
+
+3. **Sentinels:** 10 is acceptable. Emoji and high-entropy pairing is not required before Items 3/5, but if you want the strongest locked set, make it 12: ascii/cyrillic/cjk/emoji/code/hex each short+long.
+
+4. **Verdict categories:** keep all 5. `claude_bpe_weak` is useful because downstream can treat it as “do not flip classification, annotate only.”
+
+5. **Item 3 contract:** `non_claude + middleware >= 0.6` may open the `distill+middleware` hypothesis, but label carefully: tokenizer mismatch proves “non-Claude tokenizer/backend,” not necessarily “distill.” `non_claude` without middleware should not trigger `distill+middleware`, but it should veto high-confidence `A-clean` / literal Claude-backend claims.
+
+6. **Repeat spread <= 2:** reasonable. Since token counts should be deterministic, `0` is expected, `1-2` is tolerable, and `>=3` should go `ambiguous`.
+
+### Blockers before Items 3, 4, 5 can build on this
+
+- Rename `repeat_variances` to a spread/range term, or downstream will encode the wrong statistic.
+
+- Add explicit provenance fields: `baseline_method`, `token_metric`, `baseline_shell`, `gateway_shell`.
+
+- Enforce minimum successful coverage for strong verdicts. My recommendation: strong `claude_bpe` / `non_claude` requires `n_points >= 8`; fewer successful sentinels should be `insufficient_data` or `ambiguous`.
+
+- Fix `non_claude` classification so stable high class-dependent residuals can emit `non_claude` even when fitted `alpha` is near 1.
+
+- Update docstring/header thresholds to match the actual contract.
+
+- In Item 3, make tokenizer `non_claude` a backend-identity signal and A-clean veto, not only a `distill+middleware` add-on.
+
+I could not rerun `test_tokenizer_probe.py`; the sandbox policy rejected executing the Python test command. I inspected the implementation and tests, and treated your “28 tests, 0 failures” as reported evidence rather than fresh local execution.
+
+### Verdict
+
+MODIFY
+
+Required changes: provenance fields, metric/range naming, minimum point enforcement, high-residual `non_claude` semantics, and threshold doc sync. No API-key blocker.
+
+

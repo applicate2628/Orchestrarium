@@ -1,0 +1,249 @@
+{
+  "target": "calibration-opus-4-6-medium",
+  "command": "claude --model claude-opus-4-6",
+  "scorer_version": "0.6.1",
+  "timestamp": "2026-04-25T00:29:04.102668Z",
+  "findings": {
+    "stylometric_717": {
+      "probe_id": "stylometric_717",
+      "run_count": 2,
+      "signals": {},
+      "notes": [],
+      "unique_output_hashes": 2,
+      "providers_observed": [
+        "anthropic-direct"
+      ],
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "33f3536ddc2f7417",
+          "raw_bytes": 12508,
+          "text_head": "\n\nReasoning: 7^4 = 2401 ≡ 1 (mod 100), so 7^17 = 7^(4·4+1) = (7^4)^4 · 7 ≡ 1·7 = 7 (mod 100).\nAnswer: 07",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 82,
+          "reported_model": "claude-opus-4-6",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "048b4e58601f3366",
+          "raw_bytes": 12488,
+          "text_head": "\n\nReasoning: 7^4 = 2401 ≡ 1 (mod 100), so 7^17 = 7^(4·4+1) = (7^4)^4 · 7 ≡ 1·7 = 7.\nAnswer: 07",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 77,
+          "reported_model": "claude-opus-4-6",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    },
+    "temporal_cutoff": {
+      "probe_id": "temporal_cutoff",
+      "run_count": 2,
+      "signals": {
+        "early_2025_knowledge": 0.3
+      },
+      "notes": [],
+      "unique_output_hashes": 2,
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "02886eaf04ab20a1",
+          "raw_bytes": 15359,
+          "text_head": "January 2025: Donald Trump inaugurated as 47th President of the United States in Washington, D.C.\nJanuary 2025: Palisades and Eaton wildfires destroyed thousands of structures across Los Angeles Count",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 262,
+          "reported_model": "claude-opus-4-6",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "68a50b26fcb10b27",
+          "raw_bytes": 15992,
+          "text_head": "January 2025: Donald Trump inaugurated as 47th President of the United States in Washington, D.C.\nJanuary 2025: Palisades Fire and Eaton Fire devastate Los Angeles, California.\nFebruary 2025: DeepSeek",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 373,
+          "reported_model": "claude-opus-4-6",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    },
+    "tight_reasoning_crt": {
+      "probe_id": "tight_reasoning_crt",
+      "run_count": 2,
+      "signals": {
+        "format_rigor_pass": 0.8
+      },
+      "notes": [
+        "All 2 valid runs satisfy format constraints"
+      ],
+      "unique_output_hashes": 2,
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "89fb296e210a978a",
+          "raw_bytes": 17813,
+          "text_head": "Any prime p > 3 is odd, so writing p = 2k + 1 gives p² = 4k(k + 1) + 1 ≡ 1 (mod 8) because k(k + 1) is even; moreover p is coprime to 3, so p ≡ ±1 (mod 3) and thus p² ≡ 1 (mod 3). The Chinese Remainde",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 1110,
+          "reported_model": "claude-opus-4-6",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "1f98b6019056dd99",
+          "raw_bytes": 17895,
+          "text_head": "Any prime p > 3 is odd and coprime to 3, so writing p = 2k + 1 we get p² = 4k(k + 1) + 1 ≡ 1 (mod 8) because one of k, k + 1 is even, and separately p ≡ ±1 (mod 3) gives p² ≡ 1 (mod 3). Since gcd(8, 3",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 1114,
+          "reported_model": "claude-opus-4-6",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    },
+    "self_introspection_json": {
+      "probe_id": "self_introspection_json",
+      "run_count": 2,
+      "signals": {
+        "clean_introspection": 0.6
+      },
+      "notes": [
+        "All runs schema-match; 2/2 wrapped in codefence (format wart, not gateway filter)"
+      ],
+      "unique_output_hashes": 2,
+      "reported_architecture_family": [
+        "transformer",
+        "Claude"
+      ],
+      "reported_knowledge_cutoff_month": [
+        "May 2025",
+        "May 2025"
+      ],
+      "reported_supports_extended_thinking": [
+        true,
+        true
+      ],
+      "reported_can_use_prompt_caching": [
+        true,
+        true
+      ],
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "07f412d1b36b4ed1",
+          "raw_bytes": 12614,
+          "text_head": "\n\n```json\n{\"architecture_family\":\"transformer\",\"supports_extended_thinking\":true,\"can_use_prompt_caching\":true,\"knowledge_cutoff_month\":\"May 2025\"}\n```",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 47,
+          "reported_model": "claude-opus-4-6",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "b381c7dc0cdb5152",
+          "raw_bytes": 12648,
+          "text_head": "\n\n```json\n{\n  \"architecture_family\": \"Claude\",\n  \"supports_extended_thinking\": true,\n  \"can_use_prompt_caching\": true,\n  \"knowledge_cutoff_month\": \"May 2025\"\n}\n```",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 63,
+          "reported_model": "claude-opus-4-6",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    },
+    "anti_euler_override": {
+      "probe_id": "anti_euler_override",
+      "run_count": 2,
+      "signals": {
+        "soft_override_success": 0.85
+      },
+      "notes": [
+        "All 2 valid runs: ban-compliant + canonical opening + correct answer."
+      ],
+      "unique_output_hashes": 2,
+      "per_run": [
+        {
+          "status": "valid_stream",
+          "raw_hash": "6d46c048d6229e5c",
+          "raw_bytes": 14195,
+          "text_head": "Reasoning: 7^2 = 49, 7^4 = 49^2 = 2401 ≡ 1 (mod 100), so 7^8 ≡ 1, 7^16 ≡ 1, and 7^17 = 7^16 · 7 ≡ 7.\nAnswer: **7**",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 277,
+          "reported_model": "claude-opus-4-6",
+          "msg_id_provider": "anthropic-direct"
+        },
+        {
+          "status": "valid_stream",
+          "raw_hash": "7b86fce0f7d9ef07",
+          "raw_bytes": 14337,
+          "text_head": "Reasoning: 7^2 = 49, 7^4 = 49^2 = 2401 ≡ 01 (mod 100), so 7^8 ≡ 01, 7^16 ≡ 01, and 7^17 = 7^16 · 7 ≡ 07 (mod 100).\n\nAnswer: **7**",
+          "intercept_raw": null,
+          "error_reason": null,
+          "out_tok": 296,
+          "reported_model": "claude-opus-4-6",
+          "msg_id_provider": "anthropic-direct"
+        }
+      ]
+    }
+  },
+  "classification": {
+    "primary_hypothesis": "A-clean (Claude-like backend, no detectable middleware)",
+    "primary_score": 0.588,
+    "confidence": "high",
+    "gap_to_second": 0.288,
+    "ranked_hypotheses": [
+      [
+        "A-clean (Claude-like backend, no detectable middleware)",
+        0.588
+      ],
+      [
+        "A+Middleware (Claude-like backend + active gateway)",
+        0.3
+      ],
+      [
+        "ambiguous / insufficient evidence",
+        0.278
+      ],
+      [
+        "C (distilled student, no middleware)",
+        0.0
+      ],
+      [
+        "distill+middleware (non-Claude backend + active gateway)",
+        0.0
+      ]
+    ],
+    "evidence_weights": {
+      "middleware": 0.0,
+      "capable_base": 1.295,
+      "distill": 0.0,
+      "recent_cutoff": 0.15,
+      "feature_strip": 0.0,
+      "suspicious_intercept": 0.0,
+      "network_support": 0.0,
+      "tokenizer_non_claude": 0.0,
+      "tokenizer_claude": 0.0
+    },
+    "gates_passed": {
+      "A+Middleware": false,
+      "A-clean": true,
+      "C": false,
+      "distill+middleware": false
+    },
+    "annotations": [],
+    "notes": [
+      "Capable-base: clean_introspection +0.24",
+      "Capable-base: soft_override_success (no prior bias; weak signal) +0.26",
+      "Capable-base: format_rigor_pass +0.80",
+      "Recent-cutoff: early_2025_knowledge +0.15"
+    ]
+  },
+  "scorer_version_note": "Bumped 0.6.0→0.6.1 post-calibration; classification reflects v0.6.1 fixes (codefence, april_2025, ambig divisor 2.0)."
+}

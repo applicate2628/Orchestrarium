@@ -1,0 +1,183 @@
+=== Calibration matrix run ===
+    timestamp: 2026-04-25T00:14:44.644988+00:00
+    combinations: 25
+    output dir:   D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration
+
+[1/25] calibration-opus-4-5-low (lane=primary)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-5-low --cmd claude --model claude-opus-4-5 --repeats 2 --probe-effort low --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-5-low.json
+    elapsed: 124s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.675
+    Confidence: high (gap to second: 0.375)
+
+[2/25] calibration-opus-4-5-medium (lane=explore)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-5-medium --cmd claude --model claude-opus-4-5 --repeats 2 --probe-effort medium --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-5-medium.json
+    elapsed: 126s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.588
+    Confidence: high (gap to second: 0.288)
+
+[3/25] calibration-opus-4-5-high (lane=explore)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-5-high --cmd claude --model claude-opus-4-5 --repeats 2 --probe-effort high --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-5-high.json
+    elapsed: 113s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.675
+    Confidence: high (gap to second: 0.375)
+
+[4/25] calibration-opus-4-5-xhigh (lane=explore)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-5-xhigh --cmd claude --model claude-opus-4-5 --repeats 2 --probe-effort xhigh --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-5-xhigh.json
+    elapsed: 121s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.588
+    Confidence: high (gap to second: 0.288)
+
+[5/25] calibration-opus-4-5-max (lane=primary)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-5-max --cmd claude --model claude-opus-4-5 --repeats 2 --probe-effort max --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-5-max.json
+    elapsed: 127s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.588
+    Confidence: high (gap to second: 0.288)
+
+[6/25] calibration-opus-4-6-low (lane=primary)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-6-low --cmd claude --model claude-opus-4-6 --repeats 2 --probe-effort low --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-6-low.json
+    elapsed: 125s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.675
+    Confidence: high (gap to second: 0.375)
+
+[7/25] calibration-opus-4-6-medium (lane=explore)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-6-medium --cmd claude --model claude-opus-4-6 --repeats 2 --probe-effort medium --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-6-medium.json
+    elapsed: 123s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.588
+    Confidence: high (gap to second: 0.288)
+
+[8/25] calibration-opus-4-6-high (lane=explore)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-6-high --cmd claude --model claude-opus-4-6 --repeats 2 --probe-effort high --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-6-high.json
+    elapsed: 132s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.675
+    Confidence: high (gap to second: 0.375)
+
+[9/25] calibration-opus-4-6-xhigh (lane=explore)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-6-xhigh --cmd claude --model claude-opus-4-6 --repeats 2 --probe-effort xhigh --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-6-xhigh.json
+    elapsed: 112s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.675
+    Confidence: high (gap to second: 0.375)
+
+[10/25] calibration-opus-4-6-max (lane=primary)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-6-max --cmd claude --model claude-opus-4-6 --repeats 2 --probe-effort max --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-6-max.json
+    elapsed: 123s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.675
+    Confidence: high (gap to second: 0.375)
+
+[11/25] calibration-opus-4-7-low (lane=primary)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-7-low --cmd claude --model claude-opus-4-7 --repeats 2 --probe-effort low --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-7-low.json
+    elapsed: 175s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.725
+    Confidence: high (gap to second: 0.425)
+
+[12/25] calibration-opus-4-7-medium (lane=explore)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-7-medium --cmd claude --model claude-opus-4-7 --repeats 2 --probe-effort medium --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-7-medium.json
+    elapsed: 175s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.725
+    Confidence: high (gap to second: 0.425)
+
+[13/25] calibration-opus-4-7-high (lane=explore)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-7-high --cmd claude --model claude-opus-4-7 --repeats 2 --probe-effort high --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-7-high.json
+    elapsed: 197s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.725
+    Confidence: high (gap to second: 0.425)
+
+[14/25] calibration-opus-4-7-xhigh (lane=explore)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-7-xhigh --cmd claude --model claude-opus-4-7 --repeats 2 --probe-effort xhigh --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-7-xhigh.json
+    elapsed: 177s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.675
+    Confidence: high (gap to second: 0.375)
+
+[15/25] calibration-opus-4-7-max (lane=primary)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-opus-4-7-max --cmd claude --model claude-opus-4-7 --repeats 2 --probe-effort max --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-opus-4-7-max.json
+    elapsed: 170s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.725
+    Confidence: high (gap to second: 0.425)
+
+[16/25] calibration-sonnet-4-6-low (lane=primary)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-sonnet-4-6-low --cmd claude --model claude-sonnet-4-6 --repeats 2 --probe-effort low --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-sonnet-4-6-low.json
+    elapsed: 132s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.725
+    Confidence: high (gap to second: 0.425)
+
+[17/25] calibration-sonnet-4-6-medium (lane=explore)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-sonnet-4-6-medium --cmd claude --model claude-sonnet-4-6 --repeats 2 --probe-effort medium --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-sonnet-4-6-medium.json
+    elapsed: 130s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.675
+    Confidence: high (gap to second: 0.375)
+
+[18/25] calibration-sonnet-4-6-high (lane=primary)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-sonnet-4-6-high --cmd claude --model claude-sonnet-4-6 --repeats 2 --probe-effort high --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-sonnet-4-6-high.json
+    elapsed: 130s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.675
+    Confidence: high (gap to second: 0.375)
+
+[19/25] calibration-sonnet-4-6-xhigh (lane=degraded)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-sonnet-4-6-xhigh --cmd claude --model claude-sonnet-4-6 --repeats 2 --probe-effort xhigh --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-sonnet-4-6-xhigh.json
+    elapsed: 156s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.725
+    Confidence: high (gap to second: 0.425)
+
+[20/25] calibration-sonnet-4-6-max (lane=degraded)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-sonnet-4-6-max --cmd claude --model claude-sonnet-4-6 --repeats 2 --probe-effort max --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-sonnet-4-6-max.json
+    elapsed: 137s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.675
+    Confidence: high (gap to second: 0.375)
+
+[21/25] calibration-haiku-4-5-low (lane=primary)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-haiku-4-5-low --cmd claude --model claude-haiku-4-5-20251001 --repeats 2 --probe-effort low --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-haiku-4-5-low.json
+    elapsed: 134s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.55
+    Confidence: medium (gap to second: 0.198)
+
+[22/25] calibration-haiku-4-5-medium (lane=primary)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-haiku-4-5-medium --cmd claude --model claude-haiku-4-5-20251001 --repeats 2 --probe-effort medium --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-haiku-4-5-medium.json
+    elapsed: 175s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.55
+    Confidence: medium (gap to second: 0.198)
+
+[23/25] calibration-haiku-4-5-high (lane=explore)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-haiku-4-5-high --cmd claude --model claude-haiku-4-5-20251001 --repeats 2 --probe-effort high --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-haiku-4-5-high.json
+    elapsed: 145s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.55
+    Confidence: medium (gap to second: 0.198)
+
+[24/25] calibration-haiku-4-5-xhigh (lane=degraded)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-haiku-4-5-xhigh --cmd claude --model claude-haiku-4-5-20251001 --repeats 2 --probe-effort xhigh --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-haiku-4-5-xhigh.json
+    elapsed: 139s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.55
+    Confidence: medium (gap to second: 0.198)
+
+[25/25] calibration-haiku-4-5-max (lane=degraded)
+    cmd: python D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\fingerprint.py --label calibration-haiku-4-5-max --cmd claude --model claude-haiku-4-5-20251001 --repeats 2 --probe-effort max --save-raw D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration\calibration-haiku-4-5-max.json
+    elapsed: 126s   exit: 0
+    Primary:    A-clean (Claude-like backend, no detectable middleware)
+    Score:      0.55
+    Confidence: medium (gap to second: 0.198)
+
+=== Calibration complete ===
+    total elapsed: 3527s (58.8 min)
+    log saved to: D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics\calibration/_calibration_log.json

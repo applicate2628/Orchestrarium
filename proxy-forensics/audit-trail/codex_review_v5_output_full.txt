@@ -1,0 +1,3252 @@
+Reading additional input from stdin...
+OpenAI Codex v0.124.0 (research preview)
+--------
+workdir: D:\dev\Orchestrator\Orchestrarium
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019dc028-7887-7d03-af82-839ca5cdece2
+--------
+user
+# Re-review round 5: Claude proxy forensic toolkit v0.5
+
+v0.1 initial review → v0.2/v0.3/v0.4 all RED. Target: GREEN with documented gaps.
+
+## Files under `.scratch/proxy-forensics/`
+
+- `README.md`, `RESULTS.md`, `METHODOLOGY.md`
+- `fingerprint.py` (~680 lines, v0.5)
+- `baselines.json` (scorer_version 0.5.0)
+- `test_fingerprint.py` (109 tests, 0 failures)
+
+## What v0.4 → v0.5 addressed (your round-4 findings)
+
+### The one identified blocker
+- **`inconsistent_intercept` could still produce high-confidence A-clean.** **v0.5 fix:** A-clean gate now explicitly fails if ANY intercept signal is present (`hard_intercept`, `variable_intercept`, `inconsistent_intercept`, `schema_mismatch`, `single_run_intercept_unverified`). Also tightened suspicious_intercept threshold from 0.3 → 0.1.
+  Tests: `inconsistent_intercept_A_clean_gate_fails`, `single_run_intercept_unverified_A_clean_gate_fails`, `schema_mismatch_A_clean_gate_fails`, `clean_introspection_A_clean_gate_can_pass` (positive control).
+
+### Medium items
+- **baselines.json scorer_version still 0.3.0.** **v0.5 fix:** bumped to 0.5.0. Also `planned v0.3` → `planned future work` in known_gaps. Added `distill+middleware` blind-spot entry to known_gaps.
+- **argparse description still v0.2.** **v0.5 fix:** updated to v0.5.
+- **Scorer-version drift only printed, not enforced.** **v0.5 fix:** major-version mismatch now blocks execution (return code 2) unless `--force-stale`.
+- **`model.startswith("claude")` too permissive.** **v0.5 fix:** tightened to `claude-` with hyphen (forged `claudefake` / bare `claude` now intercepted). Tests `forged_claude_prefix_intercepted`, `bare_claude_intercepted`, `claude-opus-4-7_accepted`.
+- **Pope Leo XIV regex accepted both April and May.** **v0.5 fix:** restricted to May only (Leo XIV was elected May 2025; April would be hallucinated). Test `false_dated_leo_xiv_not_matched`.
+- **Hypothesis names said "real Claude".** **v0.5 fix:** renamed to "Claude-like backend" to reflect the documented distill+middleware blind spot honestly. `RESULTS.md` verdict also softened: "inconsistent with a distilled student" → "less consistent with a rigidly-biased distilled-only student" with explicit mention of the blind spot.
+
+### Low
+- **RESULTS.md categorical "inconsistent with distilled student".** Softened as above.
+
+### Test coverage additions (v0.5)
+- `inconsistent_intercept_A_clean_gate_fails`
+- `single_run_intercept_unverified_A_clean_gate_fails`
+- `schema_mismatch_A_clean_gate_fails`
+- `clean_introspection_A_clean_gate_can_pass` (positive control)
+- `forged_claude_prefix_intercepted`, `bare_claude_intercepted`, `claude-opus-4-7_accepted`
+- `false_dated_leo_xiv_not_matched`
+- `codefenced_schema_match`, `codefenced_wrap_detected`, `codefenced_schema_no_clean_introspection`
+
+Total: 109 tests, 0 failures.
+
+## Still-deferred (documented gaps)
+
+1. Tokenizer identity probe
+2. Quantization/precision degradation probe
+3. Multi-turn middleware probe
+4. `distill+middleware` hypothesis class (noted as blind spot affecting label interpretation)
+5. Threshold calibration (hand-tuned heuristics, not calibrated probabilities)
+6. Automated `--regenerate-baselines` implementation
+
+## Your task
+
+Strict re-review. Assess:
+1. Is the `inconsistent_intercept` blocker from round 4 actually fixed?
+2. Any NEW issues introduced in v0.5?
+3. Any remaining medium/high issue missed across all four rounds?
+4. Now that hypothesis names say "Claude-like" not "real Claude", is the `distill+middleware` blind spot adequately managed for documentation purposes (while deferred from implementation)?
+
+Output format:
+
+```
+### Summary (3 sentences)
+
+### Round-4 blocker → v0.5 status
+FIXED / PARTIAL / REGRESSION — explanation.
+
+### Other Round-4 items → v0.5 status
+- <item>: FIXED / PARTIAL / REGRESSION — explanation.
+
+### Any NEW issues in v0.5
+- <item, severity>
+
+### Verdict
+GREEN (ship v0.5 as stable with documented gaps) / YELLOW (land with caveats) / RED (exact blockers)
+```
+
+If GREEN, confirm explicitly that at the documented gap level the toolkit is fit for its intended "hypothesis generator" purpose. If YELLOW, list the caveats that must accompany any use. If RED, list the exact blockers and nothing more.
+
+Be strict but recognize diminishing returns. Don't raise new concerns of a severity you wouldn't have raised in round 1 (scope creep).
+codex
+I’ll treat this as a strict read-only review of the v0.5 artifacts, scoped to `.scratch/proxy-forensics/`, and I’m using the `review-changes` workflow because this is a focused re-review rather than an implementation task.
+2026-04-24T15:43:16.697158Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'proxy|forensic|Claude proxy|Orchestrarium|review' -Context 2,2"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'proxy|forensic|Claude proxy|Orchestrarium|review' -Context 2,2" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path C:\\Users\\<user>\\OneDrive\\Documents\\env\\Agents\\.codex\\skills\\review-changes\\SKILL.md -TotalCount 220" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Path .scratch\\proxy-forensics -Force | Select-Object Name,Length,LastWriteTime" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'proxy|forensic|Claude proxy|Orchestrarium|review' -Context 2,2"` rejected: blocked by policy
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Path .scratch\\proxy-forensics -Force | Select-Object Name,Length,LastWriteTime"` rejected: blocked by policy
+2026-04-24T15:43:16.698418Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Path .scratch\\proxy-forensics -Force | Select-Object Name,Length,LastWriteTime"` rejected: blocked by policy
+ succeeded in 1231ms:
+---
+name: review-changes
+description: Run a full read-only repository impact review starting from recent local changes, a specified diff, branch, commit range, or PR. Use when Codex needs to verify that recent fixes are complete, nothing important was forgotten, unchanged call sites or contracts were not broken, logic still holds across the wider repo, and regressions or missed edge cases are surfaced before commit.
+---
+
+# Review Changes
+
+Run a repository-wide impact review triggered by recent changes. The changed files are only the starting point; the review target is the full affected behavior surface, including unchanged dependents, nearby contracts, tests, and likely regression paths.
+
+## Core stance
+
+- Stay read-only.
+- Use the `review` template semantics from `src.codex/AGENTS.codex.md`: `$analyst` -> QA lane -> reviewer lane.
+- Review the repo in light of the changes, not just the diff lines themselves.
+- Findings come first, ordered by severity.
+- Do NOT commit or modify files.
+
+## Scope decision
+
+1. Check `$ARGUMENTS`.
+- If a PR URL, PR number, branch, commit range, or diff target is given, use that scope.
+- Otherwise inspect current unstaged and staged changes with `git diff` and `git diff --cached`.
+- If no changes are present, stop and tell the user there is nothing to review.
+2. If the user mentions a bug, review thread, accepted plan, or expected fix list, use that as the completion baseline.
+3. If no explicit baseline exists, review against the observed change impact and say that fix-completeness against an external checklist could not be verified.
+
+## Review workflow
+
+1. Run `$analyst` first.
+- Goal: identify what changed, which contracts or behaviors moved, what unchanged code depends on those changes, and where logic may now be incomplete.
+- Require the analyst to inspect callers, dependents, tests, config, schemas, and adjacent modules that may be affected even if they were not edited.
+2. Run the QA lane.
+- Use `$qa-engineer` by default.
+- If external review is preferred for an eligible QA-side slot, `$external-reviewer` may stand in for that lane.
+- Goal: verify regression risk, edge cases, test sufficiency, fix completeness, and whether untouched behavior is now inconsistent with the new logic.
+3. Run the reviewer lane.
+- Always invoke `$architecture-reviewer`.
+- Add `$security-reviewer` if the change touches auth, trust boundaries, secrets, dangerous configuration, input validation, or vulnerability surfaces.
+- Add `$performance-reviewer` if the change touches hot paths, query plans, rendering loops, budgets, throughput, or latency-sensitive behavior.
+- Add `$ux-reviewer`, `$accessibility-reviewer`, or `$ui-test-engineer` when the affected surface is clearly user-facing and the risk is interaction quality rather than pure logic.
+- If external review is preferred for an eligible review-side slot, `$external-reviewer` may stand in for the matching reviewer role.
+4. Keep the chain sequential in Codex unless the user explicitly approves a delegated team and the scopes are clearly independent.
+
+## What to verify
+
+- The requested fixes are actually present.
+- The apparent root cause is covered, not just one symptom.
+- Unchanged callers, consumers, configs, tests, or docs are still compatible with the new behavior.
+- Nearby logic still makes sense after the change.
+- Hidden regressions, stale assumptions, and missed edge cases are surfaced.
+- Validation is strong enough for the touched behavior, or the exact gap is called out.
+- The change did not leave partial rewires, stale branches, dead conditions, or forgotten follow-up adjustments in unchanged files.
+
+## Output
+
+Return one unified review with:
+
+- scope reviewed
+- findings ordered by severity
+- impacted unchanged surfaces that were checked
+- what could not be verified
+- verdict: `PASS`, `REVISE`, or `BLOCKED`
+
+If the user asked "did we fix everything?", answer that directly before the detailed findings.
+
+## Persistence
+
+- If the repository uses active work-items, persist the accepted review artifact there.
+- Otherwise log the review under `.reports/YYYY-MM/` using the standard report naming convention.
+
+## Rules
+
+- Do not role-play specialist reviewers inline when delegation is available and permitted.
+- Treat changed files as entry points, not as the review boundary.
+- If a critical issue appears early, surface it immediately.
+- If the impact surface is too large for a trustworthy single pass, say so and recommend splitting the review into smaller scopes.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The memory lookup was blocked by the current read-only policy, so I’m proceeding from the artifacts in this checkout and the user-provided round history. I’ve loaded the review workflow and will keep this to evidence from the current files/tests.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\README.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\RESULTS.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\METHODOLOGY.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\baselines.json" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1647ms:
+# Claude Proxy Forensic Toolkit - v0.4
+
+Fingerprint any Claude-compatible CLI endpoint (official `claude`, third-party wrappers like `claude-aw.cmd`, aggregator proxies) to estimate:
+
+- Provider routing (Anthropic direct, Google Vertex, AWS Bedrock, aggregator)
+- Whether the backend is a real frontier Claude, a distilled student, or an imitator
+- What middleware layers the gateway adds (stripping, injection, interception, spoofing)
+
+**Status: v0.4, hypothesis generator**, not adjudicating forensic classifier. Use results as an investigative starting point, not as legal/security-grade proof. See `METHODOLOGY.md` for caveats and known gaps.
+
+## Files
+
+- **`fingerprint.py`** - main executable. Runs probe battery, compares to baselines, produces confidence-graded verdict.
+- **`baselines.json`** - cached Anthropic-direct Opus 4.5/4.6/4.7 outputs with expiry date and rotation triggers.
+- **`RESULTS.md`** - the original `claude-aw.cmd` investigation that produced this toolkit.
+- **`METHODOLOGY.md`** - probe protocol, decision tree, caveats, known gaps.
+
+## Version changes
+
+### v0.4 (third codex review round)
+
+- Classifier has **hard evidence gates**: A+Middleware requires middleware ? 0.6 AND capable_base ? 0.5; A-clean requires capable_base ? 0.6 AND middleware < 0.4 AND suspicious_intercept < 0.3; C requires distill ? 0.6 AND capable_base < 0.5. Hypotheses failing their gate can't reach high confidence.
+- **Introspection schema validation**: probe 4 only signals `clean_introspection` when all four required fields (`architecture_family`, `supports_extended_thinking`, `can_use_prompt_caching`, `knowledge_cutoff_month`) are present with credible types. JSON that parses but fails schema emits `schema_mismatch` and counts as middleware evidence.
+- **Protocol-object detection stricter**: single-object JSON must have `result` string AND one of (usage dict with token counts / model string starting `claude-` / session_id ? 8 chars). Gateways like `{"result":"{\"acknowledged\":true}"}` now correctly classify as intercept.
+- **Variable/inconsistent intercept penalizes A-clean**: adaptive gateways varying responses can no longer be classified clean.
+- **Soft-override scored conditionally**: `soft_override_success` only fully counts as capable-base evidence when stylometric bias was first observed. On a neutral prompt, override success is weak (0.3? multiplier).
+- **Temporal cutoff requires verifiable events**: generic `"June 2025"` hallucinations no longer promote cutoff to post-April.
+- **Parser type-guards stream-list elements**: lists containing scalars correctly emit `parse_error`.
+
+### v0.3
+
+- Parser distinguishes `valid_single_object` (newer CLI) from `intercepted`.
+- `status_failure` runs no longer convert to `rigid_bias` / `format_rigor_fail`.
+- `hard_intercept` requires ? 2 repeats.
+- Raw hash computed from bytes (not decoded text).
+- Superscript regex matches only `?`.
+- Missing/malformed `expiry_date` fails closed.
+
+### v0.2
+
+- Parser separates `cli_error` / `parse_error` / `intercepted` / `valid_stream`.
+- Multi-run repeat support via `--repeats N` (default 2).
+- Confidence-graded classification (`high` / `medium` / `low`).
+- Hardened regexes: Unicode math, variant multiplication, phrasing.
+- Baseline expiry check.
+- Raw SHA-256 hash per run.
+- `--shell` injection warning.
+- Sentence splitter handles abbreviations.
+
+## Quick start
+
+List probes:
+
+```bash
+python fingerprint.py --list-probes
+```
+
+Fingerprint a Windows `.cmd` wrapper (default 2 repeats):
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
+```
+
+Plain `claude` call:
+
+```bash
+python fingerprint.py --label "direct" --cmd "claude --model claude-opus-4-7"
+```
+
+Single run (cheaper, but no cross-run consistency check  lower confidence):
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell --repeats 1
+```
+
+Only specific probes:
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell \
+  --probes self_introspection_json anti_euler_override
+```
+
+Save raw findings + classification:
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell \
+  --save-raw results_aw.json
+```
+
+## Probe battery
+
+Five single-turn probes. Each targets one axis. None is decisive on its own - verdict requires multiple probes pointing the same way across ? 2 repeats.
+
+| Probe | Axis | Detects | Decisive alone? |
+|---|---|---|:-:|
+| `stylometric_717` | Canonical opening | Generation, injected bias | No |
+| `temporal_cutoff` | Training recency | Release era | No |
+| `tight_reasoning_crt` | Format compliance + rigor | Capability tier | No |
+| `self_introspection_json` | Active gateway filter | Middleware (if reproducible) | Only if byte-exact across repeats |
+| `anti_euler_override` | Soft-injection vs distill | Bias overrideability | No, but informative with `stylometric_717` |
+
+**Key methodological note:** the anti-Euler probe only tells you *"bias was overrideable in this prompt"*, not *"backend is real Claude"*. An adaptive/probe-aware proxy can also pass it. Treat results as Bayesian updates, not proofs.
+
+## Output format
+
+```
+=== CLASSIFICATION ===
+  Primary:    A+Middleware (real Claude + active gateway)
+  Score:      0.756
+  Confidence: high (gap to second: 0.412)
+
+  Ranked hypotheses:
+     0.756  A+Middleware (real Claude + active gateway)
+     0.344  A-clean (real Claude, no detectable middleware)
+     0.280  ambiguous / insufficient evidence
+     0.000  C (distilled student)
+
+  Evidence weights: {'middleware': 1.25, 'capable_base': 1.15, 'distill': 0.0, 'recent_cutoff': 0.7, 'feature_strip': 0.6}
+
+  Scoring notes:
+    - Middleware: hard_intercept +0.90
+    - Capable-base: soft_override_success +0.85
+    - Capable-base: format_rigor_pass +0.80
+    - Recent-cutoff: post_april_2025 +0.70
+    - Middleware: feature_strip +0.18
+```
+
+Confidence levels:
+
+- **high** - primary score ? 0.55 AND gap to second hypothesis ? 0.2. Actionable.
+- **medium** - primary score ? 0.35 AND gap ? 0.1. Use as working hypothesis; collect more evidence before committing.
+- **low** - neither threshold met. Run more repeats, add probes, or capture mitmproxy HTTPS.
+
+## Cost
+
+Per target: roughly `5 probes ? N repeats ? ~$0.05-0.10 per call`. Default `--repeats 2`  ~$0.50-1.00 per target. Baseline regeneration (when triggered): ~$3 for 15 Opus calls.
+
+## Known gaps (v0.4)
+
+See `baselines.json  interpretation_rules.known_gaps` for the full list. Highlights:
+
+- **No tokenizer-identity probe.** Currently the `constant +7 offset` evidence from `RESULTS.md` is *not* reproducible via this toolkit. Planned future work.
+- **No quantization-degradation probe.** An int8-quantized Claude could pass the current battery. Planned future work.
+- **No multi-turn probe.** Session-level middleware (cache-across-turns manipulation, session-boundary injection) is invisible here.
+- **Narrow stylometric panel.** Single math problem gives narrow signal. Broader panel (safety refusals, code formatting, XML/tool-call conventions) would improve imitator detection.
+- **Temporal probe rotation.** The 2025-event calibration will lose discriminative power as those events become general knowledge (~2027). Rotate during baseline regeneration.
+- **No `distill+middleware` hypothesis.** A distilled student fronted by a middleware gateway would look like A+Middleware; we don't currently distinguish these. Future hypothesis class.
+- **Thresholds hand-tuned, not calibrated.** `0.55 / 0.35` confidence thresholds are heuristics. Proper calibration requires a labelled test set across provider types.
+
+## Extending
+
+Add a probe:
+
+1. Edit `baselines.json`: add entry under `probes` with `prompt`, `purpose`, and `baselines` (collect officials once).
+2. Implement a scorer in `fingerprint.py`: `score_run_<probe_id>()` function + entry in `PROBE_SCORERS` dict.
+3. Implement aggregation in `aggregate_probe()` for the new `probe_id`.
+4. Optionally thread scoring into `classify()` evidence weights.
+
+## Security notes
+
+- `--shell` (needed for `.cmd` wrappers on Windows) is command-injection unsafe if `--cmd` comes from an untrusted source. The toolkit prints a warning but cannot sandbox.
+- The toolkit runs arbitrary subprocess commands against third-party gateways. Review your provider's ToS before automated probing.
+
+## Trust model
+
+Under what assumptions do classifications hold:
+
+1. Target honors standard Claude Code CLI flags (`-p`, `--model`, `--effort`, `--tools ""`, `--output-format json`).
+2. Tool invocation is *actually* disabled - target didn't secretly call WebSearch to pass the temporal cutoff probe.
+3. Gateway is not probe-adaptive (if it knows the anti-Euler prompt and selectively complies, we can't detect that here).
+4. Sampling variance on single calls doesn't flip the verdict - use `--repeats ? 2` for stability.
+5. Baselines are fresh (within `expiry_date` window).
+
+If any of these fail, verdict reliability drops sharply.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2174ms:
+# Investigation Results - `claude-aw.cmd` Proxy (api.claudecodeapi.cloud)
+
+**Date:** 2026-04-24
+**Target:** `claude-aw.cmd --model opus` (wrapper setting `ANTHROPIC_BASE_URL=https://api.claudecodeapi.cloud`)
+**Baselines:** Anthropic-direct Opus 4.5, 4.6, 4.7 via official `claude` CLI v2.1.119
+
+> **Note on methodology revision (2026-04-24 evening):** The original investigation used hard-coded scoring (toolkit v0.1). After independent codex gpt-5.5 xhigh review, the toolkit was hardened to v0.2 with confidence-graded classification, multi-run consistency requirements, and several must-fix parser bugs. The *findings* below were reproduced on the revised toolkit (v0.2 tests in `test_fingerprint.py` synthesize the AW profile and recover the `A+Middleware` verdict at high confidence). The *interpretation* in this document still stands; the *methodology* caveats in `METHODOLOGY.md` should be read alongside it - especially that this is a hypothesis-generator, not a proof system, and that every single probe is defeatable by a sufficiently motivated operator.
+
+## Working verdict (investigative hypothesis, not proof)
+
+**Most consistent with: a Claude-like frontier backend (likely Opus 4.7) hosted on Google Vertex AI, fronted by an aggressive middleware gateway.**
+
+The observed signals are **less consistent with** a rigidly-biased distilled-only student, with a Chinese-model clone, and with an alias of an older Claude release. They are **most consistent with** a frontier Claude backend under active gateway manipulation. Important caveats: (a) the current toolkit does not distinguish a real Claude backend from a high-quality Claude-like distill fronted by the same middleware (the `distill+middleware` hypothesis class is not in scope), (b) a sufficiently sophisticated adversarial proxy could in principle produce the same behavior on all probes. For security- or legal-grade certainty, capture wire traffic (mitmproxy) and add a tokenizer-identity probe.
+
+## Middleware inventory
+
+| Layer | Behavior | Overrideable? | Evidence |
+|---|---|:-:|---|
+| Hard filter | Self-introspection  canned `{"acknowledged":true}` (22 bytes) | No | Byte-exact repeat ?2 |
+| Soft injection | Math tasks  Euler/totient-first opening | **Yes** | Anti-Euler probe |
+| Feature strip | `thinking`, `cache_control`, `--effort` | No | `cache=0/0`, effort ignored |
+| Output cap | max_tokens ? 60-240 | No | AW 63-239 vs officials 223-1855 |
+| Metadata spoof | `model` field relabels 4.5  4.7 | No | Same query, different sessions |
+
+## Evidence chain
+
+### Stage 1. Original visual benchmark (user's prior work)
+
+14-row comparison of coordinate-extraction accuracy on a 2200?1600 PNG (pixel-perfect ideal = 0):
+
+| Rank | Family | Path | Model | Effort | Reported | Mean err | Max err | OutTok |
+|:-:|---|---|---|---|---|:-:|:-:|:-:|
+| 1 | Gemini | official | Gemini 3 Flash fallback | HIGH | gemini-3-flash-preview | 0.0 px | 0.0 px | 1110 |
+| 2 | Codex | official | GPT-5.4 | xhigh | gpt-5.4 | 0.7 px | 1.4 px | 11352 |
+| 3 | Codex | official | GPT-5.5 | xhigh | gpt-5.5 | 0.9 px | 1.4 px | 560 |
+| 4 | Codex | official | GPT-5.3-Codex | xhigh | gpt-5.3-codex | 8.2 px | 35.0 px | 5579 |
+| 5 | Claude | official | Opus 4.7 | env max | claude-opus-4-7 | 39.3 px | 86.8 px | 790 |
+| 6 | Claude | official | Opus 4.7 | `--effort max` | claude-opus-4-7 | 75.0 px | 148.7 px | 1832 |
+| 7 | Claude | AW | Opus | env max | claude-opus-4.5 | 81.9 px | 142.1 px | 113 |
+| 8 | Claude | official | Opus 4.6 | `--effort max` | claude-opus-4-6 | 90.2 px | 163.4 px | 4374 |
+| 9 | Claude | AW | Opus | `--effort max` | claude-opus-4.5 | 115.4 px | 205.1 px | 113 |
+| 10 | Claude | official | Opus 4.6 | env max | claude-opus-4-6 | 150.4 px | 215.1 px | 4604 |
+| 11 | Claude | official | Sonnet 4.6 | env max | claude-sonnet-4-6 | 616.3 px | 901.6 px | 3090 |
+| 12 | Claude | official | Haiku 4.5 | env max | claude-haiku-4-5-20251001 | 638.9 px | 900.5 px | 2406 |
+| 13 | Claude | official | Opus 4.5 | `--effort max` | claude-opus-4-5-20251101 | 660.0 px | 968.0 px | 2379 |
+| 14 | Claude | official | Opus 4.5 | env max | claude-opus-4-5-20251101 | 690.8 px | 1002.8 px | 1397 |
+
+Observation: AW (rows 7, 9) lands in the 4.6/4.7 accuracy band, not the 4.5-release band. Sharp 150600 px gap between "high-res" and "downscaled" vision path.
+
+### Stage 2. Env vs `--effort` flag (CLI mechanics)
+
+Hypothesis: Opus 4.7 "launch effort pin" explains 39 vs 75 px difference.
+
+| Variant | pin state | out_tok | cost | reasoning |
+|---|:-:|:-:|:-:|---|
+| A (env=max, no flag) | pinned | 698 | $0.225 | `7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 7 (mod 100)` |
+| B (`--effort max`) | unpinned | 716 | $0.225 | `7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 7 (mod 100)` |
+
+**Result:** near-identical (1 punctuation dot, +18 tokens). Pin state does NOT explain vision discrepancy. CLI internals examined:
+
+```js
+function ht6(H){ if(M7(H)==="claude-opus-4-7") return "xhigh"; return "high" }  // launch effort
+function NbH(H, q){
+  let _ = UWH();  // env var
+  if(_===null) return $?K:void 0;
+  let f = _ ?? ($?K:void 0) ?? q ?? K;  // precedence: env > session > launch
+  ...
+}
+```
+
+### Stage 3. AW discriminator test (7^17 mod 100, unconstrained)
+
+| Variant | Reported | Msg ID prefix | out_tok | cache_create | Opening reasoning |
+|---|---|---|:-:|:-:|---|
+| 4.5 off | `claude-opus-4-5-20251101` | `msg_01*` (Anthropic) | 419 | 39867 | `7^4 = 2401 ? 1 (mod 100), so 7^17 = 7^(4ú4+1) = (7^4)^4 ú 7 ? 1ú7 = 7` |
+| 4.6 off | `claude-opus-4-6` | `msg_01*` (Anthropic) | 223 | 39697 | `7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7^1 ? 1ú7 = 7` |
+| 4.7 off | `claude-opus-4-7` | `msg_01*` (Anthropic) | 538 | 58052 | `7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 7 (mod 100)` |
+| **AW** | **`claude-opus-4.7`** | **`msg_vrtx_01Q`** (Vertex) | **77** | **0** | `?(100)=40, so 7^17 mod 100 = 7^17; compute 7^4=2401?1, hence 7^17=(7^4)^4ú7?1ú7` |
+
+First suspicion of distillation (hypothesis C): ?(100)=40 false-start + tautology `7^17 mod 100 = 7^17`. Zero cache. Compression to 77 tokens.
+
+### Stage 4. Three-probe battery
+
+#### Probe 1 - Temporal cutoff
+
+| Target | Events | Cutoff estimate |
+|---|---|:-:|
+| 4.5 off | Trump + LA wildfires + Pope Francis (Apr) | ? April 2025 |
+| 4.6 off | Trump + Palisades/Eaton wildfires + Pope Francis | ? April 2025 |
+| 4.7 off | Trump + Pope Francis + **Pope Leo XIV (May 2025)** | ? May 2025 |
+| **AW** | Trump + Pope Francis  Leo XIV + **Wimbledon July 2025** | **? July 2025** |
+
+All AW facts independently verifiable. AW cutoff matches or exceeds 4.7.
+
+#### Probe 2 - Strict-format reasoning (CRT proof)
+
+| Target | Sentences | CRT in s2 | "Therefore" in s3 | Verdict |
+|---|:-:|:-:|:-:|---|
+| 4.5 off | 3 | ? | ? | PASS |
+| 4.6 off | 3 | ? | ? | PASS |
+| 4.7 off | 3 | ? (CRT) | ? | PASS |
+| **AW** | 3 | ? (CRT) | ? | **PASS** |
+
+AW meets all constraints at Opus-level rigor. No false-start here. Distill hypothesis weakens.
+
+#### Probe 3 - Self-introspection JSON (raw stdout)
+
+| Target | Raw stdout | Assessment |
+|---|---|---|
+| 4.5 off | Clean JSON, cutoff=May 2025 | PASS |
+| 4.6 off | Wrapped in ```json codefence | format fail (Claude habit) |
+| 4.7 off | Clean JSON, architecture=Claude, cutoff=January 2026 | PASS |
+| **AW** | **`{"acknowledged":true}\n`** (22 bytes) | **INTERCEPTED** |
+
+AW returned something completely different from what was requested. Gateway-level interception.
+
+### Stage 5. Reproducibility check (?2)
+
+| Test | Result |
+|---|---|
+| Probe 3 repeat run 1 | `{"acknowledged":true}\n` - identical 22 bytes |
+| Probe 3 repeat run 2 | `{"acknowledged":true}\n` - identical 22 bytes |
+| 7^17 repeat run 1 | `Reasoning: ?(100)=40, so 7^17 mod 100 = 7^17; compute 7^4=2401?1...` |
+| 7^17 repeat run 2 | `Reasoning: ?(100)=40, so 7^17 mod 100 = 7ú(7^2)^8 mod 100 = 7ú49^8 mod 100.` |
+
+Both anomalies reproducible. Byte-exact intercept = definitively middleware, not random. ?-opening = systematic forcing, not sampling variance.
+
+### Stage 6. Anti-Euler override probe (recommended by Opus 4.7 max)
+
+Prompt: `Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'.`
+
+| Target | Opening | Banned words | Verdict |
+|---|---|:-:|---|
+| 4.5 off | `7^2 = 49, 7^4 = 49^2 = 2401 ? 1 (mod 100)` | none | COMPLIANT |
+| 4.6 off | `7^2 = 49, 7^4 = 49^2 = 2401 ? 01 (mod 100)` | none | COMPLIANT |
+| 4.7 off | `7^2 = 49; 7^4 = 49^2 = 2401 ? 1 (mod 100)` | none | COMPLIANT |
+| **AW run1** | `7^2=49; 7^4=49ú49=2401?01 mod 100` | none | **COMPLIANT** |
+| **AW run2** | `7^2=49; 7^4=49ú49=2401?1` | none | **COMPLIANT** |
+
+**Strong result** (not on its own decisive - see caveats in METHODOLOGY.md): AW switched from ?-opening to canonical `7^4 ? 1` under explicit instruction. This is inconsistent with a rigidly-biased distilled student and more consistent with a capable base model under an overrideable soft injection. An adaptive/probe-aware proxy could in principle produce the same behavior, which is why the overall verdict relies on multiple converging signals rather than this probe alone.
+
+## Hypothesis ranking (working investigative verdict, not a proof)
+
+| Rank | Hypothesis | Status | Key counter-argument |
+|:-:|---|---|---|
+| **1** | **A+Middleware: real Opus 4.7 via Vertex with aggressive shim** | leading hypothesis | All five probes align; no observed signal contradicts it |
+| 2 | C: Distilled student trained on Claude outputs | unlikely given observed data | Probe 2 rigor + anti-Euler switch inconsistent with rigid distill |
+| 3 | E: Pruned/quantized Opus | low fit | Would degrade gracefully, not produce injection signature; needs dedicated quantization probe to exclude fully |
+| 4 | F: Non-Claude base + Claude fine-tune | low fit | Constant (not proportional) tokenizer offset weakens this; needs proper tokenizer probe to exclude fully |
+| 5 | B: Older Opus checkpoint | low fit | Cutoff ? July 2025 matches latest release, not older |
+| 6 | D: Hybrid multi-model routing | low fit | Token compression (not inflation) does not fit concat-style routing |
+
+**All "excluded" hypotheses should be read as "weakened by current evidence" rather than "proven impossible"**. A sufficiently sophisticated adversarial proxy could match the observed signals while still being any of the lower-ranked classes. For high-stakes decisions, capture wire traffic (mitmproxy) and add a tokenizer-identity probe.
+
+## Capability match
+
+| Capability | AW observation | Matches |
+|---|---|---|
+| Knowledge cutoff | ? July 2025 | Opus 4.7 |
+| Reasoning rigor | Strict CRT-proof PASS | Opus 4.x tier |
+| Style fingerprint | `7^4 ? 1 (mod 100)` under override | Opus 4.x canonical |
+| Tokenizer | Claude BPE + constant +7 offset | Claude family (injected prefix) |
+| Censorship | Factual on Tiananmen/Xinjiang/Taiwan | Claude, not Chinese models |
+| Provider routing | `msg_vrtx_*` prefix | Google Vertex AI |
+
+## Unresolved
+
+| Item | Status |
+|---|---|
+| Vision 39 vs 75 px discrepancy | Not explained by math probes - likely domain-specific effect |
+| Exact Opus revision on Vertex | 4.6 or 4.7; knowledge suggests 4.7 |
+| Injected system prompt content | Not captured (requires HTTPS proxy like mitmproxy) |
+| Gateway operator identity | Not investigated |
+
+## Budget
+
+| Item | Cost |
+|---|---|
+| Total official Opus calls | ~$3-4 |
+| AW calls (local CLI estimate, unreliable) | ~$2 (true cost unknown) |
+| Opus 4.7 max consultations | 2 (methodology design + decision selection) |
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2763ms:
+{
+  "metadata": {
+    "generated_date": "2026-04-24",
+    "expiry_date": "2026-07-23",
+    "scorer_version": "0.5.0",
+    "cli_version": "2.1.119",
+    "run_flags": {
+      "effort": "max",
+      "tools": "disabled (--tools \"\")",
+      "output_format": "json"
+    },
+    "notes": "Baselines collected via `claude -p <prompt> --model <id> --effort max --tools '' --output-format json` on Anthropic-direct (not Vertex/Bedrock). Each baseline is a single run; multi-run reproducibility was not captured at collection time (TODO for v0.3).",
+    "rotation_triggers": [
+      "New Anthropic Opus generation released",
+      "CLI output format changes (new fields, renamed keys)",
+      "Probe prompts or scorer logic changed (SCORER_VERSION bumped)",
+      "Temporal events in the temporal_cutoff probe become general knowledge (current 2025-event set will lose discriminative power by ~2027)",
+      "Near-threshold classifications where sampling variance could flip the verdict"
+    ]
+  },
+  "provider_detection": {
+    "msg_id_prefixes": {
+      "msg_01": "anthropic-direct",
+      "msg_vrtx_": "google-vertex",
+      "msg_bdrk_": "aws-bedrock",
+      "uuid_36chars": "aggregator (litellm / portkey / openrouter-style)"
+    }
+  },
+  "probes": {
+    "stylometric_717": {
+      "purpose": "Detect stylometric divergence + output compression. Unconstrained math prompt - model picks its canonical opening.",
+      "prompt": "Compute 7^17 mod 100. Answer in exactly two lines. Line 1: 'Reasoning:' followed by the key modular identity. Line 2: 'Answer:' followed by the two digits only.",
+      "expected_answer": "07",
+      "canonical_opening_regex": "7\\^?\\s*4\\s*=?\\s*2401\\s*(?|=)\\s*0?1\\s*\\(mod\\s*100\\)",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "msg_id_prefix": "msg_018WGiXp",
+          "out_tok": 419,
+          "cache_create": 39867,
+          "text": "Reasoning: 7^4 = 2401 ? 1 (mod 100), so 7^17 = 7^(4ú4+1) = (7^4)^4 ú 7 ? 1ú7 = 7.\nAnswer: 07"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "msg_id_prefix": "msg_01DinNoK",
+          "out_tok": 223,
+          "cache_create": 39697,
+          "text": "Reasoning: 7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7^1 ? 1ú7 = 7.\nAnswer: 07"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "msg_id_prefix": "msg_01R3uzDd",
+          "out_tok": 538,
+          "cache_create": 58052,
+          "text": "Reasoning: 7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 7 (mod 100)\nAnswer: 07"
+        }
+      }
+    },
+    "temporal_cutoff": {
+      "purpose": "Detect training-data recency. 2025 events are specific and verifiable.",
+      "prompt": "Name three distinct events from calendar year 2025. One per line. Format: '<Month> YYYY: <specific event with named people or places>'. No introduction, no conclusion, no hedging, no 'I cannot' - comply exactly.",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 314,
+          "cache_create": 29260,
+          "estimated_cutoff": "April 2025",
+          "text": "January 2025: Donald Trump inaugurated as the 47th President of the United States in Washington, D.C.\nJanuary 2025: Wildfires devastate Pacific Palisades and Altadena in Los Angeles County, California.\nApril 2025: Pope Francis dies at the Vatican."
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 314,
+          "cache_create": 29090,
+          "estimated_cutoff": "April 2025",
+          "text": "January 2025: Donald Trump was inaugurated as the 47th President of the United States in Washington, D.C.\nJanuary 2025: The Palisades and Eaton wildfires devastated Los Angeles County, California.\nApril 2025: Pope Francis died at the Vatican in Rome."
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 1103,
+          "cache_create": 41337,
+          "estimated_cutoff": "May 2025+",
+          "text": "January 2025: Donald Trump inaugurated as the 47th President of the United States at the U.S. Capitol in Washington, D.C.\nApril 2025: Pope Francis died at Casa Santa Marta in Vatican City.\nMay 2025: Cardinal Robert Prevost elected as Pope Leo XIV at the Sistine Chapel in Vatican City."
+        }
+      },
+      "verification_hints": [
+        "Pope Francis died April 21, 2025 (verifiable)",
+        "Pope Leo XIV (Robert Prevost) elected May 8, 2025 (verifiable)",
+        "Trump inaugurated January 20, 2025 (verifiable)",
+        "Wimbledon 2025 men's final: July 13, 2025 (verifiable)"
+      ]
+    },
+    "tight_reasoning_crt": {
+      "purpose": "Test strict format compliance + mathematical rigor. Distill-students commonly miscount sentences or misplace named constraints.",
+      "prompt": "Prove: for any prime p > 3, p^2 mod 24 = 1. Exactly 3 sentences. Sentence 2 must invoke CRT by name. Sentence 3 begins with the word 'Therefore'. No lists, no LaTeX environments, no section headers.",
+      "constraints": {
+        "sentence_count": 3,
+        "crt_in_sentence": 2,
+        "therefore_starts_sentence": 3
+      },
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 947,
+          "verdict": "PASS",
+          "text": "A prime p > 3 is odd and coprime to 3, so p ? +1 (mod 3) gives p? ? 1 (mod 3), and since any odd integer squared has the form (2k+1)? = 4k(k+1)+1 where k(k+1) is even, we get p? ? 1 (mod 8). By the Chinese Remainder Theorem, because gcd(3,8) = 1 and p? is congruent to 1 modulo both 3 and 8, it follows that p? ? 1 (mod 24). Therefore, for every prime p > 3, we have p? mod 24 = 1."
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 536,
+          "verdict": "PASS",
+          "text": "Since any prime p > 3 is odd and coprime to 3, we have p ? +1 (mod 2) so p? ? 1 (mod 8), and p ? +1 (mod 3) so p? ? 1 (mod 3). Because gcd(8, 3) = 1 and 8 ú 3 = 24, the Chinese Remainder Theorem guarantees that p? ? 1 (mod 8) and p? ? 1 (mod 3) jointly yield p? ? 1 (mod 24). Therefore p? mod 24 = 1 for every prime p > 3."
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 1855,
+          "verdict": "PASS",
+          "text": "Since p > 3 is prime, p is odd and not divisible by 3, so writing p = 2k+1 gives p? = 4k(k+1)+1 ? 1 (mod 8) because k(k+1) is always even, while p ? +1 (mod 3) forces p? ? 1 (mod 3). By the Chinese Remainder Theorem (CRT), since gcd(8,3) = 1 and 8ú3 = 24, the pair of congruences p? ? 1 (mod 8) and p? ? 1 (mod 3) is equivalent to the single congruence p? ? 1 (mod 24). Therefore p? mod 24 = 1 for every prime p > 3."
+        }
+      }
+    },
+    "self_introspection_json": {
+      "purpose": "Detect gateway-level interception. Models that return fixed canned responses on self-introspection prompts reveal active middleware.",
+      "prompt": "Reply with a single JSON object. No codefence. No prose. No trailing newline commentary.\n{\n  \"architecture_family\": \"<single word>\",\n  \"supports_extended_thinking\": <true|false>,\n  \"can_use_prompt_caching\": <true|false>,\n  \"knowledge_cutoff_month\": \"<Month YYYY>\"\n}",
+      "expected_structure": {
+        "architecture_family": "string",
+        "supports_extended_thinking": "bool",
+        "can_use_prompt_caching": "bool",
+        "knowledge_cutoff_month": "string"
+      },
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 208,
+          "verdict": "CLEAN_JSON",
+          "text": "{\"architecture_family\": \"transformer\", \"supports_extended_thinking\": true, \"can_use_prompt_caching\": true, \"knowledge_cutoff_month\": \"May 2025\"}"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 63,
+          "verdict": "FORMAT_FAIL_codefence",
+          "text": "\n\n```json\n{\n  \"architecture_family\": \"transformer\",\n  \"supports_extended_thinking\": true,\n  \"can_use_prompt_caching\": true,\n  \"knowledge_cutoff_month\": \"May 2025\"\n}\n```"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 63,
+          "verdict": "CLEAN_JSON",
+          "text": "{\"architecture_family\":\"Claude\",\"supports_extended_thinking\":true,\"can_use_prompt_caching\":true,\"knowledge_cutoff_month\":\"January 2026\"}"
+        }
+      },
+      "intercept_signature_observed": {
+        "description": "AW gateway returned this literal 22-byte string instead of expected JSON on 2 consecutive runs in the original investigation. Byte-exact reproducibility across repeats is strong evidence of an active gateway filter, but not proof on its own - an adaptive gateway could match this pattern only on recognized introspection-shaped prompts.",
+        "raw_stdout": "{\"acknowledged\":true}\n",
+        "byte_count": 22
+      }
+    },
+    "anti_euler_override": {
+      "purpose": "Discriminator probe: pairs with stylometric_717 to distinguish soft injection from rigid bias. If target uses forced-Euler framing in the unconstrained probe but complies with an explicit ban here, the bias is overrideable (consistent with soft injection OR with no bias at all, OR with a probe-aware proxy). If bias persists despite the ban, bias is rigid (distill OR aggressive injection). Not decisive on its own - interpret only in conjunction with stylometric_717 results.",
+      "prompt": "Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'.",
+      "banned_words": ["euler", "totient", "fermat", "phi", "?", "?", "?"],
+      "expected_answer": "7",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 373,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49, 7^4 = 49^2 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 1^4 ú 7 = 7 (mod 100).\n\nAnswer: 7"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 287,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49, 7^4 = 49^2 = 2401 ? 01 (mod 100), so 7^8 ? 01, 7^16 ? 01, and 7^17 = 7^16 ú 7 ? 1 ú 7 = 7.\n\nAnswer: **7**"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 556,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49; 7^4 = 49^2 = 2401 ? 1 (mod 100); so 7^16 = (7^4)^4 ? 1 (mod 100); therefore 7^17 = 7^16 ú 7 ? 7 (mod 100).\nAnswer: 7"
+        }
+      }
+    }
+  },
+  "interpretation_rules": {
+    "caveat": "Single-probe signals are weak on their own. Strong classifications require (a) multiple probes pointing the same way AND (b) cross-run reproducibility (--repeats ? 2) AND (c) fresh baselines. A smart adaptive gateway can evade any single probe if it knows the probe's shape.",
+    "hypothesis_A_real_backend_with_middleware": {
+      "indicators": [
+        "canonical_opening in stylometric probe",
+        "passes anti_euler_override compliance",
+        "passes tight_reasoning_crt format constraints",
+        "knowledge_cutoff matches a real model generation",
+        "non-anthropic msg_id prefix (vertex/bedrock) - but note: any gateway can forge this string",
+        "self_introspection MAY be intercepted with byte-exact canned response across repeats"
+      ],
+      "weaknesses": [
+        "Adaptive gateways can evade byte-exact intercept detection by varying responses slightly",
+        "msg_id prefix alone is NOT proof - trivially forgeable"
+      ]
+    },
+    "hypothesis_C_distilled_student": {
+      "indicators": [
+        "false_start_abandon pattern that does NOT disappear under explicit override",
+        "fumbles format constraints (wrong sentence count, misplaced named constraints)",
+        "knowledge_cutoff gap vs claimed backend",
+        "consistent output compression AND poor style recovery",
+        "self_introspection attempts (hallucinated/waffled) rather than byte-exact intercept"
+      ],
+      "weaknesses": [
+        "A high-capability distill or a non-Claude fine-tune can imitate Claude convincingly on any single probe",
+        "Anti-euler override can be passed by probe-aware proxies"
+      ]
+    },
+    "middleware_signatures": {
+      "hard_intercept": "Multiple repeats return byte-identical non-protocol output on introspection. Single-run intercept is weak evidence - may be CLI error or adaptive response.",
+      "soft_injection": "Stylometric bias (e.g. euler phrasing) present under neutral prompt, disappears under explicit ban. Requires BOTH probes to conclude injection.",
+      "feature_strip": "cache_create=0 AND cache_read=0 on a prompt that should trigger caching. Defaults-to-zero semantics can false-positive; confirm by running on a long prompt.",
+      "effort_ignored": "identical output_tokens with/without --effort flag (requires separate targeted comparison)",
+      "output_cap": "max_tokens hard-capped well below natural model output",
+      "label_spoofing": "reported model field varies across identical requests - not currently auto-detected, inspect per_run output manually"
+    },
+    "provider_family_by_msg_id": {
+      "msg_01*": "Anthropic direct API (api.anthropic.com)",
+      "msg_vrtx_*": "Google Vertex AI (may be genuine Anthropic on Vertex, or a proxy forging the prefix)",
+      "msg_bdrk_*": "AWS Bedrock (same caveat)",
+      "uuid_36": "Aggregator (LiteLLM/Portkey/OpenRouter/etc - inspect upstream)"
+    },
+    "known_gaps": [
+      "No tokenizer-identity probe (planned future work): reported input_tokens vs locally-computed Claude BPE on sentinel strings would detect non-Claude backends masquerading as Claude.",
+      "No quantization-degradation probe (planned future work): systematic numerical precision tests (sin() to 12 digits, modular arithmetic on large numbers) would detect int8/int4 quantized variants.",
+      "No distill+middleware hypothesis class: a distilled student fronted by a middleware gateway would currently classify as A+Middleware. The labels 'real Claude + active gateway' reflect the most-consistent-with reading, not proof that the backend is Claude rather than a Claude-like distill behind the same gateway."
+      "No multi-turn middleware probe: all current probes are single-turn; gateways that act only on turn-boundaries (session injection, cache-across-turns behavior) are invisible.",
+      "Narrow stylometric panel: single math problem is a weak signature; broader stylistic panel (safety refusals, code formatting, XML/tool conventions) would catch non-Claude imitators more reliably."
+    ]
+  }
+}
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 3330ms:
+# Proxy Forensic Methodology - v0.4
+
+Protocol for classifying an unknown Claude-compatible endpoint. Distilled from the `claude-aw.cmd` investigation and refined after codex gpt-5.5 xhigh review.
+
+## Honest framing
+
+This methodology is a **hypothesis generator**, not a proof system. It narrows down probable backend identities from a universe of candidates using cheap, reproducible tests. Any single signal is defeatable by a sufficiently motivated proxy operator:
+
+- Stylometric fingerprints can be trained into distills
+- Temporal cutoff can be seeded with recent knowledge
+- msg_id prefixes are strings in response bodies - trivially forgeable
+- Byte-exact intercepts can be randomized to evade detection
+
+The methodology's strength is **compounding evidence**: when 4-5 orthogonal signals all point to the same hypothesis across multiple repeats, the probability of coincidence/adversarial fake becomes low. No single probe carries the verdict.
+
+## Goals
+
+Given an endpoint speaking the Claude CLI protocol, estimate:
+
+1. **Provider family** - Anthropic direct, Google Vertex, AWS Bedrock, aggregator, non-Anthropic imitator
+2. **Backend identity range** - real frontier Claude, distilled student, older checkpoint, non-Claude base
+3. **Middleware layers** - stripping, injection (soft or rigid), interception, spoofing
+
+## Invariants
+
+- **Baselines are Anthropic-direct, collected fresh with identical flags.** Reference outputs must match the suspect's CLI flags (`--effort max --tools ""`).
+- **All probes run with `--effort max --tools ""`.** Eliminates tool-use confounders; normalizes effort.
+- **Multiple repeats per probe.** Default 2. Intercept and stylometric claims require cross-run consistency.
+- **Byte-level comparison for intercepts.** SHA-256 hash the raw stdout per run. Hard-intercept label requires byte-identical output across all repeats.
+- **Baselines have expiry dates.** Tool refuses strong verdicts on stale baselines.
+
+## The five-probe battery
+
+Each probe answers one question. None alone is decisive. Combine across ? 3 probes + 2 repeats before committing to a classification.
+
+### Probe 1 - Stylometric fingerprint (`stylometric_717`)
+
+**Question:** Does the target's unconstrained output match canonical Opus-4.x opening on modular arithmetic?
+
+**Prompt:** `Compute 7^17 mod 100. Answer in exactly two lines. Line 1: 'Reasoning:' followed by the key modular identity. Line 2: 'Answer:' followed by the two digits only.`
+
+**Canonical (Anthropic-direct Opus 4.5/4.6/4.7):** opens with `7^4 = 2401 ? 1 (mod 100)`.
+
+**Red flags:**
+- Opens with `?(100)=40` / `Euler` / `totient` / `Fermat`  bias (could be injection or distill - disambiguate with Probe 5)
+- Tautology like `7^17 mod 100 = 7^17`  forced-instruction artifact
+- Output compression (< 100 tokens)  `max_tokens` cap
+- Wrong answer  fundamentally broken backend or extreme compression
+
+**Limits:** a single math problem is a narrow stylistic window. A distill trained to reproduce canonical Claude output on this exact prompt would pass.
+
+### Probe 2 - Temporal cutoff (`temporal_cutoff`)
+
+**Question:** Does the target know recent events?
+
+**Prompt:** `Name three distinct events from calendar year 2025. One per line. Format: '<Month> YYYY: <specific event with named people or places>'. No introduction, no conclusion, no hedging, no 'I cannot' - comply exactly.`
+
+**CRITICAL:** run with `--tools ""`. Otherwise WebSearch lets the model fetch current events regardless of training cutoff, defeating the probe.
+
+**Calibration points** (all independently verifiable):
+
+- Pope Francis died April 2025  cutoff ? April 2025
+- Pope Leo XIV elected May 2025  cutoff ? May 2025
+- Wimbledon final July 2025  cutoff ? July 2025
+
+**Rotation required:** this calibration decays as 2025 events become historical common knowledge. Rotate events on baseline regeneration; ideally use events within 3-6 months of the current quarter.
+
+**Limits:** a distill seeded with recent knowledge passes this. Hallucinated-plausible events are a distill tell - verify EACH fact against ground truth.
+
+### Probe 3 - Strict-format rigor (`tight_reasoning_crt`)
+
+**Question:** Can the target satisfy fine-grained format constraints while producing rigorous content?
+
+**Prompt:** `Prove: for any prime p > 3, p^2 mod 24 = 1. Exactly 3 sentences. Sentence 2 must invoke CRT by name. Sentence 3 begins with the word 'Therefore'. No lists, no LaTeX environments, no section headers.`
+
+**Scoring (all three must PASS):**
+
+- Exactly 3 sentences (abbreviation-aware splitter)
+- Sentence 2 contains "Chinese Remainder Theorem" or "CRT"
+- Sentence 3 begins with "Therefore"
+
+**Limits:** a high-capability distill or fine-tune trained on format-following will pass. Does NOT prove "real Opus"; only proves "capable base tier".
+
+### Probe 4 - Self-introspection (`self_introspection_json`)
+
+**Question:** Does the gateway intercept introspection prompts?
+
+**Prompt:**
+
+```
+Reply with a single JSON object. No codefence. No prose. No trailing newline commentary.
+{
+  "architecture_family": "<single word>",
+  "supports_extended_thinking": <true|false>,
+  "can_use_prompt_caching": <true|false>,
+  "knowledge_cutoff_month": "<Month YYYY>"
+}
+```
+
+**Smoking gun (with reproducibility):** ALL repeats return byte-identical output that does NOT match the requested schema. Canned response like `{"acknowledged":true}` (22 bytes) repeatedly is strong active-middleware evidence.
+
+**Weaker evidence:** intercept on single run is AMBIGUOUS - could be CLI error, transient network blip, or a probe-adaptive gateway that varies responses. Only commit to intercept label if multiple repeats produce byte-identical non-protocol output.
+
+**Limits:** a smarter gateway evades this probe by returning schema-shaped but slightly-variable JSON that lies about capabilities. Compare reported field values against Probe 1-3 observations for consistency.
+
+### Probe 5 - Soft-override (`anti_euler_override`)
+
+**Question:** Is forced framing from Probe 1 an overrideable soft injection or a rigid distill bias?
+
+**Prompt:** `Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'.`
+
+**Key design:** the positive steer ("start with 7^2 and 7^4") removes the "model didn't know alternatives" excuse.
+
+**Decision rule (conditional on Probe 1 showing bias):**
+
+- Complies with ban + uses canonical `7^4 ? 1` opening  bias was soft injection (overrideable)
+- Still uses banned vocabulary  bias is rigid (distill OR unusually aggressive injection)
+
+**Limits (important):**
+
+- Probe 5 alone does NOT prove "real Claude". It proves "bias overrideable on this prompt". An adaptive/probe-aware proxy, a high-capability distill, or a Claude fine-tune can all comply.
+- Probe 5 is informative ONLY in conjunction with Probe 1 bias. If Probe 1 showed canonical opening already, Probe 5 adds little.
+
+## Decision tree
+
+```
+START
+³
+ÃÄÄ Run all probes with --repeats ? 2
+³
+ÃÄÄ Check Probe 4 (introspection) first - high-value diagnostic
+³   ÃÄÄ All repeats byte-identical non-protocol  MIDDLEWARE present (hard-intercept signal)
+³   ÃÄÄ All repeats valid JSON matching schema  no introspection filter
+³   ÀÄÄ Mixed (some intercept, some valid)  ambiguous, increase --repeats
+³
+ÃÄÄ Check Probe 1 vs Probe 5 together
+³   ÃÄÄ Probe 1 canonical + Probe 5 canonical  no bias
+³   ÃÄÄ Probe 1 biased + Probe 5 compliant  SOFT injection (if real backend) OR adaptive proxy
+³   ÀÄÄ Probe 1 biased + Probe 5 still biased  RIGID bias (distill or aggressive injection)
+³
+ÃÄÄ Check Probe 2 (cutoff) vs Probe 3 (rigor)
+³   ÃÄÄ Both pass  CAPABLE + RECENT backend (likely real frontier Claude)
+³   ÃÄÄ Cutoff passes, rigor fails  distilled student with seeded recent data
+³   ÃÄÄ Cutoff fails, rigor passes  older checkpoint or cautious model
+³   ÀÄÄ Both fail  low-tier or broken backend
+³
+ÃÄÄ Aggregate evidence in classify()
+³   ÃÄÄ middleware >> 0, capable_base >> 0, recent_cutoff > 0  A+Middleware
+³   ÃÄÄ capable_base >> 0, middleware ~ 0  A-clean
+³   ÃÄÄ distill >> capable_base  C
+³   ÀÄÄ total evidence low  ambiguous (run more probes or add mitmproxy)
+³
+ÀÄÄ Check confidence level
+    ÃÄÄ high (primary ? 0.55, gap ? 0.2)  actionable
+    ÃÄÄ medium  working hypothesis, collect more evidence
+    ÀÄÄ low  do NOT commit to a classification
+```
+
+## Provider detection (msg_id prefix)
+
+| Prefix | Provider |
+|---|---|
+| `msg_01...` | Anthropic direct (api.anthropic.com) |
+| `msg_vrtx_...` | Google Vertex AI |
+| `msg_bdrk_...` | AWS Bedrock |
+| 36-char UUID | Aggregator (LiteLLM/Portkey/OpenRouter/etc) |
+
+**Do NOT rely on this alone.** The prefix is a string in the response body - any gateway can forge it cheaply. Use as a weak confirming signal alongside stylometric/feature evidence.
+
+## When to escalate beyond the battery
+
+The battery is single-turn and does not capture:
+
+- **Tokenizer identity** - proportional vs constant drift in `input_tokens` on sentinel strings
+- **Quantization/precision degradation** - numerical accuracy on `sin(1.234567890)` to 12 digits, checksum reconstruction, multi-step arithmetic on large numbers
+- **Multi-turn middleware** - session-level injection, cache-across-turns behavior, turn-boundary rewriting
+- **Injected system prompt content** - mitmproxy or equivalent HTTPS capture required
+
+For high-stakes classification (financial or security-sensitive decisions), do at least one of:
+
+1. Run a tokenizer probe manually (collect `usage.input_tokens` from `--output-format json` on 3-5 sentinel strings, compare deltas to baseline)
+2. Capture raw HTTPS traffic with mitmproxy + custom CA
+3. Consult a known-fresh Opus 4.7 max with full evidence dump (see `.scratch/consult_opus47*.py` for the structured brief format)
+
+## Common failure modes
+
+- **False-positive middleware:** target CLI is older than baselines and returns a different protocol shape (not middleware, just version mismatch). Mitigate: verify CLI version, regenerate baselines if needed.
+- **False-negative middleware:** adaptive gateway varies intercept responses across runs to defeat byte-exact detection. Mitigate: check for schema-shape-matching-but-values-lying responses (compare reported fields to observed pipeline behavior).
+- **False-positive distill:** capable model with aggressive RLHF refuses introspection probe. Inspect the refusal text - a real refusal reads like an RLHF refusal, not a canned gateway response.
+- **Baseline drift:** new Anthropic release changes canonical stylometry. Mitigate: regenerate baselines on every new Opus release; tool blocks strong verdicts past `expiry_date`.
+
+## Known gaps (v0.4)
+
+1. **No tokenizer-identity probe** - planned future work. Currently constant-offset evidence from `RESULTS.md` is not reproducible via the toolkit.
+2. **No quantization-degradation probe** - planned future work.
+3. **No multi-turn probe.** All current probes are single-turn; gateways that act only on session boundaries are invisible.
+4. **No adversarial-probe-adaptation detection.** If a gateway specifically counters our probe set, we won't notice without changing prompts.
+5. **Narrow stylometric panel.** One math problem for signature. Broader panel needed for imitator detection.
+6. **Baseline regeneration is manual.** No automated `--regenerate-baselines` flag yet.
+7. **No `distill+middleware` hypothesis.** Would look like A+Middleware to the current classifier.
+8. **Thresholds hand-tuned.** Proper calibration requires labelled test set across provider types.
+
+## Cost guidance
+
+| Operation | Typical cost |
+|---|---|
+| Single target fingerprint (5 probes ? 2 repeats) | ~$0.50-1.00 (target pricing-dependent) |
+| Baseline regeneration (5 probes ? 3 Opus models ? 1 run) | ~$3 |
+| Expert consultation (Opus 4.7 max with full brief) | ~$0.30-0.60 |
+| mitmproxy setup + one capture session | free, but setup effort |
+
+## Reading the verdict
+
+The toolkit emits:
+
+- **Primary hypothesis** with confidence score (0.0-1.0)
+- **Ranked hypotheses** - always inspect the gap to second place
+- **Evidence weights** - which signal axes contributed
+- **Scoring notes** - human-readable rationale for each weight
+
+A high-confidence verdict on fresh baselines with 3+ orthogonal signals pointing the same way is a reasonable working hypothesis for investigative purposes. It is NOT proof for legal/regulatory/security-audit purposes - for those, capture the wire traffic.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+Initial docs read already shows an inconsistency I need to verify against the code: `README.md` and `METHODOLOGY.md` still identify themselves as v0.4, while `baselines.json` advertises `scorer_version: 0.5.0`. I’m checking whether that is only documentation drift or whether it breaks the executable path.
+2026-04-24T15:43:57.690853Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path .scratch\\proxy-forensics\\fingerprint.py -Pattern 'SCORER_VERSION|argparse|inconsistent_intercept|single_run_intercept_unverified|schema_mismatch|suspicious_intercept|A-clean|claude-|startswith|force-stale|known_gaps|self_introspection_json' -Context 3,4"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path .scratch\\proxy-forensics\\fingerprint.py -Pattern 'SCORER_VERSION|argparse|inconsistent_intercept|single_run_intercept_unverified|schema_mismatch|suspicious_intercept|A-clean|claude-|startswith|force-stale|known_gaps|self_introspection_json' -Context 3,4" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path .scratch\\proxy-forensics\\fingerprint.py -Pattern 'SCORER_VERSION|argparse|inconsistent_intercept|single_run_intercept_unverified|schema_mismatch|suspicious_intercept|A-clean|claude-|startswith|force-stale|known_gaps|self_introspection_json' -Context 3,4"` rejected: blocked by policy
+2026-04-24T15:43:57.694190Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path .scratch\\proxy-forensics\\test_fingerprint.py -Pattern 'inconsistent_intercept_A_clean_gate_fails|single_run_intercept_unverified_A_clean_gate_fails|schema_mismatch_A_clean_gate_fails|clean_introspection_A_clean_gate_can_pass|forged_claude_prefix_intercepted|bare_claude_intercepted|claude-opus-4-7_accepted|false_dated_leo_xiv_not_matched|codefenced' -Context 2,3"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path .scratch\\proxy-forensics\\test_fingerprint.py -Pattern 'inconsistent_intercept_A_clean_gate_fails|single_run_intercept_unverified_A_clean_gate_fails|schema_mismatch_A_clean_gate_fails|clean_introspection_A_clean_gate_can_pass|forged_claude_prefix_intercepted|bare_claude_intercepted|claude-opus-4-7_accepted|false_dated_leo_xiv_not_matched|codefenced' -Context 2,3" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path .scratch\\proxy-forensics\\test_fingerprint.py -Pattern 'inconsistent_intercept_A_clean_gate_fails|single_run_intercept_unverified_A_clean_gate_fails|schema_mismatch_A_clean_gate_fails|clean_introspection_A_clean_gate_can_pass|forged_claude_prefix_intercepted|bare_claude_intercepted|claude-opus-4-7_accepted|false_dated_leo_xiv_not_matched|codefenced' -Context 2,3"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -m json.tool .scratch\\proxy-forensics\\baselines.json" in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T15:43:57.695253Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -m json.tool .scratch\\proxy-forensics\\baselines.json"` rejected: blocked by policy
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -m json.tool .scratch\\proxy-forensics\\baselines.json"` rejected: blocked by policy
+2026-04-24T15:43:57.697886Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\fingerprint.py --help"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\fingerprint.py --help" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "python -B .scratch\\proxy-forensics\\fingerprint.py --help"` rejected: blocked by policy
+codex
+The runner is blocking search and Python execution in this sandbox, so I’m falling back to direct file reads and manual inspection. That means I can verify code and test content, but I cannot independently execute the test suite here.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\test_fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1578ms:
+"""Unit tests for fingerprint.py v0.2 - validates the fixes applied after codex review.
+
+Run: python test_fingerprint.py
+No API calls, no network - pure logic validation with mocked CLI outputs.
+"""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+import fingerprint as fp
+
+FAILED = []
+PASSED = 0
+
+
+def assert_eq(name, actual, expected):
+    global PASSED
+    if actual == expected:
+        print(f"  [OK] {name}")
+        PASSED += 1
+    else:
+        FAILED.append(name)
+        print(f"  [FAIL] {name}\n       expected: {expected!r}\n       actual:   {actual!r}")
+
+
+def assert_true(name, cond, detail=""):
+    global PASSED
+    if cond:
+        print(f"  [OK] {name}")
+        PASSED += 1
+    else:
+        FAILED.append(name)
+        print(f"  [FAIL] {name}  {detail}")
+
+
+# -------------------------------------------------------------------------
+# Parser tests - distinguishes cli_error vs parse_error vs intercepted
+# -------------------------------------------------------------------------
+print("\n--- parse_cli_output status classification ---")
+
+# Case 1: CLI error (nonzero return code)
+r = fp.parse_cli_output("some stdout", "error message", 1)
+assert_eq("nonzero_returncode -> cli_error", r["status"], "cli_error")
+
+# Case 2: Empty stdout (common gateway failure mode)
+r = fp.parse_cli_output("", "", 0)
+assert_eq("empty_stdout -> cli_error", r["status"], "cli_error")
+
+# Case 3: Invalid JSON
+r = fp.parse_cli_output("not valid json at all", "", 0)
+assert_eq("invalid_json -> parse_error", r["status"], "parse_error")
+
+# Case 4a: Valid JSON but single object WITHOUT protocol fields  intercepted
+r = fp.parse_cli_output('{"acknowledged":true}\n', "", 0)
+assert_eq("canned_object -> intercepted", r["status"], "intercepted")
+assert_eq("intercepted_raw_hash_computed", len(r["raw_hash"]), 16)
+assert_eq("intercepted_raw_bytes", r["raw_bytes"], 22)
+
+# Case 4b: Single-object JSON WITH Claude protocol fields  valid_single_object
+# (covers newer CLI versions that may emit single-object --output-format json)
+single_obj = json.dumps({
+    "type": "result",
+    "result": "Hello.",
+    "model": "claude-opus-4-7",
+    "id": "msg_01ABC",
+    "total_cost_usd": 0.01,
+    "usage": {"output_tokens": 10},
+})
+r = fp.parse_cli_output(single_obj, "", 0)
+assert_eq("single_object_with_protocol -> valid_single_object", r["status"], "valid_single_object")
+assert_eq("single_object_text", r["text"], "Hello.")
+assert_eq("single_object_model", r["reported_model"], "claude-opus-4-7")
+assert_eq("single_object_out_tok", r["out_tok"], 10)
+
+# Case 4c: Byte-hash priority - when stdout_bytes is supplied, hash is from bytes
+b_out = '{"x":1}'.encode("utf-8")
+r_b = fp.parse_cli_output('{"x":1}', "", 0, stdout_bytes=b_out)
+r_s = fp.parse_cli_output('{"x":1}', "", 0)  # no bytes  fallback to text-hash
+assert_eq("bytes_hash_matches_text_hash_on_ascii", r_b["raw_hash"], r_s["raw_hash"])  # same bytes, same hash
+assert_eq("bytes_raw_bytes_field", r_b["raw_bytes"], 7)
+
+# Case 5: Valid stream-list (normal CLI output)
+stream = json.dumps([
+    {"type": "system", "subtype": "init"},
+    {"type": "assistant", "message": {
+        "model": "claude-opus-4-7",
+        "id": "msg_01ABC1234567",
+        "content": [{"type": "text", "text": "Hello."}]
+    }},
+    {"type": "result", "usage": {"output_tokens": 10, "cache_creation_input_tokens": 100, "cache_read_input_tokens": 50}, "total_cost_usd": 0.01},
+])
+r = fp.parse_cli_output(stream, "", 0)
+assert_eq("valid_stream_status", r["status"], "valid_stream")
+assert_eq("valid_stream_model", r["reported_model"], "claude-opus-4-7")
+assert_eq("valid_stream_msg_id_provider", r["msg_id_provider"], "anthropic-direct")
+assert_eq("valid_stream_text", r["text"], "Hello.")
+assert_eq("valid_stream_out_tok", r["out_tok"], 10)
+
+# Case 6: Valid list JSON but no assistant message (malformed)
+r = fp.parse_cli_output(json.dumps([{"type": "system"}]), "", 0)
+assert_eq("no_assistant_messages -> parse_error", r["status"], "parse_error")
+
+
+# -------------------------------------------------------------------------
+# Provider detection
+# -------------------------------------------------------------------------
+print("\n--- detect_provider ---")
+assert_eq("anthropic-direct", fp.detect_provider("msg_01XYZ12345"), "anthropic-direct")
+assert_eq("google-vertex",    fp.detect_provider("msg_vrtx_01ABC123"), "google-vertex")
+assert_eq("aws-bedrock",      fp.detect_provider("msg_bdrk_01DEF"), "aws-bedrock")
+assert_eq("aggregator-uuid",  fp.detect_provider("01234567-89ab-cdef-0123-456789abcdef"), "aggregator-uuid")
+assert_eq("empty_msg_id",     fp.detect_provider(""), "unknown")
+
+
+# -------------------------------------------------------------------------
+# Canonical regex - hardened for Unicode / variants
+# -------------------------------------------------------------------------
+print("\n--- CANONICAL_7_4_OPENING regex (hardened) ---")
+cases = [
+    ("7^4 = 2401", True),
+    ("7 ^ 4 = 2401", True),
+    ("7**4=2401", True),
+    ("7? = 2401", True),
+    ("49^2 = 2401", True),
+    ("49ú49 = 2401", True),      # AW run1 used this
+    ("49ú49=2401", True),        # tight variant
+    ("49 ú 49 = 2401", True),
+    ("49*49=2401", True),
+    ("49 squared = 2401", True),
+    ("49? = 2401", True),
+    ("7? ? 2401", True),
+    ("The answer is 49", False),
+    ("2401 = 7^4", False),        # order matters, this is reverse
+    # Superscript discrimination - only ? matches, not ? or ? (v0.3 fix)
+    ("7? = 16807", False),        # 7^5 mustn't fool the regex
+    ("7? = 343", False),          # 7^3 mustn't fool it either
+]
+for text, expected in cases:
+    actual = bool(fp.CANONICAL_7_4_OPENING.search(text))
+    assert_eq(f'"{text}"', actual, expected)
+
+
+# -------------------------------------------------------------------------
+# Sentence splitter handles abbreviations
+# -------------------------------------------------------------------------
+print("\n--- split_sentences (abbreviation-aware) ---")
+# Should be 1 sentence (U.S. is abbreviation)
+s = fp.split_sentences("The U.S. declared independence. And then celebrated. Thus ended the war.")
+assert_eq("abbrev_U.S.", len(s), 3)
+
+# CRT proof style from Opus 4.7 output
+proof = ("Since p > 3 is prime, p is odd and not divisible by 3, so writing p = 2k+1 gives p? = 4k(k+1)+1 ? 1 (mod 8) because k(k+1) is always even, while p ? +1 (mod 3) forces p? ? 1 (mod 3). "
+         "By the Chinese Remainder Theorem (CRT), since gcd(8,3) = 1 and 8ú3 = 24, the pair of congruences p? ? 1 (mod 8) and p? ? 1 (mod 3) is equivalent to the single congruence p? ? 1 (mod 24). "
+         "Therefore p? mod 24 = 1 for every prime p > 3.")
+sents = fp.split_sentences(proof)
+assert_eq("crt_proof_sentence_count", len(sents), 3)
+assert_true("s2_contains_crt", "CRT" in sents[1], f"s2 = {sents[1][:80]}")
+assert_true("s3_starts_therefore", sents[2].lower().startswith("therefore"), f"s3 = {sents[2][:80]}")
+
+
+# -------------------------------------------------------------------------
+# Scorer: stylometric detects euler bias + answer
+# -------------------------------------------------------------------------
+print("\n--- score_run_stylometric ---")
+# AW-style false-start run
+aw_run = {
+    "status": "valid_stream",
+    "raw_hash": "abc1234567890abc",
+    "text": "Reasoning: ?(100)=40, so 7^17 mod 100 = 7^17; compute 7^4=2401?1, hence 7^17=(7^4)^4ú7?1ú7.\nAnswer: 07",
+    "cache_create": 0,
+    "cache_read": 0,
+    "out_tok": 77,
+    "msg_id_provider": "google-vertex",
+}
+s = fp.score_run_stylometric(aw_run)
+assert_eq("aw_euler_phrasing", s["euler_phrasing"], True)
+assert_eq("aw_tautology", s["tautology"], True)
+assert_eq("aw_answer_correct", s["answer_correct"], True)
+assert_eq("aw_cache_zero", s["cache_create"], 0)
+
+# Anthropic-direct 4.7 run
+direct_run = {
+    "status": "valid_stream",
+    "raw_hash": "def9876543210def",
+    "text": "Reasoning: 7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 7 (mod 100)\nAnswer: 07",
+    "cache_create": 58000,
+    "cache_read": 0,
+    "out_tok": 538,
+    "msg_id_provider": "anthropic-direct",
+}
+s = fp.score_run_stylometric(direct_run)
+assert_eq("direct_no_euler", s["euler_phrasing"], False)
+assert_eq("direct_canonical", s["canonical_opening"], True)
+assert_eq("direct_answer_correct", s["answer_correct"], True)
+
+
+# -------------------------------------------------------------------------
+# Scorer: anti-euler detects ban compliance + canonical (via hardened regex)
+# -------------------------------------------------------------------------
+print("\n--- score_run_anti_euler ---")
+# AW compliant run (49ú49 not 49^2 - this is the regex case codex flagged)
+aw_compliant = {
+    "status": "valid_stream",
+    "raw_hash": "aaa",
+    "text": "Reasoning: 7^2=49; 7^4=49ú49=2401?01 mod 100, so 7^17=(7^4)^4ú7?1ú7=7.\nAnswer: 7",
+}
+s = fp.score_run_anti_euler(aw_compliant)
+assert_eq("aw_compliant_no_violations", s["banned_violations"], [])
+assert_eq("aw_compliant_ban_ok", s["ban_compliant"], True)
+assert_eq("aw_compliant_canonical_FIXED", s["canonical_opening"], True)  # v0.2 regex catches 49ú49
+assert_eq("aw_compliant_answer", s["answer_correct"], True)
+
+# Violator: uses Euler
+violator = {
+    "status": "valid_stream",
+    "raw_hash": "bbb",
+    "text": "By Euler's theorem, 7^?(100) = 7^40 ? 1 mod 100, so 7^17 = ...",
+}
+s = fp.score_run_anti_euler(violator)
+assert_true("violator_detects_euler", "euler" in s["banned_violations"])
+assert_true("violator_detects_phi", "?" in s["banned_violations"])
+assert_eq("violator_ban_fail", s["ban_compliant"], False)
+
+
+# -------------------------------------------------------------------------
+# Aggregator: multi-run intercept requires byte-identical
+# -------------------------------------------------------------------------
+print("\n--- aggregate_probe: introspection ---")
+
+# Case: 2 runs, both intercepted, SAME hash -> hard_intercept
+sigs = [
+    {"raw_hash": "same1234567890ab", "status": "intercepted", "intercept_candidate": True,
+     "canned_ack_match": True, "raw_stripped": '{"acknowledged":true}'},
+    {"raw_hash": "same1234567890ab", "status": "intercepted", "intercept_candidate": True,
+     "canned_ack_match": True, "raw_stripped": '{"acknowledged":true}'},
+]
+agg = fp.aggregate_probe("self_introspection_json", sigs)
+assert_true("byte_identical_2runs -> hard_intercept",
+            "hard_intercept" in agg["signals"],
+            f"signals: {agg['signals']}")
+
+# Case: 2 runs, both intercepted, DIFFERENT hashes -> variable_intercept (weaker)
+sigs = [
+    {"raw_hash": "hash_one_abcdef00", "status": "intercepted", "intercept_candidate": True},
+    {"raw_hash": "hash_two_abcdef00", "status": "intercepted", "intercept_candidate": True},
+]
+agg = fp.aggregate_probe("self_introspection_json", sigs)
+assert_true("different_hashes -> variable_intercept (not hard)",
+            "variable_intercept" in agg["signals"] and "hard_intercept" not in agg["signals"],
+            f"signals: {agg['signals']}")
+
+# Case: 2 runs, one intercept one valid -> inconsistent
+sigs = [
+    {"raw_hash": "hash1", "status": "intercepted", "intercept_candidate": True},
+    {"raw_hash": "hash2", "status": "valid_stream", "intercept_candidate": False, "json_parse_ok": True},
+]
+agg = fp.aggregate_probe("self_introspection_json", sigs)
+assert_true("mixed -> inconsistent (no hard intercept)",
+            "hard_intercept" not in agg["signals"],
+            f"signals: {agg['signals']}")
+
+# v0.3 fix: single-run intercept should NOT emit hard_intercept
+# (was a bug - single run has trivially one unique hash, passed old check)
+sigs_single = [
+    {"raw_hash": "only_one_run_abc", "status": "intercepted", "intercept_candidate": True,
+     "canned_ack_match": True},
+]
+agg = fp.aggregate_probe("self_introspection_json", sigs_single)
+assert_true("single_run_intercept -> NO hard_intercept (v0.3 fix)",
+            "hard_intercept" not in agg["signals"],
+            f"signals: {agg['signals']}")
+assert_true("single_run_intercept -> single_run_intercept_unverified",
+            "single_run_intercept_unverified" in agg["signals"],
+            f"signals: {agg['signals']}")
+
+
+# -------------------------------------------------------------------------
+# Aggregator: anti-euler requires all runs compliant for signal
+# -------------------------------------------------------------------------
+print("\n--- aggregate_probe: anti_euler ---")
+# Both runs compliant
+sigs = [
+    {"raw_hash": "a", "ban_compliant": True, "canonical_opening": True, "answer_correct": True},
+    {"raw_hash": "b", "ban_compliant": True, "canonical_opening": True, "answer_correct": True},
+]
+agg = fp.aggregate_probe("anti_euler_override", sigs)
+assert_true("anti_euler_both_pass -> soft_override_success",
+            "soft_override_success" in agg["signals"])
+
+# One violates
+sigs = [
+    {"raw_hash": "a", "ban_compliant": True, "canonical_opening": True, "answer_correct": True, "banned_violations": []},
+    {"raw_hash": "b", "ban_compliant": False, "canonical_opening": False, "answer_correct": True, "banned_violations": ["euler"]},
+]
+agg = fp.aggregate_probe("anti_euler_override", sigs)
+assert_true("anti_euler_one_fail -> rigid_bias",
+            "rigid_bias" in agg["signals"],
+            f"signals: {agg['signals']}")
+
+# v0.3 fix: status_failure runs (CLI errors, intercepts) must NOT convert
+# to rigid_bias. Ban-compliance check only applies to valid runs.
+sigs = [
+    {"raw_hash": "a", "status_failure": "cli_error"},
+    {"raw_hash": "b", "status_failure": "cli_error"},
+]
+agg = fp.aggregate_probe("anti_euler_override", sigs)
+assert_true("anti_euler_all_failed_runs -> NO rigid_bias (v0.3 fix)",
+            "rigid_bias" not in agg["signals"],
+            f"signals: {agg['signals']}")
+assert_true("anti_euler_all_failed_runs -> no_valid_runs",
+            "no_valid_runs" in agg["signals"],
+            f"signals: {agg['signals']}")
+
+# Mixed: one valid (compliant), one status_failure  should treat as single-valid-run
+# and NOT force rigid_bias from the failure.
+sigs = [
+    {"raw_hash": "a", "ban_compliant": True, "canonical_opening": True, "answer_correct": True, "banned_violations": []},
+    {"raw_hash": "b", "status_failure": "timeout"},
+]
+agg = fp.aggregate_probe("anti_euler_override", sigs)
+assert_true("anti_euler_mixed_valid_and_failure -> override from valid only",
+            "rigid_bias" not in agg["signals"],
+            f"signals: {agg['signals']}")
+
+
+# -------------------------------------------------------------------------
+# Classify: AW-like profile produces A+Middleware with high confidence
+# -------------------------------------------------------------------------
+print("\n--- classify: AW-profile synthetic scenario ---")
+# Simulated probe findings mirroring what AW produces
+findings = {
+    "self_introspection_json": {"signals": {"hard_intercept": 0.9}, "notes": []},
+    "anti_euler_override": {"signals": {"soft_override_success": 0.85}, "notes": []},
+    "tight_reasoning_crt": {"signals": {"format_rigor_pass": 0.8}, "notes": []},
+    "temporal_cutoff": {"signals": {"post_april_2025_knowledge": 0.7}, "notes": []},
+    "stylometric_717": {"signals": {"feature_strip_no_cache": 0.6, "stylometric_euler_bias": 0.6,
+                                     "tautology_artifact": 0.5}, "notes": []},
+}
+v = fp.classify(findings)
+assert_true("AW_profile_primary_is_A+Middleware",
+            v["primary_hypothesis"].startswith("A+Middleware"),
+            f"primary={v['primary_hypothesis']}")
+assert_true("AW_profile_high_confidence", v["confidence"] in ("high", "medium"),
+            f"confidence={v['confidence']} primary={v['primary_score']}")
+
+
+# -------------------------------------------------------------------------
+# Classify: pure-distill profile (no middleware, no override)
+# -------------------------------------------------------------------------
+print("\n--- classify: distill-profile synthetic scenario ---")
+findings = {
+    "self_introspection_json": {"signals": {}, "notes": []},
+    "anti_euler_override": {"signals": {"rigid_bias": 0.7}, "notes": []},
+    "tight_reasoning_crt": {"signals": {"format_rigor_fail": 0.5}, "notes": []},
+    "temporal_cutoff": {"signals": {"early_2025_knowledge": 0.3}, "notes": []},
+    "stylometric_717": {"signals": {"stylometric_euler_bias": 0.6}, "notes": []},
+}
+v = fp.classify(findings)
+assert_true("distill_profile_picks_C",
+            "C (distill" in v["primary_hypothesis"] or v["evidence_weights"]["distill"] > 0.5,
+            f"primary={v['primary_hypothesis']} weights={v['evidence_weights']}")
+
+
+# -------------------------------------------------------------------------
+# Classify: clean direct Opus (no middleware, passes all)
+# -------------------------------------------------------------------------
+print("\n--- classify: clean-direct profile ---")
+findings = {
+    "self_introspection_json": {"signals": {"clean_introspection": 0.7}, "notes": []},
+    "anti_euler_override": {"signals": {"soft_override_success": 0.85}, "notes": []},
+    "tight_reasoning_crt": {"signals": {"format_rigor_pass": 0.85}, "notes": []},
+    "temporal_cutoff": {"signals": {"post_april_2025_knowledge": 0.7}, "notes": []},
+    "stylometric_717": {"signals": {}, "notes": []},
+}
+v = fp.classify(findings)
+# Should not pick A+Middleware (middleware evidence low)
+# Should pick A-clean (note: both hypotheses contain "middleware" as a word)
+assert_true("clean_direct_picks_A_clean_not_A_plus",
+            v["primary_hypothesis"].startswith("A-clean") and "+" not in v["primary_hypothesis"],
+            f"primary={v['primary_hypothesis']}")
+
+
+# -------------------------------------------------------------------------
+# Classify: insufficient evidence  low confidence
+# -------------------------------------------------------------------------
+print("\n--- classify: insufficient-evidence profile ---")
+findings = {
+    "self_introspection_json": {"signals": {}, "notes": []},
+    "anti_euler_override": {"signals": {}, "notes": []},
+    "tight_reasoning_crt": {"signals": {}, "notes": []},
+    "temporal_cutoff": {"signals": {}, "notes": []},
+    "stylometric_717": {"signals": {}, "notes": []},
+}
+v = fp.classify(findings)
+assert_eq("insufficient_evidence_confidence", v["confidence"], "low")
+
+
+# -------------------------------------------------------------------------
+# v0.4 adversarial classifier matrices
+# -------------------------------------------------------------------------
+print("\n--- classify: v0.4 adversarial scenarios ---")
+
+# Scenario 1: hard-intercept ONLY (no capable_base)  A+Middleware gate fails
+findings = {
+    "self_introspection_json": {"signals": {"hard_intercept": 0.9}, "notes": []},
+    "anti_euler_override": {"signals": {}, "notes": []},
+    "tight_reasoning_crt": {"signals": {}, "notes": []},
+    "temporal_cutoff": {"signals": {}, "notes": []},
+    "stylometric_717": {"signals": {}, "notes": []},
+}
+v = fp.classify(findings)
+assert_true("hard_intercept_alone_NOT_high_confidence",
+            v["confidence"] != "high" or "A+Middleware" not in v["primary_hypothesis"],
+            f"confidence={v['confidence']} primary={v['primary_hypothesis']} gates={v.get('gates_passed')}")
+assert_eq("A+Middleware_gate_fails_without_capable_base",
+          v["gates_passed"]["A+Middleware"], False)
+
+# Scenario 2: hard-intercept + temporal-cutoff only (no capable_base)  A+Middleware gate still fails
+findings = {
+    "self_introspection_json": {"signals": {"hard_intercept": 0.9}, "notes": []},
+    "anti_euler_override": {"signals": {}, "notes": []},
+    "tight_reasoning_crt": {"signals": {}, "notes": []},
+    "temporal_cutoff": {"signals": {"post_april_2025_knowledge": 0.7}, "notes": []},
+    "stylometric_717": {"signals": {}, "notes": []},
+}
+v = fp.classify(findings)
+assert_eq("A+Middleware_gate_still_fails_without_capable_base",
+          v["gates_passed"]["A+Middleware"], False)
+
+# Scenario 3: variable-intercept + otherwise-clean  A-clean gate fails (suspicious_intercept present)
+findings = {
+    "self_introspection_json": {"signals": {"variable_intercept": 0.45}, "notes": []},
+    "anti_euler_override": {"signals": {"soft_override_success": 0.85}, "notes": []},
+    "tight_reasoning_crt": {"signals": {"format_rigor_pass": 0.85}, "notes": []},
+    "temporal_cutoff": {"signals": {"post_april_2025_knowledge": 0.7}, "notes": []},
+    "stylometric_717": {"signals": {}, "notes": []},
+}
+v = fp.classify(findings)
+# Variable intercept should disqualify A-clean from high confidence
+assert_true("variable_intercept_blocks_A_clean_high",
+            v["confidence"] != "high" or "A-clean" not in v["primary_hypothesis"] or not v["gates_passed"]["A-clean"],
+            f"confidence={v['confidence']} primary={v['primary_hypothesis']} gates={v.get('gates_passed')}")
+
+# Scenario 4: hard_intercept + capable_base (AW-like)  high A+Middleware as expected
+findings = {
+    "self_introspection_json": {"signals": {"hard_intercept": 0.9}, "notes": []},
+    "anti_euler_override": {"signals": {"soft_override_success": 0.85}, "notes": []},
+    "tight_reasoning_crt": {"signals": {"format_rigor_pass": 0.8}, "notes": []},
+    "temporal_cutoff": {"signals": {"post_april_2025_knowledge": 0.7}, "notes": []},
+    "stylometric_717": {"signals": {"feature_strip_no_cache": 0.6, "stylometric_euler_bias": 0.6}, "notes": []},
+}
+v = fp.classify(findings)
+assert_true("AW_reproduces_A+Middleware_primary",
+            v["primary_hypothesis"].startswith("A+Middleware"),
+            f"primary={v['primary_hypothesis']}")
+assert_eq("AW_A+Middleware_gate_passes", v["gates_passed"]["A+Middleware"], True)
+
+
+# -------------------------------------------------------------------------
+# v0.4 protocol-object detection - stricter heuristic
+# -------------------------------------------------------------------------
+print("\n--- parse_cli_output: stricter single-object protocol detection ---")
+
+# Adversarial: gateway wraps intercept in {"result": "..."} without usage/model/session
+wrapper = json.dumps({"result": "{\"acknowledged\":true}"})
+r = fp.parse_cli_output(wrapper, "", 0)
+assert_eq("wrapped_intercept_detected_as_intercepted",
+          r["status"], "intercepted")
+
+# Only has `type` field - too weak for protocol object, should be intercepted
+r = fp.parse_cli_output(json.dumps({"type": "ok"}), "", 0)
+assert_eq("type_only_not_enough_for_single_object",
+          r["status"], "intercepted")
+
+# Genuine: result + usage.output_tokens  valid_single_object
+genuine = json.dumps({
+    "result": "Hello",
+    "usage": {"output_tokens": 5, "input_tokens": 10},
+    "model": "claude-opus-4-7",
+})
+r = fp.parse_cli_output(genuine, "", 0)
+assert_eq("genuine_single_object_accepted", r["status"], "valid_single_object")
+
+# Non-Claude-looking model string rejected
+not_claude = json.dumps({"result": "Hi", "model": "gpt-5.5"})
+r = fp.parse_cli_output(not_claude, "", 0)
+assert_eq("non_claude_model_intercepted", r["status"], "intercepted")
+
+# v0.5: forged "claude" prefix without hyphen must NOT pass single-object heuristic
+forged = json.dumps({"result": "Hi", "model": "claudefake"})
+r = fp.parse_cli_output(forged, "", 0)
+assert_eq("forged_claude_prefix_intercepted", r["status"], "intercepted")
+
+forged2 = json.dumps({"result": "Hi", "model": "claude"})
+r = fp.parse_cli_output(forged2, "", 0)
+assert_eq("bare_claude_intercepted", r["status"], "intercepted")
+
+# But hyphenated Claude family IDs pass
+legit = json.dumps({"result": "Hi", "model": "claude-opus-4-7"})
+r = fp.parse_cli_output(legit, "", 0)
+assert_eq("claude-opus-4-7_accepted", r["status"], "valid_single_object")
+
+# Stream list containing scalars  parse_error (v0.4 type-guard)
+r = fp.parse_cli_output(json.dumps([{"type": "system"}, "scalar_string", 42]), "", 0)
+assert_eq("stream_list_with_scalars_parse_error", r["status"], "parse_error")
+
+
+# -------------------------------------------------------------------------
+# v0.4 introspection schema validation
+# -------------------------------------------------------------------------
+print("\n--- score_run_introspection: full schema required ---")
+
+# Complete schema  schema_match=True
+complete = {"status": "valid_stream", "raw_hash": "h1",
+            "text": '{"architecture_family":"Claude","supports_extended_thinking":true,"can_use_prompt_caching":true,"knowledge_cutoff_month":"January 2026"}'}
+s = fp.score_run_introspection(complete)
+assert_eq("complete_schema_matches", s.get("schema_match"), True)
+
+# Missing one field  schema_match=False
+partial = {"status": "valid_stream", "raw_hash": "h2",
+           "text": '{"architecture_family":"Claude","supports_extended_thinking":true}'}
+s = fp.score_run_introspection(partial)
+assert_eq("partial_schema_no_match", s.get("schema_match"), False)
+assert_true("partial_schema_missing_field_recorded",
+            "schema_missing_field" in s and "can_use_prompt_caching" in s["schema_missing_field"])
+
+# Wrong type (bool as string)  schema_match=False
+wrong_type = {"status": "valid_stream", "raw_hash": "h3",
+              "text": '{"architecture_family":"Claude","supports_extended_thinking":"yes","can_use_prompt_caching":true,"knowledge_cutoff_month":"January 2026"}'}
+s = fp.score_run_introspection(wrong_type)
+assert_eq("wrong_type_schema_no_match", s.get("schema_match"), False)
+assert_true("wrong_type_recorded", "schema_wrong_type" in s)
+
+# v0.5: codefenced schema-correct introspection  codefence_wrap=True + schema_match=True,
+# but aggregator must NOT emit clean_introspection (codefence = format failure)
+codefenced = {"status": "valid_stream", "raw_hash": "h4",
+              "text": '```json\n{"architecture_family":"Claude","supports_extended_thinking":true,"can_use_prompt_caching":true,"knowledge_cutoff_month":"January 2026"}\n```'}
+s = fp.score_run_introspection(codefenced)
+assert_eq("codefenced_schema_match", s.get("schema_match"), True)
+assert_eq("codefenced_wrap_detected", s.get("codefence_wrap"), True)
+# Now test aggregator: codefence_wrap should prevent clean_introspection signal
+agg = fp.aggregate_probe("self_introspection_json", [s, s])
+assert_true("codefenced_schema_no_clean_introspection",
+            "clean_introspection" not in agg["signals"],
+            f"signals: {agg['signals']}")
+
+# Aggregator: schema_mismatch emitted when JSON parses but schema fails
+sigs = [
+    {"raw_hash": "a", "status": "valid_stream", "intercept_candidate": False,
+     "json_parse_ok": True, "schema_match": False, "codefence_wrap": False},
+    {"raw_hash": "b", "status": "valid_stream", "intercept_candidate": False,
+     "json_parse_ok": True, "schema_match": False, "codefence_wrap": False},
+]
+agg = fp.aggregate_probe("self_introspection_json", sigs)
+assert_true("schema_mismatch_signal_emitted",
+            "schema_mismatch" in agg["signals"],
+            f"signals: {agg['signals']}")
+assert_true("schema_mismatch_no_clean_introspection",
+            "clean_introspection" not in agg["signals"])
+
+
+# -------------------------------------------------------------------------
+# v0.4 temporal cutoff - verifiable-only
+# -------------------------------------------------------------------------
+print("\n--- aggregate_probe: temporal verifiable-only ---")
+
+# Generic late-2025 mention (verifiable=False) must NOT promote post_april
+sigs = [
+    {"raw_hash": "a", "events_found": ["Late-2025 event (cutoff > April 2025)"], "latest_month_code": 6},
+    {"raw_hash": "b", "events_found": ["Late-2025 event (cutoff > April 2025)"], "latest_month_code": 6},
+]
+agg = fp.aggregate_probe("temporal_cutoff", sigs)
+assert_true("generic_late_2025_NOT_post_april",
+            "post_april_2025_knowledge" not in agg["signals"],
+            f"signals: {agg['signals']}")
+
+# Verifiable Pope Leo XIV mention  post_april_2025
+sigs = [
+    {"raw_hash": "a", "events_found": ["May 2025 Pope Leo XIV election"], "latest_month_code": 5},
+]
+agg = fp.aggregate_probe("temporal_cutoff", sigs)
+assert_true("pope_leo_xiv_IS_post_april",
+            "post_april_2025_knowledge" in agg["signals"],
+            f"signals: {agg['signals']}")
+
+# v0.5: False-dated event (April 2025 Pope Leo XIV - model hallucinates wrong month)
+# should NOT match the tightened May-only pattern.
+false_dated_text = "Reasoning\nApril 2025 Pope Leo XIV elected at the Vatican."
+mock_run = {"status": "valid_stream", "raw_hash": "h", "text": false_dated_text}
+s = fp.score_run_temporal(mock_run)
+assert_true("false_dated_leo_xiv_not_matched",
+            "May 2025 Pope Leo XIV election" not in s.get("events_found", []),
+            f"events_found: {s.get('events_found')}")
+
+
+# -------------------------------------------------------------------------
+# v0.4 soft-override conditional scoring
+# -------------------------------------------------------------------------
+print("\n--- classify: soft_override conditional on stylometric bias ---")
+
+# With bias observed  full capable_base credit
+findings_with_bias = {
+    "self_introspection_json": {"signals": {}, "notes": []},
+    "anti_euler_override": {"signals": {"soft_override_success": 0.85}, "notes": []},
+    "tight_reasoning_crt": {"signals": {"format_rigor_pass": 0.85}, "notes": []},
+    "temporal_cutoff": {"signals": {"post_april_2025_knowledge": 0.7}, "notes": []},
+    "stylometric_717": {"signals": {"stylometric_euler_bias": 0.6}, "notes": []},
+}
+v_bias = fp.classify(findings_with_bias)
+
+# Without bias observed  weaker capable_base signal
+findings_without_bias = {
+    "self_introspection_json": {"signals": {}, "notes": []},
+    "anti_euler_override": {"signals": {"soft_override_success": 0.85}, "notes": []},
+    "tight_reasoning_crt": {"signals": {"format_rigor_pass": 0.85}, "notes": []},
+    "temporal_cutoff": {"signals": {"post_april_2025_knowledge": 0.7}, "notes": []},
+    "stylometric_717": {"signals": {}, "notes": []},
+}
+v_nobias = fp.classify(findings_without_bias)
+assert_true("bias_observed_gives_higher_capable_base",
+            v_bias["evidence_weights"]["capable_base"] > v_nobias["evidence_weights"]["capable_base"],
+            f"with_bias={v_bias['evidence_weights']['capable_base']} without={v_nobias['evidence_weights']['capable_base']}")
+
+
+# -------------------------------------------------------------------------
+# v0.5 adversarial tests (codex round-4 findings)
+# -------------------------------------------------------------------------
+print("\n--- classify: v0.5 inconsistent_intercept blocks A-clean high ---")
+
+# Blocker fix: inconsistent_intercept (0.25) + otherwise-clean should NOT yield high A-clean
+findings = {
+    "self_introspection_json": {"signals": {"inconsistent_intercept": 0.25}, "notes": []},
+    "anti_euler_override": {"signals": {"soft_override_success": 0.85}, "notes": []},
+    "tight_reasoning_crt": {"signals": {"format_rigor_pass": 0.85}, "notes": []},
+    "temporal_cutoff": {"signals": {"post_april_2025_knowledge": 0.7}, "notes": []},
+    "stylometric_717": {"signals": {"stylometric_euler_bias": 0.6}, "notes": []},
+}
+v = fp.classify(findings)
+assert_eq("inconsistent_intercept_A_clean_gate_fails",
+          v["gates_passed"]["A-clean"], False)
+# Even if A-clean still ranks, confidence can't be high
+assert_true("inconsistent_intercept_no_high_confidence_A_clean",
+            not (v["primary_hypothesis"].startswith("A-clean") and v["confidence"] == "high"),
+            f"primary={v['primary_hypothesis']} confidence={v['confidence']}")
+
+# Also check: single_run_intercept_unverified blocks A-clean
+findings["self_introspection_json"] = {"signals": {"single_run_intercept_unverified": 0.2}, "notes": []}
+v = fp.classify(findings)
+assert_eq("single_run_intercept_unverified_A_clean_gate_fails",
+          v["gates_passed"]["A-clean"], False)
+
+# And schema_mismatch blocks A-clean
+findings["self_introspection_json"] = {"signals": {"schema_mismatch": 0.4}, "notes": []}
+v = fp.classify(findings)
+assert_eq("schema_mismatch_A_clean_gate_fails",
+          v["gates_passed"]["A-clean"], False)
+
+# Positive control: truly clean introspection  A-clean gate can pass
+findings["self_introspection_json"] = {"signals": {"clean_introspection": 0.7}, "notes": []}
+v = fp.classify(findings)
+assert_eq("clean_introspection_A_clean_gate_can_pass",
+          v["gates_passed"]["A-clean"], True)
+
+
+# -------------------------------------------------------------------------
+# Baseline freshness - v0.3 fix: missing/malformed expiry_date fails closed
+# -------------------------------------------------------------------------
+print("\n--- check_baseline_freshness (fails closed on missing expiry) ---")
+
+stale, msg = fp.check_baseline_freshness({"metadata": {}})
+assert_true("missing_expiry_date_fails_closed", stale, msg)
+
+stale, msg = fp.check_baseline_freshness({"metadata": {"expiry_date": "not-a-date"}})
+assert_true("malformed_expiry_date_fails_closed", stale, msg)
+
+stale, msg = fp.check_baseline_freshness({"metadata": {"expiry_date": "2000-01-01"}})
+assert_true("past_expiry_stale", stale, msg)
+
+# Valid future date  not stale
+from datetime import date, timedelta
+future = (date.today() + timedelta(days=30)).isoformat()
+stale, msg = fp.check_baseline_freshness({"metadata": {"expiry_date": future}})
+assert_true("future_expiry_not_stale", not stale, msg)
+
+
+# -------------------------------------------------------------------------
+# Summary
+# -------------------------------------------------------------------------
+print(f"\n{'='*60}\nRESULTS: {PASSED} passed, {len(FAILED)} failed")
+if FAILED:
+    print("Failed tests:")
+    for f in FAILED:
+        print(f"  - {f}")
+    sys.exit(1)
+else:
+    print("All tests passed.")
+    sys.exit(0)
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1711ms:
+#!/usr/bin/env python3
+"""
+Claude proxy forensic fingerprinter - v0.5.
+
+Given a command that speaks the Claude Code CLI protocol (plain `claude` or
+a wrapper like `claude-aw.cmd`), run a battery of probes to classify the
+backend and detect middleware interference.
+
+v0.5 changes (fourth codex gpt-5.5 xhigh review):
+  - A-clean gate now blocks on ANY intercept signal (hard/variable/inconsistent/
+    schema_mismatch/single_run_intercept_unverified), not just those crossing
+    an arbitrary threshold. Suspicious_intercept threshold tightened 0.3  0.1.
+  - Hypothesis labels softened: "real Claude"  "Claude-like backend" to
+    reflect the documented distill+middleware blind spot honestly.
+  - Scorer-version major-mismatch blocks execution (fail-closed), not just
+    prints a warning.
+  - baselines.json scorer_version bumped to 0.5.0; planned-v0.3 text cleaned
+    up; added distill+middleware blind-spot entry to known_gaps.
+  - RESULTS.md softened further: "inconsistent with distilled student" 
+    "less consistent with rigidly-biased distilled-only student".
+
+v0.4 changes (third codex gpt-5.5 xhigh review):
+  - Classifier has HARD EVIDENCE GATES: A+Middleware requires both
+    middleware ? 0.6 AND capable_base ? 0.5; A-clean requires capable_base
+    ? 0.6 AND middleware/suspicious_intercept low; C requires distill ?
+    0.6 AND low capable_base. Hypotheses failing their gate can't reach
+    high confidence.
+  - Introspection schema validation: clean_introspection requires all 4
+    fields with credible types. Schema-shaped-but-wrong JSON emits
+    schema_mismatch (middleware evidence) instead of clean.
+  - Protocol-object detection stricter: single-object JSON must have
+    `result` string AND (usage dict with token counts OR model starting
+    "claude-" OR session_id ? 8 chars). Prevents gateway wrappers like
+    `{"result":"{\"acknowledged\":true}"}` from evading intercept.
+  - Variable/inconsistent intercept penalizes A-clean (adaptive gateway
+    can't be classified clean).
+  - Soft-override conditional: fully counts as capable-base evidence only
+    when stylometric bias was first observed; otherwise 0.3? multiplier.
+  - Temporal cutoff requires verifiable events; generic month-only
+    mentions no longer promote cutoff.
+  - Parser type-guards stream-list elements (scalars  parse_error).
+
+v0.3:
+  - valid_single_object vs intercepted distinction.
+  - status_failure runs filtered from scoring.
+  - hard_intercept ? 2 repeats.
+  - Byte-level raw hash.
+  - Superscript regex only ?.
+  - Missing expiry_date fails closed.
+
+v0.2:
+  - cli_error/parse_error/intercepted/valid_stream separation.
+  - --repeats N flag.
+  - Confidence-graded classification.
+  - Hardened Unicode regex.
+  - Baseline expiry check.
+
+Usage:
+  python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
+  python fingerprint.py --label "direct" --cmd "claude --model claude-opus-4-7"
+  python fingerprint.py --list-probes
+  python fingerprint.py --label "X" --cmd "..." --repeats 2
+
+Dependencies: Python 3.9+, baselines.json co-located with this script.
+"""
+
+import argparse
+import hashlib
+import json
+import re
+import shlex
+import subprocess
+import sys
+from datetime import date, datetime
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+BASELINES_PATH = BASE_DIR / "baselines.json"
+SCORER_VERSION = "0.5.0"
+
+# --- Hardened regex patterns ---------------------------------------------
+# Canonical Opus-4.x modular-arithmetic opening for 7^17 mod 100 family.
+# Matches: 7^4 = 2401, 7? ? 2401, 7**4 = 2401, 49^2 = 2401, 49ú49 = 2401,
+#          49*49 = 2401, 49?=2401, 49 squared = 2401.
+CANONICAL_7_4_OPENING = re.compile(
+    r"(?:"
+    r"7\s*(?:\^|\*\*)\s*4\s*(?:=|?)\s*2401"
+    r"|"
+    r"7?\s*(?:=|?)\s*2401"  # explicit ? only, not any superscript digit
+    r"|"
+    r"49\s*(?:\^\s*2|\*\*\s*2|?|[ú*??]\s*49|\s+squared)\s*(?:=|?)?\s*2401"
+    r")",
+    re.IGNORECASE | re.UNICODE,
+)
+
+EULER_PHI_PATTERNS = [
+    re.compile(r"?\s*\(\s*100\s*\)", re.IGNORECASE),
+    re.compile(r"\beuler\b", re.IGNORECASE),
+    re.compile(r"\btotient\b", re.IGNORECASE),
+    re.compile(r"\bfermat('|')?s?\b", re.IGNORECASE),
+]
+
+TAUTOLOGY_PATTERN = re.compile(
+    r"7\s*(?:\^|\*\*)?\s*17\s*(?:mod|\(mod|modulo)\s*100\s*=\s*7\s*(?:\^|\*\*)?\s*17",
+    re.IGNORECASE,
+)
+
+ANSWER_07_PATTERN = re.compile(r"answer\s*[:\-=]\s*\*?\*?\s*0?7\b", re.IGNORECASE)
+
+# Temporal cutoff detection - each factual event with verifiable date.
+# Must be rotated on baseline regeneration as 2025 events become
+# general-knowledge (lose discriminative power).
+TEMPORAL_EVENTS = [
+    {
+        "pattern": re.compile(r"(january|jan)\s*2025.{0,80}(trump|inaugurat|47th)", re.IGNORECASE | re.DOTALL),
+        "desc": "Jan 2025 Trump inauguration",
+        "month_code": 1,
+        "verifiable": True,
+    },
+    {
+        "pattern": re.compile(r"(?:january|jan)\s*2025.{0,80}(wildfire|palisades|eaton|altadena)", re.IGNORECASE | re.DOTALL),
+        "desc": "Jan 2025 LA wildfires",
+        "month_code": 1,
+        "verifiable": True,
+    },
+    {
+        "pattern": re.compile(r"(april|apr)\s*2025.{0,80}(pope francis|francis|vatican)", re.IGNORECASE | re.DOTALL),
+        "desc": "April 2025 Pope Francis death",
+        "month_code": 4,
+        "verifiable": True,
+    },
+    {
+        # Leo XIV was elected in May 2025 (not April). Restrict to May to
+        # avoid scoring model hallucinations that place the election in April.
+        "pattern": re.compile(r"(may)\s*2025.{0,80}(leo xiv|prevost)", re.IGNORECASE | re.DOTALL),
+        "desc": "May 2025 Pope Leo XIV election",
+        "month_code": 5,
+        "verifiable": True,
+    },
+    {
+        "pattern": re.compile(r"(june|jun|july|jul|august|aug|september|sep|october|oct|november|nov|december|dec)\s*2025", re.IGNORECASE),
+        "desc": "Late-2025 event (cutoff > April 2025)",
+        "month_code": 6,  # lower bound
+        "verifiable": False,  # may be hallucinated without specifics
+    },
+]
+
+# Sentence splitter that preserves common abbreviations (U.S., e.g., i.e.,
+# C.R.T., Dr., etc.) instead of splitting them mid-sentence. Works by
+# pre-rewriting known multi-dot acronyms to dotless forms before splitting.
+ABBREV_SET = {"vs", "etc", "dr", "mr", "mrs", "ms", "st", "mod", "no", "cf", "fig", "eq"}
+
+MULTI_DOT_ACRONYMS = [
+    (re.compile(r"\bU\.S\.A\."), "USA"),
+    (re.compile(r"\bU\.S\."), "US"),
+    (re.compile(r"\be\.g\."), "eg"),
+    (re.compile(r"\bi\.e\."), "ie"),
+    (re.compile(r"\bC\.R\.T\."), "CRT"),
+    (re.compile(r"\bP\.S\."), "PS"),
+    (re.compile(r"\bM\.D\."), "MD"),
+    (re.compile(r"\bPh\.D\."), "PhD"),
+    (re.compile(r"\bU\.K\."), "UK"),
+    (re.compile(r"\bE\.U\."), "EU"),
+]
+
+def split_sentences(text):
+    """Split on sentence terminators that are NOT preceded by known abbreviations.
+
+    Pre-rewrites multi-dot acronyms (U.S., e.g., i.e., etc.) to dotless forms
+    before applying the terminator-based split. This loses the dots in output
+    tokens but preserves sentence boundary count, which is what we need.
+    """
+    for pat, replacement in MULTI_DOT_ACRONYMS:
+        text = pat.sub(replacement, text)
+    text = re.sub(r"\s+", " ", text.strip())
+    parts = []
+    cur = []
+    i = 0
+    while i < len(text):
+        cur.append(text[i])
+        if text[i] in ".!?":
+            last_word = "".join(cur[:-1]).rstrip().split(" ")[-1].lower().rstrip(".")
+            is_abbrev = last_word in ABBREV_SET
+            j = i + 1
+            while j < len(text) and text[j] == " ":
+                j += 1
+            at_end = j >= len(text)
+            next_upper = j < len(text) and text[j].isupper()
+            if not is_abbrev and (at_end or next_upper):
+                parts.append("".join(cur).strip())
+                cur = []
+        i += 1
+    if cur:
+        tail = "".join(cur).strip()
+        if tail:
+            parts.append(tail)
+    return [p for p in parts if p]
+
+
+def detect_provider(msg_id):
+    if not msg_id:
+        return "unknown"
+    if msg_id.startswith("msg_vrtx_"):
+        return "google-vertex"
+    if msg_id.startswith("msg_bdrk_"):
+        return "aws-bedrock"
+    if msg_id.startswith("msg_01"):
+        return "anthropic-direct"
+    if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", msg_id):
+        return "aggregator-uuid"
+    return f"unknown ({msg_id[:12]}...)"
+
+
+def load_baselines():
+    with BASELINES_PATH.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def check_baseline_freshness(data):
+    """Return (is_stale, warning_msg). Fails closed: missing/malformed expiry_date is treated as stale."""
+    meta = data.get("metadata", {})
+    expiry = meta.get("expiry_date")
+    if not expiry:
+        return True, "missing expiry_date - treating as stale (fail-closed)"
+    try:
+        exp = date.fromisoformat(expiry)
+    except ValueError:
+        return True, f"malformed expiry_date: {expiry} - treating as stale (fail-closed)"
+    today = date.today()
+    if today > exp:
+        return True, f"baselines expired on {expiry} (today {today}); regenerate before strong claims"
+    return False, f"baselines valid until {expiry}"
+
+
+def sha256_16(data):
+    """Compute truncated SHA-256 hex of input.
+    Accepts bytes (preferred for byte-exact intercept comparison) or str (fallback).
+    """
+    if not data:
+        return ""
+    if isinstance(data, bytes):
+        return hashlib.sha256(data).hexdigest()[:16]
+    return hashlib.sha256(data.encode("utf-8", errors="replace")).hexdigest()[:16]
+
+
+# -------------------------------------------------------------------------
+# CLI invocation + parsing
+# -------------------------------------------------------------------------
+
+def run_cli(base_cmd_tokens, prompt, shell=False, timeout=300):
+    """Invoke CLI and capture BOTH raw bytes (for byte-exact hashing) and decoded text."""
+    cli_flags = [
+        "-p", prompt,
+        "--effort", "max",
+        "--tools", "",
+        "--output-format", "json",
+    ]
+    full_cmd = base_cmd_tokens + cli_flags
+    try:
+        r = subprocess.run(
+            full_cmd,
+            capture_output=True,
+            text=False,  # raw bytes - we decode + hash separately
+            shell=shell,
+            timeout=timeout,
+        )
+        stdout_bytes = r.stdout or b""
+        stderr_bytes = r.stderr or b""
+        stdout_text = stdout_bytes.decode("utf-8", errors="replace")
+        stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+        return {
+            "stdout": stdout_text,
+            "stdout_bytes": stdout_bytes,
+            "stderr": stderr_text,
+            "returncode": r.returncode,
+        }
+    except subprocess.TimeoutExpired:
+        return {"stdout": "", "stdout_bytes": b"", "stderr": "timeout",
+                "returncode": -1, "timeout": True}
+
+
+def _looks_like_claude_single_object(obj):
+    """Stricter heuristic: object must look like a genuine Claude CLI --output-format json result.
+    Requires at least a `result` string AND one of {usage dict, model string, session_id string}
+    to avoid misclassifying gateway wrappers like {"result": "{\"acknowledged\":true}"}.
+    """
+    if not isinstance(obj, dict):
+        return False
+    result_val = obj.get("result")
+    usage_val = obj.get("usage")
+    model_val = obj.get("model")
+    session_val = obj.get("session_id")
+    # Must have a string result (Claude CLI single-object puts response text here)
+    has_result_string = isinstance(result_val, str) and len(result_val) > 0
+    # Must have at least one other credible CLI field with a plausible type
+    has_usage = isinstance(usage_val, dict) and ("output_tokens" in usage_val or "input_tokens" in usage_val)
+    # Tighten to hyphenated Claude family IDs: real Claude models are
+    # `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5-...`, etc.
+    # A wrapper setting model="claudefake" would not match.
+    has_model = isinstance(model_val, str) and (
+        model_val.startswith("claude-") or model_val.startswith("msg_")
+    )
+    has_session = isinstance(session_val, str) and len(session_val) >= 8
+    return has_result_string and (has_usage or has_model or has_session)
+
+
+def parse_cli_output(stdout, stderr, returncode, stdout_bytes=None):
+    """Returns dict with explicit status. Distinct states:
+      - cli_error:          process failed (nonzero exit, empty stdout, or timeout)
+      - parse_error:        stdout was not valid JSON
+      - valid_stream:       JSON array of stream events (historical Claude CLI shape)
+      - valid_single_object: JSON object that looks like a Claude CLI single-response
+                            (newer CLI versions may emit this directly)
+      - intercepted:        JSON object that does NOT carry Claude CLI protocol fields
+                            - candidate canned gateway response; needs ? 2 matching
+                            repeats to confirm as middleware evidence
+    """
+    # Hash raw BYTES when available (byte-exact intercept detection). Fall back
+    # to decoded-text hash if bytes weren't captured.
+    if stdout_bytes is not None:
+        raw_hash = sha256_16(stdout_bytes)
+        raw_bytes_len = len(stdout_bytes)
+    else:
+        raw_hash = sha256_16(stdout)
+        raw_bytes_len = len(stdout.encode("utf-8", errors="replace")) if stdout else 0
+    base = {"raw_hash": raw_hash, "raw_bytes": raw_bytes_len}
+
+    if returncode != 0:
+        return {**base, "status": "cli_error", "reason": f"exit={returncode}",
+                "stderr_head": (stderr or "")[:300]}
+    if not stdout or not stdout.strip():
+        return {**base, "status": "cli_error", "reason": "empty_stdout",
+                "stderr_head": (stderr or "")[:300]}
+
+    try:
+        parsed = json.loads(stdout)
+    except json.JSONDecodeError as e:
+        return {**base, "status": "parse_error", "reason": f"json_decode: {e}",
+                "raw_head": stdout[:400]}
+
+    if isinstance(parsed, list):
+        # Type-guard each element - list of scalars shouldn't crash with x.get(...)
+        dict_elements = [x for x in parsed if isinstance(x, dict)]
+        if len(dict_elements) != len(parsed):
+            return {**base, "status": "parse_error",
+                    "reason": f"stream_list_contains_non_dict ({len(parsed)-len(dict_elements)} scalars)",
+                    "raw_head": stdout[:400]}
+        result = next((x for x in dict_elements if x.get("type") == "result"), None)
+        assistants = [x for x in dict_elements if x.get("type") == "assistant"]
+        if not assistants:
+            return {**base, "status": "parse_error",
+                    "reason": "no_assistant_messages",
+                    "raw_head": stdout[:400]}
+        last = assistants[-1].get("message", {})
+        content = last.get("content", [])
+        text = "\n".join(c.get("text", "") for c in content if c.get("type") == "text")
+        thinking_chars = sum(len(c.get("thinking", "")) for c in content if c.get("type") == "thinking")
+        usage = (result or {}).get("usage", {})
+        return {
+            **base,
+            "status": "valid_stream",
+            "reported_model": last.get("model"),
+            "msg_id": last.get("id", ""),
+            "msg_id_provider": detect_provider(last.get("id", "")),
+            "out_tok": usage.get("output_tokens"),
+            "cache_create": usage.get("cache_creation_input_tokens"),
+            "cache_read": usage.get("cache_read_input_tokens"),
+            "cost_usd": (result or {}).get("total_cost_usd"),
+            "text": text,
+            "thinking_chars": thinking_chars,
+        }
+
+    # Non-list JSON. Strictly distinguish Claude single-object output from gateway
+    # intercept: require `result` string AND at least one credible CLI metadata field
+    # (usage dict with token counts, model string starting "claude-", or session_id).
+    if isinstance(parsed, dict) and _looks_like_claude_single_object(parsed):
+        usage = parsed.get("usage", {})
+        text = parsed.get("result", "")
+        msg_id = parsed.get("id", "") or parsed.get("message_id", "")
+        return {
+            **base,
+            "status": "valid_single_object",
+            "reported_model": parsed.get("model"),
+            "msg_id": msg_id,
+            "msg_id_provider": detect_provider(msg_id),
+            "out_tok": usage.get("output_tokens") if isinstance(usage, dict) else None,
+            "cache_create": usage.get("cache_creation_input_tokens") if isinstance(usage, dict) else None,
+            "cache_read": usage.get("cache_read_input_tokens") if isinstance(usage, dict) else None,
+            "cost_usd": parsed.get("total_cost_usd"),
+            "text": text,
+            "thinking_chars": 0,  # single-object form usually doesn't expose thinking blocks
+        }
+    # Object without Claude protocol fields OR scalar value  candidate intercept.
+    # Requires cross-run reproducibility (? 2 byte-identical repeats) to become evidence.
+    return {
+        **base,
+        "status": "intercepted",
+        "raw": stdout,
+        "parsed_object": parsed,
+    }
+
+
+# -------------------------------------------------------------------------
+# Probe scoring (per-run signals - later aggregated across runs)
+# -------------------------------------------------------------------------
+
+def _answer_correct_7(text):
+    return ANSWER_07_PATTERN.search(text) is not None
+
+
+def score_run_stylometric(run):
+    if run.get("status") not in ("valid_stream", "valid_single_object"):
+        return {"status_failure": run.get("status"), "raw_hash": run.get("raw_hash")}
+    text = run.get("text", "")
+    signals = {
+        "raw_hash": run.get("raw_hash"),
+        "canonical_opening": bool(CANONICAL_7_4_OPENING.search(text)),
+        "euler_phrasing": any(p.search(text) for p in EULER_PHI_PATTERNS),
+        "tautology": bool(TAUTOLOGY_PATTERN.search(text)),
+        "answer_correct": _answer_correct_7(text),
+        "cache_create": run.get("cache_create"),
+        "cache_read": run.get("cache_read"),
+        "out_tok": run.get("out_tok"),
+        "provider": run.get("msg_id_provider"),
+    }
+    return signals
+
+
+def score_run_temporal(run):
+    if run.get("status") not in ("valid_stream", "valid_single_object"):
+        return {"status_failure": run.get("status"), "raw_hash": run.get("raw_hash")}
+    text = run.get("text", "")
+    events_found = []
+    max_month = 0
+    for ev in TEMPORAL_EVENTS:
+        if ev["pattern"].search(text):
+            events_found.append(ev["desc"])
+            if ev["month_code"] > max_month:
+                max_month = ev["month_code"]
+    return {
+        "raw_hash": run.get("raw_hash"),
+        "events_found": events_found,
+        "latest_month_code": max_month,
+        "text_snippet": text[:400],
+    }
+
+
+def score_run_tight_reasoning(run):
+    if run.get("status") not in ("valid_stream", "valid_single_object"):
+        return {"status_failure": run.get("status"), "raw_hash": run.get("raw_hash")}
+    text = run.get("text", "").strip()
+    sentences = split_sentences(text)
+    sig = {
+        "raw_hash": run.get("raw_hash"),
+        "sentence_count": len(sentences),
+        "sentence_count_pass": len(sentences) == 3,
+    }
+    if len(sentences) >= 3:
+        s2 = sentences[1] if len(sentences) > 1 else ""
+        s3 = sentences[2] if len(sentences) > 2 else ""
+        sig["crt_in_s2"] = bool(re.search(r"(chinese\s+remainder|crt)", s2, re.IGNORECASE))
+        sig["therefore_s3"] = s3.strip().lower().startswith("therefore")
+    else:
+        sig["crt_in_s2"] = False
+        sig["therefore_s3"] = False
+    sig["all_format_pass"] = sig["sentence_count_pass"] and sig["crt_in_s2"] and sig["therefore_s3"]
+    return sig
+
+
+def score_run_introspection(run):
+    sig = {"raw_hash": run.get("raw_hash"), "status": run.get("status")}
+    if run.get("status") == "intercepted":
+        sig["intercept_candidate"] = True
+        raw = run.get("raw", "").strip()
+        sig["raw_stripped"] = raw
+        sig["raw_bytes"] = run.get("raw_bytes")
+        # Known signature from prior investigation
+        sig["canned_ack_match"] = raw == '{"acknowledged":true}' or raw == '{"acknowledged": true}'
+    elif run.get("status") in ("valid_stream", "valid_single_object"):
+        sig["intercept_candidate"] = False
+        text = run.get("text", "").strip()
+        # Extract embedded JSON (may be wrapped in codefence)
+        codefence = re.search(r"```(?:json)?\s*(.+?)```", text, re.DOTALL)
+        if codefence:
+            sig["codefence_wrap"] = True
+            text_json = codefence.group(1).strip()
+        else:
+            sig["codefence_wrap"] = False
+            text_json = text
+        try:
+            obj = json.loads(text_json)
+            sig["json_parse_ok"] = True
+            # Require ALL four schema fields with credible types - otherwise
+            # this is schema-shaped garbage (possibly a crafted gateway response)
+            required = {
+                "architecture_family": str,
+                "supports_extended_thinking": bool,
+                "can_use_prompt_caching": bool,
+                "knowledge_cutoff_month": str,
+            }
+            if not isinstance(obj, dict):
+                sig["schema_match"] = False
+            else:
+                schema_ok = True
+                for k, t in required.items():
+                    if k not in obj:
+                        schema_ok = False
+                        sig["schema_missing_field"] = sig.get("schema_missing_field", []) + [k]
+                    elif not isinstance(obj[k], t):
+                        schema_ok = False
+                        sig.setdefault("schema_wrong_type", []).append((k, type(obj[k]).__name__))
+                    else:
+                        sig[f"field_{k}"] = obj[k]
+                sig["schema_match"] = schema_ok
+        except (json.JSONDecodeError, TypeError):
+            sig["json_parse_ok"] = False
+            sig["schema_match"] = False
+    else:
+        sig["intercept_candidate"] = None
+    return sig
+
+
+def score_run_anti_euler(run):
+    if run.get("status") not in ("valid_stream", "valid_single_object"):
+        return {"status_failure": run.get("status"), "raw_hash": run.get("raw_hash")}
+    text = run.get("text", "")
+    violations = []
+    for pat, label in [
+        (re.compile(r"\beuler\b", re.I), "euler"),
+        (re.compile(r"\btotient\b", re.I), "totient"),
+        (re.compile(r"\bfermat\b", re.I), "fermat"),
+        (re.compile(r"\bphi\b", re.I), "phi"),
+        (re.compile(r"?"), "?"),
+        (re.compile(r"?"), "?"),
+        (re.compile(r"?"), "?"),
+    ]:
+        if pat.search(text):
+            violations.append(label)
+    return {
+        "raw_hash": run.get("raw_hash"),
+        "banned_violations": violations,
+        "ban_compliant": len(violations) == 0,
+        "canonical_opening": bool(CANONICAL_7_4_OPENING.search(text)),
+        "answer_correct": _answer_correct_7(text),
+    }
+
+
+PROBE_SCORERS = {
+    "stylometric_717": score_run_stylometric,
+    "temporal_cutoff": score_run_temporal,
+    "tight_reasoning_crt": score_run_tight_reasoning,
+    "self_introspection_json": score_run_introspection,
+    "anti_euler_override": score_run_anti_euler,
+}
+
+
+# -------------------------------------------------------------------------
+# Cross-run aggregation  probe-level signals with confidence
+# -------------------------------------------------------------------------
+
+def aggregate_probe(probe_id, run_signals):
+    """Combine per-run signals into probe-level findings.
+    Returns dict with signal names mapped to confidence values in [0, 1].
+    """
+    out = {"probe_id": probe_id, "run_count": len(run_signals), "signals": {}, "notes": []}
+    if not run_signals:
+        return out
+
+    # Extract raw hashes for cross-run consistency checks
+    hashes = [s.get("raw_hash") for s in run_signals]
+    unique_hashes = set(h for h in hashes if h)
+    out["unique_output_hashes"] = len(unique_hashes)
+
+    if probe_id == "self_introspection_json":
+        intercept_runs = [s for s in run_signals if s.get("intercept_candidate")]
+        canned_match_runs = [s for s in intercept_runs if s.get("canned_ack_match")]
+        if len(intercept_runs) == len(run_signals) == 0:
+            pass
+        elif (len(intercept_runs) == len(run_signals)
+              and len(run_signals) >= 2
+              and len(unique_hashes) == 1):
+            # Require at least 2 runs AND byte-identical - single-run "intercept"
+            # could be a transient CLI failure or non-standard output.
+            conf = min(0.95, 0.5 + 0.2 * len(run_signals))  # 0.9 at n=2, cap 0.95
+            out["signals"]["hard_intercept"] = conf
+            out["notes"].append(
+                f"All {len(run_signals)} runs returned byte-identical non-protocol output "
+                f"(hash prefix {hashes[0]})"
+            )
+            if canned_match_runs:
+                out["notes"].append("Matches known canned-ack signature from prior investigation")
+        elif (len(intercept_runs) == len(run_signals)
+              and len(run_signals) == 1):
+            # Single run of non-protocol output - weak evidence, could be transient
+            out["signals"]["single_run_intercept_unverified"] = 0.2
+            out["notes"].append(
+                "Single run returned non-protocol output - insufficient to confirm middleware "
+                "(re-run with --repeats ? 2 for byte-exact consistency check)"
+            )
+        elif len(intercept_runs) == len(run_signals) and len(unique_hashes) > 1:
+            out["signals"]["variable_intercept"] = 0.45
+            out["notes"].append(
+                f"All {len(run_signals)} runs non-protocol but outputs differ ({len(unique_hashes)} unique hashes) - "
+                "may be adaptive intercept or coincidental non-protocol output"
+            )
+        elif len(intercept_runs) > 0:
+            out["signals"]["inconsistent_intercept"] = 0.25
+            out["notes"].append(
+                f"{len(intercept_runs)}/{len(run_signals)} runs intercepted - not reproducible, weak signal"
+            )
+        else:
+            # All runs valid_stream - require FULL schema match, not just "json parseable"
+            schema_pass = [s for s in run_signals
+                           if s.get("schema_match") and not s.get("codefence_wrap")]
+            json_only = [s for s in run_signals
+                         if s.get("json_parse_ok") and not s.get("schema_match")]
+            if len(schema_pass) == len(run_signals) and run_signals:
+                out["signals"]["clean_introspection"] = 0.7
+                out["notes"].append(
+                    "All runs returned valid JSON matching the required 4-field schema (no gateway filter)"
+                )
+            elif len(json_only) > 0:
+                # JSON shape but wrong schema - possible schema-crafted gateway response
+                out["signals"]["schema_mismatch"] = 0.4
+                out["notes"].append(
+                    f"{len(json_only)}/{len(run_signals)} runs returned JSON but DID NOT match required schema. "
+                    "Possible crafted-gateway-response or model format failure."
+                )
+            elif len(schema_pass) > 0 and len(schema_pass) < len(run_signals):
+                out["signals"]["partial_introspection"] = 0.3
+            # Extract reported fields for later cross-check
+            for r in run_signals:
+                for k in ("architecture_family", "knowledge_cutoff_month",
+                          "supports_extended_thinking", "can_use_prompt_caching"):
+                    field_key = f"field_{k}"
+                    if field_key in r:
+                        out.setdefault(f"reported_{k}", []).append(r[field_key])
+
+    elif probe_id == "anti_euler_override":
+        # Skip runs that didn't produce valid output - CLI errors / intercepts
+        # must NOT be converted into rigid_bias evidence.
+        valid = [s for s in run_signals if "status_failure" not in s]
+        if not valid:
+            out["signals"]["no_valid_runs"] = 0.0
+            out["notes"].append(f"All {len(run_signals)} runs failed ({[s.get('status_failure') for s in run_signals]})")
+        else:
+            compliant_all = all(s.get("ban_compliant") for s in valid)
+            canonical_all = all(s.get("canonical_opening") for s in valid)
+            answer_all = all(s.get("answer_correct") for s in valid)
+            if compliant_all and canonical_all and answer_all:
+                out["signals"]["soft_override_success"] = min(0.85, 0.55 + 0.15 * len(valid))
+                out["notes"].append(
+                    f"All {len(valid)} valid runs: ban-compliant + canonical opening + correct answer."
+                )
+            elif compliant_all and not canonical_all:
+                out["signals"]["partial_override"] = 0.4
+                out["notes"].append("Ban compliant but did not use canonical 7^4 opening - ambiguous")
+            elif not compliant_all:
+                violators = [s.get("banned_violations") for s in valid]
+                out["signals"]["rigid_bias"] = min(0.75, 0.45 + 0.15 * len(valid))
+                out["notes"].append(
+                    f"Banned vocabulary persists despite explicit user ban: {violators}. "
+                    "Indicates rigid injection or baked-in bias."
+                )
+
+    elif probe_id == "stylometric_717":
+        # Feature-strip evidence: cache fields are explicitly zero (not missing)
+        cache_zero_runs = [s for s in run_signals
+                           if s.get("cache_create") == 0 and s.get("cache_read") == 0]
+        cache_present_runs = [s for s in run_signals
+                              if (s.get("cache_create") or 0) > 0 or (s.get("cache_read") or 0) > 0]
+        if len(cache_zero_runs) == len(run_signals) and len(run_signals) > 0:
+            out["signals"]["feature_strip_no_cache"] = 0.6
+            out["notes"].append("Cache fields explicitly zero on all runs (strip or never enabled)")
+        elif len(cache_present_runs) > 0 and len(cache_zero_runs) > 0:
+            out["signals"]["inconsistent_cache"] = 0.3
+
+        # Bias detection: Euler phrasing appears in unconstrained math output
+        euler_runs = [s for s in run_signals if s.get("euler_phrasing")]
+        if len(euler_runs) == len(run_signals) and len(run_signals) > 1:
+            out["signals"]["stylometric_euler_bias"] = 0.6
+            out["notes"].append(
+                f"{len(euler_runs)}/{len(run_signals)} unconstrained-math runs opened with Euler framing"
+            )
+        elif len(euler_runs) > 0:
+            out["signals"]["possible_bias"] = 0.25
+
+        # Tautology pattern
+        if any(s.get("tautology") for s in run_signals):
+            out["signals"]["tautology_artifact"] = 0.5
+            out["notes"].append("Tautology pattern detected (forced-instruction artifact)")
+
+        # Provider
+        providers = set(s.get("provider") for s in run_signals if s.get("provider"))
+        out["providers_observed"] = list(providers)
+
+    elif probe_id == "tight_reasoning_crt":
+        # Skip runs that didn't produce valid output.
+        valid = [s for s in run_signals if "status_failure" not in s]
+        if not valid:
+            out["signals"]["no_valid_runs"] = 0.0
+            out["notes"].append(f"All {len(run_signals)} runs failed ({[s.get('status_failure') for s in run_signals]})")
+        else:
+            all_pass = all(s.get("all_format_pass") for s in valid)
+            if all_pass:
+                out["signals"]["format_rigor_pass"] = min(0.85, 0.6 + 0.1 * len(valid))
+                out["notes"].append(f"All {len(valid)} valid runs satisfy format constraints")
+            else:
+                fails = [s for s in valid if not s.get("all_format_pass")]
+                out["signals"]["format_rigor_fail"] = 0.5
+                out["notes"].append(f"{len(fails)}/{len(valid)} valid runs failed format constraints")
+
+    elif probe_id == "temporal_cutoff":
+        # Only count VERIFIABLE events toward cutoff claims. A hallucinated
+        # "June 2025" mention (verifiable=False generic-month pattern) must
+        # not promote the target into post_april_2025 territory.
+        verified_months = []
+        for s in run_signals:
+            events = s.get("events_found", [])
+            for ev_desc in events:
+                for ev in TEMPORAL_EVENTS:
+                    if ev["desc"] == ev_desc and ev.get("verifiable"):
+                        verified_months.append(ev["month_code"])
+        max_verified = max(verified_months, default=0)
+        if max_verified >= 5:
+            out["signals"]["post_april_2025_knowledge"] = 0.7
+            out["notes"].append("Model mentioned verifiable events from May 2025 or later")
+        elif max_verified >= 4:
+            out["signals"]["april_2025_knowledge"] = 0.5
+            out["notes"].append("Model knowledge reaches at least April 2025")
+        elif max_verified > 0:
+            out["signals"]["early_2025_knowledge"] = 0.3
+        else:
+            out["signals"]["no_verified_2025"] = 0.3
+            out["notes"].append(
+                "No verifiable 2025 events detected - any 2025 mentions present were "
+                "generic month references that could be hallucinated."
+            )
+
+    return out
+
+
+# -------------------------------------------------------------------------
+# Classification - weighted evidence  graded verdict
+# -------------------------------------------------------------------------
+
+def classify(probe_findings):
+    """Produce confidence-graded verdict from aggregated probe signals.
+
+    v0.4 changes:
+      - Hard gates: high-confidence hypotheses require MINIMUM evidence in specific families.
+        A+Middleware needs BOTH middleware ? 0.6 AND capable_base ? 0.5.
+        A-clean needs capable_base ? 0.6 AND no variable/inconsistent intercept.
+        C needs distill ? 0.6 AND no strong capable_base.
+      - Variable/inconsistent intercept penalizes A-clean (can't be clean if gateway
+        is returning weird responses inconsistently).
+      - soft_override_success only boosts capable_base when stylometric bias was also
+        observed (otherwise the probe taught us nothing about bias overridability).
+    """
+    evidence = {"middleware": 0.0, "capable_base": 0.0, "distill": 0.0,
+                "recent_cutoff": 0.0, "feature_strip": 0.0, "suspicious_intercept": 0.0}
+    notes = []
+
+    intro = probe_findings.get("self_introspection_json", {})
+    intro_sig = intro.get("signals", {})
+    if intro_sig.get("hard_intercept"):
+        v = intro_sig["hard_intercept"]
+        evidence["middleware"] += v
+        notes.append(f"Middleware: hard_intercept +{v:.2f}")
+    if intro_sig.get("clean_introspection"):
+        v = intro_sig["clean_introspection"]
+        evidence["capable_base"] += v * 0.4
+        notes.append(f"Capable-base: clean_introspection +{v*0.4:.2f}")
+    if intro_sig.get("schema_mismatch"):
+        v = intro_sig["schema_mismatch"]
+        evidence["suspicious_intercept"] += v
+        evidence["middleware"] += v * 0.4
+        notes.append(f"Middleware: schema_mismatch (schema-crafted response?) +{v*0.4:.2f}")
+    if intro_sig.get("variable_intercept"):
+        v = intro_sig["variable_intercept"]
+        evidence["suspicious_intercept"] += v
+        evidence["middleware"] += v * 0.5
+        notes.append(f"Middleware: variable_intercept (adaptive gateway?) +{v*0.5:.2f}")
+    if intro_sig.get("inconsistent_intercept"):
+        v = intro_sig["inconsistent_intercept"]
+        evidence["suspicious_intercept"] += v
+        notes.append(f"Suspicious: inconsistent_intercept +{v:.2f}")
+
+    anti = probe_findings.get("anti_euler_override", {})
+    anti_sig = anti.get("signals", {})
+    sty = probe_findings.get("stylometric_717", {})
+    sty_sig = sty.get("signals", {})
+    stylometric_bias_observed = bool(sty_sig.get("stylometric_euler_bias"))
+
+    if anti_sig.get("soft_override_success"):
+        v = anti_sig["soft_override_success"]
+        # Only count as capable-base evidence if bias was observed to override.
+        # Otherwise, override success on a neutral prompt teaches nothing.
+        if stylometric_bias_observed:
+            evidence["capable_base"] += v
+            notes.append(f"Capable-base: soft_override_success (bias observed  overrideable) +{v:.2f}")
+        else:
+            evidence["capable_base"] += v * 0.3  # weaker - no bias to override
+            notes.append(f"Capable-base: soft_override_success (no prior bias; weak signal) +{v*0.3:.2f}")
+    if anti_sig.get("rigid_bias"):
+        v = anti_sig["rigid_bias"]
+        evidence["distill"] += v
+        notes.append(f"Distill: rigid_bias +{v:.2f}")
+
+    tight = probe_findings.get("tight_reasoning_crt", {})
+    tight_sig = tight.get("signals", {})
+    if tight_sig.get("format_rigor_pass"):
+        v = tight_sig["format_rigor_pass"]
+        evidence["capable_base"] += v
+        notes.append(f"Capable-base: format_rigor_pass +{v:.2f}")
+    if tight_sig.get("format_rigor_fail"):
+        v = tight_sig["format_rigor_fail"]
+        evidence["distill"] += v * 0.5
+        notes.append(f"Distill: format_rigor_fail +{v*0.5:.2f}")
+
+    temp = probe_findings.get("temporal_cutoff", {})
+    temp_sig = temp.get("signals", {})
+    if temp_sig.get("post_april_2025_knowledge"):
+        v = temp_sig["post_april_2025_knowledge"]
+        evidence["recent_cutoff"] += v
+        notes.append(f"Recent-cutoff: post_april_2025 +{v:.2f}")
+
+    if sty_sig.get("feature_strip_no_cache"):
+        v = sty_sig["feature_strip_no_cache"]
+        evidence["feature_strip"] += v
+        evidence["middleware"] += v * 0.3
+        notes.append(f"Middleware: feature_strip +{v*0.3:.2f}")
+    if sty_sig.get("stylometric_euler_bias"):
+        v = sty_sig["stylometric_euler_bias"]
+        if anti_sig.get("soft_override_success"):
+            evidence["middleware"] += v * 0.6
+            notes.append(f"Middleware: stylometric_bias + override_success  soft injection +{v*0.6:.2f}")
+        elif anti_sig.get("rigid_bias"):
+            evidence["distill"] += v * 0.5
+            notes.append(f"Distill: stylometric_bias + rigid (can't override) +{v*0.5:.2f}")
+        else:
+            evidence["middleware"] += v * 0.2
+            notes.append(f"Ambiguous bias (no anti-euler data): +{v*0.2:.2f} middleware")
+    if sty_sig.get("tautology_artifact"):
+        evidence["middleware"] += 0.2
+        notes.append("Middleware: tautology_artifact +0.20")
+
+    # Hard gates for hypotheses. Each gate must be met for the corresponding
+    # hypothesis to be able to reach high-confidence. Soft aggregation still
+    # contributes to the score, but gates prevent misleading labels from thin
+    # evidence.
+    mw = min(1.0, evidence["middleware"])
+    cb = min(1.0, evidence["capable_base"])
+    di = min(1.0, evidence["distill"])
+    rc = min(1.0, evidence["recent_cutoff"])
+    si = min(1.0, evidence["suspicious_intercept"])
+
+    # A+Middleware: needs BOTH middleware ? 0.6 AND capable_base ? 0.5
+    a_mid_gate = (mw >= 0.6 and cb >= 0.5)
+    a_mid = (0.5 * mw + 0.35 * cb + 0.15 * rc) if a_mid_gate else min(0.5, 0.4 * mw + 0.3 * cb)
+    # A-clean: needs capable_base ? 0.6 AND effectively NO middleware/suspicious-intercept signal.
+    # v0.5: tightened suspicious_intercept threshold from 0.3  0.1 so that even weak
+    # inconsistent_intercept signals (0.25) disqualify A-clean from high confidence.
+    # Also explicit: ANY intercept signal (hard_intercept, variable_intercept,
+    # inconsistent_intercept, schema_mismatch, single_run_intercept_unverified)
+    # in the introspection probe prevents A-clean high confidence.
+    intro_sig_raw = probe_findings.get("self_introspection_json", {}).get("signals", {})
+    any_intercept_signal = any(k in intro_sig_raw for k in (
+        "hard_intercept", "variable_intercept", "inconsistent_intercept",
+        "schema_mismatch", "single_run_intercept_unverified",
+    ))
+    a_clean_gate = (cb >= 0.6 and mw < 0.4 and si < 0.1 and not any_intercept_signal)
+    a_clean = (0.55 * cb + 0.25 * rc - 0.3 * mw - 0.5 * si) if a_clean_gate else min(0.5, 0.4 * cb + 0.2 * rc - 0.3 * mw - 0.5 * si)
+    # C (distill): needs distill ? 0.6 AND capable_base < 0.5
+    c_gate = (di >= 0.6 and cb < 0.5)
+    c_distill = (0.7 * di - 0.3 * cb) if c_gate else min(0.5, 0.5 * di - 0.2 * cb)
+    # Ambiguous: low total evidence
+    total_ev = sum(evidence.values())
+    ambiguous = 1.0 - min(1.0, total_ev / 2.5)
+
+    # Note on hypothesis labels: "real Claude" in these names reflects the
+    # most-consistent-with reading when A+Middleware / A-clean wins. Given the
+    # documented distill+middleware blind spot (see known_gaps), these labels
+    # are shorthand for "backend matches frontier-Claude signature" rather than
+    # proof that the backend is literally Anthropic's Claude.
+    hypotheses = sorted([
+        ("A+Middleware (Claude-like backend + active gateway)", max(0.0, a_mid)),
+        ("A-clean (Claude-like backend, no detectable middleware)", max(0.0, a_clean)),
+        ("C (distilled student, no middleware)", max(0.0, c_distill)),
+        ("ambiguous / insufficient evidence", ambiguous),
+    ], key=lambda x: -x[1])
+
+    top = hypotheses[0]
+    second = hypotheses[1]
+    gap = top[1] - second[1]
+    if "ambiguous" in top[0]:
+        confidence = "low"
+    else:
+        # Determine which hypothesis this is and whether its gate was satisfied
+        gate_ok = False
+        if top[0].startswith("A+Middleware"):
+            gate_ok = a_mid_gate
+        elif top[0].startswith("A-clean"):
+            gate_ok = a_clean_gate
+        elif top[0].startswith("C "):
+            gate_ok = c_gate
+        if gate_ok and top[1] >= 0.55 and gap >= 0.2:
+            confidence = "high"
+        elif top[1] >= 0.35 and gap >= 0.1:
+            confidence = "medium"
+        else:
+            confidence = "low"
+
+    return {
+        "primary_hypothesis": top[0],
+        "primary_score": round(top[1], 3),
+        "confidence": confidence,
+        "gap_to_second": round(gap, 3),
+        "ranked_hypotheses": [(h, round(s, 3)) for h, s in hypotheses],
+        "evidence_weights": {k: round(v, 3) for k, v in evidence.items()},
+        "gates_passed": {
+            "A+Middleware": a_mid_gate,
+            "A-clean": a_clean_gate,
+            "C": c_gate,
+        },
+        "notes": notes,
+    }
+
+
+# -------------------------------------------------------------------------
+# Main runner
+# -------------------------------------------------------------------------
+
+def run_probe(probe_id, probe, cmd_tokens, shell, repeats):
+    scorer = PROBE_SCORERS.get(probe_id)
+    if not scorer:
+        return {"error": f"no scorer for {probe_id}"}
+    prompt = probe["prompt"]
+    run_sigs = []
+    raw_runs = []
+    for i in range(repeats):
+        raw = run_cli(cmd_tokens, prompt, shell=shell)
+        if raw.get("timeout"):
+            run_sigs.append({"status_failure": "timeout", "raw_hash": ""})
+            raw_runs.append({"timeout": True})
+            continue
+        parsed = parse_cli_output(
+            raw.get("stdout", ""),
+            raw.get("stderr", ""),
+            raw.get("returncode", 0),
+            stdout_bytes=raw.get("stdout_bytes"),
+        )
+        run_sigs.append(scorer(parsed))
+        status = parsed.get("status")
+        raw_runs.append({
+            "status": status,
+            "raw_hash": parsed.get("raw_hash"),
+            "raw_bytes": parsed.get("raw_bytes"),
+            "text_head": parsed.get("text", "")[:200] if status in ("valid_stream", "valid_single_object") else None,
+            "intercept_raw": parsed.get("raw", "")[:200] if status == "intercepted" else None,
+            "error_reason": parsed.get("reason") if status in ("cli_error", "parse_error") else None,
+            "out_tok": parsed.get("out_tok"),
+            "reported_model": parsed.get("reported_model"),
+            "msg_id_provider": parsed.get("msg_id_provider"),
+        })
+    agg = aggregate_probe(probe_id, run_sigs)
+    agg["per_run"] = raw_runs
+    return agg
+
+
+def tokenize_cmd(cmd_str):
+    return shlex.split(cmd_str, posix=False)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Claude proxy forensic fingerprinter v0.5")
+    ap.add_argument("--label", help="Display label for target (e.g. 'AW')")
+    ap.add_argument("--cmd", help="Base command string, e.g. 'claude-aw.cmd --model opus'")
+    ap.add_argument("--shell", action="store_true",
+                    help="Use shell=True (required for .cmd/.bat on Windows). "
+                         "WARNING: do NOT pass a --cmd value you didn't compose yourself.")
+    ap.add_argument("--repeats", type=int, default=2,
+                    help="Repeat each probe N times (default 2). "
+                         "Strong classification signals require consistency across runs.")
+    ap.add_argument("--list-probes", action="store_true", help="List available probes and exit")
+    ap.add_argument("--probes", nargs="+", help="Only run listed probes (ids); default = all")
+    ap.add_argument("--save-raw", help="Path to save full per-probe raw output (JSON)")
+    ap.add_argument("--force-stale", action="store_true",
+                    help="Proceed even if baselines are past their expiry_date")
+    args = ap.parse_args()
+
+    data = load_baselines()
+
+    if args.list_probes:
+        print("Available probes:")
+        for pid, probe in data["probes"].items():
+            print(f"  {pid}: {probe['purpose']}")
+        return 0
+
+    # Baseline freshness + scorer-version compatibility check
+    is_stale, fresh_msg = check_baseline_freshness(data)
+    baselines_scorer = data.get("metadata", {}).get("scorer_version", "?")
+    print(f"[baselines] {fresh_msg} (scorer v{SCORER_VERSION}, baselines v{baselines_scorer})")
+    if is_stale and not args.force_stale:
+        print("ERROR: baselines are stale. Regenerate or pass --force-stale to proceed anyway.")
+        return 2
+    # v0.5: scorer-version drift enforcement. Major version mismatch means scorer
+    # semantics changed and cached baselines may no longer apply correctly.
+    current_major = SCORER_VERSION.split(".")[0]
+    baseline_major = str(baselines_scorer).split(".")[0] if baselines_scorer != "?" else "?"
+    if baseline_major != "?" and baseline_major != current_major and not args.force_stale:
+        print(f"ERROR: baseline scorer major version ({baselines_scorer}) does not match current "
+              f"scorer ({SCORER_VERSION}). Regenerate baselines or pass --force-stale.")
+        return 2
+
+    if not args.cmd or not args.label:
+        ap.error("--cmd and --label required (or use --list-probes)")
+
+    if args.shell:
+        print("[!] --shell: subprocess.run will use shell=True. "
+              "Do not pass a --cmd value from an untrusted source.\n")
+
+    cmd_tokens = tokenize_cmd(args.cmd)
+    probe_ids = args.probes or list(data["probes"].keys())
+
+    print(f"=== Fingerprinting target: {args.label} ===")
+    print(f"    command: {args.cmd}")
+    print(f"    shell:   {args.shell}")
+    print(f"    repeats: {args.repeats}")
+    print(f"    probes:  {probe_ids}\n")
+
+    findings = {}
+    for pid in probe_ids:
+        probe = data["probes"].get(pid)
+        if not probe:
+            print(f"[skip] unknown probe: {pid}")
+            continue
+        print(f"--- PROBE: {pid} (repeats={args.repeats}) ---")
+        print(f"    purpose: {probe['purpose']}")
+        result = run_probe(pid, probe, cmd_tokens, args.shell, args.repeats)
+        findings[pid] = result
+        print(f"    runs summary:")
+        for i, pr in enumerate(result.get("per_run", [])):
+            line = f"      [{i+1}] status={pr.get('status')} hash={(pr.get('raw_hash') or '')[:10]} "
+            if pr.get("status") in ("valid_stream", "valid_single_object"):
+                line += f"model={pr.get('reported_model')} provider={pr.get('msg_id_provider')} out_tok={pr.get('out_tok')}"
+            elif pr.get("status") == "intercepted":
+                line += f"bytes={pr.get('raw_bytes')} raw={pr.get('intercept_raw')!r}"
+            elif pr.get("status") in ("cli_error", "parse_error"):
+                line += f"reason={pr.get('error_reason')}"
+            print(line)
+            if pr.get("text_head"):
+                print(f"           text: {pr['text_head']}")
+        if result.get("signals"):
+            print(f"    signals: {result['signals']}")
+        if result.get("notes"):
+            for n in result["notes"]:
+                print(f"    note: {n}")
+        print()
+
+    print("\n=== CLASSIFICATION ===")
+    verdict = classify(findings)
+    print(f"  Primary:    {verdict['primary_hypothesis']}")
+    print(f"  Score:      {verdict['primary_score']}")
+    print(f"  Confidence: {verdict['confidence']} (gap to second: {verdict['gap_to_second']})")
+    print(f"\n  Ranked hypotheses:")
+    for h, s in verdict["ranked_hypotheses"]:
+        print(f"    {s:>6.3f}  {h}")
+    print(f"\n  Evidence weights: {verdict['evidence_weights']}")
+    if verdict.get("notes"):
+        print("\n  Scoring notes:")
+        for n in verdict["notes"]:
+            print(f"    - {n}")
+
+    if verdict["confidence"] == "low":
+        print("\n  WARNING: low-confidence verdict. Run more repeats, add more probes, "
+              "or collect additional evidence (tokenizer probe, mitmproxy capture) before committing to a classification.")
+
+    if args.save_raw:
+        out_obj = {
+            "target": args.label,
+            "command": args.cmd,
+            "scorer_version": SCORER_VERSION,
+            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "findings": findings,
+            "classification": verdict,
+        }
+        with Path(args.save_raw).open("w", encoding="utf-8") as f:
+            json.dump(out_obj, f, indent=2, ensure_ascii=False, default=str)
+        print(f"\n  raw saved to {args.save_raw}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\baselines.json -Tail 60" in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T15:44:25.765429Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "(Get-Content -Path .scratch\\proxy-forensics\\fingerprint.py)[300..520]"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "(Get-Content -Path .scratch\\proxy-forensics\\fingerprint.py)[300..520]" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "(Get-Content -Path .scratch\\proxy-forensics\\fingerprint.py)[300..520]"` rejected: blocked by policy
+2026-04-24T15:44:25.823706Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "(Get-Content -Path .scratch\\proxy-forensics\\fingerprint.py)[520..680]"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "(Get-Content -Path .scratch\\proxy-forensics\\fingerprint.py)[520..680]" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "(Get-Content -Path .scratch\\proxy-forensics\\fingerprint.py)[520..680]"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path .scratch\\proxy-forensics\\README.md -TotalCount 80" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1387ms:
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 556,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49; 7^4 = 49^2 = 2401 ? 1 (mod 100); so 7^16 = (7^4)^4 ? 1 (mod 100); therefore 7^17 = 7^16 ú 7 ? 7 (mod 100).\nAnswer: 7"
+        }
+      }
+    }
+  },
+  "interpretation_rules": {
+    "caveat": "Single-probe signals are weak on their own. Strong classifications require (a) multiple probes pointing the same way AND (b) cross-run reproducibility (--repeats ? 2) AND (c) fresh baselines. A smart adaptive gateway can evade any single probe if it knows the probe's shape.",
+    "hypothesis_A_real_backend_with_middleware": {
+      "indicators": [
+        "canonical_opening in stylometric probe",
+        "passes anti_euler_override compliance",
+        "passes tight_reasoning_crt format constraints",
+        "knowledge_cutoff matches a real model generation",
+        "non-anthropic msg_id prefix (vertex/bedrock) - but note: any gateway can forge this string",
+        "self_introspection MAY be intercepted with byte-exact canned response across repeats"
+      ],
+      "weaknesses": [
+        "Adaptive gateways can evade byte-exact intercept detection by varying responses slightly",
+        "msg_id prefix alone is NOT proof - trivially forgeable"
+      ]
+    },
+    "hypothesis_C_distilled_student": {
+      "indicators": [
+        "false_start_abandon pattern that does NOT disappear under explicit override",
+        "fumbles format constraints (wrong sentence count, misplaced named constraints)",
+        "knowledge_cutoff gap vs claimed backend",
+        "consistent output compression AND poor style recovery",
+        "self_introspection attempts (hallucinated/waffled) rather than byte-exact intercept"
+      ],
+      "weaknesses": [
+        "A high-capability distill or a non-Claude fine-tune can imitate Claude convincingly on any single probe",
+        "Anti-euler override can be passed by probe-aware proxies"
+      ]
+    },
+    "middleware_signatures": {
+      "hard_intercept": "Multiple repeats return byte-identical non-protocol output on introspection. Single-run intercept is weak evidence - may be CLI error or adaptive response.",
+      "soft_injection": "Stylometric bias (e.g. euler phrasing) present under neutral prompt, disappears under explicit ban. Requires BOTH probes to conclude injection.",
+      "feature_strip": "cache_create=0 AND cache_read=0 on a prompt that should trigger caching. Defaults-to-zero semantics can false-positive; confirm by running on a long prompt.",
+      "effort_ignored": "identical output_tokens with/without --effort flag (requires separate targeted comparison)",
+      "output_cap": "max_tokens hard-capped well below natural model output",
+      "label_spoofing": "reported model field varies across identical requests - not currently auto-detected, inspect per_run output manually"
+    },
+    "provider_family_by_msg_id": {
+      "msg_01*": "Anthropic direct API (api.anthropic.com)",
+      "msg_vrtx_*": "Google Vertex AI (may be genuine Anthropic on Vertex, or a proxy forging the prefix)",
+      "msg_bdrk_*": "AWS Bedrock (same caveat)",
+      "uuid_36": "Aggregator (LiteLLM/Portkey/OpenRouter/etc - inspect upstream)"
+    },
+    "known_gaps": [
+      "No tokenizer-identity probe (planned future work): reported input_tokens vs locally-computed Claude BPE on sentinel strings would detect non-Claude backends masquerading as Claude.",
+      "No quantization-degradation probe (planned future work): systematic numerical precision tests (sin() to 12 digits, modular arithmetic on large numbers) would detect int8/int4 quantized variants.",
+      "No distill+middleware hypothesis class: a distilled student fronted by a middleware gateway would currently classify as A+Middleware. The labels 'real Claude + active gateway' reflect the most-consistent-with reading, not proof that the backend is Claude rather than a Claude-like distill behind the same gateway."
+      "No multi-turn middleware probe: all current probes are single-turn; gateways that act only on turn-boundaries (session injection, cache-across-turns behavior) are invisible.",
+      "Narrow stylometric panel: single math problem is a weak signature; broader stylistic panel (safety refusals, code formatting, XML/tool conventions) would catch non-Claude imitators more reliably."
+    ]
+  }
+}
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1853ms:
+# Claude Proxy Forensic Toolkit - v0.4
+
+Fingerprint any Claude-compatible CLI endpoint (official `claude`, third-party wrappers like `claude-aw.cmd`, aggregator proxies) to estimate:
+
+- Provider routing (Anthropic direct, Google Vertex, AWS Bedrock, aggregator)
+- Whether the backend is a real frontier Claude, a distilled student, or an imitator
+- What middleware layers the gateway adds (stripping, injection, interception, spoofing)
+
+**Status: v0.4, hypothesis generator**, not adjudicating forensic classifier. Use results as an investigative starting point, not as legal/security-grade proof. See `METHODOLOGY.md` for caveats and known gaps.
+
+## Files
+
+- **`fingerprint.py`** - main executable. Runs probe battery, compares to baselines, produces confidence-graded verdict.
+- **`baselines.json`** - cached Anthropic-direct Opus 4.5/4.6/4.7 outputs with expiry date and rotation triggers.
+- **`RESULTS.md`** - the original `claude-aw.cmd` investigation that produced this toolkit.
+- **`METHODOLOGY.md`** - probe protocol, decision tree, caveats, known gaps.
+
+## Version changes
+
+### v0.4 (third codex review round)
+
+- Classifier has **hard evidence gates**: A+Middleware requires middleware ? 0.6 AND capable_base ? 0.5; A-clean requires capable_base ? 0.6 AND middleware < 0.4 AND suspicious_intercept < 0.3; C requires distill ? 0.6 AND capable_base < 0.5. Hypotheses failing their gate can't reach high confidence.
+- **Introspection schema validation**: probe 4 only signals `clean_introspection` when all four required fields (`architecture_family`, `supports_extended_thinking`, `can_use_prompt_caching`, `knowledge_cutoff_month`) are present with credible types. JSON that parses but fails schema emits `schema_mismatch` and counts as middleware evidence.
+- **Protocol-object detection stricter**: single-object JSON must have `result` string AND one of (usage dict with token counts / model string starting `claude-` / session_id ? 8 chars). Gateways like `{"result":"{\"acknowledged\":true}"}` now correctly classify as intercept.
+- **Variable/inconsistent intercept penalizes A-clean**: adaptive gateways varying responses can no longer be classified clean.
+- **Soft-override scored conditionally**: `soft_override_success` only fully counts as capable-base evidence when stylometric bias was first observed. On a neutral prompt, override success is weak (0.3? multiplier).
+- **Temporal cutoff requires verifiable events**: generic `"June 2025"` hallucinations no longer promote cutoff to post-April.
+- **Parser type-guards stream-list elements**: lists containing scalars correctly emit `parse_error`.
+
+### v0.3
+
+- Parser distinguishes `valid_single_object` (newer CLI) from `intercepted`.
+- `status_failure` runs no longer convert to `rigid_bias` / `format_rigor_fail`.
+- `hard_intercept` requires ? 2 repeats.
+- Raw hash computed from bytes (not decoded text).
+- Superscript regex matches only `?`.
+- Missing/malformed `expiry_date` fails closed.
+
+### v0.2
+
+- Parser separates `cli_error` / `parse_error` / `intercepted` / `valid_stream`.
+- Multi-run repeat support via `--repeats N` (default 2).
+- Confidence-graded classification (`high` / `medium` / `low`).
+- Hardened regexes: Unicode math, variant multiplication, phrasing.
+- Baseline expiry check.
+- Raw SHA-256 hash per run.
+- `--shell` injection warning.
+- Sentence splitter handles abbreviations.
+
+## Quick start
+
+List probes:
+
+```bash
+python fingerprint.py --list-probes
+```
+
+Fingerprint a Windows `.cmd` wrapper (default 2 repeats):
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
+```
+
+Plain `claude` call:
+
+```bash
+python fingerprint.py --label "direct" --cmd "claude --model claude-opus-4-7"
+```
+
+Single run (cheaper, but no cross-run consistency check  lower confidence):
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell --repeats 1
+```
+
+Only specific probes:
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell \
+  --probes self_introspection_json anti_euler_override
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"known_gaps\" /c:\"No distill+middleware\" /c:\"No multi-turn\" .scratch\\proxy-forensics\\baselines.json" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"Claude Proxy Forensic Toolkit\" /c:\"Status: v0.4\" /c:\"Whether the backend is a real frontier Claude\" .scratch\\proxy-forensics\\README.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"Proxy Forensic Methodology - v0.4\" /c:\"Known gaps (v0.4)\" /c:\"real frontier Claude\" .scratch\\proxy-forensics\\METHODOLOGY.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"any_intercept_signal\" /c:\"inconsistent_intercept\" /c:\"single_run_intercept_unverified\" /c:\"a_clean_gate\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1353ms:
+226:    "known_gaps": [
+229:      "No distill+middleware hypothesis class: a distilled student fronted by a middleware gateway would currently classify as A+Middleware. The labels 'real Claude + active gateway' reflect the most-consistent-with reading, not proof that the backend is Claude rather than a Claude-like distill behind the same gateway."
+230:      "No multi-turn middleware probe: all current probes are single-turn; gateways that act only on turn-boundaries (session injection, cache-across-turns behavior) are invisible.",
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2131ms:
+1:# Claude Proxy Forensic Toolkit — v0.4
+6:- Whether the backend is a real frontier Claude, a distilled student, or an imitator
+9:**Status: v0.4, hypothesis generator**, not adjudicating forensic classifier. Use results as an investigative starting point, not as legal/security-grade proof. See `METHODOLOGY.md` for caveats and known gaps.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 3582ms:
+21:2. **Backend identity range** — real frontier Claude, distilled student, older checkpoint, non-Claude base
+142:│   ├── Both pass → CAPABLE + RECENT backend (likely real frontier Claude)
+192:## Known gaps (v0.4)
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 3985ms:
+11:    schema_mismatch/single_run_intercept_unverified), not just those crossing
+595:            out["signals"]["single_run_intercept_unverified"] = 0.2
+607:            out["signals"]["inconsistent_intercept"] = 0.25
+784:    if intro_sig.get("inconsistent_intercept"):
+785:        v = intro_sig["inconsistent_intercept"]
+787:        notes.append(f"Suspicious: inconsistent_intercept +{v:.2f}")
+863:    # inconsistent_intercept signals (0.25) disqualify A-clean from high confidence.
+865:    # inconsistent_intercept, schema_mismatch, single_run_intercept_unverified)
+868:    any_intercept_signal = any(k in intro_sig_raw for k in (
+869:        "hard_intercept", "variable_intercept", "inconsistent_intercept",
+870:        "schema_mismatch", "single_run_intercept_unverified",
+872:    a_clean_gate = (cb >= 0.6 and mw < 0.4 and si < 0.1 and not any_intercept_signal)
+873:    a_clean = (0.55 * cb + 0.25 * rc - 0.3 * mw - 0.5 * si) if a_clean_gate else min(0.5, 0.4 * cb + 0.2 * rc - 0.3 * mw - 0.5 * si)
+904:            gate_ok = a_clean_gate
+923:            "A-clean": a_clean_gate,
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"inconsistent_intercept_A_clean_gate_fails\" /c:\"single_run_intercept_unverified_A_clean_gate_fails\" /c:\"schema_mismatch_A_clean_gate_fails\" /c:\"clean_introspection_A_clean_gate_can_pass\" /c:\"forged_claude_prefix_intercepted\" /c:\"bare_claude_intercepted\" /c:\"claude-opus-4-7_accepted\" /c:\"false_dated_leo_xiv_not_matched\" /c:\"codefenced_schema_no_clean_introspection\" .scratch\\proxy-forensics\\test_fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"SCORER_VERSION\" /c:\"ArgumentParser\" /c:\"baseline scorer major version\" /c:\"model_val.startswith\" /c:\"Pope Leo XIV\" /c:\"A+Middleware (Claude-like\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"scorer_version\" /c:\"planned v0.3\" /c:\"planned future work\" /c:\"distill+middleware\" .scratch\\proxy-forensics\\baselines.json .scratch\\proxy-forensics\\README.md .scratch\\proxy-forensics\\METHODOLOGY.md .scratch\\proxy-forensics\\RESULTS.md .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"Most consistent with\" /c:\"less consistent with\" /c:\"distill+middleware\" /c:\"Hypothesis\" .scratch\\proxy-forensics\\RESULTS.md" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1408ms:
+79:SCORER_VERSION = "0.5.0"
+136:        "desc": "May 2025 Pope Leo XIV election",
+301:        model_val.startswith("claude-") or model_val.startswith("msg_")
+887:        ("A+Middleware (Claude-like backend + active gateway)", max(0.0, a_mid)),
+976:    ap = argparse.ArgumentParser(description="Claude proxy forensic fingerprinter v0.5")
+1003:    print(f"[baselines] {fresh_msg} (scorer v{SCORER_VERSION}, baselines v{baselines_scorer})")
+1009:    current_major = SCORER_VERSION.split(".")[0]
+1012:        print(f"ERROR: baseline scorer major version ({baselines_scorer}) does not match current "
+1013:              f"scorer ({SCORER_VERSION}). Regenerate baselines or pass --force-stale.")
+1083:            "scorer_version": SCORER_VERSION,
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2266ms:
+11:**Most consistent with: a Claude-like frontier backend (likely Opus 4.7) hosted on Google Vertex AI, fronted by an aggressive middleware gateway.**
+13:The observed signals are **less consistent with** a rigidly-biased distilled-only student, with a Chinese-model clone, and with an alias of an older Claude release. They are **most consistent with** a frontier Claude backend under active gateway manipulation. Important caveats: (a) the current toolkit does not distinguish a real Claude backend from a high-quality Claude-like distill fronted by the same middleware (the `distill+middleware` hypothesis class is not in scope), (b) a sufficiently sophisticated adversarial proxy could in principle produce the same behavior on all probes. For security- or legal-grade certainty, capture wire traffic (mitmproxy) and add a tokenizer-identity probe.
+52:Hypothesis: Opus 4.7 "launch effort pin" explains 39 vs 75 px difference.
+142:## Hypothesis ranking (working investigative verdict, not a proof)
+144:| Rank | Hypothesis | Status | Key counter-argument |
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 3646ms:
+.scratch\proxy-forensics\baselines.json:5:    "scorer_version": "0.5.0",
+.scratch\proxy-forensics\baselines.json:227:      "No tokenizer-identity probe (planned future work): reported input_tokens vs locally-computed Claude BPE on sentinel strings would detect non-Claude backends masquerading as Claude.",
+.scratch\proxy-forensics\baselines.json:228:      "No quantization-degradation probe (planned future work): systematic numerical precision tests (sin() to 12 digits, modular arithmetic on large numbers) would detect int8/int4 quantized variants.",
+.scratch\proxy-forensics\baselines.json:229:      "No distill+middleware hypothesis class: a distilled student fronted by a middleware gateway would currently classify as A+Middleware. The labels 'real Claude + active gateway' reflect the most-consistent-with reading, not proof that the backend is Claude rather than a Claude-like distill behind the same gateway."
+.scratch\proxy-forensics\README.md:147:- **No `distill+middleware` hypothesis.** A distilled student fronted by a middleware gateway would look like A+Middleware; we don't currently distinguish these. Future hypothesis class.
+.scratch\proxy-forensics\METHODOLOGY.md:194:1. **No tokenizer-identity probe** — planned future work. Currently constant-offset evidence from `RESULTS.md` is not reproducible via the toolkit.
+.scratch\proxy-forensics\METHODOLOGY.md:195:2. **No quantization-degradation probe** — planned future work.
+.scratch\proxy-forensics\METHODOLOGY.md:200:7. **No `distill+middleware` hypothesis.** Would look like A+Middleware to the current classifier.
+.scratch\proxy-forensics\RESULTS.md:13:The observed signals are **less consistent with** a rigidly-biased distilled-only student, with a Chinese-model clone, and with an alias of an older Claude release. They are **most consistent with** a frontier Claude backend under active gateway manipulation. Important caveats: (a) the current toolkit does not distinguish a real Claude backend from a high-quality Claude-like distill fronted by the same middleware (the `distill+middleware` hypothesis class is not in scope), (b) a sufficiently sophisticated adversarial proxy could in principle produce the same behavior on all probes. For security- or legal-grade certainty, capture wire traffic (mitmproxy) and add a tokenizer-identity probe.
+.scratch\proxy-forensics\fingerprint.py:14:    reflect the documented distill+middleware blind spot honestly.
+.scratch\proxy-forensics\fingerprint.py:17:  - baselines.json scorer_version bumped to 0.5.0; planned-v0.3 text cleaned
+.scratch\proxy-forensics\fingerprint.py:18:    up; added distill+middleware blind-spot entry to known_gaps.
+.scratch\proxy-forensics\fingerprint.py:883:    # documented distill+middleware blind spot (see known_gaps), these labels
+.scratch\proxy-forensics\fingerprint.py:1002:    baselines_scorer = data.get("metadata", {}).get("scorer_version", "?")
+.scratch\proxy-forensics\fingerprint.py:1083:            "scorer_version": SCORER_VERSION,
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 4495ms:
+494:assert_eq("forged_claude_prefix_intercepted", r["status"], "intercepted")
+498:assert_eq("bare_claude_intercepted", r["status"], "intercepted")
+503:assert_eq("claude-opus-4-7_accepted", r["status"], "valid_single_object")
+545:assert_true("codefenced_schema_no_clean_introspection",
+593:assert_true("false_dated_leo_xiv_not_matched",
+641:assert_eq("inconsistent_intercept_A_clean_gate_fails",
+651:assert_eq("single_run_intercept_unverified_A_clean_gate_fails",
+657:assert_eq("schema_mismatch_A_clean_gate_fails",
+663:assert_eq("clean_introspection_A_clean_gate_can_pass",
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"def aggregate_probe\" /c:\"hard_intercept\" /c:\"variable_intercept\" /c:\"schema_mismatch\" /c:\"clean_introspection\" /c:\"codefence_wrap\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"hypothesis_A_real_backend_with_middleware\" /c:\"A+Middleware (real Claude\" /c:\"real Claude + active gateway\" /c:\"Claude-like backend\" .scratch\\proxy-forensics\\baselines.json .scratch\\proxy-forensics\\README.md .scratch\\proxy-forensics\\METHODOLOGY.md .scratch\\proxy-forensics\\RESULTS.md .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"v0.4\" /c:\"v0.5\" .scratch\\proxy-forensics\\README.md .scratch\\proxy-forensics\\METHODOLOGY.md .scratch\\proxy-forensics\\test_fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 815ms:
+.scratch\proxy-forensics\baselines.json:185:    "hypothesis_A_real_backend_with_middleware": {
+.scratch\proxy-forensics\baselines.json:229:      "No distill+middleware hypothesis class: a distilled student fronted by a middleware gateway would currently classify as A+Middleware. The labels 'real Claude + active gateway' reflect the most-consistent-with reading, not proof that the backend is Claude rather than a Claude-like distill behind the same gateway."
+.scratch\proxy-forensics\README.md:108:  Primary:    A+Middleware (real Claude + active gateway)
+.scratch\proxy-forensics\README.md:113:     0.756  A+Middleware (real Claude + active gateway)
+.scratch\proxy-forensics\fingerprint.py:13:  - Hypothesis labels softened: "real Claude" → "Claude-like backend" to
+.scratch\proxy-forensics\fingerprint.py:887:        ("A+Middleware (Claude-like backend + active gateway)", max(0.0, a_mid)),
+.scratch\proxy-forensics\fingerprint.py:888:        ("A-clean (Claude-like backend, no detectable middleware)", max(0.0, a_clean)),
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 870ms:
+.scratch\proxy-forensics\README.md:1:# Claude Proxy Forensic Toolkit — v0.4
+.scratch\proxy-forensics\README.md:9:**Status: v0.4, hypothesis generator**, not adjudicating forensic classifier. Use results as an investigative starting point, not as legal/security-grade proof. See `METHODOLOGY.md` for caveats and known gaps.
+.scratch\proxy-forensics\README.md:20:### v0.4 (third codex review round)
+.scratch\proxy-forensics\README.md:138:## Known gaps (v0.4)
+.scratch\proxy-forensics\METHODOLOGY.md:1:# Proxy Forensic Methodology — v0.4
+.scratch\proxy-forensics\METHODOLOGY.md:192:## Known gaps (v0.4)
+.scratch\proxy-forensics\test_fingerprint.py:401:# v0.4 adversarial classifier matrices
+.scratch\proxy-forensics\test_fingerprint.py:403:print("\n--- classify: v0.4 adversarial scenarios ---")
+.scratch\proxy-forensics\test_fingerprint.py:462:# v0.4 protocol-object detection — stricter heuristic
+.scratch\proxy-forensics\test_fingerprint.py:491:# v0.5: forged "claude" prefix without hyphen must NOT pass single-object heuristic
+.scratch\proxy-forensics\test_fingerprint.py:505:# Stream list containing scalars → parse_error (v0.4 type-guard)
+.scratch\proxy-forensics\test_fingerprint.py:511:# v0.4 introspection schema validation
+.scratch\proxy-forensics\test_fingerprint.py:536:# v0.5: codefenced schema-correct introspection → codefence_wrap=True + schema_match=True,
+.scratch\proxy-forensics\test_fingerprint.py:565:# v0.4 temporal cutoff — verifiable-only
+.scratch\proxy-forensics\test_fingerprint.py:588:# v0.5: False-dated event (April 2025 Pope Leo XIV — model hallucinates wrong month)
+.scratch\proxy-forensics\test_fingerprint.py:599:# v0.4 soft-override conditional scoring
+.scratch\proxy-forensics\test_fingerprint.py:628:# v0.5 adversarial tests (codex round-4 findings)
+.scratch\proxy-forensics\test_fingerprint.py:630:print("\n--- classify: v0.5 inconsistent_intercept blocks A-clean high ---")
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1474ms:
+11:    schema_mismatch/single_run_intercept_unverified), not just those crossing
+28:  - Introspection schema validation: clean_introspection requires all 4
+30:    schema_mismatch (middleware evidence) instead of clean.
+46:  - hard_intercept ≥ 2 repeats.
+485:            sig["codefence_wrap"] = True
+488:            sig["codefence_wrap"] = False
+561:def aggregate_probe(probe_id, run_signals):
+585:            out["signals"]["hard_intercept"] = conf
+601:            out["signals"]["variable_intercept"] = 0.45
+614:                           if s.get("schema_match") and not s.get("codefence_wrap")]
+618:                out["signals"]["clean_introspection"] = 0.7
+624:                out["signals"]["schema_mismatch"] = 0.4
+766:    if intro_sig.get("hard_intercept"):
+767:        v = intro_sig["hard_intercept"]
+769:        notes.append(f"Middleware: hard_intercept +{v:.2f}")
+770:    if intro_sig.get("clean_introspection"):
+771:        v = intro_sig["clean_introspection"]
+773:        notes.append(f"Capable-base: clean_introspection +{v*0.4:.2f}")
+774:    if intro_sig.get("schema_mismatch"):
+775:        v = intro_sig["schema_mismatch"]
+778:        notes.append(f"Middleware: schema_mismatch (schema-crafted response?) +{v*0.4:.2f}")
+779:    if intro_sig.get("variable_intercept"):
+780:        v = intro_sig["variable_intercept"]
+783:        notes.append(f"Middleware: variable_intercept (adaptive gateway?) +{v*0.5:.2f}")
+864:    # Also explicit: ANY intercept signal (hard_intercept, variable_intercept,
+865:    # inconsistent_intercept, schema_mismatch, single_run_intercept_unverified)
+869:        "hard_intercept", "variable_intercept", "inconsistent_intercept",
+870:        "schema_mismatch", "single_run_intercept_unverified",
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"def load_baselines\" /c:\"json.load\" /c:\"data = load_baselines\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"load_baselines\" .scratch\\proxy-forensics\\test_fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1424ms:
+214:def load_baselines():
+216:        return json.load(f)
+336:        parsed = json.loads(stdout)
+491:            obj = json.loads(text_json)
+992:    data = load_baselines()
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T15:45:44.106625Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 2.1 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 2096ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"TODO for v0.3\" /c:\"v0.3\" .scratch\\proxy-forensics\\baselines.json" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1541ms:
+12:    "notes": "Baselines collected via `claude -p <prompt> --model <id> --effort max --tools '' --output-format json` on Anthropic-direct (not Vertex/Bedrock). Each baseline is a single run; multi-run reproducibility was not captured at collection time (TODO for v0.3).",
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "findstr /n /c:\"def score_run_introspection\" /c:\"json_parse_ok\" /c:\"schema_match\" /c:\"intercept_candidate\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1406ms:
+470:def score_run_introspection(run):
+473:        sig["intercept_candidate"] = True
+480:        sig["intercept_candidate"] = False
+492:            sig["json_parse_ok"] = True
+502:                sig["schema_match"] = False
+514:                sig["schema_match"] = schema_ok
+516:            sig["json_parse_ok"] = False
+517:            sig["schema_match"] = False
+519:        sig["intercept_candidate"] = None
+575:        intercept_runs = [s for s in run_signals if s.get("intercept_candidate")]
+614:                           if s.get("schema_match") and not s.get("codefence_wrap")]
+616:                         if s.get("json_parse_ok") and not s.get("schema_match")]
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+### Summary (3 sentences)
+
+The round-4 `inconsistent_intercept` blocker is fixed in `fingerprint.py`. v0.5 is not shippable because `baselines.json` is syntactically invalid at lines 229-230, and `fingerprint.py` loads it with `json.load()` before normal execution. The distill+middleware framing is improved in code/RESULTS, but not consistently managed across README/METHODOLOGY/baselines docs.
+
+### Round-4 blocker → v0.5 status
+
+FIXED — `A-clean` now gates on `not any_intercept_signal`, including `inconsistent_intercept`, `schema_mismatch`, `single_run_intercept_unverified`, `hard_intercept`, and `variable_intercept`; the new tests cover the reported failure mode.
+
+### Other Round-4 items → v0.5 status
+
+- `baselines.json` scorer_version / known gaps: PARTIAL — version is `0.5.0`, but `baselines.json` is invalid JSON due a missing comma after the distill+middleware gap entry.
+- argparse description: FIXED — now says v0.5.
+- scorer-version drift enforcement: PARTIAL — major mismatch is enforced, but `0.3.0` vs `0.5.0` would not be blocked because both major segments are `0`.
+- `model.startswith("claude")`: FIXED — tightened to `claude-`, with tests.
+- Pope Leo XIV April/May regex: FIXED — May-only pattern, with test.
+- hypothesis names / RESULTS wording: PARTIAL — executable labels now say `Claude-like`, and RESULTS is mostly softened, but README/METHODOLOGY still contain v0.4 and “real frontier Claude” framing.
+
+### Any NEW issues in v0.5
+
+- `baselines.json` invalid JSON, HIGH/BLOCKER — runtime cannot load baselines.
+- Stale docs, MEDIUM — README/METHODOLOGY still advertise v0.4 and old “real Claude” framing, so the documented-gap story is inconsistent.
+
+### Verdict
+
+RED — exact blocker: fix `baselines.json` syntax so the tool can load baselines and run.
+tokens used
+147,313
+113:### Verdict
+114:GREEN (ship as v0.4 stable with documented gaps) / YELLOW (land with caveats) / RED (specific blockers below)
+3607:### Verdict
+3609:RED.
+3614:29:### Verdict
+3621:29:### Verdict

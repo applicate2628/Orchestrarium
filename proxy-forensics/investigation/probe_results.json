@@ -1,0 +1,100 @@
+{
+  "P1_temporal_cutoff": {
+    "4.5 off ": {
+      "reported": "claude-opus-4-5-20251101",
+      "msg_id": "msg_01FzUeoDx1",
+      "out_tok": 314,
+      "cache_create": 29260,
+      "cost_usd": 0.190775,
+      "text": "January 2025: Donald Trump inaugurated as the 47th President of the United States in Washington, D.C.\nJanuary 2025: Wildfires devastate Pacific Palisades and Altadena in Los Angeles County, California.\nApril 2025: Pope Francis dies at the Vatican."
+    },
+    "4.6 off ": {
+      "reported": "claude-opus-4-6",
+      "msg_id": "msg_01KFnrYxZ4",
+      "out_tok": 314,
+      "cache_create": 29090,
+      "cost_usd": 0.18967750000000003,
+      "text": "January 2025: Donald Trump was inaugurated as the 47th President of the United States in Washington, D.C.\nJanuary 2025: The Palisades and Eaton wildfires devastated Los Angeles County, California.\nApril 2025: Pope Francis died at the Vatican in Rome."
+    },
+    "4.7 off ": {
+      "reported": "claude-opus-4-7",
+      "msg_id": "msg_01EoFUJh5v",
+      "out_tok": 1103,
+      "cache_create": 41337,
+      "cost_usd": 0.28596125,
+      "text": "January 2025: Donald Trump inaugurated as the 47th President of the United States at the U.S. Capitol in Washington, D.C.\nApril 2025: Pope Francis died at Casa Santa Marta in Vatican City.\nMay 2025: Cardinal Robert Prevost elected as Pope Leo XIV at the Sistine Chapel in Vatican City."
+    },
+    "AW susp ": {
+      "reported": "claude-opus-4.7",
+      "msg_id": "msg_01MZTiqUTt",
+      "out_tok": 100,
+      "cache_create": 0,
+      "cost_usd": 0.205015,
+      "text": "January 2025: Donald Trump inaugurated as 47th U.S. President in Washington, D.C.\nApril 2025: Pope Francis died at the Vatican, succeeded by Pope Leo XIV.\nJuly 2025: Wimbledon men's singles final held at the All England Club in London."
+    }
+  },
+  "P2_tight_reasoning": {
+    "4.5 off ": {
+      "reported": "claude-opus-4-5-20251101",
+      "msg_id": "msg_01BBYFm3sM",
+      "out_tok": 947,
+      "cache_create": 18307,
+      "cost_usd": 0.14362725,
+      "text": "A prime p > 3 is odd and coprime to 3, so p ≡ ±1 (mod 3) gives p² ≡ 1 (mod 3), and since any odd integer squared has the form (2k+1)² = 4k(k+1)+1 where k(k+1) is even, we get p² ≡ 1 (mod 8). By the Chinese Remainder Theorem, because gcd(3,8) = 1 and p² is congruent to 1 modulo both 3 and 8, it follows that p² ≡ 1 (mod 24). Therefore, for every prime p > 3, we have p² mod 24 = 1."
+    },
+    "4.6 off ": {
+      "reported": "claude-opus-4-6",
+      "msg_id": "msg_01V4kWnYAn",
+      "out_tok": 536,
+      "cache_create": 18136,
+      "cost_usd": 0.132249,
+      "text": "Since any prime p > 3 is odd and coprime to 3, we have p ≡ ±1 (mod 2) so p² ≡ 1 (mod 8), and p ≡ ±1 (mod 3) so p² ≡ 1 (mod 3). Because gcd(8, 3) = 1 and 8 · 3 = 24, the Chinese Remainder Theorem guarantees that p² ≡ 1 (mod 8) and p² ≡ 1 (mod 3) jointly yield p² ≡ 1 (mod 24). Therefore p² mod 24 = 1 for every prime p > 3."
+    },
+    "4.7 off ": {
+      "reported": "claude-opus-4-7",
+      "msg_id": "msg_013nQ1nK8k",
+      "out_tok": 1855,
+      "cache_create": 26171,
+      "cost_usd": 0.21756474999999997,
+      "text": "Since p > 3 is prime, p is odd and not divisible by 3, so writing p = 2k+1 gives p² = 4k(k+1)+1 ≡ 1 (mod 8) because k(k+1) is always even, while p ≡ ±1 (mod 3) forces p² ≡ 1 (mod 3). By the Chinese Remainder Theorem (CRT), since gcd(8,3) = 1 and 8·3 = 24, the pair of congruences p² ≡ 1 (mod 8) and p² ≡ 1 (mod 3) is equivalent to the single congruence p² ≡ 1 (mod 24). Therefore p² mod 24 = 1 for every prime p > 3."
+    },
+    "AW susp ": {
+      "reported": "claude-opus-4.7",
+      "msg_id": "msg_01Njhh8hm5",
+      "out_tok": 239,
+      "cache_create": 0,
+      "cost_usd": 0.20857,
+      "text": "Since p > 3 is prime, p is coprime to both 8 and 3, so p is odd (giving p² ≡ 1 mod 8, because any odd integer is ±1 or ±3 mod 8 and each squares to 1) and p ≢ 0 mod 3 (giving p² ≡ 1 mod 3, since (±1)² = 1). By the Chinese Remainder Theorem (CRT), the simultaneous congruences p² ≡ 1 mod 8 and p² ≡ 1 mod 3 lift uniquely to a single congruence modulo 24, namely p² ≡ 1 mod 24. Therefore every prime p > 3 satisfies p² mod 24 = 1."
+    }
+  },
+  "P3_self_introspection": {
+    "4.5 off ": {
+      "reported": "claude-opus-4-5-20251101",
+      "msg_id": "msg_01BFXgM1tm",
+      "out_tok": 208,
+      "cache_create": 18323,
+      "cost_usd": 0.12525224999999998,
+      "text": "{\"architecture_family\": \"transformer\", \"supports_extended_thinking\": true, \"can_use_prompt_caching\": true, \"knowledge_cutoff_month\": \"May 2025\"}"
+    },
+    "4.6 off ": {
+      "reported": "claude-opus-4-6",
+      "msg_id": "msg_01KKCRqigD",
+      "out_tok": 63,
+      "cache_create": 18152,
+      "cost_usd": 0.120524,
+      "text": "\n\n```json\n{\n  \"architecture_family\": \"transformer\",\n  \"supports_extended_thinking\": true,\n  \"can_use_prompt_caching\": true,\n  \"knowledge_cutoff_month\": \"May 2025\"\n}\n```"
+    },
+    "4.7 off ": {
+      "reported": "claude-opus-4-7",
+      "msg_id": "msg_015rcLCDT5",
+      "out_tok": 63,
+      "cache_create": 26192,
+      "cost_usd": 0.17289600000000002,
+      "text": "{\"architecture_family\":\"Claude\",\"supports_extended_thinking\":true,\"can_use_prompt_caching\":true,\"knowledge_cutoff_month\":\"January 2026\"}"
+    },
+    "AW susp ": {
+      "error": "not list",
+      "head": "{'ok': True}"
+    }
+  }
+}

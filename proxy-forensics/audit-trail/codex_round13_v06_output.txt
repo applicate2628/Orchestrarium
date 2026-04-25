@@ -1,0 +1,1245 @@
+Reading additional input from stdin...
+OpenAI Codex v0.124.0 (research preview)
+--------
+workdir: D:\dev\Orchestrator\Orchestrarium
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019dc16f-d2af-78d2-a6b6-dea66f559c80
+--------
+user
+Round 13: SUSPECT_WORKFLOW.md:78 updated to include insufficient_data in verdict list. SUSPECT_WORKFLOW.md:99-103 updated: 124 tests pass (v0.6), plus test_tokenizer_probe (33), test_mitm_capture (9). Final verdict.
+
+Output:
+### Verdict
+GREEN (ship v0.6) / RED (exact line)
+codex
+I’ll verify the exact changed lines and surrounding contract, then return only the requested GREEN/RED verdict with the line reference if it fails.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"SUSPECT_WORKFLOW|insufficient_data|test_tokenizer_probe|test_mitm_capture|124 tests|Verdict\" C:\\Users\\<user>\\.codex\\memories\\MEMORY.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -LiteralPath C:\\Users\\<user>\\.codex\\skills\\review-changes\\SKILL.md -TotalCount 220" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1154ms:
+---
+name: review-changes
+description: Run a full read-only repository impact review starting from recent local changes, a specified diff, branch, commit range, or PR. Use when Codex needs to verify that recent fixes are complete, nothing important was forgotten, unchanged call sites or contracts were not broken, logic still holds across the wider repo, and regressions or missed edge cases are surfaced before commit.
+---
+
+# Review Changes
+
+Run a repository-wide impact review triggered by recent changes. The changed files are only the starting point; the review target is the full affected behavior surface, including unchanged dependents, nearby contracts, tests, and likely regression paths.
+
+## Core stance
+
+- Stay read-only.
+- Use the `review` template semantics from `src.codex/AGENTS.codex.md`: `$analyst` -> QA lane -> reviewer lane.
+- Review the repo in light of the changes, not just the diff lines themselves.
+- Findings come first, ordered by severity.
+- Do NOT commit or modify files.
+
+## Scope decision
+
+1. Check `$ARGUMENTS`.
+- If a PR URL, PR number, branch, commit range, or diff target is given, use that scope.
+- Otherwise inspect current unstaged and staged changes with `git diff` and `git diff --cached`.
+- If no changes are present, stop and tell the user there is nothing to review.
+2. If the user mentions a bug, review thread, accepted plan, or expected fix list, use that as the completion baseline.
+3. If no explicit baseline exists, review against the observed change impact and say that fix-completeness against an external checklist could not be verified.
+
+## Review workflow
+
+1. Run `$analyst` first.
+- Goal: identify what changed, which contracts or behaviors moved, what unchanged code depends on those changes, and where logic may now be incomplete.
+- Require the analyst to inspect callers, dependents, tests, config, schemas, and adjacent modules that may be affected even if they were not edited.
+2. Run the QA lane.
+- Use `$qa-engineer` by default.
+- If external review is preferred for an eligible QA-side slot, `$external-reviewer` may stand in for that lane.
+- Goal: verify regression risk, edge cases, test sufficiency, fix completeness, and whether untouched behavior is now inconsistent with the new logic.
+3. Run the reviewer lane.
+- Always invoke `$architecture-reviewer`.
+- Add `$security-reviewer` if the change touches auth, trust boundaries, secrets, dangerous configuration, input validation, or vulnerability surfaces.
+- Add `$performance-reviewer` if the change touches hot paths, query plans, rendering loops, budgets, throughput, or latency-sensitive behavior.
+- Add `$ux-reviewer`, `$accessibility-reviewer`, or `$ui-test-engineer` when the affected surface is clearly user-facing and the risk is interaction quality rather than pure logic.
+- If external review is preferred for an eligible review-side slot, `$external-reviewer` may stand in for the matching reviewer role.
+4. Keep the chain sequential in Codex unless the user explicitly approves a delegated team and the scopes are clearly independent.
+
+## What to verify
+
+- The requested fixes are actually present.
+- The apparent root cause is covered, not just one symptom.
+- Unchanged callers, consumers, configs, tests, or docs are still compatible with the new behavior.
+- Nearby logic still makes sense after the change.
+- Hidden regressions, stale assumptions, and missed edge cases are surfaced.
+- Validation is strong enough for the touched behavior, or the exact gap is called out.
+- The change did not leave partial rewires, stale branches, dead conditions, or forgotten follow-up adjustments in unchanged files.
+
+## Output
+
+Return one unified review with:
+
+- scope reviewed
+- findings ordered by severity
+- impacted unchanged surfaces that were checked
+- what could not be verified
+- verdict: `PASS`, `REVISE`, or `BLOCKED`
+
+If the user asked "did we fix everything?", answer that directly before the detailed findings.
+
+## Persistence
+
+- If the repository uses active work-items, persist the accepted review artifact there.
+- Otherwise log the review under `.reports/YYYY-MM/` using the standard report naming convention.
+
+## Rules
+
+- Do not role-play specialist reviewers inline when delegation is available and permitted.
+- Treat changed files as entry points, not as the review boundary.
+- If a critical issue appears early, surface it immediately.
+- If the impact surface is too large for a trustworthy single pass, say so and recommend splitting the review into smaller scopes.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:40:44.971924Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.3 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1277ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+I’m using the `review-changes` workflow in read-only mode because this is a final gate on a recent doc/test-evidence update. The memory registry search did not return a relevant prior item, so I’m reviewing the current workspace state directly.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'git diff -- SUSPECT_WORKFLOW.md' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command 'git diff --cached -- SUSPECT_WORKFLOW.md' in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T21:40:59.818346Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command '$p='"'SUSPECT_WORKFLOW.md'; "'$lines=Get-Content -LiteralPath $p; for($i=60;$i -le [Math]::Min(115,$lines.Count);$i++){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command '$p='"'SUSPECT_WORKFLOW.md'; "'$lines=Get-Content -LiteralPath $p; for($i=60;$i -le [Math]::Min(115,$lines.Count);$i++){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command "rg -n \"verdict|insufficient_data|tokenizer_probe|mitm_capture|124|v0\\.6|GREEN|RED|tests pass\" -S ." in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoProfile -Command '$p='"'SUSPECT_WORKFLOW.md'; "'$lines=Get-Content -LiteralPath $p; for($i=60;$i -le [Math]::Min(115,$lines.Count);$i++){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }'` rejected: blocked by policy
+ succeeded in 1114ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1325ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1531ms:
+.\docs\external-worker-design.md:43:| Output contract | Review findings / QA verdict + standard gate (`PASS \| REVISE \| BLOCKED`) |
+.\docs\external-worker-design.md:182:   - Multi-opinion advisory or review lanes aggregate fail-closed: any returned `REVISE` or `BLOCKED` verdict blocks progression unless a stricter repo-local rule overrides it explicitly.
+.\docs\agents-mode-reference.md:237:- For multi-opinion advisory or review lanes, any returned `REVISE` or `BLOCKED` verdict blocks gate advancement unless a stricter repo-local rule overrides it explicitly.
+.\src.gemini\agents\performance-reviewer.md:41:Always write performance issue files before returning a `REVISE` or `BLOCKED` verdict.
+.\src.gemini\agents\qt-ui-engineer.md:48:- Do not act as `$ux-reviewer` or provide a UX gate verdict.
+.\src.gemini\agents\qa-engineer.md:3:description: Verify an approved phase against its acceptance criteria and test strategy. Use when Gemini CLI needs unit, integration, or end-to-end test coverage, regression checks, edge-case analysis, basic performance checks, and a clear go or no-go QA verdict before the phase advances.
+.\src.gemini\agents\qa-engineer.md:41:When the gate decision is `REVISE` or `BLOCKED`, record the defect in `work-items/bugs/` before returning the verdict:
+.\src.gemini\agents\qa-engineer.md:64:Always write bug files before returning a `REVISE` or `BLOCKED` verdict so that defects survive across sessions.
+.\src.gemini\AGENTS.shared.md:175:- architecture verdicts and major design tradeoffs
+.\src.gemini\skills\review-changes\SKILL.md:62:- verdict: `PASS`, `REVISE`, or `BLOCKED`
+.\src.gemini\scripts\validate-pack.sh:102:  SHARED_SOURCE_FILE="$PACK_ROOT/AGENTS.shared.md"
+.\src.gemini\scripts\validate-pack.sh:109:  SHARED_SOURCE_FILE="$ROOT/AGENTS.shared.md"
+.\src.gemini\scripts\validate-pack.sh:116:  SHARED_SOURCE_FILE="$ROOT/AGENTS.shared.md"
+.\src.gemini\scripts\validate-pack.sh:152:  [[ -f "$SHARED_SOURCE_FILE" ]] || fail "missing $SHARED_SOURCE_FILE"
+.\src.gemini\scripts\validate-pack.sh:158:  [[ ! -e "$SHARED_SOURCE_FILE" ]] || fail "$SHARED_SOURCE_FILE should not exist in the installed runtime"
+.\src.gemini\scripts\validate-pack.sh:247:  grep -Fq 'Adapter host runtime' "$SHARED_SOURCE_FILE" && fail "shared governance should not allow adapter-host metadata for external execution"
+.\src.gemini\scripts\validate-pack.sh:248:  grep -Fq 'must use direct external launch' "$SHARED_SOURCE_FILE" || fail "shared governance should require direct external launch"
+.\src.gemini\skills\qt-ui-engineer\SKILL.md:48:- Do not act as `$ux-reviewer` or provide a UX gate verdict.
+.\src.gemini\skills\lead\external-dispatch.md:101:7. For multi-opinion advisory or review lanes, any returned `REVISE` or `BLOCKED` verdict blocks gate advancement unless a stricter repo-local rule overrides it explicitly.
+.\src.claude\commands\agents-security.md:16:3. **Handle reviewer verdict:**
+.\src.gemini\skills\lead\policies-catalog.md:11:| `tdd` | Test-driven: write failing test first, then implement, then refactor (RED-GREEN-REFACTOR) |
+.\src.gemini\skills\qa-engineer\SKILL.md:3:description: Verify an approved phase against its acceptance criteria and test strategy. Use when Gemini CLI needs unit, integration, or end-to-end test coverage, regression checks, edge-case analysis, basic performance checks, and a clear go or no-go QA verdict before the phase advances.
+.\src.gemini\skills\qa-engineer\SKILL.md:41:When the gate decision is REVISE or BLOCKED, record the defect in `work-items/bugs/` (or the configured bug registry path) before returning the verdict:
+.\src.gemini\skills\qa-engineer\SKILL.md:64:Always write bug files before returning a REVISE or BLOCKED verdict so that defects survive across sessions.
+.\src.claude\commands\agents-bugfix.md:23:5. **Handle QA verdict:**
+.\src.claude\commands\agents-bugfix.md:29:6. **Handle reviewer verdict** (for templates with reviewer stages — `full-delivery`, `security-sensitive`, `performance-sensitive`):
+.\src.claude\commands\agents-perf.md:29:6. **Handle reviewer verdict:**
+.\src.claude\commands\agents-perf.md:42:   - QA and performance review verdicts
+.\src.claude\commands\agents-refactor.md:26:   - **QA** (Agent tool, `subagent_type: qa-engineer`, or `external-reviewer` when external dispatch is preferred): verify no regressions — all existing tests pass, behavior preserved
+.\src.claude\commands\agents-refactor.md:29:6. **Handle reviewer verdict:**
+.\src.claude\commands\agents-refactor.md:42:   - Architecture reviewer verdict
+.\src.claude\commands\agents-implement.md:34:   - Present summary: phases completed, tests passed, open bugs, residual risk
+.\src.codex\skills\qt-ui-engineer\SKILL.md:48:- Do not act as `$ux-reviewer` or provide a UX gate verdict.
+.\src.codex\skills\qa-engineer\SKILL.md:3:description: Verify an approved phase against its acceptance criteria and test strategy. Use when Codex needs unit, integration, or end-to-end test coverage, regression checks, edge-case analysis, basic performance checks, and a clear go or no-go QA verdict before the phase advances.
+.\src.codex\skills\qa-engineer\SKILL.md:41:When the gate decision is REVISE or BLOCKED, record the defect in `work-items/bugs/` (or the configured bug registry path) before returning the verdict:
+.\src.codex\skills\qa-engineer\SKILL.md:64:Always write bug files before returning a REVISE or BLOCKED verdict so that defects survive across sessions.
+.\shared\references\evidence-based-answer-pipeline.md:31:- `supported` / `unsupported` / `ambiguous` verdict per claim.
+.\shared\AGENTS.shared.md:186:- architecture verdicts and major design tradeoffs
+.\scripts\install-gemini.sh:599:  SHARED_TARGET="$INSTALL_ROOT/AGENTS.md"
+.\scripts\install-gemini.sh:600:  LEGACY_SHARED_TARGET="$INSTALL_ROOT/AGENTS.shared.md"
+.\scripts\install-gemini.sh:619:  SHARED_TARGET="$PROJECT_ROOT/AGENTS.md"
+.\scripts\install-gemini.sh:620:  LEGACY_SHARED_TARGET="$PROJECT_ROOT/AGENTS.shared.md"
+.\scripts\install-gemini.sh:630:LEGACY_EXTENSION_SHARED_TARGET="$EXTENSION_ROOT/AGENTS.shared.md"
+.\scripts\install-gemini.sh:638:echo "AGENTS.md:    $SHARED_TARGET"
+.\scripts\install-gemini.sh:645:if [[ -e "$GEMINI_TARGET" || -e "$SHARED_TARGET" || -d "$SKILLS_TARGET" || -d "$AGENTS_TARGET" || -d "$COMMANDS_TARGET" || -d "$EXTENSION_ROOT" ]]; then
+.\scripts\install-gemini.sh:658:  install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md"
+.\scripts\install-gemini.sh:660:  install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md" 1
+.\scripts\install-gemini.sh:672:remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"
+.\scripts\install-gemini.sh:674:remove_legacy_pack_file "$LEGACY_EXTENSION_SHARED_TARGET" "extension AGENTS.shared.md"
+.\scripts\install-gemini.sh:691:  "$SHARED_TARGET" \
+.\scripts\install-codex.sh:13:SHARED_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
+.\scripts\install-codex.sh:451:if [[ ! -f "$SHARED_AGENTS_MODE_SOURCE" ]]; then
+.\scripts\install-codex.sh:452:  echo "FAIL: missing shared agents-mode template at $SHARED_AGENTS_MODE_SOURCE" >&2
+.\scripts\install-codex.sh:864:sync_agents_mode_file "$SHARED_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml" "codex"
+.\src.codex\skills\lead\policies-catalog.md:11:| `tdd` | Test-driven: write failing test first, then implement, then refactor (RED-GREEN-REFACTOR) |
+.\src.codex\skills\review-changes\SKILL.md:62:- verdict: `PASS`, `REVISE`, or `BLOCKED`
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:286:  SHARED_REF_DIR="$REPO_ROOT/shared/references"
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:316:    "$SHARED_REF_DIR/README.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:317:    "$SHARED_REF_DIR/evidence-based-answer-pipeline.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:318:    "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:319:    "$SHARED_REF_DIR/workflow-strategy-comparison.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:320:    "$SHARED_REF_DIR/repository-publication-safety.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:321:    "$SHARED_REF_DIR/ru/subagent-operating-model.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:322:    "$SHARED_REF_DIR/ru/workflow-strategy-comparison.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:323:    "$SHARED_REF_DIR/ru/repository-publication-safety.md"
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:347:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:350:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:353:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:356:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode.yaml" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:358:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".claude/.agents-mode.yaml" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:360:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "work-items/index.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:362:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "externalClaudeProfile" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:364:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "Claude CLI" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:366:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "Codex CLI" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:368:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "## Codex-specific runtime notes" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:370:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "## Claude-specific runtime notes" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:372:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" "## 1. Main rule for the lead" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:374:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" "## 6. Role map" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:376:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" "## 8. Gates: what each stage must prove" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:378:  check_h2_section_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:382:  check_h2_section_absent "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:386:  check_exact_h2_inventory "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.codex\skills\lead\scripts\validate-skill-pack.sh:469:  check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:261:  SHARED_REF_DIR="$REPO_ROOT/shared/references"
+.\src.claude\agents\scripts\validate-skill-pack.sh:266:    "$SHARED_REF_DIR/README.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:267:    "$SHARED_REF_DIR/evidence-based-answer-pipeline.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:268:    "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:269:    "$SHARED_REF_DIR/workflow-strategy-comparison.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:270:    "$SHARED_REF_DIR/repository-publication-safety.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:271:    "$SHARED_REF_DIR/ru/subagent-operating-model.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:272:    "$SHARED_REF_DIR/ru/workflow-strategy-comparison.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:273:    "$SHARED_REF_DIR/ru/repository-publication-safety.md"; do
+.\src.claude\agents\scripts\validate-skill-pack.sh:289:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:292:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:295:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:298:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode.yaml" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:300:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".claude/.agents-mode.yaml" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:302:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "work-items/index.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:304:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "externalClaudeProfile" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:306:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "Claude CLI" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:308:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "Codex CLI" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:310:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "## Codex-specific runtime notes" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:312:  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "## Claude-specific runtime notes" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:314:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" "## 1. Main rule for the lead" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:316:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" "## 6. Role map" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:318:  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" "## 8. Gates: what each stage must prove" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:320:  check_h2_section_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:324:  check_h2_section_absent "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:328:  check_exact_h2_inventory "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.claude\agents\scripts\validate-skill-pack.sh:397:  check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
+.\src.claude\agents\contracts\operating-model.md:250:| Test report | `work-items/active/<slug>/test-report.md` | Session log entry summarizing QA verdict |
+.\src.claude\agents\contracts\operating-model.md:263:- **After QA/reviewer PASS** — the final verdict is saved to the work-item.
+.\src.claude\agents\contracts\policies-catalog.md:11:| `tdd` | Test-driven: write failing test first, then implement, then refactor (RED-GREEN-REFACTOR) |
+.\src.claude\agents\qt-ui-engineer.md:48:- Do not act as `$ux-reviewer` or provide a UX gate verdict.
+.\src.claude\agents\performance-reviewer.md:41:Always write performance issue files before returning a `REVISE` or `BLOCKED` verdict.
+.\src.claude\agents\qa-engineer.md:3:description: Verify an approved phase against its acceptance criteria and test strategy. Use when Claude Code needs unit, integration, or end-to-end test coverage, regression checks, edge-case analysis, basic performance checks, and a clear go or no-go QA verdict before the phase advances.
+.\src.claude\agents\qa-engineer.md:41:When the gate decision is `REVISE` or `BLOCKED`, record the defect in `work-items/bugs/` before returning the verdict:
+.\src.claude\agents\qa-engineer.md:64:Always write bug files before returning a `REVISE` or `BLOCKED` verdict so that defects survive across sessions.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg --files | rg "(''^|/)SUSPECT_WORKFLOW'"\\.md"'$"' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n -C 25 "insufficient_data|124 tests|test_tokenizer_probe|test_mitm_capture|verdict" SUSPECT_WORKFLOW.md' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git status --short' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git diff --stat' in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T21:41:15.670334Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.2 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+rg: SUSPECT_WORKFLOW.md: IO error for operation on SUSPECT_WORKFLOW.md: The system cannot find the file specified. (os error 2)
+
+ exited 1 in 1246ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+rg: SUSPECT_WORKFLOW.md: IO error for operation on SUSPECT_WORKFLOW.md: The system cannot find the file specified. (os error 2)
+
+ succeeded in 1477ms:
+ M docs/README.md
+?? docs/routing/
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:41:16.171940Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.8 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1754ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1918ms:
+ docs/README.md | 1 +
+ 1 file changed, 1 insertion(+)
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+`SUSPECT_WORKFLOW.md` is not at repo root in this workspace; the current changes are `docs/README.md` plus an untracked `docs/routing/` tree. I’m narrowing the review to that actual file location and its README entry.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg --files docs/routing' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n -C 30 "insufficient_data|124 tests|test_tokenizer_probe|test_mitm_capture|verdict|Verdict|GREEN|RED" docs/routing' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git diff -- docs/README.md' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "routing|SUSPECT_WORKFLOW|suspect" docs README.md INSTALL.md RELEASE_NOTES.md' in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1215ms:
+docs/routing\12-lane-routing-matrix-v1-2026-04-18.md
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1648ms:
+diff --git a/docs/README.md b/docs/README.md
+index 91b27c3..234fc07 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -19,3 +19,4 @@ Current docs in this branch:
+ - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
+ - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
+ - [provider-runtime-layouts.md](provider-runtime-layouts.md) for cross-provider runtime path mapping
++- [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md)
+\ No newline at end of file
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1653ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:41:27.194819Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.7 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1793ms:
+INSTALL.md:78:- `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `parallelMode: manual` keeps parallel fan-out explicit-by-request, `auto` leaves safe parallelism enabled by routing judgment for any independent internal or external lanes, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`; `externalProvider` uses the shared provider universe `auto | codex | claude | gemini`; `externalPriorityProfile` selects the active named provider-order profile for `auto`; `externalPriorityProfiles` stores the switchable per-lane provider orders; and `externalOpinionCounts` raises specific lanes above the default single-opinion behavior when one external opinion is not enough. Those counts stay lane-local distinct-opinion requirements; `parallelMode` remains the general helper fan-out rule, while bounded same-provider external helper fan-out is handled through the dedicated brigade surfaces.
+INSTALL.md:84:- The shipped shared profiles do not hardwire Gemini-first visual routing. If you want Gemini first for image generation, icon work, or decorative visual lanes, use an explicit provider override or a repo-local custom profile; the shipped `gemini-crosscheck` profile is the named way to bring Gemini into broader non-visual advisory or review second-opinion sets.
+INSTALL.md:110:- `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `parallelMode: manual` keeps parallel fan-out explicit-by-request, `auto` leaves safe parallelism enabled by routing judgment for any independent internal or external lanes, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`; `externalProvider` uses the same shared provider universe `auto | codex | claude | gemini`; and the switchable `externalPriorityProfile` / `externalPriorityProfiles` / `externalOpinionCounts` block keeps broader Gemini participation and multi-opinion routing in `agents-mode` instead of hidden host-line defaults. Those counts stay distinct-opinion requirements for one lane, while brigade surfaces cover parallel external helper multiplicity on top of the general `parallelMode` rule.
+INSTALL.md:143:- The Orchestrarium routing overlay file is `.gemini/.agents-mode.yaml` for project installs and `~/.gemini/.agents-mode.yaml` for global installs.
+INSTALL.md:145:- After first-time Gemini project install, run Gemini CLI `/init` if you want Gemini to create or refresh the user-owned portion of `GEMINI.md`, and then use the Orchestrarium Gemini `init-project` helper to review or update the installed default `.gemini/.agents-mode.yaml` when you want project-specific routing choices.
+INSTALL.md:212:It intentionally keeps the full Gemini payload in `src.gemini/` while materializing the installed runtime as one official extension package plus the adjacent Gemini-native context files and `.agents-mode.yaml` overlay. Use Gemini's built-in `/init` for the official `GEMINI.md` bootstrap first. Orchestrarium install seeds `.gemini/.agents-mode.yaml` with the current default overlay in either the project target or `~/.gemini/`, and it materializes the canonical runtime payload under `.gemini/extensions/orchestrarium-gemini/` or `~/.gemini/extensions/orchestrarium-gemini/`; use the Orchestrarium Gemini init helper to review or update that installed default rather than replacing Gemini's official `.gemini/settings.json`. Top-level `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` stay reserved for deliberate user overrides and are not used as a second mirrored install target, because Gemini gives user/workspace tiers precedence over extension content. MCP wiring for servers such as Serena, Fetch, or Context7 remains a `settings.json` or `gemini-extension.json` concern. Gemini shares the same external provider universe `auto | codex | claude | gemini`; ordinary `auto` resolves by lane through the active priority profile, while explicit `gemini` is self-provider override only. The overlay may also carry `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts` so Gemini can participate in broader advisory or review second-opinion sets when the active policy requests more than one external opinion. Those counts stay same-lane distinct-opinion requirements rather than a cap on helper multiplicity; bounded same-provider helper fan-out now routes through `external-brigade`. When the resolved provider is Gemini, that overlay may also carry `externalModelMode: runtime-default | pinned-top-pro` plus `externalGeminiFallbackMode: disabled | auto | force`, where pinned `auto` means `gemini-3.1-pro` first and one fallback retry on `gemini-3-flash` only for limit-style Gemini failures. When the resolved provider is Claude, that overlay may also carry the same shared `externalModelMode` plus `externalClaudeApiMode: disabled | auto | force`. If you want Gemini-first visual routing, express it through an explicit provider override or a repo-local custom profile; `gemini-crosscheck` remains the named broader-Gemini shipped profile. Full operator semantics, including task continuity and continue-by-default execution expectations, live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
+RELEASE_NOTES.md:5:Update `RELEASE_NOTES.md` in the same change whenever tracked modifications affect installed behavior, governance, routing, role contracts, install surface, developer or operator workflow, or other release-relevant user-facing expectations.
+RELEASE_NOTES.md:21:- Tightened the operator-facing guidance around cost and routing expectations. README and the routing references now state plainly that Orchestrarium is tuned for maximum execution effectiveness rather than minimum token spend, and the visual or Gemini-first routing examples are now described only as explicit provider overrides or repo-local custom profiles instead of hidden shipped defaults. This matters because maintainers and operators now get an upfront warning about rapid token burn on large or heavily fanned-out runs and are less likely to mistake sample routing postures for built-in behavior.
+RELEASE_NOTES.md:23:- Changed the overlay-resolution contract so a missing project-local `.agents-mode.yaml` no longer means "act as if no operator state exists" when the matching global Orchestrarium install is present. Codex, Claude, and Gemini docs plus role surfaces now resolve overlays in the same order: local canonical file, local legacy file, matching global canonical file, then matching global legacy file; read-time normalization happens in the scope that supplied the effective config, and read-only fallback no longer fabricates a project-local override just to make routing work. This matters because globally installed operator defaults now apply honestly across projects until an explicit project-local override is created, instead of leaving agents to report misleading `no file` or disabled-state results.
+RELEASE_NOTES.md:24:- Added a shared `parallelMode: manual | auto | force` operator key so parallel helper routing is no longer only implied through external-only surfaces. The canonical `agents-mode` reference, init/toggle flows, provider operating-model addenda, and the shared defaults now treat `parallelMode` as the general fan-out rule for any independent helper or subagent lanes, while external opinion counts and brigade routing remain explicit overlays on top. This matters because operators can now force safe parallel work for speed, keep it judgment-based, or keep it explicit-only without conflating that choice with external-provider settings.
+RELEASE_NOTES.md:39:- Tightened the external-execution contract so the new model policy does not get confused with transport choice or host-subagent routing. Claude transport now hangs off the single wrapper toggle `externalClaudeApiMode`, Codex-line `externalClaudeProfile` remains the narrower Claude override, and Gemini fallback semantics now apply only under pinned Gemini runs instead of being described as a generic always-on hop.
+RELEASE_NOTES.md:51:- External lane routing is now more explicit about what each provider is actually good at. The canonical lane matrix now separates broad UI modernization from surgical UI cleanup, keeps performance and architecture review as a distinct reviewer lane, and adds `worker.systems-performance-implementation` so Rust hot paths, media-pipeline work, and other systems/perf-sensitive implementation can route to `codex > claude > gemini` without overloading the ordinary implementation lane. Shared scalar defaults, the provider universe `auto | codex | claude | gemini`, and the rule that `claude-api` is transport-only under the Claude provider all stay unchanged.
+RELEASE_NOTES.md:52:- The install surfaces, root manuals, and provider references now describe the same current routing contract instead of forcing operators to reconstruct it from mixed older prose. README, INSTALL, the canonical `agents-mode` reference, and the provider addenda now agree that `externalProvider: auto` is lane/profile-driven, that `claude-api` is a secondary Claude transport rather than a fourth provider, and that provider-local references are addenda to the live canon rather than a second hidden source of truth.
+RELEASE_NOTES.md:65:- External routing docs now spell out a fail-fast eligibility gate before any provider or CLI probing. Operators and leads can now see in one place that `$consultant` stays advisory-only, `$external-worker` covers the full non-owner worker lane, `$external-reviewer` covers review and QA, and only owner roles such as `$product-manager` and `$lead` remain generic-external-unsupported by default, which prevents wasted runtime investigation when a user explicitly asks for `external`.
+RELEASE_NOTES.md:66:- `agents-mode` now supports switchable named external-priority profiles and per-lane multi-opinion counts instead of hiding one fixed provider order behind `externalProvider: auto`. The shipped `balanced` profile preserves the quiet defaults, while `gemini-crosscheck` is the explicit repo-local profile for bringing Gemini into broader non-visual advisory and review second-opinion sets when one external opinion is not enough. This keeps scalar `externalProvider` overrides intact, keeps `claude-api` as a Claude transport rather than a fourth provider, and makes the broader Gemini routing policy visible in both docs and live overlays.
+RELEASE_NOTES.md:69:- Parallel external helper support is now explicit instead of being an implicit side effect of scattered routing prose. Shared governance and all three provider packs now state that external concurrency is not capped at one instance per helper or provider, that `externalOpinionCounts` still governs distinct-provider opinions for a single lane rather than generic helper multiplicity, and that a new first-class brigade surface exists for launching and aggregating one bounded batch of independent external helper runs.
+RELEASE_NOTES.md:86:- Made release-note updates mandatory before publication when staged tracked changes affect installed behavior, governance, routing, role contracts, install surface, or developer and operator workflow. This closes a documentation gap in the publication path: significant changes now need an explicit human-readable explanation before release instead of relying on readers to reconstruct impact from diffs alone.
+RELEASE_NOTES.md:103:- Tightened the semantics of the two operator-level toggles. `delegationMode` now uses `manual | auto | force`: `manual` keeps delegation explicit-by-request, `auto` leaves delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. If the requested delegation path is technically unavailable, the agent must report that constraint explicitly instead of silently pretending the forced delegation happened locally. `mcpMode` remains `auto | force`, where `force` means the config itself is an explicit instruction to use relevant available MCP tools instead of leaving MCP usage to optional judgment.
+RELEASE_NOTES.md:105:- First-time `agents-mode` creation now writes the full default shape instead of a partial file. Codex writes `consultantMode`, `externalClaudeApiMode: auto`, `delegationMode`, `mcpMode`, both external-preference flags, `externalProvider`, and `externalClaudeProfile`; Gemini writes the same shared routing keys plus `externalClaudeApiMode: auto`; Claude writes the shared shape without the Claude-target keys. This makes new workspace state self-describing and removes later need to infer missing settings after bootstrap.
+RELEASE_NOTES.md:109:- Extended the shared operator-mode model to cover Gemini explicitly without pretending Gemini is just another copy of the Codex or Claude lines. The reference docs now distinguish Gemini's official runtime bootstrap (`/init`), official runtime config (`.gemini/settings.json`), and Orchestrarium's repo-local `.gemini/.agents-mode.yaml` overlay for shared consultant/delegation/MCP/external-routing semantics.
+RELEASE_NOTES.md:111:- Added a Gemini-side `init-project` helper so the scaffold now has an official split bootstrap path: Gemini `/init` owns `GEMINI.md`, while the Orchestrarium helper owns `.gemini/.agents-mode.yaml` when shared cross-provider routing toggles are needed.
+RELEASE_NOTES.md:116:- Extracted `subagent-operating-model` into a shared core plus pack-local addenda instead of leaving two near-duplicate full copies. The new shared core now owns the common blueprint, routing, role, and governance-model text, while `references-codex/` and `references-claude/` retain only runtime-specific paths, provider dispatch details, execution-model notes, and repository concretization. This reduces drift in one of the densest methodology documents without pretending away the real Claude/Codex differences that still need local addenda.
+README.md:45:Cross-provider execution is available through two routing adapters:
+README.md:83:- `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
+README.md:84:- `parallelMode: manual` keeps parallel fan-out explicit-by-request, `auto` leaves safe parallelism enabled by routing judgment for any independent internal or external lanes, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
+README.md:86:- `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
+README.md:100:- For Gemini project setup, use Gemini's built-in `/init` to generate or tailor `GEMINI.md`. Official Gemini runtime config and MCP wiring stay in `.gemini/settings.json` or extension manifests, while Orchestrarium-specific shared governance is brought in through `GEMINI.md` importing project-root `AGENTS.md`, the canonical installed Gemini payload lives under `.gemini/extensions/orchestrarium-gemini/`, and shared routing semantics live in the Orchestrarium overlay `.gemini/.agents-mode.yaml`, which install seeds by default and the Gemini `init-project` helper reviews or updates after `/init`. If local Gemini overlay files are missing but `~/.gemini/.agents-mode.yaml` exists, ordinary reads should use that global overlay honestly until you choose to create a project-local override. Top-level `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` stay available for deliberate user overrides instead of carrying a second mirrored Orchestrarium install, because Gemini gives those tiers precedence over extension content.
+docs\routing\12-lane-routing-matrix-v1-2026-04-18.md:8:This note freezes the canonical `12`-lane routing model as the planning baseline for
+docs\routing\12-lane-routing-matrix-v1-2026-04-18.md:11:This is a routing-layer decision only:
+docs\routing\12-lane-routing-matrix-v1-2026-04-18.md:14:- the routing layer compresses those surfaces into `12` canonical lanes
+docs\routing\12-lane-routing-matrix-v1-2026-04-18.md:39:This lane is useful for routing policy, fallback policy, and long-running worker trust analysis, but it is
+docs\routing\12-lane-routing-matrix-v1-2026-04-18.md:40:not part of the core `12` routing lanes.
+docs\routing\12-lane-routing-matrix-v1-2026-04-18.md:79:## Non-core routing overlay
+docs\routing\12-lane-routing-matrix-v1-2026-04-18.md:83:| `worker.long-autonomous` | keep as routing overlay and reference extra lane; use `N08..N10` as its materialized basis |
+docs\routing\12-lane-routing-matrix-v1-2026-04-18.md:104:| owners | `R01` and `R02` stay outside routing lanes |
+docs\routing\12-lane-routing-matrix-v1-2026-04-18.md:105:| adapters | `A01` and `A02` stay outside semantic routing lanes |
+docs\routing\12-lane-routing-matrix-v1-2026-04-18.md:110:| execution-surface boundary | core routing results remain `S01..S33 + N01..N07`; `N08..N10` are now a separate scoreable extra-lane slice |
+docs\routing\12-lane-routing-matrix-v1-2026-04-18.md:120:- keeps `N08..N10` reported separately from the core `12` routing-lane results
+docs\README.md:22:- [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md)
+docs\provider-runtime-layouts.md:86:| Global operator overlay | `~/.gemini/.agents-mode.yaml` | Orchestrarium-owned shared-routing overlay seeded on first global install and preserved on reinstall; not a Gemini-native settings surface, and legacy sibling `~/.gemini/.agents-mode` is compatibility input only |
+docs\provider-runtime-layouts.md:104:| Orchestrarium operator overlay | `<project>/.gemini/.agents-mode.yaml` | Repo-local shared routing overlay for consultant, delegation, MCP, external-provider preferences, named priority profiles, and opinion counts; local install seeds the default, Gemini `/init` still owns `GEMINI.md`, the Orchestrarium Gemini init helper reviews or updates the overlay when project-specific choices are needed, and legacy sibling `<project>/.gemini/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Gemini overlay when the local scope is absent. |
+docs\external-worker-design.md:5:**Scope:** Orchestrarium skill-pack routing canon across Codex, Claude Code, and Gemini CLI
+docs\external-worker-design.md:130:   - `mcpMode` — `auto` vs `force` MCP routing policy
+docs\external-worker-design.md:171:   `externalProvider: auto` is pack-neutral and resolves through the active named profile instead of a line-default provider mapping. Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun. If a repository wants Gemini-first routing for visual lanes, express that through an explicit provider override or a repo-local custom profile; `gemini-crosscheck` is the named shipped profile for bringing Gemini into broader advisory and review second-opinion sets without changing the default worker and visual lane order.
+docs\external-worker-design.md:190:     - **Resolved provider:** `<provider selected after routing/default resolution | none>`
+docs\external-worker-design.md:216:- `delegationMode: manual | auto | force` — `manual` keeps explicit-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist
+docs\external-worker-design.md:217:- `parallelMode: manual | auto | force` — `manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction across internal and external helper lanes
+docs\external-worker-design.md:221:- `externalProvider: auto | claude | codex | gemini` — use the shared provider universe; `auto` resolves through the active named profile, and any extra Gemini-first visual routing should be expressed through an explicit provider override or a repo-local custom profile instead of assumed hidden heuristics
+docs\external-worker-design.md:256:Normal routing fallback to domain specialist. Not an error — standard routing behavior.
+docs\external-worker-design.md:266:| `src.claude/CLAUDE.md` | **Update** — role index + routing rules + delegation decision tree |
+docs\external-worker-design.md:267:| `src.claude/agents/contracts/operating-model.md` | **Update** — routing rules for external roles |
+docs\external-worker-design.md:269:| Team templates (JSON) | **No change** — substitution via routing decision, not template entries |
+docs\agents-mode-reference.md:20:- parallel routing by judgment by default
+docs\agents-mode-reference.md:29:- Any tool or skill that reads an existing `agents-mode` file to make a routing or operator-mode decision must normalize that file to the current canonical format before trusting the flags.
+docs\agents-mode-reference.md:84:- **same-host fast-path**: under `external-aggressive` and `max-speed`, when neutral isolation is not required, allow per-invocation explicit self-provider override. The stored file stays canonical; this is a routing rule, not a persisted key.
+docs\agents-mode-reference.md:93:| `external` | External-only consultant | Use the selected external CLI only. If it is unavailable or fails, return an unavailable advisory memo and keep routing honest. | If the lead or repo-local lane policy explicitly asks for a closeout consultant sweep, run it externally. Do not downgrade to internal fallback. |
+docs\agents-mode-reference.md:108:| `auto` | Delegation by routing judgment | Treat ordinary delegation as enabled, but still choose locally vs delegated execution based on routing, scope, and specialist fit. |
+docs\agents-mode-reference.md:116:| `auto` | Parallelism by routing judgment | Treat safe parallelism as available. Launch independent lanes together when dependencies are satisfied, scopes are disjoint, and merge or integration cost is justified. |
+docs\agents-mode-reference.md:133:| Value | Meaning | Expected routing effect |
+docs\agents-mode-reference.md:136:| `true` | Prefer external worker adapter | Eligible non-owner, non-review roles should prefer `$external-worker` as the default routing choice. |
+docs\agents-mode-reference.md:140:| Value | Meaning | Expected routing effect |
+docs\agents-mode-reference.md:143:| `true` | Prefer external review adapter | Eligible review and QA roles should prefer `$external-reviewer` as the default routing choice. |
+docs\agents-mode-reference.md:149:| `auto` | Resolve the external provider by lane type through the active named priority profile | `auto` is pack-neutral. It uses the active profile below, explicit user override, and any documented repo-local routing heuristic. Ordinary `auto` must not silently resolve to the same provider as the current host line. |
+docs\agents-mode-reference.md:168:| `balanced` | Default shared routing profile | Keeps the quiet shared lane priorities that ship by default. |
+docs\agents-mode-reference.md:224:- If a repository wants Gemini-first routing for visual lanes, express that through an explicit provider override or a repo-local custom profile rather than assuming the shipped shared profiles already do it.
+docs\agents-mode-reference.md:284:Resolve external routing in this order: `role eligibility -> provider selection -> CLI availability`.
+docs\agents-mode-reference.md:289:| Eligible worker-side role | `$external-worker` | Valid only after routing has already classified the slot as non-owner, non-review work. This includes research, design, planning, scientist or constraint, implementation, and repository-hygiene roles. |
+docs\agents-mode-reference.md:290:| Eligible review or QA-side role | `$external-reviewer` | Valid only after routing has already classified the slot as review or QA work. |
+docs\agents-mode-reference.md:295:- Worker-side specialist lanes such as `analyst`, `architect`, `planner`, `knowledge-archivist`, `algorithm-scientist`, `computational-scientist`, `security-engineer`, `performance-engineer`, and `reliability-engineer` stay eligible for `$external-worker` when routing selects external substitution.
+docs\agents-mode-reference.md:376:- `balanced` should stay marked as the default shared routing profile inside the `externalPriorityProfiles` block.
+docs\agents-mode-reference.md:406:| Explicit user override | An explicit user role or routing request can override the standing toggle state in either direction unless a higher-priority platform or policy rule forbids it. |
+docs\agents-mode-reference.md:408:| External routing order | Check role eligibility first. Only supported external buckets proceed to provider resolution and CLI availability checks. |
+docs\agents-mode-reference.md:418:| Multi-opinion routing | `externalOpinionCounts` controls how many distinct external opinions a lane must collect under `auto`. Missing counts mean `1`; shortfalls keep the lane `BLOCKED`. It does not replace the general `parallelMode` rule. |
+docs\agents-mode-reference.md:422:| Self-provider rule | Ordinary `auto` must not resolve to the same provider as the host line. Self-provider is explicit-override only. This is a repo-local routing rule, not an official provider-wide ban on invoking the same CLI. |
+docs\agents-mode-reference.md:424:| Visual-lane override policy | The shipped shared profiles do not hardwire Gemini-first visual routing. If a repository wants Gemini first for image, icon, or decorative visual lanes, express that through an explicit provider override or a repo-local custom profile. |
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" docs/routing/12-lane-routing-matrix-v1-2026-04-18.md' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git diff --no-index -- /dev/null docs/routing/12-lane-routing-matrix-v1-2026-04-18.md' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"SUSPECT_WORKFLOW\" -S --hidden --glob '"'!/.git/**'"' ." in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T21:41:40.526728Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git ls-files | rg "SUSPECT_WORKFLOW|12-lane-routing|docs/README.md"'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git ls-files | rg "SUSPECT_WORKFLOW|12-lane-routing|docs/README.md"' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git ls-files | rg "SUSPECT_WORKFLOW|12-lane-routing|docs/README.md"'` rejected: blocked by policy
+ succeeded in 1090ms:
+1:Date: 2026-04-18
+2:Updated: 2026-04-20
+3:Owner: `$lead`
+4:Status: `PASS`
+5:
+6:## Purpose
+7:
+8:This note freezes the canonical `12`-lane routing model as the planning baseline for
+9:`externalPriorityProfiles`.
+10:
+11:This is a routing-layer decision only:
+12:
+13:- the full benchmark universe remains `33` surfaces
+14:- the routing layer compresses those surfaces into `12` canonical lanes
+15:- each lane has one explicit meaning, one merge rationale, and one `3`-test basis
+16:- `worker.long-autonomous` stays outside the core `12` as a reference extra lane with a materialized `N08..N10` `3`-test basis
+17:
+18:This note does **not** yet change `Orchestrarium/shared/agents-mode.defaults.yaml`.
+19:
+20:## Canonical 12-lane matrix
+21:
+22:| `#` | Lane | Meaning | 3-test basis | Merge / source |
+23:|---|---|---|---|---|
+24:| `1` | `advisory.repo-understanding` | repo facts, source-of-truth hygiene, evidence-backed advisory grounded in the repo | `S03`, `S04`, `S06` | consultant + archivist + analyst |
+25:| `2` | `advisory.design-adr` | architecture design, ADR tradeoffs, product framing, phased planning | `S05`, `S07`, `S09` | product-analyst + architect + planner |
+26:| `3` | `design.ui-ux-structure` | pre-implementation UI and UX structure, hierarchy, flow, state design, visual intent | `S08`, `N01`, `N02` | new explicit lane |
+27:| `4` | `worker.reasoning-constraints` | formal, numerical, and security-constraint reasoning before implementation | `S10`, `S11`, `S12` | algorithm + computational + security-engineer |
+28:| `5` | `worker.default-implementation` | ordinary backend, data, and platform implementation | `S15`, `S19`, `S20` | backend + data + platform |
+29:| `6` | `worker.systems-performance-implementation` | systems ownership, toolchain-root work, performance-sensitive or reliability-sensitive implementation | `S13`, `S14`, `S21` | performance + reliability + toolchain |
+30:| `7` | `worker.ui-implementation` | actual UI implementation correctness across web, Qt UI, and model/view | `S16`, `S17`, `S18` | merge current UI worker lanes |
+31:| `8` | `worker.visual-graphics-visualization` | non-UI visual execution: geometry, rendering, graphics, visualization | `S22`, `S23`, `S24` | replace decorative visual lane |
+32:| `9` | `review.pre-pr` | generic QA and merge-readiness review before specialty gates | `S25`, `N03`, `N04` | QA plus new generic review tests |
+33:| `10` | `review.security` | dedicated security review and trust-boundary correctness gate | `S27`, `N05`, `N06` | new explicit lane |
+34:| `11` | `review.performance-architecture` | architecture quality, maintainability, scalability, performance review | `S26`, `S28`, `N07` | architecture-reviewer + performance-reviewer |
+35:| `12` | `review.ui-visual-correctness` | accessibility, UX, and UI regression correctness as one visual review gate | `S29`, `S30`, `S31` | replace vague `review.visual` |
+36:
+37:## Reference extra lane
+38:
+39:This lane is useful for routing policy, fallback policy, and long-running worker trust analysis, but it is
+40:not part of the core `12` routing lanes.
+41:
+42:| Extra | Lane | Meaning | 3-test basis | Read |
+43:|---|---|---|---|---|
+44:| `E1` | `worker.long-autonomous` | long autonomous worker execution across multi-step ownership, resume continuity, and no-drift implementation | `N08`, `N09`, `N10` | reference overlay only; not counted in the core `12` |
+45:
+46:## Concern-to-lane map
+47:
+48:| Concern | Primary lane |
+49:|---|---|
+50:| architecture design | `advisory.design-adr` |
+51:| architecture review | `review.performance-architecture` |
+52:| repo understanding | `advisory.repo-understanding` |
+53:| UI and UX design before code | `design.ui-ux-structure` |
+54:| UI implementation correctness | `worker.ui-implementation` |
+55:| UI visual correctness review | `review.ui-visual-correctness` |
+56:| generic implementation | `worker.default-implementation` |
+57:| systems, toolchain, or perf-sensitive implementation | `worker.systems-performance-implementation` |
+58:| graphics or visualization execution | `worker.visual-graphics-visualization` |
+59:| generic review gate | `review.pre-pr` |
+60:| security review gate | `review.security` |
+61:| long autonomous worker trust | `worker.long-autonomous` extra/reference lane |
+62:
+63:## Current lane migration
+64:
+65:| Current lane | Decision |
+66:|---|---|
+67:| `advisory.repo-understanding` | keep |
+68:| `advisory.design-adr` | keep |
+69:| `review.pre-pr` | keep |
+70:| `review.performance-architecture` | keep |
+71:| `worker.default-implementation` | keep |
+72:| `worker.systems-performance-implementation` | keep and widen |
+73:| `worker.ui-structural-modernization` | merge into `worker.ui-implementation` |
+74:| `worker.ui-surgical-patch-cleanup` | merge into `worker.ui-implementation` |
+75:| `worker.visual-icon-decorative` | replace with `worker.visual-graphics-visualization` |
+76:| `review.visual` | replace with `review.ui-visual-correctness` |
+77:| `worker.long-autonomous` | keep as reference extra lane and overlay-only |
+78:
+79:## Non-core routing overlay
+80:
+81:| Overlay | Read |
+82:|---|---|
+83:| `worker.long-autonomous` | keep as routing overlay and reference extra lane; use `N08..N10` as its materialized basis |
+84:
+85:## Follow-up scenarios
+86:
+87:| New scenario | Lane |
+88:|---|---|
+89:| `N01` static visual hierarchy brief | `design.ui-ux-structure` |
+90:| `N02` interaction-state flow brief | `design.ui-ux-structure` |
+91:| `N03` generic code-review findings | `review.pre-pr` |
+92:| `N04` regression-triage gate | `review.pre-pr` |
+93:| `N05` secret-exposure review | `review.security` |
+94:| `N06` authz or trust-boundary review | `review.security` |
+95:| `N07` scalability or maintainability cross-review | `review.performance-architecture` |
+96:| `N08` autonomous build-owner continuity | `worker.long-autonomous` extra/reference lane |
+97:| `N09` autonomous resume and path recall | `worker.long-autonomous` extra/reference lane |
+98:| `N10` constrained multi-step patch with no drift | `worker.long-autonomous` extra/reference lane |
+99:
+100:## Boundary conditions
+101:
+102:| Boundary | Read |
+103:|---|---|
+104:| owners | `R01` and `R02` stay outside routing lanes |
+105:| adapters | `A01` and `A02` stay outside semantic routing lanes |
+106:| UI split | `design.ui-ux-structure`, `worker.ui-implementation`, and `review.ui-visual-correctness` stay separate |
+107:| architecture split | architecture design stays in `advisory.design-adr`; architecture review stays in `review.performance-architecture` |
+108:| security split | `review.security` stays standalone |
+109:| extra lane boundary | `worker.long-autonomous` is `E1`, not lane `13`; it does not change the core lane count |
+110:| execution-surface boundary | core routing results remain `S01..S33 + N01..N07`; `N08..N10` are now a separate scoreable extra-lane slice |
+111:
+112:## Next step
+113:
+114:The next implementation step after this freeze is a documentation and config update pass that:
+115:
+116:- updates `agents-mode-reference.md`
+117:- updates `external-worker-design.md` if needed
+118:- updates `shared/agents-mode.defaults.yaml`
+119:- treats `worker.long-autonomous` as an extra/reference lane when updating profile docs
+120:- keeps `N08..N10` reported separately from the core `12` routing-lane results
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:41:41.759616Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.3 seconds
+Output:
+diff --git a/docs/routing/12-lane-routing-matrix-v1-2026-04-18.md b/docs/routing/12-lane-routing-matrix-v1-2026-04-18.md
+new file mode 100644
+index 0000000..2427a79
+--- /dev/null
++++ b/docs/routing/12-lane-routing-matrix-v1-2026-04-18.md
+@@ -0,0 +1,120 @@
++Date: 2026-04-18
++Updated: 2026-04-20
++Owner: `$lead`
++Status: `PASS`
++
++## Purpose
++
++This note freezes the canonical `12`-lane routing model as the planning baseline for
++`externalPriorityProfiles`.
++
++This is a routing-layer decision only:
++
++- the full benchmark universe remains `33` surfaces
++- the routing layer compresses those surfaces into `12` canonical lanes
++- each lane has one explicit meaning, one merge rationale, and one `3`-test basis
++- `worker.long-autonomous` stays outside the core `12` as a reference extra lane with a materialized `N08..N10` `3`-test basis
++
++This note does **not** yet change `Orchestrarium/shared/agents-mode.defaults.yaml`.
++
++## Canonical 12-lane matrix
++
++| `#` | Lane | Meaning | 3-test basis | Merge / source |
++|---|---|---|---|---|
++| `1` | `advisory.repo-understanding` | repo facts, source-of-truth hygiene, evidence-backed advisory grounded in the repo | `S03`, `S04`, `S06` | consultant + archivist + analyst |
++| `2` | `advisory.design-adr` | architecture design, ADR tradeoffs, product framing, phased planning | `S05`, `S07`, `S09` | product-analyst + architect + planner |
++| `3` | `design.ui-ux-structure` | pre-implementation UI and UX structure, hierarchy, flow, state design, visual intent | `S08`, `N01`, `N02` | new explicit lane |
++| `4` | `worker.reasoning-constraints` | formal, numerical, and security-constraint reasoning before implementation | `S10`, `S11`, `S12` | algorithm + computational + security-engineer |
++| `5` | `worker.default-implementation` | ordinary backend, data, and platform implementation | `S15`, `S19`, `S20` | backend + data + platform |
++| `6` | `worker.systems-performance-implementation` | systems ownership, toolchain-root work, performance-sensitive or reliability-sensitive implementation | `S13`, `S14`, `S21` | performance + reliability + toolchain |
++| `7` | `worker.ui-implementation` | actual UI implementation correctness across web, Qt UI, and model/view | `S16`, `S17`, `S18` | merge current UI worker lanes |
++| `8` | `worker.visual-graphics-visualization` | non-UI visual execution: geometry, rendering, graphics, visualization | `S22`, `S23`, `S24` | replace decorative visual lane |
++| `9` | `review.pre-pr` | generic QA and merge-readiness review before specialty gates | `S25`, `N03`, `N04` | QA plus new generic review tests |
++| `10` | `review.security` | dedicated security review and trust-boundary correctness gate | `S27`, `N05`, `N06` | new explicit lane |
++| `11` | `review.performance-architecture` | architecture quality, maintainability, scalability, performance review | `S26`, `S28`, `N07` | architecture-reviewer + performance-reviewer |
++| `12` | `review.ui-visual-correctness` | accessibility, UX, and UI regression correctness as one visual review gate | `S29`, `S30`, `S31` | replace vague `review.visual` |
++
++## Reference extra lane
++
++This lane is useful for routing policy, fallback policy, and long-running worker trust analysis, but it is
++not part of the core `12` routing lanes.
++
++| Extra | Lane | Meaning | 3-test basis | Read |
++|---|---|---|---|---|
++| `E1` | `worker.long-autonomous` | long autonomous worker execution across multi-step ownership, resume continuity, and no-drift implementation | `N08`, `N09`, `N10` | reference overlay only; not counted in the core `12` |
++
++## Concern-to-lane map
++
++| Concern | Primary lane |
++|---|---|
++| architecture design | `advisory.design-adr` |
++| architecture review | `review.performance-architecture` |
++| repo understanding | `advisory.repo-understanding` |
++| UI and UX design before code | `design.ui-ux-structure` |
++| UI implementation correctness | `worker.ui-implementation` |
++| UI visual correctness review | `review.ui-visual-correctness` |
++| generic implementation | `worker.default-implementation` |
++| systems, toolchain, or perf-sensitive implementation | `worker.systems-performance-implementation` |
++| graphics or visualization execution | `worker.visual-graphics-visualization` |
++| generic review gate | `review.pre-pr` |
++| security review gate | `review.security` |
++| long autonomous worker trust | `worker.long-autonomous` extra/reference lane |
++
++## Current lane migration
++
++| Current lane | Decision |
++|---|---|
++| `advisory.repo-understanding` | keep |
++| `advisory.design-adr` | keep |
++| `review.pre-pr` | keep |
++| `review.performance-architecture` | keep |
++| `worker.default-implementation` | keep |
++| `worker.systems-performance-implementation` | keep and widen |
++| `worker.ui-structural-modernization` | merge into `worker.ui-implementation` |
++| `worker.ui-surgical-patch-cleanup` | merge into `worker.ui-implementation` |
++| `worker.visual-icon-decorative` | replace with `worker.visual-graphics-visualization` |
++| `review.visual` | replace with `review.ui-visual-correctness` |
++| `worker.long-autonomous` | keep as reference extra lane and overlay-only |
++
++## Non-core routing overlay
++
++| Overlay | Read |
++|---|---|
++| `worker.long-autonomous` | keep as routing overlay and reference extra lane; use `N08..N10` as its materialized basis |
++
++## Follow-up scenarios
++
++| New scenario | Lane |
++|---|---|
++| `N01` static visual hierarchy brief | `design.ui-ux-structure` |
++| `N02` interaction-state flow brief | `design.ui-ux-structure` |
++| `N03` generic code-review findings | `review.pre-pr` |
++| `N04` regression-triage gate | `review.pre-pr` |
++| `N05` secret-exposure review | `review.security` |
++| `N06` authz or trust-boundary review | `review.security` |
++| `N07` scalability or maintainability cross-review | `review.performance-architecture` |
++| `N08` autonomous build-owner continuity | `worker.long-autonomous` extra/reference lane |
++| `N09` autonomous resume and path recall | `worker.long-autonomous` extra/reference lane |
++| `N10` constrained multi-step patch with no drift | `worker.long-autonomous` extra/reference lane |
++
++## Boundary conditions
++
++| Boundary | Read |
++|---|---|
++| owners | `R01` and `R02` stay outside routing lanes |
++| adapters | `A01` and `A02` stay outside semantic routing lanes |
++| UI split | `design.ui-ux-structure`, `worker.ui-implementation`, and `review.ui-visual-correctness` stay separate |
++| architecture split | architecture design stays in `advisory.design-adr`; architecture review stays in `review.performance-architecture` |
++| security split | `review.security` stays standalone |
++| extra lane boundary | `worker.long-autonomous` is `E1`, not lane `13`; it does not change the core lane count |
++| execution-surface boundary | core routing results remain `S01..S33 + N01..N07`; `N08..N10` are now a separate scoreable extra-lane slice |
++
++## Next step
++
++The next implementation step after this freeze is a documentation and config update pass that:
++
++- updates `agents-mode-reference.md`
++- updates `external-worker-design.md` if needed
++- updates `shared/agents-mode.defaults.yaml`
++- treats `worker.long-autonomous` as an extra/reference lane when updating profile docs
++- keeps `N08..N10` reported separately from the core `12` routing-lane results
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1278ms:
+diff --git a/docs/routing/12-lane-routing-matrix-v1-2026-04-18.md b/docs/routing/12-lane-routing-matrix-v1-2026-04-18.md
+new file mode 100644
+index 0000000..2427a79
+--- /dev/null
++++ b/docs/routing/12-lane-routing-matrix-v1-2026-04-18.md
+@@ -0,0 +1,120 @@
++Date: 2026-04-18
++Updated: 2026-04-20
++Owner: `$lead`
++Status: `PASS`
++
++## Purpose
++
++This note freezes the canonical `12`-lane routing model as the planning baseline for
++`externalPriorityProfiles`.
++
++This is a routing-layer decision only:
++
++- the full benchmark universe remains `33` surfaces
++- the routing layer compresses those surfaces into `12` canonical lanes
++- each lane has one explicit meaning, one merge rationale, and one `3`-test basis
++- `worker.long-autonomous` stays outside the core `12` as a reference extra lane with a materialized `N08..N10` `3`-test basis
++
++This note does **not** yet change `Orchestrarium/shared/agents-mode.defaults.yaml`.
++
++## Canonical 12-lane matrix
++
++| `#` | Lane | Meaning | 3-test basis | Merge / source |
++|---|---|---|---|---|
++| `1` | `advisory.repo-understanding` | repo facts, source-of-truth hygiene, evidence-backed advisory grounded in the repo | `S03`, `S04`, `S06` | consultant + archivist + analyst |
++| `2` | `advisory.design-adr` | architecture design, ADR tradeoffs, product framing, phased planning | `S05`, `S07`, `S09` | product-analyst + architect + planner |
++| `3` | `design.ui-ux-structure` | pre-implementation UI and UX structure, hierarchy, flow, state design, visual intent | `S08`, `N01`, `N02` | new explicit lane |
++| `4` | `worker.reasoning-constraints` | formal, numerical, and security-constraint reasoning before implementation | `S10`, `S11`, `S12` | algorithm + computational + security-engineer |
++| `5` | `worker.default-implementation` | ordinary backend, data, and platform implementation | `S15`, `S19`, `S20` | backend + data + platform |
++| `6` | `worker.systems-performance-implementation` | systems ownership, toolchain-root work, performance-sensitive or reliability-sensitive implementation | `S13`, `S14`, `S21` | performance + reliability + toolchain |
++| `7` | `worker.ui-implementation` | actual UI implementation correctness across web, Qt UI, and model/view | `S16`, `S17`, `S18` | merge current UI worker lanes |
++| `8` | `worker.visual-graphics-visualization` | non-UI visual execution: geometry, rendering, graphics, visualization | `S22`, `S23`, `S24` | replace decorative visual lane |
++| `9` | `review.pre-pr` | generic QA and merge-readiness review before specialty gates | `S25`, `N03`, `N04` | QA plus new generic review tests |
++| `10` | `review.security` | dedicated security review and trust-boundary correctness gate | `S27`, `N05`, `N06` | new explicit lane |
++| `11` | `review.performance-architecture` | architecture quality, maintainability, scalability, performance review | `S26`, `S28`, `N07` | architecture-reviewer + performance-reviewer |
++| `12` | `review.ui-visual-correctness` | accessibility, UX, and UI regression correctness as one visual review gate | `S29`, `S30`, `S31` | replace vague `review.visual` |
++
++## Reference extra lane
++
++This lane is useful for routing policy, fallback policy, and long-running worker trust analysis, but it is
++not part of the core `12` routing lanes.
++
++| Extra | Lane | Meaning | 3-test basis | Read |
++|---|---|---|---|---|
++| `E1` | `worker.long-autonomous` | long autonomous worker execution across multi-step ownership, resume continuity, and no-drift implementation | `N08`, `N09`, `N10` | reference overlay only; not counted in the core `12` |
++
++## Concern-to-lane map
++
++| Concern | Primary lane |
++|---|---|
++| architecture design | `advisory.design-adr` |
++| architecture review | `review.performance-architecture` |
++| repo understanding | `advisory.repo-understanding` |
++| UI and UX design before code | `design.ui-ux-structure` |
++| UI implementation correctness | `worker.ui-implementation` |
++| UI visual correctness review | `review.ui-visual-correctness` |
++| generic implementation | `worker.default-implementation` |
++| systems, toolchain, or perf-sensitive implementation | `worker.systems-performance-implementation` |
++| graphics or visualization execution | `worker.visual-graphics-visualization` |
++| generic review gate | `review.pre-pr` |
++| security review gate | `review.security` |
++| long autonomous worker trust | `worker.long-autonomous` extra/reference lane |
++
++## Current lane migration
++
++| Current lane | Decision |
++|---|---|
++| `advisory.repo-understanding` | keep |
++| `advisory.design-adr` | keep |
++| `review.pre-pr` | keep |
++| `review.performance-architecture` | keep |
++| `worker.default-implementation` | keep |
++| `worker.systems-performance-implementation` | keep and widen |
++| `worker.ui-structural-modernization` | merge into `worker.ui-implementation` |
++| `worker.ui-surgical-patch-cleanup` | merge into `worker.ui-implementation` |
++| `worker.visual-icon-decorative` | replace with `worker.visual-graphics-visualization` |
++| `review.visual` | replace with `review.ui-visual-correctness` |
++| `worker.long-autonomous` | keep as reference extra lane and overlay-only |
++
++## Non-core routing overlay
++
++| Overlay | Read |
++|---|---|
++| `worker.long-autonomous` | keep as routing overlay and reference extra lane; use `N08..N10` as its materialized basis |
++
++## Follow-up scenarios
++
++| New scenario | Lane |
++|---|---|
++| `N01` static visual hierarchy brief | `design.ui-ux-structure` |
++| `N02` interaction-state flow brief | `design.ui-ux-structure` |
++| `N03` generic code-review findings | `review.pre-pr` |
++| `N04` regression-triage gate | `review.pre-pr` |
++| `N05` secret-exposure review | `review.security` |
++| `N06` authz or trust-boundary review | `review.security` |
++| `N07` scalability or maintainability cross-review | `review.performance-architecture` |
++| `N08` autonomous build-owner continuity | `worker.long-autonomous` extra/reference lane |
++| `N09` autonomous resume and path recall | `worker.long-autonomous` extra/reference lane |
++| `N10` constrained multi-step patch with no drift | `worker.long-autonomous` extra/reference lane |
++
++## Boundary conditions
++
++| Boundary | Read |
++|---|---|
++| owners | `R01` and `R02` stay outside routing lanes |
++| adapters | `A01` and `A02` stay outside semantic routing lanes |
++| UI split | `design.ui-ux-structure`, `worker.ui-implementation`, and `review.ui-visual-correctness` stay separate |
++| architecture split | architecture design stays in `advisory.design-adr`; architecture review stays in `review.performance-architecture` |
++| security split | `review.security` stays standalone |
++| extra lane boundary | `worker.long-autonomous` is `E1`, not lane `13`; it does not change the core lane count |
++| execution-surface boundary | core routing results remain `S01..S33 + N01..N07`; `N08..N10` are now a separate scoreable extra-lane slice |
++
++## Next step
++
++The next implementation step after this freeze is a documentation and config update pass that:
++
++- updates `agents-mode-reference.md`
++- updates `external-worker-design.md` if needed
++- updates `shared/agents-mode.defaults.yaml`
++- treats `worker.long-autonomous` as an extra/reference lane when updating profile docs
++- keeps `N08..N10` reported separately from the core `12` routing-lane results
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:41:41.948379Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.4 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1425ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'Get-ChildItem -Recurse -Filter SUSPECT_WORKFLOW.md -File' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"insufficient_data|test_tokenizer_probe|test_mitm_capture|124 tests pass|v0\\.6\" --hidden --glob '"'!/.git/**'"' ." in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^$" docs/routing/12-lane-routing-matrix-v1-2026-04-18.md' in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1280ms:
+
+    Directory: D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics
+
+[32;1mMode   [0m[32;1m              LastWriteTime[0m[32;1m         Length[0m[32;1m Name[0m
+[32;1m----   [0m [32;1m             -------------[0m [32;1m        ------[0m [32;1m----[0m
+-a---          25.04.2026     0:40           6498 SUSPECT_WORKFLOW.md
+
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:41:59.980087Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.4 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1427ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1619ms:
+5:
+7:
+10:
+12:
+17:
+19:
+21:
+36:
+38:
+41:
+45:
+47:
+62:
+64:
+78:
+80:
+84:
+86:
+99:
+101:
+111:
+113:
+115:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The target file exists under `.scratch/proxy-forensics/`, which `rg` skipped earlier through ignore rules. I’m checking that scratch artifact directly now, including the claimed line ranges and the referenced test names.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 8 \"insufficient_data|Verdict|verdict|124 tests|test_tokenizer_probe|test_mitm_capture|v0\\.6|GREEN|RED\" .scratch/proxy-forensics/SUSPECT_WORKFLOW.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "''^" .scratch/proxy-forensics/SUSPECT_WORKFLOW.md' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -LiteralPath .scratch\\proxy-forensics" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git status --short --ignored .scratch/proxy-forensics/SUSPECT_WORKFLOW.md' in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1165ms:
+45-
+46-**Cost**: ~$0.50-1.50 per target depending on gateway pricing
+47-
+48-```bash
+49-python fingerprint.py --label "<name>" --cmd "<command>" --shell \
+50-  --repeats 2 --save-raw results_<name>.json
+51-```
+52-
+53:Note verdict:
+54-- [ ] Primary hypothesis (A+Middleware / A-clean / C / ambiguous)
+55-- [ ] Confidence (high / medium / low)
+56-- [ ] Gates passed (A+Middleware / A-clean / C)
+57-- [ ] Evidence weights (middleware, capable_base, distill, recent_cutoff, feature_strip, suspicious_intercept)
+58-- [ ] Any probe-level anomalies (timeouts, failed runs, inconsistent outputs)
+59-
+60-## Step 4. Cross-evidence interpretation
+61-
+62-Combine Step 2 + Step 3 findings:
+63-
+64-| Step 2 | Step 3 | Likely interpretation |
+65-|---|---|---|
+66-| Cloudflare + anthropic-direct headers present | A-clean, high confidence | Legit Anthropic reseller |
+67-| Cloudflare + no anthropic-direct headers | A+Middleware, any confidence | Third party using Cloudflare but NOT Anthropic |
+68:| Aggressive defense + A+Middleware verdict | — | Custom middleware gateway — same pattern as original AW investigation |
+69:| Aggressive defense + A-clean verdict | — | Conflict — re-examine classification |
+70:| No network evidence + C distill verdict | — | Non-Anthropic backend, likely distill |
+71:| Clean network + ambiguous verdict | — | Not enough LLM evidence; increase `--repeats` or add manual probes |
+72-
+73-## Step 5. Escalation (optional, high-stakes only)
+74-
+75:If verdict is ambiguous OR the decision has security / compliance / financial stakes:
+76-
+77-- [ ] **mitmproxy HTTPS capture**: set up local intercepting proxy, capture actual `/v1/messages` request body. Reveals injected system prompt content, exact parameter handling. Setup: 30-60 min. See `NETWORK_FINGERPRINTS.md` for how to interpret the capture.
+78:- [ ] **Tokenizer probe**: run `python tokenizer_probe.py --baseline-cmd "claude" --gateway-cmd "<suspect>" --gateway-shell --model claude-opus-4-7 --gateway-model opus --repeats 2 --save-raw tokenizer_<name>.json`. 10 sentinels, α·β linear fit, verdicts `claude_bpe`/`claude_bpe_weak`/`non_claude`/`ambiguous`/`insufficient_data`. Feed into `fingerprint.py --tokenizer-probe-raw tokenizer_<name>.json` to integrate into the classifier (opens `distill+middleware` hypothesis when `non_claude`, vetoes A-clean high confidence; `insufficient_data` / `ambiguous` → no classifier effect).
+79-- [ ] **Opus 4.7 max expert consultation**: send full evidence dump to `claude -p --model claude-opus-4-7 --effort max` for independent re-ranking (template: `consult_opus47*.py` in `.scratch/`).
+80-
+81-## Step 6. Document findings
+82-
+83-Add an entry to `NETWORK_FINGERPRINTS.md` with the new target's network profile. Archive raw JSON outputs (`network_<name>.json`, `results_<name>.json`) under `.scratch/proxy-forensics/investigations/<date>-<name>/`.
+84-
+85-## Common pitfalls
+86-
+87-- **Env var `CLAUDE_CODE_EFFORT_LEVEL`** is inherited by subprocess and can affect outputs. The toolkit forces `--effort max` via CLI flag, so env var is normally overridden, but be aware.
+88-- **`--shell True`** is required for `.cmd` wrappers on Windows. Command injection risk — never pass an untrusted `--cmd` value.
+89-- **Sampling variance**: `--repeats 1` is unreliable for classification. Default 2, use 3+ for high-stakes targets.
+90:- **Baseline drift**: if baselines are >90 days old or Anthropic has released a new Opus generation, regenerate before running comparisons. Tool blocks strong verdicts past `expiry_date`.
+91-- **Cost reporting**: `cost_usd` returned by third-party gateways is often fabricated. Trust `out_tok`, `text`, `msg_id` prefix, `cache_create/read`.
+92-- **Tool use**: always pass `--tools ""` (automatic in `fingerprint.py`). Otherwise WebSearch can fetch current events and defeat the temporal-cutoff probe.
+93-- **Rate limits / aggressive defense**: some gateways limit probe frequency or actively drop probe-shaped requests. Space runs, try fallback methods (POST vs GET), or escalate to mitmproxy.
+94-
+95-## Sanity check for new toolkit changes
+96-
+97-Before applying the toolkit to a new important suspect:
+98-
+99:- [ ] `python test_fingerprint.py` → 124 tests pass (v0.6)
+100:- [ ] `python test_tokenizer_probe.py` → 33 tests pass
+101:- [ ] `python test_mitm_capture.py` → 9 tests pass
+102-- [ ] `python fingerprint.py --list-probes` → 5 probes listed
+103-- [ ] Run on a known baseline (plain `claude --model claude-opus-4-7`) and confirm A-clean high confidence (score ≈ 0.72, gap ≈ 0.42)
+104:- [ ] Run on AW (known A+Middleware-like) and confirm that verdict (may be medium confidence due to gateway adaptation)
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1338ms:
+1:# New Suspect Investigation Workflow
+2:
+3:Step-by-step checklist for investigating a new Claude-compatible proxy endpoint. Run these in order.
+4:
+5:## Prerequisites
+6:
+7:- [ ] Toolkit is at latest version (`SCORER_VERSION` in `fingerprint.py` matches `scorer_version` in `baselines.json`)
+8:- [ ] Baselines are not expired (`metadata.expiry_date` in `baselines.json` is in future)
+9:- [ ] `claude.exe` (v2.1.x) on PATH for official baseline comparison
+10:- [ ] Target is accessible (manual `curl -I <url>` or a simple `--effort low -p "hi"` call succeeds at least once)
+11:
+12:## Step 1. Gather target metadata
+13:
+14:Capture before running any probe:
+15:
+16:- [ ] **Command shape**: `claude-<name>.cmd --model X`, or plain `claude --model X`, or something else?
+17:- [ ] **Gateway URL** (read from the wrapper script — usually `set ANTHROPIC_BASE_URL=...`)
+18:- [ ] **Credential mechanism**: token in wrapper, env var, ambient OAuth?
+19:- [ ] **Claimed backend**: what does the wrapper / operator claim runs on the other end?
+20:- [ ] **Notes about context**: is it a paid service, a free trial, a pirate relay, a known operator?
+21:
+22:## Step 2. Network-level fingerprint
+23:
+24:**Cost**: zero LLM tokens (only TLS/HTTP HEAD requests)
+25:
+26:```bash
+27:python network_probe.py --url <gateway-url> --label "<name>" \
+28:  --save-raw network_<name>.json
+29:```
+30:
+31:Note:
+32:- [ ] `tls_ok`: yes / no / intermittent
+33:- [ ] `aggressive_defense`: true / false
+34:- [ ] `proxy_software_detected`: list (Cloudflare / LiteLLM / Portkey / etc.)
+35:- [ ] `anthropic_direct_headers`: true / false (check auth'd response manually if false on unauth'd)
+36:- [ ] `latency_median_ms`, `jitter_ms`
+37:- [ ] Server header value
+38:
+39:Compare against `NETWORK_FINGERPRINTS.md` baselines. Flag:
+40:- Matches known legit path (Cloudflare + anthropic-direct headers) → possible legit reseller relaying to Anthropic
+41:- Aggressive defense without CDN → likely custom middleware
+42:- Custom CDN signature (Fly.io / Render / Railway) → hosted elsewhere, not relaying Anthropic directly
+43:
+44:## Step 3. End-to-end LLM fingerprint
+45:
+46:**Cost**: ~$0.50-1.50 per target depending on gateway pricing
+47:
+48:```bash
+49:python fingerprint.py --label "<name>" --cmd "<command>" --shell \
+50:  --repeats 2 --save-raw results_<name>.json
+51:```
+52:
+53:Note verdict:
+54:- [ ] Primary hypothesis (A+Middleware / A-clean / C / ambiguous)
+55:- [ ] Confidence (high / medium / low)
+56:- [ ] Gates passed (A+Middleware / A-clean / C)
+57:- [ ] Evidence weights (middleware, capable_base, distill, recent_cutoff, feature_strip, suspicious_intercept)
+58:- [ ] Any probe-level anomalies (timeouts, failed runs, inconsistent outputs)
+59:
+60:## Step 4. Cross-evidence interpretation
+61:
+62:Combine Step 2 + Step 3 findings:
+63:
+64:| Step 2 | Step 3 | Likely interpretation |
+65:|---|---|---|
+66:| Cloudflare + anthropic-direct headers present | A-clean, high confidence | Legit Anthropic reseller |
+67:| Cloudflare + no anthropic-direct headers | A+Middleware, any confidence | Third party using Cloudflare but NOT Anthropic |
+68:| Aggressive defense + A+Middleware verdict | — | Custom middleware gateway — same pattern as original AW investigation |
+69:| Aggressive defense + A-clean verdict | — | Conflict — re-examine classification |
+70:| No network evidence + C distill verdict | — | Non-Anthropic backend, likely distill |
+71:| Clean network + ambiguous verdict | — | Not enough LLM evidence; increase `--repeats` or add manual probes |
+72:
+73:## Step 5. Escalation (optional, high-stakes only)
+74:
+75:If verdict is ambiguous OR the decision has security / compliance / financial stakes:
+76:
+77:- [ ] **mitmproxy HTTPS capture**: set up local intercepting proxy, capture actual `/v1/messages` request body. Reveals injected system prompt content, exact parameter handling. Setup: 30-60 min. See `NETWORK_FINGERPRINTS.md` for how to interpret the capture.
+78:- [ ] **Tokenizer probe**: run `python tokenizer_probe.py --baseline-cmd "claude" --gateway-cmd "<suspect>" --gateway-shell --model claude-opus-4-7 --gateway-model opus --repeats 2 --save-raw tokenizer_<name>.json`. 10 sentinels, α·β linear fit, verdicts `claude_bpe`/`claude_bpe_weak`/`non_claude`/`ambiguous`/`insufficient_data`. Feed into `fingerprint.py --tokenizer-probe-raw tokenizer_<name>.json` to integrate into the classifier (opens `distill+middleware` hypothesis when `non_claude`, vetoes A-clean high confidence; `insufficient_data` / `ambiguous` → no classifier effect).
+79:- [ ] **Opus 4.7 max expert consultation**: send full evidence dump to `claude -p --model claude-opus-4-7 --effort max` for independent re-ranking (template: `consult_opus47*.py` in `.scratch/`).
+80:
+81:## Step 6. Document findings
+82:
+83:Add an entry to `NETWORK_FINGERPRINTS.md` with the new target's network profile. Archive raw JSON outputs (`network_<name>.json`, `results_<name>.json`) under `.scratch/proxy-forensics/investigations/<date>-<name>/`.
+84:
+85:## Common pitfalls
+86:
+87:- **Env var `CLAUDE_CODE_EFFORT_LEVEL`** is inherited by subprocess and can affect outputs. The toolkit forces `--effort max` via CLI flag, so env var is normally overridden, but be aware.
+88:- **`--shell True`** is required for `.cmd` wrappers on Windows. Command injection risk — never pass an untrusted `--cmd` value.
+89:- **Sampling variance**: `--repeats 1` is unreliable for classification. Default 2, use 3+ for high-stakes targets.
+90:- **Baseline drift**: if baselines are >90 days old or Anthropic has released a new Opus generation, regenerate before running comparisons. Tool blocks strong verdicts past `expiry_date`.
+91:- **Cost reporting**: `cost_usd` returned by third-party gateways is often fabricated. Trust `out_tok`, `text`, `msg_id` prefix, `cache_create/read`.
+92:- **Tool use**: always pass `--tools ""` (automatic in `fingerprint.py`). Otherwise WebSearch can fetch current events and defeat the temporal-cutoff probe.
+93:- **Rate limits / aggressive defense**: some gateways limit probe frequency or actively drop probe-shaped requests. Space runs, try fallback methods (POST vs GET), or escalate to mitmproxy.
+94:
+95:## Sanity check for new toolkit changes
+96:
+97:Before applying the toolkit to a new important suspect:
+98:
+99:- [ ] `python test_fingerprint.py` → 124 tests pass (v0.6)
+100:- [ ] `python test_tokenizer_probe.py` → 33 tests pass
+101:- [ ] `python test_mitm_capture.py` → 9 tests pass
+102:- [ ] `python fingerprint.py --list-probes` → 5 probes listed
+103:- [ ] Run on a known baseline (plain `claude --model claude-opus-4-7`) and confirm A-clean high confidence (score ≈ 0.72, gap ≈ 0.42)
+104:- [ ] Run on AW (known A+Middleware-like) and confirm that verdict (may be medium confidence due to gateway adaptation)
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1656ms:
+
+    Directory: D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics
+
+[32;1mMode   [0m[32;1m              LastWriteTime[0m [32;1;3m        Length[0m[32;1m Name[0m
+[32;1m----   [0m [32;1m             -------------[0m [32;1m        ------[0m [32;1m----[0m
+d----          25.04.2026     0:28                [44;1m__pycache__[0m
+d----          24.04.2026    22:49                [44;1mmitm_flows[0m
+-a---          25.04.2026     0:08          15659 baselines.json
+-a---          25.04.2026     0:28          59258 fingerprint.py
+-a---          25.04.2026     0:32          14075 METHODOLOGY.md
+-a---          25.04.2026     0:07          10329 mitm_capture.py
+-a---          24.04.2026    22:07           1943 network_anthropic.json
+-a---          24.04.2026    22:14           1456 network_aw.json
+-a---          24.04.2026    22:15           3876 NETWORK_FINGERPRINTS.md
+-a---          24.04.2026    22:10          15577 network_probe.py
+-a---          24.04.2026    22:48           2322 parse_mitm_flow.py
+-a---          25.04.2026     0:24          13150 README.md
+-a---          24.04.2026    22:03           7333 results_aw_smoketest.json
+-a---          25.04.2026     0:00           8665 results_official_validation.json
+-a---          25.04.2026     0:28          11839 RESULTS.md
+-a---          24.04.2026    22:03           5654 smoketest_stdout.txt
+-a---          25.04.2026     0:40           6498 SUSPECT_WORKFLOW.md
+-a---          24.04.2026    23:57          40683 test_fingerprint.py
+-a---          25.04.2026     0:07           6287 test_mitm_capture.py
+-a---          24.04.2026    23:53           8595 test_tokenizer_probe.py
+-a---          25.04.2026     0:07          18491 tokenizer_probe.py
+-a---          24.04.2026    22:55           7126 WIRE_CAPTURE_FINDINGS.md
+
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1833ms:
+!! .scratch/
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The claimed edits are present in the scratch workflow: line 78 includes `insufficient_data`, and lines 99-101 carry the stated test counts. I’m doing a fresh no-cache pytest run for the three named suites before calling the gate.
+2026-04-24T21:42:34.863935Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B -m pytest -q -p no:cacheprovider test_fingerprint.py test_tokenizer_probe.py test_mitm_capture.py'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B -m pytest -q -p no:cacheprovider test_fingerprint.py test_tokenizer_probe.py test_mitm_capture.py' in D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python -B -m pytest -q -p no:cacheprovider test_fingerprint.py test_tokenizer_probe.py test_mitm_capture.py'` rejected: blocked by policy
+2026-04-24T21:42:52.828943Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python --version'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python --version' in D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'python --version'` rejected: blocked by policy
+2026-04-24T21:42:52.848153Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'pytest --version'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'pytest --version' in D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'pytest --version'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "def test_|class Test" test_fingerprint.py test_tokenizer_probe.py test_mitm_capture.py' in D:\dev\Orchestrator\Orchestrarium\.scratch\proxy-forensics
+2026-04-24T21:42:54.632318Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.8 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1777ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "test_" .scratch/proxy-forensics/test_fingerprint.py .scratch/proxy-forensics/test_tokenizer_probe.py .scratch/proxy-forensics/test_mitm_capture.py' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n "insufficient_data|claude_bpe|non_claude|ambiguous" .scratch/proxy-forensics/tokenizer_probe.py .scratch/proxy-forensics/test_tokenizer_probe.py .scratch/proxy-forensics/fingerprint.py' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"SCORER_VERSION|v0\\.6|124 tests|33 tests|9 tests\" .scratch/proxy-forensics" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1526ms:
+.scratch/proxy-forensics/test_tokenizer_probe.py:97:assert_eq("claude_bpe_clean", v["verdict"], "claude_bpe")
+.scratch/proxy-forensics/test_tokenizer_probe.py:101:assert_eq("claude_bpe_small_drift", v["verdict"], "claude_bpe")
+.scratch/proxy-forensics/test_tokenizer_probe.py:105:assert_eq("non_claude_proportional", v["verdict"], "non_claude")
+.scratch/proxy-forensics/test_tokenizer_probe.py:108:# (codex fix: this path was incorrectly → ambiguous in v0.1)
+.scratch/proxy-forensics/test_tokenizer_probe.py:110:assert_eq("non_claude_high_residuals_alpha_near_1", v["verdict"], "non_claude")
+.scratch/proxy-forensics/test_tokenizer_probe.py:114:assert_eq("ambiguous_repeat_noise", v["verdict"], "ambiguous")
+.scratch/proxy-forensics/test_tokenizer_probe.py:118:assert_eq("ambiguous_insufficient_coverage", v["verdict"], "ambiguous")
+.scratch/proxy-forensics/test_tokenizer_probe.py:120:# claude_bpe_weak: tight alpha, residual drift in [5, 10), stable repeats
+.scratch/proxy-forensics/test_tokenizer_probe.py:121:# (residuals max must be < 10 to qualify as "small drift"; ≥ 10 triggers non_claude)
+.scratch/proxy-forensics/test_tokenizer_probe.py:123:assert_eq("claude_bpe_weak_drift", v["verdict"], "claude_bpe_weak")
+.scratch/proxy-forensics/test_tokenizer_probe.py:127:assert_eq("insufficient_data_handled", v["verdict"], "insufficient_data")
+.scratch/proxy-forensics/test_tokenizer_probe.py:166:# Regression: classify_fit must NOT emit claude_bpe on non-claude-like data
+.scratch/proxy-forensics/test_tokenizer_probe.py:170:# A very-high-confidence non-claude pattern must NOT be claimed as claude_bpe
+.scratch/proxy-forensics/test_tokenizer_probe.py:172:assert_true("non_claude_not_misclassified_as_claude",
+.scratch/proxy-forensics/test_tokenizer_probe.py:173:            v["verdict"] != "claude_bpe",
+.scratch/proxy-forensics/test_tokenizer_probe.py:176:# Claude-like data with minor repeat noise must not escalate to non_claude
+.scratch/proxy-forensics/test_tokenizer_probe.py:178:assert_true("claude_near_boundary_not_forced_non_claude",
+.scratch/proxy-forensics/test_tokenizer_probe.py:179:            v["verdict"] in ("claude_bpe", "claude_bpe_weak", "ambiguous"),
+.scratch/proxy-forensics/test_tokenizer_probe.py:182:# Codex regression: non_claude requires EITHER alpha drift OR stable high residuals
+.scratch/proxy-forensics/test_tokenizer_probe.py:183:# Noisy (unstable) high residuals → ambiguous, not non_claude (can't rule out noise)
+.scratch/proxy-forensics/test_tokenizer_probe.py:185:assert_eq("unstable_high_residuals_not_non_claude", v["verdict"], "ambiguous")
+.scratch/proxy-forensics/test_tokenizer_probe.py:187:# Codex regression: n_points < 8 must never produce strong claude_bpe or non_claude
+.scratch/proxy-forensics/test_tokenizer_probe.py:189:assert_true("few_points_no_strong_claude_bpe",
+.scratch/proxy-forensics/test_tokenizer_probe.py:190:            v["verdict"] not in ("claude_bpe", "non_claude"),
+.scratch/proxy-forensics/test_tokenizer_probe.py:194:assert_true("few_points_no_strong_non_claude",
+.scratch/proxy-forensics/test_tokenizer_probe.py:195:            v["verdict"] not in ("claude_bpe", "non_claude"),
+.scratch/proxy-forensics/fingerprint.py:11:    baseline + suspect, fits alpha/beta/residuals, emits claude_bpe /
+.scratch/proxy-forensics/fingerprint.py:12:    non_claude / ambiguous verdict.
+.scratch/proxy-forensics/fingerprint.py:14:    tokenizer_non_claude >= 0.5 AND middleware >= 0.6. When tokenizer probe
+.scratch/proxy-forensics/fingerprint.py:20:  - Tokenizer non_claude vetoes A-clean high confidence.
+.scratch/proxy-forensics/fingerprint.py:673:                out["notes"].append("Ban compliant but did not use canonical 7^4 opening — ambiguous")
+.scratch/proxy-forensics/fingerprint.py:771:        (`claude_bpe` / `non_claude` / `ambiguous` / `insufficient_data` /
+.scratch/proxy-forensics/fingerprint.py:772:        `claude_bpe_weak`). `non_claude` vetoes A-clean high confidence AND
+.scratch/proxy-forensics/fingerprint.py:774:      - New hypothesis: `distill+middleware` — requires non_claude tokenizer AND
+.scratch/proxy-forensics/fingerprint.py:782:                "network_support": 0.0, "tokenizer_non_claude": 0.0, "tokenizer_claude": 0.0}
+.scratch/proxy-forensics/fingerprint.py:902:        if verdict_tok == "claude_bpe":
+.scratch/proxy-forensics/fingerprint.py:904:            notes.append("Tokenizer: claude_bpe confirmed +0.80 (supports Claude backend)")
+.scratch/proxy-forensics/fingerprint.py:905:        elif verdict_tok == "claude_bpe_weak":
+.scratch/proxy-forensics/fingerprint.py:907:            notes.append("Tokenizer: claude_bpe_weak +0.30 (small drift within Claude family)")
+.scratch/proxy-forensics/fingerprint.py:908:        elif verdict_tok == "non_claude":
+.scratch/proxy-forensics/fingerprint.py:911:            evidence["tokenizer_non_claude"] += 0.8
+.scratch/proxy-forensics/fingerprint.py:912:            notes.append("Tokenizer: non_claude detected +0.80 (vetoes A-clean, enables distill+MW)")
+.scratch/proxy-forensics/fingerprint.py:913:        elif verdict_tok in ("ambiguous", "insufficient_data"):
+.scratch/proxy-forensics/fingerprint.py:925:    tok_nc = min(1.0, evidence["tokenizer_non_claude"])
+.scratch/proxy-forensics/fingerprint.py:929:    # v0.6: vetoed by non_claude tokenizer (→ distill+middleware instead)
+.scratch/proxy-forensics/fingerprint.py:938:    # v0.6: ALSO vetoed by non_claude tokenizer (cannot be clean Claude if tokenizer mismatch)
+.scratch/proxy-forensics/fingerprint.py:958:    ambiguous = 1.0 - min(1.0, total_ev / 2.5)
+.scratch/proxy-forensics/fingerprint.py:968:        ("ambiguous / insufficient evidence", ambiguous),
+.scratch/proxy-forensics/fingerprint.py:974:    if "ambiguous" in top[0]:
+.scratch/proxy-forensics/fingerprint.py:1003:        if tv in ("ambiguous", "insufficient_data"):
+.scratch/proxy-forensics/fingerprint.py:1098:                         "verdict.verdict feeds into classify() as tokenizer_claude/tokenizer_non_claude signal. "
+.scratch/proxy-forensics/fingerprint.py:1099:                         "non_claude tokenizer vetoes A-clean and enables distill+middleware hypothesis.")
+.scratch/proxy-forensics/tokenizer_probe.py:18:  - `claude_bpe`: alpha ∈ [0.97, 1.03] AND max_abs_residual < 5 AND
+.scratch/proxy-forensics/tokenizer_probe.py:20:  - `claude_bpe_weak`: alpha ∈ [0.97, 1.03] AND max_abs_residual ∈ [5, 10)
+.scratch/proxy-forensics/tokenizer_probe.py:23:  - `non_claude`: (alpha NOT in [0.9, 1.1])  OR  (alpha ∈ [0.97, 1.03] AND
+.scratch/proxy-forensics/tokenizer_probe.py:26:  - `ambiguous`: noisy repeats (repeat_spread_max > 2) OR insufficient
+.scratch/proxy-forensics/tokenizer_probe.py:28:  - `insufficient_data`: < 2 valid data points (cannot fit)
+.scratch/proxy-forensics/tokenizer_probe.py:194:    - Strong verdicts (`claude_bpe` / `non_claude`) require n_points ≥ 8.
+.scratch/proxy-forensics/tokenizer_probe.py:195:      With < 8 points, best we can claim is `ambiguous` / `claude_bpe_weak`.
+.scratch/proxy-forensics/tokenizer_probe.py:196:    - `non_claude` fires on EITHER alpha outside tolerance OR class-dependent
+.scratch/proxy-forensics/tokenizer_probe.py:203:            "verdict": "insufficient_data",
+.scratch/proxy-forensics/tokenizer_probe.py:226:    # Strong claude_bpe: tight alpha + low residuals + stable repeats + coverage
+.scratch/proxy-forensics/tokenizer_probe.py:228:        findings["verdict"] = "claude_bpe"
+.scratch/proxy-forensics/tokenizer_probe.py:236:        findings["verdict"] = "claude_bpe_weak"
+.scratch/proxy-forensics/tokenizer_probe.py:241:    # Strong non_claude: EITHER alpha drift (α outside [0.9, 1.1])
+.scratch/proxy-forensics/tokenizer_probe.py:243:    # (rules out sampling noise as explanation; small drift is claude_bpe_weak, not this)
+.scratch/proxy-forensics/tokenizer_probe.py:255:        findings["verdict"] = "non_claude"
+.scratch/proxy-forensics/tokenizer_probe.py:259:        findings["verdict"] = "ambiguous"
+.scratch/proxy-forensics/tokenizer_probe.py:262:        findings["verdict"] = "ambiguous"
+.scratch/proxy-forensics/tokenizer_probe.py:267:        findings["verdict"] = "ambiguous"
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1774ms:
+.scratch/proxy-forensics/test_mitm_capture.py:3:Run: python test_mitm_capture.py
+.scratch/proxy-forensics/test_tokenizer_probe.py:3:Run: python test_tokenizer_probe.py
+.scratch/proxy-forensics/test_fingerprint.py:3:Run: python test_fingerprint.py
+.scratch/proxy-forensics/test_fingerprint.py:571:    {"raw_hash": "a", "events_found": ["Late-2025 event (cutoff > April 2025)"], "latest_month_code": 6},
+.scratch/proxy-forensics/test_fingerprint.py:572:    {"raw_hash": "b", "events_found": ["Late-2025 event (cutoff > April 2025)"], "latest_month_code": 6},
+.scratch/proxy-forensics/test_fingerprint.py:581:    {"raw_hash": "a", "events_found": ["May 2025 Pope Leo XIV election"], "latest_month_code": 5},
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2089ms:
+.scratch/proxy-forensics\tokenizer_probe.py:116:    # v0.6 (codex round 7 blocker fix): accept both stream-list (historical)
+.scratch/proxy-forensics\test_fingerprint.py:668:# v0.6: tokenizer evidence integration
+.scratch/proxy-forensics\test_fingerprint.py:670:print("\n--- classify: v0.6 tokenizer evidence ---")
+.scratch/proxy-forensics\test_fingerprint.py:730:# v0.6: network evidence integration
+.scratch/proxy-forensics\test_fingerprint.py:732:print("\n--- classify: v0.6 network evidence ---")
+.scratch/proxy-forensics\test_fingerprint.py:787:# v0.6 codex regression: tokenizer absent must not split confident distill/MW
+.scratch/proxy-forensics\test_fingerprint.py:789:print("\n--- v0.6 regression: tokenizer absent ---")
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:7:- [ ] Toolkit is at latest version (`SCORER_VERSION` in `fingerprint.py` matches `scorer_version` in `baselines.json`)
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:99:- [ ] `python test_fingerprint.py` → 124 tests pass (v0.6)
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:100:- [ ] `python test_tokenizer_probe.py` → 33 tests pass
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:101:- [ ] `python test_mitm_capture.py` → 9 tests pass
+.scratch/proxy-forensics\RESULTS.md:13:The observed signals are **less consistent with** a rigidly-biased distilled-only student, with a Chinese-model clone, and with an alias of an older Claude release. They are **most consistent with** a frontier Claude backend under active gateway manipulation. Important caveats: (a) the toolkit's `distill+middleware` separation now lives in v0.6 behind the `tokenizer_probe.py` gate — at the time of this investigation that probe had not yet been run on AW, so the A+Middleware verdict here carries a "distill+middleware unresolved" annotation (re-run with v0.6 tokenizer probe to upgrade or downgrade to `distill+middleware`); (b) a sufficiently sophisticated adversarial proxy could in principle produce the same behavior on all probes. For security- or legal-grade certainty, capture wire traffic (mitmproxy) and run the tokenizer identity probe.
+.scratch/proxy-forensics\baselines.json:16:      "Probe prompts or scorer logic changed (SCORER_VERSION bumped)",
+.scratch/proxy-forensics\baselines.json:227:      "Tokenizer-identity probe IMPLEMENTED in v0.6 (`tokenizer_probe.py`) using CLI-mediated baseline (not raw Anthropic `count_tokens` API). Upgrade to API-key-based count_tokens would reduce cost and eliminate CLI wrapping overhead in β, but slope α and residuals still discriminate tokenizer identity with CLI fallback. See `baseline_method` field in tokenizer probe output.",
+.scratch/proxy-forensics\baselines.json:229:      "`distill+middleware` hypothesis ADDED in v0.6. Requires tokenizer non_claude verdict AND middleware ≥ 0.6. Without tokenizer data, A+Middleware verdict is ANNOTATED with 'distill+middleware unresolved' to flag the remaining uncertainty rather than silently assuming real Claude.",
+.scratch/proxy-forensics\METHODOLOGY.md:1:# Proxy Forensic Methodology — v0.6
+.scratch/proxy-forensics\METHODOLOGY.md:21:2. **Backend identity range** — frontier-Claude signature, distilled student signature, older checkpoint, non-Claude base. v0.6 adds a gated `distill+middleware` hypothesis that fires when tokenizer evidence indicates non-Claude BPE together with middleware ≥ 0.6. When `tokenizer_probe.py` is NOT run (or returns `ambiguous`/`insufficient_data`), A+Middleware verdicts are annotated "distill+middleware unresolved" to flag the remaining uncertainty explicitly rather than silently assuming real Claude.
+.scratch/proxy-forensics\METHODOLOGY.md:178:**Tokenizer identity is captured by `tokenizer_probe.py`** (v0.6) — no longer a gap. Feed the output to `fingerprint.py --tokenizer-probe-raw <file>` to integrate into classification.
+.scratch/proxy-forensics\METHODOLOGY.md:193:## Known gaps (v0.6)
+.scratch/proxy-forensics\METHODOLOGY.md:195:1. ✅ ~~No tokenizer-identity probe~~ — **implemented in v0.6** via `tokenizer_probe.py`. CLI-mediated baseline (not raw `count_tokens` API); strong verdicts require n_points ≥ 8. Output labels `baseline_method` for provenance. Upgrade to API-key based `count_tokens` reduces cost; identical semantics.
+.scratch/proxy-forensics\METHODOLOGY.md:201:7. ✅ ~~No `distill+middleware` hypothesis~~ — **added in v0.6** classifier. Gated on tokenizer `non_claude` verdict + middleware ≥ 0.6. Without tokenizer evidence, A+Middleware verdict is annotated with "distill+middleware unresolved".
+.scratch/proxy-forensics\mitm_capture.py:137:        # v0.6: subprocess.run(shell=True, timeout=...) hangs on Windows when
+.scratch/proxy-forensics\mitm_capture.py:141:        # v0.6 follow-up (codex round 7 blocker): on POSIX, start child in its
+.scratch/proxy-forensics\README.md:1:# Claude Proxy Forensic Toolkit — v0.6
+.scratch/proxy-forensics\README.md:6:- Whether the backend matches a frontier-Claude signature, a distilled student signature, or an imitator. v0.6 adds a gated `distill+middleware` hypothesis class that fires when tokenizer evidence indicates non-Claude BPE together with active middleware; without tokenizer evidence, A+Middleware verdicts are annotated "distill+middleware unresolved" instead of silently assuming real Claude.
+.scratch/proxy-forensics\README.md:9:**Status: v0.6, hypothesis generator**, not adjudicating forensic classifier. Use results as an investigative starting point, not as legal/security-grade proof. See `METHODOLOGY.md` for caveats and known gaps.
+.scratch/proxy-forensics\README.md:30:### v0.6 (fifth codex review round — current)
+.scratch/proxy-forensics\README.md:126:Combined v0.6 run (all evidence axes):
+.scratch/proxy-forensics\README.md:197:## Known gaps (v0.6)
+.scratch/proxy-forensics\README.md:201:- ✅ ~~No tokenizer-identity probe~~ — **implemented in v0.6** (`tokenizer_probe.py`). Uses CLI-mediated baseline (not raw Anthropic `count_tokens` API). Strong verdicts require n_points ≥ 8. Upgrade to API-key-based count_tokens reduces cost; identical semantics.
+.scratch/proxy-forensics\README.md:202:- ✅ ~~No `distill+middleware` hypothesis~~ — **added in v0.6**. Gated on `tokenizer_non_claude ≥ 0.5` AND `middleware ≥ 0.6`. Without tokenizer data, A+Middleware verdict is annotated "distill+middleware unresolved".
+.scratch/proxy-forensics\fingerprint.py:3:Claude proxy forensic fingerprinter — v0.6.
+.scratch/proxy-forensics\fingerprint.py:9:v0.6 changes (fifth codex gpt-5.5 xhigh review):
+.scratch/proxy-forensics\fingerprint.py:33:    up; distill+middleware entry added to known_gaps (now resolved in v0.6
+.scratch/proxy-forensics\fingerprint.py:95:SCORER_VERSION = "0.6.0"
+.scratch/proxy-forensics\fingerprint.py:766:    v0.6 changes:
+.scratch/proxy-forensics\fingerprint.py:869:    # ---- v0.6: Network evidence (corroborating only, capped contributions) ----
+.scratch/proxy-forensics\fingerprint.py:899:    # ---- v0.6: Tokenizer evidence ----
+.scratch/proxy-forensics\fingerprint.py:929:    # v0.6: vetoed by non_claude tokenizer (→ distill+middleware instead)
+.scratch/proxy-forensics\fingerprint.py:938:    # v0.6: ALSO vetoed by non_claude tokenizer (cannot be clean Claude if tokenizer mismatch)
+.scratch/proxy-forensics\fingerprint.py:950:    # v0.6: distill+middleware hypothesis. Requires BOTH middleware ≥ 0.6 AND
+.scratch/proxy-forensics\fingerprint.py:994:    # v0.6: annotate A+Middleware verdict with tokenizer resolution state
+.scratch/proxy-forensics\fingerprint.py:1077:    ap = argparse.ArgumentParser(description="Claude proxy forensic fingerprinter v0.6")
+.scratch/proxy-forensics\fingerprint.py:1091:    # v0.6: cross-evidence integration
+.scratch/proxy-forensics\fingerprint.py:1113:    print(f"[baselines] {fresh_msg} (scorer v{SCORER_VERSION}, baselines v{baselines_scorer})")
+.scratch/proxy-forensics\fingerprint.py:1127:    current_ver = _ver_tuple(SCORER_VERSION)
+.scratch/proxy-forensics\fingerprint.py:1134:              f"scorer ({SCORER_VERSION}). Pre-1.0 requires exact major.minor match. "
+.scratch/proxy-forensics\fingerprint.py:1183:    # v0.6: optional cross-evidence
+.scratch/proxy-forensics\fingerprint.py:1244:            "scorer_version": SCORER_VERSION,
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+### Verdict
+GREEN (ship v0.6)
+
+Static check passed for `.scratch/proxy-forensics/SUSPECT_WORKFLOW.md:78` and `:99-103`. I could not independently rerun Python tests because command policy blocked `python`/`pytest`; verdict uses your supplied pass output.
+tokens used
+132,574
+### Verdict
+GREEN (ship v0.6)
+
+Static check passed for `.scratch/proxy-forensics/SUSPECT_WORKFLOW.md:78` and `:99-103`. I could not independently rerun Python tests because command policy blocked `python`/`pytest`; verdict uses your supplied pass output.

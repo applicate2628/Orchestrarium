@@ -1,0 +1,48 @@
+{
+  "target": "AW",
+  "url": "https://api.claudecodeapi.cloud",
+  "timestamp": "2026-04-24T19:14:32.438779+00:00",
+  "probe_version": "0.1.0",
+  "tls": {
+    "hostname": "api.claudecodeapi.cloud",
+    "port": 443,
+    "handshake_success": false,
+    "error": "_ssl.c:1063: The handshake operation timed out"
+  },
+  "headers": {
+    "status_code": null,
+    "error": "<urlopen error [WinError 10054] An existing connection was forcibly closed by the remote host>",
+    "headers": {},
+    "elapsed_ms": null,
+    "method": "GET"
+  },
+  "timing": {
+    "samples_ms": [
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "median_ms": null,
+    "min_ms": null,
+    "max_ms": null
+  },
+  "proxy_matches": [],
+  "summary": {
+    "tls_ok": false,
+    "reached_endpoint": false,
+    "http_status": null,
+    "aggressive_defense": true,
+    "latency_median_ms": null,
+    "proxy_software_detected": [],
+    "high_confidence_proxy": [],
+    "anthropic_direct_headers": false,
+    "cdn_detected": false,
+    "middleware_detected": false,
+    "notes": [
+      "Aggressive defense detected: server accepts TCP connection then drops during TLS handshake or refuses HTTP without valid auth. This is itself middleware-like behavior — legitimate origins typically return proper HTTP errors with headers.",
+      "Endpoint did not return parseable HTTP response — no header evidence available"
+    ]
+  }
+}

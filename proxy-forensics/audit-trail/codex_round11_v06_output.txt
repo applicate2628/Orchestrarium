@@ -1,0 +1,590 @@
+Reading additional input from stdin...
+OpenAI Codex v0.124.0 (research preview)
+--------
+workdir: D:\dev\Orchestrator\Orchestrarium
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019dc168-c8d1-7893-8a94-191a5d533825
+--------
+user
+# Round-10 codex review: stale-docs final sweep
+
+Round 9: RED on 4 more stale v0.5/blind-spot references. Applied:
+
+- `fingerprint.py:3` — "Claude proxy forensic fingerprinter — v0.5" → "— v0.6"
+- `fingerprint.py:9-20` — "v0.5 changes (fourth codex ... )" block rewritten as v0.6 changes block; historical v0.5 block kept below as `v0.5 changes:` changelog entry
+- `fingerprint.py:1061` — argparse description `v0.5` → `v0.6`
+- `RESULTS.md:13` — removed "toolkit does not distinguish ... the distill+middleware hypothesis class is not in scope"; replaced with v0.6 wording referencing the gated hypothesis + "unresolved" annotation
+- Grep audit confirms no remaining `does not distinguish` / `blind spot` / `blind-spot` / `not in scope` strings
+
+## Remaining v0.5 mentions (intentional historical changelog — not stale)
+
+- `fingerprint.py:25` — `v0.5 changes (fourth codex gpt-5.5 xhigh review):` (changelog block header, describes what was done in v0.5, correct)
+- `fingerprint.py:933` — `# v0.5: tightened suspicious_intercept threshold from 0.3 → 0.1` (inline comment attributing a still-active behavior to the release it landed in)
+- `fingerprint.py:1117` — `# v0.5: scorer-version drift enforcement. Since we're pre-1.0...` (inline comment attributing behavior to release)
+- `README.md:39` — `### v0.5 (fourth codex review round)` (changelog section header)
+
+These are version-history / attribution references, not current-state claims. If you consider any of these stale, say so explicitly.
+
+## Tests
+
+- 166 total (124 fingerprint + 33 tokenizer + 9 mitm), 0 failures
+
+## Request
+
+Final verdict.
+
+Output:
+```
+### Blocker 4 status
+### Verdict
+GREEN (ship v0.6) / RED (specific remaining lines)
+```
+
+ROUND 11 UPDATE: METHODOLOGY.md:170-183 updated. Tokenizer identity removed from 'does not capture' list and moved to separate 'captured by v0.6 tokenizer_probe.py' paragraph. Escalation step 1 now says 'Run tokenizer_probe.py (10 sentinels, fits α·β slope)' instead of the old manual 3-5 sentinel recommendation.
+
+Verify and give final verdict.
+codex
+I’ll treat this as a read-only review sweep and verify the exact stale-string/version surfaces before giving the requested GREEN/RED verdict.
+2026-04-24T21:33:04.508339Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'Orchestrarium|stale|v0.6|review' -Context 1,2"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'Orchestrarium|stale|v0.6|review' -Context 1,2" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path C:\\Users\\<user>\\OneDrive\\Documents\\env\\Agents\\.codex\\skills\\review-changes\\SKILL.md -TotalCount 120" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git status --short' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Select-String -Path C:\\Users\\<user>\\.codex\\memories\\MEMORY.md -Pattern 'Orchestrarium|stale|v0.6|review' -Context 1,2"` rejected: blocked by policy
+ succeeded in 1318ms:
+---
+name: review-changes
+description: Run a full read-only repository impact review starting from recent local changes, a specified diff, branch, commit range, or PR. Use when Codex needs to verify that recent fixes are complete, nothing important was forgotten, unchanged call sites or contracts were not broken, logic still holds across the wider repo, and regressions or missed edge cases are surfaced before commit.
+---
+
+# Review Changes
+
+Run a repository-wide impact review triggered by recent changes. The changed files are only the starting point; the review target is the full affected behavior surface, including unchanged dependents, nearby contracts, tests, and likely regression paths.
+
+## Core stance
+
+- Stay read-only.
+- Use the `review` template semantics from `src.codex/AGENTS.codex.md`: `$analyst` -> QA lane -> reviewer lane.
+- Review the repo in light of the changes, not just the diff lines themselves.
+- Findings come first, ordered by severity.
+- Do NOT commit or modify files.
+
+## Scope decision
+
+1. Check `$ARGUMENTS`.
+- If a PR URL, PR number, branch, commit range, or diff target is given, use that scope.
+- Otherwise inspect current unstaged and staged changes with `git diff` and `git diff --cached`.
+- If no changes are present, stop and tell the user there is nothing to review.
+2. If the user mentions a bug, review thread, accepted plan, or expected fix list, use that as the completion baseline.
+3. If no explicit baseline exists, review against the observed change impact and say that fix-completeness against an external checklist could not be verified.
+
+## Review workflow
+
+1. Run `$analyst` first.
+- Goal: identify what changed, which contracts or behaviors moved, what unchanged code depends on those changes, and where logic may now be incomplete.
+- Require the analyst to inspect callers, dependents, tests, config, schemas, and adjacent modules that may be affected even if they were not edited.
+2. Run the QA lane.
+- Use `$qa-engineer` by default.
+- If external review is preferred for an eligible QA-side slot, `$external-reviewer` may stand in for that lane.
+- Goal: verify regression risk, edge cases, test sufficiency, fix completeness, and whether untouched behavior is now inconsistent with the new logic.
+3. Run the reviewer lane.
+- Always invoke `$architecture-reviewer`.
+- Add `$security-reviewer` if the change touches auth, trust boundaries, secrets, dangerous configuration, input validation, or vulnerability surfaces.
+- Add `$performance-reviewer` if the change touches hot paths, query plans, rendering loops, budgets, throughput, or latency-sensitive behavior.
+- Add `$ux-reviewer`, `$accessibility-reviewer`, or `$ui-test-engineer` when the affected surface is clearly user-facing and the risk is interaction quality rather than pure logic.
+- If external review is preferred for an eligible review-side slot, `$external-reviewer` may stand in for the matching reviewer role.
+4. Keep the chain sequential in Codex unless the user explicitly approves a delegated team and the scopes are clearly independent.
+
+## What to verify
+
+- The requested fixes are actually present.
+- The apparent root cause is covered, not just one symptom.
+- Unchanged callers, consumers, configs, tests, or docs are still compatible with the new behavior.
+- Nearby logic still makes sense after the change.
+- Hidden regressions, stale assumptions, and missed edge cases are surfaced.
+- Validation is strong enough for the touched behavior, or the exact gap is called out.
+- The change did not leave partial rewires, stale branches, dead conditions, or forgotten follow-up adjustments in unchanged files.
+
+## Output
+
+Return one unified review with:
+
+- scope reviewed
+- findings ordered by severity
+- impacted unchanged surfaces that were checked
+- what could not be verified
+- verdict: `PASS`, `REVISE`, or `BLOCKED`
+
+If the user asked "did we fix everything?", answer that directly before the detailed findings.
+
+## Persistence
+
+- If the repository uses active work-items, persist the accepted review artifact there.
+- Otherwise log the review under `.reports/YYYY-MM/` using the standard report naming convention.
+
+## Rules
+
+- Do not role-play specialist reviewers inline when delegation is available and permitted.
+- Treat changed files as entry points, not as the review boundary.
+- If a critical issue appears early, surface it immediately.
+- If the impact surface is too large for a trustworthy single pass, say so and recommend splitting the review into smaller scopes.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1321ms:
+ M docs/README.md
+?? docs/routing/
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The review-changes skill applies here, but the workspace is read-only in this session, so I’m using it as a read-only impact review and will not create the normal `.reports` artifact. The current git surface shows `docs/README.md` modified and `docs/routing/` untracked, so I’m locating the fingerprint/results/methodology files inside that review scope.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg --files -g fingerprint.py -g RESULTS.md -g METHODOLOGY.md -g README.md' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git diff -- docs/README.md' in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T21:33:19.263496Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Path docs\\routing -Recurse -Force | Select-Object FullName,Length"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Path docs\\routing -Recurse -Force | Select-Object FullName,Length" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-ChildItem -Path docs\\routing -Recurse -Force | Select-Object FullName,Length"` rejected: blocked by policy
+ succeeded in 1107ms:
+diff --git a/docs/README.md b/docs/README.md
+index 91b27c3..234fc07 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -19,3 +19,4 @@ Current docs in this branch:
+ - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
+ - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
+ - [provider-runtime-layouts.md](provider-runtime-layouts.md) for cross-provider runtime path mapping
++- [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md)
+\ No newline at end of file
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1275ms:
+README.md
+references-codex\README.md
+references-claude\README.md
+docs\README.md
+src.gemini\README.md
+src.gemini\extension\README.md
+src.gemini\skills\README.md
+references-gemini\README.md
+src.claude\README.md
+src.codex\README.md
+shared\references\README.md
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg --files docs/routing' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"v0\\.5|v0\\.6|does not distinguish|blind spot|blind-spot|not in scope|does not capture|tokenizer_probe|sentinels|α|beta|slope\" docs README.md src.codex src.claude shared references-codex references-claude -S" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git diff --stat' in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1221ms:
+shared\references\workflow-strategy-comparison.md:28:| Novel or externally exposed review risk | `Adversarial` | Default when blind spots matter more than speed |
+shared\references\workflow-strategy-comparison.md:29:| Critical change with both execution and blind-spot risk | `Claim-Verify + Adversarial` | Run in sequence, preserving reviewer independence |
+shared\references\workflow-strategy-comparison.md:39:| `Single-owner self-approval` | structural baseline | nothing | tiny low-risk changes | blind spots, self-approval bias, hidden risks | very low | only for trivial work | not the default |
+shared\references\workflow-strategy-comparison.md:42:| `Maker / checker` | lightweight independent gate | builder vs checker | clear execution errors against known criteria | deep design blind spots | medium | bounded work that still needs a second set of eyes | partially overlaps with our reviewer lanes |
+shared\references\workflow-strategy-comparison.md:45:| `Adversarial` | reviewer mode | builder reasoning vs hostile review | blind spots, novel failure modes, external exposure | routine bounded defects, speed-sensitive reviews | high | missed unknowns are more dangerous than missed execution bugs | core |
+shared\references\workflow-strategy-comparison.md:46:| `Claim-Verify + Adversarial` | combined review | first verify, then attack | critical work that needs both execution checking and blind-spot hunting | time and coordination cost | very high | critical changes with serious downside | supported when justified |
+shared\references\workflow-strategy-comparison.md:86:| The risk is known and bounded | `Claim-Verify` | `Adversarial` only if the downside of a missed blind spot is high |
+shared\references\ru\workflow-strategy-comparison.md:28:| Новый или внешне exposed review risk | `Adversarial` | Дефолт, когда blind spots важнее скорости |
+shared\references\ru\workflow-strategy-comparison.md:29:| Критичный change с execution и blind-spot риском одновременно | `Claim-Verify + Adversarial` | Запускать по очереди, сохраняя независимость reviewer'ов |
+shared\references\ru\workflow-strategy-comparison.md:39:| `Single-owner self-approval` | structural baseline | ничего | мелкие low-risk changes | blind spots, self-approval bias, скрытые риски | очень низкая | только для тривиальной работы | не дефолт |
+shared\references\ru\workflow-strategy-comparison.md:42:| `Maker / checker` | lightweight independent gate | builder vs checker | clear execution errors against known criteria | глубокие design blind spots | средняя | bounded work, которому всё ещё нужен второй взгляд | частично пересекается с reviewer lanes |
+shared\references\ru\workflow-strategy-comparison.md:45:| `Adversarial` | reviewer mode | builder reasoning vs hostile review | blind spots, novel failure modes, external exposure | routine bounded defects, speed-sensitive reviews | высокая | когда пропустить unknown risk опаснее, чем пропустить execution bug | core |
+shared\references\ru\workflow-strategy-comparison.md:46:| `Claim-Verify + Adversarial` | combined review | сначала verify, потом attack | критичная работа, которой нужны и execution checking, и blind-spot hunting | время и coordination cost | очень высокая | критичные изменения с серьёзным downside | supported when justified |
+shared\references\ru\workflow-strategy-comparison.md:75:| Риск известный и bounded | `Claim-Verify` | `Adversarial` только если потеря blind spot очень дорогая |
+references-claude\ru\operating-model-diagram.md:111:| Новый risk требует поиска blind spots | Adversarial review | Reviewer only (без design package) |
+references-codex\ru\operating-model-diagram.md:147:| Новый или внешне exposed risk требует поиска blind spots | `Adversarial review` | Релевантный независимый reviewer | Review report только по implementation artifact | Пропустить unknown risk опаснее, чем execution bug |
+references-claude\operating-model-diagram.md:111:| Novel risk needs blind-spot hunting | Adversarial review | Reviewer only (no design package) |
+references-codex\operating-model-diagram.md:117:| Novel risk needs blind-spot hunting | Adversarial review | Reviewer only (no design package) |
+src.codex\skills\performance-reviewer\SKILL.md:34:- Call out environment limits and measurement blind spots explicitly.
+src.codex\skills\lead\SKILL.md:172:**Adversarial** — use when the risk surface is novel, externally exposed, or the builder may have systematic blind spots.
+src.codex\skills\lead\operating-model.md:244:- The risk surface is novel, poorly understood, or the builder may have systematic blind spots
+src.codex\skills\lead\operating-model.md:268:For critical changes, run both in sequence: Claim-Verify first (fast, catches execution errors), then Adversarial (slower, catches design-level blind spots). The Adversarial reviewer still does not receive the Claim-Verify report — independence must be preserved.
+src.claude\agents\performance-reviewer.md:34:- Call out environment limits and measurement blind spots explicitly.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1304ms:
+docs/routing\12-lane-routing-matrix-v1-2026-04-18.md
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1524ms:
+ docs/README.md | 1 +
+ 1 file changed, 1 insertion(+)
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The only new untracked file is the routing matrix under `docs/routing/`. The broad stale-string grep hits generic governance phrases like “blind spots” in existing workflow-strategy docs, not the fingerprint/toolkit wording the request names, so I’m narrowing to the changed routing artifact and the exact v0.6 methodology claims.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path docs\\routing\\12-lane-routing-matrix-v1-2026-04-18.md -TotalCount 260" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"fingerprint\\.py|RESULTS\\.md|METHODOLOGY\\.md|v0\\.5|v0\\.6|does not distinguish|blind spot|blind-spot|not in scope|does not capture|tokenizer_probe|sentinel|α|beta|slope\" docs/routing docs/README.md -S" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git status --short --untracked-files=all' in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1197ms:
+ M docs/README.md
+?? docs/routing/12-lane-routing-matrix-v1-2026-04-18.md
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1454ms:
+Date: 2026-04-18
+Updated: 2026-04-20
+Owner: `$lead`
+Status: `PASS`
+
+## Purpose
+
+This note freezes the canonical `12`-lane routing model as the planning baseline for
+`externalPriorityProfiles`.
+
+This is a routing-layer decision only:
+
+- the full benchmark universe remains `33` surfaces
+- the routing layer compresses those surfaces into `12` canonical lanes
+- each lane has one explicit meaning, one merge rationale, and one `3`-test basis
+- `worker.long-autonomous` stays outside the core `12` as a reference extra lane with a materialized `N08..N10` `3`-test basis
+
+This note does **not** yet change `Orchestrarium/shared/agents-mode.defaults.yaml`.
+
+## Canonical 12-lane matrix
+
+| `#` | Lane | Meaning | 3-test basis | Merge / source |
+|---|---|---|---|---|
+| `1` | `advisory.repo-understanding` | repo facts, source-of-truth hygiene, evidence-backed advisory grounded in the repo | `S03`, `S04`, `S06` | consultant + archivist + analyst |
+| `2` | `advisory.design-adr` | architecture design, ADR tradeoffs, product framing, phased planning | `S05`, `S07`, `S09` | product-analyst + architect + planner |
+| `3` | `design.ui-ux-structure` | pre-implementation UI and UX structure, hierarchy, flow, state design, visual intent | `S08`, `N01`, `N02` | new explicit lane |
+| `4` | `worker.reasoning-constraints` | formal, numerical, and security-constraint reasoning before implementation | `S10`, `S11`, `S12` | algorithm + computational + security-engineer |
+| `5` | `worker.default-implementation` | ordinary backend, data, and platform implementation | `S15`, `S19`, `S20` | backend + data + platform |
+| `6` | `worker.systems-performance-implementation` | systems ownership, toolchain-root work, performance-sensitive or reliability-sensitive implementation | `S13`, `S14`, `S21` | performance + reliability + toolchain |
+| `7` | `worker.ui-implementation` | actual UI implementation correctness across web, Qt UI, and model/view | `S16`, `S17`, `S18` | merge current UI worker lanes |
+| `8` | `worker.visual-graphics-visualization` | non-UI visual execution: geometry, rendering, graphics, visualization | `S22`, `S23`, `S24` | replace decorative visual lane |
+| `9` | `review.pre-pr` | generic QA and merge-readiness review before specialty gates | `S25`, `N03`, `N04` | QA plus new generic review tests |
+| `10` | `review.security` | dedicated security review and trust-boundary correctness gate | `S27`, `N05`, `N06` | new explicit lane |
+| `11` | `review.performance-architecture` | architecture quality, maintainability, scalability, performance review | `S26`, `S28`, `N07` | architecture-reviewer + performance-reviewer |
+| `12` | `review.ui-visual-correctness` | accessibility, UX, and UI regression correctness as one visual review gate | `S29`, `S30`, `S31` | replace vague `review.visual` |
+
+## Reference extra lane
+
+This lane is useful for routing policy, fallback policy, and long-running worker trust analysis, but it is
+not part of the core `12` routing lanes.
+
+| Extra | Lane | Meaning | 3-test basis | Read |
+|---|---|---|---|---|
+| `E1` | `worker.long-autonomous` | long autonomous worker execution across multi-step ownership, resume continuity, and no-drift implementation | `N08`, `N09`, `N10` | reference overlay only; not counted in the core `12` |
+
+## Concern-to-lane map
+
+| Concern | Primary lane |
+|---|---|
+| architecture design | `advisory.design-adr` |
+| architecture review | `review.performance-architecture` |
+| repo understanding | `advisory.repo-understanding` |
+| UI and UX design before code | `design.ui-ux-structure` |
+| UI implementation correctness | `worker.ui-implementation` |
+| UI visual correctness review | `review.ui-visual-correctness` |
+| generic implementation | `worker.default-implementation` |
+| systems, toolchain, or perf-sensitive implementation | `worker.systems-performance-implementation` |
+| graphics or visualization execution | `worker.visual-graphics-visualization` |
+| generic review gate | `review.pre-pr` |
+| security review gate | `review.security` |
+| long autonomous worker trust | `worker.long-autonomous` extra/reference lane |
+
+## Current lane migration
+
+| Current lane | Decision |
+|---|---|
+| `advisory.repo-understanding` | keep |
+| `advisory.design-adr` | keep |
+| `review.pre-pr` | keep |
+| `review.performance-architecture` | keep |
+| `worker.default-implementation` | keep |
+| `worker.systems-performance-implementation` | keep and widen |
+| `worker.ui-structural-modernization` | merge into `worker.ui-implementation` |
+| `worker.ui-surgical-patch-cleanup` | merge into `worker.ui-implementation` |
+| `worker.visual-icon-decorative` | replace with `worker.visual-graphics-visualization` |
+| `review.visual` | replace with `review.ui-visual-correctness` |
+| `worker.long-autonomous` | keep as reference extra lane and overlay-only |
+
+## Non-core routing overlay
+
+| Overlay | Read |
+|---|---|
+| `worker.long-autonomous` | keep as routing overlay and reference extra lane; use `N08..N10` as its materialized basis |
+
+## Follow-up scenarios
+
+| New scenario | Lane |
+|---|---|
+| `N01` static visual hierarchy brief | `design.ui-ux-structure` |
+| `N02` interaction-state flow brief | `design.ui-ux-structure` |
+| `N03` generic code-review findings | `review.pre-pr` |
+| `N04` regression-triage gate | `review.pre-pr` |
+| `N05` secret-exposure review | `review.security` |
+| `N06` authz or trust-boundary review | `review.security` |
+| `N07` scalability or maintainability cross-review | `review.performance-architecture` |
+| `N08` autonomous build-owner continuity | `worker.long-autonomous` extra/reference lane |
+| `N09` autonomous resume and path recall | `worker.long-autonomous` extra/reference lane |
+| `N10` constrained multi-step patch with no drift | `worker.long-autonomous` extra/reference lane |
+
+## Boundary conditions
+
+| Boundary | Read |
+|---|---|
+| owners | `R01` and `R02` stay outside routing lanes |
+| adapters | `A01` and `A02` stay outside semantic routing lanes |
+| UI split | `design.ui-ux-structure`, `worker.ui-implementation`, and `review.ui-visual-correctness` stay separate |
+| architecture split | architecture design stays in `advisory.design-adr`; architecture review stays in `review.performance-architecture` |
+| security split | `review.security` stays standalone |
+| extra lane boundary | `worker.long-autonomous` is `E1`, not lane `13`; it does not change the core lane count |
+| execution-surface boundary | core routing results remain `S01..S33 + N01..N07`; `N08..N10` are now a separate scoreable extra-lane slice |
+
+## Next step
+
+The next implementation step after this freeze is a documentation and config update pass that:
+
+- updates `agents-mode-reference.md`
+- updates `external-worker-design.md` if needed
+- updates `shared/agents-mode.defaults.yaml`
+- treats `worker.long-autonomous` as an extra/reference lane when updating profile docs
+- keeps `N08..N10` reported separately from the core `12` routing-lane results
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:33:46.566525Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.5 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1537ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The named files are not in the normal tracked file set under this checkout. I’m checking ignored/hidden paths next so I don’t miss a `.scratch` or local-only review package before treating the current repo surface as mismatched.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg --files -uu -g fingerprint.py -g RESULTS.md -g METHODOLOGY.md' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"Claude proxy forensic fingerprinter|fingerprinter|tokenizer_probe|distill\\+middleware|hypothesis|Run tokenizer_probe|10 sentinels|3-5 sentinel|does not capture|does not distinguish|not in scope|blind spot|blind-spot|v0\\.5|v0\\.6\" -uu -S" in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T21:34:02.248782Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git ls-files | rg "(''^|/)(fingerprint'"\\.py|RESULTS\\.md|METHODOLOGY\\.md)"'$"'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git ls-files | rg "(''^|/)(fingerprint'"\\.py|RESULTS\\.md|METHODOLOGY\\.md)"'$"' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'git ls-files | rg "(''^|/)(fingerprint'"\\.py|RESULTS\\.md|METHODOLOGY\\.md)"'$"'` rejected: blocked by policy
+ succeeded in 1040ms:
+.scratch\proxy-forensics\RESULTS.md
+.scratch\proxy-forensics\fingerprint.py
+.scratch\proxy-forensics\METHODOLOGY.md
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T21:34:03.437854Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 1.2 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ exited 1 in 1192ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The review target is under `.scratch/proxy-forensics`, which explains why the normal repo file scan missed it. I’m now checking the exact stale phrases and the updated methodology lines there.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -S \"v0\\.5|v0\\.6|does not distinguish|blind spot|blind-spot|not in scope|does not capture|tokenizer_probe|10 sentinels|3-5 sentinel|unresolved|gated hypothesis|Claude proxy forensic fingerprinter|α|beta|slope\" .scratch/proxy-forensics" in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T21:34:21.299462Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$p='"'.scratch\\proxy-forensics\\METHODOLOGY.md'; "'$lines=Get-Content -Path $p; for($i=150; $i -le 190 -and $i -le $lines.Count; $i++){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$p='"'.scratch\\proxy-forensics\\METHODOLOGY.md'; "'$lines=Get-Content -Path $p; for($i=150; $i -le 190 -and $i -le $lines.Count; $i++){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$p='"'.scratch\\proxy-forensics\\fingerprint.py'; "'$lines=Get-Content -Path $p; foreach($i in 1..35 + 925..938 + 1056..1065 + 1112..1122){ if($i -le $lines.Count){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }}' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$p='"'.scratch\\proxy-forensics\\METHODOLOGY.md'; "'$lines=Get-Content -Path $p; for($i=150; $i -le 190 -and $i -le $lines.Count; $i++){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }'` rejected: blocked by policy
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$p='"'.scratch\\proxy-forensics\\fingerprint.py'; "'$lines=Get-Content -Path $p; foreach($i in 1..35 + 925..938 + 1056..1065 + 1112..1122){ if($i -le $lines.Count){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }}'` rejected: blocked by policy
+2026-04-24T21:34:21.299891Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$p='"'.scratch\\proxy-forensics\\fingerprint.py'; "'$lines=Get-Content -Path $p; foreach($i in 1..35 + 925..938 + 1056..1065 + 1112..1122){ if($i -le $lines.Count){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }}'` rejected: blocked by policy
+2026-04-24T21:34:21.305706Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$p='"'.scratch\\proxy-forensics\\RESULTS.md'; "'$lines=Get-Content -Path $p; for($i=1; $i -le 25 -and $i -le $lines.Count; $i++){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$p='"'.scratch\\proxy-forensics\\RESULTS.md'; "'$lines=Get-Content -Path $p; for($i=1; $i -le 25 -and $i -le $lines.Count; $i++){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$p='"'.scratch\\proxy-forensics\\RESULTS.md'; "'$lines=Get-Content -Path $p; for($i=1; $i -le 25 -and $i -le $lines.Count; $i++){ '"'{0}:{1}' -f "'$i,$lines[$i-1] }'` rejected: blocked by policy
+ succeeded in 1247ms:
+.scratch/proxy-forensics\METHODOLOGY.md:1:# Proxy Forensic Methodology — v0.6
+.scratch/proxy-forensics\METHODOLOGY.md:21:2. **Backend identity range** — frontier-Claude signature, distilled student signature, older checkpoint, non-Claude base. v0.6 adds a gated `distill+middleware` hypothesis that fires when tokenizer evidence indicates non-Claude BPE together with middleware ≥ 0.6. When `tokenizer_probe.py` is NOT run (or returns `ambiguous`/`insufficient_data`), A+Middleware verdicts are annotated "distill+middleware unresolved" to flag the remaining uncertainty explicitly rather than silently assuming real Claude.
+.scratch/proxy-forensics\METHODOLOGY.md:178:**Tokenizer identity is captured by `tokenizer_probe.py`** (v0.6) — no longer a gap. Feed the output to `fingerprint.py --tokenizer-probe-raw <file>` to integrate into classification.
+.scratch/proxy-forensics\METHODOLOGY.md:182:1. Run `tokenizer_probe.py` (10 sentinels, fits α·β slope; distinguishes Claude BPE from non-Claude backends masquerading as Claude)
+.scratch/proxy-forensics\METHODOLOGY.md:193:## Known gaps (v0.6)
+.scratch/proxy-forensics\METHODOLOGY.md:195:1. ✅ ~~No tokenizer-identity probe~~ — **implemented in v0.6** via `tokenizer_probe.py`. CLI-mediated baseline (not raw `count_tokens` API); strong verdicts require n_points ≥ 8. Output labels `baseline_method` for provenance. Upgrade to API-key based `count_tokens` reduces cost; identical semantics.
+.scratch/proxy-forensics\METHODOLOGY.md:201:7. ✅ ~~No `distill+middleware` hypothesis~~ — **added in v0.6** classifier. Gated on tokenizer `non_claude` verdict + middleware ≥ 0.6. Without tokenizer evidence, A+Middleware verdict is annotated with "distill+middleware unresolved".
+.scratch/proxy-forensics\RESULTS.md:13:The observed signals are **less consistent with** a rigidly-biased distilled-only student, with a Chinese-model clone, and with an alias of an older Claude release. They are **most consistent with** a frontier Claude backend under active gateway manipulation. Important caveats: (a) the toolkit's `distill+middleware` separation now lives in v0.6 behind the `tokenizer_probe.py` gate — at the time of this investigation that probe had not yet been run on AW, so the A+Middleware verdict here carries a "distill+middleware unresolved" annotation (re-run with v0.6 tokenizer probe to upgrade or downgrade to `distill+middleware`); (b) a sufficiently sophisticated adversarial proxy could in principle produce the same behavior on all probes. For security- or legal-grade certainty, capture wire traffic (mitmproxy) and run the tokenizer identity probe.
+.scratch/proxy-forensics\README.md:1:# Claude Proxy Forensic Toolkit — v0.6
+.scratch/proxy-forensics\README.md:6:- Whether the backend matches a frontier-Claude signature, a distilled student signature, or an imitator. v0.6 adds a gated `distill+middleware` hypothesis class that fires when tokenizer evidence indicates non-Claude BPE together with active middleware; without tokenizer evidence, A+Middleware verdicts are annotated "distill+middleware unresolved" instead of silently assuming real Claude.
+.scratch/proxy-forensics\README.md:9:**Status: v0.6, hypothesis generator**, not adjudicating forensic classifier. Use results as an investigative starting point, not as legal/security-grade proof. See `METHODOLOGY.md` for caveats and known gaps.
+.scratch/proxy-forensics\README.md:15:- **`tokenizer_probe.py`** — tokenizer-identity probe (10 sentinels, α·β linear fit, `claude_bpe`/`non_claude`/etc verdicts). Cheap (~$0.50/run).
+.scratch/proxy-forensics\README.md:26:- **`test_tokenizer_probe.py`** — 33 unit tests (fit, classify, sentinel composition).
+.scratch/proxy-forensics\README.md:30:### v0.6 (fifth codex review round — current)
+.scratch/proxy-forensics\README.md:32:- **Tokenizer identity probe** (`tokenizer_probe.py`): sends 10 sentinels through baseline + suspect paths, fits `gateway = α·baseline + β`, verdicts `claude_bpe` / `claude_bpe_weak` / `non_claude` / `ambiguous` / `insufficient_data`. Requires n_points ≥ 8 for strong verdicts.
+.scratch/proxy-forensics\README.md:33:- **`distill+middleware` hypothesis** added to classifier: gated on `tokenizer_non_claude ≥ 0.5` AND `middleware ≥ 0.6`. Without tokenizer data, A+Middleware is annotated "distill+middleware unresolved" instead of silently assuming real Claude.
+.scratch/proxy-forensics\README.md:39:### v0.5 (fourth codex review round)
+.scratch/proxy-forensics\README.md:119:python tokenizer_probe.py \
+.scratch/proxy-forensics\README.md:126:Combined v0.6 run (all evidence axes):
+.scratch/proxy-forensics\README.md:197:## Known gaps (v0.6)
+.scratch/proxy-forensics\README.md:201:- ✅ ~~No tokenizer-identity probe~~ — **implemented in v0.6** (`tokenizer_probe.py`). Uses CLI-mediated baseline (not raw Anthropic `count_tokens` API). Strong verdicts require n_points ≥ 8. Upgrade to API-key-based count_tokens reduces cost; identical semantics.
+.scratch/proxy-forensics\README.md:202:- ✅ ~~No `distill+middleware` hypothesis~~ — **added in v0.6**. Gated on `tokenizer_non_claude ≥ 0.5` AND `middleware ≥ 0.6`. Without tokenizer data, A+Middleware verdict is annotated "distill+middleware unresolved".
+.scratch/proxy-forensics\fingerprint.py:3:Claude proxy forensic fingerprinter — v0.6.
+.scratch/proxy-forensics\fingerprint.py:9:v0.6 changes (fifth codex gpt-5.5 xhigh review):
+.scratch/proxy-forensics\fingerprint.py:10:  - tokenizer_probe.py added (separate script): sends 10 sentinels through
+.scratch/proxy-forensics\fingerprint.py:11:    baseline + suspect, fits alpha/beta/residuals, emits claude_bpe /
+.scratch/proxy-forensics\fingerprint.py:16:    unresolved" rather than silently assuming real Claude.
+.scratch/proxy-forensics\fingerprint.py:25:v0.5 changes (fourth codex gpt-5.5 xhigh review):
+.scratch/proxy-forensics\fingerprint.py:33:    up; distill+middleware entry added to known_gaps (now resolved in v0.6
+.scratch/proxy-forensics\fingerprint.py:34:    via tokenizer-gated hypothesis).
+.scratch/proxy-forensics\fingerprint.py:766:    v0.6 changes:
+.scratch/proxy-forensics\fingerprint.py:776:        annotated as "distill+middleware unresolved".
+.scratch/proxy-forensics\fingerprint.py:869:    # ---- v0.6: Network evidence (corroborating only, capped contributions) ----
+.scratch/proxy-forensics\fingerprint.py:899:    # ---- v0.6: Tokenizer evidence ----
+.scratch/proxy-forensics\fingerprint.py:929:    # v0.6: vetoed by non_claude tokenizer (→ distill+middleware instead)
+.scratch/proxy-forensics\fingerprint.py:933:    # v0.5: tightened suspicious_intercept threshold from 0.3 → 0.1 so that even weak
+.scratch/proxy-forensics\fingerprint.py:938:    # v0.6: ALSO vetoed by non_claude tokenizer (cannot be clean Claude if tokenizer mismatch)
+.scratch/proxy-forensics\fingerprint.py:950:    # v0.6: distill+middleware hypothesis. Requires BOTH middleware ≥ 0.6 AND
+.scratch/proxy-forensics\fingerprint.py:952:    # A+Middleware verdict is annotated with "distill+middleware unresolved".
+.scratch/proxy-forensics\fingerprint.py:994:    # v0.6: annotate A+Middleware verdict with tokenizer resolution state
+.scratch/proxy-forensics\fingerprint.py:1077:    ap = argparse.ArgumentParser(description="Claude proxy forensic fingerprinter v0.6")
+.scratch/proxy-forensics\fingerprint.py:1091:    # v0.6: cross-evidence integration
+.scratch/proxy-forensics\fingerprint.py:1097:                    help="Path to a tokenizer_probe.py --save-raw JSON output. When provided, "
+.scratch/proxy-forensics\fingerprint.py:1117:    # v0.5: scorer-version drift enforcement. Since we're pre-1.0, minor
+.scratch/proxy-forensics\fingerprint.py:1183:    # v0.6: optional cross-evidence
+.scratch/proxy-forensics\fingerprint.py:1210:    if args.tokenizer_probe_raw:
+.scratch/proxy-forensics\fingerprint.py:1211:        print(f"\n=== Loading tokenizer probe from {args.tokenizer_probe_raw} ===")
+.scratch/proxy-forensics\fingerprint.py:1213:            with open(args.tokenizer_probe_raw, "r", encoding="utf-8") as f:
+.scratch/proxy-forensics\mitm_capture.py:137:        # v0.6: subprocess.run(shell=True, timeout=...) hangs on Windows when
+.scratch/proxy-forensics\mitm_capture.py:141:        # v0.6 follow-up (codex round 7 blocker): on POSIX, start child in its
+.scratch/proxy-forensics\baselines.json:227:      "Tokenizer-identity probe IMPLEMENTED in v0.6 (`tokenizer_probe.py`) using CLI-mediated baseline (not raw Anthropic `count_tokens` API). Upgrade to API-key-based count_tokens would reduce cost and eliminate CLI wrapping overhead in β, but slope α and residuals still discriminate tokenizer identity with CLI fallback. See `baseline_method` field in tokenizer probe output.",
+.scratch/proxy-forensics\baselines.json:229:      "`distill+middleware` hypothesis ADDED in v0.6. Requires tokenizer non_claude verdict AND middleware ≥ 0.6. Without tokenizer data, A+Middleware verdict is ANNOTATED with 'distill+middleware unresolved' to flag the remaining uncertainty rather than silently assuming real Claude.",
+.scratch/proxy-forensics\smoketest_stdout.txt:3:[baselines] baselines valid until 2026-07-23 (scorer v0.5.0, baselines v0.5.0)
+.scratch/proxy-forensics\WIRE_CAPTURE_FINDINGS.md:12:CLI sends to `https://api.claudecodeapi.cloud/v1/messages?beta=true`:
+.scratch/proxy-forensics\WIRE_CAPTURE_FINDINGS.md:44:POST /v1/messages?beta=true HTTP/1.1
+.scratch/proxy-forensics\WIRE_CAPTURE_FINDINGS.md:59:anthropic-beta: claude-code-20250219,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05,advisor-tool-2026-03-01,effort-2025
+.scratch/proxy-forensics\test_fingerprint.py:491:# v0.5: forged "claude" prefix without hyphen must NOT pass single-object heuristic
+.scratch/proxy-forensics\test_fingerprint.py:536:# v0.5: codefenced schema-correct introspection → codefence_wrap=True + schema_match=True,
+.scratch/proxy-forensics\test_fingerprint.py:588:# v0.5: False-dated event (April 2025 Pope Leo XIV — model hallucinates wrong month)
+.scratch/proxy-forensics\test_fingerprint.py:628:# v0.5 adversarial tests (codex round-4 findings)
+.scratch/proxy-forensics\test_fingerprint.py:630:print("\n--- classify: v0.5 inconsistent_intercept blocks A-clean high ---")
+.scratch/proxy-forensics\test_fingerprint.py:668:# v0.6: tokenizer evidence integration
+.scratch/proxy-forensics\test_fingerprint.py:670:print("\n--- classify: v0.6 tokenizer evidence ---")
+.scratch/proxy-forensics\test_fingerprint.py:730:# v0.6: network evidence integration
+.scratch/proxy-forensics\test_fingerprint.py:732:print("\n--- classify: v0.6 network evidence ---")
+.scratch/proxy-forensics\test_fingerprint.py:787:# v0.6 codex regression: tokenizer absent must not split confident distill/MW
+.scratch/proxy-forensics\test_fingerprint.py:789:print("\n--- v0.6 regression: tokenizer absent ---")
+.scratch/proxy-forensics\tokenizer_probe.py:10:response. Fit `gateway_tokens = alpha * baseline_tokens + beta` via least squares,
+.scratch/proxy-forensics\tokenizer_probe.py:13:  - `beta` stable integer-ish across classes: constant injection offset
+.scratch/proxy-forensics\tokenizer_probe.py:36:The `beta` intercept absorbs CLI wrapping overhead; we interpret α + residuals
+.scratch/proxy-forensics\tokenizer_probe.py:40:  python tokenizer_probe.py \\
+.scratch/proxy-forensics\tokenizer_probe.py:116:    # v0.6 (codex round 7 blocker fix): accept both stream-list (historical)
+.scratch/proxy-forensics\tokenizer_probe.py:171:    """Fit y = alpha*x + beta via simple least squares. Returns (alpha, beta, residuals)."""
+.scratch/proxy-forensics\tokenizer_probe.py:183:    beta = (sum_y - alpha * sum_x) / n
+.scratch/proxy-forensics\tokenizer_probe.py:184:    residuals = [y - (alpha * x + beta) for x, y in zip(xs, ys)]
+.scratch/proxy-forensics\tokenizer_probe.py:185:    return alpha, beta, residuals
+.scratch/proxy-forensics\tokenizer_probe.py:191:def classify_fit(alpha, beta, residuals, repeat_spread_max):
+.scratch/proxy-forensics\tokenizer_probe.py:211:        "beta": round(beta, 2),
+.scratch/proxy-forensics\tokenizer_probe.py:241:    # Strong non_claude: EITHER alpha drift (α outside [0.9, 1.1])
+.scratch/proxy-forensics\tokenizer_probe.py:366:    alpha, beta, residuals = least_squares_fit(baseline_points, gateway_points)
+.scratch/proxy-forensics\tokenizer_probe.py:369:    verdict = classify_fit(alpha, beta, residuals, max_repeat_spread)
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:78:- [ ] **Tokenizer probe (manual)**: send 3-5 sentinel strings, capture `usage.input_tokens`, compare deltas against Anthropic-direct baselines. Proportional drift = different tokenizer.
+.scratch/proxy-forensics\test_tokenizer_probe.py:1:"""Unit tests for tokenizer_probe.py fit + classification logic.
+.scratch/proxy-forensics\test_tokenizer_probe.py:3:Run: python test_tokenizer_probe.py
+.scratch/proxy-forensics\test_tokenizer_probe.py:10:import tokenizer_probe as tp
+.scratch/proxy-forensics\test_tokenizer_probe.py:54:alpha, beta, resid = tp.least_squares_fit(xs, ys)
+.scratch/proxy-forensics\test_tokenizer_probe.py:56:assert_close("beta_exact_7", beta, 7.0, tol=1e-9)
+.scratch/proxy-forensics\test_tokenizer_probe.py:63:alpha, beta, resid = tp.least_squares_fit(xs, ys)
+.scratch/proxy-forensics\test_tokenizer_probe.py:65:assert_close("beta_zero_on_proportional", beta, 0.0, tol=1e-9)
+.scratch/proxy-forensics\test_tokenizer_probe.py:69:ys = [17, 29, 37, 60, 110]  # same slope 1 + 7, noisy
+.scratch/proxy-forensics\test_tokenizer_probe.py:70:alpha, beta, resid = tp.least_squares_fit(xs, ys)
+.scratch/proxy-forensics\test_tokenizer_probe.py:75:alpha, beta, resid = tp.least_squares_fit([10], [17])
+.scratch/proxy-forensics\test_tokenizer_probe.py:79:alpha, beta, resid = tp.least_squares_fit([], [])
+.scratch/proxy-forensics\test_tokenizer_probe.py:83:alpha, beta, resid = tp.least_squares_fit([10, 10, 10], [17, 17, 17])
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+One new stale hit appeared outside the four lines you listed: `.scratch/proxy-forensics/SUSPECT_WORKFLOW.md:78` still says the tokenizer probe is manual with 3-5 sentinels. I’m checking whether that is a current workflow instruction or historical context.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 5 -S \"Tokenizer probe \\(manual\\)|3-5 sentinel|manual.*sentinel|tokenizer_probe\\.py|10 sentinels\" .scratch/proxy-forensics/SUSPECT_WORKFLOW.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command 'rg -n -C 4 -S "does not capture|tokenizer identity|Escalation path|Run `?tokenizer_probe|3-5 sentinel|10 sentinels|Known gaps" .scratch/proxy-forensics/METHODOLOGY.md' in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -S \"does not distinguish|not in scope|blind spot|blind-spot|3-5 sentinel|Tokenizer probe \\(manual\\)|manual\\).*sentinel\" .scratch/proxy-forensics" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1701ms:
+178-**Tokenizer identity is captured by `tokenizer_probe.py`** (v0.6) — no longer a gap. Feed the output to `fingerprint.py --tokenizer-probe-raw <file>` to integrate into classification.
+179-
+180-For high-stakes classification (financial or security-sensitive decisions), do at least one of:
+181-
+182:1. Run `tokenizer_probe.py` (10 sentinels, fits α·β slope; distinguishes Claude BPE from non-Claude backends masquerading as Claude)
+183-2. Run `mitm_capture.py` (captures raw HTTPS via mitmproxy + custom CA; reveals injected system prompt content)
+184-3. Consult a known-fresh Opus 4.7 max with full evidence dump (see `.scratch/consult_opus47*.py` for the structured brief format)
+185-
+186-## Common failure modes
+--
+189-- **False-negative middleware:** adaptive gateway varies intercept responses across runs to defeat byte-exact detection. Mitigate: check for schema-shape-matching-but-values-lying responses (compare reported fields to observed pipeline behavior).
+190-- **False-positive distill:** capable model with aggressive RLHF refuses introspection probe. Inspect the refusal text — a real refusal reads like an RLHF refusal, not a canned gateway response.
+191-- **Baseline drift:** new Anthropic release changes canonical stylometry. Mitigate: regenerate baselines on every new Opus release; tool blocks strong verdicts past `expiry_date`.
+192-
+193:## Known gaps (v0.6)
+194-
+195-1. ✅ ~~No tokenizer-identity probe~~ — **implemented in v0.6** via `tokenizer_probe.py`. CLI-mediated baseline (not raw `count_tokens` API); strong verdicts require n_points ≥ 8. Output labels `baseline_method` for provenance. Upgrade to API-key based `count_tokens` reduces cost; identical semantics.
+196-2. **No quantization-degradation probe** — planned future work. An int8/int4 Claude variant could pass the current battery.
+197-3. **No multi-turn probe.** All current probes are single-turn; gateways that act only on session boundaries are invisible.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1831ms:
+73-## Step 5. Escalation (optional, high-stakes only)
+74-
+75-If verdict is ambiguous OR the decision has security / compliance / financial stakes:
+76-
+77-- [ ] **mitmproxy HTTPS capture**: set up local intercepting proxy, capture actual `/v1/messages` request body. Reveals injected system prompt content, exact parameter handling. Setup: 30-60 min. See `NETWORK_FINGERPRINTS.md` for how to interpret the capture.
+78:- [ ] **Tokenizer probe (manual)**: send 3-5 sentinel strings, capture `usage.input_tokens`, compare deltas against Anthropic-direct baselines. Proportional drift = different tokenizer.
+79-- [ ] **Opus 4.7 max expert consultation**: send full evidence dump to `claude -p --model claude-opus-4-7 --effort max` for independent re-ranking (template: `consult_opus47*.py` in `.scratch/`).
+80-
+81-## Step 6. Document findings
+82-
+83-Add an entry to `NETWORK_FINGERPRINTS.md` with the new target's network profile. Archive raw JSON outputs (`network_<name>.json`, `results_<name>.json`) under `.scratch/proxy-forensics/investigations/<date>-<name>/`.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2060ms:
+.scratch/proxy-forensics\SUSPECT_WORKFLOW.md:78:- [ ] **Tokenizer probe (manual)**: send 3-5 sentinel strings, capture `usage.input_tokens`, compare deltas against Anthropic-direct baselines. Proportional drift = different tokenizer.
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+### Blocker 4 status
+
+`METHODOLOGY.md:170-183` is fixed: tokenizer identity is no longer listed as an uncaptured gap, and escalation now points to `tokenizer_probe.py` with 10 sentinels.
+
+But one current workflow doc is still stale:
+
+- `.scratch/proxy-forensics/SUSPECT_WORKFLOW.md:78` still says: `Tokenizer probe (manual): send 3-5 sentinel strings...`
+
+That is a current high-stakes escalation step, not historical changelog text, so it conflicts with the v0.6 tokenizer-probe workflow.
+
+### Verdict
+
+RED (specific remaining lines)
+
+- `.scratch/proxy-forensics/SUSPECT_WORKFLOW.md:78`
+tokens used
+28,513
+### Blocker 4 status
+
+`METHODOLOGY.md:170-183` is fixed: tokenizer identity is no longer listed as an uncaptured gap, and escalation now points to `tokenizer_probe.py` with 10 sentinels.
+
+But one current workflow doc is still stale:
+
+- `.scratch/proxy-forensics/SUSPECT_WORKFLOW.md:78` still says: `Tokenizer probe (manual): send 3-5 sentinel strings...`
+
+That is a current high-stakes escalation step, not historical changelog text, so it conflicts with the v0.6 tokenizer-probe workflow.
+
+### Verdict
+
+RED (specific remaining lines)
+
+- `.scratch/proxy-forensics/SUSPECT_WORKFLOW.md:78`

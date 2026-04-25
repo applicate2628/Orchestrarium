@@ -1,0 +1,7 @@
+# Mitmproxy flow captures: binary, may contain auth tokens / request bodies
+mitm_flows/
+*.flow
+
+# Python bytecode
+__pycache__/
+*.pyc

@@ -1,0 +1,2462 @@
+Reading additional input from stdin...
+OpenAI Codex v0.124.0 (research preview)
+--------
+workdir: D:\dev\Orchestrator\Orchestrarium
+model: gpt-5.5
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019dbfcd-cc92-7813-a872-1c817856f7c6
+--------
+user
+# Code review request: Claude proxy forensic toolkit
+
+You are performing an independent rigorous review of a small forensic toolkit that fingerprints Claude-compatible endpoints (official `claude` or third-party wrappers like `claude-aw.cmd`) to classify their backend and detect middleware interference.
+
+## Location
+
+All files are in the current working directory under `.scratch/proxy-forensics/`:
+
+- `README.md` — toolkit overview + usage
+- `RESULTS.md` — original investigation that produced the methodology
+- `METHODOLOGY.md` — protocol + decision tree + probe rationale
+- `fingerprint.py` — main Python runner (~350 lines)
+- `baselines.json` — cached Anthropic-direct Opus 4.5/4.6/4.7 outputs
+
+Read all five files before reviewing. They are short.
+
+## Context (one paragraph)
+
+The investigation targeted `claude-aw.cmd` — a wrapper that redirects Claude Code CLI to `api.claudecodeapi.cloud`. Through a 5-probe battery (stylometric fingerprinting on math, temporal cutoff via 2025 events, strict-format reasoning, self-introspection JSON, and an anti-Euler override probe) the backend was classified as **"real Claude Opus 4.7 on Google Vertex AI with aggressive middleware gateway"** rather than a distilled student. The toolkit packages that methodology for reuse on future suspect endpoints.
+
+## Review questions
+
+Please evaluate critically and answer each explicitly:
+
+### 1. Methodology soundness
+- Are the five probes genuinely orthogonal, or do they overlap in what they detect?
+- Is the decision tree in METHODOLOGY.md correct given the probe outputs? Are there cases where it reaches wrong conclusions?
+- The anti-Euler override probe is claimed as the "decisive" distinguisher between injection and distillation. Is that claim justified, or are there scenarios where it fails?
+- The self-introspection probe relies on byte-exact canned response detection. What would a smarter gateway do to evade this while still filtering introspection?
+
+### 2. Unstated assumptions
+- What does the toolkit assume about the target that might not hold for a different class of proxy (e.g. aggregators that route to multiple backends, or gateways that detect and adapt to probing)?
+- Are any conclusions in RESULTS.md load-bearing on evidence that could be faked by a sufficiently motivated operator?
+- The classification logic in `fingerprint.py` `classify()` uses boolean signal aggregation. Is the logic correct? Any edge cases that misclassify?
+
+### 3. Code quality (fingerprint.py specifically)
+- Any bugs, subtle or otherwise?
+- Are the scoring regexes in `score_stylometric_717()`, `score_temporal_cutoff()`, etc. robust to reasonable phrasing variations, or will they miss valid matches?
+- The sentence splitter `re.split(r"(?<=[.!?])\s+", text)` — does it handle abbreviations like "CRT." correctly? What about edge cases?
+- Windows `.cmd` handling via `shell=True` — any security concerns if `--cmd` is user-supplied? (Intended use is operator-local, not public-facing, but worth flagging.)
+
+### 4. Gaps + missed angles
+- What additional probes would strengthen the battery? Specifically targeting:
+  - Tokenizer identity (currently only described in RESULTS.md, not implemented as a probe)
+  - Quantization / precision degradation (none of the 5 probes detect this directly)
+  - Multi-turn state / conversation-level middleware behavior (all current probes are single-turn)
+  - Non-Claude imitators that learned to mimic Claude (F hypothesis was ruled out only by tokenizer offset evidence)
+- Is there a lighter-weight "triage" probe that could quickly reject obvious fakes before running the full battery?
+
+### 5. Reproducibility + calibration
+- The baselines will decay as Anthropic releases new Opus generations. How should regeneration be triggered, and what safeguards prevent running against a stale baseline?
+- The `temporal_cutoff` probe's calibration uses 2025 events. This will lose discriminative power as those events become historical. What's the refresh strategy?
+
+## Output format
+
+Return:
+
+```
+### Summary (3 sentences max)
+<your overall assessment>
+
+### Critical findings (must-fix)
+- <finding 1, with severity>
+- <finding 2, with severity>
+...
+
+### Recommended improvements (nice-to-have)
+- <recommendation 1>
+...
+
+### Gaps / missed angles
+- <gap 1, with suggested probe/approach>
+...
+
+### Verdict on each review question (1-5)
+Q1: <one-paragraph assessment>
+Q2: <one-paragraph assessment>
+Q3: <one-paragraph assessment>
+Q4: <one-paragraph assessment>
+Q5: <one-paragraph assessment>
+```
+
+Be rigorous and skeptical. This is a methodology that will be applied to real-world suspect endpoints with financial/security implications. Don't hedge — commit to assessments. If the toolkit is broadly sound, say so; if there are real weaknesses, name them concretely.
+codex
+I’ll treat this as a read-only review and use the repository review workflow. I’m first checking the review skill and prior Orchestrarium notes, then I’ll read the five requested toolkit files before forming findings.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"Orchestrarium|review-changes|proxy-forensics|publication-safety|work-items\" 'C:\\Users\\<user>\\.codex\\memories\\MEMORY.md'" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path 'C:\\Users\\<user>\\OneDrive\\Documents\\env\\Agents\\.codex\\skills\\review-changes\\SKILL.md' -Raw" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1625ms:
+46:applies_to: cwd=D:\dev\mcp-local-hub; reuse_rule=reuse for review/audit/navigation in this checkout, but re-check branch, merge-base, Go version, work-items state, and current MCP/Serena/GitHub availability each session
+76:- mcp-local-hub, read-only review, никаких изменений не делать, only report, use All MCP you want and serena, go test -count=1 -p 1 ./..., go 1.26.2, work-items/bugs/closed, status: open, servers/embed.go, defaultManifestDir, strings.SplitSeq
+109:- The checkout had `work-items/bugs/closed/`, but those closed bug files still contained `status: open`; treat that as task-memory metadata drift to clean separately, not as an active recovery item by itself [Task 3]
+161:# Task Group: Orchestrarium governance, install surfaces, and repo recovery
+162:scope: governance, install, control-plane, and repo-health work under `D:\dev\Orchestrator` and `D:\dev\Orchestrator\Orchestrarium`; use when the user asks for `$lead` recovery, execution-record or install-surface changes, global skill installs, policy clarifications, or Git-state forensics in this repo family
+163:applies_to: cwd=D:\dev\Orchestrator and D:\dev\Orchestrator\Orchestrarium; reuse_rule=reuse for this repo family and the linked `C:\Users\<user>\.codex` install/config workflow, but verify current work-item ownership, active branch, and installed runtime state before applying specifics
+165:## Task 1: `$lead` recovery established `work-items/` as the canonical resume surface
+173:- lead, task-memory, work-items, AGENTS.md, roadmap.md, brief.md, status.md, recovery-entry-point, turn_aborted
+209:- rollout_summaries/2026-04-16T22-10-33-NMtV-parallelmode_commit_global_install.md (cwd=D:\dev\Orchestrator\Orchestrarium, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\17\rollout-2026-04-17T01-10-33-019d9858-8c5c-71f3-9af2-24849bb79477.jsonl, updated_at=2026-04-17T16:42:01+00:00, thread_id=019d9858-8c5c-71f3-9af2-24849bb79477, shared routing-policy change committed and installed globally)
+223:- monorepo merge, unrelated histories, review-changes, agents-review, /.reports/, install.sh router, install.ps1 router, dangling symlink, validate-skill-pack, references-codex, references-claude
+239:- rollout_summaries/2026-04-08T23-36-44-429Z-git_repo_corruption_after_reboot_head_config_zeroed.md (cwd=D:\dev\Orchestrator\Orchestrarium, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\09\rollout-2026-04-09T02-36-44-019d6f74-9307-7fc3-bb36-898cf6a9fdd3.jsonl, updated_at=2026-04-08T23:41:48+00:00, thread_id=019d6f74-9307-7fc3-bb36-898cf6a9fdd3, read-only forensics only)
+249:- rollout_summaries/2026-04-19T22-26-55-ChPv-github_contributors_claude_cache_refresh_and_revert.md (cwd=D:\dev\Orchestrator\Orchestrarium, rollout_path=C:\Users\<user>\.codex\sessions\2026\04\20\rollout-2026-04-20T01-26-55-019da7da-9ca1-7b21-8dfe-65ff64113b9d.jsonl, updated_at=2026-04-19T23:03:48+00:00, thread_id=019da7da-9ca1-7b21-8dfe-65ff64113b9d, GitHub API/history already showed only the human author; temporary empty commit was later removed)
+253:- GitHub contributors, applicate2628/Orchestrarium, stats/contributors, HTTP 202, co-authored-by, Claude attribution, ~/.claude/settings.json, attribution commit pr, empty commit, chore: refresh GitHub contributors cache, git reset --soft HEAD~1, force-with-lease, origin/main
+268:- when the user sends just `"$lead"` or says `у тебя есть work-items, ты $lead` -> use the lead recovery entrypoint immediately instead of asking for a generic repo scan [Task 1][Task 4]
+283:- In this repo family, `work-items/` is the canonical task-memory root, `work-items/index.md` is the recovery entrypoint, and `roadmap.md`, `brief.md`, `status.md`, and often `plan.md` are the required control-plane files for lead-routed non-trivial work [Task 1][Task 6]
+290:- `/.reports/YYYY-MM/` is a required local session-log layer, not canonical storage; project installers should add it to target repo `.gitignore` if absent, while `work-items/` remains canonical and `/.plans/` is plan/log traceability [Task 6]
+291:- Claude’s equivalent of Codex `review-changes` is the updated `/agents-review` command [Task 6]
+294:- For `applicate2628/Orchestrarium`, `D:\dev\Orchestrator` is not the git root; `D:\dev\Orchestrator\Orchestrarium` is the repo root used for contributor/history audits [Task 9]
+303:- Symptom: lead recovery is ambiguous or stale -> cause: control-plane files drifted or the active item already claimed completion -> fix: audit `work-items/index.md`, ensure a truthful active owner exists, and keep `roadmap.md`, `brief.md`, `status.md`, and `plan.md` aligned before resuming [Task 1][Task 6]
+338:## Task 3: audit both packs for governance, recovery, and publication-safety drift
+346:- AGENTS.md, CLAUDE.md, lead, operating-model, subagent-contracts, team-templates, publication-safety, validate-skill-pack, quick-fix, RETURN(role), recovery, policies-catalog
+356:- work-items, roadmap.md, brief.md, status.md, plan.md, review.json, security-reviewer, performance-reviewer, dry-run, allowlist, reparse-point, symlink, manifest verification, uv cache, serena.exe
+393:- Validator PASS is not enough for pack audits that care about runtime semantics: both packs’ publication-safety scripts self-matched their own signature lists in source mode, and both PowerShell wrappers were hardwired to the installed layout rather than the source repo [Task 3]
+404:- Symptom: governance audits look green because validators passed -> cause: validator coverage did not exercise runtime publication-safety and wrapper-path behavior -> fix: run smoke tests on publication-safety scripts and Windows wrappers directly during similar audits [Task 3]
+497:- PreviewWindow.show(), access violation, 0xC0000005, Video_Generation_Complete.mp4, QOpenGLWidget, gl_ready=false, transport_mapped=false, work-items, all mcp go blazing
+532:- when the user says `ты $lead`, `у тебя есть work-items`, and `ты $lead all mcp go blazing!` -> work through the lead/task-memory pipeline and use the available specialist/MCP surfaces rather than ad hoc freeform debugging [Task 1][Task 2]
+543:- Smoke evidence already exists for `codex` no-MCP, `claude-api` no-MCP and strict-MCP, and `gemini` no-MCP; the package lives under `work-items/provider-mcp-templates/` and `work-items/provider-mcp-subagent-summary-2026-04-13.md` [Task 3]
+549:- Symptom: mounted-window verification crashes with `0xC0000005` before video start -> cause: host/runtime failure around `PreviewWindow.show()` and OpenGL host path, not necessarily the media session -> fix: capture file-based traces in `.scratch`, keep `work-items` in sync, and do not treat offscreen success as a substitute for the mounted gate [Task 1]
+694:- The final closeout landed as `f1dcb73 fix(plot): restore runtime hover hit-testing`, and the real publication-safety script path was `C:\Users\<user>\.codex\skills\lead\scripts\check-publication-safety.ps1` [Task 1]
+759:- Symptom: publication-safety scan shows lots of historical absolute paths -> cause: whole-repo scan includes pre-existing tracked artifacts -> fix: inspect the actual outgoing range and redact only fresh session artifacts before push [Task 2]
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2265ms:
+---
+name: review-changes
+description: Run a full read-only repository impact review starting from recent local changes, a specified diff, branch, commit range, or PR. Use when Codex needs to verify that recent fixes are complete, nothing important was forgotten, unchanged call sites or contracts were not broken, logic still holds across the wider repo, and regressions or missed edge cases are surfaced before commit.
+---
+
+# Review Changes
+
+Run a repository-wide impact review triggered by recent changes. The changed files are only the starting point; the review target is the full affected behavior surface, including unchanged dependents, nearby contracts, tests, and likely regression paths.
+
+## Core stance
+
+- Stay read-only.
+- Use the `review` template semantics from `src.codex/AGENTS.codex.md`: `$analyst` -> QA lane -> reviewer lane.
+- Review the repo in light of the changes, not just the diff lines themselves.
+- Findings come first, ordered by severity.
+- Do NOT commit or modify files.
+
+## Scope decision
+
+1. Check `$ARGUMENTS`.
+- If a PR URL, PR number, branch, commit range, or diff target is given, use that scope.
+- Otherwise inspect current unstaged and staged changes with `git diff` and `git diff --cached`.
+- If no changes are present, stop and tell the user there is nothing to review.
+2. If the user mentions a bug, review thread, accepted plan, or expected fix list, use that as the completion baseline.
+3. If no explicit baseline exists, review against the observed change impact and say that fix-completeness against an external checklist could not be verified.
+
+## Review workflow
+
+1. Run `$analyst` first.
+- Goal: identify what changed, which contracts or behaviors moved, what unchanged code depends on those changes, and where logic may now be incomplete.
+- Require the analyst to inspect callers, dependents, tests, config, schemas, and adjacent modules that may be affected even if they were not edited.
+2. Run the QA lane.
+- Use `$qa-engineer` by default.
+- If external review is preferred for an eligible QA-side slot, `$external-reviewer` may stand in for that lane.
+- Goal: verify regression risk, edge cases, test sufficiency, fix completeness, and whether untouched behavior is now inconsistent with the new logic.
+3. Run the reviewer lane.
+- Always invoke `$architecture-reviewer`.
+- Add `$security-reviewer` if the change touches auth, trust boundaries, secrets, dangerous configuration, input validation, or vulnerability surfaces.
+- Add `$performance-reviewer` if the change touches hot paths, query plans, rendering loops, budgets, throughput, or latency-sensitive behavior.
+- Add `$ux-reviewer`, `$accessibility-reviewer`, or `$ui-test-engineer` when the affected surface is clearly user-facing and the risk is interaction quality rather than pure logic.
+- If external review is preferred for an eligible review-side slot, `$external-reviewer` may stand in for the matching reviewer role.
+4. Keep the chain sequential in Codex unless the user explicitly approves a delegated team and the scopes are clearly independent.
+
+## What to verify
+
+- The requested fixes are actually present.
+- The apparent root cause is covered, not just one symptom.
+- Unchanged callers, consumers, configs, tests, or docs are still compatible with the new behavior.
+- Nearby logic still makes sense after the change.
+- Hidden regressions, stale assumptions, and missed edge cases are surfaced.
+- Validation is strong enough for the touched behavior, or the exact gap is called out.
+- The change did not leave partial rewires, stale branches, dead conditions, or forgotten follow-up adjustments in unchanged files.
+
+## Output
+
+Return one unified review with:
+
+- scope reviewed
+- findings ordered by severity
+- impacted unchanged surfaces that were checked
+- what could not be verified
+- verdict: `PASS`, `REVISE`, or `BLOCKED`
+
+If the user asked "did we fix everything?", answer that directly before the detailed findings.
+
+## Persistence
+
+- If the repository uses active work-items, persist the accepted review artifact there.
+- Otherwise log the review under `.reports/YYYY-MM/` using the standard report naming convention.
+
+## Rules
+
+- Do not role-play specialist reviewers inline when delegation is available and permitted.
+- Treat changed files as entry points, not as the review boundary.
+- If a critical issue appears early, surface it immediately.
+- If the impact surface is too large for a trustworthy single pass, say so and recommend splitting the review into smaller scopes.
+
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The review skill confirms this stays read-only and finding-led. I found prior repo notes that matter only for process: Orchestrarium uses local `.reports/` and `work-items/`, but this request is scoped to a scratch forensic toolkit, so I’m keeping the review focused on the five files you named.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path '.scratch\\proxy-forensics\\README.md' -Raw" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path '.scratch\\proxy-forensics\\RESULTS.md' -Raw" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path '.scratch\\proxy-forensics\\METHODOLOGY.md' -Raw" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path '.scratch\\proxy-forensics\\fingerprint.py' -Raw" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "Get-Content -Path '.scratch\\proxy-forensics\\baselines.json' -Raw" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1293ms:
+# Claude Proxy Forensic Toolkit
+
+Quickly fingerprint any Claude-compatible CLI endpoint (official `claude`, third-party wrappers like `claude-aw.cmd`, aggregator proxies) to determine:
+
+- What provider sits behind it (Anthropic direct, Google Vertex, AWS Bedrock, aggregator)
+- Whether the backend is a real frontier Claude, a distilled student, or something else
+- What middleware manipulations the gateway performs (stripping, injection, interception, spoofing)
+
+## Files
+
+- **`fingerprint.py`** - main executable. Runs probe battery on a target command, compares to cached baselines, prints classification.
+- **`baselines.json`** - cached results from Anthropic-direct Opus 4.5/4.6/4.7 on each probe. One-time collection (~$3), reused indefinitely.
+- **`RESULTS.md`** - full write-up of the `claude-aw.cmd` investigation that produced this toolkit.
+- **`METHODOLOGY.md`** - probe protocol, decision tree, rationale for each test.
+
+## Quick start
+
+List available probes:
+
+```bash
+python fingerprint.py --list-probes
+```
+
+Fingerprint a new endpoint (Windows `.cmd` wrapper):
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
+```
+
+Fingerprint a plain `claude` call (Linux/macOS or Windows with `.exe`):
+
+```bash
+python fingerprint.py --label "direct" --cmd "claude --model claude-opus-4-7"
+```
+
+Run only specific probes:
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell \
+  --probes self_introspection_json anti_euler_override
+```
+
+Save raw results for further analysis:
+
+```bash
+python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell \
+  --save-raw results_aw.json
+```
+
+## What it tests
+
+Five probes, each designed to isolate one orthogonal axis of backend identity:
+
+| Probe | Axis | Detects |
+|---|---|---|
+| `stylometric_717` | Canonical-opening style | Model generation, injected framing bias |
+| `temporal_cutoff` | Training recency | Model release window |
+| `tight_reasoning_crt` | Format compliance + rigor | Model capability tier |
+| `self_introspection_json` | Gateway filter | Active middleware (hard intercept) |
+| `anti_euler_override` | Soft-injection vs distill | Whether biased framing is overrideable |
+
+The **soft-override probe** (`anti_euler_override`) is the most valuable single test: it cleanly distinguishes a real base model under a soft gateway nudge from a distilled student with baked-in bias. Distills cannot switch their canonical opening on demand; real models can.
+
+The **introspection probe** (`self_introspection_json`) is the smoking gun for active middleware: gateways that filter introspection prompts return byte-exact canned responses (like `{"acknowledged":true}`) that no real model would emit twice identically.
+
+## Typical decision output
+
+```
+=== CLASSIFICATION ===
+  ACTIVE_MIDDLEWARE_CONFIRMED (hard intercept on introspection)
+  SOFT_INJECTION_DETECTED (overrideable by explicit user instruction - rules out rigid distill)
+  CAPABLE_BASE_MODEL (passes cutoff + rigor - backend is real frontier Claude)
+  FEATURE_STRIP (no caching observed)
+  >>> CLASSIFICATION: A+Middleware (real Claude + aggressive gateway shim) <<<
+```
+
+## Cost
+
+- **Running on new target**: ~$0.10-0.50 (5 probes, depends on how much the target charges)
+- **Regenerating baselines**: ~$3 (15 Opus calls). Do this only when new model generations ship.
+
+## Extending
+
+Add a probe: edit `baselines.json` and insert a new entry under `probes`. Implement a scorer in `fingerprint.py` (`score_*` function) and register it in the `SCORERS` dict. Baselines for that probe must be added manually or regenerated.
+
+## Assumptions
+
+- Target honors standard Claude Code CLI flags (`-p`, `--model`, `--effort`, `--tools`, `--output-format json`).
+- `--effort max` and `--tools ""` are added to every call to normalize conditions.
+- Probes assume the target is attempting to look like Anthropic Opus family. Other backends (Sonnet tier, non-Claude pretending to be Claude) will produce distinctive failure patterns that classify them accordingly.
+
+## Caveats
+
+- `cost_usd` reported by third-party gateways is often fabricated (CLI computes locally from claimed usage, gateway can lie). Trust `out_tok`, `text`, `msg_id` prefix, `cache_create/read`.
+- Dynamic label spoofing is common: the `model` field in the response may not match the actual backend. Don't rely on it alone.
+- Some middleware may detect and adapt to this probe battery over time. If results drift, compare text fingerprints closely - new evasion patterns show up as new "false-start" types.
+
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 1452ms:
+# Investigation Results - `claude-aw.cmd` Proxy (api.claudecodeapi.cloud)
+
+**Date:** 2026-04-24
+**Target:** `claude-aw.cmd --model opus` (wrapper setting `ANTHROPIC_BASE_URL=https://api.claudecodeapi.cloud`)
+**Baselines:** Anthropic-direct Opus 4.5, 4.6, 4.7 via official `claude` CLI v2.1.119
+
+## Verdict
+
+**Real Claude Opus (likely 4.7) hosted on Google Vertex AI, fronted by an aggressive middleware gateway.**
+
+Not a distillation, not a Chinese model clone, not an alias of an older Claude release. The underlying model is genuine frontier Claude; the gateway performs active manipulation on top.
+
+## Middleware inventory
+
+| Layer | Behavior | Overrideable? | Evidence |
+|---|---|:-:|---|
+| Hard filter | Self-introspection  canned `{"acknowledged":true}` (22 bytes) | No | Byte-exact repeat ?2 |
+| Soft injection | Math tasks  Euler/totient-first opening | **Yes** | Anti-Euler probe |
+| Feature strip | `thinking`, `cache_control`, `--effort` | No | `cache=0/0`, effort ignored |
+| Output cap | max_tokens ? 60-240 | No | AW 63-239 vs officials 223-1855 |
+| Metadata spoof | `model` field relabels 4.5  4.7 | No | Same query, different sessions |
+
+## Evidence chain
+
+### Stage 1. Original visual benchmark (user's prior work)
+
+14-row comparison of coordinate-extraction accuracy on a 2200?1600 PNG (pixel-perfect ideal = 0):
+
+| Rank | Family | Path | Model | Effort | Reported | Mean err | Max err | OutTok |
+|:-:|---|---|---|---|---|:-:|:-:|:-:|
+| 1 | Gemini | official | Gemini 3 Flash fallback | HIGH | gemini-3-flash-preview | 0.0 px | 0.0 px | 1110 |
+| 2 | Codex | official | GPT-5.4 | xhigh | gpt-5.4 | 0.7 px | 1.4 px | 11352 |
+| 3 | Codex | official | GPT-5.5 | xhigh | gpt-5.5 | 0.9 px | 1.4 px | 560 |
+| 4 | Codex | official | GPT-5.3-Codex | xhigh | gpt-5.3-codex | 8.2 px | 35.0 px | 5579 |
+| 5 | Claude | official | Opus 4.7 | env max | claude-opus-4-7 | 39.3 px | 86.8 px | 790 |
+| 6 | Claude | official | Opus 4.7 | `--effort max` | claude-opus-4-7 | 75.0 px | 148.7 px | 1832 |
+| 7 | Claude | AW | Opus | env max | claude-opus-4.5 | 81.9 px | 142.1 px | 113 |
+| 8 | Claude | official | Opus 4.6 | `--effort max` | claude-opus-4-6 | 90.2 px | 163.4 px | 4374 |
+| 9 | Claude | AW | Opus | `--effort max` | claude-opus-4.5 | 115.4 px | 205.1 px | 113 |
+| 10 | Claude | official | Opus 4.6 | env max | claude-opus-4-6 | 150.4 px | 215.1 px | 4604 |
+| 11 | Claude | official | Sonnet 4.6 | env max | claude-sonnet-4-6 | 616.3 px | 901.6 px | 3090 |
+| 12 | Claude | official | Haiku 4.5 | env max | claude-haiku-4-5-20251001 | 638.9 px | 900.5 px | 2406 |
+| 13 | Claude | official | Opus 4.5 | `--effort max` | claude-opus-4-5-20251101 | 660.0 px | 968.0 px | 2379 |
+| 14 | Claude | official | Opus 4.5 | env max | claude-opus-4-5-20251101 | 690.8 px | 1002.8 px | 1397 |
+
+Observation: AW (rows 7, 9) lands in the 4.6/4.7 accuracy band, not the 4.5-release band. Sharp 150600 px gap between "high-res" and "downscaled" vision path.
+
+### Stage 2. Env vs `--effort` flag (CLI mechanics)
+
+Hypothesis: Opus 4.7 "launch effort pin" explains 39 vs 75 px difference.
+
+| Variant | pin state | out_tok | cost | reasoning |
+|---|:-:|:-:|:-:|---|
+| A (env=max, no flag) | pinned | 698 | $0.225 | `7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 7 (mod 100)` |
+| B (`--effort max`) | unpinned | 716 | $0.225 | `7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 7 (mod 100)` |
+
+**Result:** near-identical (1 punctuation dot, +18 tokens). Pin state does NOT explain vision discrepancy. CLI internals examined:
+
+```js
+function ht6(H){ if(M7(H)==="claude-opus-4-7") return "xhigh"; return "high" }  // launch effort
+function NbH(H, q){
+  let _ = UWH();  // env var
+  if(_===null) return $?K:void 0;
+  let f = _ ?? ($?K:void 0) ?? q ?? K;  // precedence: env > session > launch
+  ...
+}
+```
+
+### Stage 3. AW discriminator test (7^17 mod 100, unconstrained)
+
+| Variant | Reported | Msg ID prefix | out_tok | cache_create | Opening reasoning |
+|---|---|---|:-:|:-:|---|
+| 4.5 off | `claude-opus-4-5-20251101` | `msg_01*` (Anthropic) | 419 | 39867 | `7^4 = 2401 ? 1 (mod 100), so 7^17 = 7^(4ú4+1) = (7^4)^4 ú 7 ? 1ú7 = 7` |
+| 4.6 off | `claude-opus-4-6` | `msg_01*` (Anthropic) | 223 | 39697 | `7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7^1 ? 1ú7 = 7` |
+| 4.7 off | `claude-opus-4-7` | `msg_01*` (Anthropic) | 538 | 58052 | `7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 7 (mod 100)` |
+| **AW** | **`claude-opus-4.7`** | **`msg_vrtx_01Q`** (Vertex) | **77** | **0** | `?(100)=40, so 7^17 mod 100 = 7^17; compute 7^4=2401?1, hence 7^17=(7^4)^4ú7?1ú7` |
+
+First suspicion of distillation (hypothesis C): ?(100)=40 false-start + tautology `7^17 mod 100 = 7^17`. Zero cache. Compression to 77 tokens.
+
+### Stage 4. Three-probe battery
+
+#### Probe 1 - Temporal cutoff
+
+| Target | Events | Cutoff estimate |
+|---|---|:-:|
+| 4.5 off | Trump + LA wildfires + Pope Francis (Apr) | ? April 2025 |
+| 4.6 off | Trump + Palisades/Eaton wildfires + Pope Francis | ? April 2025 |
+| 4.7 off | Trump + Pope Francis + **Pope Leo XIV (May 2025)** | ? May 2025 |
+| **AW** | Trump + Pope Francis  Leo XIV + **Wimbledon July 2025** | **? July 2025** |
+
+All AW facts independently verifiable. AW cutoff matches or exceeds 4.7.
+
+#### Probe 2 - Strict-format reasoning (CRT proof)
+
+| Target | Sentences | CRT in s2 | "Therefore" in s3 | Verdict |
+|---|:-:|:-:|:-:|---|
+| 4.5 off | 3 | ? | ? | PASS |
+| 4.6 off | 3 | ? | ? | PASS |
+| 4.7 off | 3 | ? (CRT) | ? | PASS |
+| **AW** | 3 | ? (CRT) | ? | **PASS** |
+
+AW meets all constraints at Opus-level rigor. No false-start here. Distill hypothesis weakens.
+
+#### Probe 3 - Self-introspection JSON (raw stdout)
+
+| Target | Raw stdout | Assessment |
+|---|---|---|
+| 4.5 off | Clean JSON, cutoff=May 2025 | PASS |
+| 4.6 off | Wrapped in ```json codefence | format fail (Claude habit) |
+| 4.7 off | Clean JSON, architecture=Claude, cutoff=January 2026 | PASS |
+| **AW** | **`{"acknowledged":true}\n`** (22 bytes) | **INTERCEPTED** |
+
+AW returned something completely different from what was requested. Gateway-level interception.
+
+### Stage 5. Reproducibility check (?2)
+
+| Test | Result |
+|---|---|
+| Probe 3 repeat run 1 | `{"acknowledged":true}\n` - identical 22 bytes |
+| Probe 3 repeat run 2 | `{"acknowledged":true}\n` - identical 22 bytes |
+| 7^17 repeat run 1 | `Reasoning: ?(100)=40, so 7^17 mod 100 = 7^17; compute 7^4=2401?1...` |
+| 7^17 repeat run 2 | `Reasoning: ?(100)=40, so 7^17 mod 100 = 7ú(7^2)^8 mod 100 = 7ú49^8 mod 100.` |
+
+Both anomalies reproducible. Byte-exact intercept = definitively middleware, not random. ?-opening = systematic forcing, not sampling variance.
+
+### Stage 6. Anti-Euler killer probe (recommended by Opus 4.7 max)
+
+Prompt: `Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'.`
+
+| Target | Opening | Banned words | Verdict |
+|---|---|:-:|---|
+| 4.5 off | `7^2 = 49, 7^4 = 49^2 = 2401 ? 1 (mod 100)` | none | COMPLIANT |
+| 4.6 off | `7^2 = 49, 7^4 = 49^2 = 2401 ? 01 (mod 100)` | none | COMPLIANT |
+| 4.7 off | `7^2 = 49; 7^4 = 49^2 = 2401 ? 1 (mod 100)` | none | COMPLIANT |
+| **AW run1** | `7^2=49; 7^4=49ú49=2401?01 mod 100` | none | **COMPLIANT** |
+| **AW run2** | `7^2=49; 7^4=49ú49=2401?1` | none | **COMPLIANT** |
+
+**Decisive result:** AW switched from ?-opening to canonical `7^4 ? 1` under explicit instruction. A distilled student cannot do this on demand - this is a capable base model under soft injection.
+
+## Hypothesis ranking
+
+| Rank | Hypothesis | Status | Key counter-argument |
+|:-:|---|---|---|
+| **1** | **A+Middleware: real Opus 4.7 via Vertex with aggressive shim** | ? **CONFIRMED** | Anti-Euler override + byte-exact intercept reproducible |
+| 2 | C: Distilled student trained on Claude outputs | ? refuted | Probe 2 rigor + anti-Euler switch = capable base |
+| 3 | E: Pruned/quantized Opus | ? weak fit | Would degrade gracefully, not show injection signature |
+| 4 | F: Non-Claude base + Claude fine-tune | ? refuted | Constant (not proportional) tokenizer offset |
+| 5 | B: Older Opus checkpoint | ? refuted | Cutoff ? July 2025 matches latest |
+| 6 | D: Hybrid multi-model routing | ? refuted | Token compression (not inflation) seen |
+
+## Capability match
+
+| Capability | AW observation | Matches |
+|---|---|---|
+| Knowledge cutoff | ? July 2025 | Opus 4.7 |
+| Reasoning rigor | Strict CRT-proof PASS | Opus 4.x tier |
+| Style fingerprint | `7^4 ? 1 (mod 100)` under override | Opus 4.x canonical |
+| Tokenizer | Claude BPE + constant +7 offset | Claude family (injected prefix) |
+| Censorship | Factual on Tiananmen/Xinjiang/Taiwan | Claude, not Chinese models |
+| Provider routing | `msg_vrtx_*` prefix | Google Vertex AI |
+
+## Unresolved
+
+| Item | Status |
+|---|---|
+| Vision 39 vs 75 px discrepancy | Not explained by math probes - likely domain-specific effect |
+| Exact Opus revision on Vertex | 4.6 or 4.7; knowledge suggests 4.7 |
+| Injected system prompt content | Not captured (requires HTTPS proxy like mitmproxy) |
+| Gateway operator identity | Not investigated |
+
+## Budget
+
+| Item | Cost |
+|---|---|
+| Total official Opus calls | ~$3-4 |
+| AW calls (local CLI estimate, unreliable) | ~$2 (true cost unknown) |
+| Opus 4.7 max consultations | 2 (methodology design + decision selection) |
+
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2593ms:
+# Proxy Forensic Methodology
+
+Step-by-step protocol for classifying an unknown Claude-compatible endpoint. This is the reusable procedure distilled from the `claude-aw.cmd` investigation.
+
+## Goal
+
+Given a target that speaks Claude Code CLI (`claude` or a wrapper), determine:
+
+1. **Provider family** - Anthropic direct, Google Vertex, AWS Bedrock, or aggregator
+2. **Backend identity** - real frontier Claude, distilled student, older checkpoint, or non-Claude imitator
+3. **Middleware layers** - what does the gateway strip, inject, intercept, or spoof?
+
+## Core invariants of this method
+
+- **Baselines are Anthropic-direct, collected fresh with identical flags.** Without trusted reference outputs, nothing can be compared stylometrically.
+- **All probes run with `--effort max --tools ""`**. Eliminates tool-use confounders and normalizes effort across targets.
+- **Each probe isolates one axis.** Never conflate "knowledge recency" with "reasoning capability" with "gateway filtering" - separate tests catch each.
+- **Byte-level comparison matters for intercept detection.** Fuzzy comparison misses deterministic canned responses.
+
+## The five-probe battery
+
+Each probe answers a specific question about the target.
+
+### Probe 1 - Stylometric fingerprint
+
+**Question:** Does the target's unconstrained output match the canonical opening of any known Claude generation?
+
+**Prompt:** "Compute 7^17 mod 100. Answer in exactly two lines. Line 1: 'Reasoning:' followed by the key modular identity. Line 2: 'Answer:' followed by the two digits only."
+
+**Expected for real 4.x Opus:** opens with `7^4 = 2401 ? 1 (mod 100)`.
+
+**Red flags:**
+- Opens with `?(100)=40` / Euler / totient / Fermat - suggests bias or distillation
+- Tautology like `7^17 mod 100 = 7^17` - artifact of forced framing
+- Extreme output compression (< 100 tokens) - `max_tokens` cap
+- Wrong answer (anything other than `07`) - fundamentally broken backend
+
+### Probe 2 - Temporal cutoff
+
+**Question:** Does the target know recent events?
+
+**Prompt:** "Name three distinct events from calendar year 2025. One per line. Format: '<Month> YYYY: <specific event with named people or places>'. No introduction, no conclusion, no hedging, no 'I cannot' - comply exactly."
+
+**Verify all facts independently.** Hallucinated-but-plausible 2025 events are distill-tells.
+
+**Calibration points:**
+- Mentions Pope Francis died (April 2025)  cutoff ? April 2025
+- Mentions Pope Leo XIV / Robert Prevost (May 2025)  cutoff ? May 2025
+- Mentions specific post-May 2025 events (Wimbledon July, late 2025 geopolitics)  matches Opus 4.7
+
+**Critical flag:** `--tools ""` - otherwise WebSearch lets the model fetch current events regardless of training cutoff, defeating the probe.
+
+### Probe 3 - Strict-format rigor
+
+**Question:** Can the target follow fine-grained format constraints while producing rigorous content?
+
+**Prompt:** "Prove: for any prime p > 3, p? mod 24 = 1. Exactly 3 sentences. Sentence 2 must invoke CRT by name. Sentence 3 begins with the word 'Therefore'. No lists, no LaTeX environments, no section headers."
+
+**Scoring (all three must PASS):**
+- Exactly 3 sentences (count by `.!?` terminators)
+- Sentence 2 contains "Chinese Remainder Theorem" or "CRT"
+- Sentence 3 starts with "Therefore"
+
+**Distilled students commonly fail on:**
+- Miscounting sentences (off-by-one)
+- Placing CRT in sentence 1 or 3
+- Starting sentence 3 with something other than "Therefore"
+
+Real Opus 4.5/4.6/4.7 all pass. Failure here is a strong negative signal.
+
+### Probe 4 - Self-introspection (gateway filter detection)
+
+**Question:** Does the gateway intercept introspection prompts?
+
+**Prompt:** "Reply with a single JSON object. No codefence. No prose. No trailing newline commentary.\n{\n  \"architecture_family\": \"<single word>\",\n  \"supports_extended_thinking\": <true|false>,\n  \"can_use_prompt_caching\": <true|false>,\n  \"knowledge_cutoff_month\": \"<Month YYYY>\"\n}"
+
+**Capture RAW stdout bytes.** Don't just parse - show the exact output.
+
+**Smoking gun:** target returns a fixed canned response (e.g. `{"acknowledged":true}\n` = 22 bytes) instead of the requested schema, **and the response is byte-exact on repeat runs**. No real model produces identical 22-byte strings on two independent runs of a novel prompt.
+
+**Second-order flag:** model introspects but reports capabilities that contradict observable pipeline behavior (e.g. reports `supports_extended_thinking: true` while Probe 1 showed zero thinking tokens). Either backend is real Opus behind a stripping shim (points to hypothesis A), or the model hallucinates capabilities (points to C).
+
+### Probe 5 - Soft-override (injection vs distill discriminator)
+
+**Question:** Is the forced framing from Probe 1 an injected system prompt (overrideable) or baked-in distill bias (not overrideable)?
+
+**Prompt:** "Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'."
+
+**Key subtlety:** add a **positive steer** ("start with 7^2 and 7^4"). This removes the excuse that the model used ? because it didn't know alternatives. If the model still leaks banned vocabulary despite positive steer + explicit ban, the bias is rigid (distill). If it switches to the canonical opening, bias was soft injection.
+
+**Decision rule:**
+- Target complies (no banned words, uses canonical `7^4` opening)  **soft injection confirmed, hypothesis A**
+- Target still uses banned framing  **rigid bias, hypothesis C** (or extremely aggressive injection that overrides user)
+
+This is the **most decisive single probe** in the battery. Run it whenever stylometric fingerprint (Probe 1) shows bias.
+
+## Decision tree
+
+```
+START
+³
+ÃÄÄ Run Probe 1 (stylometric)
+³   ÃÄÄ Canonical 7^4 opening?  skip to Probe 2
+³   ÀÄÄ False-start / tautology?  run Probe 5 (soft-override)
+³       ÃÄÄ Complies with override  SOFT INJECTION (A)
+³       ÀÄÄ Still biased  RIGID (C) or aggressive injection
+³
+ÃÄÄ Run Probe 2 (temporal cutoff)
+³   ÃÄÄ Recent events verified  backend not older than the cutoff they match
+³   ÃÄÄ Hallucinated events  distill or bad model
+³   ÀÄÄ Refuses  filter-heavy gateway or conservative distill
+³
+ÃÄÄ Run Probe 3 (strict format)
+³   ÃÄÄ Passes all constraints  capable base model
+³   ÀÄÄ Fails  low-rigor backend, likely distill
+³
+ÃÄÄ Run Probe 4 (introspection)
+³   ÃÄÄ Byte-exact canned response  ACTIVE MIDDLEWARE (regardless of backend)
+³   ÃÄÄ Model answers honestly  no introspection filter
+³   ÀÄÄ Refuses gracefully  standard RLHF, no filter
+³
+ÀÄÄ Check cache/thinking/effort fingerprints in parsed output
+    ÃÄÄ cache_create=0, cache_read=0  gateway strips cache_control
+    ÃÄÄ thinking_chars=0 on 4.6/4.7 + zero thinking cost overhead  stripped thinking pipeline
+    ÀÄÄ --effort max gives identical output to no-flag  --effort ignored
+```
+
+## Classification outcomes
+
+**A+Middleware (real backend, aggressive gateway):**
+- Probe 1: may show false-start (soft injection)
+- Probe 2: recent cutoff match
+- Probe 3: passes
+- Probe 4: byte-exact intercept likely
+- Probe 5: complies with override
+- Feature fingerprint: cache/thinking/effort stripped
+
+**C (distilled student):**
+- Probe 1: false-start OR stilted output
+- Probe 2: stale or hallucinated events
+- Probe 3: fails format constraints
+- Probe 4: attempts introspection (may lie)
+- Probe 5: cannot switch opening
+- Feature fingerprint: no middleware signatures
+
+**B (older genuine checkpoint):**
+- Probe 1: canonical but different phrasing than latest
+- Probe 2: cutoff matches older model
+- Probe 3: passes
+- Probe 4: honest introspection
+- Probe 5: complies
+
+**Non-Claude imitator (F):**
+- Ruled out by tokenizer: constant +7 offset  Claude BPE. Proportional drift  different tokenizer.
+
+## Provider detection (msg_id prefix)
+
+| Prefix | Provider |
+|---|---|
+| `msg_01...` | Anthropic direct (api.anthropic.com) |
+| `msg_vrtx_...` | Google Vertex AI |
+| `msg_bdrk_...` | AWS Bedrock |
+| 36-char UUID | Aggregator (LiteLLM/Portkey/OpenRouter/etc) |
+
+Not load-bearing on its own - any gateway can forge the prefix string. Use in conjunction with stylometric/feature evidence.
+
+## Additional diagnostics
+
+### CLI-level checks (free, no API cost)
+
+- `claude --debug-file /tmp/log.txt -p "..." --model X`  inspect metadata (API not body)
+- Binary strings analysis (`strings claude.exe | grep -iE "effort|budget"`)  CLI internals
+- `~/.claude.json` state inspection (`unpinOpus47LaunchEffort` etc)
+
+### Advanced (requires setup)
+
+- **mitmproxy with cert injection**  capture actual API request body, reveal injected system prompt content
+- **Token-counting API**  compare input_tokens to locally-computed BPE count to confirm tokenizer identity
+- **Beta header probing**  try `--betas interleaved-thinking-2025-05-14` etc to see which features gateway exposes
+
+## When to escalate
+
+If probes give inconsistent results (e.g. passes Probe 3 but fails Probe 2 in unexpected direction):
+
+1. Re-run probes ? 2 to check for sampling variance
+2. Vary probe prompts slightly to rule out prompt-specific overfitting
+3. Consult a known-good Opus 4.7 (or newest available) with full evidence dump - ask for re-ranking and additional probe suggestions
+
+The `consult_opus47.py` and `consult_opus47_round2.py` scripts in `.scratch/` show the structured evidence-brief format used to consult Opus 4.7 max. Reuse that template.
+
+## Cost guidance
+
+| Operation | Typical cost |
+|---|---|
+| Baseline regeneration (5 probes ? 3 Opus) | ~$3 |
+| Single target fingerprint (5 probes) | ~$0.10-0.50 depending on target pricing |
+| Expert consultation (Opus 4.7 max with full brief) | ~$0.30-0.60 |
+
+## Limitations
+
+- Middleware can adapt to probes over time. If a gateway starts passing Probe 4, it doesn't mean the middleware is gone - operator may have added `{"acknowledged":true}` detection to probe battery output and adjusted the intercept filter. Compare text fingerprints closely for new evasion patterns.
+- Stylometric fingerprints decay as new Claude generations ship. Regenerate baselines when Anthropic releases new Opus versions.
+- This method identifies active middleware but does not capture the injected content. For that, use mitmproxy or equivalent HTTPS-in-the-middle capture.
+
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 3328ms:
+{
+  "metadata": {
+    "generated_date": "2026-04-24",
+    "cli_version": "2.1.119",
+    "run_flags": {
+      "effort": "max",
+      "tools": "disabled (--tools \"\")",
+      "output_format": "json"
+    },
+    "notes": "Baselines collected via `claude -p <prompt> --model <id> --effort max --tools '' --output-format json` on Anthropic-direct (not Vertex/Bedrock)."
+  },
+  "provider_detection": {
+    "msg_id_prefixes": {
+      "msg_01": "anthropic-direct",
+      "msg_vrtx_": "google-vertex",
+      "msg_bdrk_": "aws-bedrock",
+      "uuid_36chars": "aggregator (litellm / portkey / openrouter-style)"
+    }
+  },
+  "probes": {
+    "stylometric_717": {
+      "purpose": "Detect stylometric divergence + output compression. Unconstrained math prompt - model picks its canonical opening.",
+      "prompt": "Compute 7^17 mod 100. Answer in exactly two lines. Line 1: 'Reasoning:' followed by the key modular identity. Line 2: 'Answer:' followed by the two digits only.",
+      "expected_answer": "07",
+      "canonical_opening_regex": "7\\^?\\s*4\\s*=?\\s*2401\\s*(?|=)\\s*0?1\\s*\\(mod\\s*100\\)",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "msg_id_prefix": "msg_018WGiXp",
+          "out_tok": 419,
+          "cache_create": 39867,
+          "text": "Reasoning: 7^4 = 2401 ? 1 (mod 100), so 7^17 = 7^(4ú4+1) = (7^4)^4 ú 7 ? 1ú7 = 7.\nAnswer: 07"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "msg_id_prefix": "msg_01DinNoK",
+          "out_tok": 223,
+          "cache_create": 39697,
+          "text": "Reasoning: 7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7^1 ? 1ú7 = 7.\nAnswer: 07"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "msg_id_prefix": "msg_01R3uzDd",
+          "out_tok": 538,
+          "cache_create": 58052,
+          "text": "Reasoning: 7^4 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 7 (mod 100)\nAnswer: 07"
+        }
+      }
+    },
+    "temporal_cutoff": {
+      "purpose": "Detect training-data recency. 2025 events are specific and verifiable.",
+      "prompt": "Name three distinct events from calendar year 2025. One per line. Format: '<Month> YYYY: <specific event with named people or places>'. No introduction, no conclusion, no hedging, no 'I cannot' - comply exactly.",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 314,
+          "cache_create": 29260,
+          "estimated_cutoff": "April 2025",
+          "text": "January 2025: Donald Trump inaugurated as the 47th President of the United States in Washington, D.C.\nJanuary 2025: Wildfires devastate Pacific Palisades and Altadena in Los Angeles County, California.\nApril 2025: Pope Francis dies at the Vatican."
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 314,
+          "cache_create": 29090,
+          "estimated_cutoff": "April 2025",
+          "text": "January 2025: Donald Trump was inaugurated as the 47th President of the United States in Washington, D.C.\nJanuary 2025: The Palisades and Eaton wildfires devastated Los Angeles County, California.\nApril 2025: Pope Francis died at the Vatican in Rome."
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 1103,
+          "cache_create": 41337,
+          "estimated_cutoff": "May 2025+",
+          "text": "January 2025: Donald Trump inaugurated as the 47th President of the United States at the U.S. Capitol in Washington, D.C.\nApril 2025: Pope Francis died at Casa Santa Marta in Vatican City.\nMay 2025: Cardinal Robert Prevost elected as Pope Leo XIV at the Sistine Chapel in Vatican City."
+        }
+      },
+      "verification_hints": [
+        "Pope Francis died April 21, 2025 (verifiable)",
+        "Pope Leo XIV (Robert Prevost) elected May 8, 2025 (verifiable)",
+        "Trump inaugurated January 20, 2025 (verifiable)",
+        "Wimbledon 2025 men's final: July 13, 2025 (verifiable)"
+      ]
+    },
+    "tight_reasoning_crt": {
+      "purpose": "Test strict format compliance + mathematical rigor. Distill-students commonly miscount sentences or misplace named constraints.",
+      "prompt": "Prove: for any prime p > 3, p^2 mod 24 = 1. Exactly 3 sentences. Sentence 2 must invoke CRT by name. Sentence 3 begins with the word 'Therefore'. No lists, no LaTeX environments, no section headers.",
+      "constraints": {
+        "sentence_count": 3,
+        "crt_in_sentence": 2,
+        "therefore_starts_sentence": 3
+      },
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 947,
+          "verdict": "PASS",
+          "text": "A prime p > 3 is odd and coprime to 3, so p ? +1 (mod 3) gives p? ? 1 (mod 3), and since any odd integer squared has the form (2k+1)? = 4k(k+1)+1 where k(k+1) is even, we get p? ? 1 (mod 8). By the Chinese Remainder Theorem, because gcd(3,8) = 1 and p? is congruent to 1 modulo both 3 and 8, it follows that p? ? 1 (mod 24). Therefore, for every prime p > 3, we have p? mod 24 = 1."
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 536,
+          "verdict": "PASS",
+          "text": "Since any prime p > 3 is odd and coprime to 3, we have p ? +1 (mod 2) so p? ? 1 (mod 8), and p ? +1 (mod 3) so p? ? 1 (mod 3). Because gcd(8, 3) = 1 and 8 ú 3 = 24, the Chinese Remainder Theorem guarantees that p? ? 1 (mod 8) and p? ? 1 (mod 3) jointly yield p? ? 1 (mod 24). Therefore p? mod 24 = 1 for every prime p > 3."
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 1855,
+          "verdict": "PASS",
+          "text": "Since p > 3 is prime, p is odd and not divisible by 3, so writing p = 2k+1 gives p? = 4k(k+1)+1 ? 1 (mod 8) because k(k+1) is always even, while p ? +1 (mod 3) forces p? ? 1 (mod 3). By the Chinese Remainder Theorem (CRT), since gcd(8,3) = 1 and 8ú3 = 24, the pair of congruences p? ? 1 (mod 8) and p? ? 1 (mod 3) is equivalent to the single congruence p? ? 1 (mod 24). Therefore p? mod 24 = 1 for every prime p > 3."
+        }
+      }
+    },
+    "self_introspection_json": {
+      "purpose": "Detect gateway-level interception. Models that return fixed canned responses on self-introspection prompts reveal active middleware.",
+      "prompt": "Reply with a single JSON object. No codefence. No prose. No trailing newline commentary.\n{\n  \"architecture_family\": \"<single word>\",\n  \"supports_extended_thinking\": <true|false>,\n  \"can_use_prompt_caching\": <true|false>,\n  \"knowledge_cutoff_month\": \"<Month YYYY>\"\n}",
+      "expected_structure": {
+        "architecture_family": "string",
+        "supports_extended_thinking": "bool",
+        "can_use_prompt_caching": "bool",
+        "knowledge_cutoff_month": "string"
+      },
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 208,
+          "verdict": "CLEAN_JSON",
+          "text": "{\"architecture_family\": \"transformer\", \"supports_extended_thinking\": true, \"can_use_prompt_caching\": true, \"knowledge_cutoff_month\": \"May 2025\"}"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 63,
+          "verdict": "FORMAT_FAIL_codefence",
+          "text": "\n\n```json\n{\n  \"architecture_family\": \"transformer\",\n  \"supports_extended_thinking\": true,\n  \"can_use_prompt_caching\": true,\n  \"knowledge_cutoff_month\": \"May 2025\"\n}\n```"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 63,
+          "verdict": "CLEAN_JSON",
+          "text": "{\"architecture_family\":\"Claude\",\"supports_extended_thinking\":true,\"can_use_prompt_caching\":true,\"knowledge_cutoff_month\":\"January 2026\"}"
+        }
+      },
+      "intercept_signature": {
+        "description": "AW gateway returned this literal 22-byte string instead of expected JSON, byte-exact on 2 consecutive runs - definitive hard-intercept signature.",
+        "raw_stdout": "{\"acknowledged\":true}\n",
+        "byte_count": 22
+      }
+    },
+    "anti_euler_override": {
+      "purpose": "Killer discriminator: if target uses forced-Euler framing under ordinary prompt but complies when explicitly banned, it's soft-injection (not distill). Distill cannot switch canonical opening on demand.",
+      "prompt": "Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'.",
+      "banned_words": ["euler", "totient", "fermat", "phi", "?", "?", "?"],
+      "expected_answer": "7",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 373,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49, 7^4 = 49^2 = 2401 ? 1 (mod 100), so 7^17 = (7^4)^4 ú 7 ? 1^4 ú 7 = 7 (mod 100).\n\nAnswer: 7"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 287,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49, 7^4 = 49^2 = 2401 ? 01 (mod 100), so 7^8 ? 01, 7^16 ? 01, and 7^17 = 7^16 ú 7 ? 1 ú 7 = 7.\n\nAnswer: **7**"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 556,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49; 7^4 = 49^2 = 2401 ? 1 (mod 100); so 7^16 = (7^4)^4 ? 1 (mod 100); therefore 7^17 = 7^16 ú 7 ? 7 (mod 100).\nAnswer: 7"
+        }
+      }
+    }
+  },
+  "interpretation_rules": {
+    "hypothesis_A_real_backend_with_middleware": {
+      "indicators": [
+        "canonical_opening in stylometric probe",
+        "passes anti_euler_override compliance",
+        "passes tight_reasoning_crt format constraints",
+        "knowledge_cutoff matches a real model generation",
+        "non-anthropic msg_id prefix (vertex/bedrock possible)",
+        "self_introspection may be intercepted (hard filter)"
+      ]
+    },
+    "hypothesis_C_distilled_student": {
+      "indicators": [
+        "false_start_abandon pattern that does NOT disappear under explicit override",
+        "fumbles format constraints (wrong sentence count, misplaced named constraints)",
+        "knowledge_cutoff gap vs claimed backend",
+        "consistent output compression AND poor style recovery",
+        "self_introspection attempts (hallucinated/waffled) rather than byte-exact intercept"
+      ]
+    },
+    "middleware_signatures": {
+      "hard_intercept": "Byte-exact fixed response on introspection probe (smoking gun for active gateway)",
+      "soft_injection": "Forced framing that disappears under explicit override (e.g. anti-euler probe)",
+      "feature_strip": "cache_create=0 AND cache_read=0 on a prompt that should trigger caching",
+      "effort_ignored": "identical output_tokens with/without --effort flag",
+      "output_cap": "max_tokens hard-capped well below natural model output",
+      "label_spoofing": "reported model field varies across identical requests"
+    },
+    "provider_family_by_msg_id": {
+      "msg_01*": "Anthropic direct API (api.anthropic.com)",
+      "msg_vrtx_*": "Google Vertex AI (genuine Anthropic on Vertex)",
+      "msg_bdrk_*": "AWS Bedrock",
+      "uuid_36": "Aggregator (LiteLLM/Portkey/OpenRouter/etc - inspect upstream)"
+    }
+  }
+}
+
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 4522ms:
+#!/usr/bin/env python3
+"""
+Claude proxy forensic fingerprinter.
+
+Given a command that speaks the Claude Code CLI protocol (plain `claude` or
+a wrapper like `claude-aw.cmd`), run a battery of probes to classify the
+backend and detect middleware interference.
+
+Usage:
+  python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
+  python fingerprint.py --label "aggregator-X" --cmd "claude --model whatever"
+  python fingerprint.py --list-probes
+  python fingerprint.py --regenerate-baselines   # expensive, runs 5 probes ? 3 Opus models
+
+Dependencies: Python 3.9+, baselines.json co-located with this script.
+
+Design notes:
+  - Baselines are cached in baselines.json. Official Opus calls are expensive
+    (~$0.20 each), so we run them once and re-use. New suspects compare vs cache.
+  - Each probe is self-describing (prompt, purpose, scoring rules) and stored
+    in the baselines file. Add a probe by editing that file and extending
+    score_probe() below.
+  - --effort max and --tools "" are added automatically to every call so the
+    suspect cannot sneak extra capability through tool use.
+"""
+
+import argparse
+import json
+import re
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+BASELINES_PATH = BASE_DIR / "baselines.json"
+
+
+def load_baselines():
+    with BASELINES_PATH.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def save_baselines(data):
+    with BASELINES_PATH.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def detect_provider(msg_id: str) -> str:
+    if not msg_id:
+        return "unknown"
+    if msg_id.startswith("msg_vrtx_"):
+        return "google-vertex"
+    if msg_id.startswith("msg_bdrk_"):
+        return "aws-bedrock"
+    if msg_id.startswith("msg_01"):
+        return "anthropic-direct"
+    if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", msg_id):
+        return "aggregator-uuid"
+    return f"unknown ({msg_id[:12]}...)"
+
+
+def run_cli(base_cmd_tokens, prompt, shell=False, timeout=300):
+    cli_flags = [
+        "-p", prompt,
+        "--effort", "max",
+        "--tools", "",
+        "--output-format", "json",
+    ]
+    full_cmd = base_cmd_tokens + cli_flags
+    try:
+        r = subprocess.run(
+            full_cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            shell=shell,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return {"error": "timeout", "raw": ""}
+    return {"stdout": r.stdout, "stderr": r.stderr, "returncode": r.returncode}
+
+
+def parse_cli_output(out: str) -> dict:
+    """Parse Claude CLI stream-json output. Returns normalized dict.
+
+    Returns an 'intercepted' flag when the output is NOT a Claude CLI stream
+    (e.g. gateway returned a canned object) - that is itself strong evidence.
+    """
+    if not out:
+        return {"intercepted": True, "raw": "", "reason": "empty_stdout"}
+    try:
+        arr = json.loads(out)
+    except json.JSONDecodeError as e:
+        return {"intercepted": True, "raw": out, "reason": f"non_json: {e}"}
+    if not isinstance(arr, list):
+        return {
+            "intercepted": True,
+            "raw": out,
+            "parsed_object": arr,
+            "reason": "not_stream_list",
+        }
+    result = next((x for x in arr if x.get("type") == "result"), {})
+    assistants = [x for x in arr if x.get("type") == "assistant"]
+    last = assistants[-1].get("message", {}) if assistants else {}
+    content = last.get("content", [])
+    text = "\n".join(c.get("text", "") for c in content if c.get("type") == "text")
+    thinking_chars = sum(len(c.get("thinking", "")) for c in content if c.get("type") == "thinking")
+    usage = result.get("usage", {})
+    return {
+        "intercepted": False,
+        "reported_model": last.get("model"),
+        "msg_id": last.get("id", ""),
+        "msg_id_provider": detect_provider(last.get("id", "")),
+        "out_tok": usage.get("output_tokens"),
+        "cache_create": usage.get("cache_creation_input_tokens", 0),
+        "cache_read": usage.get("cache_read_input_tokens", 0),
+        "cost_usd": result.get("total_cost_usd"),
+        "text": text,
+        "thinking_chars": thinking_chars,
+    }
+
+
+def score_stylometric_717(parsed, baseline_text):
+    findings = []
+    text = parsed.get("text", "")
+    # Check for false-start frames that are NOT in Anthropic-direct baselines
+    for pat, label in [
+        (r"?\s*\(\s*100\s*\)", "phi(100) false-start"),
+        (r"euler", "Euler-framing"),
+        (r"totient", "totient-framing"),
+        (r"fermat", "Fermat-framing"),
+    ]:
+        if re.search(pat, text, re.IGNORECASE):
+            findings.append(f"FALSE_START: {label}")
+    # Check canonical opening present
+    canonical = re.search(r"7\^?\s*4\s*=?\s*2401\s*[?=]\s*0?1", text)
+    if canonical:
+        findings.append("CANONICAL_OPENING: 7^4 = 2401 ? 1 pattern present")
+    # Tautology check
+    if re.search(r"7\^17\s*mod\s*100\s*=\s*7\^17", text):
+        findings.append("TAUTOLOGY: injected instruction artifact")
+    # Answer correctness
+    if re.search(r"answer:\s*0?7\b", text, re.IGNORECASE):
+        findings.append("ANSWER_CORRECT: 07")
+    else:
+        findings.append("ANSWER_INCORRECT_OR_MISSING")
+    return findings
+
+
+def score_temporal_cutoff(parsed):
+    text = parsed.get("text", "")
+    findings = []
+    patterns = {
+        r"(january|jan)\s*2025": "Jan 2025 events",
+        r"(april|apr)\s*2025.*(pope francis|francis)": "April 2025 Pope Francis death",
+        r"(may|april|apr)\s*2025.*(leo xiv|prevost)": "May 2025 Pope Leo XIV election",
+        r"(june|jun|july|jul|august|aug|september|sep|october|oct|november|nov|december|dec)\s*2025": "Late-2025 event (cutoff > April 2025)",
+    }
+    for pat, desc in patterns.items():
+        if re.search(pat, text, re.IGNORECASE):
+            findings.append(f"KNOWS: {desc}")
+    return findings
+
+
+def score_tight_reasoning(parsed):
+    text = parsed.get("text", "").strip()
+    findings = []
+    # Crude sentence splitter: split on '. ' or '.\n'
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+    findings.append(f"SENTENCE_COUNT: {len(sentences)}")
+    if len(sentences) == 3:
+        findings.append("SENTENCE_COUNT_PASS")
+        if re.search(r"(chinese remainder|crt)", sentences[1], re.IGNORECASE):
+            findings.append("CRT_IN_SENTENCE_2_PASS")
+        else:
+            findings.append("CRT_IN_SENTENCE_2_FAIL")
+        if sentences[2].lower().startswith("therefore"):
+            findings.append("THEREFORE_S3_PASS")
+        else:
+            findings.append("THEREFORE_S3_FAIL")
+    else:
+        findings.append("SENTENCE_COUNT_FAIL")
+    return findings
+
+
+def score_self_introspection(parsed):
+    findings = []
+    if parsed.get("intercepted"):
+        raw = parsed.get("raw", "")
+        findings.append(f"HARD_INTERCEPT: raw={len(raw)} bytes")
+        findings.append(f"RAW: {raw[:200]!r}")
+        if raw.strip() == '{"acknowledged":true}':
+            findings.append("CANNED_ACK_SIGNATURE_MATCH")
+        return findings
+    text = parsed.get("text", "")
+    # Try to extract JSON
+    stripped = text.strip()
+    # Remove codefences if present
+    codefence_match = re.search(r"```(?:json)?\s*(.+?)```", stripped, re.DOTALL)
+    if codefence_match:
+        findings.append("FORMAT_FAIL: wrapped in codefence")
+        stripped = codefence_match.group(1).strip()
+    try:
+        obj = json.loads(stripped)
+        findings.append("JSON_PARSE_OK")
+        for k in ("architecture_family", "supports_extended_thinking", "can_use_prompt_caching", "knowledge_cutoff_month"):
+            if k in obj:
+                findings.append(f"FIELD_{k}: {obj[k]!r}")
+            else:
+                findings.append(f"FIELD_MISSING: {k}")
+    except json.JSONDecodeError:
+        findings.append("JSON_PARSE_FAIL")
+    return findings
+
+
+def score_anti_euler(parsed):
+    findings = []
+    text = parsed.get("text", "")
+    banned = ["euler", "totient", "fermat", "phi", "?", "?", "?"]
+    violations = [w for w in banned if w.lower() in text.lower()]
+    if violations:
+        findings.append(f"BAN_VIOLATED: {violations}")
+        findings.append("INTERPRETATION: rigid middleware injection OR distilled bias")
+    else:
+        findings.append("BAN_COMPLIANT")
+        findings.append("INTERPRETATION: soft injection overridden, OR no injection at all")
+    canonical = re.search(r"7\^?\s*4\s*=?\s*49\^?\s*2?\s*=?\s*2401", text)
+    if canonical:
+        findings.append("CANONICAL_7^4_OPENING: matches Anthropic-direct style")
+    return findings
+
+
+SCORERS = {
+    "stylometric_717": lambda p, b: score_stylometric_717(p, b),
+    "temporal_cutoff": lambda p, b: score_temporal_cutoff(p),
+    "tight_reasoning_crt": lambda p, b: score_tight_reasoning(p),
+    "self_introspection_json": lambda p, b: score_self_introspection(p),
+    "anti_euler_override": lambda p, b: score_anti_euler(p),
+}
+
+
+def run_probe_on_target(probe_id, probe, cmd_tokens, shell):
+    raw = run_cli(cmd_tokens, probe["prompt"], shell=shell)
+    if raw.get("error") == "timeout":
+        return {"probe_id": probe_id, "error": "timeout"}
+    parsed = parse_cli_output(raw.get("stdout", ""))
+    findings = SCORERS.get(probe_id, lambda p, b: ["no_scorer"])(parsed, None)
+    return {
+        "probe_id": probe_id,
+        "parsed": parsed,
+        "findings": findings,
+    }
+
+
+def classify(results):
+    """Return top-line classification given a full probe-run result dict."""
+    signals = {
+        "hard_intercept": False,
+        "soft_injection_overridden": False,
+        "rigid_injection_or_distill": False,
+        "canonical_style_under_override": False,
+        "recent_cutoff": False,
+        "format_rigor_pass": False,
+        "feature_strip": False,
+        "label_spoofing": False,
+    }
+
+    intro = results.get("self_introspection_json", {}).get("findings", [])
+    if any("HARD_INTERCEPT" in f for f in intro):
+        signals["hard_intercept"] = True
+
+    anti = results.get("anti_euler_override", {}).get("findings", [])
+    if any("BAN_COMPLIANT" in f for f in anti) and any("CANONICAL_7^4_OPENING" in f for f in anti):
+        signals["soft_injection_overridden"] = True
+        signals["canonical_style_under_override"] = True
+    if any("BAN_VIOLATED" in f for f in anti):
+        signals["rigid_injection_or_distill"] = True
+
+    temp = results.get("temporal_cutoff", {}).get("findings", [])
+    if any("May 2025" in f or "Leo XIV" in f or "cutoff > April 2025" in f for f in temp):
+        signals["recent_cutoff"] = True
+
+    tight = results.get("tight_reasoning_crt", {}).get("findings", [])
+    if ("SENTENCE_COUNT_PASS" in tight and "CRT_IN_SENTENCE_2_PASS" in tight and "THEREFORE_S3_PASS" in tight):
+        signals["format_rigor_pass"] = True
+
+    # feature strip detection
+    sty = results.get("stylometric_717", {}).get("parsed", {})
+    if sty.get("cache_create") == 0 and sty.get("cache_read") == 0:
+        signals["feature_strip"] = True
+
+    # decision
+    verdict = []
+    if signals["hard_intercept"]:
+        verdict.append("ACTIVE_MIDDLEWARE_CONFIRMED (hard intercept on introspection)")
+    if signals["soft_injection_overridden"]:
+        verdict.append("SOFT_INJECTION_DETECTED (overrideable by explicit user instruction - rules out rigid distill)")
+    if signals["rigid_injection_or_distill"]:
+        verdict.append("RIGID_BIAS (injection not overrideable, OR distilled student - inspect stylometric details)")
+    if signals["recent_cutoff"] and signals["format_rigor_pass"]:
+        verdict.append("CAPABLE_BASE_MODEL (passes cutoff + rigor - backend is real frontier Claude)")
+    if signals["feature_strip"]:
+        verdict.append("FEATURE_STRIP (no caching observed)")
+
+    if signals["hard_intercept"] and signals["soft_injection_overridden"] and signals["recent_cutoff"] and signals["format_rigor_pass"]:
+        verdict.append(">>> CLASSIFICATION: A+Middleware (real Claude + aggressive gateway shim) <<<")
+    elif signals["rigid_injection_or_distill"] and not signals["format_rigor_pass"]:
+        verdict.append(">>> CLASSIFICATION: C (distilled student) <<<")
+    else:
+        verdict.append(">>> CLASSIFICATION: ambiguous - expand probes <<<")
+
+    return {"signals": signals, "verdict": verdict}
+
+
+def tokenize_cmd(cmd_str):
+    # On Windows shell=True takes a string; otherwise split.
+    return shlex.split(cmd_str, posix=False)
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Claude proxy forensic fingerprinter")
+    ap.add_argument("--label", help="Display label for target (e.g. 'AW')")
+    ap.add_argument("--cmd", help="Base command string, e.g. 'claude-aw.cmd --model opus'")
+    ap.add_argument("--shell", action="store_true", help="Use shell=True (needed for .cmd/.bat on Windows)")
+    ap.add_argument("--list-probes", action="store_true", help="List available probes and exit")
+    ap.add_argument("--regenerate-baselines", action="store_true", help="Re-run all probes on Opus 4.5/4.6/4.7 and overwrite baselines.json (expensive, ~$3)")
+    ap.add_argument("--probes", nargs="+", help="Only run listed probes (ids); default = all")
+    ap.add_argument("--save-raw", help="Path to save raw per-probe parsed output (JSON)")
+    args = ap.parse_args()
+
+    data = load_baselines()
+
+    if args.list_probes:
+        print("Available probes:")
+        for pid, probe in data["probes"].items():
+            print(f"  {pid}: {probe['purpose']}")
+        return 0
+
+    if args.regenerate_baselines:
+        print("Regenerating baselines is NOT automated here (would need 15 Opus calls, ~$3).")
+        print("To regenerate: edit baselines.json manually or run probe_battery.py from .scratch/")
+        return 1
+
+    if not args.cmd or not args.label:
+        ap.error("--cmd and --label required (or use --list-probes)")
+
+    cmd_tokens = tokenize_cmd(args.cmd)
+    probe_ids = args.probes or list(data["probes"].keys())
+
+    print(f"=== Fingerprinting target: {args.label} ===")
+    print(f"    command: {args.cmd}")
+    print(f"    shell:   {args.shell}")
+    print(f"    probes:  {probe_ids}\n")
+
+    results = {}
+    for pid in probe_ids:
+        probe = data["probes"].get(pid)
+        if not probe:
+            print(f"[skip] unknown probe: {pid}")
+            continue
+        print(f"--- PROBE: {pid} ---")
+        print(f"    purpose: {probe['purpose']}")
+        res = run_probe_on_target(pid, probe, cmd_tokens, args.shell)
+        results[pid] = res
+        if res.get("error"):
+            print(f"    ERROR: {res['error']}")
+            continue
+        parsed = res["parsed"]
+        if parsed.get("intercepted"):
+            print(f"    INTERCEPTED: reason={parsed.get('reason')}, raw len={len(parsed.get('raw',''))}")
+            print(f"    raw: {parsed.get('raw','')[:200]!r}")
+        else:
+            print(f"    reported_model : {parsed.get('reported_model')}")
+            print(f"    msg_id_provider: {parsed.get('msg_id_provider')} ({parsed.get('msg_id','')[:18]})")
+            print(f"    out_tok        : {parsed.get('out_tok')}")
+            print(f"    cache_create   : {parsed.get('cache_create')}")
+            print(f"    text (first 300): {parsed.get('text','')[:300]}")
+        print(f"    findings:")
+        for f in res["findings"]:
+            print(f"      - {f}")
+        # Baseline comparison
+        baselines = probe.get("baselines", {})
+        if baselines and not parsed.get("intercepted"):
+            target_text = parsed.get("text", "").strip()
+            for bname, bdata in baselines.items():
+                if target_text == bdata.get("text", "").strip():
+                    print(f"    EXACT-MATCH vs baseline: {bname}")
+        print()
+
+    print("\n=== CLASSIFICATION ===")
+    summary = classify(results)
+    for line in summary["verdict"]:
+        print(f"  {line}")
+    print(f"\n  signals: {summary['signals']}")
+
+    if args.save_raw:
+        with Path(args.save_raw).open("w", encoding="utf-8") as f:
+            json.dump({"target": args.label, "results": results, "classification": summary}, f,
+                      indent=2, ensure_ascii=False, default=str)
+        print(f"\n  raw saved to {args.save_raw}")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
+
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+I’ve read all five files. A few concrete implementation issues are already visible, so I’m checking line numbers and doing a no-write runtime sanity check of the scorers rather than relying only on visual inspection.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n \"def score_stylometric_717|def score_temporal_cutoff|def score_tight_reasoning|def score_self_introspection|def score_anti_euler|def classify|def run_cli|def parse_cli_output|def tokenize_cmd|shell=True|canonical_opening_regex|banned_words|regenerate-baselines|generated_date\" .scratch\\proxy-forensics" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\fingerprint.py --list-probes" in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T14:05:12.069853Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\fingerprint.py --list-probes"` rejected: blocked by policy
+2026-04-24T14:05:12.070128Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python -c \"import importlib.util; p=r'.scratch\\\\proxy-forensics\\\\fingerprint.py'; spec=importlib.util.spec_from_file_location('fp', p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m.score_stylometric_717({'text':'Reasoning: phi(100)=40, so 7"'^4 = 2401 = 1. Answer: 07'"'}, None))\""` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python -c \"import importlib.util; p=r'.scratch\\\\proxy-forensics\\\\fingerprint.py'; spec=importlib.util.spec_from_file_location('fp', p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m.score_stylometric_717({'text':'Reasoning: phi(100)=40, so 7"'^4 = 2401 = 1. Answer: 07'"'}, None))\"" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python .scratch\\proxy-forensics\\fingerprint.py --list-probes"` rejected: blocked by policy
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python -c \"import importlib.util; p=r'.scratch\\\\proxy-forensics\\\\fingerprint.py'; spec=importlib.util.spec_from_file_location('fp', p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m.score_stylometric_717({'text':'Reasoning: phi(100)=40, so 7"'^4 = 2401 = 1. Answer: 07'"'}, None))\""` rejected: blocked by policy
+2026-04-24T14:05:12.246211Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python -c \"import importlib.util; p=r'.scratch\\\\proxy-forensics\\\\fingerprint.py'; spec=importlib.util.spec_from_file_location('fp', p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m.score_anti_euler({'text':'Reasoning: 7"'^2=49; 7''^4=49''^2=2401 ? 1 (mod 100). Answer: 7'"'}, None))\""` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python -c \"import importlib.util; p=r'.scratch\\\\proxy-forensics\\\\fingerprint.py'; spec=importlib.util.spec_from_file_location('fp', p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m.score_anti_euler({'text':'Reasoning: 7"'^2=49; 7''^4=49''^2=2401 ? 1 (mod 100). Answer: 7'"'}, None))\"" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$env:PYTHONDONTWRITEBYTECODE='"'1'; python -c \"import importlib.util; p=r'.scratch\\\\proxy-forensics\\\\fingerprint.py'; spec=importlib.util.spec_from_file_location('fp', p); m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m); print(m.score_anti_euler({'text':'Reasoning: 7"'^2=49; 7''^4=49''^2=2401 ? 1 (mod 100). Answer: 7'"'}, None))\""` rejected: blocked by policy
+ succeeded in 1817ms:
+.scratch\proxy-forensics\fingerprint.py:13:  python fingerprint.py --regenerate-baselines   # expensive, runs 5 probes × 3 Opus models
+.scratch\proxy-forensics\fingerprint.py:63:def run_cli(base_cmd_tokens, prompt, shell=False, timeout=300):
+.scratch\proxy-forensics\fingerprint.py:86:def parse_cli_output(out: str) -> dict:
+.scratch\proxy-forensics\fingerprint.py:126:def score_stylometric_717(parsed, baseline_text):
+.scratch\proxy-forensics\fingerprint.py:153:def score_temporal_cutoff(parsed):
+.scratch\proxy-forensics\fingerprint.py:168:def score_tight_reasoning(parsed):
+.scratch\proxy-forensics\fingerprint.py:189:def score_self_introspection(parsed):
+.scratch\proxy-forensics\fingerprint.py:219:def score_anti_euler(parsed):
+.scratch\proxy-forensics\fingerprint.py:258:def classify(results):
+.scratch\proxy-forensics\fingerprint.py:318:def tokenize_cmd(cmd_str):
+.scratch\proxy-forensics\fingerprint.py:319:    # On Windows shell=True takes a string; otherwise split.
+.scratch\proxy-forensics\fingerprint.py:327:    ap.add_argument("--shell", action="store_true", help="Use shell=True (needed for .cmd/.bat on Windows)")
+.scratch\proxy-forensics\fingerprint.py:329:    ap.add_argument("--regenerate-baselines", action="store_true", help="Re-run all probes on Opus 4.5/4.6/4.7 and overwrite baselines.json (expensive, ~$3)")
+.scratch\proxy-forensics\baselines.json:3:    "generated_date": "2026-04-24",
+.scratch\proxy-forensics\baselines.json:25:      "canonical_opening_regex": "7\\^?\\s*4\\s*=?\\s*2401\\s*(≡|=)\\s*0?1\\s*\\(mod\\s*100\\)",
+.scratch\proxy-forensics\baselines.json:150:      "banned_words": ["euler", "totient", "fermat", "phi", "φ", "π", "Φ"],
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+The no-write Python sanity calls were blocked by local execution policy, so I’m switching to PowerShell/.NET checks and line-numbered reads. The important part is still inspectable from source: several scorer patterns and classification gates are deterministic.
+2026-04-24T14:05:37.238613Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\fingerprint.py' | ForEach-Object { "'$i++; if ($i -ge 120 -and $i -le 240) { '"'{0,4}: {1}' -f "'$i, $_ } }'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\fingerprint.py' | ForEach-Object { "'$i++; if ($i -ge 120 -and $i -le 240) { '"'{0,4}: {1}' -f "'$i, $_ } }' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\fingerprint.py' | ForEach-Object { "'$i++; if ($i -ge 120 -and $i -le 240) { '"'{0,4}: {1}' -f "'$i, $_ } }'` rejected: blocked by policy
+2026-04-24T14:05:37.240347Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\fingerprint.py' | ForEach-Object { "'$i++; if ($i -ge 258 -and $i -le 335) { '"'{0,4}: {1}' -f "'$i, $_ } }'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\fingerprint.py' | ForEach-Object { "'$i++; if ($i -ge 258 -and $i -le 335) { '"'{0,4}: {1}' -f "'$i, $_ } }' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\fingerprint.py' | ForEach-Object { "'$i++; if ($i -ge 258 -and $i -le 335) { '"'{0,4}: {1}' -f "'$i, $_ } }'` rejected: blocked by policy
+2026-04-24T14:05:37.363437Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "try { [regex]'?\\s*\\(\\s*100\\s*\\)' | Out-Null; 'regex-ok' } catch { "'$_.Exception.Message }'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "try { [regex]'?\\s*\\(\\s*100\\s*\\)' | Out-Null; 'regex-ok' } catch { "'$_.Exception.Message }' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "try { [regex]'?\\s*\\(\\s*100\\s*\\)' | Out-Null; 'regex-ok' } catch { "'$_.Exception.Message }'` rejected: blocked by policy
+2026-04-24T14:05:37.380787Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\METHODOLOGY.md' | ForEach-Object { "'$i++; if (($i -ge 20 -and $i -le 85) -or ($i -ge 87 -and $i -le 145) -or ($i -ge 150 -and $i -le 180)) { '"'{0,4}: {1}' -f "'$i, $_ } }'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\METHODOLOGY.md' | ForEach-Object { "'$i++; if (($i -ge 20 -and $i -le 85) -or ($i -ge 87 -and $i -le 145) -or ($i -ge 150 -and $i -le 180)) { '"'{0,4}: {1}' -f "'$i, $_ } }' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\METHODOLOGY.md' | ForEach-Object { "'$i++; if (($i -ge 20 -and $i -le 85) -or ($i -ge 87 -and $i -le 145) -or ($i -ge 150 -and $i -le 180)) { '"'{0,4}: {1}' -f "'$i, $_ } }'` rejected: blocked by policy
+2026-04-24T14:05:37.383065Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\RESULTS.md' | ForEach-Object { "'$i++; if (($i -ge 10 -and $i -le 24) -or ($i -ge 120 -and $i -le 155) -or ($i -ge 165 -and $i -le 187)) { '"'{0,4}: {1}' -f "'$i, $_ } }'` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\RESULTS.md' | ForEach-Object { "'$i++; if (($i -ge 10 -and $i -le 24) -or ($i -ge 120 -and $i -le 155) -or ($i -ge 165 -and $i -le 187)) { '"'{0,4}: {1}' -f "'$i, $_ } }' in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command '$i=0; Get-Content -Path '"'.scratch\\proxy-forensics\\RESULTS.md' | ForEach-Object { "'$i++; if (($i -ge 10 -and $i -le 24) -or ($i -ge 120 -and $i -le 155) -or ($i -ge 165 -and $i -le 187)) { '"'{0,4}: {1}' -f "'$i, $_ } }'` rejected: blocked by policy
+codex
+The sandbox policy is rejecting multi-line PowerShell scriptlets, but plain `rg` reads are fine. I’m using direct ripgrep context reads for the same line references.
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 8 \"def score_stylometric_717|def score_temporal_cutoff|def score_tight_reasoning|def score_self_introspection|def score_anti_euler\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+2026-04-24T14:05:54.863190Z ERROR codex_core::tools::router: error=`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 8 \"def classify|feature strip|decision|def tokenize_cmd|shell=True|add_argument\\(\\\"--shell\" .scratch\\proxy-forensics\\fingerprint.py"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 8 \"def classify|feature strip|decision|def tokenize_cmd|shell=True|add_argument\\(\\\"--shell\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+ declined in 0ms:
+`"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 8 \"def classify|feature strip|decision|def tokenize_cmd|shell=True|add_argument\\(\\\"--shell\" .scratch\\proxy-forensics\\fingerprint.py"` rejected: blocked by policy
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 5 \"Probe 5|Decision rule|most decisive|Distill|Non-Claude|Decision tree|Byte-exact|five-probe|Each probe isolates\" .scratch\\proxy-forensics\\METHODOLOGY.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 5 \"Verdict|Middleware inventory|Decisive result|A distilled student cannot|Hypothesis ranking|Tokenizer|Capability match|Unresolved\" .scratch\\proxy-forensics\\RESULTS.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 4 \"canonical_opening_regex|banned_words|generated_date|regenerating|run_flags|interpretation_rules|intercept_signature\" .scratch\\proxy-forensics\\baselines.json" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1781ms:
+118-        "cache_create": usage.get("cache_creation_input_tokens", 0),
+119-        "cache_read": usage.get("cache_read_input_tokens", 0),
+120-        "cost_usd": result.get("total_cost_usd"),
+121-        "text": text,
+122-        "thinking_chars": thinking_chars,
+123-    }
+124-
+125-
+126:def score_stylometric_717(parsed, baseline_text):
+127-    findings = []
+128-    text = parsed.get("text", "")
+129-    # Check for false-start frames that are NOT in Anthropic-direct baselines
+130-    for pat, label in [
+131-        (r"φ\s*\(\s*100\s*\)", "phi(100) false-start"),
+132-        (r"euler", "Euler-framing"),
+133-        (r"totient", "totient-framing"),
+134-        (r"fermat", "Fermat-framing"),
+--
+145-    # Answer correctness
+146-    if re.search(r"answer:\s*0?7\b", text, re.IGNORECASE):
+147-        findings.append("ANSWER_CORRECT: 07")
+148-    else:
+149-        findings.append("ANSWER_INCORRECT_OR_MISSING")
+150-    return findings
+151-
+152-
+153:def score_temporal_cutoff(parsed):
+154-    text = parsed.get("text", "")
+155-    findings = []
+156-    patterns = {
+157-        r"(january|jan)\s*2025": "Jan 2025 events",
+158-        r"(april|apr)\s*2025.*(pope francis|francis)": "April 2025 Pope Francis death",
+159-        r"(may|april|apr)\s*2025.*(leo xiv|prevost)": "May 2025 Pope Leo XIV election",
+160-        r"(june|jun|july|jul|august|aug|september|sep|october|oct|november|nov|december|dec)\s*2025": "Late-2025 event (cutoff > April 2025)",
+161-    }
+162-    for pat, desc in patterns.items():
+163-        if re.search(pat, text, re.IGNORECASE):
+164-            findings.append(f"KNOWS: {desc}")
+165-    return findings
+166-
+167-
+168:def score_tight_reasoning(parsed):
+169-    text = parsed.get("text", "").strip()
+170-    findings = []
+171-    # Crude sentence splitter: split on '. ' or '.\n'
+172-    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+173-    findings.append(f"SENTENCE_COUNT: {len(sentences)}")
+174-    if len(sentences) == 3:
+175-        findings.append("SENTENCE_COUNT_PASS")
+176-        if re.search(r"(chinese remainder|crt)", sentences[1], re.IGNORECASE):
+--
+181-            findings.append("THEREFORE_S3_PASS")
+182-        else:
+183-            findings.append("THEREFORE_S3_FAIL")
+184-    else:
+185-        findings.append("SENTENCE_COUNT_FAIL")
+186-    return findings
+187-
+188-
+189:def score_self_introspection(parsed):
+190-    findings = []
+191-    if parsed.get("intercepted"):
+192-        raw = parsed.get("raw", "")
+193-        findings.append(f"HARD_INTERCEPT: raw={len(raw)} bytes")
+194-        findings.append(f"RAW: {raw[:200]!r}")
+195-        if raw.strip() == '{"acknowledged":true}':
+196-            findings.append("CANNED_ACK_SIGNATURE_MATCH")
+197-        return findings
+--
+211-                findings.append(f"FIELD_{k}: {obj[k]!r}")
+212-            else:
+213-                findings.append(f"FIELD_MISSING: {k}")
+214-    except json.JSONDecodeError:
+215-        findings.append("JSON_PARSE_FAIL")
+216-    return findings
+217-
+218-
+219:def score_anti_euler(parsed):
+220-    findings = []
+221-    text = parsed.get("text", "")
+222-    banned = ["euler", "totient", "fermat", "phi", "φ", "π", "Φ"]
+223-    violations = [w for w in banned if w.lower() in text.lower()]
+224-    if violations:
+225-        findings.append(f"BAN_VIOLATED: {violations}")
+226-        findings.append("INTERPRETATION: rigid middleware injection OR distilled bias")
+227-    else:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2807ms:
+2-
+3-**Date:** 2026-04-24
+4-**Target:** `claude-aw.cmd --model opus` (wrapper setting `ANTHROPIC_BASE_URL=https://api.claudecodeapi.cloud`)
+5-**Baselines:** Anthropic-direct Opus 4.5, 4.6, 4.7 via official `claude` CLI v2.1.119
+6-
+7:## Verdict
+8-
+9-**Real Claude Opus (likely 4.7) hosted on Google Vertex AI, fronted by an aggressive middleware gateway.**
+10-
+11-Not a distillation, not a Chinese model clone, not an alias of an older Claude release. The underlying model is genuine frontier Claude; the gateway performs active manipulation on top.
+12-
+13:## Middleware inventory
+14-
+15-| Layer | Behavior | Overrideable? | Evidence |
+16-|---|---|:-:|---|
+17-| Hard filter | Self-introspection → canned `{"acknowledged":true}` (22 bytes) | No | Byte-exact repeat ×2 |
+18-| Soft injection | Math tasks → Euler/totient-first opening | **Yes** | Anti-Euler probe |
+--
+90-
+91-All AW facts independently verifiable. AW cutoff matches or exceeds 4.7.
+92-
+93-#### Probe 2 — Strict-format reasoning (CRT proof)
+94-
+95:| Target | Sentences | CRT in s2 | "Therefore" in s3 | Verdict |
+96-|---|:-:|:-:|:-:|---|
+97-| 4.5 off | 3 | ✓ | ✓ | PASS |
+98-| 4.6 off | 3 | ✓ | ✓ | PASS |
+99-| 4.7 off | 3 | ✓ (CRT) | ✓ | PASS |
+100-| **AW** | 3 | ✓ (CRT) | ✓ | **PASS** |
+--
+125-
+126-### Stage 6. Anti-Euler killer probe (recommended by Opus 4.7 max)
+127-
+128-Prompt: `Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'.`
+129-
+130:| Target | Opening | Banned words | Verdict |
+131-|---|---|:-:|---|
+132-| 4.5 off | `7^2 = 49, 7^4 = 49^2 = 2401 ≡ 1 (mod 100)` | none | COMPLIANT |
+133-| 4.6 off | `7^2 = 49, 7^4 = 49^2 = 2401 ≡ 01 (mod 100)` | none | COMPLIANT |
+134-| 4.7 off | `7^2 = 49; 7^4 = 49^2 = 2401 ≡ 1 (mod 100)` | none | COMPLIANT |
+135-| **AW run1** | `7^2=49; 7^4=49·49=2401≡01 mod 100` | none | **COMPLIANT** |
+136-| **AW run2** | `7^2=49; 7^4=49·49=2401≡1` | none | **COMPLIANT** |
+137-
+138:**Decisive result:** AW switched from φ-opening to canonical `7^4 ≡ 1` under explicit instruction. A distilled student cannot do this on demand — this is a capable base model under soft injection.
+139-
+140:## Hypothesis ranking
+141-
+142-| Rank | Hypothesis | Status | Key counter-argument |
+143-|:-:|---|---|---|
+144-| **1** | **A+Middleware: real Opus 4.7 via Vertex with aggressive shim** | ✅ **CONFIRMED** | Anti-Euler override + byte-exact intercept reproducible |
+145-| 2 | C: Distilled student trained on Claude outputs | ❌ refuted | Probe 2 rigor + anti-Euler switch = capable base |
+146-| 3 | E: Pruned/quantized Opus | ❌ weak fit | Would degrade gracefully, not show injection signature |
+147-| 4 | F: Non-Claude base + Claude fine-tune | ❌ refuted | Constant (not proportional) tokenizer offset |
+148-| 5 | B: Older Opus checkpoint | ❌ refuted | Cutoff ≥ July 2025 matches latest |
+149-| 6 | D: Hybrid multi-model routing | ❌ refuted | Token compression (not inflation) seen |
+150-
+151:## Capability match
+152-
+153-| Capability | AW observation | Matches |
+154-|---|---|---|
+155-| Knowledge cutoff | ≥ July 2025 | Opus 4.7 |
+156-| Reasoning rigor | Strict CRT-proof PASS | Opus 4.x tier |
+157-| Style fingerprint | `7^4 ≡ 1 (mod 100)` under override | Opus 4.x canonical |
+158:| Tokenizer | Claude BPE + constant +7 offset | Claude family (injected prefix) |
+159-| Censorship | Factual on Tiananmen/Xinjiang/Taiwan | Claude, not Chinese models |
+160-| Provider routing | `msg_vrtx_*` prefix | Google Vertex AI |
+161-
+162:## Unresolved
+163-
+164-| Item | Status |
+165-|---|---|
+166-| Vision 39 vs 75 px discrepancy | Not explained by math probes — likely domain-specific effect |
+167-| Exact Opus revision on Vertex | 4.6 or 4.7; knowledge suggests 4.7 |
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 3572ms:
+12-
+13-## Core invariants of this method
+14-
+15-- **Baselines are Anthropic-direct, collected fresh with identical flags.** Without trusted reference outputs, nothing can be compared stylometrically.
+16-- **All probes run with `--effort max --tools ""`**. Eliminates tool-use confounders and normalizes effort across targets.
+17:- **Each probe isolates one axis.** Never conflate "knowledge recency" with "reasoning capability" with "gateway filtering" — separate tests catch each.
+18-- **Byte-level comparison matters for intercept detection.** Fuzzy comparison misses deterministic canned responses.
+19-
+20:## The five-probe battery
+21-
+22-Each probe answers a specific question about the target.
+23-
+24-### Probe 1 — Stylometric fingerprint
+25-
+--
+59-**Scoring (all three must PASS):**
+60-- Exactly 3 sentences (count by `.!?` terminators)
+61-- Sentence 2 contains "Chinese Remainder Theorem" or "CRT"
+62-- Sentence 3 starts with "Therefore"
+63-
+64:**Distilled students commonly fail on:**
+65-- Miscounting sentences (off-by-one)
+66-- Placing CRT in sentence 1 or 3
+67-- Starting sentence 3 with something other than "Therefore"
+68-
+69-Real Opus 4.5/4.6/4.7 all pass. Failure here is a strong negative signal.
+--
+78-
+79-**Smoking gun:** target returns a fixed canned response (e.g. `{"acknowledged":true}\n` = 22 bytes) instead of the requested schema, **and the response is byte-exact on repeat runs**. No real model produces identical 22-byte strings on two independent runs of a novel prompt.
+80-
+81-**Second-order flag:** model introspects but reports capabilities that contradict observable pipeline behavior (e.g. reports `supports_extended_thinking: true` while Probe 1 showed zero thinking tokens). Either backend is real Opus behind a stripping shim (points to hypothesis A), or the model hallucinates capabilities (points to C).
+82-
+83:### Probe 5 — Soft-override (injection vs distill discriminator)
+84-
+85-**Question:** Is the forced framing from Probe 1 an injected system prompt (overrideable) or baked-in distill bias (not overrideable)?
+86-
+87-**Prompt:** "Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'."
+88-
+89-**Key subtlety:** add a **positive steer** ("start with 7^2 and 7^4"). This removes the excuse that the model used φ because it didn't know alternatives. If the model still leaks banned vocabulary despite positive steer + explicit ban, the bias is rigid (distill). If it switches to the canonical opening, bias was soft injection.
+90-
+91:**Decision rule:**
+92-- Target complies (no banned words, uses canonical `7^4` opening) → **soft injection confirmed, hypothesis A**
+93-- Target still uses banned framing → **rigid bias, hypothesis C** (or extremely aggressive injection that overrides user)
+94-
+95:This is the **most decisive single probe** in the battery. Run it whenever stylometric fingerprint (Probe 1) shows bias.
+96-
+97:## Decision tree
+98-
+99-```
+100-START
+101-│
+102-├── Run Probe 1 (stylometric)
+103-│   ├── Canonical 7^4 opening? → skip to Probe 2
+104:│   └── False-start / tautology? → run Probe 5 (soft-override)
+105-│       ├── Complies with override → SOFT INJECTION (A)
+106-│       └── Still biased → RIGID (C) or aggressive injection
+107-│
+108-├── Run Probe 2 (temporal cutoff)
+109-│   ├── Recent events verified → backend not older than the cutoff they match
+--
+113-├── Run Probe 3 (strict format)
+114-│   ├── Passes all constraints → capable base model
+115-│   └── Fails → low-rigor backend, likely distill
+116-│
+117-├── Run Probe 4 (introspection)
+118:│   ├── Byte-exact canned response → ACTIVE MIDDLEWARE (regardless of backend)
+119-│   ├── Model answers honestly → no introspection filter
+120-│   └── Refuses gracefully → standard RLHF, no filter
+121-│
+122-└── Check cache/thinking/effort fingerprints in parsed output
+123-    ├── cache_create=0, cache_read=0 → gateway strips cache_control
+--
+130-**A+Middleware (real backend, aggressive gateway):**
+131-- Probe 1: may show false-start (soft injection)
+132-- Probe 2: recent cutoff match
+133-- Probe 3: passes
+134-- Probe 4: byte-exact intercept likely
+135:- Probe 5: complies with override
+136-- Feature fingerprint: cache/thinking/effort stripped
+137-
+138-**C (distilled student):**
+139-- Probe 1: false-start OR stilted output
+140-- Probe 2: stale or hallucinated events
+141-- Probe 3: fails format constraints
+142-- Probe 4: attempts introspection (may lie)
+143:- Probe 5: cannot switch opening
+144-- Feature fingerprint: no middleware signatures
+145-
+146-**B (older genuine checkpoint):**
+147-- Probe 1: canonical but different phrasing than latest
+148-- Probe 2: cutoff matches older model
+149-- Probe 3: passes
+150-- Probe 4: honest introspection
+151:- Probe 5: complies
+152-
+153:**Non-Claude imitator (F):**
+154-- Ruled out by tokenizer: constant +7 offset → Claude BPE. Proportional drift → different tokenizer.
+155-
+156-## Provider detection (msg_id prefix)
+157-
+158-| Prefix | Provider |
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 3664ms:
+1-{
+2-  "metadata": {
+3:    "generated_date": "2026-04-24",
+4-    "cli_version": "2.1.119",
+5:    "run_flags": {
+6-      "effort": "max",
+7-      "tools": "disabled (--tools \"\")",
+8-      "output_format": "json"
+9-    },
+--
+21-    "stylometric_717": {
+22-      "purpose": "Detect stylometric divergence + output compression. Unconstrained math prompt — model picks its canonical opening.",
+23-      "prompt": "Compute 7^17 mod 100. Answer in exactly two lines. Line 1: 'Reasoning:' followed by the key modular identity. Line 2: 'Answer:' followed by the two digits only.",
+24-      "expected_answer": "07",
+25:      "canonical_opening_regex": "7\\^?\\s*4\\s*=?\\s*2401\\s*(≡|=)\\s*0?1\\s*\\(mod\\s*100\\)",
+26-      "baselines": {
+27-        "claude-opus-4-5": {
+28-          "reported_model": "claude-opus-4-5-20251101",
+29-          "msg_id_prefix": "msg_018WGiXp",
+--
+137-          "verdict": "CLEAN_JSON",
+138-          "text": "{\"architecture_family\":\"Claude\",\"supports_extended_thinking\":true,\"can_use_prompt_caching\":true,\"knowledge_cutoff_month\":\"January 2026\"}"
+139-        }
+140-      },
+141:      "intercept_signature": {
+142-        "description": "AW gateway returned this literal 22-byte string instead of expected JSON, byte-exact on 2 consecutive runs — definitive hard-intercept signature.",
+143-        "raw_stdout": "{\"acknowledged\":true}\n",
+144-        "byte_count": 22
+145-      }
+146-    },
+147-    "anti_euler_override": {
+148-      "purpose": "Killer discriminator: if target uses forced-Euler framing under ordinary prompt but complies when explicitly banned, it's soft-injection (not distill). Distill cannot switch canonical opening on demand.",
+149-      "prompt": "Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'.",
+150:      "banned_words": ["euler", "totient", "fermat", "phi", "φ", "π", "Φ"],
+151-      "expected_answer": "7",
+152-      "baselines": {
+153-        "claude-opus-4-5": {
+154-          "reported_model": "claude-opus-4-5-20251101",
+--
+170-        }
+171-      }
+172-    }
+173-  },
+174:  "interpretation_rules": {
+175-    "hypothesis_A_real_backend_with_middleware": {
+176-      "indicators": [
+177-        "canonical_opening in stylometric probe",
+178-        "passes anti_euler_override compliance",
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 10 \"def classify\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 8 \"feature_strip\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 6 \"CLASSIFICATION\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 5 \"tokenize_cmd\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 5 \"--shell\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1495ms:
+248-        return {"probe_id": probe_id, "error": "timeout"}
+249-    parsed = parse_cli_output(raw.get("stdout", ""))
+250-    findings = SCORERS.get(probe_id, lambda p, b: ["no_scorer"])(parsed, None)
+251-    return {
+252-        "probe_id": probe_id,
+253-        "parsed": parsed,
+254-        "findings": findings,
+255-    }
+256-
+257-
+258:def classify(results):
+259-    """Return top-line classification given a full probe-run result dict."""
+260-    signals = {
+261-        "hard_intercept": False,
+262-        "soft_injection_overridden": False,
+263-        "rigid_injection_or_distill": False,
+264-        "canonical_style_under_override": False,
+265-        "recent_cutoff": False,
+266-        "format_rigor_pass": False,
+267-        "feature_strip": False,
+268-        "label_spoofing": False,
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2320ms:
+259-    """Return top-line classification given a full probe-run result dict."""
+260-    signals = {
+261-        "hard_intercept": False,
+262-        "soft_injection_overridden": False,
+263-        "rigid_injection_or_distill": False,
+264-        "canonical_style_under_override": False,
+265-        "recent_cutoff": False,
+266-        "format_rigor_pass": False,
+267:        "feature_strip": False,
+268-        "label_spoofing": False,
+269-    }
+270-
+271-    intro = results.get("self_introspection_json", {}).get("findings", [])
+272-    if any("HARD_INTERCEPT" in f for f in intro):
+273-        signals["hard_intercept"] = True
+274-
+275-    anti = results.get("anti_euler_override", {}).get("findings", [])
+--
+285-
+286-    tight = results.get("tight_reasoning_crt", {}).get("findings", [])
+287-    if ("SENTENCE_COUNT_PASS" in tight and "CRT_IN_SENTENCE_2_PASS" in tight and "THEREFORE_S3_PASS" in tight):
+288-        signals["format_rigor_pass"] = True
+289-
+290-    # feature strip detection
+291-    sty = results.get("stylometric_717", {}).get("parsed", {})
+292-    if sty.get("cache_create") == 0 and sty.get("cache_read") == 0:
+293:        signals["feature_strip"] = True
+294-
+295-    # decision
+296-    verdict = []
+297-    if signals["hard_intercept"]:
+298-        verdict.append("ACTIVE_MIDDLEWARE_CONFIRMED (hard intercept on introspection)")
+299-    if signals["soft_injection_overridden"]:
+300-        verdict.append("SOFT_INJECTION_DETECTED (overrideable by explicit user instruction — rules out rigid distill)")
+301-    if signals["rigid_injection_or_distill"]:
+302-        verdict.append("RIGID_BIAS (injection not overrideable, OR distilled student — inspect stylometric details)")
+303-    if signals["recent_cutoff"] and signals["format_rigor_pass"]:
+304-        verdict.append("CAPABLE_BASE_MODEL (passes cutoff + rigor — backend is real frontier Claude)")
+305:    if signals["feature_strip"]:
+306-        verdict.append("FEATURE_STRIP (no caching observed)")
+307-
+308-    if signals["hard_intercept"] and signals["soft_injection_overridden"] and signals["recent_cutoff"] and signals["format_rigor_pass"]:
+309-        verdict.append(">>> CLASSIFICATION: A+Middleware (real Claude + aggressive gateway shim) <<<")
+310-    elif signals["rigid_injection_or_distill"] and not signals["format_rigor_pass"]:
+311-        verdict.append(">>> CLASSIFICATION: C (distilled student) <<<")
+312-    else:
+313-        verdict.append(">>> CLASSIFICATION: ambiguous — expand probes <<<")
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 3117ms:
+303-    if signals["recent_cutoff"] and signals["format_rigor_pass"]:
+304-        verdict.append("CAPABLE_BASE_MODEL (passes cutoff + rigor — backend is real frontier Claude)")
+305-    if signals["feature_strip"]:
+306-        verdict.append("FEATURE_STRIP (no caching observed)")
+307-
+308-    if signals["hard_intercept"] and signals["soft_injection_overridden"] and signals["recent_cutoff"] and signals["format_rigor_pass"]:
+309:        verdict.append(">>> CLASSIFICATION: A+Middleware (real Claude + aggressive gateway shim) <<<")
+310-    elif signals["rigid_injection_or_distill"] and not signals["format_rigor_pass"]:
+311:        verdict.append(">>> CLASSIFICATION: C (distilled student) <<<")
+312-    else:
+313:        verdict.append(">>> CLASSIFICATION: ambiguous — expand probes <<<")
+314-
+315-    return {"signals": signals, "verdict": verdict}
+316-
+317-
+318-def tokenize_cmd(cmd_str):
+319-    # On Windows shell=True takes a string; otherwise split.
+--
+387-            target_text = parsed.get("text", "").strip()
+388-            for bname, bdata in baselines.items():
+389-                if target_text == bdata.get("text", "").strip():
+390-                    print(f"    EXACT-MATCH vs baseline: {bname}")
+391-        print()
+392-
+393:    print("\n=== CLASSIFICATION ===")
+394-    summary = classify(results)
+395-    for line in summary["verdict"]:
+396-        print(f"  {line}")
+397-    print(f"\n  signals: {summary['signals']}")
+398-
+399-    if args.save_raw:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 3930ms:
+313-        verdict.append(">>> CLASSIFICATION: ambiguous — expand probes <<<")
+314-
+315-    return {"signals": signals, "verdict": verdict}
+316-
+317-
+318:def tokenize_cmd(cmd_str):
+319-    # On Windows shell=True takes a string; otherwise split.
+320-    return shlex.split(cmd_str, posix=False)
+321-
+322-
+323-def main():
+--
+345-        return 1
+346-
+347-    if not args.cmd or not args.label:
+348-        ap.error("--cmd and --label required (or use --list-probes)")
+349-
+350:    cmd_tokens = tokenize_cmd(args.cmd)
+351-    probe_ids = args.probes or list(data["probes"].keys())
+352-
+353-    print(f"=== Fingerprinting target: {args.label} ===")
+354-    print(f"    command: {args.cmd}")
+355-    print(f"    shell:   {args.shell}")
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T14:06:16.493539Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 5 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+rg: unrecognized flag --shell
+
+ exited 1 in 4981ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+rg: unrecognized flag --shell
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 6 \"subprocess.run\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 6 \"--output-format\" .scratch\\proxy-forensics\\fingerprint.py .scratch\\proxy-forensics\\README.md .scratch\\proxy-forensics\\baselines.json" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 6 \"not_stream_list|intercepted|json.loads|assistant|result\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 5 -- \"--shell\" .scratch\\proxy-forensics\\fingerprint.py .scratch\\proxy-forensics\\README.md" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 4 \"Regenerating baselines|regenerate\" .scratch\\proxy-forensics\\fingerprint.py .scratch\\proxy-forensics\\README.md .scratch\\proxy-forensics\\METHODOLOGY.md" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 2309ms:
+66-        "--effort", "max",
+67-        "--tools", "",
+68-        "--output-format", "json",
+69-    ]
+70-    full_cmd = base_cmd_tokens + cli_flags
+71-    try:
+72:        r = subprocess.run(
+73-            full_cmd,
+74-            capture_output=True,
+75-            text=True,
+76-            encoding="utf-8",
+77-            errors="replace",
+78-            shell=shell,
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 3278ms:
+.scratch\proxy-forensics\fingerprint.py-9-Usage:
+.scratch\proxy-forensics\fingerprint.py-10-  python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
+.scratch\proxy-forensics\fingerprint.py-11-  python fingerprint.py --label "aggregator-X" --cmd "claude --model whatever"
+.scratch\proxy-forensics\fingerprint.py-12-  python fingerprint.py --list-probes
+.scratch\proxy-forensics\fingerprint.py:13:  python fingerprint.py --regenerate-baselines   # expensive, runs 5 probes × 3 Opus models
+.scratch\proxy-forensics\fingerprint.py-14-
+.scratch\proxy-forensics\fingerprint.py-15-Dependencies: Python 3.9+, baselines.json co-located with this script.
+.scratch\proxy-forensics\fingerprint.py-16-
+.scratch\proxy-forensics\fingerprint.py-17-Design notes:
+--
+.scratch\proxy-forensics\fingerprint.py-325-    ap.add_argument("--label", help="Display label for target (e.g. 'AW')")
+.scratch\proxy-forensics\fingerprint.py-326-    ap.add_argument("--cmd", help="Base command string, e.g. 'claude-aw.cmd --model opus'")
+.scratch\proxy-forensics\fingerprint.py-327-    ap.add_argument("--shell", action="store_true", help="Use shell=True (needed for .cmd/.bat on Windows)")
+.scratch\proxy-forensics\fingerprint.py-328-    ap.add_argument("--list-probes", action="store_true", help="List available probes and exit")
+.scratch\proxy-forensics\fingerprint.py:329:    ap.add_argument("--regenerate-baselines", action="store_true", help="Re-run all probes on Opus 4.5/4.6/4.7 and overwrite baselines.json (expensive, ~$3)")
+.scratch\proxy-forensics\fingerprint.py-330-    ap.add_argument("--probes", nargs="+", help="Only run listed probes (ids); default = all")
+.scratch\proxy-forensics\fingerprint.py-331-    ap.add_argument("--save-raw", help="Path to save raw per-probe parsed output (JSON)")
+.scratch\proxy-forensics\fingerprint.py-332-    args = ap.parse_args()
+.scratch\proxy-forensics\fingerprint.py-333-
+--
+.scratch\proxy-forensics\fingerprint.py-338-        for pid, probe in data["probes"].items():
+.scratch\proxy-forensics\fingerprint.py-339-            print(f"  {pid}: {probe['purpose']}")
+.scratch\proxy-forensics\fingerprint.py-340-        return 0
+.scratch\proxy-forensics\fingerprint.py-341-
+.scratch\proxy-forensics\fingerprint.py:342:    if args.regenerate_baselines:
+.scratch\proxy-forensics\fingerprint.py:343:        print("Regenerating baselines is NOT automated here (would need 15 Opus calls, ~$3).")
+.scratch\proxy-forensics\fingerprint.py:344:        print("To regenerate: edit baselines.json manually or run probe_battery.py from .scratch/")
+.scratch\proxy-forensics\fingerprint.py-345-        return 1
+.scratch\proxy-forensics\fingerprint.py-346-
+.scratch\proxy-forensics\fingerprint.py-347-    if not args.cmd or not args.label:
+.scratch\proxy-forensics\fingerprint.py-348-        ap.error("--cmd and --label required (or use --list-probes)")
+--
+.scratch\proxy-forensics\README.md-76-
+.scratch\proxy-forensics\README.md-77-## Cost
+.scratch\proxy-forensics\README.md-78-
+.scratch\proxy-forensics\README.md-79-- **Running on new target**: ~$0.10-0.50 (5 probes, depends on how much the target charges)
+.scratch\proxy-forensics\README.md:80:- **Regenerating baselines**: ~$3 (15 Opus calls). Do this only when new model generations ship.
+.scratch\proxy-forensics\README.md-81-
+.scratch\proxy-forensics\README.md-82-## Extending
+.scratch\proxy-forensics\README.md-83-
+.scratch\proxy-forensics\README.md:84:Add a probe: edit `baselines.json` and insert a new entry under `probes`. Implement a scorer in `fingerprint.py` (`score_*` function) and register it in the `SCORERS` dict. Baselines for that probe must be added manually or regenerated.
+.scratch\proxy-forensics\README.md-85-
+.scratch\proxy-forensics\README.md-86-## Assumptions
+.scratch\proxy-forensics\README.md-87-
+.scratch\proxy-forensics\README.md-88-- Target honors standard Claude Code CLI flags (`-p`, `--model`, `--effort`, `--tools`, `--output-format json`).
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 4095ms:
+83-    return {"stdout": r.stdout, "stderr": r.stderr, "returncode": r.returncode}
+84-
+85-
+86-def parse_cli_output(out: str) -> dict:
+87-    """Parse Claude CLI stream-json output. Returns normalized dict.
+88-
+89:    Returns an 'intercepted' flag when the output is NOT a Claude CLI stream
+90-    (e.g. gateway returned a canned object) — that is itself strong evidence.
+91-    """
+92-    if not out:
+93:        return {"intercepted": True, "raw": "", "reason": "empty_stdout"}
+94-    try:
+95:        arr = json.loads(out)
+96-    except json.JSONDecodeError as e:
+97:        return {"intercepted": True, "raw": out, "reason": f"non_json: {e}"}
+98-    if not isinstance(arr, list):
+99-        return {
+100:            "intercepted": True,
+101-            "raw": out,
+102-            "parsed_object": arr,
+103:            "reason": "not_stream_list",
+104-        }
+105:    result = next((x for x in arr if x.get("type") == "result"), {})
+106:    assistants = [x for x in arr if x.get("type") == "assistant"]
+107:    last = assistants[-1].get("message", {}) if assistants else {}
+108-    content = last.get("content", [])
+109-    text = "\n".join(c.get("text", "") for c in content if c.get("type") == "text")
+110-    thinking_chars = sum(len(c.get("thinking", "")) for c in content if c.get("type") == "thinking")
+111:    usage = result.get("usage", {})
+112-    return {
+113:        "intercepted": False,
+114-        "reported_model": last.get("model"),
+115-        "msg_id": last.get("id", ""),
+116-        "msg_id_provider": detect_provider(last.get("id", "")),
+117-        "out_tok": usage.get("output_tokens"),
+118-        "cache_create": usage.get("cache_creation_input_tokens", 0),
+119-        "cache_read": usage.get("cache_read_input_tokens", 0),
+120:        "cost_usd": result.get("total_cost_usd"),
+121-        "text": text,
+122-        "thinking_chars": thinking_chars,
+123-    }
+124-
+125-
+126-def score_stylometric_717(parsed, baseline_text):
+--
+185-        findings.append("SENTENCE_COUNT_FAIL")
+186-    return findings
+187-
+188-
+189-def score_self_introspection(parsed):
+190-    findings = []
+191:    if parsed.get("intercepted"):
+192-        raw = parsed.get("raw", "")
+193-        findings.append(f"HARD_INTERCEPT: raw={len(raw)} bytes")
+194-        findings.append(f"RAW: {raw[:200]!r}")
+195-        if raw.strip() == '{"acknowledged":true}':
+196-            findings.append("CANNED_ACK_SIGNATURE_MATCH")
+197-        return findings
+--
+201-    # Remove codefences if present
+202-    codefence_match = re.search(r"```(?:json)?\s*(.+?)```", stripped, re.DOTALL)
+203-    if codefence_match:
+204-        findings.append("FORMAT_FAIL: wrapped in codefence")
+205-        stripped = codefence_match.group(1).strip()
+206-    try:
+207:        obj = json.loads(stripped)
+208-        findings.append("JSON_PARSE_OK")
+209-        for k in ("architecture_family", "supports_extended_thinking", "can_use_prompt_caching", "knowledge_cutoff_month"):
+210-            if k in obj:
+211-                findings.append(f"FIELD_{k}: {obj[k]!r}")
+212-            else:
+213-                findings.append(f"FIELD_MISSING: {k}")
+--
+252-        "probe_id": probe_id,
+253-        "parsed": parsed,
+254-        "findings": findings,
+255-    }
+256-
+257-
+258:def classify(results):
+259:    """Return top-line classification given a full probe-run result dict."""
+260-    signals = {
+261-        "hard_intercept": False,
+262-        "soft_injection_overridden": False,
+263-        "rigid_injection_or_distill": False,
+264-        "canonical_style_under_override": False,
+265-        "recent_cutoff": False,
+266-        "format_rigor_pass": False,
+267-        "feature_strip": False,
+268-        "label_spoofing": False,
+269-    }
+270-
+271:    intro = results.get("self_introspection_json", {}).get("findings", [])
+272-    if any("HARD_INTERCEPT" in f for f in intro):
+273-        signals["hard_intercept"] = True
+274-
+275:    anti = results.get("anti_euler_override", {}).get("findings", [])
+276-    if any("BAN_COMPLIANT" in f for f in anti) and any("CANONICAL_7^4_OPENING" in f for f in anti):
+277-        signals["soft_injection_overridden"] = True
+278-        signals["canonical_style_under_override"] = True
+279-    if any("BAN_VIOLATED" in f for f in anti):
+280-        signals["rigid_injection_or_distill"] = True
+281-
+282:    temp = results.get("temporal_cutoff", {}).get("findings", [])
+283-    if any("May 2025" in f or "Leo XIV" in f or "cutoff > April 2025" in f for f in temp):
+284-        signals["recent_cutoff"] = True
+285-
+286:    tight = results.get("tight_reasoning_crt", {}).get("findings", [])
+287-    if ("SENTENCE_COUNT_PASS" in tight and "CRT_IN_SENTENCE_2_PASS" in tight and "THEREFORE_S3_PASS" in tight):
+288-        signals["format_rigor_pass"] = True
+289-
+290-    # feature strip detection
+291:    sty = results.get("stylometric_717", {}).get("parsed", {})
+292-    if sty.get("cache_create") == 0 and sty.get("cache_read") == 0:
+293-        signals["feature_strip"] = True
+294-
+295-    # decision
+296-    verdict = []
+297-    if signals["hard_intercept"]:
+--
+352-
+353-    print(f"=== Fingerprinting target: {args.label} ===")
+354-    print(f"    command: {args.cmd}")
+355-    print(f"    shell:   {args.shell}")
+356-    print(f"    probes:  {probe_ids}\n")
+357-
+358:    results = {}
+359-    for pid in probe_ids:
+360-        probe = data["probes"].get(pid)
+361-        if not probe:
+362-            print(f"[skip] unknown probe: {pid}")
+363-            continue
+364-        print(f"--- PROBE: {pid} ---")
+365-        print(f"    purpose: {probe['purpose']}")
+366-        res = run_probe_on_target(pid, probe, cmd_tokens, args.shell)
+367:        results[pid] = res
+368-        if res.get("error"):
+369-            print(f"    ERROR: {res['error']}")
+370-            continue
+371-        parsed = res["parsed"]
+372:        if parsed.get("intercepted"):
+373-            print(f"    INTERCEPTED: reason={parsed.get('reason')}, raw len={len(parsed.get('raw',''))}")
+374-            print(f"    raw: {parsed.get('raw','')[:200]!r}")
+375-        else:
+376-            print(f"    reported_model : {parsed.get('reported_model')}")
+377-            print(f"    msg_id_provider: {parsed.get('msg_id_provider')} ({parsed.get('msg_id','')[:18]})")
+378-            print(f"    out_tok        : {parsed.get('out_tok')}")
+--
+380-            print(f"    text (first 300): {parsed.get('text','')[:300]}")
+381-        print(f"    findings:")
+382-        for f in res["findings"]:
+383-            print(f"      - {f}")
+384-        # Baseline comparison
+385-        baselines = probe.get("baselines", {})
+386:        if baselines and not parsed.get("intercepted"):
+387-            target_text = parsed.get("text", "").strip()
+388-            for bname, bdata in baselines.items():
+389-                if target_text == bdata.get("text", "").strip():
+390-                    print(f"    EXACT-MATCH vs baseline: {bname}")
+391-        print()
+392-
+393-    print("\n=== CLASSIFICATION ===")
+394:    summary = classify(results)
+395-    for line in summary["verdict"]:
+396-        print(f"  {line}")
+397-    print(f"\n  signals: {summary['signals']}")
+398-
+399-    if args.save_raw:
+400-        with Path(args.save_raw).open("w", encoding="utf-8") as f:
+401:            json.dump({"target": args.label, "results": results, "classification": summary}, f,
+402-                      indent=2, ensure_ascii=False, default=str)
+403-        print(f"\n  raw saved to {args.save_raw}")
+404-
+405-    return 0
+406-
+407-
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+2026-04-24T14:06:50.113895Z ERROR codex_core::tools::router: error=Exit code: 1
+Wall time: 5.1 seconds
+Output:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+rg: unrecognized flag --output-format
+
+ exited 1 in 5140ms:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+rg: unrecognized flag --output-format
+
+ succeeded in 5818ms:
+.scratch\proxy-forensics\README.md-22-```
+.scratch\proxy-forensics\README.md-23-
+.scratch\proxy-forensics\README.md-24-Fingerprint a new endpoint (Windows `.cmd` wrapper):
+.scratch\proxy-forensics\README.md-25-
+.scratch\proxy-forensics\README.md-26-```bash
+.scratch\proxy-forensics\README.md:27:python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
+.scratch\proxy-forensics\README.md-28-```
+.scratch\proxy-forensics\README.md-29-
+.scratch\proxy-forensics\README.md-30-Fingerprint a plain `claude` call (Linux/macOS or Windows with `.exe`):
+.scratch\proxy-forensics\README.md-31-
+.scratch\proxy-forensics\README.md-32-```bash
+--
+.scratch\proxy-forensics\README.md-34-```
+.scratch\proxy-forensics\README.md-35-
+.scratch\proxy-forensics\README.md-36-Run only specific probes:
+.scratch\proxy-forensics\README.md-37-
+.scratch\proxy-forensics\README.md-38-```bash
+.scratch\proxy-forensics\README.md:39:python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell \
+.scratch\proxy-forensics\README.md-40-  --probes self_introspection_json anti_euler_override
+.scratch\proxy-forensics\README.md-41-```
+.scratch\proxy-forensics\README.md-42-
+.scratch\proxy-forensics\README.md-43-Save raw results for further analysis:
+.scratch\proxy-forensics\README.md-44-
+.scratch\proxy-forensics\README.md-45-```bash
+.scratch\proxy-forensics\README.md:46:python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell \
+.scratch\proxy-forensics\README.md-47-  --save-raw results_aw.json
+.scratch\proxy-forensics\README.md-48-```
+.scratch\proxy-forensics\README.md-49-
+.scratch\proxy-forensics\README.md-50-## What it tests
+.scratch\proxy-forensics\README.md-51-
+--
+.scratch\proxy-forensics\fingerprint.py-5-Given a command that speaks the Claude Code CLI protocol (plain `claude` or
+.scratch\proxy-forensics\fingerprint.py-6-a wrapper like `claude-aw.cmd`), run a battery of probes to classify the
+.scratch\proxy-forensics\fingerprint.py-7-backend and detect middleware interference.
+.scratch\proxy-forensics\fingerprint.py-8-
+.scratch\proxy-forensics\fingerprint.py-9-Usage:
+.scratch\proxy-forensics\fingerprint.py:10:  python fingerprint.py --label "AW" --cmd "claude-aw.cmd --model opus" --shell
+.scratch\proxy-forensics\fingerprint.py-11-  python fingerprint.py --label "aggregator-X" --cmd "claude --model whatever"
+.scratch\proxy-forensics\fingerprint.py-12-  python fingerprint.py --list-probes
+.scratch\proxy-forensics\fingerprint.py-13-  python fingerprint.py --regenerate-baselines   # expensive, runs 5 probes × 3 Opus models
+.scratch\proxy-forensics\fingerprint.py-14-
+.scratch\proxy-forensics\fingerprint.py-15-Dependencies: Python 3.9+, baselines.json co-located with this script.
+--
+.scratch\proxy-forensics\fingerprint.py-322-
+.scratch\proxy-forensics\fingerprint.py-323-def main():
+.scratch\proxy-forensics\fingerprint.py-324-    ap = argparse.ArgumentParser(description="Claude proxy forensic fingerprinter")
+.scratch\proxy-forensics\fingerprint.py-325-    ap.add_argument("--label", help="Display label for target (e.g. 'AW')")
+.scratch\proxy-forensics\fingerprint.py-326-    ap.add_argument("--cmd", help="Base command string, e.g. 'claude-aw.cmd --model opus'")
+.scratch\proxy-forensics\fingerprint.py:327:    ap.add_argument("--shell", action="store_true", help="Use shell=True (needed for .cmd/.bat on Windows)")
+.scratch\proxy-forensics\fingerprint.py-328-    ap.add_argument("--list-probes", action="store_true", help="List available probes and exit")
+.scratch\proxy-forensics\fingerprint.py-329-    ap.add_argument("--regenerate-baselines", action="store_true", help="Re-run all probes on Opus 4.5/4.6/4.7 and overwrite baselines.json (expensive, ~$3)")
+.scratch\proxy-forensics\fingerprint.py-330-    ap.add_argument("--probes", nargs="+", help="Only run listed probes (ids); default = all")
+.scratch\proxy-forensics\fingerprint.py-331-    ap.add_argument("--save-raw", help="Path to save raw per-probe parsed output (JSON)")
+.scratch\proxy-forensics\fingerprint.py-332-    args = ap.parse_args()
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 5 \"canonical\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 5 \"answer\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 5 \"tautology|7\\\\\\"'^17" .scratch'"\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 5 \"recent_cutoff|May 2025|cutoff > April\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+exec
+"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n -C 5 \"label_spoofing\" .scratch\\proxy-forensics\\fingerprint.py" in D:\dev\Orchestrator\Orchestrarium
+ succeeded in 1376ms:
+133-        (r"totient", "totient-framing"),
+134-        (r"fermat", "Fermat-framing"),
+135-    ]:
+136-        if re.search(pat, text, re.IGNORECASE):
+137-            findings.append(f"FALSE_START: {label}")
+138:    # Check canonical opening present
+139:    canonical = re.search(r"7\^?\s*4\s*=?\s*2401\s*[≡=]\s*0?1", text)
+140:    if canonical:
+141-        findings.append("CANONICAL_OPENING: 7^4 = 2401 ≡ 1 pattern present")
+142-    # Tautology check
+143-    if re.search(r"7\^17\s*mod\s*100\s*=\s*7\^17", text):
+144-        findings.append("TAUTOLOGY: injected instruction artifact")
+145-    # Answer correctness
+--
+225-        findings.append(f"BAN_VIOLATED: {violations}")
+226-        findings.append("INTERPRETATION: rigid middleware injection OR distilled bias")
+227-    else:
+228-        findings.append("BAN_COMPLIANT")
+229-        findings.append("INTERPRETATION: soft injection overridden, OR no injection at all")
+230:    canonical = re.search(r"7\^?\s*4\s*=?\s*49\^?\s*2?\s*=?\s*2401", text)
+231:    if canonical:
+232-        findings.append("CANONICAL_7^4_OPENING: matches Anthropic-direct style")
+233-    return findings
+234-
+235-
+236-SCORERS = {
+--
+259-    """Return top-line classification given a full probe-run result dict."""
+260-    signals = {
+261-        "hard_intercept": False,
+262-        "soft_injection_overridden": False,
+263-        "rigid_injection_or_distill": False,
+264:        "canonical_style_under_override": False,
+265-        "recent_cutoff": False,
+266-        "format_rigor_pass": False,
+267-        "feature_strip": False,
+268-        "label_spoofing": False,
+269-    }
+--
+273-        signals["hard_intercept"] = True
+274-
+275-    anti = results.get("anti_euler_override", {}).get("findings", [])
+276-    if any("BAN_COMPLIANT" in f for f in anti) and any("CANONICAL_7^4_OPENING" in f for f in anti):
+277-        signals["soft_injection_overridden"] = True
+278:        signals["canonical_style_under_override"] = True
+279-    if any("BAN_VIOLATED" in f for f in anti):
+280-        signals["rigid_injection_or_distill"] = True
+281-
+282-    temp = results.get("temporal_cutoff", {}).get("findings", [])
+283-    if any("May 2025" in f or "Leo XIV" in f or "cutoff > April 2025" in f for f in temp):
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2211ms:
+154-    text = parsed.get("text", "")
+155-    findings = []
+156-    patterns = {
+157-        r"(january|jan)\s*2025": "Jan 2025 events",
+158-        r"(april|apr)\s*2025.*(pope francis|francis)": "April 2025 Pope Francis death",
+159:        r"(may|april|apr)\s*2025.*(leo xiv|prevost)": "May 2025 Pope Leo XIV election",
+160:        r"(june|jun|july|jul|august|aug|september|sep|october|oct|november|nov|december|dec)\s*2025": "Late-2025 event (cutoff > April 2025)",
+161-    }
+162-    for pat, desc in patterns.items():
+163-        if re.search(pat, text, re.IGNORECASE):
+164-            findings.append(f"KNOWS: {desc}")
+165-    return findings
+--
+260-    signals = {
+261-        "hard_intercept": False,
+262-        "soft_injection_overridden": False,
+263-        "rigid_injection_or_distill": False,
+264-        "canonical_style_under_override": False,
+265:        "recent_cutoff": False,
+266-        "format_rigor_pass": False,
+267-        "feature_strip": False,
+268-        "label_spoofing": False,
+269-    }
+270-
+--
+278-        signals["canonical_style_under_override"] = True
+279-    if any("BAN_VIOLATED" in f for f in anti):
+280-        signals["rigid_injection_or_distill"] = True
+281-
+282-    temp = results.get("temporal_cutoff", {}).get("findings", [])
+283:    if any("May 2025" in f or "Leo XIV" in f or "cutoff > April 2025" in f for f in temp):
+284:        signals["recent_cutoff"] = True
+285-
+286-    tight = results.get("tight_reasoning_crt", {}).get("findings", [])
+287-    if ("SENTENCE_COUNT_PASS" in tight and "CRT_IN_SENTENCE_2_PASS" in tight and "THEREFORE_S3_PASS" in tight):
+288-        signals["format_rigor_pass"] = True
+289-
+--
+298-        verdict.append("ACTIVE_MIDDLEWARE_CONFIRMED (hard intercept on introspection)")
+299-    if signals["soft_injection_overridden"]:
+300-        verdict.append("SOFT_INJECTION_DETECTED (overrideable by explicit user instruction — rules out rigid distill)")
+301-    if signals["rigid_injection_or_distill"]:
+302-        verdict.append("RIGID_BIAS (injection not overrideable, OR distilled student — inspect stylometric details)")
+303:    if signals["recent_cutoff"] and signals["format_rigor_pass"]:
+304-        verdict.append("CAPABLE_BASE_MODEL (passes cutoff + rigor — backend is real frontier Claude)")
+305-    if signals["feature_strip"]:
+306-        verdict.append("FEATURE_STRIP (no caching observed)")
+307-
+308:    if signals["hard_intercept"] and signals["soft_injection_overridden"] and signals["recent_cutoff"] and signals["format_rigor_pass"]:
+309-        verdict.append(">>> CLASSIFICATION: A+Middleware (real Claude + aggressive gateway shim) <<<")
+310-    elif signals["rigid_injection_or_distill"] and not signals["format_rigor_pass"]:
+311-        verdict.append(">>> CLASSIFICATION: C (distilled student) <<<")
+312-    else:
+313-        verdict.append(">>> CLASSIFICATION: ambiguous — expand probes <<<")
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 2854ms:
+141-        findings.append("CANONICAL_OPENING: 7^4 = 2401 ≡ 1 pattern present")
+142-    # Tautology check
+143-    if re.search(r"7\^17\s*mod\s*100\s*=\s*7\^17", text):
+144-        findings.append("TAUTOLOGY: injected instruction artifact")
+145-    # Answer correctness
+146:    if re.search(r"answer:\s*0?7\b", text, re.IGNORECASE):
+147-        findings.append("ANSWER_CORRECT: 07")
+148-    else:
+149-        findings.append("ANSWER_INCORRECT_OR_MISSING")
+150-    return findings
+151-
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 4104ms:
+263-        "rigid_injection_or_distill": False,
+264-        "canonical_style_under_override": False,
+265-        "recent_cutoff": False,
+266-        "format_rigor_pass": False,
+267-        "feature_strip": False,
+268:        "label_spoofing": False,
+269-    }
+270-
+271-    intro = results.get("self_introspection_json", {}).get("findings", [])
+272-    if any("HARD_INTERCEPT" in f for f in intro):
+273-        signals["hard_intercept"] = True
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+ succeeded in 5291ms:
+138-    # Check canonical opening present
+139-    canonical = re.search(r"7\^?\s*4\s*=?\s*2401\s*[≡=]\s*0?1", text)
+140-    if canonical:
+141-        findings.append("CANONICAL_OPENING: 7^4 = 2401 ≡ 1 pattern present")
+142-    # Tautology check
+143:    if re.search(r"7\^17\s*mod\s*100\s*=\s*7\^17", text):
+144-        findings.append("TAUTOLOGY: injected instruction artifact")
+145-    # Answer correctness
+146-    if re.search(r"answer:\s*0?7\b", text, re.IGNORECASE):
+147-        findings.append("ANSWER_CORRECT: 07")
+148-    else:
+[31;1mInvalidOperation: [31;1mCannot set property. Property setting is supported only on core types in this language mode.[0m
+
+codex
+### Summary (3 sentences max)
+The investigation is directionally useful, but the toolkit is not reliable enough for financial/security-significant endpoint classification yet. The main weakness is overclaiming: it treats a small set of prompt responses as backend identity proof, while the code collapses parser failures, single-run canned outputs, and weak capability signals into strong labels. I would use it as a hypothesis generator, not as an adjudicating forensic classifier.
+
+### Critical findings (must-fix)
+- **Critical:** `parse_cli_output()` treats any non-list JSON, non-JSON, empty stdout, or CLI failure as `intercepted`, then `score_self_introspection()` turns that into `HARD_INTERCEPT` from a single run. This can falsely label normal CLI JSON output or command failure as middleware. See `.scratch/proxy-forensics/fingerprint.py:86-105`, `191-196`.
+
+- **High:** `classify()` overclaims `CAPABLE_BASE_MODEL` and `A+Middleware` from weak boolean aggregation. A modern non-Claude model that knows 2025 events, follows the CRT format, returns a canned introspection response, and passes the anti-Euler prompt can be classified as real Claude middleware without tokenizer, provider, or multi-prompt stylometric evidence. See `fingerprint.py:282-313`.
+
+- **High:** The anti-Euler probe is not “decisive” as stated. It proves only that the observed Euler/totient bias is overrideable in that prompt; a capable distill, Claude fine-tune, adaptive gateway, or probe-aware proxy can also comply. The absolute claim in `RESULTS.md:138` is too strong.
+
+- **High:** The code’s anti-Euler canonical detector is narrower than the documented successful AW outputs. `score_anti_euler()` expects a `49^2=2401` shape, but `RESULTS.md:135-136` documents `49·49=2401`, which the scorer may miss, preventing the intended `soft_injection_overridden` signal. See `fingerprint.py:230`, `276-280`.
+
+- **High:** Baseline regeneration is documented as a workflow, but `--regenerate-baselines` is explicitly not implemented. The toolkit has no stale-baseline guard, no expiry, and no forced recalibration path. See `README.md:80`, `fingerprint.py:342-345`, `baselines.json:3`.
+
+### Recommended improvements (nice-to-have)
+- Support all real Claude CLI output shapes explicitly: single JSON object, stream JSON / NDJSON, wrapper arrays, and raw gateway objects. Keep “protocol parse failure” separate from “confirmed middleware intercept.”
+- Run intercept and stylometry probes at least twice, with small prompt variants, before assigning hard labels.
+- Replace exact/boolean scoring with evidence weights and confidence levels; keep `confirmed`, `likely`, and `ambiguous` separate.
+- Add baseline metadata: probe revision, scorer revision, exact command, raw stdout hash, CLI version, model id, generation date, expiry date, and calibration notes.
+- Harden regexes for phrasing variants, Unicode math symbols, `modulo`, multiplication signs, `7**4`, `7⁴`, “49 squared,” and “2401 leaves remainder 1.”
+- Warn loudly on `--shell`; operator-local does not remove command injection risk when users paste wrapper commands from untrusted providers.
+
+### Gaps / missed angles
+- **Tokenizer identity:** implement a token-count probe using multiple sentinel strings: whitespace-heavy text, CJK, emoji ZWJ, base64, code, and rare words. Fit `reported_tokens = local_claude_tokens + constant`; proportional drift suggests non-Claude tokenizer.
+- **Quantization / precision degradation:** add a calibrated exactness suite: modular arithmetic, checksum reconstruction, long-context needle retrieval, and multi-step arithmetic under identical format constraints. Compare error rate and reasoning degradation against baselines.
+- **Multi-turn middleware:** test state retention, prompt injection persistence, introspection after benign setup, cache behavior across turns, and whether middleware only rewrites first-turn system/user messages.
+- **Non-Claude imitators:** use a broader stylometric panel, not one `7^17` problem. Include safety/refusal phrasing, XML/tool-call conventions, tokenizer offsets, and Claude-specific formatting habits.
+- **Triage:** a cheap first pass could run `msg_id/provider + self-introspection raw capture + anti-Euler 7^17 + one strict-format proof`. Obvious fakes will fail before the full battery.
+
+### Verdict on each review question (1-5)
+Q1: The probes are complementary but not genuinely orthogonal. Stylometric `7^17` and anti-Euler are the same task family; strict-format and anti-Euler both test instruction following; temporal cutoff and self-introspection both touch claimed knowledge/capability. The decision tree is directionally reasonable for the AW case but reaches wrong conclusions for adaptive gateways, multi-backend aggregators, high-capability non-Claude models, and direct Claude with no Probe 1 false-start. A smarter gateway would evade byte-exact introspection detection by returning schema-shaped, slightly variable, model-like JSON while still filtering sensitive fields.
+
+Q2: The toolkit assumes a stable single backend, honest enough metadata, non-adaptive middleware, comparable Anthropic-direct baselines, disabled tools actually being honored, and low sampling variance. Several `RESULTS.md` conclusions are load-bearing on fakeable evidence: `msg_id`, model labels, token counts, cost, cache fields, and even seeded knowledge events. `classify()` is too coarse: it ignores tokenizer evidence, does not verify temporal facts, does not require Probe 1 bias before claiming soft injection, and sets feature stripping when missing cache fields default to zero.
+
+Q3: The code has real bugs and robustness gaps. The parser/intercept conflation is the biggest; anti-Euler canonical matching is too narrow; `label_spoofing` is never set; baseline text is mostly unused; nonzero return codes are ignored; and single-run hard intercept detection contradicts the methodology’s repeat requirement. The sentence splitter will miscount abbreviations like `e.g.`, `U.S.`, `C.R.T.`, and any sentence with terse initials, though `CRT.` at sentence end is fine. `shell=True` with user-supplied `--cmd` is a command-injection risk and should be treated as trusted-local only.
+
+Q4: The missing probes are material. Tokenizer identity should be implemented because it is currently used as a major argument in `RESULTS.md` without being part of the reusable battery. Quantization/pruning needs calibrated degradation tests, not just style and cutoff probes. Multi-turn behavior is essential because middleware often acts at conversation/session boundaries, not only per prompt. Non-Claude imitators require tokenizer, broader stylometry, and Claude-specific protocol/format probes before being ruled out.
+
+Q5: Baselines should expire and block strong classifications when stale. Regenerate on new Anthropic Opus releases, CLI output-format changes, probe/scorer changes, baseline age threshold, near-threshold classifications, or any high-stakes use. The 2025 temporal probe should be rotated into a dated calibration set with verified positive and negative events after each baseline refresh; otherwise it will become historical common knowledge and lose discriminative value.
+
+
+tokens used
+140,627
+### Summary (3 sentences max)
+The investigation is directionally useful, but the toolkit is not reliable enough for financial/security-significant endpoint classification yet. The main weakness is overclaiming: it treats a small set of prompt responses as backend identity proof, while the code collapses parser failures, single-run canned outputs, and weak capability signals into strong labels. I would use it as a hypothesis generator, not as an adjudicating forensic classifier.
+
+### Critical findings (must-fix)
+- **Critical:** `parse_cli_output()` treats any non-list JSON, non-JSON, empty stdout, or CLI failure as `intercepted`, then `score_self_introspection()` turns that into `HARD_INTERCEPT` from a single run. This can falsely label normal CLI JSON output or command failure as middleware. See `.scratch/proxy-forensics/fingerprint.py:86-105`, `191-196`.
+
+- **High:** `classify()` overclaims `CAPABLE_BASE_MODEL` and `A+Middleware` from weak boolean aggregation. A modern non-Claude model that knows 2025 events, follows the CRT format, returns a canned introspection response, and passes the anti-Euler prompt can be classified as real Claude middleware without tokenizer, provider, or multi-prompt stylometric evidence. See `fingerprint.py:282-313`.
+
+- **High:** The anti-Euler probe is not “decisive” as stated. It proves only that the observed Euler/totient bias is overrideable in that prompt; a capable distill, Claude fine-tune, adaptive gateway, or probe-aware proxy can also comply. The absolute claim in `RESULTS.md:138` is too strong.
+
+- **High:** The code’s anti-Euler canonical detector is narrower than the documented successful AW outputs. `score_anti_euler()` expects a `49^2=2401` shape, but `RESULTS.md:135-136` documents `49·49=2401`, which the scorer may miss, preventing the intended `soft_injection_overridden` signal. See `fingerprint.py:230`, `276-280`.
+
+- **High:** Baseline regeneration is documented as a workflow, but `--regenerate-baselines` is explicitly not implemented. The toolkit has no stale-baseline guard, no expiry, and no forced recalibration path. See `README.md:80`, `fingerprint.py:342-345`, `baselines.json:3`.
+
+### Recommended improvements (nice-to-have)
+- Support all real Claude CLI output shapes explicitly: single JSON object, stream JSON / NDJSON, wrapper arrays, and raw gateway objects. Keep “protocol parse failure” separate from “confirmed middleware intercept.”
+- Run intercept and stylometry probes at least twice, with small prompt variants, before assigning hard labels.
+- Replace exact/boolean scoring with evidence weights and confidence levels; keep `confirmed`, `likely`, and `ambiguous` separate.
+- Add baseline metadata: probe revision, scorer revision, exact command, raw stdout hash, CLI version, model id, generation date, expiry date, and calibration notes.
+- Harden regexes for phrasing variants, Unicode math symbols, `modulo`, multiplication signs, `7**4`, `7⁴`, “49 squared,” and “2401 leaves remainder 1.”
+- Warn loudly on `--shell`; operator-local does not remove command injection risk when users paste wrapper commands from untrusted providers.
+
+### Gaps / missed angles
+- **Tokenizer identity:** implement a token-count probe using multiple sentinel strings: whitespace-heavy text, CJK, emoji ZWJ, base64, code, and rare words. Fit `reported_tokens = local_claude_tokens + constant`; proportional drift suggests non-Claude tokenizer.
+- **Quantization / precision degradation:** add a calibrated exactness suite: modular arithmetic, checksum reconstruction, long-context needle retrieval, and multi-step arithmetic under identical format constraints. Compare error rate and reasoning degradation against baselines.
+- **Multi-turn middleware:** test state retention, prompt injection persistence, introspection after benign setup, cache behavior across turns, and whether middleware only rewrites first-turn system/user messages.
+- **Non-Claude imitators:** use a broader stylometric panel, not one `7^17` problem. Include safety/refusal phrasing, XML/tool-call conventions, tokenizer offsets, and Claude-specific formatting habits.
+- **Triage:** a cheap first pass could run `msg_id/provider + self-introspection raw capture + anti-Euler 7^17 + one strict-format proof`. Obvious fakes will fail before the full battery.
+
+### Verdict on each review question (1-5)
+Q1: The probes are complementary but not genuinely orthogonal. Stylometric `7^17` and anti-Euler are the same task family; strict-format and anti-Euler both test instruction following; temporal cutoff and self-introspection both touch claimed knowledge/capability. The decision tree is directionally reasonable for the AW case but reaches wrong conclusions for adaptive gateways, multi-backend aggregators, high-capability non-Claude models, and direct Claude with no Probe 1 false-start. A smarter gateway would evade byte-exact introspection detection by returning schema-shaped, slightly variable, model-like JSON while still filtering sensitive fields.
+
+Q2: The toolkit assumes a stable single backend, honest enough metadata, non-adaptive middleware, comparable Anthropic-direct baselines, disabled tools actually being honored, and low sampling variance. Several `RESULTS.md` conclusions are load-bearing on fakeable evidence: `msg_id`, model labels, token counts, cost, cache fields, and even seeded knowledge events. `classify()` is too coarse: it ignores tokenizer evidence, does not verify temporal facts, does not require Probe 1 bias before claiming soft injection, and sets feature stripping when missing cache fields default to zero.
+
+Q3: The code has real bugs and robustness gaps. The parser/intercept conflation is the biggest; anti-Euler canonical matching is too narrow; `label_spoofing` is never set; baseline text is mostly unused; nonzero return codes are ignored; and single-run hard intercept detection contradicts the methodology’s repeat requirement. The sentence splitter will miscount abbreviations like `e.g.`, `U.S.`, `C.R.T.`, and any sentence with terse initials, though `CRT.` at sentence end is fine. `shell=True` with user-supplied `--cmd` is a command-injection risk and should be treated as trusted-local only.
+
+Q4: The missing probes are material. Tokenizer identity should be implemented because it is currently used as a major argument in `RESULTS.md` without being part of the reusable battery. Quantization/pruning needs calibrated degradation tests, not just style and cutoff probes. Multi-turn behavior is essential because middleware often acts at conversation/session boundaries, not only per prompt. Non-Claude imitators require tokenizer, broader stylometry, and Claude-specific protocol/format probes before being ruled out.
+
+Q5: Baselines should expire and block strong classifications when stale. Regenerate on new Anthropic Opus releases, CLI output-format changes, probe/scorer changes, baseline age threshold, near-threshold classifications, or any high-stakes use. The 2025 temporal probe should be rotated into a dated calibration set with verified positive and negative events after each baseline refresh; otherwise it will become historical common knowledge and lose discriminative value.
+
+

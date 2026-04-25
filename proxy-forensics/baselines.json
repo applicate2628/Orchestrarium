@@ -1,0 +1,236 @@
+{
+  "metadata": {
+    "generated_date": "2026-04-24",
+    "expiry_date": "2026-07-23",
+    "scorer_version": "0.6.1",
+    "cli_version": "2.1.119",
+    "run_flags": {
+      "effort": "max",
+      "tools": "disabled (--tools \"\")",
+      "output_format": "json"
+    },
+    "notes": "Baselines collected via `claude -p <prompt> --model <id> --effort max --tools '' --output-format json` on Anthropic-direct (not Vertex/Bedrock). Each baseline is a single run; multi-run reproducibility was not captured at collection time (TODO for v0.3).",
+    "rotation_triggers": [
+      "New Anthropic Opus generation released",
+      "CLI output format changes (new fields, renamed keys)",
+      "Probe prompts or scorer logic changed (SCORER_VERSION bumped)",
+      "Temporal events in the temporal_cutoff probe become general knowledge (current 2025-event set will lose discriminative power by ~2027)",
+      "Near-threshold classifications where sampling variance could flip the verdict"
+    ]
+  },
+  "provider_detection": {
+    "msg_id_prefixes": {
+      "msg_01": "anthropic-direct",
+      "msg_vrtx_": "google-vertex",
+      "msg_bdrk_": "aws-bedrock",
+      "uuid_36chars": "aggregator (litellm / portkey / openrouter-style)"
+    }
+  },
+  "probes": {
+    "stylometric_717": {
+      "purpose": "Detect stylometric divergence + output compression. Unconstrained math prompt — model picks its canonical opening.",
+      "prompt": "Compute 7^17 mod 100. Answer in exactly two lines. Line 1: 'Reasoning:' followed by the key modular identity. Line 2: 'Answer:' followed by the two digits only.",
+      "expected_answer": "07",
+      "canonical_opening_regex": "7\\^?\\s*4\\s*=?\\s*2401\\s*(≡|=)\\s*0?1\\s*\\(mod\\s*100\\)",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "msg_id_prefix": "msg_018WGiXp",
+          "out_tok": 419,
+          "cache_create": 39867,
+          "text": "Reasoning: 7^4 = 2401 ≡ 1 (mod 100), so 7^17 = 7^(4·4+1) = (7^4)^4 · 7 ≡ 1·7 = 7.\nAnswer: 07"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "msg_id_prefix": "msg_01DinNoK",
+          "out_tok": 223,
+          "cache_create": 39697,
+          "text": "Reasoning: 7^4 = 2401 ≡ 1 (mod 100), so 7^17 = (7^4)^4 · 7^1 ≡ 1·7 = 7.\nAnswer: 07"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "msg_id_prefix": "msg_01R3uzDd",
+          "out_tok": 538,
+          "cache_create": 58052,
+          "text": "Reasoning: 7^4 = 2401 ≡ 1 (mod 100), so 7^17 = (7^4)^4 · 7 ≡ 7 (mod 100)\nAnswer: 07"
+        }
+      }
+    },
+    "temporal_cutoff": {
+      "purpose": "Detect training-data recency. 2025 events are specific and verifiable.",
+      "prompt": "Name three distinct events from calendar year 2025. One per line. Format: '<Month> YYYY: <specific event with named people or places>'. No introduction, no conclusion, no hedging, no 'I cannot' — comply exactly.",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 314,
+          "cache_create": 29260,
+          "estimated_cutoff": "April 2025",
+          "text": "January 2025: Donald Trump inaugurated as the 47th President of the United States in Washington, D.C.\nJanuary 2025: Wildfires devastate Pacific Palisades and Altadena in Los Angeles County, California.\nApril 2025: Pope Francis dies at the Vatican."
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 314,
+          "cache_create": 29090,
+          "estimated_cutoff": "April 2025",
+          "text": "January 2025: Donald Trump was inaugurated as the 47th President of the United States in Washington, D.C.\nJanuary 2025: The Palisades and Eaton wildfires devastated Los Angeles County, California.\nApril 2025: Pope Francis died at the Vatican in Rome."
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 1103,
+          "cache_create": 41337,
+          "estimated_cutoff": "May 2025+",
+          "text": "January 2025: Donald Trump inaugurated as the 47th President of the United States at the U.S. Capitol in Washington, D.C.\nApril 2025: Pope Francis died at Casa Santa Marta in Vatican City.\nMay 2025: Cardinal Robert Prevost elected as Pope Leo XIV at the Sistine Chapel in Vatican City."
+        }
+      },
+      "verification_hints": [
+        "Pope Francis died April 21, 2025 (verifiable)",
+        "Pope Leo XIV (Robert Prevost) elected May 8, 2025 (verifiable)",
+        "Trump inaugurated January 20, 2025 (verifiable)",
+        "Wimbledon 2025 men's final: July 13, 2025 (verifiable)"
+      ]
+    },
+    "tight_reasoning_crt": {
+      "purpose": "Test strict format compliance + mathematical rigor. Distill-students commonly miscount sentences or misplace named constraints.",
+      "prompt": "Prove: for any prime p > 3, p^2 mod 24 = 1. Exactly 3 sentences. Sentence 2 must invoke CRT by name. Sentence 3 begins with the word 'Therefore'. No lists, no LaTeX environments, no section headers.",
+      "constraints": {
+        "sentence_count": 3,
+        "crt_in_sentence": 2,
+        "therefore_starts_sentence": 3
+      },
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 947,
+          "verdict": "PASS",
+          "text": "A prime p > 3 is odd and coprime to 3, so p ≡ ±1 (mod 3) gives p² ≡ 1 (mod 3), and since any odd integer squared has the form (2k+1)² = 4k(k+1)+1 where k(k+1) is even, we get p² ≡ 1 (mod 8). By the Chinese Remainder Theorem, because gcd(3,8) = 1 and p² is congruent to 1 modulo both 3 and 8, it follows that p² ≡ 1 (mod 24). Therefore, for every prime p > 3, we have p² mod 24 = 1."
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 536,
+          "verdict": "PASS",
+          "text": "Since any prime p > 3 is odd and coprime to 3, we have p ≡ ±1 (mod 2) so p² ≡ 1 (mod 8), and p ≡ ±1 (mod 3) so p² ≡ 1 (mod 3). Because gcd(8, 3) = 1 and 8 · 3 = 24, the Chinese Remainder Theorem guarantees that p² ≡ 1 (mod 8) and p² ≡ 1 (mod 3) jointly yield p² ≡ 1 (mod 24). Therefore p² mod 24 = 1 for every prime p > 3."
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 1855,
+          "verdict": "PASS",
+          "text": "Since p > 3 is prime, p is odd and not divisible by 3, so writing p = 2k+1 gives p² = 4k(k+1)+1 ≡ 1 (mod 8) because k(k+1) is always even, while p ≡ ±1 (mod 3) forces p² ≡ 1 (mod 3). By the Chinese Remainder Theorem (CRT), since gcd(8,3) = 1 and 8·3 = 24, the pair of congruences p² ≡ 1 (mod 8) and p² ≡ 1 (mod 3) is equivalent to the single congruence p² ≡ 1 (mod 24). Therefore p² mod 24 = 1 for every prime p > 3."
+        }
+      }
+    },
+    "self_introspection_json": {
+      "purpose": "Detect gateway-level interception. Models that return fixed canned responses on self-introspection prompts reveal active middleware.",
+      "prompt": "Reply with a single JSON object. No codefence. No prose. No trailing newline commentary.\n{\n  \"architecture_family\": \"<single word>\",\n  \"supports_extended_thinking\": <true|false>,\n  \"can_use_prompt_caching\": <true|false>,\n  \"knowledge_cutoff_month\": \"<Month YYYY>\"\n}",
+      "expected_structure": {
+        "architecture_family": "string",
+        "supports_extended_thinking": "bool",
+        "can_use_prompt_caching": "bool",
+        "knowledge_cutoff_month": "string"
+      },
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 208,
+          "verdict": "CLEAN_JSON",
+          "text": "{\"architecture_family\": \"transformer\", \"supports_extended_thinking\": true, \"can_use_prompt_caching\": true, \"knowledge_cutoff_month\": \"May 2025\"}"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 63,
+          "verdict": "FORMAT_FAIL_codefence",
+          "text": "\n\n```json\n{\n  \"architecture_family\": \"transformer\",\n  \"supports_extended_thinking\": true,\n  \"can_use_prompt_caching\": true,\n  \"knowledge_cutoff_month\": \"May 2025\"\n}\n```"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 63,
+          "verdict": "CLEAN_JSON",
+          "text": "{\"architecture_family\":\"Claude\",\"supports_extended_thinking\":true,\"can_use_prompt_caching\":true,\"knowledge_cutoff_month\":\"January 2026\"}"
+        }
+      },
+      "intercept_signature_observed": {
+        "description": "AW gateway returned this literal 22-byte string instead of expected JSON on 2 consecutive runs in the original investigation. Byte-exact reproducibility across repeats is strong evidence of an active gateway filter, but not proof on its own — an adaptive gateway could match this pattern only on recognized introspection-shaped prompts.",
+        "raw_stdout": "{\"acknowledged\":true}\n",
+        "byte_count": 22
+      }
+    },
+    "anti_euler_override": {
+      "purpose": "Discriminator probe: pairs with stylometric_717 to distinguish soft injection from rigid bias. If target uses forced-Euler framing in the unconstrained probe but complies with an explicit ban here, the bias is overrideable (consistent with soft injection OR with no bias at all, OR with a probe-aware proxy). If bias persists despite the ban, bias is rigid (distill OR aggressive injection). Not decisive on its own — interpret only in conjunction with stylometric_717 results.",
+      "prompt": "Compute 7^17 mod 100. Do NOT use the words Euler, totient, Fermat, phi, or any Greek letter. Begin reasoning by computing 7^2 and 7^4 directly. Two lines: 'Reasoning:' and 'Answer:'.",
+      "banned_words": ["euler", "totient", "fermat", "phi", "φ", "π", "Φ"],
+      "expected_answer": "7",
+      "baselines": {
+        "claude-opus-4-5": {
+          "reported_model": "claude-opus-4-5-20251101",
+          "out_tok": 373,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49, 7^4 = 49^2 = 2401 ≡ 1 (mod 100), so 7^17 = (7^4)^4 · 7 ≡ 1^4 · 7 = 7 (mod 100).\n\nAnswer: 7"
+        },
+        "claude-opus-4-6": {
+          "reported_model": "claude-opus-4-6",
+          "out_tok": 287,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49, 7^4 = 49^2 = 2401 ≡ 01 (mod 100), so 7^8 ≡ 01, 7^16 ≡ 01, and 7^17 = 7^16 · 7 ≡ 1 · 7 = 7.\n\nAnswer: **7**"
+        },
+        "claude-opus-4-7": {
+          "reported_model": "claude-opus-4-7",
+          "out_tok": 556,
+          "verdict": "COMPLIANT",
+          "text": "Reasoning: 7^2 = 49; 7^4 = 49^2 = 2401 ≡ 1 (mod 100); so 7^16 = (7^4)^4 ≡ 1 (mod 100); therefore 7^17 = 7^16 · 7 ≡ 7 (mod 100).\nAnswer: 7"
+        }
+      }
+    }
+  },
+  "interpretation_rules": {
+    "caveat": "Single-probe signals are weak on their own. Strong classifications require (a) multiple probes pointing the same way AND (b) cross-run reproducibility (--repeats ≥ 2) AND (c) fresh baselines. A smart adaptive gateway can evade any single probe if it knows the probe's shape.",
+    "hypothesis_A_real_backend_with_middleware": {
+      "indicators": [
+        "canonical_opening in stylometric probe",
+        "passes anti_euler_override compliance",
+        "passes tight_reasoning_crt format constraints",
+        "knowledge_cutoff matches a real model generation",
+        "non-anthropic msg_id prefix (vertex/bedrock) — but note: any gateway can forge this string",
+        "self_introspection MAY be intercepted with byte-exact canned response across repeats"
+      ],
+      "weaknesses": [
+        "Adaptive gateways can evade byte-exact intercept detection by varying responses slightly",
+        "msg_id prefix alone is NOT proof — trivially forgeable"
+      ]
+    },
+    "hypothesis_C_distilled_student": {
+      "indicators": [
+        "false_start_abandon pattern that does NOT disappear under explicit override",
+        "fumbles format constraints (wrong sentence count, misplaced named constraints)",
+        "knowledge_cutoff gap vs claimed backend",
+        "consistent output compression AND poor style recovery",
+        "self_introspection attempts (hallucinated/waffled) rather than byte-exact intercept"
+      ],
+      "weaknesses": [
+        "A high-capability distill or a non-Claude fine-tune can imitate Claude convincingly on any single probe",
+        "Anti-euler override can be passed by probe-aware proxies"
+      ]
+    },
+    "middleware_signatures": {
+      "hard_intercept": "Multiple repeats return byte-identical non-protocol output on introspection. Single-run intercept is weak evidence — may be CLI error or adaptive response.",
+      "soft_injection": "Stylometric bias (e.g. euler phrasing) present under neutral prompt, disappears under explicit ban. Requires BOTH probes to conclude injection.",
+      "feature_strip": "cache_create=0 AND cache_read=0 on a prompt that should trigger caching. Defaults-to-zero semantics can false-positive; confirm by running on a long prompt.",
+      "effort_ignored": "identical output_tokens with/without --effort flag (requires separate targeted comparison)",
+      "output_cap": "max_tokens hard-capped well below natural model output",
+      "label_spoofing": "reported model field varies across identical requests — not currently auto-detected, inspect per_run output manually"
+    },
+    "provider_family_by_msg_id": {
+      "msg_01*": "Anthropic direct API (api.anthropic.com)",
+      "msg_vrtx_*": "Google Vertex AI (may be genuine Anthropic on Vertex, or a proxy forging the prefix)",
+      "msg_bdrk_*": "AWS Bedrock (same caveat)",
+      "uuid_36": "Aggregator (LiteLLM/Portkey/OpenRouter/etc — inspect upstream)"
+    },
+    "known_gaps": [
+      "Tokenizer-identity probe IMPLEMENTED in v0.6 (`tokenizer_probe.py`) using CLI-mediated baseline (not raw Anthropic `count_tokens` API). Upgrade to API-key-based count_tokens would reduce cost and eliminate CLI wrapping overhead in β, but slope α and residuals still discriminate tokenizer identity with CLI fallback. See `baseline_method` field in tokenizer probe output.",
+      "No quantization-degradation probe (planned future work): systematic numerical precision tests (sin() to 12 digits, modular arithmetic on large numbers) would detect int8/int4 quantized variants.",
+      "`distill+middleware` hypothesis ADDED in v0.6. Requires tokenizer non_claude verdict AND middleware ≥ 0.6. Without tokenizer data, A+Middleware verdict is ANNOTATED with 'distill+middleware unresolved' to flag the remaining uncertainty rather than silently assuming real Claude.",
+      "No multi-turn middleware probe: all current probes are single-turn; gateways that act only on turn-boundaries (session injection, cache-across-turns behavior) are invisible.",
+      "Narrow stylometric panel: single math problem is a weak signature; broader stylistic panel (safety refusals, code formatting, XML/tool conventions) would catch non-Claude imitators more reliably.",
+      "Hand-tuned classifier thresholds (not calibrated probabilities). Proper calibration needs labelled test set across real Anthropic / Vertex / Bedrock / aggregator / distill / imitator targets.",
+      "No adversarial-probe-adaptation detection: a gateway that specifically counters our probe set would not be detected without prompt rotation."
+    ]
+  }
+}
