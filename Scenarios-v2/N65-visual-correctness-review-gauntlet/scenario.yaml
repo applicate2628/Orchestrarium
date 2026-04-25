@@ -1,0 +1,20 @@
+id: N65
+surface_id: E55
+pack_id: E55
+role_class: review
+artifact_type: visual correctness review findings
+modality_family: UI visual correctness gate with screenshot-probe evidence and exact defect tuples
+allowed_change_surface:
+  - candidate/review-report.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/review-target/**
+score_profile: "ux-review, visual-correctness, exact-findings, false-positive-control"
+overlay_flags:
+  - top-pair-role-fit
+  - visual-correctness
+  - screenshot-probe-binding
+  - false-positive-control
+  - binary-separator-candidate

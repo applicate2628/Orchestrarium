@@ -1,0 +1,20 @@
+id: N66
+surface_id: E56
+pack_id: E56
+role_class: advisory
+artifact_type: conflicting evidence fact memo
+modality_family: repo-understanding with stale docs, draft ADRs, current code, tests, and source-ranking ledger
+allowed_change_surface:
+  - candidate/fact-memo.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/repo-snapshot/**
+score_profile: "repo-understanding, source-ranking, conflict-ledger, non-claim-control"
+overlay_flags:
+  - top-pair-role-fit
+  - conflicting-evidence
+  - source-authority
+  - false-claim-control
+  - binary-separator-candidate

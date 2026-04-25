@@ -1,0 +1,20 @@
+id: N68
+surface_id: E58
+pack_id: E58
+role_class: review
+artifact_type: actual screenshot visual review
+modality_family: screenshot grounding, visual UI defect review, coordinate evidence, false-positive traps
+allowed_change_surface:
+  - candidate/answer.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: actual-screenshot-grounding, exact-visual-defect-tuples, coordinate-window, scored-rubric
+overlay_flags:
+  - top-pair-role-fit
+  - visual-grounding
+  - actual-screenshot
+  - ui-review
+  - binary-separator-candidate

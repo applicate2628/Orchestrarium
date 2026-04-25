@@ -1,0 +1,73 @@
+{
+  "date": "2026-04-25",
+  "diagnostic_id": "W42",
+  "scenario_id": "N64",
+  "title": "Security depth review gauntlet",
+  "status": "admitted-diagnostic",
+  "denominator_policy": {
+    "full_v2_hard_slot": false,
+    "reason": "N64 is a primary-resolution diagnostic for L10 security review. It does not replace an existing /40 slot because X1 and X3 both pass."
+  },
+  "scenario": {
+    "name": "N64-security-depth-review-gauntlet",
+    "intent": "multi-file security review with nine exact vuln tuples and false-positive traps",
+    "oracle": "Scenarios-v2/N64-security-depth-review-gauntlet/oracle/security-depth-review-contract.json",
+    "exact_finding_count": 9,
+    "false_positive_terms": [
+      "MASKED_EXAMPLE_TOKEN",
+      "rel=\"noopener\"",
+      "GET /health"
+    ]
+  },
+  "results": {
+    "X1": {
+      "model": "gpt-5.5",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "verdict": "PASS",
+      "changedPaths": ["candidate/review-report.md"],
+      "workerOutputBytes": 131863,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_04-56-04-X1-w42-security-depth-n64-2026-04-25/N64/",
+      "primary_failure": null
+    },
+    "X3": {
+      "model": "opus 4.7max",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "verdict": "PASS",
+      "changedPaths": ["candidate/review-report.md"],
+      "workerOutputBytes": 1663,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_04-56-03-X3-w42-security-depth-n64-2026-04-25/N64/",
+      "primary_failure": null
+    },
+    "X2": {
+      "model": "gpt-5.3-codex-spark",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "verdict": "FAIL",
+      "changedPaths": [],
+      "workerOutputBytes": 1442,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_05-06-43-X2-w42-security-depth-n64-2026-04-25/N64/",
+      "primary_failure": "did not edit candidate/review-report.md; verifier saw starter placeholders"
+    },
+    "X6": {
+      "model": "gemini3.1flash-lite-preview",
+      "route_class": "runtime-caveat",
+      "wrapperExitCode": 1,
+      "verificationPassed": true,
+      "verdict": "NOT-RUN",
+      "changedPaths": ["candidate/review-report.md"],
+      "workerOutputBytes": 2463,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_05-06-43-X6-w42-security-depth-n64-2026-04-25/N64/",
+      "primary_failure": "Gemini wrapper returned non-zero after capacity/tool-loop/AbortError even though local verifier passed"
+    }
+  },
+  "interpretation": {
+    "top_pair": "binary tie remains on L10 security depth; both X1 and X3 pass exact nine-finding tuple gate",
+    "routing": "keep ordinary security review as X1/X3 near-tie; do not assign a primary from N64",
+    "calibration": "X2 fails lower-bound calibration; X6 shows semantic capability in the report but is not a clean scoreable pass because wrapperExitCode is non-zero"
+  }
+}

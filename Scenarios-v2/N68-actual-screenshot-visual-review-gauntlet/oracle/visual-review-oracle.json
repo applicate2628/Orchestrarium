@@ -1,0 +1,93 @@
+{
+  "contractId": "N68-W46-actual-screenshot-visual-review",
+  "image_id": "N68-actual-screenshot-v1",
+  "image_file": "inputs/actual-screenshot.png",
+  "dimensions": {
+    "width": 1280,
+    "height": 900
+  },
+  "coordinate_tolerance_px": 34,
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/answer.json",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/actual-screenshot.png",
+    "oracle/README.md",
+    "oracle/answer-schema.json",
+    "oracle/scoring-anchors.md",
+    "oracle/visual-review-oracle.json",
+    "verifiers/README.md",
+    "verifiers/check_actual_screenshot_visual_review.py"
+  ],
+  "requiredChangedPaths": [
+    "candidate/answer.json"
+  ],
+  "expectedFindings": [
+    {
+      "id": "F01",
+      "component_terms": ["search", "input"],
+      "defect_terms": ["clipped", "icon", "overlap"],
+      "target": {"x": 222, "y": 88}
+    },
+    {
+      "id": "F02",
+      "component_terms": ["run", "audit", "button"],
+      "defect_terms": ["spinner", "overlap", "label"],
+      "target": {"x": 1063, "y": 88}
+    },
+    {
+      "id": "F03",
+      "component_terms": ["risk", "score", "card"],
+      "defect_terms": ["clipped", "cut", "overflow", "blank", "divider", "empty"],
+      "target": {"x": 332, "y": 218}
+    },
+    {
+      "id": "F04",
+      "component_terms": ["status", "healthy", "chip", "badge", "pill"],
+      "defect_terms": ["low", "contrast", "empty", "missing", "label", "clipped", "cut", "edge"],
+      "target": {"x": 789, "y": 216}
+    },
+    {
+      "id": "F05",
+      "component_terms": ["owner", "header", "incident", "queue", "status", "column"],
+      "defect_terms": ["sort", "arrow", "overlap", "caret", "missing", "detached"],
+      "target": {"x": 735, "y": 396}
+    },
+    {
+      "id": "F06",
+      "component_terms": ["deploy", "tab"],
+      "defect_terms": ["underline", "strikethrough", "crosses", "strike", "line", "active"],
+      "target": {"x": 480, "y": 727}
+    },
+    {
+      "id": "F07",
+      "component_terms": ["sync", "now", "button", "toast", "workspace", "card", "import"],
+      "defect_terms": ["toast", "covered", "cover", "overlap", "occludes", "occluded"],
+      "target": {"x": 1049, "y": 779}
+    },
+    {
+      "id": "F08",
+      "component_terms": ["legend", "magenta", "label", "heatmap", "critical"],
+      "defect_terms": ["detached", "swatch", "misaligned", "stray", "square", "missing", "key", "overlap"],
+      "target": {"x": 993, "y": 548}
+    }
+  ],
+  "falsePositiveTerms": [
+    "decorative",
+    "grid",
+    "disabled export",
+    "export button",
+    "muted timestamp",
+    "timestamp",
+    "meta text"
+  ]
+}

@@ -1,0 +1,122 @@
+{
+  "date": "2026-04-25",
+  "diagnostic_id": "W45",
+  "scenario_id": "N67",
+  "title": "Cross-phase integration owner gauntlet",
+  "status": "admitted-diagnostic",
+  "denominator_policy": {
+    "full_v2_hard_slot": false,
+    "reason": "N67 is a cross-phase integration-owner diagnostic for staged owner/QA gating. It reinforces the staged X1 routing rule but does not replace a /40 slot without a separate promotion decision."
+  },
+  "scenario": {
+    "name": "N67-cross-phase-integration-owner-gauntlet",
+    "intent": "four fresh staged invocations over integration ledger, compatibility report, QA gate, and closure for a backend/frontend/QA pagination-contract mismatch",
+    "oracle": "Scenarios-v2/N67-cross-phase-integration-owner-gauntlet/oracle/integration-owner-contract.json",
+    "required_changed_paths": [
+      "candidate/integration-ledger.json",
+      "candidate/incompatibility-report.md",
+      "candidate/qa-gate.json",
+      "candidate/closure.json"
+    ],
+    "required_gate": "REVISE_BEFORE_QA",
+    "required_owner": "integration-owner",
+    "compatibility_terms": [
+      "cursor_token",
+      "nextCursor",
+      "page_token",
+      "do-not-run-qa",
+      "repair",
+      "re-entry"
+    ]
+  },
+  "results": {
+    "X1": {
+      "model": "gpt-5.5",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "verdict": "PASS",
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/incompatibility-report.md",
+        "candidate/integration-ledger.json",
+        "candidate/qa-gate.json"
+      ],
+      "phaseOutputBytes": {
+        "01-integration-ledger": 65977,
+        "02-compatibility-report": 71244,
+        "03-qa-gate": 70025,
+        "04-closure": 53135
+      },
+      "runRoot": ".scratch/v2-staged-runs/2026-04-25_06-31-53-X1-w45-cross-phase-integration-n67-2026-04-25/N67/",
+      "primary_failure": null
+    },
+    "X3": {
+      "model": "opus 4.7max",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "verdict": "FAIL",
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/incompatibility-report.md",
+        "candidate/integration-ledger.json",
+        "candidate/qa-gate.json"
+      ],
+      "phaseOutputBytes": {
+        "01-integration-ledger": 1482,
+        "02-compatibility-report": 1736,
+        "03-qa-gate": 1502,
+        "04-closure": 2518
+      },
+      "runRoot": ".scratch/v2-staged-runs/2026-04-25_06-31-53-X3-w45-cross-phase-integration-n67-2026-04-25/N67/",
+      "primary_failure": "missed source-ranking/pre-QA compatibility markers, QA-stop markers, REVISE_BEFORE_QA gate, repair/re-entry markers, and closure markers"
+    },
+    "X2": {
+      "model": "gpt-5.3-codex-spark",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "verdict": "FAIL",
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/incompatibility-report.md",
+        "candidate/qa-gate.json"
+      ],
+      "phaseOutputBytes": {
+        "01-integration-ledger": 1217,
+        "02-compatibility-report": 38894,
+        "03-qa-gate": 66015,
+        "04-closure": 143784
+      },
+      "runRoot": ".scratch/v2-staged-runs/2026-04-25_06-41-40-X2-w45-cross-phase-integration-n67-2026-04-25/N67/",
+      "primary_failure": "did not change candidate/integration-ledger.json; exact changed-path contract failed before deeper staged checks"
+    },
+    "X6": {
+      "model": "gemini3.1flash-lite-preview",
+      "route_class": "runtime-plus-verifier",
+      "wrapperExitCode": 1,
+      "verificationPassed": false,
+      "verdict": "NOT-RUN",
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/incompatibility-report.md",
+        "candidate/integration-ledger.json",
+        "candidate/qa-gate.json"
+      ],
+      "phaseOutputBytes": {
+        "01-integration-ledger": 538,
+        "02-compatibility-report": 3128,
+        "03-qa-gate": 3702,
+        "04-closure": 3029
+      },
+      "runRoot": ".scratch/v2-staged-runs/2026-04-25_06-41-40-X6-w45-cross-phase-integration-n67-2026-04-25/N67/",
+      "primary_failure": "phase 3 wrapper returned non-zero after Gemini route/tool noise; verifier also failed artifact ids, owners, QA gate, repair/re-entry, and closure markers"
+    }
+  },
+  "interpretation": {
+    "top_pair": "X1 PASS and X3 scoreable FAIL on staged cross-phase integration-owner work",
+    "routing": "promote X1 for staged integration-owner, cross-phase compatibility, QA-stop, repair/re-entry, and closure packets; keep X3 for compact single-session slices only",
+    "calibration": "X2 is a scoreable lower calibration fail; X6 is runtime-caveat NOT-RUN because wrapperExitCode is non-zero even though verifier failures are visible"
+  }
+}

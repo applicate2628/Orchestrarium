@@ -1,0 +1,120 @@
+{
+  "contractId": "N67-W45-cross-phase-integration",
+  "integrationFingerprint": "cursor-contract-2026-04-25",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/integration-ledger.json",
+    "candidate/incompatibility-report.md",
+    "candidate/qa-gate.json",
+    "candidate/closure.json",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/artifacts/backend-api-plan.md",
+    "inputs/artifacts/frontend-adapter-plan.md",
+    "inputs/artifacts/qa-plan.md",
+    "inputs/phases/01-integration-ledger.md",
+    "inputs/phases/02-compatibility-report.md",
+    "inputs/phases/03-qa-gate.md",
+    "inputs/phases/04-closure.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/integration-owner-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_cross_phase_integration.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N67",
+    "surface_id": "E57",
+    "pack_id": "E57",
+    "role_class": "owner",
+    "artifact_type": "staged cross-phase integration owner packet",
+    "modality_family": "multi-session integration owner, cross-phase compatibility gate, QA stop, repair reentry, and closure",
+    "allowed_change_surface": [
+      "candidate/integration-ledger.json",
+      "candidate/incompatibility-report.md",
+      "candidate/qa-gate.json",
+      "candidate/closure.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "staged-integration-owner, compatibility-gate, reentry, qa-stop, scored-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "owner-orchestration",
+      "staged-runner",
+      "integration-owner",
+      "cross-phase-compatibility",
+      "qa-gate",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/integration-ledger.json",
+    "candidate/incompatibility-report.md",
+    "candidate/qa-gate.json",
+    "candidate/closure.json"
+  ],
+  "artifactMarkers": [
+    "B1-backend-api-plan",
+    "F1-frontend-adapter-plan",
+    "Q1-qa-plan",
+    "$backend-engineer",
+    "$frontend-engineer",
+    "$qa-engineer"
+  ],
+  "compatibilityMarkers": [
+    "cursor_token",
+    "nextCursor",
+    "page_token",
+    "integration-owner",
+    "REVISE_BEFORE_QA",
+    "do-not-run-qa",
+    "repair",
+    "re-entry"
+  ],
+  "ledgerMarkers": [
+    "compatibility",
+    "before QA",
+    "integration",
+    "accepted artifacts"
+  ],
+  "closureMarkers": [
+    "REVISE_BEFORE_QA",
+    "do-not-run-qa",
+    "cursor_token",
+    "nextCursor",
+    "page_token",
+    "repair",
+    "re-entry"
+  ],
+  "expected_start_state_failures": [
+    "ledger",
+    "report",
+    "qa-gate",
+    "closure"
+  ]
+}

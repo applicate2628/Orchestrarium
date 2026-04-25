@@ -1,0 +1,212 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/fact-memo.md",
+    "candidate/repo-snapshot/src/policy_runtime.py",
+    "candidate/repo-snapshot/src/entitlements.py",
+    "candidate/repo-snapshot/src/report_exporter.py",
+    "candidate/repo-snapshot/tests/test_policy_runtime.py",
+    "candidate/repo-snapshot/docs/README.md",
+    "candidate/repo-snapshot/docs/adr/ADR-011-policy-registry.md",
+    "candidate/repo-snapshot/docs/adr/ADR-014-yaml-rollback-draft.md",
+    "candidate/repo-snapshot/docs/migration-status.md",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/source-authority.md",
+    "oracle/README.md",
+    "oracle/conflicting-evidence-contract.json",
+    "oracle/expected-ledger.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_conflicting_evidence_fact_memo.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N66",
+    "surface_id": "E56",
+    "pack_id": "E56",
+    "role_class": "advisory",
+    "artifact_type": "conflicting evidence fact memo",
+    "modality_family": "repo-understanding with stale docs, draft ADRs, current code, tests, and source-ranking ledger",
+    "allowed_change_surface": [
+      "candidate/fact-memo.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/repo-snapshot/**"
+    ],
+    "score_profile": "repo-understanding, source-ranking, conflict-ledger, non-claim-control",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "conflicting-evidence",
+      "source-authority",
+      "false-claim-control",
+      "binary-separator-candidate"
+    ]
+  },
+  "editable_report": "candidate/fact-memo.md",
+  "required_report_sections": [
+    "## Source Ranking",
+    "## Conflict Ledger",
+    "## Confirmed Current Facts",
+    "## Non-Claims",
+    "## Bounded Next Action"
+  ],
+  "source_ranking_header": ["Rank", "Source", "Status", "Why"],
+  "conflict_ledger_header": ["#", "Claim", "Current source of truth", "Stale/conflicting source", "Decision", "Evidence"],
+  "confirmed_facts_header": ["#", "Fact", "Evidence"],
+  "non_claims_header": ["#", "Non-claim", "Reason"],
+  "exact_counts": {
+    "source_ranking": 4,
+    "conflict_ledger": 5,
+    "confirmed_facts": 4,
+    "non_claims": 4
+  },
+  "required_source_ranking": [
+    {
+      "rank": 1,
+      "source_terms": ["current code", "tests"],
+      "status_terms": ["authoritative", "current"],
+      "why_terms": ["policy_runtime.py", "test_policy_runtime.py"]
+    },
+    {
+      "rank": 2,
+      "source_terms": ["ADR-011"],
+      "status_terms": ["accepted"],
+      "why_terms": ["registry", "product re-intake"]
+    },
+    {
+      "rank": 3,
+      "source_terms": ["migration-status.md"],
+      "status_terms": ["stale", "mixed"],
+      "why_terms": ["2026-02-03", "verify"]
+    },
+    {
+      "rank": 4,
+      "source_terms": ["README", "ADR-014"],
+      "status_terms": ["stale", "draft"],
+      "why_terms": ["not accepted", "contradict"]
+    }
+  ],
+  "required_conflicts": [
+    {
+      "id": "C1",
+      "claim_terms": ["policy", "source", "YAML", "registry"],
+      "current_terms": ["policy_runtime.py:1", "policy_runtime.py:3", "ADR-011"],
+      "stale_terms": ["README.md:3", "ADR-014"],
+      "decision_terms": ["registry-v2", "current", "YAML", "stale"],
+      "evidence_terms": ["POLICY_SOURCE", "REGISTRY", "documentation only"]
+    },
+    {
+      "id": "C2",
+      "claim_terms": ["owner", "platform-policy", "reporting"],
+      "current_terms": ["policy_runtime.py:5", "ADR-011"],
+      "stale_terms": ["README.md:3"],
+      "decision_terms": ["platform-policy", "owns"],
+      "evidence_terms": ["owner", "reporting team"]
+    },
+    {
+      "id": "C3",
+      "claim_terms": ["EU", "premium", "override"],
+      "current_terms": ["entitlements.py:6", "test_policy_runtime.py:4"],
+      "stale_terms": ["README.md:6", "migration-status.md:8"],
+      "decision_terms": ["denied", "eu_override"],
+      "evidence_terms": ["return False", "is False"]
+    },
+    {
+      "id": "C4",
+      "claim_terms": ["hidden", "include_hidden", "auditor"],
+      "current_terms": ["entitlements.py:12", "entitlements.py:14", "test_policy_runtime.py:9"],
+      "stale_terms": ["README.md:6", "migration-status.md:7"],
+      "decision_terms": ["auditor", "visible-and-hidden", "non-auditor", "visible-only"],
+      "evidence_terms": ["include_hidden", "visible-and-hidden", "visible-only"]
+    },
+    {
+      "id": "C5",
+      "claim_terms": ["LEGACY_POLICY", "rollback"],
+      "current_terms": ["ADR-011", "policy_runtime.py:15"],
+      "stale_terms": ["README.md:9", "ADR-014"],
+      "decision_terms": ["rejected", "not available"],
+      "evidence_terms": ["LEGACY_POLICY=1", "return None"]
+    }
+  ],
+  "required_confirmed_facts": [
+    {
+      "id": "F1",
+      "fact_terms": ["runtime", "registry-v2"],
+      "evidence_terms": ["policy_runtime.py:1", "POLICY_SOURCE"]
+    },
+    {
+      "id": "F2",
+      "fact_terms": ["platform-policy", "owner"],
+      "evidence_terms": ["policy_runtime.py:5", "ADR-011"]
+    },
+    {
+      "id": "F3",
+      "fact_terms": ["EU", "premium", "eu_override"],
+      "evidence_terms": ["entitlements.py:6", "test_policy_runtime.py:4"]
+    },
+    {
+      "id": "F4",
+      "fact_terms": ["hidden", "auditor", "non-auditor"],
+      "evidence_terms": ["test_policy_runtime.py:9", "test_policy_runtime.py:13"]
+    }
+  ],
+  "required_non_claims": [
+    {
+      "id": "N1",
+      "non_claim_terms": ["YAML", "runtime"],
+      "reason_terms": ["README", "stale", "ADR-011"]
+    },
+    {
+      "id": "N2",
+      "non_claim_terms": ["ADR-014", "accepted"],
+      "reason_terms": ["draft", "never accepted"]
+    },
+    {
+      "id": "N3",
+      "non_claim_terms": ["LEGACY_POLICY", "available"],
+      "reason_terms": ["rejected", "ADR-011"]
+    },
+    {
+      "id": "N4",
+      "non_claim_terms": ["product", "semantics", "changed"],
+      "reason_terms": ["re-intake", "fact memo"]
+    }
+  ],
+  "required_next_action_terms": [
+    "documentation cleanup",
+    "README",
+    "migration-status",
+    "ADR-014",
+    "no runtime patch",
+    "product re-intake"
+  ],
+  "prohibited_report_snippets": [
+    "yaml is authoritative",
+    "treat adr-014 as accepted",
+    "premium accounts can always export",
+    "hidden-row export is not available yet",
+    "set legacy_policy=1"
+  ]
+}

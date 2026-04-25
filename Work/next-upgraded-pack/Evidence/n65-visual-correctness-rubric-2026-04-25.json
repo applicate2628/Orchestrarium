@@ -1,0 +1,73 @@
+{
+  "date": "2026-04-25",
+  "diagnostic_id": "W43",
+  "scenario_id": "N65",
+  "title": "Visual correctness review gauntlet",
+  "status": "admitted-diagnostic",
+  "denominator_policy": {
+    "full_v2_hard_slot": false,
+    "reason": "N65 is a primary-resolution diagnostic for L12 UI visual-correctness review. It does not replace an existing /40 slot because X1 and X3 both pass."
+  },
+  "scenario": {
+    "name": "N65-visual-correctness-review-gauntlet",
+    "intent": "review-only UI visual correctness packet with DOM/CSS/state/screenshot-probe evidence, eight exact defect tuples, and false-positive traps",
+    "oracle": "Scenarios-v2/N65-visual-correctness-review-gauntlet/oracle/visual-correctness-review-contract.json",
+    "exact_finding_count": 8,
+    "false_positive_terms": [
+      "aria-label",
+      "decorative-grid",
+      "muted-meta"
+    ]
+  },
+  "results": {
+    "X1": {
+      "model": "gpt-5.5",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "verdict": "PASS",
+      "changedPaths": ["candidate/review-report.md"],
+      "workerOutputBytes": 94940,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_05-20-09-X1-w43-visual-correctness-n65-2026-04-25/N65/",
+      "primary_failure": null
+    },
+    "X3": {
+      "model": "opus 4.7max",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "verdict": "PASS",
+      "changedPaths": ["candidate/review-report.md"],
+      "workerOutputBytes": 1666,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_05-20-08-X3-w43-visual-correctness-n65-2026-04-25/N65/",
+      "primary_failure": null
+    },
+    "X2": {
+      "model": "gpt-5.3-codex-spark",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "verdict": "FAIL",
+      "changedPaths": [],
+      "workerOutputBytes": 1094,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_05-23-19-X2-w43-visual-correctness-n65-2026-04-25/N65/",
+      "primary_failure": "did not edit candidate/review-report.md; verifier saw starter placeholders"
+    },
+    "X6": {
+      "model": "gemini3.1flash-lite-preview",
+      "route_class": "runtime",
+      "wrapperExitCode": 124,
+      "verificationPassed": null,
+      "verdict": "NOT-RUN",
+      "changedPaths": [],
+      "workerOutputBytes": null,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_05-23-18-X6-w43-visual-correctness-n65-2026-04-25/N65/",
+      "primary_failure": "shell timeout after 1800s with only prompt.txt in meta; no worker-output.txt or summary.json"
+    }
+  },
+  "interpretation": {
+    "top_pair": "binary tie remains on L12 UI visual-correctness review; both X1 and X3 pass exact eight-finding tuple gate",
+    "routing": "do not assign an ordinary visual-review primary from N65; keep X1/X3 near-tie for single-shot visual correctness review while preserving X3 primary for compact visual implementation and X1 evidence for pure pixel-localization diagnostics",
+    "calibration": "X2 fails lower-bound calibration by not editing the report; X6 is runtime NOT-RUN because the Gemini launch timed out before worker output"
+  }
+}

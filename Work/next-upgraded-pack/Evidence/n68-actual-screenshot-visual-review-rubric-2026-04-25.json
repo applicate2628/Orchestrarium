@@ -1,0 +1,105 @@
+{
+  "date": "2026-04-25",
+  "diagnostic_id": "W46",
+  "scenario_id": "N68",
+  "title": "Actual screenshot visual review gauntlet",
+  "status": "admitted-diagnostic",
+  "denominator_policy": {
+    "full_v2_hard_slot": false,
+    "reason": "N68 is an actual-screenshot visual grounding/review diagnostic. Both top rows fail the binary gate, so it is not promoted into /40."
+  },
+  "research_design_anchors": [
+    "VisualWebBench web screenshot understanding and grounding",
+    "ScreenSpot-Pro high-resolution GUI grounding",
+    "OSWorld-G fine-grained GUI grounding"
+  ],
+  "scenario": {
+    "name": "N68-actual-screenshot-visual-review-gauntlet",
+    "intent": "one 1280x900 dashboard screenshot with eight seeded visual defects, coordinate windows, and false-positive traps",
+    "oracle": "Scenarios-v2/N68-actual-screenshot-visual-review-gauntlet/oracle/visual-review-oracle.json",
+    "image": "Scenarios-v2/N68-actual-screenshot-visual-review-gauntlet/inputs/actual-screenshot.png",
+    "expectedFindingCount": 8,
+    "coordinateTolerancePx": 34,
+    "falsePositiveTraps": [
+      "decorative background/grid lines",
+      "disabled Export button",
+      "muted timestamp/meta text"
+    ]
+  },
+  "validation": {
+    "json_parse": "PASS",
+    "bundle_shape": "PASS",
+    "start_state": "PASS_EXPECTED_FAIL",
+    "reference_probe": "PASS_100",
+    "git_diff_check": "PASS",
+    "initial_invalidated_runs": [
+      "first X1 run invalidated by non-strict JSON schema",
+      "second X1 run invalidated by missing type on image_id schema",
+      "first X6 score recalculated after verifier learned to ignore trailing Gemini registry noise after the first balanced JSON object"
+    ]
+  },
+  "results": {
+    "X1": {
+      "model": "gpt-5.5",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "verdict": "FAIL",
+      "score_0_100": 70,
+      "matchedCount": 6,
+      "expectedCount": 8,
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_07-09-07-w46-actual-screenshot-n68-final2-2026-04-25/X1/",
+      "workerOutputBytes": 2742,
+      "elapsedSeconds": 26.88,
+      "primary_failure": "missed search-input defect, missed release-timeline coordinate/grounding, and omitted required false-positive non-finding ledger"
+    },
+    "X3": {
+      "model": "opus 4.7max",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "verdict": "FAIL",
+      "score_0_100": 80,
+      "matchedCount": 6,
+      "expectedCount": 8,
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_07-09-07-w46-actual-screenshot-n68-final2-2026-04-25/X3/",
+      "workerOutputBytes": 2072,
+      "elapsedSeconds": 316.41,
+      "primary_failure": "missed search-input defect and risk-score coordinate grounding"
+    },
+    "X6": {
+      "model": "gemini3.1flash-lite-preview",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "verdict": "FAIL",
+      "score_0_100": 20,
+      "matchedCount": 0,
+      "expectedCount": 8,
+      "runRoot": ".scratch/visual-localization-runs/2026-04-25_07-16-57-w46-actual-screenshot-n68-calibration-final-2026-04-25/X6/",
+      "workerOutputBytes": 2945,
+      "elapsedSeconds": 13.224,
+      "primary_failure": "detected broad visual areas but coordinates were effectively scaled/misaligned and no oracle tuple matched"
+    },
+    "X2": {
+      "model": "gpt-5.3-codex-spark",
+      "route_class": "not-supported",
+      "verdict": "NOT-RUN",
+      "primary_failure": "current visual runner supports X1/X3/X5/X6 vision routes only"
+    },
+    "X5": {
+      "model": "gemini3.1pro",
+      "route_class": "runtime",
+      "verdict": "NOT-RUN",
+      "timeoutSeconds": 264,
+      "outputFile": ".scratch/x5-quota-check-2026-04-25_0718.txt",
+      "observedOutputFile": false,
+      "primary_failure": "Gemini Pro smoke timed out with no output file and no explicit quota/reset message"
+    }
+  },
+  "interpretation": {
+    "top_pair": "both X1 and X3 fail binary; X3 has the scored edge on actual screenshot visual grounding, 80 versus 70",
+    "routing": "do not assign a binary visual-review primary from N68. If actual screenshot coordinate grounding is the deciding factor, prefer X3 provisionally and verify; keep N65 as ordinary visual review near-tie and N61 as pure pixel-localization diagnostic.",
+    "calibration": "X6 is scoreable lower-bound fail. X2 is not supported by the current visual runner. X5 remains route/runtime unhealthy."
+  }
+}

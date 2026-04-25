@@ -1,0 +1,181 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/review-report.md",
+    "candidate/review-target/README.md",
+    "candidate/review-target/security-depth/admin_api.py",
+    "candidate/review-target/security-depth/session_tokens.py",
+    "candidate/review-target/security-depth/webhook_handler.py",
+    "candidate/review-target/security-depth/audit_log.py",
+    "candidate/review-target/security-depth/export_links.py",
+    "candidate/review-target/security-depth/admin_console.html",
+    "inputs/README.md",
+    "inputs/accepted-security-claims.md",
+    "inputs/review-boundary.md",
+    "inputs/task.md",
+    "inputs/trust-boundary-notes.md",
+    "oracle/README.md",
+    "oracle/security-depth-review-contract.json",
+    "oracle/expected-findings.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "oracle/severity-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_security_depth_review.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N64",
+    "surface_id": "E54",
+    "pack_id": "E54",
+    "role_class": "review",
+    "artifact_type": "security-depth review findings",
+    "modality_family": "multi-file security depth gate with exact vuln tuples and false-positive traps",
+    "allowed_change_surface": [
+      "candidate/review-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "security-review, exact-findings, false-positive-control, depth-gauntlet",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "security-depth",
+      "exact-vulnerability-tuples",
+      "false-positive-control",
+      "binary-separator-candidate"
+    ]
+  },
+  "editable_report": "candidate/review-report.md",
+  "required_report_sections": [
+    "## Findings",
+    "## False Positives Avoided",
+    "## Gate Decision"
+  ],
+  "findings_table_header": ["#", "File", "Line", "Category", "Severity", "Title", "Evidence"],
+  "allowed_categories": ["authz", "tenant-boundary", "session", "webhook", "secret-exposure", "pii", "replay"],
+  "allowed_severities": ["high", "medium", "low"],
+  "exact_finding_count": 9,
+  "required_findings": [
+    {
+      "id": "F1",
+      "file": "candidate/review-target/security-depth/admin_api.py",
+      "acceptable_lines": [6],
+      "severity": "high",
+      "category_terms": ["tenant", "boundary", "authz"],
+      "title_keywords": ["tenant", "body", "client", "scope", "escape"],
+      "required_evidence_terms": ["tenant_id", "body"]
+    },
+    {
+      "id": "F2",
+      "file": "candidate/review-target/security-depth/admin_api.py",
+      "acceptable_lines": [7, 13],
+      "severity": "high",
+      "category_terms": ["authz", "role", "privilege"],
+      "title_keywords": ["role", "client", "acting", "privilege", "admin"],
+      "required_evidence_terms": ["acting_role", "finance-admin"]
+    },
+    {
+      "id": "F3",
+      "file": "candidate/review-target/security-depth/admin_api.py",
+      "acceptable_lines": [20, 21],
+      "severity": "medium",
+      "category_terms": ["authz", "pii", "tenant"],
+      "title_keywords": ["hidden", "export", "include", "accounts"],
+      "required_evidence_terms": ["include_hidden", "account_exporter.export"]
+    },
+    {
+      "id": "F4",
+      "file": "candidate/review-target/security-depth/session_tokens.py",
+      "acceptable_lines": [5, 6],
+      "severity": "high",
+      "category_terms": ["session", "token"],
+      "title_keywords": ["reset", "predictable", "token", "guessable"],
+      "required_evidence_terms": ["bucket", "user.email"]
+    },
+    {
+      "id": "F5",
+      "file": "candidate/review-target/security-depth/session_tokens.py",
+      "acceptable_lines": [10],
+      "severity": "medium",
+      "category_terms": ["session", "cookie"],
+      "title_keywords": ["cookie", "httponly", "secure", "samesite"],
+      "required_evidence_terms": ["httponly=False", "secure=False", "samesite=\"None\""]
+    },
+    {
+      "id": "F6",
+      "file": "candidate/review-target/security-depth/webhook_handler.py",
+      "acceptable_lines": [10],
+      "severity": "high",
+      "category_terms": ["webhook", "auth", "signature"],
+      "title_keywords": ["webhook", "signature", "debug", "bypass"],
+      "required_evidence_terms": ["debug_signature", "skip"]
+    },
+    {
+      "id": "F7",
+      "file": "candidate/review-target/security-depth/webhook_handler.py",
+      "acceptable_lines": [16, 17],
+      "severity": "medium",
+      "category_terms": ["replay", "webhook"],
+      "title_keywords": ["webhook", "replay", "idempotency", "event"],
+      "required_evidence_terms": ["event_store.record", "credits.grant"]
+    },
+    {
+      "id": "F8",
+      "file": "candidate/review-target/security-depth/audit_log.py",
+      "acceptable_lines": [4, 5, 8],
+      "severity": "high",
+      "category_terms": ["secret", "exposure", "log"],
+      "title_keywords": ["audit", "authorization", "cookie", "secret"],
+      "required_evidence_terms": ["Authorization", "Cookie", "audit_sink.write"]
+    },
+    {
+      "id": "F9",
+      "file": "candidate/review-target/security-depth/export_links.py",
+      "acceptable_lines": [7],
+      "severity": "high",
+      "category_terms": ["secret", "exposure", "pii"],
+      "title_keywords": ["download", "url", "service", "key", "email"],
+      "required_evidence_terms": ["SERVICE_API_KEY", "owner_email", "api_key"]
+    }
+  ],
+  "forbidden_findings": [
+    {
+      "title_keywords": ["masked_example_token", "sk_test_example", "example token", "synthetic token"],
+      "reason": "synthetic fixture token is not propagated to a sink"
+    },
+    {
+      "title_keywords": ["noopener", "rel noopener", "documentation link"],
+      "reason": "rel=noopener is acceptable hardening"
+    },
+    {
+      "title_keywords": ["health", "public health", "get health"],
+      "reason": "public health endpoint returns only ok=true"
+    }
+  ],
+  "required_false_positive_terms": ["MASKED_EXAMPLE_TOKEN", "rel=\"noopener\"", "GET /health"],
+  "prohibited_report_snippets": ["ship it", "looks fine", "no findings"],
+  "expected_gate_decision": "REVISE"
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["image_id", "findings", "non_findings"],
+  "properties": {
+    "image_id": {
+      "type": "string",
+      "const": "N68-actual-screenshot-v1"
+    },
+    "findings": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["component", "defect", "x", "y", "evidence"],
+        "properties": {
+          "component": {"type": "string"},
+          "defect": {"type": "string"},
+          "x": {"type": "integer", "minimum": 0, "maximum": 1279},
+          "y": {"type": "integer", "minimum": 0, "maximum": 899},
+          "evidence": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "non_findings": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "additionalProperties": false
+}

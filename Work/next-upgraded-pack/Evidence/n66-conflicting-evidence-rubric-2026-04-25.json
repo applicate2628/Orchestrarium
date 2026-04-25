@@ -1,0 +1,80 @@
+{
+  "date": "2026-04-25",
+  "diagnostic_id": "W44",
+  "scenario_id": "N66",
+  "title": "Conflicting evidence fact memo gauntlet",
+  "status": "admitted-diagnostic",
+  "denominator_policy": {
+    "full_v2_hard_slot": false,
+    "reason": "N66 is a primary-resolution diagnostic for L01 repo-understanding under conflicting evidence. It does not replace an existing /40 slot because X1 and X3 both pass."
+  },
+  "scenario": {
+    "name": "N66-conflicting-evidence-fact-memo-gauntlet",
+    "intent": "fact memo over current code, tests, accepted ADR, stale README, draft ADR, and stale migration note with exact source-ranking/conflict/non-claim tuples",
+    "oracle": "Scenarios-v2/N66-conflicting-evidence-fact-memo-gauntlet/oracle/conflicting-evidence-contract.json",
+    "source_ranking_count": 4,
+    "conflict_count": 5,
+    "confirmed_fact_count": 4,
+    "non_claim_count": 4
+  },
+  "results": {
+    "X1": {
+      "model": "gpt-5.5",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "verdict": "PASS",
+      "changedPaths": ["candidate/fact-memo.md"],
+      "workerOutputBytes": 169439,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_06-07-53-X1-w44-conflicting-evidence-n66-2026-04-25/N66/",
+      "primary_failure": null
+    },
+    "X3": {
+      "model": "opus 4.7max",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "verdict": "PASS",
+      "changedPaths": ["candidate/fact-memo.md"],
+      "workerOutputBytes": 1725,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_06-07-52-X3-w44-conflicting-evidence-n66-2026-04-25/N66/",
+      "primary_failure": null
+    },
+    "X2": {
+      "model": "gpt-5.3-codex-spark",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "verdict": "FAIL",
+      "changedPaths": ["candidate/fact-memo.md"],
+      "workerOutputBytes": 76567,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_06-13-31-X2-w44-conflicting-evidence-n66-2026-04-25/N66/",
+      "primary_failure": "missed source-ranking rows, all five conflict tuples, fact/non-claim coverage, bounded next-action term, and repeated a prohibited stale claim"
+    },
+    "X6": {
+      "model": "gemini3.1flash-lite-preview",
+      "route_class": "scoreable",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "verdict": "FAIL",
+      "changedPaths": ["candidate/fact-memo.md"],
+      "workerOutputBytes": 3076,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-25_06-13-31-X6-w44-conflicting-evidence-n66-2026-04-25/N66/",
+      "primary_failure": "missed source-ranking rows, all five conflict tuples, multiple confirmed facts, and non-claim coverage despite producing a memo"
+    }
+  },
+  "x5_probe": {
+    "model": "gemini3.1pro",
+    "route_class": "runtime",
+    "verdict": "NOT-RUN",
+    "timeout_seconds": 240,
+    "output_file": ".scratch/x5-quota-check-2026-04-25_0621.txt",
+    "observed_output_file": false,
+    "interpretation": "No explicit quota/reset message was observed. Current status remains Gemini Pro route/runtime timeout, not quota-clear and not a scoreable model failure."
+  },
+  "interpretation": {
+    "top_pair": "binary tie remains on L01 repo-understanding/conflicting-evidence fact memo; both X1 and X3 pass exact source-ranking and conflict-ledger gates",
+    "routing": "keep L01 repo-understanding as X1/X3 near-tie; X3 remains strongly preferable when compact operator output is valued",
+    "calibration": "X2 and X6 both fail scoreably, so N66 is a useful lower-bound discriminator even though it does not separate the top pair"
+  }
+}

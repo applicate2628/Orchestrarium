@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ops Console</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="shell">
+    <section class="topbar" aria-label="Release controls">
+      <div class="brand">Ops Console</div>
+      <button class="icon-button" aria-label="Refresh incidents" title="Refresh incidents">↻</button>
+      <button class="btn primary publish" aria-disabled="true">Publish</button>
+    </section>
+    <div class="status-banner" role="status">3 integrations need operator attention.</div>
+    <nav class="tabs" aria-label="Incident views">
+      <button class="tab" aria-selected="true">Active</button>
+      <button class="tab" aria-selected="false">Muted</button>
+    </nav>
+    <section class="workspace">
+      <div class="content">
+        <p class="warning-copy">Shipment retry rate is above the release threshold.</p>
+        <div class="summary-skeleton" aria-hidden="true"></div>
+        <table class="incident-table">
+          <thead>
+            <tr><th>Service</th><th>Status</th><th>Owner</th><th>Actions</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Billing API</td><td>Warning</td><td>Core</td><td><button>Requeue</button></td></tr>
+            <tr><td>Exports</td><td>Paused</td><td>Data</td><td><button>Resume</button></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <aside class="inspector" aria-label="Incident details">
+        <h2>Inspector</h2>
+        <p class="muted-meta">Updated 4 min ago</p>
+        <article class="settings-card">
+          <button class="toggle">Retry window</button>
+        </article>
+      </aside>
+    </section>
+    <form class="operator-form">
+      <label for="handoff">Handoff note</label>
+      <textarea id="handoff" aria-describedby="handoff-error"></textarea>
+      <p id="handoff-error" class="field-error">Handoff note is required.</p>
+    </form>
+    <div class="toast" role="status">Saved draft locally.</div>
+    <div class="decorative-grid" aria-hidden="true"></div>
+  </main>
+</body>
+</html>

@@ -1,0 +1,20 @@
+id: N64
+surface_id: E54
+pack_id: E54
+role_class: review
+artifact_type: security-depth review findings
+modality_family: multi-file security depth gate with exact vuln tuples and false-positive traps
+allowed_change_surface:
+  - candidate/review-report.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/review-target/**
+score_profile: "security-review, exact-findings, false-positive-control, depth-gauntlet"
+overlay_flags:
+  - top-pair-role-fit
+  - security-depth
+  - exact-vulnerability-tuples
+  - false-positive-control
+  - binary-separator-candidate

@@ -1,0 +1,170 @@
+{
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/review-report.md",
+    "candidate/review-target/README.md",
+    "candidate/review-target/visual-ui/dashboard.html",
+    "candidate/review-target/visual-ui/styles.css",
+    "candidate/review-target/visual-ui/screenshot-probes.md",
+    "candidate/review-target/visual-ui/state-matrix.md",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/review-boundary.md",
+    "inputs/visual-acceptance-notes.md",
+    "inputs/probe-method.md",
+    "oracle/README.md",
+    "oracle/visual-correctness-review-contract.json",
+    "oracle/expected-findings.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "oracle/severity-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_visual_correctness_review.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N65",
+    "surface_id": "E55",
+    "pack_id": "E55",
+    "role_class": "review",
+    "artifact_type": "visual correctness review findings",
+    "modality_family": "UI visual correctness gate with screenshot-probe evidence and exact defect tuples",
+    "allowed_change_surface": [
+      "candidate/review-report.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "ux-review, visual-correctness, exact-findings, false-positive-control",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "visual-correctness",
+      "screenshot-probe-binding",
+      "false-positive-control",
+      "binary-separator-candidate"
+    ]
+  },
+  "editable_report": "candidate/review-report.md",
+  "required_report_sections": [
+    "## Findings",
+    "## False Positives Avoided",
+    "## Gate Decision"
+  ],
+  "findings_table_header": ["#", "File", "Line", "Category", "Severity", "Title", "Evidence"],
+  "allowed_categories": ["layout", "responsive", "state", "contrast", "focus", "occlusion", "affordance", "motion"],
+  "allowed_severities": ["high", "medium", "low"],
+  "exact_finding_count": 8,
+  "required_findings": [
+    {
+      "id": "F1",
+      "file": "candidate/review-target/visual-ui/styles.css",
+      "acceptable_lines": [83, 84],
+      "severity": "high",
+      "category_terms": ["occlusion", "layout"],
+      "title_keywords": ["inspector", "actions", "overlap", "occludes"],
+      "required_evidence_terms": ["rightActionsProbe", "92 px"]
+    },
+    {
+      "id": "F2",
+      "file": "candidate/review-target/visual-ui/styles.css",
+      "acceptable_lines": [29, 141],
+      "severity": "high",
+      "category_terms": ["responsive", "layout"],
+      "title_keywords": ["mobile", "banner", "topbar", "hidden"],
+      "required_evidence_terms": ["mobileBannerProbe", "44 px"]
+    },
+    {
+      "id": "F3",
+      "file": "candidate/review-target/visual-ui/styles.css",
+      "acceptable_lines": [107, 108, 109],
+      "severity": "high",
+      "category_terms": ["state", "affordance"],
+      "title_keywords": ["disabled", "publish", "enabled", "primary"],
+      "required_evidence_terms": ["disabledPublishProbe", "aria-disabled=true"]
+    },
+    {
+      "id": "F4",
+      "file": "candidate/review-target/visual-ui/styles.css",
+      "acceptable_lines": [94],
+      "severity": "medium",
+      "category_terms": ["focus"],
+      "title_keywords": ["focus", "outline", "clipped"],
+      "required_evidence_terms": ["focusClipProbe", "3 px", "overflow"]
+    },
+    {
+      "id": "F5",
+      "file": "candidate/review-target/visual-ui/styles.css",
+      "acceptable_lines": [60, 61],
+      "severity": "medium",
+      "category_terms": ["contrast"],
+      "title_keywords": ["warning", "contrast", "copy"],
+      "required_evidence_terms": ["warningContrastProbe", "2.8:1", "4.5:1"]
+    },
+    {
+      "id": "F6",
+      "file": "candidate/review-target/visual-ui/styles.css",
+      "acceptable_lines": [119, 121, 122, 150],
+      "severity": "high",
+      "category_terms": ["occlusion", "responsive"],
+      "title_keywords": ["toast", "validation", "field", "covers"],
+      "required_evidence_terms": ["toastFieldProbe", "validation"]
+    },
+    {
+      "id": "F7",
+      "file": "candidate/review-target/visual-ui/styles.css",
+      "acceptable_lines": [46, 47, 48],
+      "severity": "medium",
+      "category_terms": ["state"],
+      "title_keywords": ["selected", "tab", "indistinguishable", "state"],
+      "required_evidence_terms": ["tabStateProbe", "deltaE 1.1"]
+    },
+    {
+      "id": "F8",
+      "file": "candidate/review-target/visual-ui/styles.css",
+      "acceptable_lines": [65],
+      "severity": "medium",
+      "category_terms": ["layout", "motion"],
+      "title_keywords": ["skeleton", "layout", "shift", "space"],
+      "required_evidence_terms": ["skeletonShiftProbe", "64 px", "0 px"]
+    }
+  ],
+  "forbidden_findings": [
+    {
+      "title_keywords": ["aria-label", "icon-only", "refresh icon"],
+      "reason": "the icon button has an accessible label and acceptable visual target"
+    },
+    {
+      "title_keywords": ["decorative grid", "background grid", "gradient grid"],
+      "reason": "the decorative grid is inert and does not cover content"
+    },
+    {
+      "title_keywords": ["muted metadata", "timestamp", "updated 4 min"],
+      "reason": "low-emphasis timestamp metadata is intentionally muted and not task-critical"
+    }
+  ],
+  "required_false_positive_terms": ["aria-label", "decorative-grid", "muted-meta"],
+  "prohibited_report_snippets": ["ship it", "looks fine", "no findings"],
+  "expected_gate_decision": "REVISE"
+}

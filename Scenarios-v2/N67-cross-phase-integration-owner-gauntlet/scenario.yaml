@@ -1,0 +1,25 @@
+id: N67
+surface_id: E57
+pack_id: E57
+role_class: owner
+artifact_type: staged cross-phase integration owner packet
+modality_family: multi-session integration owner, cross-phase compatibility gate, QA stop, repair reentry, and closure
+allowed_change_surface:
+  - candidate/integration-ledger.json
+  - candidate/incompatibility-report.md
+  - candidate/qa-gate.json
+  - candidate/closure.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "staged-integration-owner, compatibility-gate, reentry, qa-stop, scored-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - owner-orchestration
+  - staged-runner
+  - integration-owner
+  - cross-phase-compatibility
+  - qa-gate
+  - binary-separator-candidate
