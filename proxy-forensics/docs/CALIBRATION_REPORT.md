@@ -86,12 +86,12 @@ All requirements satisfied:
 ## Reproducing
 
 ```bash
-python calibration_runner.py        # full matrix, ~50 min
-# Per-combo results saved to .scratch/proxy-forensics/calibration/calibration-*.json
-# Aggregate log: .scratch/proxy-forensics/calibration/_calibration_log.json
+python scripts/calibration_runner.py    # full matrix, ~50 min
+# Per-combo results saved to calibration/calibration-*.json
+# Aggregate log: calibration/_calibration_log.json
 ```
 
 For affected-only re-run (after classifier code change):
 ```bash
-python calibration_rerun.py         # 15 combos (Opus 4.5/4.6 + Haiku), ~30 min
+python scripts/calibration_rerun.py     # 15 combos (Opus 4.5/4.6 + Haiku), ~30 min
 ```

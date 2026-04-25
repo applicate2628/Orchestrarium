@@ -1,6 +1,6 @@
 # Network-Level Fingerprint Comparison
 
-Baseline network fingerprints for known Claude endpoints, collected via `network_probe.py`. Use as reference for comparing new suspect endpoints.
+Baseline network fingerprints for known Claude endpoints, collected via `scripts/network_probe.py`. Use as reference for comparing new suspect endpoints. Sample raw outputs in `examples/network_anthropic.json` and `examples/network_aw.json`.
 
 **Collection date**: 2026-04-24. Re-collect quarterly.
 
@@ -44,7 +44,7 @@ aggressive_defense: TRUE
 
 ## How to compare a new suspect
 
-1. Run `python network_probe.py --url <suspect-url>` and save output.
+1. Run `python scripts/network_probe.py --url <suspect-url>` and save output.
 2. Compare:
    - **TLS success rate**: consistent vs drops? Drops = middleware/defense.
    - **Server / CDN signatures**: Cloudflare suggests legit reseller. Bare nginx / unknown = custom infrastructure.
@@ -65,4 +65,4 @@ aggressive_defense: TRUE
 Add a new endpoint fingerprint here whenever:
 - A new suspect proxy is investigated.
 - A known endpoint's fingerprint changes materially (CDN migration, server change).
-- A new proxy-software signature is added to `network_probe.py`'s `PROXY_SIGNATURES` table.
+- A new proxy-software signature is added to `scripts/network_probe.py`'s `PROXY_SIGNATURES` table.

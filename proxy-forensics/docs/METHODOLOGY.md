@@ -179,9 +179,9 @@ The LLM-behavior battery (`fingerprint.py` 5 probes) is single-turn. It does NOT
 
 For high-stakes classification (financial or security-sensitive decisions), do at least one of:
 
-1. Run `tokenizer_probe.py` (10 sentinels, fits α·β slope; distinguishes Claude BPE from non-Claude backends masquerading as Claude)
-2. Run `mitm_capture.py` (captures raw HTTPS via mitmproxy + custom CA; reveals injected system prompt content)
-3. Consult a known-fresh Opus 4.7 max with full evidence dump (see `.scratch/consult_opus47*.py` for the structured brief format)
+1. Run `scripts/tokenizer_probe.py` (10 sentinels, fits α·β slope; distinguishes Claude BPE from non-Claude backends masquerading as Claude)
+2. Run `scripts/mitm_capture.py` (captures raw HTTPS via mitmproxy + custom CA; reveals injected system prompt content)
+3. Consult a known-fresh Opus 4.7 max with full evidence dump (see `investigation/consult_opus47*.py` for the structured brief format)
 
 ## Common failure modes
 

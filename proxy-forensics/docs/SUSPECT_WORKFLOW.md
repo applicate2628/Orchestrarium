@@ -24,7 +24,7 @@ Capture before running any probe:
 **Cost**: zero LLM tokens (only TLS/HTTP HEAD requests)
 
 ```bash
-python network_probe.py --url <gateway-url> --label "<name>" \
+python scripts/network_probe.py --url <gateway-url> --label "<name>" \
   --save-raw network_<name>.json
 ```
 
@@ -46,7 +46,7 @@ Compare against `NETWORK_FINGERPRINTS.md` baselines. Flag:
 **Cost**: ~$0.50-1.50 per target depending on gateway pricing
 
 ```bash
-python fingerprint.py --label "<name>" --cmd "<command>" --shell \
+python scripts/fingerprint.py --label "<name>" --cmd "<command>" --shell \
   --repeats 2 --save-raw results_<name>.json
 ```
 
@@ -75,12 +75,12 @@ Combine Step 2 + Step 3 findings:
 If verdict is ambiguous OR the decision has security / compliance / financial stakes:
 
 - [ ] **mitmproxy HTTPS capture**: set up local intercepting proxy, capture actual `/v1/messages` request body. Reveals injected system prompt content, exact parameter handling. Setup: 30-60 min. See `NETWORK_FINGERPRINTS.md` for how to interpret the capture.
-- [ ] **Tokenizer probe**: run `python tokenizer_probe.py --baseline-cmd "claude" --gateway-cmd "<suspect>" --gateway-shell --model claude-opus-4-7 --gateway-model opus --repeats 2 --save-raw tokenizer_<name>.json`. 10 sentinels, α·β linear fit, verdicts `claude_bpe`/`claude_bpe_weak`/`non_claude`/`ambiguous`/`insufficient_data`. Feed into `fingerprint.py --tokenizer-probe-raw tokenizer_<name>.json` to integrate into the classifier (opens `distill+middleware` hypothesis when `non_claude`, vetoes A-clean high confidence; `insufficient_data` / `ambiguous` → no classifier effect).
-- [ ] **Opus 4.7 max expert consultation**: send full evidence dump to `claude -p --model claude-opus-4-7 --effort max` for independent re-ranking (template: `consult_opus47*.py` in `.scratch/`).
+- [ ] **Tokenizer probe**: run `python scripts/tokenizer_probe.py --baseline-cmd "claude" --gateway-cmd "<suspect>" --gateway-shell --model claude-opus-4-7 --gateway-model opus --repeats 2 --save-raw tokenizer_<name>.json`. 10 sentinels, α·β linear fit, verdicts `claude_bpe`/`claude_bpe_weak`/`non_claude`/`ambiguous`/`insufficient_data`. Feed into `scripts/fingerprint.py --tokenizer-probe-raw tokenizer_<name>.json` to integrate into the classifier (opens `distill+middleware` hypothesis when `non_claude`, vetoes A-clean high confidence; `insufficient_data` / `ambiguous` → no classifier effect).
+- [ ] **Opus 4.7 max expert consultation**: send full evidence dump to `claude -p --model claude-opus-4-7 --effort max` for independent re-ranking (template: `investigation/consult_opus47*.py`).
 
 ## Step 6. Document findings
 
-Add an entry to `NETWORK_FINGERPRINTS.md` with the new target's network profile. Archive raw JSON outputs (`network_<name>.json`, `results_<name>.json`) under `.scratch/proxy-forensics/investigations/<date>-<name>/`.
+Add an entry to `NETWORK_FINGERPRINTS.md` (sibling doc) with the new target's network profile. Archive raw JSON outputs (`network_<name>.json`, `results_<name>.json`) under `examples/<date>-<name>/` or your preferred local investigations directory.
 
 ## Common pitfalls
 
@@ -89,16 +89,16 @@ Add an entry to `NETWORK_FINGERPRINTS.md` with the new target's network profile.
 - **Sampling variance**: `--repeats 1` is unreliable for classification. Default 2, use 3+ for high-stakes targets.
 - **Baseline drift**: if baselines are >90 days old or Anthropic has released a new Opus generation, regenerate before running comparisons. Tool blocks strong verdicts past `expiry_date`.
 - **Cost reporting**: `cost_usd` returned by third-party gateways is often fabricated. Trust `out_tok`, `text`, `msg_id` prefix, `cache_create/read`.
-- **Tool use**: always pass `--tools ""` (automatic in `fingerprint.py`). Otherwise WebSearch can fetch current events and defeat the temporal-cutoff probe.
+- **Tool use**: always pass `--tools ""` (automatic in `scripts/fingerprint.py`). Otherwise WebSearch can fetch current events and defeat the temporal-cutoff probe.
 - **Rate limits / aggressive defense**: some gateways limit probe frequency or actively drop probe-shaped requests. Space runs, try fallback methods (POST vs GET), or escalate to mitmproxy.
 
 ## Sanity check for new toolkit changes
 
 Before applying the toolkit to a new important suspect:
 
-- [ ] `python test_fingerprint.py` → 124 tests pass (v0.6)
-- [ ] `python test_tokenizer_probe.py` → 33 tests pass
-- [ ] `python test_mitm_capture.py` → 9 tests pass
-- [ ] `python fingerprint.py --list-probes` → 5 probes listed
+- [ ] `python scripts/tests/test_fingerprint.py` → 134 tests pass (v0.6.1)
+- [ ] `python scripts/tests/test_tokenizer_probe.py` → 33 tests pass
+- [ ] `python scripts/tests/test_mitm_capture.py` → 9 tests pass
+- [ ] `python scripts/fingerprint.py --list-probes` → 5 probes listed
 - [ ] Run on a known baseline (plain `claude --model claude-opus-4-7`) and confirm A-clean high confidence (score ≈ 0.72, gap ≈ 0.42)
 - [ ] Run on AW (known A+Middleware-like) and confirm that verdict (may be medium confidence due to gateway adaptation)

@@ -127,6 +127,6 @@ For the current classification purpose, wire capture provided the evidence we ne
 
 ## Files
 
-- Raw flow dumps: `.scratch/proxy-forensics/mitm_flows/*.flow`
-- Capture script: `.scratch/proxy-forensics/mitm_capture.py`
-- Parser utility: `.scratch/proxy-forensics/parse_mitm_flow.py`
+- Raw flow dumps: `mitm_flows/*.flow` (gitignored — binary, may contain auth tokens; regenerate locally)
+- Capture script: `scripts/mitm_capture.py`
+- Parser utility: `scripts/parse_mitm_flow.py`
