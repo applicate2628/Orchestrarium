@@ -1,0 +1,31 @@
+id: N70
+surface_id: E60
+pack_id: E60
+role_class: implementation
+artifact_type: real-repo multi-file event migration scorecard
+modality_family: multi-file implementation, hidden consumer contract, runtime budget, patch-quality, output cost
+allowed_change_surface:
+  - candidate/migration-ledger.json
+  - candidate/workspace/src/entitlemesh/parser.py
+  - candidate/workspace/src/entitlemesh/engine.py
+  - candidate/workspace/src/entitlemesh/reporting.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/src/entitlemesh/__init__.py
+  - candidate/workspace/src/entitlemesh/models.py
+  - candidate/workspace/tests/**
+score_profile: realrepo-multifile-migration, hidden-consumer, runtime-budget, exact-scope, cost-rubric
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - real-repo-workflow
+  - hidden-consumer
+  - interface-migration
+  - runtime-budget
+  - patch-quality-rubric
+  - scored-rubric
+  - binary-separator-candidate

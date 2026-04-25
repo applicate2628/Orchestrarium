@@ -1,0 +1,106 @@
+{
+  "contractId": "N72-W50-caller-spanning-api-refactor",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/refactor-ledger.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/billinglink/__init__.py",
+    "candidate/workspace/src/billinglink/models.py",
+    "candidate/workspace/src/billinglink/service.py",
+    "candidate/workspace/src/billinglink/api.py",
+    "candidate/workspace/src/billinglink/cli.py",
+    "candidate/workspace/src/billinglink/reports.py",
+    "candidate/workspace/tests/test_visible_quote.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "oracle/README.md",
+    "oracle/caller-contract.json",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_caller_spanning_api_refactor.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N72",
+    "surface_id": "E62",
+    "pack_id": "E62",
+    "role_class": "implementation",
+    "artifact_type": "caller-spanning API refactor scorecard",
+    "modality_family": "multi-caller implementation, hidden API/CLI/report contracts, compatibility, patch-quality, output cost",
+    "allowed_change_surface": [
+      "candidate/refactor-ledger.json",
+      "candidate/workspace/src/billinglink/service.py",
+      "candidate/workspace/src/billinglink/api.py",
+      "candidate/workspace/src/billinglink/cli.py",
+      "candidate/workspace/src/billinglink/reports.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md",
+      "candidate/workspace/src/billinglink/__init__.py",
+      "candidate/workspace/src/billinglink/models.py",
+      "candidate/workspace/tests/**"
+    ],
+    "score_profile": "caller-spanning-refactor, hidden-consumer, compatibility, exact-scope, cost-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "real-repo-workflow",
+      "caller-spanning-interface-refactor",
+      "hidden-consumer",
+      "compatibility",
+      "patch-quality-rubric",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/refactor-ledger.json",
+    "candidate/workspace/src/billinglink/service.py",
+    "candidate/workspace/src/billinglink/api.py",
+    "candidate/workspace/src/billinglink/cli.py",
+    "candidate/workspace/src/billinglink/reports.py"
+  ],
+  "ledgerRequiredTerms": [
+    "AccountRef",
+    "api-v2",
+    "api-legacy",
+    "caller",
+    "cli",
+    "report",
+    "compatibility",
+    "payload immutability",
+    "no test edits"
+  ],
+  "forbiddenStaticTerms": [
+    "acct-hidden",
+    "cust-hidden",
+    "subprocess",
+    "eval(",
+    "exec(",
+    "requests",
+    "urllib"
+  ]
+}

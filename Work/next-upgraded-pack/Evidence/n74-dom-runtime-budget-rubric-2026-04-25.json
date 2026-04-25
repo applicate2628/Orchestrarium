@@ -1,0 +1,56 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_16-05-25-X1-w52-dom-runtime-output-budget-n74-2026-04-25\\N74",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 80,
+      "runtime": 40,
+      "keyboard_state": 20,
+      "patch_quality": 20,
+      "operator_budget": 0,
+      "elapsed_seconds": 331.296,
+      "output_bytes": 241980,
+      "changed_paths": [
+        "candidate/ui-runtime-ledger.json",
+        "candidate/workspace/src/app.mjs",
+        "candidate/workspace/src/state.mjs",
+        "candidate/workspace/src/styles.css",
+        "candidate/workspace/src/view.mjs"
+      ],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [
+        "operator-budget-fail"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_16-05-25-X3-w52-dom-runtime-output-budget-n74-2026-04-25\\N74",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 100,
+      "runtime": 40,
+      "keyboard_state": 20,
+      "patch_quality": 20,
+      "operator_budget": 20,
+      "elapsed_seconds": 358.603,
+      "output_bytes": 2085,
+      "changed_paths": [
+        "candidate/ui-runtime-ledger.json",
+        "candidate/workspace/src/app.mjs",
+        "candidate/workspace/src/state.mjs",
+        "candidate/workspace/src/styles.css",
+        "candidate/workspace/src/view.mjs"
+      ],
+      "auxiliary_changed_paths": [],
+      "failure_ids": []
+    }
+  ]
+}

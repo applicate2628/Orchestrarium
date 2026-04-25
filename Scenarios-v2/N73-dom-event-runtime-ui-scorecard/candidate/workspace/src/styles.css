@@ -1,0 +1,16 @@
+.board {
+  display: grid;
+  gap: 12px;
+}
+
+.card[data-visible="false"] {
+  display: none;
+}
+
+[data-filter][aria-pressed="true"] {
+  font-weight: 700;
+}
+
+[data-save]:disabled {
+  opacity: 0.6;
+}

@@ -1,0 +1,32 @@
+id: N72
+surface_id: E62
+pack_id: E62
+role_class: implementation
+artifact_type: caller-spanning API refactor scorecard
+modality_family: multi-caller implementation, hidden API/CLI/report contracts, compatibility, patch-quality, output cost
+allowed_change_surface:
+  - candidate/refactor-ledger.json
+  - candidate/workspace/src/billinglink/service.py
+  - candidate/workspace/src/billinglink/api.py
+  - candidate/workspace/src/billinglink/cli.py
+  - candidate/workspace/src/billinglink/reports.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/src/billinglink/__init__.py
+  - candidate/workspace/src/billinglink/models.py
+  - candidate/workspace/tests/**
+score_profile: caller-spanning-refactor, hidden-consumer, compatibility, exact-scope, cost-rubric
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - real-repo-workflow
+  - caller-spanning-interface-refactor
+  - hidden-consumer
+  - compatibility
+  - patch-quality-rubric
+  - scored-rubric
+  - binary-separator-candidate

@@ -1,0 +1,127 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_12-04-30-X1-w48-entitlement-migration-n70-2026-04-25\\N70",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 85,
+      "correctness": 50,
+      "runtime": 15,
+      "patch_quality": 20,
+      "cost": 0,
+      "runtime_seconds": 0.261966,
+      "elapsed_seconds": 301.531,
+      "output_bytes": 229032,
+      "changed_paths": [
+        "candidate/migration-ledger.json",
+        "candidate/workspace/src/entitlemesh/engine.py",
+        "candidate/workspace/src/entitlemesh/parser.py",
+        "candidate/workspace/src/entitlemesh/reporting.py"
+      ],
+      "auxiliary_changed_paths": [],
+      "failure_ids": []
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_12-04-30-X3-w48-entitlement-migration-n70-2026-04-25\\N70",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 90,
+      "correctness": 50,
+      "runtime": 15,
+      "patch_quality": 10,
+      "cost": 15,
+      "runtime_seconds": 0.214704,
+      "elapsed_seconds": 377.598,
+      "output_bytes": 2395,
+      "changed_paths": [
+        "candidate/migration-ledger.json",
+        "candidate/workspace/src/entitlemesh/engine.py",
+        "candidate/workspace/src/entitlemesh/parser.py",
+        "candidate/workspace/src/entitlemesh/reporting.py"
+      ],
+      "auxiliary_changed_paths": [
+        "candidate/workspace/src/entitlemesh/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/entitlemesh/__pycache__/engine.cpython-314.pyc",
+        "candidate/workspace/src/entitlemesh/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/entitlemesh/__pycache__/parser.cpython-314.pyc",
+        "candidate/workspace/src/entitlemesh/__pycache__/reporting.cpython-314.pyc"
+      ],
+      "failure_ids": [
+        "patch-auxiliary-churn"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_12-11-28-X2-w48-entitlement-migration-n70-2026-04-25\\N70",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 15,
+      "correctness": 0,
+      "runtime": 0,
+      "patch_quality": 0,
+      "cost": 15,
+      "runtime_seconds": null,
+      "elapsed_seconds": 4.004,
+      "output_bytes": 1307,
+      "changed_paths": [],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [
+        "correctness-exception",
+        "patch-missing-core-fields",
+        "patch-missing-core-fields",
+        "ledger-changed-files",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_12-11-28-X6-w48-entitlement-migration-n70-2026-04-25\\N70",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-wrapper",
+      "wrapper_exit_code": 1,
+      "verification_passed": false,
+      "rubric": 0,
+      "correctness": 0,
+      "runtime": 0,
+      "patch_quality": 0,
+      "cost": 0,
+      "runtime_seconds": 0.1924,
+      "elapsed_seconds": 167.981,
+      "output_bytes": 3702,
+      "changed_paths": [
+        "candidate/migration-ledger.json",
+        "candidate/workspace/src/entitlemesh/engine.py",
+        "candidate/workspace/src/entitlemesh/models.py",
+        "candidate/workspace/src/entitlemesh/parser.py",
+        "candidate/workspace/src/entitlemesh/reporting.py"
+      ],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [
+        "correctness-hidden-states",
+        "correctness-order-independence",
+        "ledger-term",
+        "ledger-term"
+      ]
+    }
+  ]
+}

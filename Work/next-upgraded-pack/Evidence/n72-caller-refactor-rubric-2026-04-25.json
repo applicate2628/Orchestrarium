@@ -1,0 +1,118 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_14-22-54-X1-w50-caller-spanning-api-n72-2026-04-25\\N72",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 83,
+      "correctness": 45,
+      "caller_coverage": 20,
+      "patch_quality": 10,
+      "cost": 8,
+      "elapsed_seconds": 217.57,
+      "output_bytes": 146983,
+      "changed_paths": [
+        "candidate/refactor-ledger.json",
+        "candidate/workspace/src/billinglink/api.py",
+        "candidate/workspace/src/billinglink/cli.py",
+        "candidate/workspace/src/billinglink/reports.py",
+        "candidate/workspace/src/billinglink/service.py"
+      ],
+      "auxiliary_changed_paths": [
+        "candidate/workspace/src/billinglink/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/billinglink/__pycache__/api.cpython-314.pyc",
+        "candidate/workspace/src/billinglink/__pycache__/cli.cpython-314.pyc",
+        "candidate/workspace/src/billinglink/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/billinglink/__pycache__/reports.cpython-314.pyc",
+        "candidate/workspace/src/billinglink/__pycache__/service.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_visible_quote.cpython-314.pyc"
+      ],
+      "failure_ids": [
+        "patch-auxiliary-churn"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_14-22-54-X3-w50-caller-spanning-api-n72-2026-04-25\\N72",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 90,
+      "correctness": 45,
+      "caller_coverage": 20,
+      "patch_quality": 10,
+      "cost": 15,
+      "elapsed_seconds": 290.381,
+      "output_bytes": 2599,
+      "changed_paths": [
+        "candidate/refactor-ledger.json",
+        "candidate/workspace/src/billinglink/api.py",
+        "candidate/workspace/src/billinglink/cli.py",
+        "candidate/workspace/src/billinglink/reports.py",
+        "candidate/workspace/src/billinglink/service.py"
+      ],
+      "auxiliary_changed_paths": [
+        "candidate/workspace/src/billinglink/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/billinglink/__pycache__/api.cpython-314.pyc",
+        "candidate/workspace/src/billinglink/__pycache__/cli.cpython-314.pyc",
+        "candidate/workspace/src/billinglink/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/billinglink/__pycache__/reports.cpython-314.pyc",
+        "candidate/workspace/src/billinglink/__pycache__/service.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_visible_quote.cpython-314.pyc"
+      ],
+      "failure_ids": [
+        "patch-auxiliary-churn"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_14-28-30-X2-w50-caller-spanning-api-n72-2026-04-25\\N72",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 15,
+      "correctness": 0,
+      "caller_coverage": 0,
+      "patch_quality": 0,
+      "cost": 15,
+      "elapsed_seconds": 5.859,
+      "output_bytes": 1467,
+      "changed_paths": [],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [
+        "behavior-api-v2",
+        "behavior-service-v2",
+        "behavior-cli-v2",
+        "behavior-report-v2",
+        "ledger-changed-files",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_14-28-29-X6-w50-caller-spanning-api-n72-2026-04-25\\N72",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "rubric": 0,
+      "failure_ids": [
+        "summary-missing"
+      ]
+    }
+  ]
+}

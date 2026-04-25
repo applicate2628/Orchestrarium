@@ -1,0 +1,138 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_12-23-57-X1-w49-test-led-rate-limit-n71-2026-04-25\\N71",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 83,
+      "correctness": 40,
+      "regression_test": 25,
+      "patch_quality": 10,
+      "cost": 8,
+      "elapsed_seconds": 224.382,
+      "output_bytes": 135535,
+      "changed_paths": [
+        "candidate/test-ledger.json",
+        "candidate/workspace/src/flowlimit/limiter.py",
+        "candidate/workspace/tests/test_window_regression.py"
+      ],
+      "auxiliary_changed_paths": [
+        "candidate/workspace/.pytest_cache/.gitignore",
+        "candidate/workspace/.pytest_cache/CACHEDIR.TAG",
+        "candidate/workspace/.pytest_cache/README.md",
+        "candidate/workspace/.pytest_cache/v/cache/lastfailed",
+        "candidate/workspace/.pytest_cache/v/cache/nodeids",
+        "candidate/workspace/src/flowlimit/__pycache__/limiter.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_visible_limit.cpython-314-pytest-9.0.3.pyc",
+        "candidate/workspace/tests/__pycache__/test_window_regression.cpython-314-pytest-9.0.3.pyc",
+        "candidate/workspace/tests/__pycache__/test_window_regression.cpython-314.pyc"
+      ],
+      "failure_ids": [
+        "patch-auxiliary-churn"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_12-23-57-X3-w49-test-led-rate-limit-n71-2026-04-25\\N71",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 90,
+      "correctness": 40,
+      "regression_test": 25,
+      "patch_quality": 10,
+      "cost": 15,
+      "elapsed_seconds": 195.532,
+      "output_bytes": 2410,
+      "changed_paths": [
+        "candidate/test-ledger.json",
+        "candidate/workspace/src/flowlimit/limiter.py",
+        "candidate/workspace/tests/test_window_regression.py"
+      ],
+      "auxiliary_changed_paths": [
+        "candidate/workspace/src/flowlimit/__pycache__/limiter.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_window_regression.cpython-314.pyc"
+      ],
+      "failure_ids": [
+        "patch-auxiliary-churn"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_12-28-47-X2-w49-test-led-rate-limit-n71-2026-04-25\\N71",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 15,
+      "correctness": 0,
+      "regression_test": 0,
+      "patch_quality": 0,
+      "cost": 15,
+      "elapsed_seconds": 10.139,
+      "output_bytes": 1587,
+      "changed_paths": [],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [
+        "correctness-retry-after",
+        "correctness-user-isolation",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-assertions",
+        "ledger-changed-files",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_12-28-45-X6-w49-test-led-rate-limit-n71-2026-04-25\\N71",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 15,
+      "correctness": 0,
+      "regression_test": 0,
+      "patch_quality": 0,
+      "cost": 15,
+      "elapsed_seconds": 293.345,
+      "output_bytes": 3748,
+      "changed_paths": [
+        "candidate/test-ledger.json",
+        "candidate/workspace/src/flowlimit/limiter.py",
+        "candidate/workspace/tests/test_window_regression.py"
+      ],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [
+        "tests-visible",
+        "test-required-term",
+        "test-required-term",
+        "ledger-changed-files",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term"
+      ]
+    }
+  ]
+}

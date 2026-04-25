@@ -1,0 +1,107 @@
+{
+  "contractId": "N70-W48-entitlement-event-migration",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/migration-ledger.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/entitlemesh/__init__.py",
+    "candidate/workspace/src/entitlemesh/models.py",
+    "candidate/workspace/src/entitlemesh/parser.py",
+    "candidate/workspace/src/entitlemesh/engine.py",
+    "candidate/workspace/src/entitlemesh/reporting.py",
+    "candidate/workspace/tests/test_visible_entitlements.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "oracle/README.md",
+    "oracle/migration-contract.json",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_entitlement_event_migration.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N70",
+    "surface_id": "E60",
+    "pack_id": "E60",
+    "role_class": "implementation",
+    "artifact_type": "real-repo multi-file event migration scorecard",
+    "modality_family": "multi-file implementation, hidden consumer contract, runtime budget, patch-quality, output cost",
+    "allowed_change_surface": [
+      "candidate/migration-ledger.json",
+      "candidate/workspace/src/entitlemesh/parser.py",
+      "candidate/workspace/src/entitlemesh/engine.py",
+      "candidate/workspace/src/entitlemesh/reporting.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md",
+      "candidate/workspace/src/entitlemesh/__init__.py",
+      "candidate/workspace/src/entitlemesh/models.py",
+      "candidate/workspace/tests/**"
+    ],
+    "score_profile": "realrepo-multifile-migration, hidden-consumer, runtime-budget, exact-scope, cost-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "real-repo-workflow",
+      "hidden-consumer",
+      "interface-migration",
+      "runtime-budget",
+      "patch-quality-rubric",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/migration-ledger.json",
+    "candidate/workspace/src/entitlemesh/parser.py",
+    "candidate/workspace/src/entitlemesh/engine.py",
+    "candidate/workspace/src/entitlemesh/reporting.py"
+  ],
+  "runtimeMaxSeconds": 2.0,
+  "generatedEventCount": 50000,
+  "ledgerRequiredTerms": [
+    "schema-v2",
+    "legacy",
+    "hidden consumer",
+    "replacement",
+    "highest sequence",
+    "hold",
+    "release",
+    "summary",
+    "runtime",
+    "no test edits"
+  ],
+  "forbiddenStaticTerms": [
+    "pandas",
+    "numpy",
+    "subprocess",
+    "eval(",
+    "exec(",
+    "tenant-hidden",
+    "principal-hidden",
+    "replace-hidden"
+  ]
+}

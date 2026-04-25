@@ -1,0 +1,8 @@
+{
+  "name": "n73-dom-event-runtime-ui-scorecard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "verify:visible": "node scripts/verify-visible-render.mjs"
+  }
+}

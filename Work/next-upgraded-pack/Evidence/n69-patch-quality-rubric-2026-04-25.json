@@ -1,0 +1,122 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_11-36-07-X1-w47-patch-quality-n69-2026-04-25\\N69",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 85,
+      "correctness": 45,
+      "runtime": 20,
+      "patch_quality": 20,
+      "cost": 0,
+      "runtime_seconds": 0.054297,
+      "elapsed_seconds": 273.83,
+      "output_bytes": 149015,
+      "changed_paths": [
+        "candidate/patch-quality-ledger.json",
+        "candidate/workspace/src/ledgerpatch/reconcile.py"
+      ],
+      "auxiliary_changed_paths": [],
+      "failure_ids": []
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_11-36-07-X3-w47-patch-quality-n69-2026-04-25\\N69",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 90,
+      "correctness": 45,
+      "runtime": 20,
+      "patch_quality": 10,
+      "cost": 15,
+      "runtime_seconds": 0.03025,
+      "elapsed_seconds": 230.203,
+      "output_bytes": 2037,
+      "changed_paths": [
+        "candidate/patch-quality-ledger.json",
+        "candidate/workspace/src/ledgerpatch/reconcile.py"
+      ],
+      "auxiliary_changed_paths": [
+        "candidate/workspace/.pytest_cache/.gitignore",
+        "candidate/workspace/.pytest_cache/CACHEDIR.TAG",
+        "candidate/workspace/.pytest_cache/README.md",
+        "candidate/workspace/.pytest_cache/v/cache/lastfailed",
+        "candidate/workspace/.pytest_cache/v/cache/nodeids",
+        "candidate/workspace/src/ledgerpatch/__pycache__/reconcile.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_reconcile.cpython-314-pytest-9.0.3.pyc"
+      ],
+      "failure_ids": [
+        "patch-auxiliary-churn"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_11-42-07-X2-w47-patch-quality-n69-2026-04-25\\N69",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 35,
+      "correctness": 0,
+      "runtime": 20,
+      "patch_quality": 0,
+      "cost": 15,
+      "runtime_seconds": 0.013069,
+      "elapsed_seconds": 6.667,
+      "output_bytes": 1087,
+      "changed_paths": [],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [
+        "correctness-hidden-semantics",
+        "patch-missing-core-fields",
+        "ledger-changed-files",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_11-42-07-X6-w47-patch-quality-n69-2026-04-25\\N69",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 35,
+      "correctness": 0,
+      "runtime": 20,
+      "patch_quality": 0,
+      "cost": 15,
+      "runtime_seconds": 0.023735,
+      "elapsed_seconds": 102.685,
+      "output_bytes": 3501,
+      "changed_paths": [
+        "candidate/patch-quality-ledger.json",
+        "candidate/workspace/src/ledgerpatch/reconcile.py"
+      ],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [
+        "correctness-hidden-semantics",
+        "ledger-changed-files",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term"
+      ]
+    }
+  ]
+}

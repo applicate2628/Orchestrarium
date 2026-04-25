@@ -1,0 +1,120 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_15-28-28-X1-w51-dom-event-runtime-ui-n73-2026-04-25\\N73",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 93,
+      "runtime": 45,
+      "keyboard_state": 20,
+      "patch_quality": 20,
+      "cost": 8,
+      "elapsed_seconds": 238.595,
+      "output_bytes": 138818,
+      "changed_paths": [
+        "candidate/ui-runtime-ledger.json",
+        "candidate/workspace/src/app.mjs",
+        "candidate/workspace/src/state.mjs",
+        "candidate/workspace/src/styles.css",
+        "candidate/workspace/src/view.mjs"
+      ],
+      "auxiliary_changed_paths": [],
+      "failure_ids": []
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_15-28-28-X3-w51-dom-event-runtime-ui-n73-2026-04-25\\N73",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 93,
+      "runtime": 45,
+      "keyboard_state": 20,
+      "patch_quality": 20,
+      "cost": 8,
+      "elapsed_seconds": 500.13,
+      "output_bytes": 2467,
+      "changed_paths": [
+        "candidate/ui-runtime-ledger.json",
+        "candidate/workspace/src/app.mjs",
+        "candidate/workspace/src/state.mjs",
+        "candidate/workspace/src/styles.css",
+        "candidate/workspace/src/view.mjs"
+      ],
+      "auxiliary_changed_paths": [],
+      "failure_ids": []
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_15-37-59-X2-w51-dom-event-runtime-ui-n73-2026-04-25\\N73",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 15,
+      "runtime": 0,
+      "keyboard_state": 0,
+      "patch_quality": 0,
+      "cost": 15,
+      "elapsed_seconds": 7.212,
+      "output_bytes": 1034,
+      "changed_paths": [],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [
+        "runtime-filter-summary",
+        "runtime-filter-hidden-card",
+        "runtime-keyboard-dirty",
+        "runtime-save-enabled",
+        "runtime-dirty-status",
+        "runtime-save-status",
+        "ledger-changed-files",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_15-37-57-X6-w51-dom-event-runtime-ui-n73-2026-04-25\\N73",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 15,
+      "runtime": 0,
+      "keyboard_state": 0,
+      "patch_quality": 0,
+      "cost": 15,
+      "elapsed_seconds": 173.863,
+      "output_bytes": 3840,
+      "changed_paths": [
+        "candidate/ui-runtime-ledger.json",
+        "candidate/workspace/src/state.mjs",
+        "candidate/workspace/src/view.mjs"
+      ],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [
+        "runtime-dirty-status",
+        "ledger-changed-files",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term"
+      ]
+    }
+  ]
+}

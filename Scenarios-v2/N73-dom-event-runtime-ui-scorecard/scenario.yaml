@@ -1,0 +1,31 @@
+id: N73
+surface_id: E63
+pack_id: E63
+role_class: implementation
+artifact_type: DOM event runtime UI scorecard
+modality_family: frontend implementation, hidden DOM event runtime, keyboard interaction, dirty state, exact-scope, output cost
+allowed_change_surface:
+  - candidate/ui-runtime-ledger.json
+  - candidate/workspace/src/state.mjs
+  - candidate/workspace/src/view.mjs
+  - candidate/workspace/src/app.mjs
+  - candidate/workspace/src/styles.css
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/package.json
+  - candidate/workspace/scripts/**
+score_profile: dom-event-runtime-ui, hidden-event-contract, exact-scope, cost-rubric
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - frontend-ui
+  - runtime-event-harness
+  - keyboard-interaction
+  - dirty-state
+  - patch-quality-rubric
+  - scored-rubric
+  - binary-separator-candidate

@@ -1,0 +1,105 @@
+{
+  "contractId": "N71-W49-test-led-rate-limit-regression",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/test-ledger.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/flowlimit/__init__.py",
+    "candidate/workspace/src/flowlimit/models.py",
+    "candidate/workspace/src/flowlimit/limiter.py",
+    "candidate/workspace/tests/test_visible_limit.py",
+    "candidate/workspace/tests/test_window_regression.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/test-led-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_test_led_rate_limit.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N71",
+    "surface_id": "E61",
+    "pack_id": "E61",
+    "role_class": "implementation",
+    "artifact_type": "test-led regression patch scorecard",
+    "modality_family": "implementation with hidden behavior, required regression test, patch-quality, output cost",
+    "allowed_change_surface": [
+      "candidate/test-ledger.json",
+      "candidate/workspace/src/flowlimit/limiter.py",
+      "candidate/workspace/tests/test_window_regression.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md",
+      "candidate/workspace/src/flowlimit/__init__.py",
+      "candidate/workspace/src/flowlimit/models.py",
+      "candidate/workspace/tests/test_visible_limit.py"
+    ],
+    "score_profile": "test-led-regression, hidden-behavior, required-test-artifact, exact-scope, cost-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "test-led-delivery",
+      "hidden-consumer",
+      "patch-quality-rubric",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/test-ledger.json",
+    "candidate/workspace/src/flowlimit/limiter.py",
+    "candidate/workspace/tests/test_window_regression.py"
+  ],
+  "ledgerRequiredTerms": [
+    "same tenant",
+    "different users",
+    "window boundary",
+    "retry_after",
+    "regression test",
+    "no visible test edits"
+  ],
+  "testRequiredTerms": [
+    "same",
+    "tenant",
+    "different",
+    "user",
+    "boundary",
+    "retry_after",
+    "FixedWindowLimiter",
+    "RateLimitRequest"
+  ],
+  "forbiddenStaticTerms": [
+    "pandas",
+    "numpy",
+    "subprocess",
+    "eval(",
+    "exec(",
+    "tenant-hidden",
+    "user-hidden"
+  ]
+}

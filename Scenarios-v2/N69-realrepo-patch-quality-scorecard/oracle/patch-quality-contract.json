@@ -1,0 +1,100 @@
+{
+  "contractId": "N69-W47-patch-quality-scorecard",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/patch-quality-ledger.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/ledgerpatch/__init__.py",
+    "candidate/workspace/src/ledgerpatch/models.py",
+    "candidate/workspace/src/ledgerpatch/reconcile.py",
+    "candidate/workspace/src/ledgerpatch/reporting.py",
+    "candidate/workspace/tests/test_reconcile.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "oracle/README.md",
+    "oracle/patch-quality-contract.json",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_patch_quality_scorecard.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N69",
+    "surface_id": "E59",
+    "pack_id": "E59",
+    "role_class": "implementation",
+    "artifact_type": "real-repo patch quality scorecard",
+    "modality_family": "single-session implementation, hidden correctness, runtime budget, patch-quality, output cost",
+    "allowed_change_surface": [
+      "candidate/patch-quality-ledger.json",
+      "candidate/workspace/src/ledgerpatch/reconcile.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md",
+      "candidate/workspace/src/ledgerpatch/__init__.py",
+      "candidate/workspace/src/ledgerpatch/models.py",
+      "candidate/workspace/src/ledgerpatch/reporting.py",
+      "candidate/workspace/tests/**"
+    ],
+    "score_profile": "realrepo-patch-quality, hidden-correctness, runtime-budget, exact-scope, cost-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "real-repo-workflow",
+      "hidden-consumer",
+      "runtime-budget",
+      "patch-quality-rubric",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/patch-quality-ledger.json",
+    "candidate/workspace/src/ledgerpatch/reconcile.py"
+  ],
+  "runtimeMaxSeconds": 1.2,
+  "generatedEventCount": 60000,
+  "ledgerRequiredTerms": [
+    "dedupe",
+    "highest sequence",
+    "void",
+    "refund",
+    "currency",
+    "single-pass",
+    "runtime",
+    "no test edits"
+  ],
+  "forbiddenStaticTerms": [
+    "pandas",
+    "numpy",
+    "subprocess",
+    "eval(",
+    "exec(",
+    "acct-alpha",
+    "acct-beta",
+    "void-hidden"
+  ]
+}

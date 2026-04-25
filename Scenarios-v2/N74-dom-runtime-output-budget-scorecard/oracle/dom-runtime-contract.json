@@ -1,0 +1,111 @@
+{
+  "contractId": "N74-W52-dom-runtime-output-budget",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/ui-runtime-ledger.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/package.json",
+    "candidate/workspace/scripts/verify-visible-render.mjs",
+    "candidate/workspace/src/state.mjs",
+    "candidate/workspace/src/view.mjs",
+    "candidate/workspace/src/app.mjs",
+    "candidate/workspace/src/styles.css",
+    "inputs/README.md",
+    "inputs/task.md",
+    "oracle/README.md",
+    "oracle/dom-runtime-contract.json",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/dom-runtime-harness.mjs",
+    "verifiers/check_dom_runtime_output_budget.py",
+    "verifiers/check_operator_budget.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N74",
+    "surface_id": "E64",
+    "pack_id": "E64",
+    "role_class": "implementation",
+    "artifact_type": "DOM runtime output budget scorecard",
+    "modality_family": "frontend implementation, hidden DOM event runtime, keyboard interaction, dirty state, exact-scope, hard output budget",
+    "allowed_change_surface": [
+      "candidate/ui-runtime-ledger.json",
+      "candidate/workspace/src/state.mjs",
+      "candidate/workspace/src/view.mjs",
+      "candidate/workspace/src/app.mjs",
+      "candidate/workspace/src/styles.css"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md",
+      "candidate/workspace/package.json",
+      "candidate/workspace/scripts/**"
+    ],
+    "score_profile": "dom-event-runtime-ui, hidden-event-contract, exact-scope, hard-output-budget",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "frontend-ui",
+      "runtime-event-harness",
+      "keyboard-interaction",
+      "dirty-state",
+      "patch-quality-rubric",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/ui-runtime-ledger.json",
+    "candidate/workspace/src/state.mjs",
+    "candidate/workspace/src/view.mjs",
+    "candidate/workspace/src/app.mjs",
+    "candidate/workspace/src/styles.css"
+  ],
+  "operator_budget": {
+    "max_worker_output_bytes": 50000
+  },
+  "ledgerRequiredTerms": [
+    "DOM event",
+    "filter",
+    "aria-pressed",
+    "keyboard",
+    "dirty state",
+    "save",
+    "payload immutability",
+    "no script edits"
+  ],
+  "forbiddenStaticTerms": [
+    "jsdom",
+    "playwright",
+    "puppeteer",
+    "selenium",
+    "setTimeout",
+    "fetch(",
+    "XMLHttpRequest",
+    "AUTH-HIDDEN",
+    "BILL-HIDDEN",
+    "RISK-HIDDEN"
+  ]
+}
