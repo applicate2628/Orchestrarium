@@ -1,0 +1,115 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_16-38-26-X1-w53-persisted-state-replay-n75-2026-04-25\\N75",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 83,
+      "correctness": 45,
+      "replay_rollback": 20,
+      "patch_quality": 10,
+      "cost": 8,
+      "elapsed_seconds": 185.496,
+      "output_bytes": 148703,
+      "changed_paths": [
+        "candidate/migration-ledger.json",
+        "candidate/workspace/src/statedock/api.py",
+        "candidate/workspace/src/statedock/events.py",
+        "candidate/workspace/src/statedock/migrator.py",
+        "candidate/workspace/src/statedock/store.py",
+        "candidate/workspace/tests/test_visible_replay.py"
+      ],
+      "auxiliary_changed_paths": [
+        "candidate/workspace/src/statedock/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/statedock/__pycache__/api.cpython-314.pyc",
+        "candidate/workspace/src/statedock/__pycache__/events.cpython-314.pyc",
+        "candidate/workspace/src/statedock/__pycache__/migrator.cpython-314.pyc",
+        "candidate/workspace/src/statedock/__pycache__/store.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_visible_replay.cpython-314.pyc"
+      ],
+      "failure_ids": [
+        "patch-auxiliary-churn"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_16-38-26-X3-w53-persisted-state-replay-n75-2026-04-25\\N75",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 83,
+      "correctness": 45,
+      "replay_rollback": 20,
+      "patch_quality": 10,
+      "cost": 8,
+      "elapsed_seconds": 452.739,
+      "output_bytes": 2577,
+      "changed_paths": [
+        "candidate/migration-ledger.json",
+        "candidate/workspace/src/statedock/api.py",
+        "candidate/workspace/src/statedock/events.py",
+        "candidate/workspace/src/statedock/migrator.py",
+        "candidate/workspace/src/statedock/store.py",
+        "candidate/workspace/tests/test_visible_replay.py"
+      ],
+      "auxiliary_changed_paths": [
+        "candidate/workspace/src/statedock/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/statedock/__pycache__/api.cpython-314.pyc",
+        "candidate/workspace/src/statedock/__pycache__/events.cpython-314.pyc",
+        "candidate/workspace/src/statedock/__pycache__/migrator.cpython-314.pyc",
+        "candidate/workspace/src/statedock/__pycache__/store.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_visible_replay.cpython-314.pyc"
+      ],
+      "failure_ids": [
+        "patch-auxiliary-churn"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_16-47-04-X2-w53-persisted-state-replay-n75-2026-04-25\\N75",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 75,
+      "correctness": 45,
+      "replay_rollback": 20,
+      "patch_quality": 10,
+      "cost": 0,
+      "elapsed_seconds": 78.84,
+      "output_bytes": 182431,
+      "changed_paths": [
+        "candidate/migration-ledger.json",
+        "candidate/workspace/src/statedock/api.py",
+        "candidate/workspace/src/statedock/events.py",
+        "candidate/workspace/src/statedock/migrator.py",
+        "candidate/workspace/src/statedock/store.py",
+        "candidate/workspace/tests/test_visible_replay.py"
+      ],
+      "auxiliary_changed_paths": [
+        ".reports/2026-04/report(main)-2026-04-25_16-47-00_N75-X2.md"
+      ],
+      "failure_ids": [
+        "patch-auxiliary-churn"
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_16-47-03-X6-w53-persisted-state-replay-n75-2026-04-25\\N75",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "rubric": 0,
+      "failure_ids": [
+        "summary-missing"
+      ]
+    }
+  ]
+}

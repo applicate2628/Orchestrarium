@@ -1,0 +1,125 @@
+{
+  "contractId": "N77-W55-security-capability-runtime",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/security-ledger.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/capvault/__init__.py",
+    "candidate/workspace/src/capvault/audit.py",
+    "candidate/workspace/src/capvault/models.py",
+    "candidate/workspace/src/capvault/redirects.py",
+    "candidate/workspace/src/capvault/service.py",
+    "candidate/workspace/src/capvault/tokens.py",
+    "candidate/workspace/tests/test_visible_capability.py",
+    "candidate/workspace/tests/test_security_regression.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/security-capability-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_security_capability_runtime.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N77",
+    "surface_id": "E67",
+    "pack_id": "E67",
+    "role_class": "implementation",
+    "artifact_type": "security capability runtime patch scorecard",
+    "modality_family": "security implementation, exploit oracle, capability tokens, redirect validation, audit redaction, exact-scope, output cost",
+    "allowed_change_surface": [
+      "candidate/security-ledger.json",
+      "candidate/workspace/src/capvault/audit.py",
+      "candidate/workspace/src/capvault/redirects.py",
+      "candidate/workspace/src/capvault/tokens.py",
+      "candidate/workspace/tests/test_security_regression.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md",
+      "candidate/workspace/src/capvault/__init__.py",
+      "candidate/workspace/src/capvault/models.py",
+      "candidate/workspace/src/capvault/service.py",
+      "candidate/workspace/tests/test_visible_capability.py"
+    ],
+    "score_profile": "security-runtime-exploit, required-regression-test, audit-redaction, exact-scope, cost-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "security-engineer",
+      "exploit-oracle",
+      "hidden-consumer",
+      "patch-quality-rubric",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/security-ledger.json",
+    "candidate/workspace/src/capvault/audit.py",
+    "candidate/workspace/src/capvault/redirects.py",
+    "candidate/workspace/src/capvault/tokens.py",
+    "candidate/workspace/tests/test_security_regression.py"
+  ],
+  "ledgerRequiredTerms": [
+    "hmac",
+    "tenant",
+    "user",
+    "resource",
+    "nonce",
+    "replay",
+    "redirect",
+    "audit",
+    "no token leakage",
+    "regression test"
+  ],
+  "testRequiredTerms": [
+    "tamper",
+    "tenant",
+    "user",
+    "resource",
+    "replay",
+    "redirect",
+    "audit",
+    "CapabilityService",
+    "ExportRequest"
+  ],
+  "forbiddenStaticTerms": [
+    "subprocess",
+    "eval(",
+    "exec(",
+    "pickle",
+    "yaml",
+    "tenant-hidden",
+    "user-hidden",
+    "resource-hidden",
+    "evil.test"
+  ],
+  "defaultReturnUrl": "https://files.example.com/downloads/",
+  "allowedHost": "files.example.com",
+  "allowedPathPrefix": "/downloads/",
+  "runtimeMaxSeconds": 1.5
+}

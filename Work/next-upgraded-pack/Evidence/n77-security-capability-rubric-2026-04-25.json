@@ -1,0 +1,255 @@
+{
+  "results": [
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_21-13-11-X1-w55-security-capability-n77-2026-04-25\\N77",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 85,
+      "runtime_security": 55,
+      "regression_test": 15,
+      "artifact_quality": 15,
+      "cost": 0,
+      "elapsed_seconds": 344.089,
+      "output_bytes": 404044,
+      "changed_paths": [
+        "candidate/security-ledger.json",
+        "candidate/workspace/src/capvault/audit.py",
+        "candidate/workspace/src/capvault/redirects.py",
+        "candidate/workspace/src/capvault/tokens.py",
+        "candidate/workspace/tests/test_security_regression.py"
+      ],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [],
+      "notes": []
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_21-13-11-X3-w55-security-capability-n77-2026-04-25\\N77",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 93,
+      "runtime_security": 55,
+      "regression_test": 15,
+      "artifact_quality": 8,
+      "cost": 15,
+      "elapsed_seconds": 520.994,
+      "output_bytes": 2598,
+      "changed_paths": [
+        "candidate/security-ledger.json",
+        "candidate/workspace/src/capvault/audit.py",
+        "candidate/workspace/src/capvault/redirects.py",
+        "candidate/workspace/src/capvault/tokens.py",
+        "candidate/workspace/tests/test_security_regression.py"
+      ],
+      "auxiliary_changed_paths": [
+        "candidate/workspace/src/capvault/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/audit.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/redirects.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/service.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/tokens.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_security_regression.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_visible_capability.cpython-314.pyc"
+      ],
+      "failure_ids": [
+        "patch-auxiliary-churn"
+      ],
+      "notes": []
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_21-22-42-X2-w55-security-capability-n77-2026-04-25\\N77",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 15,
+      "runtime_security": 0,
+      "regression_test": 0,
+      "artifact_quality": 0,
+      "cost": 15,
+      "elapsed_seconds": 4.934,
+      "output_bytes": 1231,
+      "changed_paths": [],
+      "auxiliary_changed_paths": [],
+      "failure_ids": [
+        "runtime-tamper",
+        "runtime-user-binding",
+        "runtime-redirect-trap",
+        "runtime-audit-leak",
+        "runtime-audit-fingerprint",
+        "static-required-term",
+        "static-required-term",
+        "static-required-term",
+        "static-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-required-term",
+        "test-assertions",
+        "ledger-contract",
+        "ledger-changed-files",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term",
+        "ledger-term"
+      ],
+      "notes": [
+        {
+          "id": "runtime-tamper",
+          "detail": "expected denial, got Decision(allowed=True, reason='ok', redirect_url='https://files.example.com/downloads/export.csv', nonce='nonce-hidden-a')"
+        },
+        {
+          "id": "runtime-user-binding",
+          "detail": "expected denial, got Decision(allowed=True, reason='ok', redirect_url='https://files.example.com/downloads/export.csv', nonce='nonce-hidden-a')"
+        },
+        {
+          "id": "runtime-redirect-trap",
+          "detail": "'https://files.example.com/downloads/export.csv%0d%0aLocation:%20https://evil.test' returned 'https://files.example.com/downloads/export.csv%0d%0aLocation:%20https://evil.test'"
+        },
+        {
+          "id": "runtime-audit-leak",
+          "detail": "audit record leaked token, signature, or secret material"
+        },
+        {
+          "id": "runtime-audit-fingerprint",
+          "detail": "audit record does not include token fingerprint"
+        },
+        {
+          "id": "static-required-term",
+          "detail": "implementation does not reference 'hmac'"
+        },
+        {
+          "id": "static-required-term",
+          "detail": "implementation does not reference 'sha256'"
+        },
+        {
+          "id": "static-required-term",
+          "detail": "implementation does not reference 'compare_digest'"
+        },
+        {
+          "id": "static-required-term",
+          "detail": "implementation does not reference 'urlparse'"
+        },
+        {
+          "id": "test-required-term",
+          "detail": "security regression test missing 'tamper'"
+        },
+        {
+          "id": "test-required-term",
+          "detail": "security regression test missing 'tenant'"
+        },
+        {
+          "id": "test-required-term",
+          "detail": "security regression test missing 'user'"
+        },
+        {
+          "id": "test-required-term",
+          "detail": "security regression test missing 'resource'"
+        },
+        {
+          "id": "test-required-term",
+          "detail": "security regression test missing 'replay'"
+        },
+        {
+          "id": "test-required-term",
+          "detail": "security regression test missing 'redirect'"
+        },
+        {
+          "id": "test-required-term",
+          "detail": "security regression test missing 'audit'"
+        },
+        {
+          "id": "test-required-term",
+          "detail": "security regression test missing 'CapabilityService'"
+        },
+        {
+          "id": "test-required-term",
+          "detail": "security regression test missing 'ExportRequest'"
+        },
+        {
+          "id": "test-assertions",
+          "detail": "security regression test lacks enough assertions"
+        },
+        {
+          "id": "ledger-contract",
+          "detail": "contractId mismatch"
+        },
+        {
+          "id": "ledger-changed-files",
+          "detail": "changedFiles must match required changed paths"
+        },
+        {
+          "id": "ledger-term",
+          "detail": "missing 'hmac'"
+        },
+        {
+          "id": "ledger-term",
+          "detail": "missing 'tenant'"
+        },
+        {
+          "id": "ledger-term",
+          "detail": "missing 'user'"
+        },
+        {
+          "id": "ledger-term",
+          "detail": "missing 'resource'"
+        },
+        {
+          "id": "ledger-term",
+          "detail": "missing 'nonce'"
+        },
+        {
+          "id": "ledger-term",
+          "detail": "missing 'replay'"
+        },
+        {
+          "id": "ledger-term",
+          "detail": "missing 'redirect'"
+        },
+        {
+          "id": "ledger-term",
+          "detail": "missing 'audit'"
+        },
+        {
+          "id": "ledger-term",
+          "detail": "missing 'no token leakage'"
+        },
+        {
+          "id": "ledger-term",
+          "detail": "missing 'regression test'"
+        }
+      ]
+    },
+    {
+      "run_root": ".scratch\\v2-cohort-runs\\2026-04-25_21-22-41-X6-w55-security-capability-n77-2026-04-25\\N77",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "rubric": 0,
+      "failure_ids": [
+        "summary-missing"
+      ]
+    }
+  ]
+}

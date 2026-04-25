@@ -1,0 +1,37 @@
+id: N76
+surface_id: E66
+pack_id: E66
+role_class: implementation
+artifact_type: staged persisted-state migration reentry packet
+modality_family: staged stateful implementation, source arbitration, replay, rollback, schema migration, reentry, closeout
+allowed_change_surface:
+  - candidate/source-ledger.json
+  - candidate/migration-ledger.json
+  - candidate/reentry-state.json
+  - candidate/closeout.json
+  - candidate/workspace/src/statedock/events.py
+  - candidate/workspace/src/statedock/migrator.py
+  - candidate/workspace/src/statedock/store.py
+  - candidate/workspace/src/statedock/api.py
+  - candidate/workspace/tests/test_visible_replay.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/src/statedock/__init__.py
+score_profile: staged-persisted-state-reentry, hidden-replay, rollback, source-ledger, exact-scope, cost-rubric
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - staged-runner
+  - real-repo-workflow
+  - persisted-state
+  - schema-migration
+  - replay-idempotency
+  - rollback
+  - reentry
+  - patch-quality-rubric
+  - scored-rubric
+  - binary-separator-candidate

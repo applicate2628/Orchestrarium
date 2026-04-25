@@ -1,0 +1,38 @@
+id: N78
+surface_id: E68
+pack_id: E68
+role_class: implementation
+artifact_type: staged security reentry packet
+modality_family: staged security implementation, exploit oracle, threat ledger, reentry validation, closeout, exact-scope, output cost
+allowed_change_surface:
+  - candidate/threat-ledger.json
+  - candidate/security-ledger.json
+  - candidate/exploit-validation.json
+  - candidate/reentry-state.json
+  - candidate/closeout.json
+  - candidate/workspace/src/capvault/audit.py
+  - candidate/workspace/src/capvault/redirects.py
+  - candidate/workspace/src/capvault/tokens.py
+  - candidate/workspace/tests/test_security_regression.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/src/capvault/__init__.py
+  - candidate/workspace/src/capvault/models.py
+  - candidate/workspace/src/capvault/service.py
+  - candidate/workspace/tests/test_visible_capability.py
+score_profile: staged-security-reentry, exploit-oracle, threat-ledger, validation-ledger, exact-scope, cost-rubric
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - security-engineer
+  - staged-runner
+  - exploit-oracle
+  - reentry
+  - hidden-consumer
+  - patch-quality-rubric
+  - scored-rubric
+  - binary-separator-candidate

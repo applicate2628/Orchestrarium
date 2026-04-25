@@ -1,0 +1,226 @@
+{
+  "contractId": "N78-W56-staged-security-reentry",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/threat-ledger.json",
+    "candidate/security-ledger.json",
+    "candidate/exploit-validation.json",
+    "candidate/reentry-state.json",
+    "candidate/closeout.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/capvault/__init__.py",
+    "candidate/workspace/src/capvault/audit.py",
+    "candidate/workspace/src/capvault/models.py",
+    "candidate/workspace/src/capvault/redirects.py",
+    "candidate/workspace/src/capvault/service.py",
+    "candidate/workspace/src/capvault/tokens.py",
+    "candidate/workspace/tests/test_visible_capability.py",
+    "candidate/workspace/tests/test_security_regression.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/phases/01-threat-ledger.md",
+    "inputs/phases/02-implementation.md",
+    "inputs/phases/03-exploit-validation.md",
+    "inputs/phases/04-closeout.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/security-capability-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_security_capability_runtime.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N78",
+    "surface_id": "E68",
+    "pack_id": "E68",
+    "role_class": "implementation",
+    "artifact_type": "staged security reentry packet",
+    "modality_family": "staged security implementation, exploit oracle, threat ledger, reentry validation, closeout, exact-scope, output cost",
+    "allowed_change_surface": [
+      "candidate/threat-ledger.json",
+      "candidate/security-ledger.json",
+      "candidate/exploit-validation.json",
+      "candidate/reentry-state.json",
+      "candidate/closeout.json",
+      "candidate/workspace/src/capvault/audit.py",
+      "candidate/workspace/src/capvault/redirects.py",
+      "candidate/workspace/src/capvault/tokens.py",
+      "candidate/workspace/tests/test_security_regression.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md",
+      "candidate/workspace/src/capvault/__init__.py",
+      "candidate/workspace/src/capvault/models.py",
+      "candidate/workspace/src/capvault/service.py",
+      "candidate/workspace/tests/test_visible_capability.py"
+    ],
+    "score_profile": "staged-security-reentry, exploit-oracle, threat-ledger, validation-ledger, exact-scope, cost-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "security-engineer",
+      "staged-runner",
+      "exploit-oracle",
+      "reentry",
+      "hidden-consumer",
+      "patch-quality-rubric",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/threat-ledger.json",
+    "candidate/security-ledger.json",
+    "candidate/exploit-validation.json",
+    "candidate/reentry-state.json",
+    "candidate/closeout.json",
+    "candidate/workspace/src/capvault/audit.py",
+    "candidate/workspace/src/capvault/redirects.py",
+    "candidate/workspace/src/capvault/tokens.py",
+    "candidate/workspace/tests/test_security_regression.py"
+  ],
+  "phasePathRules": {
+    "01-threat-ledger": {
+      "allowed": [
+        "candidate/threat-ledger.json"
+      ],
+      "requiredAny": [
+        "candidate/threat-ledger.json"
+      ]
+    },
+    "02-implementation": {
+      "allowed": [
+        "candidate/security-ledger.json",
+        "candidate/workspace/src/capvault/audit.py",
+        "candidate/workspace/src/capvault/redirects.py",
+        "candidate/workspace/src/capvault/tokens.py",
+        "candidate/workspace/tests/test_security_regression.py"
+      ],
+      "requiredAny": [
+        "candidate/workspace/src/capvault/tokens.py",
+        "candidate/workspace/src/capvault/redirects.py",
+        "candidate/workspace/src/capvault/audit.py",
+        "candidate/workspace/tests/test_security_regression.py"
+      ]
+    },
+    "03-exploit-validation": {
+      "allowed": [
+        "candidate/exploit-validation.json",
+        "candidate/reentry-state.json"
+      ],
+      "requiredAny": [
+        "candidate/exploit-validation.json",
+        "candidate/reentry-state.json"
+      ]
+    },
+    "04-closeout": {
+      "allowed": [
+        "candidate/closeout.json"
+      ],
+      "requiredAny": [
+        "candidate/closeout.json"
+      ]
+    }
+  },
+  "threatLedgerRequiredTerms": [
+    "source",
+    "threat",
+    "hmac",
+    "alg none",
+    "tenant",
+    "user",
+    "resource",
+    "nonce",
+    "replay",
+    "redirect",
+    "audit",
+    "non-claim"
+  ],
+  "securityLedgerRequiredTerms": [
+    "hmac",
+    "tenant",
+    "user",
+    "resource",
+    "nonce",
+    "replay",
+    "redirect",
+    "audit",
+    "no token leakage",
+    "regression test"
+  ],
+  "validationRequiredTerms": [
+    "tamper",
+    "alg none",
+    "tenant",
+    "user",
+    "resource",
+    "replay",
+    "expiry",
+    "redirect",
+    "audit",
+    "runtime"
+  ],
+  "reentryRequiredTerms": [
+    "ready",
+    "runtime",
+    "exploit",
+    "regression",
+    "no blockers"
+  ],
+  "closeoutRequiredTerms": [
+    "pass",
+    "changed files",
+    "reentry",
+    "handoff",
+    "verification"
+  ],
+  "testRequiredTerms": [
+    "tamper",
+    "tenant",
+    "user",
+    "resource",
+    "replay",
+    "redirect",
+    "audit",
+    "CapabilityService",
+    "ExportRequest"
+  ],
+  "forbiddenStaticTerms": [
+    "subprocess",
+    "eval(",
+    "exec(",
+    "pickle",
+    "yaml",
+    "tenant-hidden",
+    "user-hidden",
+    "resource-hidden",
+    "evil.test"
+  ],
+  "defaultReturnUrl": "https://files.example.com/downloads/",
+  "allowedHost": "files.example.com",
+  "allowedPathPrefix": "/downloads/",
+  "runtimeMaxSeconds": 1.5
+}

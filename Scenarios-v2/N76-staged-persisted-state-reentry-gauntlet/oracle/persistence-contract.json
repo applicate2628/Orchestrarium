@@ -1,0 +1,212 @@
+{
+  "contractId": "N76-W54-staged-persisted-state-reentry",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/source-ledger.json",
+    "candidate/migration-ledger.json",
+    "candidate/reentry-state.json",
+    "candidate/closeout.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/statedock/__init__.py",
+    "candidate/workspace/src/statedock/events.py",
+    "candidate/workspace/src/statedock/migrator.py",
+    "candidate/workspace/src/statedock/store.py",
+    "candidate/workspace/src/statedock/api.py",
+    "candidate/workspace/tests/test_visible_replay.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/phases/01-source-ledger.md",
+    "inputs/phases/02-migration-implementation.md",
+    "inputs/phases/03-reentry-validation.md",
+    "inputs/phases/04-closeout.md",
+    "oracle/README.md",
+    "oracle/persistence-contract.json",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_persisted_state_replay_migration.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N76",
+    "surface_id": "E66",
+    "pack_id": "E66",
+    "role_class": "implementation",
+    "artifact_type": "staged persisted-state migration reentry packet",
+    "modality_family": "staged stateful implementation, source arbitration, replay, rollback, schema migration, reentry, closeout",
+    "allowed_change_surface": [
+      "candidate/source-ledger.json",
+      "candidate/migration-ledger.json",
+      "candidate/reentry-state.json",
+      "candidate/closeout.json",
+      "candidate/workspace/src/statedock/events.py",
+      "candidate/workspace/src/statedock/migrator.py",
+      "candidate/workspace/src/statedock/store.py",
+      "candidate/workspace/src/statedock/api.py",
+      "candidate/workspace/tests/test_visible_replay.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md",
+      "candidate/workspace/src/statedock/__init__.py"
+    ],
+    "score_profile": "staged-persisted-state-reentry, hidden-replay, rollback, source-ledger, exact-scope, cost-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "staged-runner",
+      "real-repo-workflow",
+      "persisted-state",
+      "schema-migration",
+      "replay-idempotency",
+      "rollback",
+      "reentry",
+      "patch-quality-rubric",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/source-ledger.json",
+    "candidate/migration-ledger.json",
+    "candidate/reentry-state.json",
+    "candidate/closeout.json",
+    "candidate/workspace/src/statedock/events.py",
+    "candidate/workspace/src/statedock/migrator.py",
+    "candidate/workspace/src/statedock/store.py",
+    "candidate/workspace/src/statedock/api.py",
+    "candidate/workspace/tests/test_visible_replay.py"
+  ],
+  "phasePathRules": {
+    "01-source-ledger": {
+      "allowed": [
+        "candidate/source-ledger.json",
+        "candidate/reentry-state.json"
+      ],
+      "requiredAny": [
+        "candidate/source-ledger.json"
+      ]
+    },
+    "02-migration-implementation": {
+      "allowed": [
+        "candidate/migration-ledger.json",
+        "candidate/workspace/src/statedock/events.py",
+        "candidate/workspace/src/statedock/migrator.py",
+        "candidate/workspace/src/statedock/store.py",
+        "candidate/workspace/src/statedock/api.py",
+        "candidate/workspace/tests/test_visible_replay.py",
+        "candidate/reentry-state.json"
+      ],
+      "requiredAny": [
+        "candidate/workspace/src/statedock/store.py",
+        "candidate/workspace/src/statedock/events.py",
+        "candidate/migration-ledger.json"
+      ]
+    },
+    "03-reentry-validation": {
+      "allowed": [
+        "candidate/reentry-state.json",
+        "candidate/migration-ledger.json"
+      ],
+      "requiredAny": [
+        "candidate/reentry-state.json"
+      ]
+    },
+    "04-closeout": {
+      "allowed": [
+        "candidate/closeout.json",
+        "candidate/reentry-state.json"
+      ],
+      "requiredAny": [
+        "candidate/closeout.json"
+      ]
+    }
+  },
+  "expectedSourceIds": [
+    "INC-STATE-219",
+    "ADR-42",
+    "runtime-trace",
+    "visible-test"
+  ],
+  "expectedStaleIds": [
+    "stale-v1-only-note",
+    "shortcut-no-rollback"
+  ],
+  "expectedPhaseIds": [
+    "01-source-ledger",
+    "02-migration-implementation",
+    "03-reentry-validation",
+    "04-closeout"
+  ],
+  "ledgerRequiredTerms": [
+    "v1 compatibility",
+    "schema-v2",
+    "dedupe_key",
+    "idempotent replay",
+    "checkpoint rollback",
+    "persist load",
+    "source immutability",
+    "visible regression",
+    "exact changed files"
+  ],
+  "sourceLedgerRequiredTerms": [
+    "INC-STATE-219",
+    "ADR-42",
+    "runtime-trace",
+    "visible-test",
+    "stale-v1-only-note",
+    "shortcut-no-rollback",
+    "accepted",
+    "rejected",
+    "rollback",
+    "dedupe"
+  ],
+  "reentryRequiredTerms": [
+    "01-source-ledger",
+    "02-migration-implementation",
+    "03-reentry-validation",
+    "04-closeout",
+    "idempotent replay",
+    "checkpoint rollback",
+    "persist load",
+    "verifier pass"
+  ],
+  "closeoutRequiredTerms": [
+    "N76-W54-staged-persisted-state-reentry",
+    "check_persisted_state_replay_migration.py",
+    "changed paths",
+    "no oracle edits",
+    "X1/X3 separator candidate"
+  ],
+  "forbiddenStaticTerms": [
+    "tenant-red-hidden",
+    "tenant-blue-hidden",
+    "cp-hidden",
+    "subprocess",
+    "eval(",
+    "exec(",
+    "requests",
+    "urllib"
+  ]
+}

@@ -1,0 +1,32 @@
+id: N77
+surface_id: E67
+pack_id: E67
+role_class: implementation
+artifact_type: security capability runtime patch scorecard
+modality_family: security implementation, exploit oracle, capability tokens, redirect validation, audit redaction, exact-scope, output cost
+allowed_change_surface:
+  - candidate/security-ledger.json
+  - candidate/workspace/src/capvault/audit.py
+  - candidate/workspace/src/capvault/redirects.py
+  - candidate/workspace/src/capvault/tokens.py
+  - candidate/workspace/tests/test_security_regression.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/src/capvault/__init__.py
+  - candidate/workspace/src/capvault/models.py
+  - candidate/workspace/src/capvault/service.py
+  - candidate/workspace/tests/test_visible_capability.py
+score_profile: security-runtime-exploit, required-regression-test, audit-redaction, exact-scope, cost-rubric
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - security-engineer
+  - exploit-oracle
+  - hidden-consumer
+  - patch-quality-rubric
+  - scored-rubric
+  - binary-separator-candidate

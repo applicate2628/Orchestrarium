@@ -1,0 +1,168 @@
+{
+  "results": [
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-25_22-21-21-X1-w56-staged-security-reentry-n78-2026-04-25\\N78",
+      "row": "X1",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": true,
+      "rubric": 85,
+      "runtime_security": 45,
+      "staged_artifacts": 25,
+      "phase": 15,
+      "cost": 0,
+      "elapsed_seconds": 1000.47,
+      "output_bytes": 613332,
+      "changed_paths": [
+        "candidate/closeout.json",
+        "candidate/exploit-validation.json",
+        "candidate/reentry-state.json",
+        "candidate/security-ledger.json",
+        "candidate/threat-ledger.json",
+        "candidate/workspace/src/capvault/audit.py",
+        "candidate/workspace/src/capvault/redirects.py",
+        "candidate/workspace/src/capvault/tokens.py",
+        "candidate/workspace/tests/test_security_regression.py"
+      ],
+      "auxiliary_changed_paths": [
+        "candidate/workspace/src/capvault/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/audit.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/redirects.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/service.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/tokens.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_security_regression.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_visible_capability.cpython-314.pyc"
+      ],
+      "failure_ids": [],
+      "notes": []
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-25_22-21-20-X3-w56-staged-security-reentry-n78-2026-04-25\\N78",
+      "row": "X3",
+      "model": "opus 4.7max",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 23,
+      "runtime_security": 0,
+      "staged_artifacts": 0,
+      "phase": 15,
+      "cost": 8,
+      "elapsed_seconds": 1130.246,
+      "output_bytes": 8299,
+      "changed_paths": [
+        "candidate/closeout.json",
+        "candidate/exploit-validation.json",
+        "candidate/reentry-state.json",
+        "candidate/security-ledger.json",
+        "candidate/threat-ledger.json",
+        "candidate/workspace/src/capvault/audit.py",
+        "candidate/workspace/src/capvault/redirects.py",
+        "candidate/workspace/src/capvault/tokens.py",
+        "candidate/workspace/tests/test_security_regression.py"
+      ],
+      "auxiliary_changed_paths": [
+        "candidate/workspace/src/capvault/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/audit.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/redirects.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/service.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/tokens.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_security_regression.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_visible_capability.cpython-314.pyc"
+      ],
+      "failure_ids": [
+        "runtime-redirect-trap",
+        "static-required-term",
+        "candidate/threat-ledger.json-contract",
+        "candidate/threat-ledger.json-term",
+        "candidate/threat-ledger.json-term",
+        "candidate/security-ledger.json-contract",
+        "candidate/security-ledger.json-changed-files",
+        "candidate/security-ledger.json-term",
+        "candidate/security-ledger.json-term",
+        "candidate/exploit-validation.json-contract",
+        "candidate/exploit-validation.json-term",
+        "candidate/reentry-state.json-contract",
+        "candidate/reentry-state.json-term",
+        "candidate/closeout.json-contract",
+        "candidate/closeout.json-term"
+      ],
+      "notes": [
+        "failed invariants: candidate/closeout.json-contract, candidate/closeout.json-term, candidate/exploit-validation.json-contract, candidate/exploit-validation.json-term, candidate/reentry-state.json-contract, candidate/reentry-state.json-term, candidate/security-ledger.json-changed-files, candidate/security-ledger.json-contract, candidate/security-ledger.json-term, candidate/threat-ledger.json-contract, candidate/threat-ledger.json-term, runtime-redirect-trap, static-required-term"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-25_22-45-22-X2-w56-staged-security-reentry-n78-2026-04-25\\N78",
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "wrapper_exit_code": 0,
+      "verification_passed": false,
+      "rubric": 45,
+      "runtime_security": 45,
+      "staged_artifacts": 0,
+      "phase": 0,
+      "cost": 0,
+      "elapsed_seconds": 380.661,
+      "output_bytes": 1011624,
+      "changed_paths": [
+        "candidate/closeout.json",
+        "candidate/exploit-validation.json",
+        "candidate/reentry-state.json",
+        "candidate/security-ledger.json",
+        "candidate/workspace/src/capvault/audit.py",
+        "candidate/workspace/src/capvault/redirects.py",
+        "candidate/workspace/src/capvault/tokens.py",
+        "candidate/workspace/tests/test_security_regression.py"
+      ],
+      "auxiliary_changed_paths": [
+        ".reports/2026-04/report(main)-2026-04-25_22-45-closeout.md",
+        "candidate/workspace/src/capvault/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/audit.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/redirects.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/service.cpython-314.pyc",
+        "candidate/workspace/src/capvault/__pycache__/tokens.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_security_regression.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_visible_capability.cpython-314.pyc"
+      ],
+      "failure_ids": [
+        "scope-changed-paths",
+        "candidate/threat-ledger.json-contract",
+        "candidate/threat-ledger.json-term",
+        "candidate/threat-ledger.json-term",
+        "candidate/threat-ledger.json-term",
+        "candidate/threat-ledger.json-term",
+        "candidate/threat-ledger.json-term",
+        "candidate/threat-ledger.json-term",
+        "candidate/threat-ledger.json-term",
+        "candidate/threat-ledger.json-term",
+        "candidate/threat-ledger.json-term",
+        "candidate/threat-ledger.json-term",
+        "candidate/security-ledger.json-term"
+      ],
+      "notes": [
+        "failed invariants: candidate/security-ledger.json-term, candidate/threat-ledger.json-contract, candidate/threat-ledger.json-term, scope-changed-paths",
+        "01-threat-ledger path rule miss: []",
+        "03-exploit-validation path rule miss: ['candidate/exploit-validation.json', 'candidate/reentry-state.json', 'candidate/workspace/tests/test_security_regression.py']"
+      ]
+    },
+    {
+      "run_root": "D:\\dev\\Orchestrator\\benchmarks\\.scratch\\v2-staged-runs\\2026-04-25_22-45-22-X6-w56-staged-security-reentry-n78-2026-04-25\\N78",
+      "row": "X6",
+      "model": "gemini3.1flash-lite-preview",
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-no-summary",
+      "rubric": 0,
+      "failure_ids": [
+        "summary-missing"
+      ]
+    }
+  ]
+}

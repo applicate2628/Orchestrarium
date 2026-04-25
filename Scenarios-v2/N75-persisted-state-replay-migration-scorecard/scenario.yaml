@@ -1,0 +1,32 @@
+id: N75
+surface_id: E65
+pack_id: E65
+role_class: implementation
+artifact_type: persisted-state replay migration scorecard
+modality_family: stateful implementation, replay, rollback, schema migration, exact scope, patch-quality, output cost
+allowed_change_surface:
+  - candidate/migration-ledger.json
+  - candidate/workspace/src/statedock/events.py
+  - candidate/workspace/src/statedock/migrator.py
+  - candidate/workspace/src/statedock/store.py
+  - candidate/workspace/src/statedock/api.py
+  - candidate/workspace/tests/test_visible_replay.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/src/statedock/__init__.py
+score_profile: persisted-state-replay-migration, hidden-replay, rollback, exact-scope, cost-rubric
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - real-repo-workflow
+  - persisted-state
+  - schema-migration
+  - replay-idempotency
+  - rollback
+  - patch-quality-rubric
+  - scored-rubric
+  - binary-separator-candidate
