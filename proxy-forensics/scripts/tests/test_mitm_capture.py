@@ -1,6 +1,6 @@
 """Unit tests for mitm_capture.py helpers (no real mitmproxy or network calls).
 
-Run: python test_mitm_capture.py
+Run from proxy-forensics/ root: python scripts/tests/test_mitm_capture.py
 """
 
 import os

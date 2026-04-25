@@ -1,6 +1,6 @@
-"""Unit tests for fingerprint.py v0.2 — validates the fixes applied after codex review.
+"""Unit tests for fingerprint.py — validates classifier semantics and probe scoring.
 
-Run: python test_fingerprint.py
+Run from proxy-forensics/ root: python scripts/tests/test_fingerprint.py
 No API calls, no network — pure logic validation with mocked CLI outputs.
 """
 

@@ -1,6 +1,6 @@
 """Unit tests for tokenizer_probe.py fit + classification logic.
 
-Run: python test_tokenizer_probe.py
+Run from proxy-forensics/ root: python scripts/tests/test_tokenizer_probe.py
 """
 
 import sys
