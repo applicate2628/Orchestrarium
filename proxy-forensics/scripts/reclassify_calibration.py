@@ -85,7 +85,9 @@ def reclassify_one(path):
 
 
 def main():
-    calib_dir = Path(__file__).resolve().parent / "calibration"
+    script_dir = Path(__file__).resolve().parent
+    project_root = script_dir.parent if script_dir.name == "scripts" else script_dir
+    calib_dir = project_root / "calibration"
     json_files = sorted(calib_dir.glob("calibration-*.json"))
     print(f"Reclassifying {len(json_files)} calibration JSONs...")
     print()

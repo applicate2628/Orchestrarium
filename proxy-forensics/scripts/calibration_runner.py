@@ -21,8 +21,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-CALIB_DIR = ROOT / "calibration"
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent if SCRIPT_DIR.name == "scripts" else SCRIPT_DIR
+CALIB_DIR = PROJECT_ROOT / "calibration"
 CALIB_DIR.mkdir(exist_ok=True)
 
 # (model_id, effort, lane_type)
@@ -66,7 +67,7 @@ def run_one_calibration(model, effort, lane_type, idx, total):
     label = f"calibration-{model.replace('claude-','').replace('-20251001','')}-{effort}"
     raw_path = CALIB_DIR / f"{label}.json"
     cmd = [
-        "python", str(ROOT / "fingerprint.py"),
+        "python", str(SCRIPT_DIR / "fingerprint.py"),
         "--label", label,
         "--cmd", f"claude --model {model}",
         "--repeats", "2",
