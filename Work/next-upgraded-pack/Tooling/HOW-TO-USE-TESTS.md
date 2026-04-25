@@ -17,11 +17,12 @@ Use this document when you want to:
 
 | Surface | Current read |
 |---|---|
-| main admitted ranking surface | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
+| main admitted ranking surface | `Results-drafts/full-v2-hard-results-current.md` |
 | compact operator table | `Results-drafts/short-results-current-2026-04-18.md` |
 | legacy admitted upgraded-pack ranking | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |
 | supporting legacy runnable surface | `Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` |
-| full v2 result surface | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
+| full v2 hard result surface | `Results-drafts/full-v2-hard-results-current.md` |
+| deprecated pre-v3 full-v2 baseline | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
 | reference extra-lane surface | `Results-drafts/v2-extra-lane-n08-n10-results-2026-04-20.md` |
 | diagnostic top-pair rubric surface | `Results-drafts/v2-top-pair-rubric-e3-results-2026-04-20.md` |
 | active upgraded-pack runner | `Tooling/run-active-cohort-batch.ps1` |
@@ -41,11 +42,31 @@ the stale surface instead of adding a second competing result surface.
 
 | Rule | Meaning |
 |---|---|
-| update in place | keep `short-results-current-2026-04-18.md` and `v2-full-s01-s33-n01-n07-results-2026-04-18.md` as the live operator surfaces |
+| update in place | keep `short-results-current-2026-04-18.md` and `full-v2-hard-results-current.md` as the live operator surfaces |
 | no stale forks | do not create new `short-results-current-v3-*` or duplicate full-result files unless a new archive snapshot is admitted |
-| mark pre-v3 clearly | any remaining old score line must say `pre-v3 baseline` or `ceiling-effect baseline` |
+| mark pre-v3 clearly | any remaining old score line must say `pre-v3 baseline`, `ceiling-effect baseline`, or `DEPRECATED / SUPERSEDED` |
 | hardening before rerank | do not publish a stronger classification claim until hardened scenario contracts and rerun evidence exist |
 | quota boundary | quota, provider-limit, and clean runtime timeouts remain `NOT-RUN` / `REQUEUE`, not model `FAIL` |
+
+## Named report formats
+
+Use these names when the user asks for a compact status report.
+
+| Name                         | Use                                                                  | Contract                                                                 |
+|------------------------------|----------------------------------------------------------------------|--------------------------------------------------------------------------|
+| `RF12+1 Short-Rule Table`    | compact role-fit routing read for `X1` versus `X3` across `L00..L12` | one source-aligned Markdown table; rows stay ordered `L00` through `L12` |
+| alias `RF12`                 | shorthand for the same report                                        | keep terse routing rules; no raw evidence dump unless explicitly asked   |
+
+`RF12+1 Short-Rule Table` columns:
+
+| Column       | Meaning                                                       |
+|--------------|---------------------------------------------------------------|
+| `Line`       | canonical lane id and lane name, for example `L06 systems`    |
+| `Primary`    | current preferred row: `X1`, `X3`, `near-tie`, or `split`     |
+| `Short rule` | one concise routing rule with the reason embedded             |
+
+Keep the table horizontally readable. If a rule becomes too long, split it into a second row with
+blank `Line` and `Primary` cells rather than making one very wide table cell.
 
 | Item | Meaning |
 |---|---|
@@ -99,7 +120,8 @@ The full steady-state core execution pack is the union of those two batches.
 Use the next-pack root:
 
 ```powershell
-Set-Location D:\dev\Orchestrator\benchmarks\Work\next-upgraded-pack
+$repoRoot = git rev-parse --show-toplevel
+Set-Location (Join-Path $repoRoot 'Work\next-upgraded-pack')
 ```
 
 ## Quick start
@@ -248,8 +270,9 @@ After a meaningful run:
 |---|---|
 | one row on one batch | `Evidence/` |
 | the compact live table | `Results-drafts/short-results-current-2026-04-18.md` |
-| the main admitted ranking surface | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
-| the full v2 read | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
+| the main admitted ranking surface | `Results-drafts/full-v2-hard-results-current.md` |
+| the full v2 hard read | `Results-drafts/full-v2-hard-results-current.md` |
+| a historical pre-v3 full-v2 caveat | `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
 | the `worker.long-autonomous` extra-lane read | `Results-drafts/v2-extra-lane-n08-n10-results-2026-04-20.md` |
 | the diagnostic top-pair rubric read | `Evidence/x1-x3-top-pair-rubric-e3-2026-04-20.md`, `Results-drafts/v2-top-pair-rubric-e3-results-2026-04-20.md` |
 | live resume point | `Checkpoints/status-2026-04-16.md` |
@@ -269,8 +292,9 @@ After a meaningful run:
 | Goal | What to do |
 |---|---|
 | inspect current state fast | read `Results-drafts/short-results-current-2026-04-18.md` |
-| inspect the main admitted ranking | read `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
-| inspect the full v2 read | read `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
+| inspect the main admitted ranking | read `Results-drafts/full-v2-hard-results-current.md` |
+| inspect the full v2 hard read | read `Results-drafts/full-v2-hard-results-current.md` |
+| inspect the deprecated pre-v3 full-v2 baseline | read `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` |
 | inspect the `worker.long-autonomous` extra-lane read | read `Results-drafts/v2-extra-lane-n08-n10-results-2026-04-20.md` |
 | inspect the diagnostic top-pair rubric | read `Results-drafts/v2-top-pair-rubric-e3-results-2026-04-20.md` |
 | inspect the legacy upgraded-pack ranking | read `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` |

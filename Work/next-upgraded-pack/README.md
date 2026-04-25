@@ -24,7 +24,8 @@ It is allowed to change freely while designing and executing the next wave.
 | File | Role |
 |---|---|
 | `Results-drafts/short-results-current-2026-04-18.md` | compact operator-facing current table |
-| `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` | main live quota-aware full-v2 ranking surface; `X5/S12` reran into scoreable `FAIL` |
+| `Results-drafts/full-v2-hard-results-current.md` | current canonical hardened `/40` ranking surface |
+| `Results-drafts/v2-full-s01-s33-n01-n07-results-2026-04-18.md` | deprecated pre-v3 full-v2 baseline; retained only as historical provenance |
 | `Results-drafts/v2-extra-lane-n08-n10-results-2026-04-20.md` | reference extra-lane result surface for `E1 worker.long-autonomous`; `X4` deferred while the secret-backed route is unavailable |
 | `Results-drafts/x1-x3-steady-state-core-results-2026-04-17.md` | legacy upgraded-pack ranking surface |
 | `Results-drafts/x1-x3-current-runnable-pack-results-2026-04-17.md` | legacy supporting runnable-pack surface |

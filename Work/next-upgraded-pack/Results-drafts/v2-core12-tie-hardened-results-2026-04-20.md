@@ -7,8 +7,8 @@ Status: `PASS`
 This is the current hardened weak-separator read for `X1`, `X3`, and `X5` over the core-12 lanes
 that were previously tied.
 
-This file is a targeted tiebreaker. It does not replace the full `S01..S33 + N01..N07` score table,
-because the touched scenarios now use stricter contracts/verifiers.
+This file is a targeted tiebreaker. The old full `S01..S33 + N01..N07` score table is now a
+deprecated pre-v3 baseline; the current full `/40` replacement is `full-v2-hard-results-current.md`.
 
 | Row | Label | Admitted scoreable read | Timeout / incomplete | Current read |
 |---|---|---:|---:|---|
@@ -62,4 +62,4 @@ because the touched scenarios now use stricter contracts/verifiers.
 |---|---|
 | `../Evidence/x1-x3-x5-core12-tie-hardened-2026-04-20.md` | evidence, run roots, timeout classification, and manual verifier diagnostics |
 | `../Evidence/x5-core12-timeout-closure-2026-04-20.md` | timeout closure evidence converting previous `X5` timeout cells into scoreable states |
-| `v2-full-s01-s33-n01-n07-results-2026-04-18.md` | full current expanded v2 surface before targeted hardening |
+| `v2-full-s01-s33-n01-n07-results-2026-04-18.md` | deprecated expanded pre-v3 full-v2 baseline before targeted hardening |

@@ -3003,3 +3003,725 @@ The role-fit read still favors X3 for compact single-session UI/visual-state ree
 `308696`). This closes the N38 runtime ambiguity for the single-session branch: staged UI remains
 only an X1 scoreable pass, but compact single-session UI/visual-state work remains X3-primary after
 N20, N25, N47, and now N60.
+
+## 2026-04-25 Follow-Up: E51 Visual Pixel-Localization Diagnostic
+
+`N61-visual-pixel-localization-gauntlet` materializes the visual tiny-target localization hypothesis
+as a real scenario bundle. The image is a `2200 x 1600` canvas with grid cues, six `13 x 13` solid
+targets, same-color decoys, and a point-distance oracle. Passing requires all six target ids exactly
+once, mean error `<= 5.0 px`, and max error `<= 8.0 px`, so the verifier allows a several-pixel
+window rather than exact-center matching.
+
+The first raw `X1`/`X3` runs were produced before the prompt/schema contract was tightened from a
+`points` array into an object keyed by target id. Those raw runs remain useful as diagnostic evidence,
+but the post-fix object-map rerun below is the current read.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N61` oracle/schema JSON parse | `PASS` |
+| `N61` bundle-shape verifier | `PASS` |
+| `N61` exact reference answer in `.scratch/verifier-probes/2026-04-25-n61-visual/` | `PASS`, mean `0.0 px`, max `0.0 px`, score `100 / 100` |
+| `N61` shifted tolerance answer in `.scratch/verifier-probes/2026-04-25-n61-visual/` | `PASS`, mean `4.472 px`, max `4.472 px`, score `99.2 / 100`; confirms the verifier allows a several-pixel window |
+| `mcp-free` before runs | killed none |
+| `git diff --check` before launch | `PASS` |
+
+### Prompt/schema audit
+
+| Finding | Result |
+|---|---|
+| Old response contract | Allowed array-style `points`, so a model could emit duplicate candidate points for the same color. |
+| Observed impact | `X1` emitted duplicate `red`/`cyan` candidates and omitted four ids; strict first-occurrence mean overstated local pixel error. |
+| Current fix | `points` is now an object keyed by `red/cyan/lime/magenta/amber/blue`, requiring exactly one coordinate per target. |
+| Verifier diagnostic | Added `best_duplicate_*`, `matched_id_count`, and `within_window_ids` to separate local precision from coverage/format failures on legacy array outputs. |
+| Score audit | `score_0_100` now keeps a soft gradient for FAIL cases: coverage `20`, format `20`, within-window count `20`, mean-error gradient `25`, max-error gradient `15`; binary PASS remains unchanged. |
+| Post-fix status | Clean `X1`/`X3` rerun completed on the revised object-map prompt/schema. |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Strict mean / max px | Coverage | Primary failure |
+|---|---|---|---:|---|---:|---:|---|---|
+| `N61` | `X1 / gpt-5.5` | `.scratch/visual-localization-runs/2026-04-25_02-30-14-n61-visual-pixel-localization-2026-04-25-postfix2-x1/` | `0` | `FAIL` | `65.1` | `77.065 / 106.231` | `6 / 6` ids; no target inside `8 px` window | object-map output fixed; all points are wrong-but-bounded, not decoy-level |
+| `N61` | `X3 / opus 4.7max` | `.scratch/visual-localization-runs/2026-04-25_02-30-14-n61-visual-pixel-localization-2026-04-25-postfix2-x3/` | `0` | `FAIL` | `50.0` | `344.406 / 1981.709` | `6 / 6` ids; `lime/amber/blue` inside `8 px` window | selected a cyan decoy region; red/magenta exceed strict pass window |
+| `N61` | `X5 / gemini3.1pro` | `.scratch/visual-localization-runs/2026-04-25_01-38-23-n61-visual-pixel-localization-2026-04-25-x5-nomcp-timeboxed2/` | `124` | `NOT-RUN` | n/a | n/a | n/a | `600s` timeout before JSON output |
+| `N61` | `X6 / gemini3.1flash-lite-preview` | `.scratch/visual-localization-runs/2026-04-25_03-03-26-n61-visual-pixel-localization-2026-04-25-x6/` | `0` | `FAIL` | `40.0` | `363.604 / 1973.736` | `6 / 6` ids; no target inside `8 px` window | quota/route live; selected cyan decoy and missed strict window on all targets |
+
+Superseded pre-revision raw runs:
+
+| Row / model | Run root | Diagnostic read |
+|---|---|---|
+| `X1 / gpt-5.5` | `.scratch/visual-localization-runs/2026-04-25_01-48-52-n61-visual-pixel-localization-2026-04-25-x1-final/` | legacy array output duplicated `red/cyan`, missed four ids; best duplicate mean/max over attempted ids was `6.525 / 10.05 px` |
+| `X3 / opus 4.7max` | `.scratch/visual-localization-runs/2026-04-25_01-23-24-n61-visual-pixel-localization-2026-04-25-x3-nomcp/` | all six ids present, but cyan decoy produced strict mean/max `341.301 / 1983.825 px` |
+
+Fallback diagnostic `gemini-3-flash-preview` was also attempted at
+`.scratch/visual-localization-runs/2026-04-25_01-55-59-n61-visual-pixel-localization-2026-04-25-gemini-flash-diagnostic/`.
+It timed out after `240s` with only the Gemini wrapper banner and no JSON. This is route evidence
+only and is not counted as official `X5`.
+
+### Verdict
+
+`N61` is diagnostic `E51`, not a `full-v2-hard` `/40` slot. It does not produce a binary top-pair
+winner because both `X1` and `X3` remain scoreable failures under the strict `5 px` mean / `8 px`
+max gate. It does produce a scored pure-localization edge after the prompt/schema fix: `X1` has
+lower mean/max error and score `65.1 / 100`, while `X3` has three exact-window hits but one catastrophic
+cyan decoy and score `50.0 / 100`. `X6` is quota/route-live but weaker on this visual diagnostic at
+`40.0 / 100`. Official `X5` remains runtime-unhealthy for fresh semantic waves and is recorded as
+`NOT-RUN`, not as a model-quality failure.
+
+This changes the visual read by separating two surfaces that were previously conflated. Keep `X3`
+primary for compact visual/raster code patches after N48/N60. Do not promote a Gemini-first pure
+image-localization rule from official benchmark evidence until the Gemini Pro route produces
+scoreable output, or until a separately labeled fallback Gemini diagnostic is admitted.
+
+## 2026-04-25 Follow-Up: W41 Frame-Inversion Audit
+
+`N62-frame-inversion-compact-staged-interface` and
+`N63-frame-inversion-staged-compact-api-budget` test whether the current `X1`/`X3` split is merely
+prompt-frame/style-coded. They intentionally invert the frame while preserving the hard verifier
+class: compact wording over N35-class staged interface requirements, and staged wording over
+N57-class compact API migration plus visible operator budget.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N62/N63` JSON parse | `PASS` |
+| `N62/N63` bundle-shape verifiers | `PASS` |
+| `N62/N63` expected start-state verifier | `PASS`; starter bundles fail as expected under full verification |
+| `git diff --check` on new bundles | `PASS` |
+| `mcp-free` before model runs | first pass killed orphaned `mcp-language-server.exe`; second pass killed none |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---|
+| `N62` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_03-48-55-X1-w41-frame-inversion-n62-2026-04-25/N62/` | `0` | `PASS` | n/a | none |
+| `N62` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_03-48-55-X3-w41-frame-inversion-n62-2026-04-25/N62/` | `0` | `PASS` | n/a | none |
+| `N62` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_04-07-45-X2-w41-frame-inversion-n62-2026-04-25/N62/` | `0` | `FAIL` | n/a | exact scope missed `candidate/workspace/src/interfaceflow/api.py` |
+| `N62` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_04-07-45-X6-w41-frame-inversion-n62-2026-04-25/N62/` | `124` | `NOT-RUN` | n/a | shell timeout before `worker-output.txt` or `summary.json` |
+| `N63` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_03-59-21-X1-w41-frame-inversion-n63-2026-04-25/N63/` | `0` | `FAIL` | `545831` | operator budget `545831 > 40000`; hidden API/scope checks pass |
+| `N63` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_03-59-21-X3-w41-frame-inversion-n63-2026-04-25/N63/` | `0` | `PASS` | `3190` | none |
+| `N63` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_04-07-45-X2-w41-frame-inversion-n63-2026-04-25/N63/` | `0` | `FAIL` | `125688` | operator budget `125688 > 40000`; hidden API/scope checks pass |
+| `N63` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_04-07-45-X6-w41-frame-inversion-n63-2026-04-25/N63/` | `124` | `NOT-RUN` | n/a | shell timeout before `worker-output.txt` or `summary.json` |
+
+### X5 quota probe
+
+A short `X5 / gemini3.1pro` probe through `gemini-isolated-worker.ps1` with
+`gemini-3-pro-high-explicit` timed out after `180s` without producing
+`.scratch/x5-quota-check-2026-04-25_0440.txt` and without an explicit quota/reset message. Current
+X5 status remains `route/runtime unhealthy`, not quota-clear and not scoreable model failure.
+
+### Verdict
+
+W41 confirms execution-shape routing rather than invalidating the split.
+
+`N62` makes the N35-class interface migration compact and both top rows pass. Therefore the original
+`N35/N36` failures should be read as staged re-entry / multi-session accountability failures, not as
+evidence that X3 cannot perform the migration semantics.
+
+`N63` makes the N57-class compact API migration staged in wording, and X1 still fails only the
+visible operator-output budget while hidden API migration and exact scope pass. Therefore the compact
+low-noise X3 separator is not merely a compact prompt artifact.
+
+Routing remains: `X1 primary` for staged re-entry, multi-session accountability, and phase-ledger
+closure; `X3 primary` for compact low-noise/operator-budget implementation.
+
+## 2026-04-25 Follow-Up: W42 Security Depth Review Gauntlet
+
+`N64-security-depth-review-gauntlet` targets unresolved `L10 review.security`. It is a multi-file
+review-only bundle with nine exact vulnerability tuples across authz, tenant boundary, sessions,
+webhooks, replay, secret exposure, and PII, plus three explicit false-positive traps:
+`MASKED_EXAMPLE_TOKEN`, `rel="noopener"`, and `GET /health`.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N64` JSON parse and bundle-shape verifier | `PASS` |
+| `N64` starter full verifier | expected `FAIL`; missing report/gate/tuple content |
+| `N64` reference probe in `.scratch/verifier-probes/2026-04-25-n64-reference` | completed report verifier `PASS` |
+| `mcp-free` before model runs | `STATS kill: none` |
+| `git diff --check` before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---|
+| `N64` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_04-56-04-X1-w42-security-depth-n64-2026-04-25/N64/` | `0` | `PASS` | `131863` | none |
+| `N64` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_04-56-03-X3-w42-security-depth-n64-2026-04-25/N64/` | `0` | `PASS` | `1663` | none |
+| `N64` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_05-06-43-X2-w42-security-depth-n64-2026-04-25/N64/` | `0` | `FAIL` | `1442` | did not edit the starter report |
+| `N64` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_05-06-43-X6-w42-security-depth-n64-2026-04-25/N64/` | `1` | local `PASS` | `2463` | runtime caveat: capacity/tool-loop/AbortError produced non-zero wrapper exit |
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3` on L10 security depth. Both top rows pass the exact
+nine-finding tuple gate and avoid the false positives. N64 therefore does not assign a security
+primary.
+
+Role-fit read: keep ordinary security review as `X1 / X3 near-tie`. X3 has a strong operator-cost
+advantage on this diagnostic (`1663` bytes versus `131863`), but that is not enough to promote a
+semantic security primary. X2 is a clean lower-bound scoreable fail. X6 produced a locally passing
+report, but because the Gemini wrapper returned non-zero after capacity/tool errors, it remains a
+runtime-caveat result rather than a clean scoreable pass.
+
+## 2026-04-25 Follow-Up: W43 Visual Correctness Review Gauntlet
+
+`N65-visual-correctness-review-gauntlet` targets unresolved `L12 review.ui-visual-correctness`.
+It is a review-only UI packet with DOM, CSS, state-matrix, and screenshot-probe evidence. The
+contract requires eight exact visual defect tuples and three false-positive exclusions:
+`aria-label`, `decorative-grid`, and `muted-meta`.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N65` JSON parse and bundle-shape verifier | `PASS` |
+| `N65` starter full verifier | expected `FAIL`; missing report/gate/tuple content |
+| `N65` reference probe in `.scratch/verifier-probes/2026-04-25-n65-reference` | completed report verifier `PASS` |
+| `mcp-free` before model runs | `STATS kill: none` |
+| `git diff --check` on new bundle | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---|
+| `N65` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_05-20-09-X1-w43-visual-correctness-n65-2026-04-25/N65/` | `0` | `PASS` | `94940` | none |
+| `N65` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_05-20-08-X3-w43-visual-correctness-n65-2026-04-25/N65/` | `0` | `PASS` | `1666` | none |
+| `N65` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_05-23-19-X2-w43-visual-correctness-n65-2026-04-25/N65/` | `0` | `FAIL` | `1094` | did not edit the starter report |
+| `N65` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_05-23-18-X6-w43-visual-correctness-n65-2026-04-25/N65/` | `124` | `NOT-RUN` | n/a | shell timeout after `1800s`; only `prompt.txt` existed in `meta/` |
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3` on L12 visual correctness review. Both top rows pass the
+exact eight-finding tuple gate and avoid the false-positive traps. N65 therefore does not assign an
+ordinary visual-review primary.
+
+Role-fit read: keep single-shot visual correctness review as `X1 / X3 near-tie`. X3 again has a
+large operator-cost advantage (`1666` bytes versus `94940`), but the semantic visual-review gate
+does not separate the top pair. This preserves the existing split: use `X3` for compact visual/raster
+implementation, treat pure pixel localization as separate diagnostic evidence, and use ordinary
+visual review as near-tie until a stronger objective miss appears.
+
+## 2026-04-25 Follow-Up: W44 Conflicting Evidence Fact Memo
+
+`N66-conflicting-evidence-fact-memo-gauntlet` targets `L01 advisory.repo-understanding` with a
+bounded repo snapshot containing current code/tests, accepted ADR-011, stale README text, draft
+ADR-014, and a stale migration-status note. The memo contract requires source ranking, five conflict
+ledger rows, four confirmed facts, four non-claims, and a bounded next action.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N66` JSON parse and bundle-shape verifier | `PASS` |
+| `N66` starter full verifier | expected `FAIL`; missing source ranking, conflict ledger, facts, non-claims, and next-action content |
+| `N66` reference probe in `.scratch/verifier-probes/2026-04-25-n66-reference` | completed fact memo verifier `PASS` |
+| `mcp-free` before model runs | `STATS kill: none` |
+| `git diff --check` on new bundle | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---|
+| `N66` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_06-07-53-X1-w44-conflicting-evidence-n66-2026-04-25/N66/` | `0` | `PASS` | `169439` | none |
+| `N66` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_06-07-52-X3-w44-conflicting-evidence-n66-2026-04-25/N66/` | `0` | `PASS` | `1725` | none |
+| `N66` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_06-13-31-X2-w44-conflicting-evidence-n66-2026-04-25/N66/` | `0` | `FAIL` | `76567` | missed source-ranking, conflict-ledger, fact/non-claim, and next-action requirements |
+| `N66` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_06-13-31-X6-w44-conflicting-evidence-n66-2026-04-25/N66/` | `0` | `FAIL` | `3076` | missed source-ranking rows, all five conflict tuples, and multiple fact/non-claim requirements |
+
+### X5 quota probe
+
+A short `X5 / gemini3.1pro` probe through `gemini-isolated-worker.ps1` with
+`gemini-3-pro-high-explicit` timed out after `240s` without producing
+`.scratch/x5-quota-check-2026-04-25_0621.txt` and without an explicit quota/reset message. Current
+X5 status remains `route/runtime unhealthy`, not quota-clear and not scoreable model failure.
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3` on L01 conflicting-evidence repo-understanding. Both top rows
+pass the exact source-ranking and conflict-ledger verifier, so N66 does not assign a repo-understanding
+primary.
+
+Role-fit read: keep `L01` as `X1 / X3 near-tie` for correctness. X3 has a very large operator-cost
+advantage on this diagnostic (`1725` bytes versus `169439`), and both lower calibration rows fail
+scoreably, so the scenario is useful for lower-bound separation but not for top-pair primary selection.
+
+## 2026-04-25 Follow-Up: W45 Cross-Phase Integration Owner
+
+`N67-cross-phase-integration-owner-gauntlet` targets staged owner/QA gating. Three accepted upstream
+artifacts disagree on the pagination continuation field: backend uses `cursor_token`, frontend uses
+`nextCursor`, and QA uses `page_token`. The staged worker must detect the incompatibility before QA,
+assign `integration-owner`, stop QA with `REVISE_BEFORE_QA`, and preserve repair/re-entry closure.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N67` JSON parse and bundle-shape verifier | `PASS` |
+| `N67` starter full verifier | expected `FAIL`; missing ledger, report, QA gate, and closure content |
+| `N67` reference probe in `.scratch/verifier-probes/2026-04-25-n67-reference` | completed staged packet verifier `PASS` |
+| `mcp-free` before and after runs | `STATS kill: none` |
+| `git diff --check` on new bundle | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---|
+| `N67` | `X1 / gpt-5.5` | `.scratch/v2-staged-runs/2026-04-25_06-31-53-X1-w45-cross-phase-integration-n67-2026-04-25/N67/` | `0` | `PASS` | `260381` | none |
+| `N67` | `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-25_06-31-53-X3-w45-cross-phase-integration-n67-2026-04-25/N67/` | `0` | `FAIL` | `7238` | missed pre-QA compatibility, QA-stop, gate, repair/re-entry, and closure markers |
+| `N67` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-25_06-41-40-X2-w45-cross-phase-integration-n67-2026-04-25/N67/` | `0` | `FAIL` | `249910` | did not change `candidate/integration-ledger.json`; exact changed-path contract failed |
+| `N67` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-25_06-41-40-X6-w45-cross-phase-integration-n67-2026-04-25/N67/` | `1` | `NOT-RUN` | `10397` | runtime-caveat non-zero wrapper plus verifier failures on owners, QA gate, repair/re-entry, and closure |
+
+### Verdict
+
+This is an honest top-pair separator: `X1 PASS`, `X3 scoreable FAIL` with `wrapperExitCode=0` and
+all four expected candidate paths changed. X3 stayed compact but failed the cross-phase integration
+owner semantics that matter: source-ranking/pre-QA compatibility, `REVISE_BEFORE_QA`, `do-not-run-qa`,
+repair/re-entry, and closure.
+
+Role-fit read: use `X1` for staged integration-owner packets, cross-phase compatibility checks,
+QA-stop decisions, repair/re-entry ledgers, and closure. Use `X3` only for compact single-session
+slices where those staged governance semantics are not the work product.
+
+## 2026-04-25 Follow-Up: W46 Actual Screenshot Visual Review
+
+`N68-actual-screenshot-visual-review-gauntlet` targets actual screenshot grounding, not DOM/CSS
+retelling. It uses one `1280 x 900` PNG dashboard screenshot with eight seeded visual defects, three
+false-positive traps, exact component/defect terms, and coordinate windows. The design follows
+GUI/web grounding benchmark patterns: element grounding, screenshot-only visual evidence, coordinate
+quality, and false-positive discipline.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N68` JSON parse and bundle-shape verifier | `PASS` |
+| `N68` starter full verifier | expected `FAIL`; empty finding set |
+| `N68` reference answer in `.scratch/verifier-probes/2026-04-25-n68-reference-answer.json` | verifier `PASS`; score `100 / 100` |
+| `mcp-free` before and after runs | `STATS kill: none` |
+| `git diff --check` on new bundle/tooling | `PASS` |
+
+Initial `X1` probes were invalidated by strict output-schema issues, not model quality. The final
+run below used the fixed schema and verifier.
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N68` | `X1 / gpt-5.5` | `.scratch/visual-localization-runs/2026-04-25_07-09-07-w46-actual-screenshot-n68-final2-2026-04-25/X1/` | `0` | `FAIL` | `70` | `2742` | missed search-input defect, release-timeline grounding, and required non-finding ledger |
+| `N68` | `X3 / opus 4.7max` | `.scratch/visual-localization-runs/2026-04-25_07-09-07-w46-actual-screenshot-n68-final2-2026-04-25/X3/` | `0` | `FAIL` | `80` | `2072` | missed search-input defect and risk-score coordinate grounding |
+| `N68` | `X6 / gemini3.1flash-lite-preview` | `.scratch/visual-localization-runs/2026-04-25_07-16-57-w46-actual-screenshot-n68-calibration-final-2026-04-25/X6/` | `0` | `FAIL` | `20` | `2945` | coordinates were scaled/misaligned; no seeded tuple matched |
+| `N68` | `X2 / gpt-5.3-codex-spark` | n/a | n/a | `NOT-RUN` | n/a | n/a | current visual runner supports `X1/X3/X5/X6` vision routes only |
+| `N68` | `X5 / gemini3.1pro` | n/a | n/a | `NOT-RUN` | n/a | n/a | smoke timed out after `264s` with no output file and no explicit quota/reset message |
+
+### Verdict
+
+N68 is not a binary top-pair separator because both `X1` and `X3` fail. It is still useful visual
+grounding evidence: `X3` scores higher (`80 / 100` versus `70 / 100`) on the actual screenshot
+review, while `X6` separates lower at `20 / 100`.
+
+Role-fit read: keep ordinary visual correctness review as `X1 / X3 near-tie` after N65. For actual
+screenshot coordinate grounding, use `X3` provisionally when the task is screenshot-first and
+coordinate/scored-review quality is the deciding factor, but verify because neither top row passed
+the strict eight-finding binary gate.
+
+## 2026-04-25 Follow-Up: W47 Real-Repo Patch Quality Scorecard
+
+`N69-realrepo-patch-quality-scorecard` targets compact real-repo implementation with hidden
+correctness, runtime, patch-quality, and output-cost scoring. The starter package exposes a visible
+charge/refund ledger test while hidden consumers require duplicate replacement by highest `sequence`,
+void handling through `voids_event_id`, refund subtraction, currency partitioning, deterministic
+evidence ids, no input mutation, and a fast indexed path over `60000` generated events.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N69` JSON parse and bundle-shape verifier | `PASS` |
+| `N69` starter full verifier | expected `FAIL`; hidden semantics, ledger, and patch fields missing |
+| `N69` reference probe in `.scratch/verifier-probes/2026-04-25-n69-reference` | verifier `PASS`; runtime `0.032s` under `1.2s` limit |
+| `git diff --check` on new bundle/tooling | `PASS` |
+| `mcp-free` after runs | `STATS kill: none` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N69` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_11-36-07-X1-w47-patch-quality-n69-2026-04-25/N69/` | `0` | `PASS` | `85 / 100` | `149015` | no semantic failure; output-cost score `0` |
+| `N69` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_11-36-07-X3-w47-patch-quality-n69-2026-04-25/N69/` | `0` | `PASS` | `90 / 100` | `2037` | auxiliary `.pytest_cache` / `__pycache__` churn lowers patch-quality score |
+| `N69` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_11-42-07-X2-w47-patch-quality-n69-2026-04-25/N69/` | `0` | `FAIL` | `35 / 100` | `1087` | made no patch; missed hidden semantics and ledger fields |
+| `N69` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_11-42-07-X6-w47-patch-quality-n69-2026-04-25/N69/` | `0` | `FAIL` | `35 / 100` | `3501` | order-independence hidden semantics and ledger fields failed |
+
+### X5 quota probe
+
+A short `X5 / gemini3.1pro` probe through `gemini-isolated-worker.ps1` with
+`gemini-3-pro-high-explicit` timed out after `244s` without producing
+`.scratch/x5-quota-check-2026-04-25_1146.txt` and without an explicit quota/reset message. Current
+X5 status remains `route/runtime unhealthy`, not quota-clear and not a scoreable model failure.
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3` on the hidden ledger implementation: both pass semantic,
+runtime, and required-path gates. The scored role fit separates tradeoffs instead of assigning a
+binary primary. `X3` wins total rubric (`90` versus `85`) because it is much cheaper and faster at
+the operator-output layer. `X1` wins patch hygiene because it changes only the two required files,
+while X3 leaves generated cache artifacts that are counted as auxiliary churn by the W47 scorer.
+
+Role-fit read: use W47 as patch-quality/cost evidence, not a `/40` slot. For compact real-repo
+patches where low output cost matters, X3 remains preferred if generated cache/churn is controlled.
+For exact patch hygiene and clean workspace discipline, X1 has the safer tendency.
+
+## 2026-04-25 Follow-Up: W48 Entitlement Event Migration Scorecard
+
+`N70-entitlement-event-migration-scorecard` targets a multi-file real-repo-style event schema
+migration. The patch surface is parser, engine, reporting, and migration ledger. Hidden consumers
+exercise schema-v2 nested identifiers, legacy compatibility, replacement/removal semantics, duplicate
+highest-sequence selection, `hold` / `release` state, summary counters, and `50000` generated-event
+runtime.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N70` JSON parse and bundle-shape verifier | `PASS` |
+| `N70` visible legacy unittest | `PASS`; `1` visible test |
+| `N70` starter full verifier | expected `FAIL`; schema-v2 parser and ledger missing |
+| `N70` reference probe in `.scratch/verifier-probes/2026-04-25-n70-reference` | verifier `PASS`; runtime about `1.0s` under final `2.0s` limit |
+| `git diff --check` on new bundle/tooling | `PASS` |
+| `mcp-free` after runs | `STATS kill: none` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N70` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_12-04-30-X1-w48-entitlement-migration-n70-2026-04-25/N70/` | `0` | `PASS` | `85 / 100` | `229032` | no semantic failure; output-cost score `0` |
+| `N70` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_12-04-30-X3-w48-entitlement-migration-n70-2026-04-25/N70/` | `0` | `PASS` | `90 / 100` | `2395` | auxiliary `__pycache__` churn lowers patch-quality score |
+| `N70` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_12-11-28-X2-w48-entitlement-migration-n70-2026-04-25/N70/` | `0` | `FAIL` | `15 / 100` | `1307` | made no patch; schema-v2 parser exception and ledger failures |
+| `N70` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_12-11-28-X6-w48-entitlement-migration-n70-2026-04-25/N70/` | `1` | `NOT-RUN` | `0 / 100` | `3702` | runtime/tool-loop wrapper failure; local verifier also showed hidden state and ledger misses |
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3` on the multi-file hidden-consumer migration. This is important
+negative evidence: simply making the patch multi-file and adding schema-v2 hidden consumers did not
+break X3 or create an X1 semantic edge.
+
+The scored split repeats W47: `X3` wins total rubric (`90` versus `85`) through very low output cost;
+`X1` wins patch hygiene by changing only required files and leaving no auxiliary cache artifacts.
+Promote this as execution-style evidence only, not a binary role separator and not a `/40` slot.
+
+## 2026-04-25 Follow-Up: W49 Test-Led Rate Limit Regression
+
+`N71-test-led-rate-limit-regression-scorecard` targets test-led implementation. The starter
+`FixedWindowLimiter` passes a visible single-user test but leaks rate-limit state across users in the
+same tenant/route and returns a full-window `retry_after`. The contract requires a production fix,
+a meaningful regression test in `tests/test_window_regression.py`, and a `test-ledger.json` packet.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N71` JSON parse and bundle-shape verifier | `PASS` |
+| `N71` visible unittest | `PASS`; `1` visible test |
+| `N71` starter full verifier | expected `FAIL`; hidden behavior, regression test, and ledger missing |
+| `N71` reference probe in `.scratch/verifier-probes/2026-04-25-n71-reference` | verifier `PASS`; visible tests `PASS` with `2` tests |
+| `git diff --check` on new bundle/tooling | `PASS` |
+| `mcp-free` after runs | `STATS kill: none` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N71` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_12-23-57-X1-w49-test-led-rate-limit-n71-2026-04-25/N71/` | `0` | `PASS` | `83 / 100` | `135535` | auxiliary `.pytest_cache` / `__pycache__` churn; output-cost partial |
+| `N71` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_12-23-57-X3-w49-test-led-rate-limit-n71-2026-04-25/N71/` | `0` | `PASS` | `90 / 100` | `2410` | auxiliary `__pycache__` churn |
+| `N71` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_12-28-47-X2-w49-test-led-rate-limit-n71-2026-04-25/N71/` | `0` | `FAIL` | `15 / 100` | `1587` | no patch; hidden behavior, regression test, and ledger failed |
+| `N71` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_12-28-45-X6-w49-test-led-rate-limit-n71-2026-04-25/N71/` | `0` | `FAIL` | `15 / 100` | `3748` | visible tests / regression-test artifact / ledger failed |
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3`. The hypothesis that this small test-led patch would create an
+X1-over-X3 binary edge did not hold: both rows fixed behavior and supplied an accepted regression
+test artifact. X3 wins the scored rubric (`90` versus `83`) through output cost and lower auxiliary
+churn. X1 remains safe on semantic correctness, but this N71 construction should not be used as a
+hard X1-primary proof for test-led implementation.
+
+## 2026-04-25 Follow-Up: W50 Caller-Spanning API Refactor
+
+`N72-caller-spanning-api-refactor-scorecard` changes the W47-W49 axis from internal patch semantics
+to interface breakage across multiple callers. The starter `billinglink` package only supports legacy
+`customer_id` payloads. The hidden contract requires schema-v2 `AccountRef` payloads, legacy
+compatibility, service/API/CLI/report propagation, payload immutability, exact five-file scope, and a
+complete `refactor-ledger.json`.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N72` JSON parse and bundle-shape verifier | `PASS` |
+| `N72` visible legacy unittest | `PASS`; `2` visible tests |
+| `N72` starter full verifier | expected `FAIL`; hidden caller contracts and ledger missing |
+| `N72` reference probe in `.scratch/verifier-probes/2026-04-25-n72-reference` | verifier `PASS`; exact changed paths accepted |
+| `git diff --check` on new bundle/tooling | `PASS` |
+| `mcp-free` after runs | `STATS kill: none` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N72` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_14-22-54-X1-w50-caller-spanning-api-n72-2026-04-25/N72/` | `0` | `PASS` | `83 / 100` | `146983` | hidden callers pass; auxiliary `__pycache__` churn; output-cost partial |
+| `N72` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_14-22-54-X3-w50-caller-spanning-api-n72-2026-04-25/N72/` | `0` | `PASS` | `90 / 100` | `2599` | hidden callers pass; auxiliary `__pycache__` churn |
+| `N72` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_14-28-30-X2-w50-caller-spanning-api-n72-2026-04-25/N72/` | `0` | `FAIL` | `15 / 100` | `1467` | no patch; hidden API/service/CLI/report caller contracts and ledger failed |
+| `N72` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_14-28-29-X6-w50-caller-spanning-api-n72-2026-04-25/N72/` | n/a | `NOT-RUN` | `0 / 100` | n/a | shell timeout after `1800s`, no `summary.json`; local probe of partial run root also failed visible and hidden contracts |
+
+### X5 quota probe
+
+A short `X5 / gemini3.1pro` probe through `gemini-isolated-worker.ps1` with
+`gemini-3-pro-high-explicit` timed out after `244s` without producing
+`.scratch/x5-quota-check-2026-04-25_1459.txt` and without an explicit quota/reset message. Current
+X5 status remains `route/runtime unhealthy`, not quota-clear and not a scoreable model failure.
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3`. This is negative evidence against the hypothesis that a
+single-session caller-spanning API refactor is enough to produce an X1 semantic edge: both top rows
+preserved legacy compatibility and satisfied hidden API, service, CLI, and report callers. X3 again
+wins scored fit through output cost; X1 remains semantically safe but not binary-superior on this
+single-session refactor surface.
+
+Role-fit read: keep staged API/interface migration as `X1 primary` after N35/N36. Keep ordinary
+single-session caller-spanning refactors as `X1 / X3 binary near-tie`; choose X3 when cost/compactness
+matters and enforce cache/scope hygiene explicitly.
+
+## 2026-04-25 Follow-Up: W51 DOM Event Runtime UI
+
+`N73-dom-event-runtime-ui-scorecard` targets runtime UI behavior rather than static markup. The
+bundle uses a dependency-free Node DOM/event harness that imports the candidate UI modules, mounts
+the board, dispatches filter clicks, keyboard dirty toggles, and save clicks, then checks DOM state,
+`aria-pressed`, `data-visible`, dirty status, save disabled state, and source payload immutability.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N73` JSON parse and bundle-shape verifier | `PASS` |
+| `N73` visible render check | `PASS` |
+| `N73` starter hidden verifier | expected `FAIL`; filter, keyboard dirty, save, and ledger gaps |
+| `N73` reference probe in `.scratch/verifier-probes/2026-04-25-n73-reference` | verifier `PASS`; exact changed paths accepted |
+| `git diff --check` on new bundle/tooling | `PASS` |
+| `mcp-free` after runs | `STATS kill: none` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N73` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_15-28-28-X1-w51-dom-event-runtime-ui-n73-2026-04-25/N73/` | `0` | `PASS` | `93 / 100` | `138818` | none; exact five-path patch and DOM runtime pass |
+| `N73` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_15-28-28-X3-w51-dom-event-runtime-ui-n73-2026-04-25/N73/` | `0` | `PASS` | `93 / 100` | `2467` | none; exact five-path patch and DOM runtime pass; elapsed proxy pushed cost bucket to partial |
+| `N73` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_15-37-59-X2-w51-dom-event-runtime-ui-n73-2026-04-25/N73/` | `0` | `FAIL` | `15 / 100` | `1034` | no patch; filter, keyboard, save, and ledger failed |
+| `N73` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_15-37-57-X6-w51-dom-event-runtime-ui-n73-2026-04-25/N73/` | `0` | `FAIL` | `15 / 100` | `3840` | dirty status and ledger completeness failed; changed only three of five required paths |
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3`. Runtime DOM/event execution did not create a top-pair
+semantic separator: both rows handled filtering, keyboard dirty toggles, save behavior, exact scope,
+and immutability. X1 was faster by prompt-to-output proxy (`238.595s` versus `500.130s`), X3 was much
+more compact (`2467` bytes versus `138818`), and the current rubric gives both the same `93 / 100`.
+
+Role-fit read: keep compact UI implementation as X3-leaning only when low-noise/output budget is a
+hard gate (N47/N60 evidence). For DOM event runtime correctness without a strict output budget, use
+`X1 / X3` as binary near-tie and verify the actual UI behavior.
+
+## 2026-04-25 Follow-Up: W52 DOM Runtime Output Budget
+
+`N74-dom-runtime-output-budget-scorecard` repeats the N73 deterministic DOM/event runtime harness and
+adds a visible operator-output budget verifier. The runtime contract still checks filter clicks,
+keyboard dirty toggles, save behavior, exact five-path scope, payload immutability, and the
+`ui-runtime-ledger.json`. The added budget contract reads the runner-owned `meta/worker-output.txt`
+and fails if visible operator output exceeds `50000` bytes.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N74` JSON parse and DOM/runtime bundle-shape verifier | `PASS` |
+| `N74` operator-budget bundle-shape verifier | `PASS` |
+| `N74` visible render check | `PASS` |
+| `N74` starter hidden verifier | expected `FAIL`; runtime/ledger gaps remain in starter |
+| `N74` reference probe in `.scratch/verifier-probes/2026-04-25-n74-reference` | DOM/runtime verifier `PASS`; operator-budget verifier `PASS` with synthetic meta output |
+| `git diff --check` on new bundle/tooling | pending post-documentation rerun |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N74` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_16-05-25-X1-w52-dom-runtime-output-budget-n74-2026-04-25/N74/` | `0` | `FAIL` | `80 / 100` | `241980` | DOM runtime and exact scope pass; visible operator-output budget fails |
+| `N74` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_16-05-25-X3-w52-dom-runtime-output-budget-n74-2026-04-25/N74/` | `0` | `PASS` | `100 / 100` | `2085` | none; DOM runtime, exact scope, and output budget pass |
+
+Calibration rows were not launched in W52. W51 had just run `X2` and `X6` on the same DOM runtime
+base, and N74 changes only the top-pair visible output-budget gate. Keep lower-row calibration for
+the next completed semantic task or final comparison sweep.
+
+### Verdict
+
+This is an honest compact inverse separator: `X1 / gpt-5.5` preserved runtime UI semantics and exact
+scope but scoreably failed the visible operator-budget contract (`241980 > 50000`), while
+`X3 / opus 4.7max` passed all runtime and budget gates (`2085 <= 50000`).
+
+Role-fit read: for DOM event runtime correctness without strict output budget, N73 remains
+`X1 / X3` near-tie. For compact UI implementation where low visible operator output is a first-class
+contract, N74 reinforces `X3 primary`.
+
+## 2026-04-25 Follow-Up: W53 Persisted-State Replay Migration
+
+`N75-persisted-state-replay-migration-scorecard` changes the W50-W52 axis to persisted state. The
+bundle requires v1/v2 event normalization, source immutability, idempotent replay by `dedupe_key`,
+checkpoint rollback, schema-v2 persist/load envelopes, exact six-path scope, a visible regression
+test, and `migration-ledger.json` coverage.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N75` JSON parse and bundle-shape verifier | `PASS` |
+| `N75` visible legacy replay unittest | `PASS`; `1` visible test |
+| `N75` starter hidden verifier | expected `FAIL`; immutability, schema, dedupe, rollback, persistence, and ledger gaps |
+| `N75` reference probe in `.scratch/verifier-probes/2026-04-25-n75-reference/N75` | verifier `PASS`; exact changed paths accepted |
+| `git diff --check` on new bundle/tooling before launch | `PASS` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N75` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_16-38-26-X1-w53-persisted-state-replay-n75-2026-04-25/N75/` | `0` | `PASS` | `83 / 100` | `148703` | none semantically; auxiliary `__pycache__` churn and partial cost |
+| `N75` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_16-38-26-X3-w53-persisted-state-replay-n75-2026-04-25/N75/` | `0` | `PASS` | `83 / 100` | `2577` | none semantically; auxiliary `__pycache__` churn; elapsed cost bucket partial |
+| `N75` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_16-47-04-X2-w53-persisted-state-replay-n75-2026-04-25/N75/` | `0` | `PASS` | `75 / 100` | `182431` | none semantically; auxiliary session-log churn and output-cost zero |
+| `N75` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_16-47-03-X6-w53-persisted-state-replay-n75-2026-04-25/N75/` | n/a | `NOT-RUN` | `0 / 100` | n/a | shell timeout after `1800s`; no `summary.json` |
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3`. The hidden persisted-state replay/rollback oracle is not
+enough by itself to separate the top pair in a single-session implementation frame: both pass
+schema migration, source immutability, idempotent replay, rollback, persistence, exact scope, and
+visible regression gates. X2 also passes semantically, which marks N75 as a poor top-pair separator
+but useful lower-bound evidence for this fixture shape.
+
+Role-fit read: ordinary single-session persisted-state migration joins caller-spanning refactor and
+small test-led regression as `X1 / X3` near-tie. To separate this lane further, the next attempt must
+add staged re-entry, real repo integration, or stricter runtime/operability constraints rather than
+only more hidden replay cases.
+
+## 2026-04-25 Follow-Up: W54 Staged Persisted-State Reentry
+
+`N76-staged-persisted-state-reentry-gauntlet` is the staged version of N75. It keeps the same hidden
+runtime state oracle, but spreads the task across four fresh invocations: source ledger, migration
+implementation, re-entry validation, and closeout. The verifier requires the runtime migration gates
+plus exact staged artifacts: `source-ledger.json`, `migration-ledger.json`, `reentry-state.json`, and
+`closeout.json`.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N76` JSON parse and bundle-shape verifier | `PASS` |
+| `N76` starter hidden verifier | expected `FAIL`; staged ledgers and runtime migration gaps |
+| `N76` reference probe in `.scratch/verifier-probes/2026-04-25-n76-reference/N76` | verifier `PASS`; exact changed paths accepted |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before calibration | `STATS kill: none` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N76` | `X1 / gpt-5.5` | `.scratch/v2-staged-runs/2026-04-25_19-34-56-X1-w54-staged-persisted-state-n76-2026-04-25/N76/` | `0` | `PASS` | `85 / 100` | `870319` | none semantically; output cost zero and auxiliary cache churn |
+| `N76` | `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-25_19-34-55-X3-w54-staged-persisted-state-n76-2026-04-25/N76/` | `0` | `FAIL` | `15 / 100` | `7852` | missing `migrator.py` changed path, schema version, persist envelope, source/migration/reentry/closeout ledger contracts |
+| `N76` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-25_19-55-46-X2-w54-staged-persisted-state-n76-2026-04-25/N76/` | `0` | `FAIL` | `70 / 100` | `503532` | semantic behavior passes, but exact staged scope fails because `migrator.py` was not changed |
+| `N76` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-25_19-55-45-X6-w54-staged-persisted-state-n76-2026-04-25/N76/` | n/a | `NOT-RUN` | `0 / 100` | n/a | shell timeout during phase 2 after Gemini capacity/registry errors; no final `summary.json` |
+
+### Verdict
+
+This is a scoreable X1-over-X3 staged persisted-state separator. N75 proved that a single-session
+persisted-state replay migration is too easy; N76 adds staged source arbitration, implementation,
+re-entry validation, and closeout, and the top pair splits cleanly. X3 stays compact but loses
+required runtime and artifact contracts. X2 passes most semantics but misses exact staged scope.
+
+Role-fit read: persisted-state/interface migration should be `X1 primary` when staged re-entry,
+source-ledger accountability, validation status, and closeout are part of the job. Compact
+single-session persisted-state migration remains near-tie after N75.
+
+## 2026-04-25 Follow-Up: W55 Security Capability Runtime Patch
+
+`N77-security-capability-runtime-scorecard` targets the unresolved security implementation branch
+instead of another security review memo. The bundle requires a dependency-free capability-token
+repair with HMAC-SHA256 signing, tenant/user/resource/expiry/nonce binding, replay rejection, exact
+redirect validation, audit redaction, a focused regression test, exact five-path scope, and a
+`security-ledger.json` artifact. Hidden verifier checks are runtime exploit attempts, not textual
+claims.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N77` JSON parse and bundle-shape verifier | `PASS` |
+| `N77` starter verifier | expected `FAIL`; unsigned token, weak binding, redirect, audit, test, and ledger gaps |
+| `N77` reference probe in `.scratch/verifier-probes/2026-04-25-n77-reference/N77` | verifier `PASS`; exact changed paths accepted |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` after calibration | `STATS kill: none`; parent-owned MCP helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N77` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-25_21-13-11-X1-w55-security-capability-n77-2026-04-25/N77/` | `0` | `PASS` | `85 / 100` | `404044` | none semantically; output-cost score `0` |
+| `N77` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-25_21-13-11-X3-w55-security-capability-n77-2026-04-25/N77/` | `0` | `PASS` | `93 / 100` | `2598` | none semantically; auxiliary `__pycache__` churn lowers artifact score |
+| `N77` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-25_21-22-42-X2-w55-security-capability-n77-2026-04-25/N77/` | `0` | `FAIL` | `15 / 100` | `1231` | no patch; runtime exploit, static, test, and ledger gates fail |
+| `N77` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-25_21-22-41-X6-w55-security-capability-n77-2026-04-25/N77/` | n/a | `NOT-RUN` | `0 / 100` | n/a | shell timeout after `2400s`; no `summary.json` |
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3` on single-session security implementation. Both top rows
+closed the hidden runtime exploit oracle and preserved exact scope. X3 has the better operator-cost
+profile (`93 / 100` versus `85 / 100`); X1 has no auxiliary cache churn but emits much larger output.
+X2 is a scoreable lower-row no-op fail. X6 remains a runtime no-summary caveat.
+
+Role-fit read: ordinary single-session security patching should stay `X1 / X3 near-tie`, with X3
+preferred when compact output is a first-class operator metric and X1 preferred when trace-heavy
+security reasoning or workspace hygiene is valued. The next useful security separator should be a
+staged security re-entry variant, not more exploit cases in the same single-session frame.
+
+## 2026-04-25 Follow-Up: W56 Staged Security Reentry
+
+`N78-staged-security-reentry-gauntlet` is the staged version of N77. It keeps the same hidden runtime
+exploit oracle, but spreads the work across four fresh invocations: threat ledger, implementation,
+exploit validation/re-entry, and closeout. The verifier requires the runtime security gates plus
+exact staged artifacts: `threat-ledger.json`, `security-ledger.json`, `exploit-validation.json`,
+`reentry-state.json`, and `closeout.json`.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N78` JSON parse and bundle-shape verifier | `PASS` |
+| `N78` starter verifier | expected `FAIL`; runtime exploit and staged artifact gaps |
+| `N78` reference probe in `.scratch/verifier-probes/2026-04-25-n78-reference/N78` | verifier `PASS`; exact changed paths accepted |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` after calibration | `STATS kill: none`; parent-owned MCP helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N78` | `X1 / gpt-5.5` | `.scratch/v2-staged-runs/2026-04-25_22-21-21-X1-w56-staged-security-reentry-n78-2026-04-25/N78/` | `0` | `PASS` | `85 / 100` | `613332` | none semantically; output-cost score `0` |
+| `N78` | `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-25_22-21-20-X3-w56-staged-security-reentry-n78-2026-04-25/N78/` | `0` | `FAIL` | `23 / 100` | `8299` | percent-encoded CRLF redirect trap, missing structured-url marker, staged ledger/validation/closeout contract gaps |
+| `N78` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-staged-runs/2026-04-25_22-45-22-X2-w56-staged-security-reentry-n78-2026-04-25/N78/` | `0` | `FAIL` | `45 / 100` | `1011624` | runtime exploit patch passes, but exact scope and staged artifact gates fail |
+| `N78` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-staged-runs/2026-04-25_22-45-22-X6-w56-staged-security-reentry-n78-2026-04-25/N78/` | n/a | `NOT-RUN` | `0 / 100` | n/a | shell timeout after `2400s`; no `summary.json` |
+
+### Verdict
+
+This is a scoreable X1-over-X3 staged security separator. N77 proved that a single-session security
+implementation with hidden exploit tests ties the top pair; N78 adds staged threat modeling,
+implementation accountability, exploit validation, re-entry state, and closeout, and the top pair
+splits cleanly. X3 remains compact but misses both a hidden redirect exploit and staged artifact
+contracts. X2 can fix the runtime exploit but fails the staged scope/artifact layer.
+
+Role-fit read: security implementation should now follow the same execution-shape rule as API,
+systems, owner, review, and persisted-state lanes. Use `X1 primary` for staged security re-entry,
+threat-ledger accountability, validation status, and closeout. Keep compact single-session security
+patching as `X1 / X3 near-tie`, with X3 only preferred when output compactness is first-class.

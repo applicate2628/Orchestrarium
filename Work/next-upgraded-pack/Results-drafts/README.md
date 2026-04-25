@@ -17,8 +17,8 @@ Only admitted later packages should become new dated snapshots under `Archive/`.
 | `x1-x3-current-runnable-pack-results-2026-04-17.md` | legacy supporting runnable-pack surface |
 | `x1-x3-full-registry-results-2026-04-17.md` | legacy widest execution-backed registry surface for `X1..X3` |
 | `v2-worked-example-cohort-results-2026-04-18.md` | first admitted bounded v2 result surface for `X1`, `X2`, `X5`, and `X6` |
-| `v2-full-s01-s33-results-2026-04-18.md` | earlier same-day full v2 result surface on `S01..S33` only |
-| `v2-full-s01-s33-n01-n07-results-2026-04-18.md` | pre-v3 ceiling-effect baseline for `X1`, `X2`, `X3`, `X4`, `X5`, and `X6` on `S01..S33 + N01..N07`; not current classification |
+| `v2-full-s01-s33-results-2026-04-18.md` | deprecated earlier same-day full-v2 result surface on `S01..S33` only; historical baseline |
+| `v2-full-s01-s33-n01-n07-results-2026-04-18.md` | deprecated/superseded pre-v3 ceiling-effect baseline for `X1`, `X2`, `X3`, `X4`, `X5`, and `X6` on `S01..S33 + N01..N07`; not current classification |
 | `full-v2-hard-results-current.md` | current canonical hardened `/40` result surface; preserves the `12+1` / `40` score shape while replacing weak full-v2 slots with admitted hardened equivalents |
 | `v2-extra-lane-n08-n10-results-2026-04-20.md` | reference extra-lane result surface for `E1 worker.long-autonomous`; `X4` is `NOT-RUN` while the secret-backed Claude route is unavailable |
 | `v2-core12-tie-hardened-results-2026-04-20.md` | targeted hardening result for weak-separator core lanes; `X1` and `X3` tied, `X5` separated lower with timeout caveats |

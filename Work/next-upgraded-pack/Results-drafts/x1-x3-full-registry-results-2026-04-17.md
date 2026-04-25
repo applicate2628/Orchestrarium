@@ -85,7 +85,7 @@ registry:
 
 ## Boundary note
 
-This is the widest current execution-backed result surface for the active cohort.
+This is a historical execution-backed result surface for the old upgraded-pack architecture.
 
-The smaller steady-state core pack remains the main admitted ranking surface, but the wider
-full-registry read no longer has missing execution debt for `X1`, `X2`, or `X3`.
+The smaller steady-state core pack was the main admitted ranking surface for that legacy architecture,
+but current benchmark classification now lives in the hardened `Scenarios-v2` surfaces.

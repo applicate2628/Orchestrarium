@@ -1,11 +1,16 @@
 Date: 2026-04-18
 Owner: `$lead`
 Status: `PASS`
+Classification status: `DEPRECATED / SUPERSEDED`
 
 ## Result
 
 This is the first admitted full-v2 result surface covering `S01..S33` for `X1`, `X2`, `X5`, and
 `X6`.
+
+This file is retained only as historical pre-v3 execution evidence. It was superseded first by
+`v2-full-s01-s33-n01-n07-results-2026-04-18.md` and is now superseded for current classification by
+`full-v2-hard-results-current.md`.
 
 | ID | Label |
 |---|---|
@@ -16,8 +21,8 @@ This is the first admitted full-v2 result surface covering `S01..S33` for `X1`, 
 
 | `#` | Row | Pass / 33 | Read |
 |---|---|---:|---|
-| `1` | `X1 / gpt-5.4` | `31 / 33` | strongest current full-v2 row |
-| `2` | `X5 / gemini3.1pro` | `27 / 33` | clear second on the full-v2 surface |
+| `1` | `X1 / gpt-5.4` | `31 / 33` | strongest row on this deprecated historical checkpoint |
+| `2` | `X5 / gemini3.1pro` | `27 / 33` | clear second on this deprecated historical checkpoint |
 | `3` | `X2 / gpt-spark` | `14 / 33` | mixed row; stronger on some document and review surfaces than on the harder reasoning and implementation slices |
 | `4` | `X6 / gemini3.1flash-lite-preview` | `12 / 33` | coverage-complete but noisy, quota-sensitive, and unstable |
 
@@ -81,3 +86,4 @@ This is the first admitted full-v2 result surface covering `S01..S33` for `X1`, 
 |---|---|
 | `../Evidence/x1-x2-x5-x6-full-v2-s01-s33-2026-04-18.md` | admitted evidence and caveat source |
 | `v2-worked-example-cohort-results-2026-04-18.md` | earlier bounded-v2 checkpoint, now superseded as the main v2 result surface |
+| `v2-full-s01-s33-n01-n07-results-2026-04-18.md` | expanded pre-v3 baseline that superseded this file before `full-v2-hard-results-current.md` became the canonical hardened `/40` surface |

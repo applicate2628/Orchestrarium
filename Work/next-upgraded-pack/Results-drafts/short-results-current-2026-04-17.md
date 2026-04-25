@@ -4,10 +4,11 @@ Status: `PASS`
 
 ## Result
 
-This is the current **short compact result table** for the live upgraded-pack surfaces.
+This is a historical **short compact result table** for the legacy upgraded-pack surfaces.
 
-The main admitted comparison surface is the steady-state core execution pack for `X1`, `X2`, and `X3`.
-The current runnable mutable pack remains a supporting surface.
+The main admitted comparison surface for that legacy architecture was the steady-state core execution
+pack for `X1`, `X2`, and `X3`. Current benchmark classification now lives in the hardened
+`Scenarios-v2` surfaces.
 `X5` and `X6` stay outside the ranked surface as runtime-blocked exploratory rows.
 
 | ID | Label |
@@ -58,7 +59,7 @@ The current runnable mutable pack remains a supporting surface.
 
 | Source | Role |
 |---|---|
-| `x1-x3-steady-state-core-results-2026-04-17.md` | main admitted ranking surface |
+| `x1-x3-steady-state-core-results-2026-04-17.md` | legacy admitted ranking surface |
 | `x1-x3-full-registry-results-2026-04-17.md` | widest execution-backed registry surface |
 | `x1-x3-current-runnable-pack-results-2026-04-17.md` | supporting worker-heavy runnable surface |
 | `../Evidence/x5-worker-heavy-triage-2026-04-17.md` | `X5` runtime-blocked exploratory note |
