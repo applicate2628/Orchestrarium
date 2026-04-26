@@ -1,0 +1,113 @@
+{
+  "surface": "full-v2-hard",
+  "date": "2026-04-26",
+  "row": "X4",
+  "model_profile": "Claude China secret-backed claude.exe --model opus --effort max",
+  "batch_name": "x4-full-v2-hard-2026-04-26",
+  "score": {
+    "pass": 32,
+    "fail": 8,
+    "not_run": 0,
+    "denominator": 40,
+    "score_text": "32 / 40"
+  },
+  "scoreability": {
+    "rule": "PASS only when wrapperExitCode is 0 and verificationPassed is true; verifier false with wrapperExitCode 0 is scoreable FAIL",
+    "runtime_notes": [
+      "N60 appeared pending during polling but completed in the original batch with wrapperExitCode 0 and verificationPassed true; no retry result was admitted.",
+      "No X4 full-v2-hard slot remains NOT-RUN after the N60 summary arrived."
+    ]
+  },
+  "runner_provenance": {
+    "cohort_runner": "Work/next-upgraded-pack/Tooling/run-v2-cohort-batch.ps1",
+    "staged_runner": "Work/next-upgraded-pack/Tooling/run-v2-staged-cohort-batch.ps1",
+    "route": "X4 uses the secret-backed Claude wrapper with strict empty MCP config and non-interactive --print.",
+    "normal_batch_root": ".scratch/v2-cohort-runs/*-X4-x4-full-v2-hard-2026-04-26",
+    "staged_batch_root": ".scratch/v2-staged-runs/*-X4-x4-full-v2-hard-2026-04-26",
+    "smoke_root_for_n17": ".scratch/v2-cohort-runs/2026-04-26_00-10-48-X4-x4-full-v2-hard-smoke-2026-04-26/N17"
+  },
+  "slot_status": {
+    "N17": "PASS",
+    "N26": "PASS",
+    "N40": "FAIL",
+    "N56": "PASS",
+    "S03": "PASS",
+    "S04": "PASS",
+    "S06": "PASS",
+    "S05": "PASS",
+    "S07": "PASS",
+    "S09": "PASS",
+    "S08": "PASS",
+    "N01": "PASS",
+    "N02": "PASS",
+    "N22": "PASS",
+    "N32": "PASS",
+    "N58": "PASS",
+    "N35": "FAIL",
+    "N36": "FAIL",
+    "N57": "FAIL",
+    "N19": "PASS",
+    "N39": "FAIL",
+    "N59": "PASS",
+    "N25": "FAIL",
+    "N47": "PASS",
+    "N60": "PASS",
+    "S22": "PASS",
+    "N21": "PASS",
+    "N48": "PASS",
+    "S25": "PASS",
+    "N03": "PASS",
+    "N04": "PASS",
+    "S27": "PASS",
+    "N05": "PASS",
+    "N06": "PASS",
+    "S28": "PASS",
+    "N07": "PASS",
+    "N37": "FAIL",
+    "S29": "PASS",
+    "S30": "PASS",
+    "N43": "FAIL"
+  },
+  "failure_summary": [
+    {
+      "scenario": "N40",
+      "class": "staged owner recovery",
+      "verifier_reason": "missing stale rejection marker, incomplete phase owners, route-decision markers, and closure markers"
+    },
+    {
+      "scenario": "N35",
+      "class": "staged interface migration",
+      "verifier_reason": "missing required api.py scope plus session lookup, policy owner, router, integration, report, phase-ledger, migration-map, compatibility, validation, and review-response invariants"
+    },
+    {
+      "scenario": "N36",
+      "class": "staged API migration",
+      "verifier_reason": "missing required api.py scope plus account lookup, entitlement source IDs, publisher, integration, reporting, phase-ledger, migration-map, compatibility, validation, and review-response invariants"
+    },
+    {
+      "scenario": "N57",
+      "class": "compact API migration",
+      "verifier_reason": "semantic verifier and operator budget passed, but required changed path candidate/workspace/src/billingmesh/api.py was missing"
+    },
+    {
+      "scenario": "N39",
+      "class": "staged systems recovery",
+      "verifier_reason": "missing one-of recovery scope path, prohibited literals in implementation ledger, stale source selected, wrong resume owner, and quota runtime misclassified as FAIL"
+    },
+    {
+      "scenario": "N25",
+      "class": "UI dirty-state repeat",
+      "verifier_reason": "blocked navigation status missing, success focus missing, and invalid-field accessible description missing"
+    },
+    {
+      "scenario": "N37",
+      "class": "staged adversarial review gate",
+      "verifier_reason": "missing validation markers, ADR plan fingerprint, exact finding/source tuples, non-finding ledger, response-gate owner/cue fields, and closure validation marker"
+    },
+    {
+      "scenario": "N43",
+      "class": "UI immutable-test hotfix",
+      "verifier_reason": "blocked navigation status missing, success focus missing, and invalid-field accessible description missing"
+    }
+  ]
+}

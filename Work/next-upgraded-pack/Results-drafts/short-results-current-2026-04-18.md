@@ -26,8 +26,8 @@ equivalents across `12` routing lines plus one owner/control line.
 | `X1 / gpt-5.5` | `35 / 40` | global tie; fails compact operator-budget slots, not hidden correctness |
 | `X3 / opus 4.7max` | `35 / 40` | global tie; fails staged re-entry/source-ledger slots |
 | `X5 / gemini3.1pro` | `14 / 40` | partial only: `17` scoreable slots, `23` `NOT-RUN` |
-| `X2 / gpt-spark` | `5 / 40` | partial calibration only: `19` scoreable slots, `21` `NOT-RUN` |
-| `X6 / flash-lite` | `1 / 40` | partial calibration only: `7` scoreable slots, `33` `NOT-RUN` |
+| `X2 / gpt-spark` | `12 / 40` | closed lower-bound row: `12 PASS`, `28 FAIL`, `0 NOT-RUN` |
+| `X6 / flash-lite` | `13 / 40` | partial lower-bound row: `13 PASS`, `19 FAIL`, `8 NOT-RUN`; remaining cells are timeout/quota requeues |
 
 `Scenarios-v2` is quota-aware across the expanded full `S01..S33 + N01..N07` surface for
 `X1`, `X2`, `X3`, `X4`, `X5`, and `X6`. Explicit provider quota / usage-limit failures are
@@ -334,7 +334,7 @@ fallback diagnostic also timed out after `240s`.
 | `#` | Caveat | Applies to |
 |---|---|---|
 | `1` | the live v2 surface now includes routing-basis `N01..N07`; compare against the earlier `S01..S33` read only with the surface change in mind | full v2 surface |
-| `2` | `X4` current read is valid only on the repo-canonical secret-backed Claude path; earlier same-day non-secret and broken-path attempts are not part of the admitted table | `Claude China` |
+| `2` | `X4` current read is valid only on the repo-canonical secret-backed Claude path; earlier same-day non-secret and broken-path attempts are not part of the admitted table. The admitted `full-v2-hard` closing run is `32 / 40` with `8` scoreable verifier failures and `0` runtime not-runs | `Claude China` |
 | `3` | `X5` no longer has quota `REQUEUE`; `S12` reran into scoreable `FAIL` after earlier timeout attempts | `gemini3.1pro` |
 | `4` | `X6` current read merges the completed fallback full-surface root with quota-rerun roots from `2026-04-19`; already scoreable original passes were not overwritten by later noisy reruns | `gemini3.1flash-lite-preview` |
 | `5` | `S25` and `S26` were re-audited before this read; tamper checks now fail on metadata drift and protected-surface edits | review-bundle integrity |
@@ -413,6 +413,8 @@ fallback diagnostic also timed out after `240s`.
 | `78` | `N76` was added on `2026-04-25` as W54 staged persisted-state re-entry diagnostic; it is not merged into `full-v2-hard` `/40`. It repeats N75's runtime oracle but spreads source ledger, implementation, re-entry validation, and closeout across four fresh invocations. `X1 / gpt-5.5` passes (`85 / 100`). `X3 / opus 4.7max` scoreably fails (`15 / 100`) on missing `migrator.py` scope, schema version, persist envelope, and ledger/reentry/closeout contracts. `X2` scoreably fails exact staged scope (`70 / 100`). `X6` is runtime `NOT-RUN` after phase-2 timeout/capacity noise | `N76 staged persisted-state reentry` |
 | `79` | `N77` was added on `2026-04-25` as W55 security capability runtime patch diagnostic; it is not merged into `full-v2-hard` `/40`. The verifier uses hidden runtime exploit attempts for HMAC capability tokens, tenant/user/resource binding, replay, expiry, redirect traps, audit redaction, exact scope, regression test, and ledger. `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass, so `binary tie remains`. Rubric reads `X3 93 / 100` versus `X1 85 / 100`: X3 wins output cost, while X1 avoids auxiliary cache churn. `X2` scoreably fails at `15 / 100` after no patch; `X6` is runtime `NOT-RUN` after `2400s` with no `summary.json` | `N77 security capability runtime patch` |
 | `80` | `N78` was added on `2026-04-25` as W56 staged security re-entry diagnostic; it is not merged into `full-v2-hard` `/40`. It repeats N77's hidden exploit oracle but stages threat ledger, implementation, exploit validation, re-entry state, and closeout across four fresh invocations. `X1 / gpt-5.5` passes (`85 / 100`). `X3 / opus 4.7max` scoreably fails (`23 / 100`) on a percent-encoded CRLF redirect trap plus staged ledger/validation/closeout contract gaps. `X2` scoreably fails (`45 / 100`) despite passing runtime exploit gates because exact scope and staged artifacts fail. `X6` is runtime `NOT-RUN` after `2400s` with no `summary.json` | `N78 staged security reentry` |
+| `81` | `X4 / Claude China opus max` completed the admitted `full-v2-hard` closing run on `2026-04-26`: `32 / 40`, with `32 PASS`, `8 scoreable FAIL`, and `0 NOT-RUN`. Fails are `N25`, `N35`, `N36`, `N37`, `N39`, `N40`, `N43`, and `N57`. `N60` looked pending during polling but completed in the original batch as `PASS`; no retry result was admitted | `X4 full-v2-hard closing comparison` |
+| `82` | `X2 / gpt-spark` filled all `21` former `full-v2-hard` `NOT-RUN` slots with `wrapperExitCode=0`: `7` new PASS and `14` new scoreable FAIL. Canonical `X2` is now closed at `12 / 40`. `X6 / flash-lite` filled `25` additional cells before Gemini quota exhaustion: current score is `13 / 40`, with `8` remaining `NOT-RUN` cells (`N56`, `N57`, `N35`, `N36`, `N04`, `S27`, `N37`, `S29`). Staged `N35/N36/N37` hit `TerminalQuotaError`, reset estimate about `2026-04-26 12:04 MSK`, so they are requeues rather than model failures | `X2/X6 full-v2-hard fill` |
 
 ## Source
 
@@ -494,3 +496,7 @@ fallback diagnostic also timed out after `240s`.
 | `../Evidence/n74-dom-runtime-budget-rubric-2026-04-25.json` | machine-readable W52 DOM runtime output-budget evidence; X1 passes runtime semantics but fails visible output budget, while X3 passes all gates |
 | `../Evidence/n75-persisted-state-rubric-2026-04-25.json` | machine-readable W53 persisted-state replay migration evidence; X1, X3, and X2 pass hidden semantics, while X6 is runtime no-summary |
 | `../Evidence/n76-staged-persisted-state-rubric-2026-04-25.json` | machine-readable W54 staged persisted-state reentry evidence; X1 passes, X3/X2 fail scoreably, and X6 is runtime no-summary |
+| `../Evidence/n77-security-capability-rubric-2026-04-25.json` | machine-readable W55 security capability runtime patch evidence |
+| `../Evidence/n78-staged-security-rubric-2026-04-25.json` | machine-readable W56 staged security re-entry evidence |
+| `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 full-v2-hard closing comparison evidence |
+| `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 full-v2-hard fill evidence |

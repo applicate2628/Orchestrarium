@@ -63,7 +63,7 @@ It separates:
 
 | Surface | Use in this scorecard |
 |---|---|
-| `full-v2-hard-results-current.md` | current canonical hardened `/40` surface: `X1 35 / 40`, `X3 35 / 40`, calibration rows partial |
+| `full-v2-hard-results-current.md` | current canonical hardened `/40` surface: `X1 35 / 40`, `X3 35 / 40`, `X4 32 / 40`, `X2 12 / 40`, `X6 13 / 40`; `X5` remains partial/runtime-unhealthy |
 | `v2-full-s01-s33-n01-n07-results-2026-04-18.md` | deprecated pre-v3 six-row baseline and lower-row calibration provenance |
 | `v2-core12-tie-hardened-results-2026-04-20.md` | hardened `X1` / `X3` / `X5` read for advisory, design, generic review, and security review |
 | `v2-extra-lane-n08-n10-results-2026-04-20.md` | `E1 worker.long-autonomous` extra-lane read |
@@ -118,6 +118,7 @@ It separates:
 | `n66-conflicting-evidence-rubric-2026-04-25.json` | `W44` conflicting-evidence diagnostic; `X1` and `X3` both pass exact source-ranking/conflict-ledger fact memo gate, so `L01` remains near-tie |
 | `n67-cross-phase-integration-rubric-2026-04-25.json` | `W45` cross-phase integration-owner diagnostic; `X1` passes and `X3` fails scoreably, so staged owner/QA-gate routing is `X1 primary` |
 | `n68-actual-screenshot-visual-review-rubric-2026-04-25.json` | `W46` actual-screenshot visual grounding diagnostic; both top rows fail binary, but `X3` scores `80` versus `X1` `70` |
+| `x2-x6-fill-full-v2-hard-2026-04-26.json` | calibration fill evidence: `X2` is fully closed at `12 / 40`, while `X6` is partially filled at `13 / 40` with `8` timeout/quota requeues |
 
 ## Decision Labels
 

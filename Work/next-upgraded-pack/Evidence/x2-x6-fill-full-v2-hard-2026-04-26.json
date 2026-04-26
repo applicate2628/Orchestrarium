@@ -1,0 +1,136 @@
+{
+  "date": "2026-04-26",
+  "surface": "full-v2-hard",
+  "denominator": 40,
+  "classificationRules": {
+    "pass": "wrapper completed and verifier/scorer passed",
+    "scoreableFail": "wrapper completed and verifier/scorer failed",
+    "notRun": "timeout, quota, no summary, or provider transport failure"
+  },
+  "x2": {
+    "rowId": "X2",
+    "modelLabel": "gpt-spark",
+    "batchName": "x2-fill-full-v2-hard-2026-04-26",
+    "filledFormerNotRuns": 21,
+    "newFillResults": {
+      "pass": [
+        "S03",
+        "S05",
+        "S08",
+        "N01",
+        "N05",
+        "S28",
+        "S29"
+      ],
+      "fail": [
+        "S04",
+        "S06",
+        "S07",
+        "S09",
+        "N47",
+        "N48",
+        "S22",
+        "S25",
+        "N03",
+        "N04",
+        "N06",
+        "N07",
+        "N43",
+        "S27"
+      ],
+      "notRun": []
+    },
+    "canonicalFullV2Hard": {
+      "pass": 12,
+      "fail": 28,
+      "notRun": 0,
+      "score": "12 / 40"
+    }
+  },
+  "x6": {
+    "rowId": "X6",
+    "modelLabel": "gemini3.1flash-lite-preview",
+    "normalBatchName": "x6-fill-full-v2-hard-seq-2026-04-26",
+    "stagedBatchName": "x6-fill-full-v2-hard-staged-2026-04-26",
+    "newScoreableResults": {
+      "pass": [
+        "S04",
+        "S05",
+        "S07",
+        "S09",
+        "S08",
+        "N01",
+        "N22",
+        "S22",
+        "N05",
+        "N06",
+        "S28",
+        "N07"
+      ],
+      "fail": [
+        "S03",
+        "S06",
+        "N32",
+        "N58",
+        "N59",
+        "N25",
+        "N47",
+        "N60",
+        "N21",
+        "N48",
+        "S25",
+        "N03",
+        "N43"
+      ]
+    },
+    "remainingNotRun": [
+      {
+        "scenario": "N56",
+        "reason": "previous runtime no-summary; not retried in this fill before quota exhausted"
+      },
+      {
+        "scenario": "N57",
+        "reason": "single-scenario timeout without summary"
+      },
+      {
+        "scenario": "N35",
+        "reason": "staged run hit Gemini TerminalQuotaError before all phases completed"
+      },
+      {
+        "scenario": "N36",
+        "reason": "staged run hit Gemini TerminalQuotaError"
+      },
+      {
+        "scenario": "N04",
+        "reason": "single-scenario timeout without summary"
+      },
+      {
+        "scenario": "S27",
+        "reason": "single-scenario timeout without summary"
+      },
+      {
+        "scenario": "N37",
+        "reason": "staged run hit Gemini TerminalQuotaError"
+      },
+      {
+        "scenario": "S29",
+        "reason": "single-scenario timeout without summary"
+      }
+    ],
+    "quotaEvidence": {
+      "providerMessage": "TerminalQuotaError: You have exhausted your capacity on this model.",
+      "resetEstimateLocal": "2026-04-26T12:04:00+03:00",
+      "exampleScenarios": [
+        "N35",
+        "N36",
+        "N37"
+      ]
+    },
+    "canonicalFullV2Hard": {
+      "pass": 13,
+      "fail": 19,
+      "notRun": 8,
+      "score": "13 / 40"
+    }
+  }
+}

@@ -120,18 +120,14 @@ function Invoke-GeminiCommand {
     )
 
     $geminiCmdPath = Get-GeminiCmdPath
-    $quotedCommand = [System.Collections.Generic.List[string]]::new()
-    $null = $quotedCommand.Add((Quote-CmdToken -Value $geminiCmdPath))
-    foreach ($arg in $GeminiCliArgs) {
-        $null = $quotedCommand.Add((Quote-CmdToken -Value $arg))
-    }
-
-    $innerCommand = $quotedCommand -join " "
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = "cmd.exe"
-    $psi.Arguments = "/d /s /c `"$innerCommand`""
+    $psi.FileName = $geminiCmdPath
+    foreach ($arg in $GeminiCliArgs) {
+        $psi.ArgumentList.Add($arg)
+    }
+    $psi.ArgumentList.Add("--prompt")
+    $psi.ArgumentList.Add($PromptText)
     $psi.UseShellExecute = $false
-    $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.WorkingDirectory = $WorkingDirectory
@@ -139,12 +135,12 @@ function Invoke-GeminiCommand {
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $psi
     $null = $process.Start()
-    $process.StandardInput.Write($PromptText)
-    $process.StandardInput.Close()
-
-    $stdout = $process.StandardOutput.ReadToEnd()
-    $stderr = $process.StandardError.ReadToEnd()
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
     $process.WaitForExit()
+
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
 
     if ($stdout) {
         [Console]::Out.Write($stdout)
@@ -183,7 +179,6 @@ $resolvedOutputFile = Resolve-OptionalOutputPath -Path $OutputFile
 foreach ($extraArg in $GeminiArgs) {
     $null = $promptArgs.Add($extraArg)
 }
-$null = $promptArgs.Add("--prompt=")
 
 if (-not $NoMcp) {
     if ($allowed.Count -gt 0) {
@@ -228,7 +223,22 @@ New-Item -ItemType Directory -Force -Path $runtimeGeminiDir, $runtimeCwd | Out-N
 
 $sourceGeminiDir = Join-Path $HOME ".gemini"
 Copy-IfExists -SourcePath (Join-Path $sourceGeminiDir "oauth_creds.json") -DestinationDir $runtimeGeminiDir
-Copy-IfExists -SourcePath (Join-Path $sourceGeminiDir "google_accounts.json") -DestinationDir $runtimeGeminiDir
+$sourceAccountsPath = Join-Path $sourceGeminiDir "google_accounts.json"
+$runtimeAccountsPath = Join-Path $runtimeGeminiDir "google_accounts.json"
+Copy-IfExists -SourcePath $sourceAccountsPath -DestinationDir $runtimeGeminiDir
+if (Test-Path -LiteralPath $runtimeAccountsPath -PathType Leaf) {
+    try {
+        $accounts = Get-Content -LiteralPath $runtimeAccountsPath -Raw | ConvertFrom-Json
+        if ([string]::IsNullOrWhiteSpace($accounts.active) -and $accounts.old -and @($accounts.old).Count -gt 0) {
+            # Gemini CLI headless OAuth requires an active account; normalize only the isolated runtime copy.
+            $accounts.active = @($accounts.old)[0]
+            $accounts | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $runtimeAccountsPath -Encoding utf8
+        }
+    }
+    catch {
+        Write-Warning "Could not normalize isolated Gemini account state: $($_.Exception.Message)"
+    }
+}
 Copy-IfExists -SourcePath (Join-Path $sourceGeminiDir "installation_id") -DestinationDir $runtimeGeminiDir
 
 $runtimeSettings = @{
@@ -266,6 +276,9 @@ $runtimeSettingsJson = $runtimeSettings | ConvertTo-Json -Depth 20
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText((Join-Path $runtimeGeminiDir "settings.json"), $runtimeSettingsJson, $utf8NoBom)
 
+$null = $geminiCliArgs.Add("--skip-trust")
+$null = $geminiCliArgs.Add("--approval-mode")
+$null = $geminiCliArgs.Add("yolo")
 $null = $geminiCliArgs.Add("--include-directories")
 $null = $geminiCliArgs.Add($WorkspaceDir)
 foreach ($arg in $promptArgs) {

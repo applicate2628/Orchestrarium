@@ -1,4 +1,4 @@
-Date: 2026-04-25
+Date: 2026-04-26
 Owner: `$lead`
 Status: `ACTIVE`
 
@@ -24,35 +24,37 @@ This surface keeps the same `40` score-slot shape:
 | `X1` | active `gpt-5.5` | `35 / 40` | `35 PASS`, `5 FAIL`, `0 NOT-RUN` | tied globally, but fails compact operator-budget slots |
 | `X3` | `opus 4.7max` | `35 / 40` | `35 PASS`, `5 FAIL`, `0 NOT-RUN` | tied globally, but fails staged re-entry / ledger slots |
 | `X5` | `gemini3.1pro` | `14 / 40` | `14 PASS`, `3 FAIL`, `23 NOT-RUN` | partial hardened calibration only; route/runtime unhealthy for recent waves |
-| `X2` | `gpt-spark` | `5 / 40` | `5 PASS`, `14 FAIL`, `21 NOT-RUN` | partial hardened calibration only; lower-bound row; W41 adds two diagnostic scoreable fails |
-| `X6` | `gemini3.1flash-lite-preview` | `1 / 40` | `1 PASS`, `6 FAIL`, `33 NOT-RUN` | partial hardened calibration only; many runtime-route/no-summary cells |
-| `X4` | Claude China route | `0 / 40` | final-only; not admitted on this surface yet | hold for final closing comparison |
+| `X2` | `gpt-spark` | `12 / 40` | `12 PASS`, `28 FAIL`, `0 NOT-RUN` | closed lower-bound row after 2026-04-26 fill run |
+| `X6` | `gemini3.1flash-lite-preview` | `13 / 40` | `13 PASS`, `19 FAIL`, `8 NOT-RUN` | partial lower-bound row; remaining slots are timeout/quota `NOT-RUN` after 2026-04-26 fill run |
+| `X4` | Claude China route, `opus --effort max` | `32 / 40` | `32 PASS`, `8 FAIL`, `0 NOT-RUN` | admitted final closing comparison; weaker on staged/interface/review and UI dirty-state gates |
 
 Interpretation: the current hardened `/40` is a global tie for `X1` and `X3`, but not a role tie.
+`X4` is close enough to be useful as a Claude-line comparator, but it is not tied with the top pair.
 The failure classes are different:
 
 | Row | Scoreable fails inside the 40-slot surface | Failure class |
 |---|---|---|
 | `X1` | `N47`, `N48`, `N56`, `N57`, `N58` | preserved hidden semantics/physics/scope, but exceeded visible operator-output budget |
 | `X3` | `N35`, `N36`, `N37`, `N39`, `N40` | missed staged re-entry, migration ledger, source binding, owner continuity, or closure semantics |
+| `X4` | `N25`, `N35`, `N36`, `N37`, `N39`, `N40`, `N43`, `N57` | similar staged/interface/review misses plus UI dirty-state failures; `N60` completed PASS in the original batch |
 
 ## Line Summary
 
-| Line                                  | Slots             |   `X1` |   `X3` | Read     |
-|---------------------------------------|-------------------|-------:|-------:|----------|
-| `L00 owner/control`                   | `N17,N26,N40,N56` | `3/4`  | `3/4`  | split    |
-| `L01 advisory.repo-understanding`     | `S03,S04,S06`     | `3/3`  | `3/3`  | near-tie |
-| `L02 advisory.design-adr`             | `S05,S07,S09`     | `3/3`  | `3/3`  | near-tie |
-| `L03 design.ui-ux-structure`          | `S08,N01,N02`     | `3/3`  | `3/3`  | near-tie |
-| `L04 worker.reasoning-constraints`    | `N22,N32,N58`     | `2/3`  | `3/3`  | split    |
-| `L05 worker.default-implementation`   | `N35,N36,N57`     | `2/3`  | `1/3`  | split    |
-| `L06 systems/performance-worker`      | `N19,N39,N59`     | `3/3`  | `2/3`  | split    |
-| `L07 worker.ui-implementation`        | `N25,N47,N60`     | `2/3`  | `3/3`  | `X3`     |
-| `L08 worker.visual/graphics`          | `S22,N21,N48`     | `2/3`  | `3/3`  | `X3`     |
-| `L09 review.pre-pr`                   | `S25,N03,N04`     | `3/3`  | `3/3`  | near-tie |
-| `L10 review.security`                 | `S27,N05,N06`     | `3/3`  | `3/3`  | near-tie |
-| `L11 review.performance-architecture` | `S28,N07,N37`     | `3/3`  | `2/3`  | `X1`     |
-| `L12 review.ui-visual-correctness`    | `S29,S30,N43`     | `3/3`  | `3/3`  | near-tie |
+| Line                                  | Slots             |   `X1` |   `X3` |   `X4` | Read     |
+|---------------------------------------|-------------------|-------:|-------:|-------:|----------|
+| `L00 owner/control`                   | `N17,N26,N40,N56` | `3/4`  | `3/4`  | `3/4`  | split    |
+| `L01 advisory.repo-understanding`     | `S03,S04,S06`     | `3/3`  | `3/3`  | `3/3`  | near-tie |
+| `L02 advisory.design-adr`             | `S05,S07,S09`     | `3/3`  | `3/3`  | `3/3`  | near-tie |
+| `L03 design.ui-ux-structure`          | `S08,N01,N02`     | `3/3`  | `3/3`  | `3/3`  | near-tie |
+| `L04 worker.reasoning-constraints`    | `N22,N32,N58`     | `2/3`  | `3/3`  | `3/3`  | split    |
+| `L05 worker.default-implementation`   | `N35,N36,N57`     | `2/3`  | `1/3`  | `0/3`  | split    |
+| `L06 systems/performance-worker`      | `N19,N39,N59`     | `3/3`  | `2/3`  | `2/3`  | split    |
+| `L07 worker.ui-implementation`        | `N25,N47,N60`     | `2/3`  | `3/3`  | `2/3`  | `X3`     |
+| `L08 worker.visual/graphics`          | `S22,N21,N48`     | `2/3`  | `3/3`  | `3/3`  | `X3`     |
+| `L09 review.pre-pr`                   | `S25,N03,N04`     | `3/3`  | `3/3`  | `3/3`  | near-tie |
+| `L10 review.security`                 | `S27,N05,N06`     | `3/3`  | `3/3`  | `3/3`  | near-tie |
+| `L11 review.performance-architecture` | `S28,N07,N37`     | `3/3`  | `2/3`  | `2/3`  | `X1`     |
+| `L12 review.ui-visual-correctness`    | `S29,S30,N43`     | `3/3`  | `3/3`  | `2/3`  | near-tie |
 
 ## Priority Matrix
 
@@ -415,48 +417,48 @@ work as near-tie after W55.
 
 Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route/no-summary on this hardened slot.
 
-| # | Line | Slot | X1 | X3 | X2 | X5 | X6 | Source |
-|---:|---|---|---|---|---|---|---|---|
-| `01` | `L00` | `N17 owner orchestration` | `P` | `P` | `P` | `NR` | `P` | `n17-owner-routing-rubric` |
-| `02` | `L00` | `N26 owner recovery repeat` | `P` | `P` | `F` | `P` | `F` | `n26-owner-wave-rubric` |
-| `03` | `L00` | `N40 staged owner recovery` | `P` | `F` | `F` | `NR` | `F` | `n40-staged-owner-rubric` |
-| `04` | `L00` | `N56 compact owner operator-budget` | `F` | `P` | `F` | `NR` | `NR` | `n56-owner-operator-budget-rubric` |
-| `05` | `L01` | `S03 repo/advisory` | `P` | `P` | `NR` | `P` | `NR` | `v2-core12-tie-hardened` |
-| `06` | `L01` | `S04 knowledge/archive` | `P` | `P` | `NR` | `P` | `NR` | `v2-core12-tie-hardened` |
-| `07` | `L01` | `S06 source investigation` | `P` | `P` | `NR` | `P` | `NR` | `v2-core12-tie-hardened` |
-| `08` | `L02` | `S05 product/design ADR` | `P` | `P` | `NR` | `P` | `NR` | `v2-core12-tie-hardened` |
-| `09` | `L02` | `S07 architecture ADR` | `P` | `P` | `NR` | `P` | `NR` | `v2-core12-tie-hardened` |
-| `10` | `L02` | `S09 planning ADR` | `P` | `P` | `NR` | `P` | `NR` | `v2-core12-tie-hardened` |
-| `11` | `L03` | `S08 UI/UX structure` | `P` | `P` | `NR` | `P` | `NR` | `v2-core12-tie-hardened` |
-| `12` | `L03` | `N01 visual hierarchy` | `P` | `P` | `NR` | `P` | `NR` | `v2-core12-tie-hardened` |
-| `13` | `L03` | `N02 state flow trace` | `P` | `P` | `F` | `P` | `F` | `v2-core12-tie-hardened`; E2 calibration |
-| `14` | `L04` | `N22 numerical stability` | `P` | `P` | `F` | `NR` | `NR` | `n22-numerical-stability-rubric` |
-| `15` | `L04` | `N32 dual physics oracle` | `P` | `P` | `F` | `NR` | `NR` | `n32-dual-physics-rubric` |
-| `16` | `L04` | `N58 MoM batch runtime` | `F` | `P` | `F` | `NR` | `NR` | `n58-mom-batch-runtime-rubric` |
-| `17` | `L05` | `N35 staged interface migration` | `P` | `F` | `P` | `NR` | `NR` | `n35-staged-interface-rubric` |
-| `18` | `L05` | `N36 staged API migration` | `P` | `F` | `F` | `NR` | `NR` | `n36-staged-api-rubric` |
-| `19` | `L05` | `N57 compact API migration` | `F` | `P` | `F` | `NR` | `NR` | `n57-compact-api-migration-rubric` |
-| `20` | `L06` | `N19 systems/toolchain` | `P` | `P` | `P` | `NR` | `F` | `n19-systems-toolchain-rubric` |
-| `21` | `L06` | `N39 staged systems recovery` | `P` | `F` | `F` | `NR` | `F` | `n39-staged-toolchain-rubric` |
-| `22` | `L06` | `N59 real-repo performance cache` | `P` | `P` | `F` | `NR` | `NR` | `n59-perf-cache-rubric` |
-| `23` | `L07` | `N25 UI dirty-state repeat` | `P` | `P` | `F` | `P` | `NR` | `n25-ui-dirty-repeat-rubric` |
-| `24` | `L07` | `N47 UI operator-budget` | `F` | `P` | `NR` | `NR` | `NR` | `n47-ui-operator-budget-rubric` |
-| `25` | `L07` | `N60 UI visual-state reentry` | `P` | `P` | `F` | `NR` | `NR` | `n60-ui-reentry-rubric` |
-| `26` | `L08` | `S22 adversarial geometry` | `P` | `P` | `NR` | `NR` | `NR` | `x1-mainline-hardening-no-new-failures` |
-| `27` | `L08` | `N21 visual raster` | `P` | `P` | `P` | `NR` | `NR` | `n21-visual-raster-rubric` |
-| `28` | `L08` | `N48 visual raster operator-budget` | `F` | `P` | `NR` | `NR` | `NR` | `n48-visual-operator-budget-rubric` |
-| `29` | `L09` | `S25 pre-pr review` | `P` | `P` | `NR` | `F` | `NR` | `v2-core12-tie-hardened` |
-| `30` | `L09` | `N03 generic review findings` | `P` | `P` | `NR` | `F` | `NR` | `v2-core12-tie-hardened` |
-| `31` | `L09` | `N04 regression triage` | `P` | `P` | `NR` | `P` | `NR` | `v2-core12-tie-hardened` |
-| `32` | `L10` | `S27 security review` | `P` | `P` | `NR` | `P` | `NR` | `v2-core12-tie-hardened` |
-| `33` | `L10` | `N05 secret exposure review` | `P` | `P` | `NR` | `F` | `NR` | `v2-core12-tie-hardened` |
-| `34` | `L10` | `N06 authz trust boundary` | `P` | `P` | `NR` | `P` | `NR` | `v2-core12-tie-hardened` |
-| `35` | `L11` | `S28 performance review` | `P` | `P` | `NR` | `NR` | `NR` | wave-2 tuple-exact hardening |
-| `36` | `L11` | `N07 scalability/architecture review` | `P` | `P` | `NR` | `NR` | `NR` | wave-2 tuple-exact hardening |
-| `37` | `L11` | `N37 staged adversarial review gate` | `P` | `F` | `P` | `NR` | `NR` | `n37-staged-review-rubric` |
-| `38` | `L12` | `S29 accessibility/UI review` | `P` | `P` | `NR` | `NR` | `NR` | wave-2 tuple-exact hardening |
-| `39` | `L12` | `S30 UX interaction review` | `P` | `P` | `F` | `NR` | `F` | E2 hardened separator slice |
-| `40` | `L12` | `N43 UI immutable-test hotfix` | `P` | `P` | `NR` | `NR` | `NR` | `x1-mainline-hardening-no-new-failures` |
+| # | Line | Slot | X1 | X3 | X4 | X2 | X5 | X6 | Source |
+|---:|---|---|---|---|---|---|---|---|---|
+| `01` | `L00` | `N17 owner orchestration` | `P` | `P` | `P` | `P` | `NR` | `P` | `n17-owner-routing-rubric` |
+| `02` | `L00` | `N26 owner recovery repeat` | `P` | `P` | `P` | `F` | `P` | `F` | `n26-owner-wave-rubric` |
+| `03` | `L00` | `N40 staged owner recovery` | `P` | `F` | `F` | `F` | `NR` | `F` | `n40-staged-owner-rubric` |
+| `04` | `L00` | `N56 compact owner operator-budget` | `F` | `P` | `P` | `F` | `NR` | `NR` | `n56-owner-operator-budget-rubric` |
+| `05` | `L01` | `S03 repo/advisory` | `P` | `P` | `P` | `P` | `P` | `F` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `06` | `L01` | `S04 knowledge/archive` | `P` | `P` | `P` | `F` | `P` | `P` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `07` | `L01` | `S06 source investigation` | `P` | `P` | `P` | `F` | `P` | `F` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `08` | `L02` | `S05 product/design ADR` | `P` | `P` | `P` | `P` | `P` | `P` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `09` | `L02` | `S07 architecture ADR` | `P` | `P` | `P` | `F` | `P` | `P` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `10` | `L02` | `S09 planning ADR` | `P` | `P` | `P` | `F` | `P` | `P` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `11` | `L03` | `S08 UI/UX structure` | `P` | `P` | `P` | `P` | `P` | `P` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `12` | `L03` | `N01 visual hierarchy` | `P` | `P` | `P` | `P` | `P` | `P` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `13` | `L03` | `N02 state flow trace` | `P` | `P` | `P` | `F` | `P` | `F` | `v2-core12-tie-hardened`; E2 calibration |
+| `14` | `L04` | `N22 numerical stability` | `P` | `P` | `P` | `F` | `NR` | `P` | `n22-numerical-stability-rubric`; X6 fill |
+| `15` | `L04` | `N32 dual physics oracle` | `P` | `P` | `P` | `F` | `NR` | `F` | `n32-dual-physics-rubric`; X6 fill |
+| `16` | `L04` | `N58 MoM batch runtime` | `F` | `P` | `P` | `F` | `NR` | `F` | `n58-mom-batch-runtime-rubric`; X6 fill |
+| `17` | `L05` | `N35 staged interface migration` | `P` | `F` | `F` | `P` | `NR` | `NR` | `n35-staged-interface-rubric` |
+| `18` | `L05` | `N36 staged API migration` | `P` | `F` | `F` | `F` | `NR` | `NR` | `n36-staged-api-rubric` |
+| `19` | `L05` | `N57 compact API migration` | `F` | `P` | `F` | `F` | `NR` | `NR` | `n57-compact-api-migration-rubric` |
+| `20` | `L06` | `N19 systems/toolchain` | `P` | `P` | `P` | `P` | `NR` | `F` | `n19-systems-toolchain-rubric` |
+| `21` | `L06` | `N39 staged systems recovery` | `P` | `F` | `F` | `F` | `NR` | `F` | `n39-staged-toolchain-rubric` |
+| `22` | `L06` | `N59 real-repo performance cache` | `P` | `P` | `P` | `F` | `NR` | `F` | `n59-perf-cache-rubric`; X6 fill |
+| `23` | `L07` | `N25 UI dirty-state repeat` | `P` | `P` | `F` | `F` | `P` | `F` | `n25-ui-dirty-repeat-rubric`; X6 fill |
+| `24` | `L07` | `N47 UI operator-budget` | `F` | `P` | `P` | `F` | `NR` | `F` | `n47-ui-operator-budget-rubric`; X2/X6 fill |
+| `25` | `L07` | `N60 UI visual-state reentry` | `P` | `P` | `P` | `F` | `NR` | `F` | `n60-ui-reentry-rubric`; X6 fill |
+| `26` | `L08` | `S22 adversarial geometry` | `P` | `P` | `P` | `F` | `NR` | `P` | `x1-mainline-hardening-no-new-failures`; X2/X6 fill |
+| `27` | `L08` | `N21 visual raster` | `P` | `P` | `P` | `P` | `NR` | `F` | `n21-visual-raster-rubric`; X6 fill |
+| `28` | `L08` | `N48 visual raster operator-budget` | `F` | `P` | `P` | `F` | `NR` | `F` | `n48-visual-operator-budget-rubric`; X2/X6 fill |
+| `29` | `L09` | `S25 pre-pr review` | `P` | `P` | `P` | `F` | `F` | `F` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `30` | `L09` | `N03 generic review findings` | `P` | `P` | `P` | `F` | `F` | `F` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `31` | `L09` | `N04 regression triage` | `P` | `P` | `P` | `F` | `P` | `NR` | `v2-core12-tie-hardened`; X2 fill; X6 timeout |
+| `32` | `L10` | `S27 security review` | `P` | `P` | `P` | `F` | `P` | `NR` | `v2-core12-tie-hardened`; X2 fill; X6 timeout |
+| `33` | `L10` | `N05 secret exposure review` | `P` | `P` | `P` | `P` | `F` | `P` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `34` | `L10` | `N06 authz trust boundary` | `P` | `P` | `P` | `F` | `P` | `P` | `v2-core12-tie-hardened`; X2/X6 fill |
+| `35` | `L11` | `S28 performance review` | `P` | `P` | `P` | `P` | `NR` | `P` | wave-2 tuple-exact hardening; X2/X6 fill |
+| `36` | `L11` | `N07 scalability/architecture review` | `P` | `P` | `P` | `F` | `NR` | `P` | wave-2 tuple-exact hardening; X2/X6 fill |
+| `37` | `L11` | `N37 staged adversarial review gate` | `P` | `F` | `F` | `P` | `NR` | `NR` | `n37-staged-review-rubric` |
+| `38` | `L12` | `S29 accessibility/UI review` | `P` | `P` | `P` | `P` | `NR` | `NR` | wave-2 tuple-exact hardening; X2 fill; X6 timeout |
+| `39` | `L12` | `S30 UX interaction review` | `P` | `P` | `P` | `F` | `NR` | `F` | E2 hardened separator slice |
+| `40` | `L12` | `N43 UI immutable-test hotfix` | `P` | `P` | `F` | `F` | `NR` | `F` | `x1-mainline-hardening-no-new-failures`; X2/X6 fill |
 
 ## Scoring Rules
 
@@ -516,3 +518,5 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n76-staged-persisted-state-rubric-2026-04-25.json` | machine-readable `W54` staged persisted-state re-entry evidence; X1 passes, X3 scoreably fails, X2 scoreably fails exact staged scope, X6 is runtime no-summary, not promoted into `/40` |
 | `../Evidence/n77-security-capability-rubric-2026-04-25.json` | machine-readable `W55` security capability runtime patch evidence; X1 and X3 both pass hidden exploit gates, X2 fails scoreably, X6 is runtime no-summary, not promoted into `/40` |
 | `../Evidence/n78-staged-security-rubric-2026-04-25.json` | machine-readable `W56` staged security re-entry evidence; X1 passes, X3 fails scoreably, X2 fails scoreably, X6 is runtime no-summary, not promoted into `/40` |
+| `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence; `X4 / Claude China opus max` is `32 / 40` with `8` scoreable verifier failures and `0` runtime not-runs |
+| `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 fill evidence; X2 is now closed at `12 / 40`, while X6 is `13 / 40` with `8` remaining timeout/quota `NOT-RUN` cells |
