@@ -126,6 +126,23 @@
         "N37"
       ]
     },
+    "closureRetryAfterQuotaReset": {
+      "dateTimeLocal": "2026-04-26T16:30:50+03:00",
+      "batchName": "x6-close-nr-full-v2-hard-2026-04-26",
+      "normalScenariosAttempted": [
+        "N56",
+        "N57",
+        "N04",
+        "S27",
+        "S29"
+      ],
+      "result": "route-auth-not-run",
+      "wrapperExitCode": 1,
+      "providerMessage": "IneligibleTierError: Your current account is not eligible for Gemini Code Assist for individuals because it is not currently available in your location.",
+      "directGeminiSmoke": "same IneligibleTierError with current HOME",
+      "apiKeyRouteProbe": "gemini-api-key auth requires GEMINI_API_KEY; no key was present in environment",
+      "scoreImpact": "none; these remain NOT-RUN, not model FAIL"
+    },
     "canonicalFullV2Hard": {
       "pass": 13,
       "fail": 19,

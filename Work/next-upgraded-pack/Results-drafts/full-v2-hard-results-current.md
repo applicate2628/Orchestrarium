@@ -25,7 +25,7 @@ This surface keeps the same `40` score-slot shape:
 | `X3` | `opus 4.7max` | `35 / 40` | `35 PASS`, `5 FAIL`, `0 NOT-RUN` | tied globally, but fails staged re-entry / ledger slots |
 | `X5` | `gemini3.1pro` | `14 / 40` | `14 PASS`, `3 FAIL`, `23 NOT-RUN` | partial hardened calibration only; route/runtime unhealthy for recent waves |
 | `X2` | `gpt-spark` | `12 / 40` | `12 PASS`, `28 FAIL`, `0 NOT-RUN` | closed lower-bound row after 2026-04-26 fill run |
-| `X6` | `gemini3.1flash-lite-preview` | `13 / 40` | `13 PASS`, `19 FAIL`, `8 NOT-RUN` | partial lower-bound row; remaining slots are timeout/quota `NOT-RUN` after 2026-04-26 fill run |
+| `X6` | `gemini3.1flash-lite-preview` | `13 / 40` | `13 PASS`, `19 FAIL`, `8 NOT-RUN` | partial lower-bound row; remaining slots are timeout/auth-route `NOT-RUN` after 2026-04-26 closure retry |
 | `X4` | Claude China route, `opus --effort max` | `32 / 40` | `32 PASS`, `8 FAIL`, `0 NOT-RUN` | admitted final closing comparison; weaker on staged/interface/review and UI dirty-state gates |
 
 Interpretation: the current hardened `/40` is a global tie for `X1` and `X3`, but not a role tie.
@@ -519,4 +519,4 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n77-security-capability-rubric-2026-04-25.json` | machine-readable `W55` security capability runtime patch evidence; X1 and X3 both pass hidden exploit gates, X2 fails scoreably, X6 is runtime no-summary, not promoted into `/40` |
 | `../Evidence/n78-staged-security-rubric-2026-04-25.json` | machine-readable `W56` staged security re-entry evidence; X1 passes, X3 fails scoreably, X2 fails scoreably, X6 is runtime no-summary, not promoted into `/40` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence; `X4 / Claude China opus max` is `32 / 40` with `8` scoreable verifier failures and `0` runtime not-runs |
-| `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 fill evidence; X2 is now closed at `12 / 40`, while X6 is `13 / 40` with `8` remaining timeout/quota `NOT-RUN` cells |
+| `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 fill evidence; X2 is now closed at `12 / 40`, while X6 is `13 / 40` with `8` remaining timeout/auth-route `NOT-RUN` cells |

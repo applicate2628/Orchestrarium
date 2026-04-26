@@ -118,7 +118,7 @@ It separates:
 | `n66-conflicting-evidence-rubric-2026-04-25.json` | `W44` conflicting-evidence diagnostic; `X1` and `X3` both pass exact source-ranking/conflict-ledger fact memo gate, so `L01` remains near-tie |
 | `n67-cross-phase-integration-rubric-2026-04-25.json` | `W45` cross-phase integration-owner diagnostic; `X1` passes and `X3` fails scoreably, so staged owner/QA-gate routing is `X1 primary` |
 | `n68-actual-screenshot-visual-review-rubric-2026-04-25.json` | `W46` actual-screenshot visual grounding diagnostic; both top rows fail binary, but `X3` scores `80` versus `X1` `70` |
-| `x2-x6-fill-full-v2-hard-2026-04-26.json` | calibration fill evidence: `X2` is fully closed at `12 / 40`, while `X6` is partially filled at `13 / 40` with `8` timeout/quota requeues |
+| `x2-x6-fill-full-v2-hard-2026-04-26.json` | calibration fill evidence: `X2` is fully closed at `12 / 40`, while `X6` is partially filled at `13 / 40` with `8` timeout/auth-route requeues |
 
 ## Decision Labels
 
