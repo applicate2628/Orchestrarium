@@ -3969,3 +3969,39 @@ N85 is the first promoted `full-v2-hard /40` replacement after the N79+ diagnost
 replaces N59 in `L06 systems/performance-worker`: X1 passes the hidden performance/correctness/scope
 work but scoreably fails the hard operator-output budget; X3 passes all gates compactly. Current
 top-pair canonical score becomes `X1 34 / 40` versus `X3 35 / 40`.
+
+## 2026-04-28 Follow-Up: W65 Real Interface Downstream Migration
+
+`N86-real-interface-downstream-migration` removes the N57-style operator-output budget and tests a
+BillingMesh API migration through hidden repo consumers plus a hidden downstream app that imports
+only the public `billingmesh` package exports. PASS requires structured dataclass result models,
+legacy method removal, public root exports, downstream `dataclasses.asdict` compatibility,
+denied-without-publish, retryable timeout, duplicate non-republish behavior, structured reporting,
+source-bound ledgers, review response, closeout, and exact changed-path scope.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N86` JSON parse and verifier compile | `PASS` |
+| `N86` bundle-shape verifier | `PASS` |
+| `N86` starter verifier | expected `FAIL`; legacy APIs, missing result models, ledger gaps, and downstream public-app failure present |
+| synthesized valid probe in `.scratch/verifier-probes/2026-04-28-n86-interface-valid/N86` | verifier `PASS`; scope `PASS` |
+| stale N57/operator-budget scan inside N86 | `PASS`; no `operator`, `low-noise`, `check_operator`, or `compact-api-contract` references |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Interface/downstream verifier | Scope | Worker output | Classification |
+|---|---|---|---:|---|---|---:|---|
+| `N86` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-28_20-34-35-X1-wave65-n86-interface-downstream-2026-04-28/N86/run` | `0` | `PASS` | `PASS`; all 12 required paths changed | `462449` bytes | `PASS` |
+| `N86` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-28_20-34-35-X3-wave65-n86-interface-downstream-2026-04-28/N86/run` | `0` | `PASS` | `FAIL`; missing `candidate/workspace/src/billingmesh/api.py` | `2764` bytes | scoreable `FAIL` |
+
+### Verdict
+
+N86 is an honest X1-over-X3 diagnostic separator for real interface migration when exact migration
+surface completeness is part of the contract. The split is not a runtime/quota issue and not an
+output-budget issue: X3 passed the hidden interface/downstream semantic verifier, then failed the
+exact changed-path migration surface by leaving `api.py` unchanged. Do not promote N86 into
+`full-v2-hard /40` without a later named slot-replacement decision.

@@ -1,0 +1,71 @@
+{
+  "scenario": "N86",
+  "wave": "W65",
+  "batchName": "wave65-n86-interface-downstream-2026-04-28",
+  "replacementDecision": {
+    "promotedIntoFullV2Hard": false,
+    "replacesSlot": null,
+    "reason": "N86 is a diagnostic interface-migration separator. It does not change the canonical /40 denominator until a later slot-replacement decision names an outgoing slot and explains why exact migration-surface completeness is more valuable than the existing lane slot."
+  },
+  "verdict": "X1 primary for real interface migration when exact changed-path migration surface is first-class; X3 passes hidden downstream semantics but scoreably fails exact scope",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "primaryFailure": null,
+      "hiddenInterfaceDownstreamPassed": true,
+      "scopePassed": true,
+      "workerOutputBytes": 462449,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/migration-state.json",
+        "candidate/review-response.json",
+        "candidate/workspace/src/billingmesh/__init__.py",
+        "candidate/workspace/src/billingmesh/account_directory.py",
+        "candidate/workspace/src/billingmesh/api.py",
+        "candidate/workspace/src/billingmesh/entitlement_policy.py",
+        "candidate/workspace/src/billingmesh/models.py",
+        "candidate/workspace/src/billingmesh/reporting.py",
+        "candidate/workspace/src/billingmesh/service.py",
+        "candidate/workspace/src/billingmesh/usage_publisher.py",
+        "candidate/workspace/tests/test_billingmesh.py"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_20-34-35-X1-wave65-n86-interface-downstream-2026-04-28/N86/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_20-34-35-X1-wave65-n86-interface-downstream-2026-04-28/N86/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "primaryFailure": "exact-scope-missing-api-py",
+      "hiddenInterfaceDownstreamPassed": true,
+      "scopePassed": false,
+      "workerOutputBytes": 2764,
+      "missingRequiredChangedPaths": [
+        "candidate/workspace/src/billingmesh/api.py"
+      ],
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/migration-state.json",
+        "candidate/review-response.json",
+        "candidate/workspace/src/billingmesh/__init__.py",
+        "candidate/workspace/src/billingmesh/account_directory.py",
+        "candidate/workspace/src/billingmesh/entitlement_policy.py",
+        "candidate/workspace/src/billingmesh/models.py",
+        "candidate/workspace/src/billingmesh/reporting.py",
+        "candidate/workspace/src/billingmesh/service.py",
+        "candidate/workspace/src/billingmesh/usage_publisher.py",
+        "candidate/workspace/tests/test_billingmesh.py"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_20-34-35-X3-wave65-n86-interface-downstream-2026-04-28/N86/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_20-34-35-X3-wave65-n86-interface-downstream-2026-04-28/N86/meta/summary.json"
+    }
+  ]
+}

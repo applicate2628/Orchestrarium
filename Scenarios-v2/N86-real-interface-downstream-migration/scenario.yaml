@@ -1,0 +1,38 @@
+id: N86
+surface_id: E76
+pack_id: E76
+role_class: implementation
+artifact_type: real interface migration patch plus hidden downstream public-app contract
+modality_family: single-session API contract migration, scattered consumers, hidden downstream app, generated cache isolation
+allowed_change_surface:
+  - .pytest_cache/**
+  - candidate/migration-state.json
+  - candidate/review-response.json
+  - candidate/closure.json
+  - candidate/workspace/src/billingmesh/__init__.py
+  - candidate/workspace/src/billingmesh/models.py
+  - candidate/workspace/src/billingmesh/account_directory.py
+  - candidate/workspace/src/billingmesh/entitlement_policy.py
+  - candidate/workspace/src/billingmesh/usage_publisher.py
+  - candidate/workspace/src/billingmesh/service.py
+  - candidate/workspace/src/billingmesh/reporting.py
+  - candidate/workspace/src/billingmesh/api.py
+  - candidate/workspace/tests/test_billingmesh.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+score_profile: "real-interface-migration, hidden-downstream-app, source-bound-ledger, review-response, patch-quality-rubric, cache-ignored"
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - api-migration
+  - hidden-consumer
+  - hidden-downstream-app
+  - compatibility-preservation
+  - review-response
+  - scored-rubric
+  - binary-separator-candidate
+  - generated-cache-ignored
