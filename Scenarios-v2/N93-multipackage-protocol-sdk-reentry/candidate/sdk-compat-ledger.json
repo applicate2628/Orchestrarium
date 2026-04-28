@@ -1,0 +1,8 @@
+{
+  "contractId": "N93-multipackage-protocol-sdk-reentry",
+  "planFingerprint": "",
+  "wireCases": [],
+  "publicExports": [],
+  "legacyMigration": [],
+  "cliCases": []
+}

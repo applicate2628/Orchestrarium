@@ -395,8 +395,9 @@ Source design/plan: `rf12-primary-resolution-plan-2026-04-25.md`.
 | `W69` | `DONE` | `N90-staged-ux-review-reentry-gate` | Can staged UX review/reentry split after N82/N88 tied single-shot UX policy and N79 split staged implementation? | Ran `X1` and `X3`; lower rows deferred. | `X1 PASS`; `X3 PASS`; `binary tie remains`; do not keep hardening staged UX review without a new contract axis. |
 | `W70` | `DONE` | `N91-realrepo-staged-security-incident-reentry` | Does the N78 staged-security split repeat in a real-repo incident repair with hidden exploit runtime and exact scope? | Ran `X1` and `X3`; no `X4`; Gemini rows parked. | `X1 PASS`; `X3 PASS`; `binary tie remains`; do not generalize N78 to all staged security repair. |
 | `W71` | `PENDING-X1-RETRY` | `N92-staged-interface-downstream-reentry-gauntlet` | Does staged interface/downstream reentry split when public facade, legacy adapter, and clean-room downstream SDK are runtime-critical? | Ran `X3`; X1 hit Codex quota before edits and must be retried after reset. | `X3 PASS`; `X1 NOT-RUN` quota; no top-pair verdict yet. |
+| `W72` | `PREPARED-NOT-RUN` | `N93-multipackage-protocol-sdk-reentry` | Does a multi-package protocol/SDK/CLI/plugin migration expose interface-refactor breakage beyond N92's single-package staged migration? | Prepared only; no `X1` launch per user instruction; no `X3` launch in this prep pass. | Local admission probes pass: JSON/shape/start-state/valid/scope/cache/export/legacy-wrapper. Await model-launch decision. |
 
-## W71 Candidate Axes
+## W72 Candidate Axes
 
 | Candidate | Rationale | First action |
 |---|---|---|
@@ -404,6 +405,7 @@ Source design/plan: `rf12-primary-resolution-plan-2026-04-25.md`.
 | compact security review output budget | N84/N89 tie ordinary security review; X3 is consistently much more compact | only build if low-noise review output should be a first-class role contract; otherwise avoid more security-review variants |
 | real repo staged security incident | W70/N91 completed and tied X1/X3 | do not keep tightening this axis unless a new scoreable contract is admitted |
 | real-repo staged interface/downstream reentry | N35/N36 split staged interface/API for X1, N57 splits compact API for X3, N86 adds X1 exact migration-surface evidence without output budget, and N83 ties ordinary hidden-consumer refactor | next best separator candidate; build a staged code/consumer/reentry task rather than review-only artifacts |
+| multipackage protocol/SDK/CLI migration | N93 is now materialized and validated locally; it tests root exports across four packages, v2 wire format, legacy migration, plugin idempotency, structured CLI return, and exact 19-path staged ledgers | when approved, launch model runs on N93; keep X1 parked until user explicitly allows it |
 
 ## Resume Point
 
@@ -413,9 +415,10 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume by retrying `X1` on `N92` after the Codex quota reset. If X1 completes,
-update W71 verdict in the live evidence files before choosing W72. W64 promotion-candidate sweep is
-parked until a named replacement decision is admitted.
+If interrupted now, resume from `N93` local admission state. Do not launch `X1` until the user
+explicitly allows it. Open actions: retry `X1` on `N92` after quota if W71 is still needed, or run
+N93 model probes when approved. W64 promotion-candidate sweep is parked until a named replacement
+decision is admitted.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`
 versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), staged owner recovery

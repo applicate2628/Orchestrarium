@@ -1,0 +1,45 @@
+id: N93
+surface_id: E83
+pack_id: E83
+role_class: implementation
+artifact_type: multipackage protocol/sdk migration with staged downstream reentry
+modality_family: cross-package interface migration, SDK wire compatibility, plugin adapter, CLI contract, hidden downstream app, staged source/reentry ledgers
+allowed_change_surface:
+  - .pytest_cache/**
+  - candidate/source-ledger.json
+  - candidate/migration-state.json
+  - candidate/sdk-compat-ledger.json
+  - candidate/reentry-state.json
+  - candidate/review-response.json
+  - candidate/closure.json
+  - candidate/workspace/src/protocolmesh_core/__init__.py
+  - candidate/workspace/src/protocolmesh_core/models.py
+  - candidate/workspace/src/protocolmesh_core/registry.py
+  - candidate/workspace/src/protocolmesh_core/router.py
+  - candidate/workspace/src/protocolmesh_sdk/__init__.py
+  - candidate/workspace/src/protocolmesh_sdk/client.py
+  - candidate/workspace/src/protocolmesh_sdk/compat.py
+  - candidate/workspace/src/protocolmesh_sdk/serializer.py
+  - candidate/workspace/src/protocolmesh_plugins/__init__.py
+  - candidate/workspace/src/protocolmesh_plugins/http_adapter.py
+  - candidate/workspace/src/protocolmesh_cli/__init__.py
+  - candidate/workspace/src/protocolmesh_cli/main.py
+  - candidate/workspace/tests/test_protocolmesh.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+score_profile: "multipackage-protocol-sdk-reentry, hidden-downstream-sdk, cli-contract, plugin-contract, exact-scope, cache-ignored"
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - staged-runner
+  - reentry
+  - api-migration
+  - sdk-compatibility
+  - cli-contract
+  - plugin-adapter
+  - hidden-consumer
+  - binary-separator-candidate

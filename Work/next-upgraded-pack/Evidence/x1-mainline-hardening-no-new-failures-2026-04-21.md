@@ -4228,3 +4228,38 @@ No top-pair verdict yet. X1 hit the Codex usage limit before model work; the wor
 try again at `4:51 AM`, and changed paths are empty. That is `NOT-RUN / REQUEUE`, not a scoreable
 model fail. X3 passed N92 with exact benchmark scope, so the next required action is an X1 retry on
 the same batch/scenario after quota reset.
+
+## 2026-04-29 Follow-Up: W72 Multipackage Protocol SDK Reentry Prep
+
+`N93-multipackage-protocol-sdk-reentry` was prepared as the next interface-breakage separator axis
+without launching `X1`, per user instruction. It extends the N92 idea into a multi-package
+ProtocolMesh SDK/CLI/plugin migration: core routing, SDK v2 wire serialization, legacy envelope
+migration, plugin delivery, CLI structured return, staged source/migration/sdk-compat/reentry
+ledgers, protected input hashes, clean-room public package imports, and exact nineteen-path scope.
+
+### Preparation validation
+
+| Check | Result |
+|---|---|
+| `N93` verifier py_compile | `PASS` |
+| `N93` oracle JSON parse | `PASS` |
+| `N93` bundle-shape verifier | `PASS` |
+| `N93` starter verifier | expected `FAIL`; starter has legacy wrappers, no dataclasses, incomplete package-root exports, weak CLI, and empty ledgers |
+| synthesized valid probe in `.scratch/verifier-probes/2026-04-29-n93-protocol-valid/N93` | verifier `PASS`; `100.0 / 100` |
+| exact changed-path negative probe | expected `FAIL`; omission of `candidate/workspace/src/protocolmesh_sdk/serializer.py` rejected |
+| cache auxiliary probe | `PASS`; protocolmesh SDK `__pycache__` changed path ignored as generated cache |
+| public export mutation probe | expected `FAIL`; missing `protocolmesh_sdk.migrate_legacy_envelope` root export breaks visible/import/runtime gates |
+| legacy wrapper mutation probe | expected `FAIL`; reintroduced `send_event` fails static legacy-wrapper gate |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Changed paths | Worker output | Classification |
+|---|---|---|---:|---|---|---:|---|
+| `N93` | `X1 / gpt-5.5` | not launched | n/a | n/a | n/a | n/a | `NOT-RUN`; user requested prep only |
+| `N93` | `X3 / opus 4.7max` | not launched | n/a | n/a | n/a | n/a | `NOT-RUN`; prep only |
+
+### Verdict
+
+No top-pair verdict yet. N93 is admission-ready for a future X1/X3 launch, but this pass deliberately
+did not start X1 or X3. It stays diagnostic-only and must not change the canonical `full-v2-hard /40`
+surface unless complete model results and a named slot-replacement decision are admitted later.

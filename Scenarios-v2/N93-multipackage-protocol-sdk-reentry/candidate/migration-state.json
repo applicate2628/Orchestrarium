@@ -1,0 +1,15 @@
+{
+  "contractId": "N93-multipackage-protocol-sdk-reentry",
+  "planFingerprint": "",
+  "phases": [],
+  "interfaceMap": [],
+  "callSiteMigration": [],
+  "compatibilityMatrix": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 20,
+    "requiredChangedPaths": []
+  }
+}

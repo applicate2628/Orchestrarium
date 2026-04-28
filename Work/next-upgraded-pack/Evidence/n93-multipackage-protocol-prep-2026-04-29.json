@@ -1,0 +1,65 @@
+{
+  "date": "2026-04-29",
+  "wave": "W72",
+  "scenarioId": "N93",
+  "scenarioPath": "Scenarios-v2/N93-multipackage-protocol-sdk-reentry/",
+  "status": "prepared-not-run",
+  "modelRuns": {
+    "X1": {
+      "status": "NOT-LAUNCHED",
+      "reason": "User requested preparation without launching X1."
+    },
+    "X3": {
+      "status": "NOT-LAUNCHED",
+      "reason": "Preparation-only pass; no top-pair run started."
+    }
+  },
+  "localValidation": [
+    {
+      "check": "verifier py_compile",
+      "result": "PASS"
+    },
+    {
+      "check": "oracle JSON parse",
+      "result": "PASS"
+    },
+    {
+      "check": "bundle-shape-only",
+      "result": "PASS"
+    },
+    {
+      "check": "expect-start-state",
+      "result": "PASS"
+    },
+    {
+      "check": "synthesized valid probe",
+      "path": ".scratch/verifier-probes/2026-04-29-n93-protocol-valid/N93",
+      "result": "PASS",
+      "score": 100.0
+    },
+    {
+      "check": "exact changed-path negative probe",
+      "mutation": "omit candidate/workspace/src/protocolmesh_sdk/serializer.py",
+      "result": "EXPECTED-FAIL"
+    },
+    {
+      "check": "cache auxiliary probe",
+      "mutation": "add candidate/workspace/src/protocolmesh_sdk/__pycache__/client.cpython-313.pyc changed path",
+      "result": "PASS"
+    },
+    {
+      "check": "public export mutation probe",
+      "path": ".scratch/verifier-probes/2026-04-29-n93-protocol-missing-export/N93",
+      "mutation": "remove protocolmesh_sdk.migrate_legacy_envelope root export",
+      "result": "EXPECTED-FAIL"
+    },
+    {
+      "check": "legacy wrapper mutation probe",
+      "path": ".scratch/verifier-probes/2026-04-29-n93-protocol-legacy-wrapper/N93",
+      "mutation": "reintroduce send_event wrapper",
+      "result": "EXPECTED-FAIL"
+    }
+  ],
+  "admissionRead": "N93 is ready for future X1/X3 launch, but no model run has been started.",
+  "promotion": "Diagnostic-only until complete X1/X3 results and a named full-v2-hard replacement decision exist."
+}
