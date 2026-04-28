@@ -305,7 +305,8 @@ keep adding minor variants to a solved compact-output or staged-ledger family.
 | `D` N80 materialization | Build calibrated screenshot-grounding visual review v2. | `PASS` on 2026-04-28; nonzero `22 px` window, false-positive traps, threshold scorer, start-state fail, and reference PASS validated. | Image/oracle validation; local scorer probe; `git diff --check`. |
 | `E` N80 run | Run `X1` and `X3` only. | `PASS` on 2026-04-28; `X1 PASS 82`, `X3 FAIL 63`, both wrapper `0`. | Same as phase `C`. |
 | `F` N81 repo evidence-conflict/action-plan | Run the next advisory repo-understanding separator attempt after N79/N80. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS 100`, `X3 PASS 100`, so `binary tie remains` and no primary is assigned. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; `git diff --check`; `mcp-free`; top-pair run. |
-| `F2` next P1 wave | Pick `N82` or `N83` based on which RF line remains least resolved after N81. | `NEXT`; current best next axis is `N82` UX structure/runtime-state spec unless interface-refactor breakage is prioritized manually. | Pre-run protocol plus live evidence update. |
+| `F2` N82 UX runtime-state spec | Run the objective UX-structure state-spec separator attempt after N81. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS 100`, `X3 PASS 100`, so `binary tie remains` and no primary is assigned. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; `git diff --check`; `mcp-free`; top-pair run. |
+| `F3` next P1 wave | Pick `N83` or a stronger UX runtime/visual simulation based on N82. | `NEXT`; current best next axis is `N83-interface-refactor-breakage-hunt` because N81/N82 show single-shot term anchors are weak separators. | Pre-run protocol plus live evidence update. |
 | `G` promotion review | Decide whether any N79+ diagnostic replaces a weaker `/40` slot. | `PASS` only if the replacement has clearer role-fit value, stable scoring, and a named outgoing slot. | Update `full-v2-hard-results-current.md`, RF12, checkpoint, and evidence in one batch. |
 
 ## 2026-04-28 Gate Decision
@@ -354,3 +355,16 @@ use decision-context or staged review gates rather than another broad literal tr
 
 Next concrete action: Phase `F2`, materialize `N82-ux-structure-runtime-state-spec` unless the manual
 priority switches to `N83-interface-refactor-breakage-hunt`.
+
+## W60 Results
+
+| Wave | Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Calibration | Decision |
+|---|---|---|---|---|---|
+| `W60` | `N82 UX runtime state spec` | `PASS`; `100 / 100`; `27 / 27` matched; exact changed path `candidate/ux-state-spec.json` | `PASS`; `100 / 100`; `27 / 27` matched; exact changed path `candidate/ux-state-spec.json` | not launched by policy; `X4` final-only and Gemini parked | `binary tie remains`; UX structure/runtime-state stays near-tie |
+
+Decision: W60 does not separate X1/X3. Making UX structure objective through JSON state, breakpoint,
+affordance, copy, handoff, and non-goal anchors was still solved by both top rows. Do not keep
+tightening this as a term-matched single-shot spec; switch to runtime simulation, staged UX review, or
+interface breakage where failures are behavioral.
+
+Next concrete action: Phase `F3`, materialize `N83-interface-refactor-breakage-hunt`.

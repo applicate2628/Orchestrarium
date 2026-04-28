@@ -1,0 +1,215 @@
+{
+  "contractId": "N82-E72-ux-runtime-state-spec",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/ux-state-spec.json",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/workflow-context.md",
+    "inputs/observed-screen-faults.json",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/ux-state-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_ux_runtime_state_spec.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N82",
+    "surface_id": "E72",
+    "pack_id": "E72",
+    "role_class": "design",
+    "artifact_type": "UX runtime state specification",
+    "modality_family": "UX structure, runtime state model, breakpoint invariants, affordance ownership, false visual cue suppression, handoff boundaries",
+    "allowed_change_surface": [
+      "candidate/ux-state-spec.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "ux-structure, runtime-state-spec, breakpoint-invariants, affordance-rules, copy-ledger, role-boundary, scored-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "design-ui-ux-structure",
+      "runtime-state",
+      "breakpoint-invariants",
+      "false-affordance-control",
+      "role-boundary",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/ux-state-spec.json"
+  ],
+  "editable_report": "candidate/ux-state-spec.json",
+  "top_level_keys": [
+    "spec_id",
+    "role_owner",
+    "state_model",
+    "breakpoint_invariants",
+    "affordance_rules",
+    "copy_ledger",
+    "handoff_contracts",
+    "non_goals"
+  ],
+  "expected_counts": {
+    "state_model": 5,
+    "breakpoint_invariants": 3,
+    "affordance_rules": 6,
+    "copy_ledger": 5,
+    "handoff_contracts": 3,
+    "non_goals": 5
+  },
+  "required_states": [
+    {
+      "id": "local-green-remote-stale",
+      "terms": ["local checks", "green", "remote review", "stale", "publish", "disabled", "sync"]
+    },
+    {
+      "id": "owner-missing",
+      "terms": ["owner", "missing", "assign", "publish", "hidden", "accountable"]
+    },
+    {
+      "id": "risk-accepted-regression-missing",
+      "terms": ["risk", "accepted", "regression", "missing", "publish", "disabled"]
+    },
+    {
+      "id": "ready-auditor-hidden-export",
+      "terms": ["ready", "auditor-only", "hidden export", "publish", "enabled"]
+    },
+    {
+      "id": "published-reentry-needed",
+      "terms": ["published", "receipt", "re-entry", "follow-up", "diff"]
+    }
+  ],
+  "required_breakpoints": [
+    {
+      "id": "desktop-1440",
+      "terms": ["state summary", "source evidence", "action rail", "visible", "together"]
+    },
+    {
+      "id": "tablet-900",
+      "terms": ["state summary", "action rail", "visible", "source evidence", "below"]
+    },
+    {
+      "id": "mobile-390",
+      "terms": ["state summary", "first", "publish", "after", "owner", "risk", "secondary evidence", "collapse"]
+    }
+  ],
+  "required_affordances": [
+    {
+      "id": "A1",
+      "terms": ["local checks", "remote stale", "publish", "disabled", "review remote changes"]
+    },
+    {
+      "id": "A2",
+      "terms": ["owner missing", "publish", "hidden", "assign owner"]
+    },
+    {
+      "id": "A3",
+      "terms": ["risk accepted", "regression missing", "publish", "disabled", "run regression"]
+    },
+    {
+      "id": "A4",
+      "terms": ["auditor-only", "hidden export", "not all roles"]
+    },
+    {
+      "id": "A5",
+      "terms": ["published", "re-entry", "follow-up diff", "visible"]
+    },
+    {
+      "id": "A6",
+      "terms": ["disabled", "reason", "visible", "silent"]
+    }
+  ],
+  "required_copy": [
+    {
+      "id": "C1",
+      "terms": ["Remote review stale", "not ready"]
+    },
+    {
+      "id": "C2",
+      "terms": ["Assign release owner", "required"]
+    },
+    {
+      "id": "C3",
+      "terms": ["Regression evidence missing", "risk accepted"]
+    },
+    {
+      "id": "C4",
+      "terms": ["Auditor-only hidden export", "scope"]
+    },
+    {
+      "id": "C5",
+      "terms": ["Published", "open follow-up diff"]
+    }
+  ],
+  "required_handoffs": [
+    {
+      "id": "implementation",
+      "terms": ["visible state", "ordering", "copy", "no CSS", "no API"]
+    },
+    {
+      "id": "ux-review",
+      "terms": ["false readiness", "breakpoint", "affordance", "mobile"]
+    },
+    {
+      "id": "qa",
+      "terms": ["state transition", "publish disabled", "owner missing", "remote stale"]
+    }
+  ],
+  "required_non_goals": [
+    {
+      "id": "N1",
+      "terms": ["component", "tree"]
+    },
+    {
+      "id": "N2",
+      "terms": ["CSS", "class"]
+    },
+    {
+      "id": "N3",
+      "terms": ["API", "payload"]
+    },
+    {
+      "id": "N4",
+      "terms": ["test", "plan"]
+    },
+    {
+      "id": "N5",
+      "terms": ["product", "decision"]
+    }
+  ],
+  "forbidden_global_terms": [
+    "ready to publish when remote stale",
+    "publish enabled with owner missing",
+    "hidden export for all roles",
+    "define css class",
+    "define api payload",
+    "react component"
+  ],
+  "pass_score_threshold_0_100": 90
+}

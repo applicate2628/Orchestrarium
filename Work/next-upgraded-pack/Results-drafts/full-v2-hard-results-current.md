@@ -261,6 +261,19 @@ W59 interpretation: a stricter single-shot evidence-conflict action plan still d
 top pair. Future advisory hardening should use staged source arbitration or decision-context checks;
 literal forbidden-snippet traps are too gameable.
 
+## UX Runtime State W60 Diagnostic
+
+`N82-ux-structure-runtime-state-spec` converts UX structure into a valid JSON state-spec with
+runtime states, breakpoint invariants, affordance rules, copy ledger, handoff contracts, and
+non-goals. It is not part of the `full-v2-hard` `/40` denominator.
+
+| Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Read |
+|---|---|---|---|
+| `N82` | `PASS`; `100 / 100`; `27 / 27`; wrapper `0` | `PASS`; `100 / 100`; `27 / 27`; wrapper `0` | `binary tie remains`; UX structure/runtime-state stays near-tie |
+
+W60 interpretation: single-shot objective UX JSON does not split the top pair. Future UX separators
+need behavioral runtime simulation, staged UX review, or visual-grounded oracles.
+
 ## Real-Repo Patch Quality W47 Diagnostic
 
 `N69-realrepo-patch-quality-scorecard` probes a compact implementation patch with hidden ledger
@@ -528,7 +541,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 |---|---|
 | `v2-core12-tie-hardened-results-2026-04-20.md` | admitted hardened core12 slots for `S03`, `S04`, `S05`, `S06`, `S07`, `S08`, `S09`, `S25`, `S27`, `N01`, `N02`, `N03`, `N04`, `N05`, `N06` |
 | `role-fit-scorecard-v1-2026-04-22.md` | lane-fit interpretation and current hardening wave summaries |
-| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N81` |
+| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N82` |
 | `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted mainline hardening record |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` through `../Evidence/n60-ui-reentry-rubric-2026-04-24.json` | machine-readable rubric/scorer evidence for promoted diagnostic slots |
 | `../Evidence/n61-visual-pixel-localization-rubric-2026-04-25.json` | machine-readable `E51` visual pixel-localization diagnostic evidence; post-fix score favors `X1`, not promoted into `/40` |
@@ -551,5 +564,6 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n79-staged-ui-reentry-rubric-2026-04-28.json` | machine-readable `W57` staged UI visual-state reentry evidence; X1 passes, X3 fails scoreably, X4/Gemini not run by policy, not promoted into `/40` |
 | `../Evidence/n80-screenshot-grounding-rubric-2026-04-28.json` | machine-readable `W58` calibrated screenshot-grounding evidence; X1 passes, X3 fails scoreably, X4/Gemini not run by policy, not promoted into `/40` |
 | `../Evidence/n81-evidence-action-rubric-2026-04-28.json` | machine-readable `W59` evidence-conflict action-plan evidence; X1 and X3 both pass, so not promoted into `/40` |
+| `../Evidence/n82-ux-state-rubric-2026-04-28.json` | machine-readable `W60` UX runtime-state evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence; `X4 / Claude China opus max` is `32 / 40` with `8` scoreable verifier failures and `0` runtime not-runs |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 fill evidence; X2 is now closed at `12 / 40`, while X6 is `13 / 40` with `8` remaining timeout/auth-route `NOT-RUN` cells |

@@ -1,0 +1,37 @@
+{
+  "scenario": "N82",
+  "wave": "W60",
+  "batchName": "w60-n82-ux-state-2026-04-28",
+  "verdict": "binary tie remains",
+  "note": "Both top-pair rows passed the objective UX runtime-state JSON contract. Retain as negative UX separator evidence; future UX/design separators need runtime simulation, staged review, or visual grounding rather than term-matched JSON anchors.",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score_0_100": 100.0,
+      "matched": "27/27",
+      "changedPaths": [
+        "candidate/ux-state-spec.json"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_17-53-25-X1-w60-n82-ux-state-2026-04-28/N82/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_17-53-25-X1-w60-n82-ux-state-2026-04-28/N82/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score_0_100": 100.0,
+      "matched": "27/27",
+      "changedPaths": [
+        "candidate/ux-state-spec.json"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_17-53-25-X3-w60-n82-ux-state-2026-04-28/N82/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_17-53-25-X3-w60-n82-ux-state-2026-04-28/N82/meta/summary.json"
+    }
+  ]
+}

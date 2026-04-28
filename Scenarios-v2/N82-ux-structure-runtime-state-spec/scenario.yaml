@@ -1,0 +1,23 @@
+id: N82
+surface_id: E72
+pack_id: E72
+role_class: design
+artifact_type: UX runtime state specification
+modality_family: UX structure, runtime state model, breakpoint invariants, affordance ownership, false visual cue suppression, handoff boundaries
+allowed_change_surface:
+  - candidate/ux-state-spec.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "ux-structure, runtime-state-spec, breakpoint-invariants, affordance-rules, copy-ledger, role-boundary, scored-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - design-ui-ux-structure
+  - runtime-state
+  - breakpoint-invariants
+  - false-affordance-control
+  - role-boundary
+  - scored-rubric
+  - binary-separator-candidate

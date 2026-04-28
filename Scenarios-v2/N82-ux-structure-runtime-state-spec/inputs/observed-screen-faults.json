@@ -1,0 +1,34 @@
+{
+  "faults": [
+    {
+      "id": "F1",
+      "state": "local-green-remote-stale",
+      "visible_fault": "Publish appears as the primary green action because local checks passed.",
+      "risk": "Operator can publish stale remote review."
+    },
+    {
+      "id": "F2",
+      "state": "owner-missing",
+      "visible_fault": "Owner warning is below the fold on tablet and mobile.",
+      "risk": "Workflow looks ready without accountable owner."
+    },
+    {
+      "id": "F3",
+      "state": "risk-accepted-regression-missing",
+      "visible_fault": "Risk accepted badge visually outranks the missing regression cue.",
+      "risk": "Accepted risk is misread as release readiness."
+    },
+    {
+      "id": "F4",
+      "state": "ready-auditor-hidden-export",
+      "visible_fault": "Hidden export copy does not say auditor-only.",
+      "risk": "Operators infer hidden rows are available to all roles."
+    },
+    {
+      "id": "F5",
+      "state": "published-reentry-needed",
+      "visible_fault": "Published receipt hides the path back to follow-up diffs.",
+      "risk": "Re-entry work is lost after publish."
+    }
+  ]
+}

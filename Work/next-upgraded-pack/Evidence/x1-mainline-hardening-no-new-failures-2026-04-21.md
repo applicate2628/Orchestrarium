@@ -3832,3 +3832,34 @@ it does not assign a primary.
 Verifier note: the X3 worker output explicitly observed that forbidden literal snippets can be
 gamed with inserted tokens. Future evidence-conflict scenarios should prefer decision-context checks
 and table-specific stale-claim assertions over broad literal substring traps.
+
+## 2026-04-28 Follow-Up: W60 UX Runtime State Spec
+
+`N82-ux-structure-runtime-state-spec` converts the UX-structure lane from a prose brief into a
+valid-JSON runtime-state contract with five states, three breakpoint invariants, six affordance rules,
+five copy-ledger entries, three handoff contracts, and five non-goals.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N82` JSON parse for oracle and input faults | `PASS` |
+| `N82` bundle-shape verifier | `PASS` |
+| `N82` starter verifier | expected `FAIL`; placeholder JSON only |
+| `N82` synthesized reference probe in `.scratch/verifier-probes/2026-04-28-n82-ux-state/valid-ux-state-spec.json` | verifier `PASS`; `27 / 27`, `100 / 100` |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Matched | Changed paths | Primary failure |
+|---|---|---|---:|---|---:|---:|---|---|
+| `N82` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-28_17-53-25-X1-w60-n82-ux-state-2026-04-28/N82/run` | `0` | `PASS` | `100 / 100` | `27 / 27` | `candidate/ux-state-spec.json` | none |
+| `N82` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-28_17-53-25-X3-w60-n82-ux-state-2026-04-28/N82/run` | `0` | `PASS` | `100 / 100` | `27 / 27` | `candidate/ux-state-spec.json` | none |
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3` on the N82 objective UX state-spec task. This is negative
+separator evidence for `design.ui-ux-structure`: single-shot JSON anchors are not enough to split the
+top pair. Future UX/design separation should use runtime simulation, staged UX review, or calibrated
+visual grounding rather than term-matched JSON anchors.
