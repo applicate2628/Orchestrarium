@@ -392,15 +392,16 @@ Source design/plan: `rf12-primary-resolution-plan-2026-04-25.md`.
 | `W66` | `DONE` | `N87-performance-review-gate` | Can performance review architecture split without output budget through benchmark admissibility and cache-boundary diagnosis? | Ran `X1` and `X3`; lower rows deferred. | `X1 PASS`; `X3 PASS`; `binary tie remains`; do not replace N07. |
 | `W67` | `DONE` | `N88-ux-runtime-event-policy-simulator` | Can UX structure split through hidden runtime event-policy simulation rather than term-matched JSON? | Ran `X1` and `X3`; lower rows deferred. | `X1 PASS`; `X3 PASS`; `binary tie remains`; do not replace N02. |
 | `W68` | `DONE` | `N89-security-review-runtime-witness-gauntlet` | Can ordinary security review split through executable exploit-witness binding while staying review-only? | Ran `X1` and `X3` after v3 integrity review. | `X1 PASS`; `X3 PASS`; `binary tie remains`; do not keep hardening ordinary single-session security review. |
+| `W69` | `DONE` | `N90-staged-ux-review-reentry-gate` | Can staged UX review/reentry split after N82/N88 tied single-shot UX policy and N79 split staged implementation? | Ran `X1` and `X3`; lower rows deferred. | `X1 PASS`; `X3 PASS`; `binary tie remains`; do not keep hardening staged UX review without a new contract axis. |
 
-## W69 Candidate Axes
+## W70 Candidate Axes
 
 | Candidate | Rationale | First action |
 |---|---|---|
-| staged UX/review gate | N82 and N88 prove single-shot UX policy remains tied; staged UI implementation already favors X1 after N79, but staged UX review itself is unresolved | design a review-only staged UX artifact with source/state/reentry closure, not another JSON state table |
 | real-repo interface migration promotion | N86 gives X1 exact migration-surface evidence while N57 gives X3 compact-budget evidence; canonical `/40` still has older interface slots | run W64 replacement review only if a named outgoing slot is admitted |
 | compact security review output budget | N84/N89 tie ordinary security review; X3 is consistently much more compact | only build if low-noise review output should be a first-class role contract; otherwise avoid more security-review variants |
 | real repo staged security incident | N78 proves staged synthetic security re-entry favors X1, while N77/N84/N89 tie single-session security | build only if policy needs a real-repo repeat of staged security, not another single-shot report |
+| real-repo staged interface or incident repair | N86/N90 show review-only staged artifacts can still tie, while staged implementation/reentry lanes separate | prefer a real code/consumer/reentry task over another review-only bundle if the next goal is top-pair separation |
 
 ## Resume Point
 
@@ -410,7 +411,7 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume by choosing a new W69 axis. W64 promotion-candidate sweep is parked until
+If interrupted now, resume by choosing a new W70 axis. W64 promotion-candidate sweep is parked until
 a named replacement decision is admitted.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`

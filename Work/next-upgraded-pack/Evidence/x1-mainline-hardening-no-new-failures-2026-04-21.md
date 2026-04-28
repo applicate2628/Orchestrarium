@@ -4111,3 +4111,42 @@ were discarded after review found answer-key leakage and weak witness exactness.
 still do not split ordinary single-session security review. X3 is much more compact, but compactness
 is not a binary winner because N89 has no output budget. Keep N89 diagnostic-only; staged security
 implementation/re-entry remains X1-primary after N78.
+
+## 2026-04-28 Follow-Up: W69 Staged UX Review Reentry Gate
+
+`N90-staged-ux-review-reentry-gate` tests the unresolved staged UX-review axis after N82 and N88
+proved that single-shot UX policy/spec tasks still tie. The bundle is review-only: candidates must
+produce staged source/state, ADR, findings, response-gate, and closeout artifacts while the
+publish-console review target remains immutable. The verifier uses protected target hashes,
+runtime witness execution, opaque exact finding-tuple digests, hidden response-decision digests,
+false-positive controls, and exact five-artifact changed-path scope.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N90` JSON parse and verifier compile | `PASS` |
+| `N90` bundle-shape verifier | `PASS` |
+| `N90` starter verifier | expected `FAIL`; state, ADR, findings, response gate, and closure are placeholders |
+| synthesized valid probe in `.scratch/verifier-probes/2026-04-28-n90-staged-ux-review-valid/N90` | verifier `PASS`; `100.0 / 100` |
+| exact changed-path positive probe | `PASS`; five required review artifacts accepted |
+| exact changed-path negative probe | `PASS`; single-path run rejected |
+| answer-leakage review | `PASS`; oracle JSON exposes shape/count/enums, while exact findings and response decisions are verifier-owned opaque checks |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Changed paths | Worker output | Classification |
+|---|---|---|---:|---|---|---:|---|
+| `N90` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-28_23-10-15-X1-wave69-n90-staged-ux-review-2026-04-28/N90/run` | `0` | `PASS`; `100.0 / 100` | exact five review artifacts | `396503` bytes | `PASS` |
+| `N90` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-28_23-10-15-X3-wave69-n90-staged-ux-review-2026-04-28/N90/run` | `0` | `PASS`; `100.0 / 100` | exact five review artifacts; target `__pycache__` classified auxiliary | `1539` bytes | `PASS` |
+
+### Verdict
+
+`binary tie remains` for X1 and X3 on N90. Staged UX review/reentry with runtime witness binding,
+opaque exact tuples, hidden response decisions, protected target hashes, and exact changed-path scope
+still does not split the top pair. X3 is much more compact, but compactness is not a binary winner
+because N90 has no output budget. Keep N90 diagnostic-only; do not replace N02, S30, or any
+canonical `/40` UX review slot from this result. Next work should change axis rather than further
+tighten staged UX review.

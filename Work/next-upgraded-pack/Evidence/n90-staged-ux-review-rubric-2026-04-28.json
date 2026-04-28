@@ -1,0 +1,79 @@
+{
+  "scenario": "N90",
+  "wave": "W69",
+  "batchName": "wave69-n90-staged-ux-review-2026-04-28",
+  "replacementDecision": {
+    "promotedIntoFullV2Hard": false,
+    "replacesSlot": null,
+    "reason": "N90 is a diagnostic negative separator for staged UX review/reentry. Both top rows pass the hardened staged verifier, so it does not replace N02, S30, or any canonical /40 UX review slot."
+  },
+  "admissionNotes": {
+    "integrityHardening": [
+      "review target is immutable and protected by SHA256 hashes",
+      "oracle JSON exposes shape/count/enums but not exact finding tuples or response decisions",
+      "verifier uses opaque exact-tuple digests for finding case/file/line/category/severity",
+      "response-gate decisions are verifier-owned digests rather than readable oracle rows",
+      "runtime witnesses are computed by executing the frozen UX target",
+      "exact final changed-path equality is required when changed paths are supplied"
+    ],
+    "preRunValidation": [
+      "JSON parse PASS",
+      "bundle-shape PASS",
+      "starter candidate expected FAIL",
+      "synthesized valid probe PASS at 100.0 / 100",
+      "exact changed-path positive and negative probes PASS",
+      "git diff --check PASS",
+      "mcp-free STATS kill: none"
+    ]
+  },
+  "verdict": "binary tie remains for staged UX review/reentry",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score": 100.0,
+      "workerOutputBytes": 396503,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/decision-adr.md",
+        "candidate/findings.json",
+        "candidate/response-gate.json",
+        "candidate/ux-review-state.json"
+      ],
+      "auxiliaryChangedPaths": [],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_23-10-15-X1-wave69-n90-staged-ux-review-2026-04-28/N90/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_23-10-15-X1-wave69-n90-staged-ux-review-2026-04-28/N90/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score": 100.0,
+      "workerOutputBytes": 1539,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/decision-adr.md",
+        "candidate/findings.json",
+        "candidate/response-gate.json",
+        "candidate/ux-review-state.json"
+      ],
+      "auxiliaryChangedPaths": [
+        "candidate/review-target/ux_runtime/__pycache__/export_summary.cpython-314.pyc",
+        "candidate/review-target/ux_runtime/__pycache__/publish_state.cpython-314.pyc",
+        "candidate/review-target/ux_runtime/__pycache__/reentry_flow.cpython-314.pyc",
+        "candidate/review-target/ux_runtime/__pycache__/rendering.cpython-314.pyc"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_23-10-15-X3-wave69-n90-staged-ux-review-2026-04-28/N90/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_23-10-15-X3-wave69-n90-staged-ux-review-2026-04-28/N90/meta/summary.json"
+    }
+  ],
+  "postRunVerification": [
+    "admitted X1 run passed check_staged_ux_review_reentry.py with exact five changed paths",
+    "admitted X3 run passed check_staged_ux_review_reentry.py with exact five benchmark changed paths; target __pycache__ files are auxiliary worker artifacts"
+  ]
+}

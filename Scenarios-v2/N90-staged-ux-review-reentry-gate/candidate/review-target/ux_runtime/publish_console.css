@@ -1,0 +1,26 @@
+.publish-button[disabled] {
+  opacity: 0.48;
+}
+
+.publish-button[disabled]::after {
+  content: attr(data-disabled-reason);
+}
+
+.empty-draft-label {
+  color: #59636e;
+}
+
+@media (max-width: 480px) {
+  .action-bar {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .publish-button {
+    order: 0;
+  }
+
+  .remediation-action {
+    order: 2;
+  }
+}

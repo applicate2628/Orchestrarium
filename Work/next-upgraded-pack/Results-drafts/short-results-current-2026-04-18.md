@@ -542,5 +542,6 @@ remains top-pair near-tie.
 | `../Evidence/n87-performance-review-gate-rubric-2026-04-28.json` | machine-readable W66 performance-review gate evidence; X1 and X3 both pass, so `binary tie remains` |
 | `../Evidence/n88-ux-runtime-policy-rubric-2026-04-28.json` | machine-readable W67 UX runtime event-policy evidence; X1 and X3 both pass, so `binary tie remains` |
 | `../Evidence/n89-security-runtime-witness-rubric-2026-04-28.json` | machine-readable W68 security runtime witness review evidence; X1 and X3 both pass, so `binary tie remains` |
+| `../Evidence/n90-staged-ux-review-rubric-2026-04-28.json` | machine-readable W69 staged UX review/reentry evidence; X1 and X3 both pass, so `binary tie remains` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 full-v2-hard closing comparison evidence |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 full-v2-hard fill evidence |

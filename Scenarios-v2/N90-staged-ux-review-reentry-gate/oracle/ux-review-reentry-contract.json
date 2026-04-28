@@ -1,0 +1,162 @@
+{
+  "contractId": "N90-staged-ux-review-reentry-gate",
+  "planFingerprint": "n90-staged-ux-review-reentry-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "candidate/README.md",
+    "candidate/ux-review-state.json",
+    "candidate/decision-adr.md",
+    "candidate/findings.json",
+    "candidate/response-gate.json",
+    "candidate/closure.json",
+    "candidate/review-target/README.md",
+    "candidate/review-target/ux_runtime/publish_state.py",
+    "candidate/review-target/ux_runtime/rendering.py",
+    "candidate/review-target/ux_runtime/export_summary.py",
+    "candidate/review-target/ux_runtime/reentry_flow.py",
+    "candidate/review-target/ux_runtime/publish_console.css",
+    "candidate/review-target/docs/stale-ux-notes.md",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/review-feedback.md",
+    "inputs/decoy-map.md",
+    "inputs/runtime-probe-cases.md",
+    "inputs/phases/01-source-state-ledger.md",
+    "inputs/phases/02-decision-adr.md",
+    "inputs/phases/03-ux-findings.md",
+    "inputs/phases/04-response-closeout.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/ux-review-reentry-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_staged_ux_review_reentry.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N90",
+    "surface_id": "E80",
+    "pack_id": "E80",
+    "role_class": "review",
+    "artifact_type": "staged UX review reentry gate with runtime witness bindings",
+    "modality_family": "multi-stage UX review, runtime state arbitration, false-positive rejection, response gate, and reentry closeout",
+    "allowed_change_surface": [
+      "candidate/ux-review-state.json",
+      "candidate/decision-adr.md",
+      "candidate/findings.json",
+      "candidate/response-gate.json",
+      "candidate/closure.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "staged-ux-review, runtime-witness, exact-findings, false-positive-control, reentry",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "staged-runner",
+      "reentry",
+      "ux-review",
+      "runtime-witness-binding",
+      "false-positive-traps",
+      "hidden-finding-tuples",
+      "source-binding",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "editable_paths": [
+    "candidate/ux-review-state.json",
+    "candidate/decision-adr.md",
+    "candidate/findings.json",
+    "candidate/response-gate.json",
+    "candidate/closure.json"
+  ],
+  "required_state_keys": [
+    "contractId",
+    "planFingerprint",
+    "phases",
+    "sourceBindings",
+    "staleSourceRejections",
+    "findingLedger",
+    "falsePositiveLedger",
+    "responseLedger",
+    "reentryLedger",
+    "patchBudget"
+  ],
+  "required_top_level_finding_keys": [
+    "category",
+    "file",
+    "fixBoundary",
+    "id",
+    "line",
+    "owner",
+    "runtimeEvidence",
+    "severity",
+    "sourceEvidence",
+    "title"
+  ],
+  "required_witness_keys": [
+    "caseId",
+    "findingId",
+    "observed",
+    "sourceBinding",
+    "status"
+  ],
+  "required_response_keys": [
+    "decision",
+    "id",
+    "owner",
+    "reason",
+    "sourceIds",
+    "visibleReturnCue"
+  ],
+  "allowed_categories": [
+    "state-gating",
+    "priority-order",
+    "mobile-order",
+    "privacy-boundary",
+    "reentry-flow",
+    "focus-return"
+  ],
+  "allowed_severities": [
+    "high",
+    "medium",
+    "low"
+  ],
+  "allowed_response_decisions": [
+    "accept",
+    "revise",
+    "reject"
+  ],
+  "exact_finding_count": 7,
+  "exact_non_finding_count": 3,
+  "exact_witness_count": 10,
+  "exact_response_count": 7,
+  "expected_gate_decision": "REVISE",
+  "runtime_case_count": 7,
+  "benign_case_count": 3,
+  "pass_score_threshold_0_100": 100
+}

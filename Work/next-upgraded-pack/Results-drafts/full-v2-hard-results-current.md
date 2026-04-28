@@ -615,6 +615,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | security review with executable runtime witness binding | `X1` / `X3` near-tie after N89; use staged security N78 when a binary X1-primary security lane is needed |
 | read-only performance-review gate | `X1` / `X3` near-tie after N87; choose X3 only when compact review output is explicitly valued |
 | UX runtime event-policy design | `X1` / `X3` near-tie after N88; hidden simulator traces beat term matching but still do not assign a binary primary |
+| staged UX review/reentry gate | `X1` / `X3` near-tie after N90; staged source/state, runtime witnesses, opaque exact tuples, hidden response decisions, and exact changed-path scope still tie without an output budget |
 | compact real-repo patch when cost matters | `X3` with patch-hygiene guard; W47 ties binary but scores X3 higher, and N85 makes compact performance hot-path work a binary X3 separator |
 | multi-file hidden-consumer migration | `X1` / `X3` binary near-tie on pure hidden semantics; choose X3 for cost, X1 for hygiene and exact migration-surface completeness after N86 |
 | small test-led regression patch | `X1` / `X3` binary near-tie; choose X3 for cost after N71 |
@@ -667,5 +668,6 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n87-performance-review-gate-rubric-2026-04-28.json` | machine-readable `W66` performance-review gate evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/n88-ux-runtime-policy-rubric-2026-04-28.json` | machine-readable `W67` UX runtime event-policy evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/n89-security-runtime-witness-rubric-2026-04-28.json` | machine-readable `W68` security runtime witness review evidence; X1 and X3 both pass, so not promoted into `/40` |
+| `../Evidence/n90-staged-ux-review-rubric-2026-04-28.json` | machine-readable `W69` staged UX review/reentry evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence before N85 promotion; current X4 row is `31 PASS`, `8 FAIL`, `1 NOT-RUN` until N85 is run in final-only mode |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` plus `../Evidence/n85-performance-runtime-rubric-2026-04-28.json` | machine-readable X2/X6 fill evidence; X2 remains `12 / 40`, while X6 is now `13 / 40` with `9` timeout/auth-route `NOT-RUN` cells after N85 |

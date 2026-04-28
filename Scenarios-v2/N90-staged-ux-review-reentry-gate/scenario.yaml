@@ -1,0 +1,30 @@
+id: N90
+surface_id: E80
+pack_id: E80
+role_class: review
+artifact_type: staged UX review reentry gate with runtime witness bindings
+modality_family: multi-stage UX review, runtime state arbitration, false-positive rejection, response gate, and reentry closeout
+allowed_change_surface:
+  - candidate/ux-review-state.json
+  - candidate/decision-adr.md
+  - candidate/findings.json
+  - candidate/response-gate.json
+  - candidate/closure.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/review-target/**
+score_profile: "staged-ux-review, runtime-witness, exact-findings, false-positive-control, reentry"
+overlay_flags:
+  - top-pair-role-fit
+  - staged-runner
+  - reentry
+  - ux-review
+  - runtime-witness-binding
+  - false-positive-traps
+  - hidden-finding-tuples
+  - source-binding
+  - scored-rubric
+  - binary-separator-candidate
