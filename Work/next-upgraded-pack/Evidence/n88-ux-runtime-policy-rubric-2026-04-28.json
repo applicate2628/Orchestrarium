@@ -1,0 +1,45 @@
+{
+  "scenario": "N88",
+  "wave": "W67",
+  "batchName": "wave67-n88-ux-runtime-policy-2026-04-28",
+  "replacementDecision": {
+    "promotedIntoFullV2Hard": false,
+    "replacesSlot": null,
+    "reason": "N88 is a diagnostic negative separator for UX runtime event-policy design. Both top rows pass the hidden simulator, so it does not replace N02 or any canonical /40 slot."
+  },
+  "verdict": "binary tie remains for UX runtime event-policy simulation",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score": 100.0,
+      "workerOutputBytes": 151375,
+      "changedPaths": [
+        "candidate/breakpoint-policy.json",
+        "candidate/reentry-policy.json",
+        "candidate/runtime-policy.json"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_21-26-25-X1-wave67-n88-ux-runtime-policy-2026-04-28/N88/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_21-26-25-X1-wave67-n88-ux-runtime-policy-2026-04-28/N88/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score": 100.0,
+      "workerOutputBytes": 2758,
+      "changedPaths": [
+        "candidate/breakpoint-policy.json",
+        "candidate/reentry-policy.json",
+        "candidate/runtime-policy.json"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_21-26-23-X3-wave67-n88-ux-runtime-policy-2026-04-28/N88/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_21-26-23-X3-wave67-n88-ux-runtime-policy-2026-04-28/N88/meta/summary.json"
+    }
+  ]
+}

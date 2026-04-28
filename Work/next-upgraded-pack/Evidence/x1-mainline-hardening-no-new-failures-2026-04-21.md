@@ -4038,3 +4038,38 @@ classifying author responses, returning `REVISE`, and keeping exact five-artifac
 memory-lifetime diagnosis, false-positive restraint, and exact `REVISE` gate discipline are not
 enough to split the top pair in this read-only performance-review frame. Keep N87 diagnostic-only;
 do not replace N07 in `full-v2-hard /40` from this result.
+
+## 2026-04-28 Follow-Up: W67 UX Runtime Event-Policy Simulator
+
+`N88-ux-runtime-event-policy-simulator` tests whether UX structure can split through hidden runtime
+event-policy simulation rather than term-matched JSON anchors. The bundle is design-only: candidates
+must update runtime, breakpoint, and re-entry policy JSON, with no implementation/UI/CSS edits.
+The hidden simulator checks stale remote source handling, owner-required publishing, regression-proof
+requirements, priority ordering when failures combine, auditor-export scope, post-publish follow-up
+diff handling, ready-state publishing, breakpoint ordering, and re-entry persistence.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N88` JSON parse and verifier compile | `PASS` |
+| `N88` bundle-shape verifier | `PASS` |
+| `N88` starter verifier | expected `FAIL`; runtime, breakpoint, and re-entry policy files are placeholders |
+| synthesized valid probe in `.scratch/verifier-probes/2026-04-28-n88-ux-runtime-policy-valid/N88` | verifier `PASS`; `100.0 / 100` |
+| stale N82/E72 scan inside N88 | `PASS` |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Changed paths | Worker output | Classification |
+|---|---|---|---:|---|---|---:|---|
+| `N88` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-28_21-26-25-X1-wave67-n88-ux-runtime-policy-2026-04-28/N88/run` | `0` | `PASS`; `100.0 / 100` | `candidate/breakpoint-policy.json`, `candidate/reentry-policy.json`, `candidate/runtime-policy.json` | `151375` bytes | `PASS` |
+| `N88` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-28_21-26-23-X3-wave67-n88-ux-runtime-policy-2026-04-28/N88/run` | `0` | `PASS`; `100.0 / 100` | `candidate/breakpoint-policy.json`, `candidate/reentry-policy.json`, `candidate/runtime-policy.json` | `2758` bytes | `PASS` |
+
+### Verdict
+
+`binary tie remains` for X1 and X3 on N88. Hidden event-policy simulation is stronger than the N82
+runtime-state JSON contract, but both top rows satisfy it. X3 is much more compact; compactness is
+not a binary winner here because no output budget is part of N88. Keep N88 diagnostic-only; do not
+replace N02 or any canonical `/40` UX slot from this result.

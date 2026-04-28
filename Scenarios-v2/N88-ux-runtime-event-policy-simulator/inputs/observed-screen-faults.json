@@ -1,0 +1,20 @@
+{
+  "faults": [
+    {
+      "id": "F1-false-ready",
+      "description": "Publish looked enabled when remote review source was stale."
+    },
+    {
+      "id": "F2-mobile-owner-hidden",
+      "description": "Mobile layout put owner-missing below secondary evidence."
+    },
+    {
+      "id": "F3-auditor-export-confusion",
+      "description": "Auditor-only export looked like a publish-ready state."
+    },
+    {
+      "id": "F4-reentry-receipt-lost",
+      "description": "Published receipt disappeared when a follow-up diff arrived."
+    }
+  ]
+}

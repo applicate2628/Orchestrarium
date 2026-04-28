@@ -1,0 +1,25 @@
+id: N88
+surface_id: E78
+pack_id: E78
+role_class: design
+artifact_type: UX runtime event-policy simulator
+modality_family: UX runtime policy, hidden event traces, breakpoint behavior, reentry cues, false readiness suppression, role-boundary export
+allowed_change_surface:
+  - candidate/runtime-policy.json
+  - candidate/breakpoint-policy.json
+  - candidate/reentry-policy.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "ux-runtime-simulation, event-policy, breakpoint-policy, reentry-policy, false-affordance-control, scored-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - design-ui-ux-structure
+  - runtime-simulator
+  - breakpoint-invariants
+  - false-affordance-control
+  - role-boundary
+  - scored-rubric
+  - binary-separator-candidate

@@ -348,6 +348,7 @@ model fail.
 51. Materialize and run `N85-performance-review-runtime-budget` as W63/E75. `DONE` on 2026-04-28; `X1 FAIL`, `X3 PASS`; X1 passes hidden correctness/runtime/scope but fails hard operator-output budget (`266051 > 40000`), while X3 passes all gates compactly. Promote N85 as the `full-v2-hard /40` replacement for N59 in L06.
 52. Materialize and run `N86-real-interface-downstream-migration` as W65/E76. `DONE` on 2026-04-28; `X1 PASS`, `X3 FAIL`; X3 passes the hidden interface/downstream verifier but scoreably fails exact migration-surface scope by leaving `candidate/workspace/src/billingmesh/api.py` unchanged. Keep diagnostic-only until a slot-replacement decision names an outgoing slot.
 53. Materialize and run `N87-performance-review-gate` as W66/E77. `DONE` on 2026-04-28; `X1 PASS`, `X3 PASS`; `binary tie remains` on benchmark admissibility, cache-boundary diagnosis, memory-lifetime review, false-positive restraint, response gate, `REVISE`, and exact five-artifact scope.
+54. Materialize and run `N88-ux-runtime-event-policy-simulator` as W67/E78. `DONE` on 2026-04-28; `X1 PASS`, `X3 PASS`; `binary tie remains` on hidden UX event-policy simulation, breakpoint ordering, and re-entry persistence. Keep diagnostic-only; do not replace N02 or any canonical UX slot.
 
 ## Current Routing Impact
 
@@ -362,7 +363,7 @@ model fail.
 | UI implementation | split by execution shape: `X3` primary versus `X1` for compact single-session UI after `N20`, `N25`, `N47`, `N60`, and `N74`; `N79` replaces brittle `N38` and gives a scoreable staged UI/visual-state separator (`X1 PASS 96`, `X3 FAIL 63`) | use X3 for compact single-session UI, especially when low-noise/operator budget is explicit; use X1 for staged UI/visual-state reentry, source/state ledger, reentry closeout, and hidden accessibility/layout/raster accountability |
 | actual screenshot grounding | `X1 primary` after calibrated `N80` produced `X1 PASS 82 / 100` versus `X3 FAIL 63 / 100`; N68's earlier loose actual-screenshot result stays non-binary historical context | use X1 when pixel windows, semantic defect tuples, and false-positive traps are hard verifier requirements; do not promote X5/Gemini until route health returns |
 | repo-understanding / evidence-conflict action planning | `X1 / X3 near-tie` after `N66` and `N81` both passed top pair at exact gate; N81 additionally shows forbidden-literal traps are too weak as a separator mechanism | future advisory separators must use decision-context, stale-claim semantics, staged source arbitration, or review-gate closure rather than another single-shot conflict table |
-| UX structure / runtime-state design | `X1 / X3 near-tie` after N82: both top rows pass an objective JSON state-machine UX spec at `100 / 100` | future UX separators need runtime simulation, staged UX review, or visual grounding; do not keep tightening term-matched JSON anchors |
+| UX structure / runtime-state design | `X1 / X3 near-tie` after N82 and N88: both top rows pass objective JSON state-machine anchors and the stronger hidden event-policy simulator | future UX separators need staged UX review, visual grounding, or implementation-backed runtime behavior; do not keep tightening single-shot UX policy JSON |
 | interface refactor hidden-consumer patch | `X1 / X3 near-tie` after N83: both top rows pass hidden batch-consumer, structured-report, legacy-removal, exact-scope, and ledger gates | do not use ordinary hidden-consumer refactor as a top-pair separator; use staged interface/API for X1-primary or explicit compact operator-budget API migration for X3-primary |
 | ordinary single-session security review | `X1 / X3 near-tie` after N84: both top rows pass exact vuln tuples, exploit reproduction binding, false-positive suppression, gate decision, and exact JSON scope | do not use ordinary security-review reproduction as a top-pair separator; use staged security re-entry for X1-primary or compact output preference when low-noise review output is first-class |
 | owner recovery staged re-entry | `X1 primary` after `N40` produced `X1 PASS 98 / 100` versus `X3 FAIL 55 / 100` | strong enough for staged owner routing; next repeat should be a real repo owner workflow only if policy needs extra confirmation |
@@ -388,8 +389,8 @@ Source design/plan: `rf12-primary-resolution-plan-2026-04-25.md`.
 | `W64` | `PARKED` | promotion-candidate sweep | Which diagnostics deserve canonical `/40` slot replacement? | Run only when a replacement decision is admitted; `X4` final-only by user policy. | PASS requires named outgoing slot and updated canonical `/40` table. |
 | `W65` | `DONE` | `N86-real-interface-downstream-migration` | Can real interface migration split without output budget through hidden downstream public API and exact migration surface? | Ran `X1` and `X3`; no `X4`; Gemini rows parked. | `X1 PASS`; `X3 scoreable FAIL` only exact scope after hidden verifier pass. |
 | `W66` | `DONE` | `N87-performance-review-gate` | Can performance review architecture split without output budget through benchmark admissibility and cache-boundary diagnosis? | Ran `X1` and `X3`; lower rows deferred. | `X1 PASS`; `X3 PASS`; `binary tie remains`; do not replace N07. |
-| `W67` | `NEXT` | `N88-ux-runtime-event-policy-simulator` | Can UX structure split through hidden runtime event-policy simulation rather than term-matched JSON? | Run `X1` and `X3` after local simulator/reference validation. | PASS requires simulator outcome split and design-only artifact scope. |
-| `W68` | `QUEUED` | `N89-security-review-runtime-witness-gauntlet` | Can ordinary security review split through executable exploit-witness binding while staying review-only? | Run `X1` and `X3` after deterministic harness validation. | PASS requires runtime witness binding split, not staged implementation artifacts. |
+| `W67` | `DONE` | `N88-ux-runtime-event-policy-simulator` | Can UX structure split through hidden runtime event-policy simulation rather than term-matched JSON? | Ran `X1` and `X3`; lower rows deferred. | `X1 PASS`; `X3 PASS`; `binary tie remains`; do not replace N02. |
+| `W68` | `NEXT` | `N89-security-review-runtime-witness-gauntlet` | Can ordinary security review split through executable exploit-witness binding while staying review-only? | Run `X1` and `X3` after deterministic harness validation. | PASS requires runtime witness binding split, not staged implementation artifacts. |
 
 ## Resume Point
 
@@ -399,7 +400,7 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume from W67 / `N88-ux-runtime-event-policy-simulator` design
+If interrupted now, resume from W68 / `N89-security-review-runtime-witness-gauntlet` design
 materialization. W64 promotion-candidate sweep is parked until a named replacement decision is
 admitted.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon

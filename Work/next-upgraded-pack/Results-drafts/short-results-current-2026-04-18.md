@@ -101,6 +101,12 @@ operator-output budget. `X1` scoreably fails only that budget (`266051 > 40000`)
 runtime/scope; `X3` passes all gates (`1827 <= 40000`). Current top-pair score is now
 `X1 34 / 40` versus `X3 35 / 40`.
 
+W65 through W67 added three diagnostic follow-ups outside the canonical `/40` denominator. N86
+separates in favor of X1 on exact real interface migration surface after X3 passes hidden downstream
+semantics but misses `api.py` scope. N87 ties on read-only performance review. N88 ties on UX
+runtime event-policy simulation; X3 is much more compact, but no output budget is part of that
+UX design contract.
+
 | ID | Label |
 |---|---|
 | `X1` | `gpt-5.5` active; older rows may cite `gpt-5.4` as model-of-run |
@@ -435,6 +441,7 @@ runtime/scope; `X3` passes all gates (`1827 <= 40000`). Current top-pair score i
 | `85` | `N83` was added on `2026-04-28` as W61 interface-refactor breakage diagnostic; it is not merged into `full-v2-hard` `/40`. It tests hidden batch-consumer behavior, duplicate-state preservation, rejected-request non-dispatch, structured-report compatibility, legacy interface removal, exact ten-path scope, visible regression markers, and migration ledger. `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass with wrapper `0`, so `binary tie remains`. The v2 runner now treats top-level `.pytest_cache/` as auxiliary generated cache | `N83 interface-refactor breakage hunt` |
 | `86` | `N86` was added on `2026-04-28` as W65 real interface downstream migration diagnostic; it is not merged into `full-v2-hard` `/40`. It removes the N57 operator-output budget and adds a hidden downstream public-app contract over root package exports, dataclass serialization, denied-without-publish, timeout retryability, duplicate non-republish, structured reporting, source-bound ledgers, review response, closeout, and exact scope. `X1 / gpt-5.5` passes. `X3 / opus 4.7max` scoreably fails only exact scope after passing hidden interface/downstream semantics: missing `candidate/workspace/src/billingmesh/api.py` | `N86 real interface downstream migration` |
 | `87` | `N87` was added on `2026-04-28` as W66 performance-review gate diagnostic; it is not merged into `full-v2-hard` `/40`. It is a read-only review gate over warm-cache benchmark contamination, cache-key context loss, global cache lifetime growth, approval-gate incompleteness, false-positive restraint, response decisions, and exact `REVISE` gate. `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass with wrapper `0`, so `binary tie remains`; X3 is much more compact (`2466` bytes versus `154170`) but not a binary winner | `N87 performance review gate` |
+| `88` | `N88` was added on `2026-04-28` as W67 UX runtime event-policy simulator diagnostic; it is not merged into `full-v2-hard` `/40`. It replaces term-matched UX JSON anchors with hidden event-policy traces for stale remote source, missing owner, missing regression proof, combined-failure priority, auditor export, follow-up diff, ready-state publishing, breakpoint ordering, and re-entry persistence. `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass with wrapper `0`, so `binary tie remains`; X3 is much more compact (`2758` bytes versus `151375`) but no output budget is part of this UX design contract | `N88 UX runtime event-policy simulator` |
 
 ## Source
 
@@ -526,5 +533,6 @@ runtime/scope; `X3` passes all gates (`1827 <= 40000`). Current top-pair score i
 | `../Evidence/n83-interface-refactor-breakage-rubric-2026-04-28.json` | machine-readable W61 interface-refactor breakage evidence; X1 and X3 both pass hidden batch-consumer and structured-report runtime gates, so `binary tie remains` |
 | `../Evidence/n86-interface-downstream-rubric-2026-04-28.json` | machine-readable W65 real interface downstream migration evidence; X1 passes, while X3 passes hidden downstream semantics but scoreably fails exact migration-surface scope |
 | `../Evidence/n87-performance-review-gate-rubric-2026-04-28.json` | machine-readable W66 performance-review gate evidence; X1 and X3 both pass, so `binary tie remains` |
+| `../Evidence/n88-ux-runtime-policy-rubric-2026-04-28.json` | machine-readable W67 UX runtime event-policy evidence; X1 and X3 both pass, so `binary tie remains` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 full-v2-hard closing comparison evidence |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 full-v2-hard fill evidence |

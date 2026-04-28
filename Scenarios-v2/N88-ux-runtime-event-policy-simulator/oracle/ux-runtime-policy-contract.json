@@ -1,0 +1,165 @@
+{
+  "contractId": "N88-ux-runtime-event-policy-simulator",
+  "planFingerprint": "n88-ux-runtime-event-policy-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/runtime-policy.json",
+    "candidate/breakpoint-policy.json",
+    "candidate/reentry-policy.json",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/workflow-context.md",
+    "inputs/observed-screen-faults.json",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/ux-runtime-policy-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_ux_runtime_policy.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N88",
+    "surface_id": "E78",
+    "pack_id": "E78",
+    "role_class": "design",
+    "artifact_type": "UX runtime event-policy simulator",
+    "modality_family": "UX runtime policy, hidden event traces, breakpoint behavior, reentry cues, false readiness suppression, role-boundary export",
+    "allowed_change_surface": [
+      "candidate/runtime-policy.json",
+      "candidate/breakpoint-policy.json",
+      "candidate/reentry-policy.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "ux-runtime-simulation, event-policy, breakpoint-policy, reentry-policy, false-affordance-control, scored-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "design-ui-ux-structure",
+      "runtime-simulator",
+      "breakpoint-invariants",
+      "false-affordance-control",
+      "role-boundary",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/runtime-policy.json",
+    "candidate/breakpoint-policy.json",
+    "candidate/reentry-policy.json"
+  ],
+  "requiredRuntimeKeys": [
+    "contractId",
+    "planFingerprint",
+    "conditions",
+    "disabledReasons",
+    "actionPriority",
+    "visibleCues"
+  ],
+  "requiredBreakpointKeys": [
+    "contractId",
+    "planFingerprint",
+    "breakpoints"
+  ],
+  "requiredReentryKeys": [
+    "contractId",
+    "planFingerprint",
+    "publishedReceipt",
+    "followUpDiff",
+    "auditorExport"
+  ],
+  "requiredActions": [
+    "refresh-source",
+    "assign-owner",
+    "attach-regression",
+    "review-follow-up-diff",
+    "publish",
+    "export-auditor-copy"
+  ],
+  "requiredDisabledReasons": [
+    "remote-source-stale",
+    "owner-missing",
+    "regression-proof-missing",
+    "auditor-export-only"
+  ],
+  "hiddenTraces": [
+    {
+      "id": "T1-remote-stale",
+      "state": {"remoteFresh": false, "ownerPresent": true, "riskAccepted": true, "regressionProof": true, "auditorExportRequested": false, "published": false, "followUpDiff": false},
+      "expected": {"dominantAction": "refresh-source", "publishEnabled": false, "disabledReason": "remote-source-stale"}
+    },
+    {
+      "id": "T2-owner-missing",
+      "state": {"remoteFresh": true, "ownerPresent": false, "riskAccepted": true, "regressionProof": true, "auditorExportRequested": false, "published": false, "followUpDiff": false},
+      "expected": {"dominantAction": "assign-owner", "publishEnabled": false, "disabledReason": "owner-missing"}
+    },
+    {
+      "id": "T3-regression-missing",
+      "state": {"remoteFresh": true, "ownerPresent": true, "riskAccepted": true, "regressionProof": false, "auditorExportRequested": false, "published": false, "followUpDiff": false},
+      "expected": {"dominantAction": "attach-regression", "publishEnabled": false, "disabledReason": "regression-proof-missing"}
+    },
+    {
+      "id": "T4-combined-remote-owner",
+      "state": {"remoteFresh": false, "ownerPresent": false, "riskAccepted": true, "regressionProof": true, "auditorExportRequested": false, "published": false, "followUpDiff": false},
+      "expected": {"dominantAction": "refresh-source", "publishEnabled": false, "disabledReason": "remote-source-stale"}
+    },
+    {
+      "id": "T5-auditor-export-only",
+      "state": {"remoteFresh": true, "ownerPresent": true, "riskAccepted": true, "regressionProof": true, "auditorExportRequested": true, "published": false, "followUpDiff": false},
+      "expected": {"dominantAction": "export-auditor-copy", "publishEnabled": false, "disabledReason": "auditor-export-only"}
+    },
+    {
+      "id": "T6-published-followup",
+      "state": {"remoteFresh": true, "ownerPresent": true, "riskAccepted": true, "regressionProof": true, "auditorExportRequested": false, "published": true, "followUpDiff": true},
+      "expected": {"dominantAction": "review-follow-up-diff", "publishEnabled": false, "disabledReason": "follow-up-diff"}
+    },
+    {
+      "id": "T7-ready-publish",
+      "state": {"remoteFresh": true, "ownerPresent": true, "riskAccepted": true, "regressionProof": true, "auditorExportRequested": false, "published": false, "followUpDiff": false},
+      "expected": {"dominantAction": "publish", "publishEnabled": true, "disabledReason": null}
+    }
+  ],
+  "breakpointExpectations": {
+    "desktop-1440": {
+      "mustContain": ["state-summary", "source-evidence", "blocker-list", "action-rail"],
+      "before": [["state-summary", "action-rail"], ["source-evidence", "action-rail"]]
+    },
+    "tablet-900": {
+      "mustContain": ["state-summary", "blocker-list", "action-rail", "source-evidence"],
+      "before": [["state-summary", "action-rail"], ["blocker-list", "source-evidence"]]
+    },
+    "mobile-390": {
+      "mustContain": ["state-summary", "blocker-list", "primary-action", "secondary-evidence"],
+      "before": [["state-summary", "primary-action"], ["blocker-list", "primary-action"], ["primary-action", "secondary-evidence"]]
+    }
+  },
+  "reentryExpectations": {
+    "publishedReceipt": {"persistDuringFollowUp": true, "visibleCue": "published receipt"},
+    "followUpDiff": {"dominantAction": "review-follow-up-diff", "visibleCue": "follow-up diff"},
+    "auditorExport": {"scoped": true, "hidesOwnerOnlyNotes": true, "doesNotEnablePublish": true}
+  },
+  "pass_score_threshold_0_100": 90
+}
