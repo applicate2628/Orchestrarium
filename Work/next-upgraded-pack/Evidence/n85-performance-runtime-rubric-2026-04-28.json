@@ -1,0 +1,114 @@
+{
+  "scenario": "N85",
+  "wave": "W63",
+  "batchName": "wave63-n85-performance-runtime-2026-04-28",
+  "replacementDecision": {
+    "promotedIntoFullV2Hard": true,
+    "replacesSlot": "N59 real-repo performance cache",
+    "reason": "N85 preserves the N59 hidden correctness, measured runtime, and exact patch-scope gates, then adds a visible hard operator-output budget that is performance-lane relevant. This converts the prior PASS/PASS scored compactness edge into a binary role-fit separator."
+  },
+  "verdict": "X3 primary for compact performance hot-path work; X1 fails only the hard operator-output budget",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "primaryFailure": "operator-output-budget",
+      "operatorBudget": {
+        "workerOutputBytes": 266051,
+        "maxWorkerOutputBytes": 40000,
+        "passed": false
+      },
+      "runtime": {
+        "seconds": 0.015369,
+        "maxSeconds": 0.7,
+        "passed": true
+      },
+      "scopePassed": true,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/optimization-state.json",
+        "candidate/perf-ledger.json",
+        "candidate/workspace/src/quoteperf/engine.py",
+        "candidate/workspace/tests/test_quote_engine.py"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_19-27-57-X1-wave63-n85-performance-runtime-2026-04-28/N85/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_19-27-57-X1-wave63-n85-performance-runtime-2026-04-28/N85/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "scoreability": "scoreable",
+      "primaryFailure": null,
+      "operatorBudget": {
+        "workerOutputBytes": 1827,
+        "maxWorkerOutputBytes": 40000,
+        "passed": true
+      },
+      "runtime": {
+        "seconds": 0.014301,
+        "maxSeconds": 0.7,
+        "passed": true
+      },
+      "scopePassed": true,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/optimization-state.json",
+        "candidate/perf-ledger.json",
+        "candidate/workspace/src/quoteperf/catalog.py",
+        "candidate/workspace/src/quoteperf/engine.py",
+        "candidate/workspace/tests/test_quote_engine.py"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_19-27-57-X3-wave63-n85-performance-runtime-2026-04-28/N85/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_19-27-57-X3-wave63-n85-performance-runtime-2026-04-28/N85/meta/summary.json"
+    },
+    {
+      "rowId": "X2",
+      "modelLabel": "gpt-5.3-codex-spark",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "binary": "FAIL",
+      "scoreability": "scoreable",
+      "primaryFailure": "no patch; runtime, evidence, and scope gates failed",
+      "operatorBudget": {
+        "workerOutputBytes": 1217,
+        "maxWorkerOutputBytes": 40000,
+        "passed": true
+      },
+      "runtime": {
+        "seconds": 3.508,
+        "maxSeconds": 0.7,
+        "passed": false
+      },
+      "scopePassed": false,
+      "changedPaths": [],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_19-36-19-X2-wave63-n85-performance-runtime-fill-2026-04-28/N85/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_19-36-19-X2-wave63-n85-performance-runtime-fill-2026-04-28/N85/meta/summary.json"
+    },
+    {
+      "rowId": "X6",
+      "modelLabel": "gemini3.1flash-lite-preview",
+      "wrapperExitCode": 1,
+      "verificationPassed": false,
+      "binary": "NOT-RUN",
+      "scoreability": "runtime-route-auth",
+      "primaryFailure": "Gemini CLI UNSUPPORTED_LOCATION authentication failure before model work",
+      "operatorBudget": {
+        "workerOutputBytes": 3077,
+        "maxWorkerOutputBytes": 40000,
+        "passed": true
+      },
+      "runtime": null,
+      "scopePassed": false,
+      "changedPaths": [],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_19-36-19-X6-wave63-n85-performance-runtime-fill-2026-04-28/N85/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_19-36-19-X6-wave63-n85-performance-runtime-fill-2026-04-28/N85/meta/summary.json"
+    }
+  ]
+}

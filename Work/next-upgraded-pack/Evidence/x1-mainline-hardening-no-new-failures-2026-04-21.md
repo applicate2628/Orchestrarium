@@ -3934,3 +3934,38 @@ suppression strengthen ordinary security review versus N64, but both top rows st
 complete JSON oracle. Routing impact: ordinary single-session security review stays `X1 / X3
 near-tie`; choose `X3` when compact review output is first-class, choose `X1` when verbose
 traceability is preferred. Staged security implementation/re-entry remains `X1 primary` after N78.
+
+## 2026-04-28 Follow-Up: W63 Performance Runtime Budget
+
+`N85-performance-review-runtime-budget` replaces the weaker N59 performance-cache slot for the
+canonical `full-v2-hard /40` surface. It keeps N59's hidden quote-pricing correctness, measured
+batch runtime, evidence JSON, and exact patch-scope checks, then adds a visible hard
+`worker-output.txt <= 40000` budget. In this lane, output cost is part of the performance operator
+contract rather than a secondary style preference.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N85` JSON parse and bundle-shape verifiers | `PASS` |
+| `N85` starter verifier | expected `FAIL`; slow hot path and missing evidence |
+| `N85` synthesized valid probe in `.scratch/verifier-probes/2026-04-28-n85-performance-valid/N85/run` | verifier `PASS`; runtime `0.009939s <= 0.7s`; operator output `89 <= 40000` |
+| stale `N59` / `E49` scan inside N85 | `PASS` |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Runtime | Output budget | Changed paths | Classification |
+|---|---|---|---:|---|---:|---:|---|---|
+| `N85` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-28_19-27-57-X1-wave63-n85-performance-runtime-2026-04-28/N85/run` | `0` | `FAIL` only `check_operator_budget.py` | `0.015369s <= 0.7s` | `266051 > 40000` | five required benchmark paths | scoreable `FAIL` |
+| `N85` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-28_19-27-57-X3-wave63-n85-performance-runtime-2026-04-28/N85/run` | `0` | `PASS` | `0.014301s <= 0.7s` | `1827 <= 40000` | six accepted benchmark paths | `PASS` |
+| `N85` | `X2 / gpt-spark` | `.scratch/v2-cohort-runs/2026-04-28_19-36-19-X2-wave63-n85-performance-runtime-fill-2026-04-28/N85/run` | `0` | `FAIL` runtime/evidence/scope | `3.508s > 0.7s` | `1217 <= 40000` | none | scoreable `FAIL` |
+| `N85` | `X6 / flash-lite` | `.scratch/v2-cohort-runs/2026-04-28_19-36-19-X6-wave63-n85-performance-runtime-fill-2026-04-28/N85/run` | `1` | route/auth before model work | n/a | n/a | none | `NOT-RUN`; Gemini `UNSUPPORTED_LOCATION` |
+
+### Verdict
+
+N85 is the first promoted `full-v2-hard /40` replacement after the N79+ diagnostic series. It
+replaces N59 in `L06 systems/performance-worker`: X1 passes the hidden performance/correctness/scope
+work but scoreably fails the hard operator-output budget; X3 passes all gates compactly. Current
+top-pair canonical score becomes `X1 34 / 40` versus `X3 35 / 40`.

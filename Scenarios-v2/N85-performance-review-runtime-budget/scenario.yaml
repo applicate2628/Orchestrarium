@@ -1,0 +1,35 @@
+id: N85
+surface_id: E75
+pack_id: E75
+role_class: implementation
+artifact_type: performance hot-path patch with hidden correctness, runtime, patch-quality, and operator-output budget
+modality_family: single-session performance-sensitive implementation, hidden consumer semantics, measured runtime budget, patch-quality rubric, operator-cost gate
+allowed_change_surface:
+  - .pytest_cache/**
+  - candidate/optimization-state.json
+  - candidate/perf-ledger.json
+  - candidate/closure.json
+  - candidate/workspace/src/quoteperf/__init__.py
+  - candidate/workspace/src/quoteperf/models.py
+  - candidate/workspace/src/quoteperf/catalog.py
+  - candidate/workspace/src/quoteperf/engine.py
+  - candidate/workspace/src/quoteperf/reporting.py
+  - candidate/workspace/tests/test_quote_engine.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+score_profile: "performance-review-runtime-budget, hidden-correctness, runtime-budget, patch-quality, hard-output-budget"
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - performance-sensitive
+  - real-repo-workflow
+  - hidden-consumer
+  - runtime-budget
+  - patch-quality-rubric
+  - operator-output-budget
+  - scored-rubric
+  - binary-separator-candidate

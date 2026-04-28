@@ -21,20 +21,22 @@ This surface keeps the same `40` score-slot shape:
 
 | Row | Model/profile | Hardened `/40` | Scoreable detail | Current read |
 |---|---|---:|---|---|
-| `X1` | active `gpt-5.5` | `35 / 40` | `35 PASS`, `5 FAIL`, `0 NOT-RUN` | tied globally, but fails compact operator-budget slots |
-| `X3` | `opus 4.7max` | `35 / 40` | `35 PASS`, `5 FAIL`, `0 NOT-RUN` | tied globally, but fails staged re-entry / ledger slots |
+| `X1` | active `gpt-5.5` | `34 / 40` | `34 PASS`, `6 FAIL`, `0 NOT-RUN` | second globally after N85 replacement; fails compact operator-budget slots |
+| `X3` | `opus 4.7max` | `35 / 40` | `35 PASS`, `5 FAIL`, `0 NOT-RUN` | current top hardened row; fails staged re-entry / ledger slots |
 | `X5` | `gemini3.1pro` | `14 / 40` | `14 PASS`, `3 FAIL`, `23 NOT-RUN` | partial hardened calibration only; route/runtime unhealthy for recent waves |
 | `X2` | `gpt-spark` | `12 / 40` | `12 PASS`, `28 FAIL`, `0 NOT-RUN` | closed lower-bound row after 2026-04-26 fill run |
-| `X6` | `gemini3.1flash-lite-preview` | `13 / 40` | `13 PASS`, `19 FAIL`, `8 NOT-RUN` | partial lower-bound row; remaining slots are timeout/auth-route `NOT-RUN` after 2026-04-26 closure retry |
-| `X4` | Claude China route, `opus --effort max` | `32 / 40` | `32 PASS`, `8 FAIL`, `0 NOT-RUN` | admitted final closing comparison; weaker on staged/interface/review and UI dirty-state gates |
+| `X6` | `gemini3.1flash-lite-preview` | `13 / 40` | `13 PASS`, `18 FAIL`, `9 NOT-RUN` | partial lower-bound row; N85 is auth-route `NOT-RUN` after Gemini `UNSUPPORTED_LOCATION` |
+| `X4` | Claude China route, `opus --effort max` | `31 / 40` | `31 PASS`, `8 FAIL`, `1 NOT-RUN` | admitted final closing comparison except N85, which is held for final-only X4 rerun policy |
 
-Interpretation: the current hardened `/40` is a global tie for `X1` and `X3`, but not a role tie.
+Interpretation: the current hardened `/40` now gives `X3` a one-slot global edge over `X1` after
+N85 replaced the weaker N59 performance-cache slot. This is still a role-specific result, not a
+universal model ordering.
 `X4` is close enough to be useful as a Claude-line comparator, but it is not tied with the top pair.
 The failure classes are different:
 
 | Row | Scoreable fails inside the 40-slot surface | Failure class |
 |---|---|---|
-| `X1` | `N47`, `N48`, `N56`, `N57`, `N58` | preserved hidden semantics/physics/scope, but exceeded visible operator-output budget |
+| `X1` | `N47`, `N48`, `N56`, `N57`, `N58`, `N85` | preserved hidden semantics/physics/scope, but exceeded visible operator-output budget |
 | `X3` | `N35`, `N36`, `N37`, `N39`, `N40` | missed staged re-entry, migration ledger, source binding, owner continuity, or closure semantics |
 | `X4` | `N25`, `N35`, `N36`, `N37`, `N39`, `N40`, `N43`, `N57` | similar staged/interface/review misses plus UI dirty-state failures; `N60` completed PASS in the original batch |
 
@@ -48,7 +50,7 @@ The failure classes are different:
 | `L03 design.ui-ux-structure`          | `S08,N01,N02`     | `3/3`  | `3/3`  | `3/3`  | near-tie |
 | `L04 worker.reasoning-constraints`    | `N22,N32,N58`     | `2/3`  | `3/3`  | `3/3`  | split    |
 | `L05 worker.default-implementation`   | `N35,N36,N57`     | `2/3`  | `1/3`  | `0/3`  | split    |
-| `L06 systems/performance-worker`      | `N19,N39,N59`     | `3/3`  | `2/3`  | `2/3`  | split    |
+| `L06 systems/performance-worker`      | `N19,N39,N85`     | `2/3`  | `2/3`  | `1/3+NR` | split    |
 | `L07 worker.ui-implementation`        | `N25,N47,N60`     | `2/3`  | `3/3`  | `2/3`  | `X3`     |
 | `L08 worker.visual/graphics`          | `S22,N21,N48`     | `2/3`  | `3/3`  | `3/3`  | `X3`     |
 | `L09 review.pre-pr`                   | `S25,N03,N04`     | `3/3`  | `3/3`  | `3/3`  | near-tie |
@@ -74,7 +76,7 @@ Priority is routing priority, not abstract model quality. `P0` changes provider 
 | `L05 worker.default-implementation`   | `P0` | `X1 > X3`   | staged API/interface         |                      |
 |                                       |      | `X3 > X1`   | compact single-shot          |                      |
 | `L06 systems/performance-worker`      | `P0` | `X1 > X3`   | staged systems recovery      |                      |
-|                                       |      | `X3 > X1`   | compact perf hot path        | verify turnaround    |
+|                                       |      | `X3 > X1`   | compact perf hot path        | N85 promoted         |
 | `L07 worker.ui-implementation`        | `P0` | `X3 > X1`   | compact UI state/render      | staged X3 gap        |
 | `L08 worker.visual/graphics`          | `P0` | `X3 > X1`   | compact raster/visual patch  | N48/N60 evidence     |
 |                                       | `P1` | `X1` scored | pure image localization      | N61 diagnostic only; no binary winner |
@@ -514,7 +516,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `19` | `L05` | `N57 compact API migration` | `F` | `P` | `F` | `F` | `NR` | `NR` | `n57-compact-api-migration-rubric` |
 | `20` | `L06` | `N19 systems/toolchain` | `P` | `P` | `P` | `P` | `NR` | `F` | `n19-systems-toolchain-rubric` |
 | `21` | `L06` | `N39 staged systems recovery` | `P` | `F` | `F` | `F` | `NR` | `F` | `n39-staged-toolchain-rubric` |
-| `22` | `L06` | `N59 real-repo performance cache` | `P` | `P` | `P` | `F` | `NR` | `F` | `n59-perf-cache-rubric`; X6 fill |
+| `22` | `L06` | `N85 performance runtime budget` | `F` | `P` | `NR` | `F` | `NR` | `NR` | `n85-performance-runtime-rubric`; replaces N59 |
 | `23` | `L07` | `N25 UI dirty-state repeat` | `P` | `P` | `F` | `F` | `P` | `F` | `n25-ui-dirty-repeat-rubric`; X6 fill |
 | `24` | `L07` | `N47 UI operator-budget` | `F` | `P` | `P` | `F` | `NR` | `F` | `n47-ui-operator-budget-rubric`; X2/X6 fill |
 | `25` | `L07` | `N60 UI visual-state reentry` | `P` | `P` | `P` | `F` | `NR` | `F` | `n60-ui-reentry-rubric`; X6 fill |
@@ -550,10 +552,10 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | Need | Current primary |
 |---|---|
 | staged delivery/re-entry, staged API/interface migration, staged systems recovery, staged owner recovery, staged review/ADR gate, staged UI visual-state reentry | `X1` |
-| compact single-session implementation, compact UI/visual/raster, compact owner packet, compact real-repo API migration, compact low-noise science/runtime | `X3` |
+| compact single-session implementation, compact UI/visual/raster, compact owner packet, compact real-repo API migration, compact performance hot path, compact low-noise science/runtime | `X3` |
 | pure scientific correctness without strict output budget | `X1` / `X3` near-tie |
 | tuple-exact single-shot review/security/source investigation | `X1` / `X3` near-tie; N84 confirms exploit-reproduction security review still ties |
-| compact real-repo patch when cost matters | `X3` with patch-hygiene guard; W47 ties binary but scores X3 higher |
+| compact real-repo patch when cost matters | `X3` with patch-hygiene guard; W47 ties binary but scores X3 higher, and N85 makes compact performance hot-path work a binary X3 separator |
 | multi-file hidden-consumer migration | `X1` / `X3` binary near-tie; choose X3 for cost, X1 for hygiene |
 | small test-led regression patch | `X1` / `X3` binary near-tie; choose X3 for cost after N71 |
 | caller-spanning single-session API refactor | `X1` / `X3` binary near-tie; choose X3 for cost after N72, with explicit cache/scope hygiene guard |
@@ -574,7 +576,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 |---|---|
 | `v2-core12-tie-hardened-results-2026-04-20.md` | admitted hardened core12 slots for `S03`, `S04`, `S05`, `S06`, `S07`, `S08`, `S09`, `S25`, `S27`, `N01`, `N02`, `N03`, `N04`, `N05`, `N06` |
 | `role-fit-scorecard-v1-2026-04-22.md` | lane-fit interpretation and current hardening wave summaries |
-| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N84` |
+| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N85` |
 | `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted mainline hardening record |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` through `../Evidence/n60-ui-reentry-rubric-2026-04-24.json` | machine-readable rubric/scorer evidence for promoted diagnostic slots |
 | `../Evidence/n61-visual-pixel-localization-rubric-2026-04-25.json` | machine-readable `E51` visual pixel-localization diagnostic evidence; post-fix score favors `X1`, not promoted into `/40` |
@@ -600,5 +602,6 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n82-ux-state-rubric-2026-04-28.json` | machine-readable `W60` UX runtime-state evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/n83-interface-refactor-breakage-rubric-2026-04-28.json` | machine-readable `W61` interface-refactor breakage evidence; X1 and X3 both pass hidden batch-consumer and structured-report gates, so not promoted into `/40` |
 | `../Evidence/n84-security-repro-rubric-2026-04-28.json` | machine-readable `W62` security-review reproduction evidence; X1 and X3 both pass exact JSON repro and false-positive gates, so not promoted into `/40` |
-| `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence; `X4 / Claude China opus max` is `32 / 40` with `8` scoreable verifier failures and `0` runtime not-runs |
-| `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 fill evidence; X2 is now closed at `12 / 40`, while X6 is `13 / 40` with `8` remaining timeout/auth-route `NOT-RUN` cells |
+| `../Evidence/n85-performance-runtime-rubric-2026-04-28.json` | machine-readable `W63` performance runtime evidence; X1 fails only the hard operator-output budget after hidden runtime/scope pass, X3 passes all gates, promoted over N59 in `/40` |
+| `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence before N85 promotion; current X4 row is `31 PASS`, `8 FAIL`, `1 NOT-RUN` until N85 is run in final-only mode |
+| `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` plus `../Evidence/n85-performance-runtime-rubric-2026-04-28.json` | machine-readable X2/X6 fill evidence; X2 remains `12 / 40`, while X6 is now `13 / 40` with `9` timeout/auth-route `NOT-RUN` cells after N85 |

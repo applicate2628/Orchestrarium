@@ -26,12 +26,12 @@ External advisory check:
 
 ## Current Diagnosis
 
-`X1 / gpt-5.5` and `X3 / opus 4.7max` remain tied globally at `35 / 40`, but their failure classes
-are symmetric:
+After W63/N85 promotion, `X3 / opus 4.7max` leads the canonical hardened table by one slot:
+`35 / 40` versus `X1 / gpt-5.5` at `34 / 40`. The failure classes remain execution-shape-specific:
 
 | Row | Fails | Failure class |
 |---|---|---|
-| `X1` | `N47`, `N48`, `N56`, `N57`, `N58` | hidden semantics/physics/scope pass, visible operator-output budget fails |
+| `X1` | `N47`, `N48`, `N56`, `N57`, `N58`, `N85` | hidden semantics/physics/scope pass, visible operator-output budget fails |
 | `X3` | `N35`, `N36`, `N37`, `N39`, `N40` | staged re-entry, migration ledger, source binding, owner continuity, or closure semantics fail |
 
 Opus advisory conclusion: this symmetry is useful, but risky. It may partly encode two prompt/style
@@ -308,6 +308,7 @@ keep adding minor variants to a solved compact-output or staged-ledger family.
 | `F2` N82 UX runtime-state spec | Run the objective UX-structure state-spec separator attempt after N81. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS 100`, `X3 PASS 100`, so `binary tie remains` and no primary is assigned. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; `git diff --check`; `mcp-free`; top-pair run. |
 | `F3` N83 interface refactor breakage hunt | Run hidden batch-consumer and structured-report interface-refactor separator attempt after N82. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS`, `X3 PASS`, so `binary tie remains` and no primary is assigned for ordinary hidden-consumer refactor. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; `git diff --check`; `mcp-free`; top-pair run; runner cache-split fix. |
 | `F4` N84 security review repro gauntlet | Run exploit-reproduction and false-positive suppression separator attempt for ordinary security review. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS`, `X3 PASS`, so `binary tie remains` and no primary is assigned for ordinary single-session security review. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; stale split-brain scan; `git diff --check`; `mcp-free`; top-pair run. |
+| `F5` N85 performance runtime budget | Run compact performance hot-path replacement for N59. | `PASS` on 2026-04-28 as a completed wave and promoted replacement; `X1 FAIL`, `X3 PASS`, so L06 compact performance is X3-primary. | JSON parse; three bundle-shape verifiers; expected start-state fail; synthesized reference PASS; stale scan; `git diff --check`; `mcp-free`; X1/X3 plus X2/X6 fill. |
 | `G` promotion review | Decide whether any N79+ diagnostic replaces a weaker `/40` slot. | `PASS` only if the replacement has clearer role-fit value, stable scoring, and a named outgoing slot. | Update `full-v2-hard-results-current.md`, RF12, checkpoint, and evidence in one batch. |
 
 ## 2026-04-28 Gate Decision
@@ -384,7 +385,7 @@ Operational note: the first N83 runs exposed a v2 runner issue where top-level `
 was counted as benchmark scope drift. The runner now treats top-level `.pytest_cache/` and
 `.mypy_cache/` like nested cache directories: auxiliary generated artifacts, not model patch scope.
 
-Next concrete action: W63 `N85-performance-review-runtime-budget` or Phase `G` promotion review.
+Next concrete action: W64 promotion review only if another named `/40` replacement is needed.
 
 ## W62 Results
 
@@ -397,3 +398,14 @@ by requiring exploit-case binding and non-finding discipline, but both top rows 
 Do not keep tightening ordinary single-session security review as a separator. Keep staged security
 implementation/re-entry as `X1 primary` after N78 and use output compactness only as a secondary
 preference for ordinary security review.
+
+## W63 Results
+
+| Wave | Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Calibration | Decision |
+|---|---|---|---|---|---|
+| `W63` | `N85 performance runtime budget` | scoreable `FAIL`; hidden correctness/runtime/scope pass, hard output budget fails `266051 > 40000` | `PASS`; hidden correctness/runtime/scope and output budget pass `1827 <= 40000` | `X2 FAIL`; `X6 NOT-RUN` route/auth `UNSUPPORTED_LOCATION`; `X4` final-only and X5 parked | promote N85 over N59 in `full-v2-hard /40`; compact performance hot-path is X3-primary |
+
+Decision: W63 is the first N79+ wave promoted into the canonical `/40` table. It replaces N59
+because it preserves the same hidden performance/correctness/scope gates and turns the prior X3
+compactness edge into an explicit performance-lane acceptance contract. Current top-pair canonical
+score becomes `X1 34 / 40` versus `X3 35 / 40`.
