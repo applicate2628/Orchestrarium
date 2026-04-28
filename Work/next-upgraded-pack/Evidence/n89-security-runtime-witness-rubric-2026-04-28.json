@@ -1,0 +1,73 @@
+{
+  "scenario": "N89",
+  "wave": "W68",
+  "batchName": "wave68-n89-security-runtime-witness-v3-2026-04-28",
+  "replacementDecision": {
+    "promotedIntoFullV2Hard": false,
+    "replacesSlot": null,
+    "reason": "N89 is a diagnostic negative separator for ordinary single-session security review. Both top rows pass the hardened runtime-witness verifier, so it does not replace N06 or any canonical /40 security-review slot."
+  },
+  "admissionNotes": {
+    "admittedRun": "v3 only",
+    "discardedDebugRuns": [
+      "wave68-n89-security-runtime-witness-2026-04-28",
+      "wave68-n89-security-runtime-witness-v2-2026-04-28"
+    ],
+    "integrityHardening": [
+      "oracle JSON no longer publishes exact finding tuples or witness rows",
+      "verifier source uses opaque exact-tuple digests plus dynamic runtime execution rather than readable finding tuples",
+      "protected review-target hashes are checked on default and bundle-shape paths",
+      "false-positive cardinality is enforced",
+      "witnessMatrix rows require exact structured observed/sourceBinding objects"
+    ]
+  },
+  "verdict": "binary tie remains for security review with executable runtime witness binding",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score": 100.0,
+      "workerOutputBytes": 158078,
+      "changedPaths": [
+        "candidate/review-report.json"
+      ],
+      "auxiliaryChangedPaths": [
+        "candidate/review-target/security-depth/__pycache__/admin_api.cpython-314.pyc",
+        "candidate/review-target/security-depth/__pycache__/audit_log.cpython-314.pyc",
+        "candidate/review-target/security-depth/__pycache__/export_links.cpython-314.pyc",
+        "candidate/review-target/security-depth/__pycache__/session_tokens.cpython-314.pyc",
+        "candidate/review-target/security-depth/__pycache__/webhook_handler.cpython-314.pyc"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_22-29-33-X1-wave68-n89-security-runtime-witness-v3-2026-04-28/N89/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_22-29-33-X1-wave68-n89-security-runtime-witness-v3-2026-04-28/N89/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score": 100.0,
+      "workerOutputBytes": 1951,
+      "changedPaths": [
+        "candidate/review-report.json"
+      ],
+      "auxiliaryChangedPaths": [
+        "candidate/review-target/security-depth/__pycache__/admin_api.cpython-314.pyc",
+        "candidate/review-target/security-depth/__pycache__/audit_log.cpython-314.pyc",
+        "candidate/review-target/security-depth/__pycache__/export_links.cpython-314.pyc",
+        "candidate/review-target/security-depth/__pycache__/session_tokens.cpython-314.pyc",
+        "candidate/review-target/security-depth/__pycache__/webhook_handler.cpython-314.pyc"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_22-29-32-X3-wave68-n89-security-runtime-witness-v3-2026-04-28/N89/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_22-29-32-X3-wave68-n89-security-runtime-witness-v3-2026-04-28/N89/meta/summary.json"
+    }
+  ],
+  "postRunVerification": [
+    "current N89 verifier re-validated the admitted X1 run root with PASS",
+    "current N89 verifier re-validated the admitted X3 run root with PASS"
+  ]
+}

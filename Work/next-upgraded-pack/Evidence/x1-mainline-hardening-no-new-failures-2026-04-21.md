@@ -4073,3 +4073,41 @@ diff handling, ready-state publishing, breakpoint ordering, and re-entry persist
 runtime-state JSON contract, but both top rows satisfy it. X3 is much more compact; compactness is
 not a binary winner here because no output budget is part of N88. Keep N88 diagnostic-only; do not
 replace N02 or any canonical `/40` UX slot from this result.
+
+## 2026-04-28 Follow-Up: W68 Security Runtime Witness Review
+
+`N89-security-review-runtime-witness-gauntlet` tests whether ordinary single-session security review
+can split through executable witness binding while remaining review-only. It keeps the N84 envelope
+of one mutable `candidate/review-report.json`, then adds verifier-owned runtime probes over the
+admin, session, webhook, audit, and export target. Admission is v3 only: earlier v1/v2 debug runs
+were discarded after review found answer-key leakage and weak witness exactness.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N89` JSON parse and verifier compile | `PASS` |
+| `N89` bundle-shape verifier | `PASS` |
+| `N89` starter verifier | expected `FAIL`; report scaffold lacks findings, false positives, witness matrix, and gate decision |
+| synthesized valid probe in `.scratch/verifier-probes/2026-04-28-n89-security-runtime-witness-v3-valid/N89` | verifier `PASS`; `100.0 / 100` |
+| answer-leakage review | `PASS`; oracle JSON hides exact findings/witness rows; verifier uses opaque tuple digests plus dynamic runtime execution |
+| protected-target tamper probe | `PASS`; default/bundle-shape verifier fails on changed `candidate/review-target/security-depth/admin_api.py` |
+| false-positive cardinality probe | `PASS`; extra `B4` row fails exact `falsePositiveAvoided` count |
+| stale N84/E74 scan inside N89 | `PASS` |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Changed paths | Worker output | Classification |
+|---|---|---|---:|---|---|---:|---|
+| `N89` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-28_22-29-33-X1-wave68-n89-security-runtime-witness-v3-2026-04-28/N89/run` | `0` | `PASS`; `100.0 / 100` | `candidate/review-report.json`; verifier-created `__pycache__` classified auxiliary | `158078` bytes | `PASS` |
+| `N89` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-28_22-29-32-X3-wave68-n89-security-runtime-witness-v3-2026-04-28/N89/run` | `0` | `PASS`; `100.0 / 100` | `candidate/review-report.json`; verifier-created `__pycache__` classified auxiliary | `1951` bytes | `PASS` |
+
+### Verdict
+
+`binary tie remains` for X1 and X3 on N89. Executable runtime witness binding, exact structured
+`witnessMatrix` rows, false-positive cardinality, protected target hashes, and review-only scope
+still do not split ordinary single-session security review. X3 is much more compact, but compactness
+is not a binary winner because N89 has no output budget. Keep N89 diagnostic-only; staged security
+implementation/re-entry remains X1-primary after N78.

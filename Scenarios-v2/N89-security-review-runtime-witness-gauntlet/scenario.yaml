@@ -1,0 +1,21 @@
+id: N89
+surface_id: E79
+pack_id: E79
+role_class: review
+artifact_type: security runtime witness review JSON
+modality_family: multi-file security review with executable witness binding and false-positive runtime checks
+allowed_change_surface:
+  - candidate/review-report.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/review-target/**
+score_profile: "security-review, exact-findings, executable-witness-binding, false-positive-control, depth-gauntlet"
+overlay_flags:
+  - top-pair-role-fit
+  - security-runtime-witness
+  - exact-vulnerability-tuples
+  - executable-witness-binding
+  - false-positive-control
+  - binary-separator-candidate

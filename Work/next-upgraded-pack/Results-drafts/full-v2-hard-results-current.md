@@ -335,6 +335,20 @@ combined-failure priority, auditor export, follow-up diff, ready-state publish, 
 and re-entry persistence still do not split the top pair. Keep N88 diagnostic-only; do not replace
 N02 or any canonical UX slot from this result.
 
+## Security Runtime Witness W68 Diagnostic
+
+`N89-security-review-runtime-witness-gauntlet` tests ordinary review-only security reporting with
+executable witness binding. It is not part of the `full-v2-hard` `/40` denominator.
+
+| Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Read |
+|---|---|---|---|
+| `N89` | `PASS`; wrapper `0`; exact findings, false-positive cardinality, protected target hashes, and structured runtime witnesses pass | `PASS`; wrapper `0`; same hardened review gates pass | `binary tie remains`; X3 is compact but not a binary winner |
+
+W68 interpretation: even after removing answer-key leakage from the oracle, replacing prose witness
+claims with exact structured runtime observations, and enforcing protected review-target hashes,
+ordinary single-session security review still ties the top pair. Keep N89 diagnostic-only; use N78
+for staged security implementation/re-entry routing.
+
 ## Security Review Reproduction W62 Diagnostic
 
 `N84-security-review-repro-gauntlet` retests ordinary security review after N64 with JSON exploit
@@ -598,6 +612,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | compact single-session implementation, compact UI/visual/raster, compact owner packet, compact real-repo API migration, compact performance hot path, compact low-noise science/runtime | `X3` |
 | pure scientific correctness without strict output budget | `X1` / `X3` near-tie |
 | tuple-exact single-shot review/security/source investigation | `X1` / `X3` near-tie; N84 confirms exploit-reproduction security review still ties |
+| security review with executable runtime witness binding | `X1` / `X3` near-tie after N89; use staged security N78 when a binary X1-primary security lane is needed |
 | read-only performance-review gate | `X1` / `X3` near-tie after N87; choose X3 only when compact review output is explicitly valued |
 | UX runtime event-policy design | `X1` / `X3` near-tie after N88; hidden simulator traces beat term matching but still do not assign a binary primary |
 | compact real-repo patch when cost matters | `X3` with patch-hygiene guard; W47 ties binary but scores X3 higher, and N85 makes compact performance hot-path work a binary X3 separator |
@@ -651,5 +666,6 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n86-interface-downstream-rubric-2026-04-28.json` | machine-readable `W65` real interface downstream migration evidence; X1 passes, while X3 passes hidden downstream semantics but scoreably fails exact migration-surface scope, not promoted into `/40` |
 | `../Evidence/n87-performance-review-gate-rubric-2026-04-28.json` | machine-readable `W66` performance-review gate evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/n88-ux-runtime-policy-rubric-2026-04-28.json` | machine-readable `W67` UX runtime event-policy evidence; X1 and X3 both pass, so not promoted into `/40` |
+| `../Evidence/n89-security-runtime-witness-rubric-2026-04-28.json` | machine-readable `W68` security runtime witness review evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence before N85 promotion; current X4 row is `31 PASS`, `8 FAIL`, `1 NOT-RUN` until N85 is run in final-only mode |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` plus `../Evidence/n85-performance-runtime-rubric-2026-04-28.json` | machine-readable X2/X6 fill evidence; X2 remains `12 / 40`, while X6 is now `13 / 40` with `9` timeout/auth-route `NOT-RUN` cells after N85 |

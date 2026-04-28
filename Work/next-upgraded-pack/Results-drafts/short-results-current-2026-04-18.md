@@ -107,6 +107,12 @@ semantics but misses `api.py` scope. N87 ties on read-only performance review. N
 runtime event-policy simulation; X3 is much more compact, but no output budget is part of that
 UX design contract.
 
+W68 added `N89-security-review-runtime-witness-gauntlet` after v3 integrity hardening. Earlier
+debug versions were not admitted because review found oracle/verifier answer leakage and weak
+witness exactness. The admitted v3 run ties: `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass
+executable witness binding at `100 / 100`; X3 is much more compact, but ordinary security review
+remains top-pair near-tie.
+
 | ID | Label |
 |---|---|
 | `X1` | `gpt-5.5` active; older rows may cite `gpt-5.4` as model-of-run |
@@ -442,6 +448,7 @@ UX design contract.
 | `86` | `N86` was added on `2026-04-28` as W65 real interface downstream migration diagnostic; it is not merged into `full-v2-hard` `/40`. It removes the N57 operator-output budget and adds a hidden downstream public-app contract over root package exports, dataclass serialization, denied-without-publish, timeout retryability, duplicate non-republish, structured reporting, source-bound ledgers, review response, closeout, and exact scope. `X1 / gpt-5.5` passes. `X3 / opus 4.7max` scoreably fails only exact scope after passing hidden interface/downstream semantics: missing `candidate/workspace/src/billingmesh/api.py` | `N86 real interface downstream migration` |
 | `87` | `N87` was added on `2026-04-28` as W66 performance-review gate diagnostic; it is not merged into `full-v2-hard` `/40`. It is a read-only review gate over warm-cache benchmark contamination, cache-key context loss, global cache lifetime growth, approval-gate incompleteness, false-positive restraint, response decisions, and exact `REVISE` gate. `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass with wrapper `0`, so `binary tie remains`; X3 is much more compact (`2466` bytes versus `154170`) but not a binary winner | `N87 performance review gate` |
 | `88` | `N88` was added on `2026-04-28` as W67 UX runtime event-policy simulator diagnostic; it is not merged into `full-v2-hard` `/40`. It replaces term-matched UX JSON anchors with hidden event-policy traces for stale remote source, missing owner, missing regression proof, combined-failure priority, auditor export, follow-up diff, ready-state publishing, breakpoint ordering, and re-entry persistence. `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass with wrapper `0`, so `binary tie remains`; X3 is much more compact (`2758` bytes versus `151375`) but no output budget is part of this UX design contract | `N88 UX runtime event-policy simulator` |
+| `89` | `N89` was added on `2026-04-28` as W68 security runtime witness review diagnostic; it is not merged into `full-v2-hard` `/40`. It keeps a review-only `candidate/review-report.json` surface and adds verifier-owned executable witnesses, exact structured `witnessMatrix` rows, protected review-target hashes, and exact false-positive cardinality. Admitted v3 result: `X1 / gpt-5.5` and `X3 / opus 4.7max` both pass with wrapper `0`, so `binary tie remains`; X3 is much more compact (`1951` bytes versus `158078`) but no output budget is part of this security-review contract | `N89 security runtime witness review` |
 
 ## Source
 
@@ -534,5 +541,6 @@ UX design contract.
 | `../Evidence/n86-interface-downstream-rubric-2026-04-28.json` | machine-readable W65 real interface downstream migration evidence; X1 passes, while X3 passes hidden downstream semantics but scoreably fails exact migration-surface scope |
 | `../Evidence/n87-performance-review-gate-rubric-2026-04-28.json` | machine-readable W66 performance-review gate evidence; X1 and X3 both pass, so `binary tie remains` |
 | `../Evidence/n88-ux-runtime-policy-rubric-2026-04-28.json` | machine-readable W67 UX runtime event-policy evidence; X1 and X3 both pass, so `binary tie remains` |
+| `../Evidence/n89-security-runtime-witness-rubric-2026-04-28.json` | machine-readable W68 security runtime witness review evidence; X1 and X3 both pass, so `binary tie remains` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 full-v2-hard closing comparison evidence |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 full-v2-hard fill evidence |
