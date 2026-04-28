@@ -1,0 +1,4 @@
+$ git diff --name-only origin/main...HEAD
+docs/README.md
+docs/migration-status.md
+docs/adr/ADR-025-legacy-linear-rollback-draft.md

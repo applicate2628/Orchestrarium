@@ -304,7 +304,8 @@ keep adding minor variants to a solved compact-output or staged-ledger family.
 | `C` N79 run | Run `X1` and `X3` only. | `PASS` on 2026-04-28; both rows scoreable. `X1 PASS 96`; `X3 FAIL 63`. | Read `summary.json`, verifier logs, scorer JSON; update live evidence. |
 | `D` N80 materialization | Build calibrated screenshot-grounding visual review v2. | `PASS` on 2026-04-28; nonzero `22 px` window, false-positive traps, threshold scorer, start-state fail, and reference PASS validated. | Image/oracle validation; local scorer probe; `git diff --check`. |
 | `E` N80 run | Run `X1` and `X3` only. | `PASS` on 2026-04-28; `X1 PASS 82`, `X3 FAIL 63`, both wrapper `0`. | Same as phase `C`. |
-| `F` next P1 wave | Pick `N81`, `N82`, or `N83` based on which RF line remains least resolved after N79/N80. | `NEXT`; current best next axis is `N81` repo evidence-conflict/action-plan unless UX spec is prioritized manually. | Pre-run protocol plus live evidence update. |
+| `F` N81 repo evidence-conflict/action-plan | Run the next advisory repo-understanding separator attempt after N79/N80. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS 100`, `X3 PASS 100`, so `binary tie remains` and no primary is assigned. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; `git diff --check`; `mcp-free`; top-pair run. |
+| `F2` next P1 wave | Pick `N82` or `N83` based on which RF line remains least resolved after N81. | `NEXT`; current best next axis is `N82` UX structure/runtime-state spec unless interface-refactor breakage is prioritized manually. | Pre-run protocol plus live evidence update. |
 | `G` promotion review | Decide whether any N79+ diagnostic replaces a weaker `/40` slot. | `PASS` only if the replacement has clearer role-fit value, stable scoring, and a named outgoing slot. | Update `full-v2-hard-results-current.md`, RF12, checkpoint, and evidence in one batch. |
 
 ## 2026-04-28 Gate Decision
@@ -338,5 +339,18 @@ N80 is the better separator because it uses deterministic image generation, a no
 window, semantic defect tuples, false-positive traps, and a pass threshold. Both wrappers exited `0`,
 so X3's failure is scoreable.
 
-Next concrete action: Phase `F`, materialize `N81-evidence-conflict-repo-action-plan` unless the next
-manual priority switches to `N82` UX state/breakpoint specification or `N83` interface-refactor breakage.
+Completed follow-up: Phase `F` materialized and ran `N81-evidence-conflict-repo-action-plan`.
+
+## W59 Results
+
+| Wave | Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Calibration | Decision |
+|---|---|---|---|---|---|
+| `W59` | `N81 evidence-conflict repo action plan` | `PASS`; `100 / 100`; `24 / 24` matched; exact changed path `candidate/action-plan.md` | `PASS`; `100 / 100`; `24 / 24` matched; exact changed path `candidate/action-plan.md` | not launched by policy; `X4` final-only and Gemini parked | `binary tie remains`; repo-understanding/action-plan stays near-tie |
+
+Decision: W59 does not separate X1/X3. It is useful negative evidence: a stricter single-shot
+source-authority/action-plan table is still solved by both top rows. The X3 worker also called out a
+substring-gaming weakness in literal forbidden-snippet checks, so the next advisory hardening should
+use decision-context or staged review gates rather than another broad literal trap.
+
+Next concrete action: Phase `F2`, materialize `N82-ux-structure-runtime-state-spec` unless the manual
+priority switches to `N83-interface-refactor-breakage-hunt`.

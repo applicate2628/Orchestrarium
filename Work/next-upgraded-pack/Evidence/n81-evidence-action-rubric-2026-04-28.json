@@ -1,0 +1,37 @@
+{
+  "scenario": "N81",
+  "wave": "W59",
+  "batchName": "w59-n81-evidence-action-2026-04-28",
+  "verdict": "binary tie remains",
+  "note": "Both top-pair rows passed. N81 is retained as a hardening/tie datapoint, not a separator; X3 worker output explicitly noted substring-gaming pressure, so future evidence-conflict oracles should prefer decision-context checks over forbidden literal snippets.",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score_0_100": 100.0,
+      "matched": "24/24",
+      "changedPaths": [
+        "candidate/action-plan.md"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_17-33-47-X1-w59-n81-evidence-action-2026-04-28/N81/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_17-33-47-X1-w59-n81-evidence-action-2026-04-28/N81/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score_0_100": 100.0,
+      "matched": "24/24",
+      "changedPaths": [
+        "candidate/action-plan.md"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_17-33-47-X3-w59-n81-evidence-action-2026-04-28/N81/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_17-33-47-X3-w59-n81-evidence-action-2026-04-28/N81/meta/summary.json"
+    }
+  ]
+}

@@ -3797,3 +3797,38 @@ Role-fit read: actual screenshot grounding is no longer just the earlier non-bin
 When calibrated pixel windows, semantic defect tuples, and false-positive traps are first-class, X1 is
 the current primary for screenshot grounding. Compact visual/raster code patches remain X3-primary only
 when low-noise/operator budget is the hard gate.
+
+## 2026-04-28 Follow-Up: W59 Evidence Conflict Repo Action Plan
+
+`N81-evidence-conflict-repo-action-plan` tests whether a repo-understanding advisory task can split
+the top pair when the candidate must reconcile current code/tests, command output, an accepted ADR,
+stale docs, a mixed migration note, and a draft rollback ADR into a bounded action plan.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N81` JSON parse for oracle/schema | `PASS` |
+| `N81` bundle-shape verifier | `PASS` |
+| `N81` starter verifier | expected `FAIL`; no required action-plan sections |
+| `N81` synthesized reference probe in `.scratch/verifier-probes/2026-04-28-n81-evidence-action/valid-action-plan.md` | verifier `PASS`; `24 / 24`, `100 / 100` |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Matched | Changed paths | Primary failure |
+|---|---|---|---:|---|---:|---:|---|---|
+| `N81` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-28_17-33-47-X1-w59-n81-evidence-action-2026-04-28/N81/run` | `0` | `PASS` | `100 / 100` | `24 / 24` | `candidate/action-plan.md` | none |
+| `N81` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-28_17-33-47-X3-w59-n81-evidence-action-2026-04-28/N81/run` | `0` | `PASS` | `100 / 100` | `24 / 24` | `candidate/action-plan.md` | none |
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3` on the N81 repo-understanding/action-plan task. Both rows
+produce the exact source-authority, conflict-ledger, command-evidence, action-plan, non-claim, and
+re-intake structure. N81 is retained as negative separator evidence for `advisory.repo-understanding`;
+it does not assign a primary.
+
+Verifier note: the X3 worker output explicitly observed that forbidden literal snippets can be
+gamed with inserted tokens. Future evidence-conflict scenarios should prefer decision-context checks
+and table-specific stale-claim assertions over broad literal substring traps.

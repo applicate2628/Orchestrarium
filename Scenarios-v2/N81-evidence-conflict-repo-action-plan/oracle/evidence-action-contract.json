@@ -1,0 +1,276 @@
+{
+  "contractId": "N81-E71-evidence-conflict-repo-action-plan",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/action-plan.md",
+    "candidate/repo-snapshot/src/retry_runtime.py",
+    "candidate/repo-snapshot/src/export_plan.py",
+    "candidate/repo-snapshot/tests/test_retry_runtime.py",
+    "candidate/repo-snapshot/docs/README.md",
+    "candidate/repo-snapshot/docs/adr/ADR-022-retry-policy-v3.md",
+    "candidate/repo-snapshot/docs/adr/ADR-025-legacy-linear-rollback-draft.md",
+    "candidate/repo-snapshot/docs/migration-status.md",
+    "candidate/repo-snapshot/commands/pytest.txt",
+    "candidate/repo-snapshot/commands/docs-check.txt",
+    "candidate/repo-snapshot/commands/branch-diff.txt",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/source-authority.md",
+    "oracle/README.md",
+    "oracle/evidence-action-contract.json",
+    "oracle/expected-ledger.md",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_evidence_conflict_action_plan.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N81",
+    "surface_id": "E71",
+    "pack_id": "E71",
+    "role_class": "advisory",
+    "artifact_type": "conflicting evidence repo action plan",
+    "modality_family": "repo-understanding with stale docs, accepted ADRs, draft rollback ADRs, command evidence, source authority, non-claim control, and re-intake boundary",
+    "allowed_change_surface": [
+      "candidate/action-plan.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/repo-snapshot/**"
+    ],
+    "score_profile": "repo-understanding, source-ranking, command-evidence, bounded-action-plan, re-intake-boundary, scored-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "conflicting-evidence",
+      "source-authority",
+      "command-evidence",
+      "false-claim-control",
+      "re-intake-boundary",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/action-plan.md"
+  ],
+  "editable_report": "candidate/action-plan.md",
+  "required_report_sections": [
+    "## Source Authority",
+    "## Evidence Conflict Ledger",
+    "## Command Evidence",
+    "## Action Plan",
+    "## Non-Claims",
+    "## Re-Intake Trigger"
+  ],
+  "source_authority_header": ["Rank", "Source", "Status", "Why"],
+  "conflict_ledger_header": ["#", "Claim", "Current evidence", "Conflicting evidence", "Decision", "Action"],
+  "command_evidence_header": ["Command", "Observed status", "Implication", "Action"],
+  "action_plan_header": ["Owner", "Files", "Change type", "Gate", "Do not do"],
+  "non_claims_header": ["#", "Non-claim", "Reason"],
+  "exact_counts": {
+    "source_authority": 5,
+    "conflict_ledger": 6,
+    "command_evidence": 3,
+    "action_plan": 4,
+    "non_claims": 5
+  },
+  "required_source_authority": [
+    {
+      "rank": 1,
+      "source_terms": ["current code", "tests"],
+      "status_terms": ["authoritative", "current"],
+      "why_terms": ["retry_runtime.py", "export_plan.py", "test_retry_runtime.py"]
+    },
+    {
+      "rank": 2,
+      "source_terms": ["command", "output"],
+      "status_terms": ["observed", "current"],
+      "why_terms": ["pytest.txt", "docs-check.txt", "branch-diff.txt"]
+    },
+    {
+      "rank": 3,
+      "source_terms": ["ADR-022"],
+      "status_terms": ["accepted"],
+      "why_terms": ["retry-policy-v3", "product re-intake"]
+    },
+    {
+      "rank": 4,
+      "source_terms": ["migration-status"],
+      "status_terms": ["mixed", "stale"],
+      "why_terms": ["2026-02-03", "verify"]
+    },
+    {
+      "rank": 5,
+      "source_terms": ["README", "ADR-025"],
+      "status_terms": ["stale", "draft"],
+      "why_terms": ["not accepted", "contradict"]
+    }
+  ],
+  "required_conflicts": [
+    {
+      "id": "C1",
+      "claim_terms": ["policy", "version", "algorithm"],
+      "current_terms": ["retry_runtime.py:3", "retry_runtime.py:4", "ADR-022"],
+      "conflicting_terms": ["README.md:3", "ADR-025"],
+      "decision_terms": ["retry-policy-v3", "bounded-exponential", "current"],
+      "action_terms": ["docs", "sync", "no runtime patch"]
+    },
+    {
+      "id": "C2",
+      "claim_terms": ["owner", "SRE", "ingestion"],
+      "current_terms": ["retry_runtime.py:5", "ADR-022"],
+      "conflicting_terms": ["README.md:3"],
+      "decision_terms": ["sre-reliability", "owns"],
+      "action_terms": ["README", "migration-status", "owner"]
+    },
+    {
+      "id": "C3",
+      "claim_terms": ["attempts", "backoff", "delay"],
+      "current_terms": ["retry_runtime.py:6", "retry_runtime.py:7", "test_retry_runtime.py:10"],
+      "conflicting_terms": ["README.md:5"],
+      "decision_terms": ["4", "75", "150", "300"],
+      "action_terms": ["docs", "product re-intake"]
+    },
+    {
+      "id": "C4",
+      "claim_terms": ["hidden", "export", "auditor"],
+      "current_terms": ["export_plan.py:4", "test_retry_runtime.py:17"],
+      "conflicting_terms": ["README.md:7", "docs-check.txt"],
+      "decision_terms": ["auditor", "visible-and-hidden"],
+      "action_terms": ["docs", "no code patch"]
+    },
+    {
+      "id": "C5",
+      "claim_terms": ["pytest", "docs-check", "failure"],
+      "current_terms": ["pytest.txt", "docs-check.txt"],
+      "conflicting_terms": ["docs/README.md", "stale"],
+      "decision_terms": ["tests pass", "docs-check fails", "documentation"],
+      "action_terms": ["fix docs", "do not rewrite tests"]
+    },
+    {
+      "id": "C6",
+      "claim_terms": ["rollback", "legacy-linear", "ADR-025"],
+      "current_terms": ["ADR-022", "retry_runtime.py:20"],
+      "conflicting_terms": ["ADR-025", "README.md:9"],
+      "decision_terms": ["draft", "not accepted", "do not set"],
+      "action_terms": ["archive", "re-intake", "no rollback"]
+    }
+  ],
+  "required_command_evidence": [
+    {
+      "command_terms": ["pytest", "test_retry_runtime.py"],
+      "status_terms": ["4 passed", "PASS"],
+      "implication_terms": ["runtime", "retry-policy-v3", "auditor"],
+      "action_terms": ["no runtime patch"]
+    },
+    {
+      "command_terms": ["docs_check", "docs-check"],
+      "status_terms": ["FAIL", "docs/README.md"],
+      "implication_terms": ["docs", "stale", "retry-policy-v3"],
+      "action_terms": ["docs", "sync"]
+    },
+    {
+      "command_terms": ["git diff", "origin/main"],
+      "status_terms": ["docs/README.md", "migration-status", "ADR-025"],
+      "implication_terms": ["docs", "ADR"],
+      "action_terms": ["keep", "bounded"]
+    }
+  ],
+  "required_action_plan": [
+    {
+      "owner_terms": ["sre", "docs"],
+      "files_terms": ["docs/README.md", "docs/migration-status.md"],
+      "change_terms": ["documentation", "evidence-sync"],
+      "gate_terms": ["docs-check"],
+      "do_not_terms": ["runtime", "patch"]
+    },
+    {
+      "owner_terms": ["architecture", "ADR"],
+      "files_terms": ["ADR-025"],
+      "change_terms": ["draft", "not accepted"],
+      "gate_terms": ["architecture", "review"],
+      "do_not_terms": ["accepted", "legacy-linear"]
+    },
+    {
+      "owner_terms": ["qa", "sre"],
+      "files_terms": ["pytest.txt", "docs-check.txt"],
+      "change_terms": ["verify", "evidence"],
+      "gate_terms": ["pytest", "docs-check"],
+      "do_not_terms": ["rewrite tests", "stale docs"]
+    },
+    {
+      "owner_terms": ["product"],
+      "files_terms": ["none", "re-intake"],
+      "change_terms": ["semantic", "decision"],
+      "gate_terms": ["product", "re-intake"],
+      "do_not_terms": ["silently", "runtime"]
+    }
+  ],
+  "required_non_claims": [
+    {
+      "id": "N1",
+      "non_claim_terms": ["legacy-linear", "current"],
+      "reason_terms": ["README", "ADR-025", "stale", "draft"]
+    },
+    {
+      "id": "N2",
+      "non_claim_terms": ["ADR-025", "accepted"],
+      "reason_terms": ["draft", "not accepted"]
+    },
+    {
+      "id": "N3",
+      "non_claim_terms": ["runtime", "bug"],
+      "reason_terms": ["pytest", "4 passed", "docs-check"]
+    },
+    {
+      "id": "N4",
+      "non_claim_terms": ["hidden", "exports", "disabled"],
+      "reason_terms": ["auditor", "visible-and-hidden"]
+    },
+    {
+      "id": "N5",
+      "non_claim_terms": ["product", "approval", "semantics"],
+      "reason_terms": ["re-intake", "ADR-022"]
+    }
+  ],
+  "required_reintake_terms": [
+    "product re-intake",
+    "retry attempts",
+    "backoff",
+    "owner",
+    "hidden export",
+    "customer-visible",
+    "before implementation"
+  ],
+  "prohibited_report_snippets": [
+    "legacy-linear is current",
+    "patch runtime",
+    "adr-025 is accepted",
+    "hidden exports are disabled",
+    "ingestion owns retry policy",
+    "set retry_policy=legacy-linear"
+  ],
+  "pass_score_threshold_0_100": 90
+}

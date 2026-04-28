@@ -440,7 +440,7 @@ fallback diagnostic also timed out after `240s`.
 | `../Evidence/x1-x3-top-pair-rubric-e3-2026-04-20.md` | diagnostic `E3` rubric evidence |
 | `../Evidence/x1-control-plane-override-rerun-s16-s19-s20-2026-04-20.md` | targeted `X1` rerun evidence for `S16`, `S19`, and `S20` |
 | `../Evidence/separator-audit-2026-04-21.md` | factual audit of answer-leakage, verifier strictness, and separation potential across all 43 scenarios; motivates the N06 tuple-exact hardening |
-| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, and N14..N80 hardening sections |
+| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, and N14..N81 hardening sections |
 | `../Evidence/n16-long-horizon-rubric-2026-04-22.json` | machine-readable N16 scored-rubric output for admitted `X1` and `X3` runs |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` | machine-readable N17 owner-orchestration scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs |
 | `../Evidence/n18-scientist-constraints-rubric-2026-04-22.json` | machine-readable N18 scientist/constraints scored-rubric output for admitted `X1`, `X2`, `X3`, partial-route `X6`, and timeout `X5` runs |
@@ -502,5 +502,6 @@ fallback diagnostic also timed out after `240s`.
 | `../Evidence/n78-staged-security-rubric-2026-04-25.json` | machine-readable W56 staged security re-entry evidence |
 | `../Evidence/n79-staged-ui-reentry-rubric-2026-04-28.json` | machine-readable W57 staged UI visual-state reentry evidence |
 | `../Evidence/n80-screenshot-grounding-rubric-2026-04-28.json` | machine-readable W58 calibrated screenshot-grounding evidence |
+| `../Evidence/n81-evidence-action-rubric-2026-04-28.json` | machine-readable W59 evidence-conflict action-plan evidence; X1 and X3 both pass `24 / 24`, so `binary tie remains` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 full-v2-hard closing comparison evidence |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 full-v2-hard fill evidence |

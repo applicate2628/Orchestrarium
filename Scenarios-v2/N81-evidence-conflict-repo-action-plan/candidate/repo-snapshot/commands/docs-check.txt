@@ -1,0 +1,5 @@
+$ python tools/docs_check.py
+FAIL docs/README.md: stale retry policy label `legacy-linear`; expected `retry-policy-v3`.
+FAIL docs/README.md: stale owner `ingestion-team`; expected `sre-reliability`.
+FAIL docs/README.md: stale hidden-row export statement; auditor hidden-row export is allowed.
+exit status 1

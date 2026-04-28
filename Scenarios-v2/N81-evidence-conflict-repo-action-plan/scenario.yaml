@@ -1,0 +1,24 @@
+id: N81
+surface_id: E71
+pack_id: E71
+role_class: advisory
+artifact_type: conflicting evidence repo action plan
+modality_family: repo-understanding with stale docs, accepted ADRs, draft rollback ADRs, command evidence, source authority, non-claim control, and re-intake boundary
+allowed_change_surface:
+  - candidate/action-plan.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/repo-snapshot/**
+score_profile: "repo-understanding, source-ranking, command-evidence, bounded-action-plan, re-intake-boundary, scored-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - conflicting-evidence
+  - source-authority
+  - command-evidence
+  - false-claim-control
+  - re-intake-boundary
+  - scored-rubric
+  - binary-separator-candidate
