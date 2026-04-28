@@ -1,0 +1,65 @@
+{
+  "scenarioId": "N80",
+  "generatedAtUtc": "2026-04-28T14:24:08.113919+00:00",
+  "results": [
+    {
+      "rowId": "X1",
+      "scenarioId": "N80",
+      "model": "gpt-5.5",
+      "binary": "PASS",
+      "scoreable": true,
+      "runtimeReason": null,
+      "wrapperExitCode": 0,
+      "verifierExitCode": 0,
+      "score_0_100": 82.0,
+      "matched_count": 8,
+      "expected_count": 10,
+      "mean_error_px": 2.855,
+      "max_error_px": 7.071,
+      "false_positive_count": 0,
+      "failures": [],
+      "unmatched_expected": [
+        "F04",
+        "F07"
+      ],
+      "outputBytes": 26503,
+      "elapsedSeconds": 35.994,
+      "summary": ".scratch\\visual-localization-runs\\2026-04-28_17-14-34-w58-n80-screenshot-grounding-2026-04-28-rerun\\summary.json",
+      "workerOutput": ".scratch\\visual-localization-runs\\2026-04-28_17-14-34-w58-n80-screenshot-grounding-2026-04-28-rerun\\X1\\worker-output.txt",
+      "metrics": ".scratch\\visual-localization-runs\\2026-04-28_17-14-34-w58-n80-screenshot-grounding-2026-04-28-rerun\\X1\\metrics.json",
+      "verifyLog": ".scratch\\visual-localization-runs\\2026-04-28_17-14-34-w58-n80-screenshot-grounding-2026-04-28-rerun\\X1\\verify.txt"
+    },
+    {
+      "rowId": "X3",
+      "scenarioId": "N80",
+      "model": "opus 4.7max",
+      "binary": "FAIL",
+      "scoreable": true,
+      "runtimeReason": null,
+      "wrapperExitCode": 0,
+      "verifierExitCode": 1,
+      "score_0_100": 63.0,
+      "matched_count": 7,
+      "expected_count": 10,
+      "mean_error_px": 8.067,
+      "max_error_px": 17.117,
+      "false_positive_count": 1,
+      "failures": [
+        "false-positives:header ornament",
+        "matched-below-threshold-7-8",
+        "score-below-threshold-63.0-80.0"
+      ],
+      "unmatched_expected": [
+        "F02",
+        "F09",
+        "F10"
+      ],
+      "outputBytes": 2755,
+      "elapsedSeconds": 53.06,
+      "summary": ".scratch\\visual-localization-runs\\2026-04-28_17-14-34-w58-n80-screenshot-grounding-2026-04-28-rerun\\summary.json",
+      "workerOutput": ".scratch\\visual-localization-runs\\2026-04-28_17-14-34-w58-n80-screenshot-grounding-2026-04-28-rerun\\X3\\worker-output.txt",
+      "metrics": ".scratch\\visual-localization-runs\\2026-04-28_17-14-34-w58-n80-screenshot-grounding-2026-04-28-rerun\\X3\\metrics.json",
+      "verifyLog": ".scratch\\visual-localization-runs\\2026-04-28_17-14-34-w58-n80-screenshot-grounding-2026-04-28-rerun\\X3\\verify.txt"
+    }
+  ]
+}

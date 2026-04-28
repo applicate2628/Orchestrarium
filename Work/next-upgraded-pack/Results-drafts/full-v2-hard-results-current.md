@@ -112,6 +112,7 @@ Current visual split:
 | compact visual/raster code patch | `X3` first under N48/N60 benchmark evidence |
 | staged UI/visual-state delivery | `X1` has the staged scoreable evidence; single-session N60 favors `X3` by cost |
 | pure image localization / tiny object pick | no binary winner; post-fix N61 gives `X1` a scored edge over `X3` and `X6`, while X5 is route-unhealthy |
+| calibrated actual screenshot grounding | `X1` after N80; N68's earlier X3 edge is superseded for calibrated screenshot work |
 
 ## Frame-Inversion W41 Diagnostic
 
@@ -229,9 +230,22 @@ Calibration rows:
 |---|---|---|---|
 | `N68` | `NOT-RUN`; current visual runner has no X2 vision route | `FAIL`; `20 / 100`; coordinates scaled/misaligned | not run; Pro smoke timed out after `264s` with no output |
 
-W46 interpretation: do not assign a binary visual-review primary. Keep N65 as ordinary visual-review
-near-tie, keep N61 as pure pixel-localization diagnostic, and use N68 as actual-screenshot
-coordinate-grounding evidence favoring X3 by scored fit only.
+W46 interpretation: do not assign a binary visual-review primary from N68 alone. N68 remains
+historical loose screenshot-review context, not the current calibrated screenshot-grounding read.
+
+## Calibrated Screenshot Grounding W58 Diagnostic
+
+`N80-screenshot-grounding-review-v2` repeats actual screenshot grounding with deterministic image
+generation, ten semantic visual-defect tuples, a nonzero `22 px` coordinate window, false-positive
+traps, and a threshold scorer. It is not part of the `full-v2-hard` `/40` denominator.
+
+| Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Read |
+|---|---|---|---|
+| `N80` | `PASS`; `82 / 100`; `8 / 10`; mean/max `2.855 / 7.071 px` | `FAIL`; `63 / 100`; `7 / 10`; mean/max `8.067 / 17.117 px`; one false-positive header ornament | scoreable X1-over-X3 calibrated screenshot-grounding separator |
+
+W58 interpretation: actual screenshot grounding is `X1 primary` when calibrated pixel windows,
+semantic defect tuples, and false-positive traps are hard verifier requirements. Keep N65 as ordinary
+visual-review near-tie and keep N61 as pure pixel-localization diagnostic.
 
 ## Real-Repo Patch Quality W47 Diagnostic
 
@@ -486,6 +500,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | DOM event runtime UI correctness without strict output budget | `X1` / `X3` binary near-tie after N73; verify behavior on the target UI |
 | DOM event runtime UI with strict output budget | `X3` primary after N74; X1 preserves runtime semantics but fails visible output budget |
 | staged UI visual-state reentry | `X1` primary after N79; X3 completes the staged route but fails hidden state/accessibility/layout/raster/ledger/closure gates |
+| calibrated actual screenshot grounding | `X1` primary after N80; X3 misses the match threshold and flags a false-positive header ornament |
 | single-session persisted-state replay migration | `X1` / `X3` binary near-tie after N75; X2 also passes, so harden via staged re-entry or real repo constraints before assigning a primary |
 | staged persisted-state replay migration | `X1` primary after N76; X3 fails runtime/schema/artifact contracts and X2 fails exact staged scope |
 | single-session security implementation patch | `X1` / `X3` binary near-tie after N77; X3 has scored compactness edge, but no semantic security primary |
@@ -499,7 +514,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 |---|---|
 | `v2-core12-tie-hardened-results-2026-04-20.md` | admitted hardened core12 slots for `S03`, `S04`, `S05`, `S06`, `S07`, `S08`, `S09`, `S25`, `S27`, `N01`, `N02`, `N03`, `N04`, `N05`, `N06` |
 | `role-fit-scorecard-v1-2026-04-22.md` | lane-fit interpretation and current hardening wave summaries |
-| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N79` |
+| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N80` |
 | `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted mainline hardening record |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` through `../Evidence/n60-ui-reentry-rubric-2026-04-24.json` | machine-readable rubric/scorer evidence for promoted diagnostic slots |
 | `../Evidence/n61-visual-pixel-localization-rubric-2026-04-25.json` | machine-readable `E51` visual pixel-localization diagnostic evidence; post-fix score favors `X1`, not promoted into `/40` |
@@ -520,5 +535,6 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n77-security-capability-rubric-2026-04-25.json` | machine-readable `W55` security capability runtime patch evidence; X1 and X3 both pass hidden exploit gates, X2 fails scoreably, X6 is runtime no-summary, not promoted into `/40` |
 | `../Evidence/n78-staged-security-rubric-2026-04-25.json` | machine-readable `W56` staged security re-entry evidence; X1 passes, X3 fails scoreably, X2 fails scoreably, X6 is runtime no-summary, not promoted into `/40` |
 | `../Evidence/n79-staged-ui-reentry-rubric-2026-04-28.json` | machine-readable `W57` staged UI visual-state reentry evidence; X1 passes, X3 fails scoreably, X4/Gemini not run by policy, not promoted into `/40` |
+| `../Evidence/n80-screenshot-grounding-rubric-2026-04-28.json` | machine-readable `W58` calibrated screenshot-grounding evidence; X1 passes, X3 fails scoreably, X4/Gemini not run by policy, not promoted into `/40` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence; `X4 / Claude China opus max` is `32 / 40` with `8` scoreable verifier failures and `0` runtime not-runs |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 fill evidence; X2 is now closed at `12 / 40`, while X6 is `13 / 40` with `8` remaining timeout/auth-route `NOT-RUN` cells |

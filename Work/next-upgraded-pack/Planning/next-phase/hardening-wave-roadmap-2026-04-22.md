@@ -340,6 +340,7 @@ model fail.
 43. Materialize and run `N59-realrepo-perf-cache-budget` as W39/E49. `DONE` on 2026-04-24; `X1 PASS 90`, `X3 PASS 100`; `binary tie remains` on hidden semantics, runtime budget, exact scope, and evidence gates, but X3 wins cost/compactness and measured scorer runtime. `X2` fails scoreably (`50 / 100`), `X6` is runtime no-summary, and X5 Gemini Pro quota probes timed out without an explicit quota error.
 44. Materialize and run `N60-ui-visual-state-reentry-packet` as W40/E50. `DONE` on 2026-04-24; `X1 PASS 96`, `X3 PASS 100`; `binary tie remains` on hidden UI state, ARIA/status, layout, raster, ledger, closure, test, and exact scope, but X3 wins cost/compactness. `X2` fails scoreably (`10 / 100`) after making no patch, and `X6` is runtime no-summary.
 45. Materialize and run `N79-staged-ui-visual-state-reentry-v2` as W57/E69. `DONE` on 2026-04-28; `X1 PASS 96`, `X3 FAIL 63`; scoreable staged UI/visual-state separator. X3 passed scope and phase-path discipline but failed hidden state/accessibility/layout/raster/ledger/closure gates.
+46. Materialize and run `N80-screenshot-grounding-review-v2` as W58/E70. `DONE` on 2026-04-28; `X1 PASS 82`, `X3 FAIL 63`; scoreable calibrated screenshot-grounding separator with `22 px` windows, semantic defect tuples, and false-positive traps.
 
 ## Current Routing Impact
 
@@ -352,6 +353,7 @@ model fail.
 | real-repo performance hot path | `X1` and `X3` both pass `N59` hidden correctness, runtime, scope, and evidence gates; X3 wins scored fit (`100` vs `90`) because it stays compact (`2653` vs `336382` output bytes) and measures faster in scorer rechecks | use X3 for compact single-session performance patches when low-noise operation matters; keep X1 viable when verbose trace and self-explanation are desired |
 | systems/toolchain staged recovery re-entry | `X1 primary` after bounded `N39` produced `X1 PASS 94 / 100` versus `X3 FAIL 78 / 100`; `X2` and `X6` also fail scoreably and `X5` is route-fail | strong enough for staged systems/toolchain routing; next repeat should be a real repo toolchain workflow only if policy needs extra confirmation |
 | UI implementation | split by execution shape: `X3` primary versus `X1` for compact single-session UI after `N20`, `N25`, `N47`, `N60`, and `N74`; `N79` replaces brittle `N38` and gives a scoreable staged UI/visual-state separator (`X1 PASS 96`, `X3 FAIL 63`) | use X3 for compact single-session UI, especially when low-noise/operator budget is explicit; use X1 for staged UI/visual-state reentry, source/state ledger, reentry closeout, and hidden accessibility/layout/raster accountability |
+| actual screenshot grounding | `X1 primary` after calibrated `N80` produced `X1 PASS 82 / 100` versus `X3 FAIL 63 / 100`; N68's earlier loose actual-screenshot result stays non-binary historical context | use X1 when pixel windows, semantic defect tuples, and false-positive traps are hard verifier requirements; do not promote X5/Gemini until route health returns |
 | owner recovery staged re-entry | `X1 primary` after `N40` produced `X1 PASS 98 / 100` versus `X3 FAIL 55 / 100` | strong enough for staged owner routing; next repeat should be a real repo owner workflow only if policy needs extra confirmation |
 | incident-budget staged re-entry | `X1 primary` after `N41` produced `X1 PASS 100 / 100` versus `X3 FAIL 78 / 100` | strong enough for staged incident-budget routing; next repeat should be a real repo repair workflow only if policy needs extra confirmation |
 | scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, `N31`, `N32`, `N34`, and `N49`; `N58` adds a compact low-noise science/runtime separator because X1 passes physics/runtime/scope but fails visible output budget while X3 passes all gates | co-primary for scientific correctness; use `X3` when compact operator-output is a hard requirement; use fresh measured runtime for true solver-speed decisions |
@@ -366,8 +368,8 @@ Source design/plan: `rf12-primary-resolution-plan-2026-04-25.md`.
 | Wave | Status | Scenario | Primary Question | Run Policy | Gate |
 |---|---|---|---|---|---|
 | `W57` | `DONE` | `N79-staged-ui-visual-state-reentry-v2` | Can staged UI/visual-state work produce scoreable X1/X3 evidence without N38-style no-summary runtime noise? | Ran `X1` and `X3`; no `X4`; Gemini rows parked. | `X1 PASS 96`; `X3 scoreable FAIL 63`; staged UI now X1-primary. |
-| `W58` | `NEXT` | `N80-screenshot-grounding-review-v2` | Can actual screenshot visual review separate top-pair models with calibrated pixel windows and semantic defect tuples? | Run after W57; top pair only unless promoted to final comparison. | PASS requires calibrated nonzero tolerance, false-positive traps, and rubric/binary result in live evidence. |
-| `W59` | `QUEUED` | `N81-evidence-conflict-repo-action-plan` | Can repo-understanding/advisory work split under stale docs, changed code, command evidence, and non-claim discipline? | Run after visual/UI priority waves. | PASS requires source-bound action plan and explicit stale-source rejection. |
+| `W58` | `DONE` | `N80-screenshot-grounding-review-v2` | Can actual screenshot visual review separate top-pair models with calibrated pixel windows and semantic defect tuples? | Ran `X1` and `X3`; no `X4`; Gemini rows parked. | `X1 PASS 82`; `X3 scoreable FAIL 63`; calibrated screenshot grounding now X1-primary. |
+| `W59` | `NEXT` | `N81-evidence-conflict-repo-action-plan` | Can repo-understanding/advisory work split under stale docs, changed code, command evidence, and non-claim discipline? | Run after visual/UI priority waves. | PASS requires source-bound action plan and explicit stale-source rejection. |
 | `W60` | `QUEUED` | `N82-ux-structure-runtime-state-spec` | Can UX structure become objective enough to assign a primary? | Top pair only. | PASS requires state/breakpoint/affordance invariants, not prose-only UX taste. |
 | `W61` | `QUEUED` | `N83-interface-refactor-breakage-hunt` | Can interface refactor quality split without output-budget as the decisive gate? | Top pair first; lower rows only after completed wave. | PASS requires hidden consumer/runtime breakage oracle and exact compatibility ledger. |
 | `W62` | `QUEUED` | `N84-security-review-repro-gauntlet` | Can ordinary security review split through exploit reproduction and false-positive suppression? | Top pair first. | PASS requires exact vuln tuples plus non-finding discipline. |
@@ -382,8 +384,8 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume from the scored `N79` staged UI visual-state reentry closeout and then
-materialize `N80-screenshot-grounding-review-v2`.
+If interrupted now, resume from the scored `N80` screenshot-grounding closeout and then materialize
+`N81-evidence-conflict-repo-action-plan`.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`
 versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), staged owner recovery
@@ -391,6 +393,9 @@ versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), stage
 `N38` is superseded for staged UI by `N79`: X1 passes and X3 fails scoreably on hidden
 state/accessibility/layout/raster/ledger/closure gates. `N60` remains the single-session
 UI/visual-state branch as scoreable `PASS/PASS` with X3 cost edge.
+`N68` is superseded for calibrated screenshot grounding by `N80`: X1 passes and X3 fails scoreably
+once the oracle uses deterministic image generation, semantic defect tuples, nonzero coordinate
+windows, and false-positive traps.
 The compact `X1 FAIL / X3 PASS` line has three admitted cells: `N46` on DeployGrid repair,
 `N47` on UI dirty-state repair, and `N48` on visual raster repair. In all three, X1 preserved hidden
 semantics and exact scope but failed the visible operator-budget gate, while X3 passed all gates

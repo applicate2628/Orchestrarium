@@ -1,0 +1,20 @@
+id: N80
+surface_id: E70
+pack_id: E70
+role_class: review
+artifact_type: calibrated screenshot grounding visual review
+modality_family: high-resolution screenshot grounding, UI defect review, coordinate evidence, false-positive traps
+allowed_change_surface:
+  - candidate/answer.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: screenshot-grounding-v2, exact-visual-defect-tuples, calibrated-coordinate-window, scored-rubric
+overlay_flags:
+  - top-pair-role-fit
+  - visual-grounding
+  - actual-screenshot
+  - ui-review
+  - binary-separator-candidate

@@ -1,0 +1,130 @@
+{
+  "contractId": "N80-W58-screenshot-grounding-review-v2",
+  "image_id": "N80-screenshot-grounding-v2",
+  "image_file": "inputs/actual-screenshot.png",
+  "dimensions": {
+    "width": 1600,
+    "height": 1100
+  },
+  "coordinate_tolerance_px": 22,
+  "pass_min_matched": 8,
+  "pass_score_threshold_0_100": 80,
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/answer.json",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/actual-screenshot.png",
+    "oracle/README.md",
+    "oracle/answer-schema.json",
+    "oracle/scoring-anchors.md",
+    "oracle/visual-review-oracle.json",
+    "verifiers/README.md",
+    "verifiers/check_screenshot_grounding_review.py"
+  ],
+  "requiredChangedPaths": [
+    "candidate/answer.json"
+  ],
+  "requiredNonFindings": [
+    ["decorative", "grid"],
+    ["disabled", "export"],
+    ["timestamp"],
+    ["sparkline", "trend"],
+    ["skeleton", "shimmer"],
+    ["brand", "logo"]
+  ],
+  "expectedFindings": [
+    {
+      "id": "F01",
+      "severity": "medium",
+      "component_terms": ["search", "input", "field"],
+      "defect_terms": ["clipped", "icon", "overlap", "overflow", "placeholder", "mask"],
+      "target": {"x": 99, "y": 105}
+    },
+    {
+      "id": "F02",
+      "severity": "medium",
+      "component_terms": ["run", "audit", "button"],
+      "defect_terms": ["spinner", "overlap", "label", "covered", "occlude"],
+      "target": {"x": 1352, "y": 105}
+    },
+    {
+      "id": "F03",
+      "severity": "high",
+      "component_terms": ["risk", "score", "kpi", "card"],
+      "defect_terms": ["clipped", "cut", "overflow", "mask", "blank", "hidden", "divider"],
+      "target": {"x": 216, "y": 246}
+    },
+    {
+      "id": "F04",
+      "severity": "medium",
+      "component_terms": ["status", "healthy", "chip", "badge", "pill", "service"],
+      "defect_terms": ["low", "contrast", "invisible", "missing", "label", "same", "green"],
+      "target": {"x": 944, "y": 249}
+    },
+    {
+      "id": "F05",
+      "severity": "medium",
+      "component_terms": ["trend", "chart", "sparkline", "alert", "marker", "breach"],
+      "defect_terms": ["detached", "marker", "dot", "tooltip", "label", "orphan", "connector", "floating", "duplicate"],
+      "target": {"x": 1210, "y": 296}
+    },
+    {
+      "id": "F06",
+      "severity": "medium",
+      "component_terms": ["owner", "status", "header", "incident", "queue", "table", "column"],
+      "defect_terms": ["sort", "caret", "arrow", "overlap", "detached", "misplaced"],
+      "target": {"x": 843, "y": 462}
+    },
+    {
+      "id": "F07",
+      "severity": "medium",
+      "component_terms": ["selected", "row", "focus", "checkbox", "incident", "table"],
+      "defect_terms": ["misaligned", "offset", "focus", "outline", "ring", "selection"],
+      "target": {"x": 317, "y": 596}
+    },
+    {
+      "id": "F08",
+      "severity": "medium",
+      "component_terms": ["deploy", "tab", "release", "timeline", "observe"],
+      "defect_terms": ["underline", "strikethrough", "crosses", "strike", "line", "active"],
+      "target": {"x": 578, "y": 864}
+    },
+    {
+      "id": "F09",
+      "severity": "medium",
+      "component_terms": ["legend", "heatmap", "critical", "swatch", "risk"],
+      "defect_terms": ["detached", "misaligned", "far", "orphan", "separated", "key"],
+      "target": {"x": 1274, "y": 655}
+    },
+    {
+      "id": "F10",
+      "severity": "high",
+      "component_terms": ["sync", "now", "button", "toast", "workspace", "actions", "import"],
+      "defect_terms": ["toast", "overlap", "covered", "cover", "occlude", "blocked", "shadow", "sliver", "artifact", "protrudes"],
+      "target": {"x": 1394, "y": 957}
+    }
+  ],
+  "falsePositiveTerms": [
+    "decorative grid",
+    "background grid",
+    "disabled export",
+    "export button",
+    "muted timestamp",
+    "timestamp",
+    "meta text",
+    "decorative sparkline",
+    "trend sparkline",
+    "skeleton shimmer",
+    "brand logo",
+    "header ornament"
+  ]
+}

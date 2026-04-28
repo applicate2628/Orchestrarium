@@ -302,9 +302,9 @@ keep adding minor variants to a solved compact-output or staged-ledger family.
 | `A` plan alignment | Update this plan, live wave roadmap, and status checkpoint to make `N79+` the active route. | `PASS` when all three surfaces agree on `X1/X3 first`, Gemini parked, and X4 final-only. | `git diff --check`; doc self-consistency read. |
 | `B` N79 materialization | Build bounded staged UI/visual-state re-entry v2. No changes to existing anchored rows. | `PASS` on 2026-04-28; bundle-shape, scorer syntax, expected start-state, and synthesized candidate dry-run passed. | JSON parse; `--bundle-shape-only`; synthesized dry-run; `git diff --check`. |
 | `C` N79 run | Run `X1` and `X3` only. | `PASS` on 2026-04-28; both rows scoreable. `X1 PASS 96`; `X3 FAIL 63`. | Read `summary.json`, verifier logs, scorer JSON; update live evidence. |
-| `D` N80 materialization | Build calibrated screenshot-grounding visual review v2. | `NEXT`; PASS when reference/oracle windows are not 0px brittle and false positives are scoreable. | Image/oracle validation; local scorer probe; `git diff --check`. |
-| `E` N80 run | Run `X1` and `X3` only. | `PASS` when the result produces either a binary split or an honest near-tie/rubric read. | Same as phase `C`. |
-| `F` next P1 wave | Pick `N81`, `N82`, or `N83` based on which RF line remains least resolved after N79/N80. | `PASS` when the chosen scenario changes axis rather than repeating output-budget or staged-ledger proof. | Pre-run protocol plus live evidence update. |
+| `D` N80 materialization | Build calibrated screenshot-grounding visual review v2. | `PASS` on 2026-04-28; nonzero `22 px` window, false-positive traps, threshold scorer, start-state fail, and reference PASS validated. | Image/oracle validation; local scorer probe; `git diff --check`. |
+| `E` N80 run | Run `X1` and `X3` only. | `PASS` on 2026-04-28; `X1 PASS 82`, `X3 FAIL 63`, both wrapper `0`. | Same as phase `C`. |
+| `F` next P1 wave | Pick `N81`, `N82`, or `N83` based on which RF line remains least resolved after N79/N80. | `NEXT`; current best next axis is `N81` repo evidence-conflict/action-plan unless UX spec is prioritized manually. | Pre-run protocol plus live evidence update. |
 | `G` promotion review | Decide whether any N79+ diagnostic replaces a weaker `/40` slot. | `PASS` only if the replacement has clearer role-fit value, stable scoring, and a named outgoing slot. | Update `full-v2-hard-results-current.md`, RF12, checkpoint, and evidence in one batch. |
 
 ## 2026-04-28 Gate Decision
@@ -325,3 +325,18 @@ This changes staged UI/visual-state routing to `X1 primary`. Compact single-sess
 X3-primary only when low-noise/output budget is part of the role contract.
 
 Next concrete action: Phase `D`, materialize `N80-screenshot-grounding-review-v2`.
+
+## W58 Results
+
+| Wave | Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Calibration | Decision |
+|---|---|---|---|---|---|
+| `W58` | `N80 screenshot-grounding review v2` | `PASS`; `82 / 100`; `8 / 10` matched, mean/max error `2.855 / 7.071 px`, no false positives | scoreable `FAIL`; `63 / 100`; `7 / 10` matched, mean/max error `8.067 / 17.117 px`, one false-positive header ornament | not launched by policy; `X4` final-only and Gemini parked | X1 primary for calibrated actual screenshot grounding |
+
+Decision: W58 supersedes the non-binary N68 screenshot read for calibrated screenshot grounding. N68
+still records that a loose strict-all-defects screenshot review gave X3 a scored non-binary edge, but
+N80 is the better separator because it uses deterministic image generation, a nonzero coordinate
+window, semantic defect tuples, false-positive traps, and a pass threshold. Both wrappers exited `0`,
+so X3's failure is scoreable.
+
+Next concrete action: Phase `F`, materialize `N81-evidence-conflict-repo-action-plan` unless the next
+manual priority switches to `N82` UX state/breakpoint specification or `N83` interface-refactor breakage.

@@ -321,16 +321,21 @@ New-Item -ItemType Directory -Force -Path $batchRoot | Out-Null
 $scenarioName = switch ($ScenarioId) {
     'N61' { 'N61-visual-pixel-localization-gauntlet' }
     'N68' { 'N68-actual-screenshot-visual-review-gauntlet' }
-    default { throw "Only N61 and N68 are supported by this visual runner." }
+    'N80' { 'N80-screenshot-grounding-review-v2' }
+    default { throw "Only N61, N68, and N80 are supported by this visual runner." }
 }
 $scenarioRoot = Join-Path $repoRoot "Scenarios-v2\$scenarioName"
 if ($ScenarioId -eq 'N61') {
     $imageFileName = 'visual-localization-canvas.png'
     $verifierFileName = 'check_visual_localization.py'
 }
-else {
+elseif ($ScenarioId -eq 'N68') {
     $imageFileName = 'actual-screenshot.png'
     $verifierFileName = 'check_actual_screenshot_visual_review.py'
+}
+else {
+    $imageFileName = 'actual-screenshot.png'
+    $verifierFileName = 'check_screenshot_grounding_review.py'
 }
 if (-not (Test-Path -LiteralPath $scenarioRoot -PathType Container)) {
     throw "Scenario root not found: $scenarioRoot"

@@ -3760,3 +3760,40 @@ changed-path scope plus phase-path discipline before failing the hidden UI/visua
 Role-fit read: compact single-session UI remains X3-primary when low-noise/output budget is explicit
 after N47/N60/N74. Staged UI/visual-state reentry is now X1-primary after N79 because X1 preserves
 state, accessibility, layout, raster, ledger, closeout, and exact scope across fresh invocations.
+
+## 2026-04-28 Follow-Up: W58 Screenshot Grounding Review V2
+
+`N80-screenshot-grounding-review-v2` converts the earlier `N68` actual-screenshot review into a
+calibrated visual-grounding diagnostic: one deterministic `1600 x 1100` dashboard screenshot, ten
+seeded visual defects, nonzero `22 px` coordinate tolerance, false-positive traps, exact JSON shape,
+and a score threshold (`>= 8 / 10` matched and `>= 80 / 100`) instead of brittle `0 px` matching.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N80` JSON parse for oracle/schema | `PASS` |
+| `N80` bundle-shape verifier | `PASS` |
+| `N80` starter verifier | expected `FAIL`; no findings |
+| `N80` synthesized reference probe in `.scratch/verifier-probes/2026-04-28-n80-recalibrated-valid-answer.json` | verifier `PASS`; `10 / 10`, `100 / 100` |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Matched | Mean / max px | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---:|---:|---|
+| `N80` | `X1 / gpt-5.5` | `.scratch/visual-localization-runs/2026-04-28_17-14-34-w58-n80-screenshot-grounding-2026-04-28-rerun/X1/` | `0` | `PASS` | `82 / 100` | `8 / 10` | `2.855 / 7.071` | `26503` | none; clean PASS threshold |
+| `N80` | `X3 / opus 4.7max` | `.scratch/visual-localization-runs/2026-04-28_17-14-34-w58-n80-screenshot-grounding-2026-04-28-rerun/X3/` | `0` | `FAIL` | `63 / 100` | `7 / 10` | `8.067 / 17.117` | `2755` | missed run-button, heatmap legend, toast/button artifacts; false-positive on header ornament |
+
+### Verdict
+
+This is a scoreable X1-over-X3 screenshot-grounding separator. It is not route/runtime noise: both
+wrappers exited `0`, both produced parseable JSON, and both were scored by the same calibrated oracle.
+X1 passes the visual grounding threshold with lower coordinate error and no false positives. X3 stays
+compact, but misses the match threshold and flags an intentional header/skeleton ornament as a defect.
+
+Role-fit read: actual screenshot grounding is no longer just the earlier non-binary N68 X3-scored edge.
+When calibrated pixel windows, semantic defect tuples, and false-positive traps are first-class, X1 is
+the current primary for screenshot grounding. Compact visual/raster code patches remain X3-primary only
+when low-noise/operator budget is the hard gate.
