@@ -4150,3 +4150,43 @@ still does not split the top pair. X3 is much more compact, but compactness is n
 because N90 has no output budget. Keep N90 diagnostic-only; do not replace N02, S30, or any
 canonical `/40` UX review slot from this result. Next work should change axis rather than further
 tighten staged UX review.
+
+## 2026-04-29 Follow-Up: W70 Real-Repo Staged Security Incident Reentry
+
+`N91-realrepo-staged-security-incident-reentry` repeats the staged security idea in a real-repo-style
+repair bundle instead of another review-only report. Candidates must repair tenant-bound export
+authorization, HMAC-bound download tokens, redirect allowlisting, and audit redaction while also
+updating incident, repair, exploit-validation, reentry, and closeout ledgers. The verifier owns
+hidden runtime exploit checks for cross-tenant support access, break-glass support flow, owner/admin
+authorization, token tamper, replay, expiry, resource/user binding, redirect traps, audit redaction,
+protected starter hashes, and exact ten-path changed scope.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N91` JSON parse and verifier compile | `PASS` |
+| `N91` bundle-shape verifier | `PASS` |
+| `N91` starter verifier | expected `FAIL`; starter has the tenant/support/token/redirect/audit defects |
+| synthesized valid probe in `.scratch/verifier-probes/2026-04-29-n91-security-incident-valid/N91` | verifier `PASS`; `100.0 / 100` |
+| exact changed-path positive probe | `PASS`; ten required artifacts accepted |
+| exact changed-path negative probe | `PASS`; single-path run rejected |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Changed paths | Worker output | Classification |
+|---|---|---|---:|---|---|---:|---|
+| `N91` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-29_00-02-54-X1-wave70-n91-security-incident-2026-04-29/N91/run` | `0` | `PASS`; `100.0 / 100` | exact ten security/ledger artifacts | `867547` bytes | `PASS` |
+| `N91` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-29_00-02-54-X3-wave70-n91-security-incident-2026-04-29/N91/run` | `0` | `PASS`; `100.0 / 100` | exact ten security/ledger artifacts | `2752` bytes | `PASS` |
+
+### Verdict
+
+`binary tie remains` for X1 and X3 on N91. Real-repo staged security incident repair with hidden
+runtime exploit checks, exact changed-path scope, protected starter hashes, regression tests, and
+reentry/closeout ledgers is solved by both top rows. X3 is much more compact, but compactness is not
+a binary winner because N91 has no output budget. Keep N91 diagnostic-only; do not replace N78 or
+any canonical `/40` slot from this result. The next useful top-pair separator should move to a
+different implementation axis, preferably real-repo staged interface/downstream reentry rather than
+more security/review-only hardening.

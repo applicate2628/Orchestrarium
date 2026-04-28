@@ -113,6 +113,17 @@ witness exactness. The admitted v3 run ties: `X1 / gpt-5.5` and `X3 / opus 4.7ma
 executable witness binding at `100 / 100`; X3 is much more compact, but ordinary security review
 remains top-pair near-tie.
 
+W69 added `N90-staged-ux-review-reentry-gate`: staged UX source/state, ADR, findings, response gate,
+and closeout over a protected publish-console runtime target. `X1 / gpt-5.5` and
+`X3 / opus 4.7max` both pass at `100 / 100`; `binary tie remains`. This is diagnostic-only and
+does not replace any `/40` UX slot.
+
+W70 added `N91-realrepo-staged-security-incident-reentry`: real-repo staged security incident repair
+with hidden tenant/token/redirect/audit exploit checks, exact ten-path scope, protected starter
+hashes, regression tests, and reentry/closeout ledgers. `X1 / gpt-5.5` and `X3 / opus 4.7max` both
+pass at `100 / 100`; `binary tie remains`. This narrows N78's staged-security routing read rather
+than changing the canonical `/40`.
+
 | ID | Label |
 |---|---|
 | `X1` | `gpt-5.5` active; older rows may cite `gpt-5.4` as model-of-run |
@@ -145,6 +156,10 @@ remains top-pair near-tie.
 | `19` | W63 performance runtime budget replacement | `X1 / gpt-5.5`: `N85 FAIL`; output budget only | `X3 / opus 4.7max`: `N85 PASS` | `X2 FAIL`; no patch/runtime fail | `Claude China` final-only `NOT-RUN` | `X6 NOT-RUN`; Gemini `UNSUPPORTED_LOCATION`; X5 parked | promoted over N59; canonical top-pair now `X3 35 / 40` vs `X1 34 / 40` |
 | `20` | W65 real interface downstream migration | `X1 / gpt-5.5`: `N86 PASS` | `X3 / opus 4.7max`: `N86 FAIL`; exact scope only | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | diagnostic only; X3 passed hidden downstream semantics but missed required `api.py` migration surface |
 | `21` | W66 performance review gate | `X1 / gpt-5.5`: `N87 PASS` | `X3 / opus 4.7max`: `N87 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; benchmark admissibility and cache-boundary review did not split top pair |
+| `22` | W67 UX runtime event-policy simulator | `X1 / gpt-5.5`: `N88 PASS` | `X3 / opus 4.7max`: `N88 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; hidden event-policy simulation did not split UX structure |
+| `23` | W68 security runtime witness review | `X1 / gpt-5.5`: `N89 PASS` | `X3 / opus 4.7max`: `N89 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; executable witness binding did not split ordinary security review |
+| `24` | W69 staged UX review/reentry | `X1 / gpt-5.5`: `N90 PASS` | `X3 / opus 4.7max`: `N90 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; staged UX review still near-tie without output budget |
+| `25` | W70 real-repo staged security incident | `X1 / gpt-5.5`: `N91 PASS` | `X3 / opus 4.7max`: `N91 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; real-repo staged security repair narrows, not replaces, N78 |
 | `18` | W26 operator-budget compact hotfix | `X1 / gpt-5.5`: `N46 FAIL 70` | `X3 / opus 4.7max`: `N46 PASS 100` |  |  |  | first honest compact single-session `X1 FAIL / X3 PASS`; X1 preserves hidden repair semantics but fails the visible operator-budget gate (`210369 > 40000`) |
 | `19` | W27 UI compact operator-budget hotfix | `X1 / gpt-5.5`: `N47 FAIL 70` | `X3 / opus 4.7max`: `N47 PASS 94` |  |  |  | second honest compact single-session `X1 FAIL / X3 PASS`; both pass hidden UI dirty-state semantics and exact scope, while X1 fails the visible operator-budget gate (`169913 > 40000`) |
 | `20` | W28 visual raster compact operator-budget hotfix | `X1 / gpt-5.5`: `N48 FAIL 70` | `X3 / opus 4.7max`: `N48 PASS 100` |  |  |  | third honest compact single-session `X1 FAIL / X3 PASS`; both pass exact raster semantics and renderer-only scope, while X1 fails the visible operator-budget gate (`77825 > 40000`) |

@@ -1,0 +1,86 @@
+{
+  "scenario": "N91",
+  "wave": "W70",
+  "batchName": "wave70-n91-security-incident-2026-04-29",
+  "replacementDecision": {
+    "promotedIntoFullV2Hard": false,
+    "replacesSlot": null,
+    "reason": "N91 is a diagnostic real-repo staged security incident repeat. Both top rows pass the hardened runtime exploit, ledger, exact scope, and re-entry verifier, so it does not replace N78 or any canonical /40 slot."
+  },
+  "admissionNotes": {
+    "integrityHardening": [
+      "protected starter files are pinned by SHA256 hashes",
+      "candidate may edit only five incident/reentry artifacts plus four security modules and one regression-test file",
+      "verifier owns hidden exploit checks for tenant boundary, support break-glass, token HMAC binding, tamper, replay, expiry, redirect traps, and audit redaction",
+      "exact final changed-path equality is required when changed paths are supplied",
+      "reference probe must pass the hidden runtime verifier at 100.0 / 100",
+      "starter bundle must fail expected start-state checks"
+    ],
+    "preRunValidation": [
+      "JSON parse PASS",
+      "bundle-shape PASS",
+      "starter candidate expected FAIL",
+      "synthesized valid probe PASS at 100.0 / 100",
+      "exact changed-path positive probe PASS",
+      "exact changed-path negative probe PASS",
+      "git diff --check PASS",
+      "mcp-free STATS kill: none"
+    ]
+  },
+  "verdict": "binary tie remains for real-repo staged security incident reentry",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score": 100.0,
+      "workerOutputBytes": 867547,
+      "changedPaths": [
+        "candidate/closeout.json",
+        "candidate/exploit-validation.json",
+        "candidate/incident-ledger.json",
+        "candidate/reentry-state.json",
+        "candidate/repair-ledger.json",
+        "candidate/workspace/src/incidentflow/audit.py",
+        "candidate/workspace/src/incidentflow/download_tokens.py",
+        "candidate/workspace/src/incidentflow/export_access.py",
+        "candidate/workspace/src/incidentflow/redirects.py",
+        "candidate/workspace/tests/test_incident_regression.py"
+      ],
+      "auxiliaryChangedPaths": [],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_00-02-54-X1-wave70-n91-security-incident-2026-04-29/N91/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-29_00-02-54-X1-wave70-n91-security-incident-2026-04-29/N91/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score": 100.0,
+      "workerOutputBytes": 2752,
+      "changedPaths": [
+        "candidate/closeout.json",
+        "candidate/exploit-validation.json",
+        "candidate/incident-ledger.json",
+        "candidate/reentry-state.json",
+        "candidate/repair-ledger.json",
+        "candidate/workspace/src/incidentflow/audit.py",
+        "candidate/workspace/src/incidentflow/download_tokens.py",
+        "candidate/workspace/src/incidentflow/export_access.py",
+        "candidate/workspace/src/incidentflow/redirects.py",
+        "candidate/workspace/tests/test_incident_regression.py"
+      ],
+      "auxiliaryChangedPaths": [],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_00-02-54-X3-wave70-n91-security-incident-2026-04-29/N91/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-29_00-02-54-X3-wave70-n91-security-incident-2026-04-29/N91/meta/summary.json"
+    }
+  ],
+  "postRunVerification": [
+    "admitted X1 run passed check_staged_security_incident.py with exact ten changed paths",
+    "admitted X3 run passed check_staged_security_incident.py with exact ten changed paths",
+    "both rows reported wrapperExitCode 0 and verifier PASS at 100.0 / 100"
+  ]
+}

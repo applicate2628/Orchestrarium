@@ -347,7 +347,22 @@ executable witness binding. It is not part of the `full-v2-hard` `/40` denominat
 W68 interpretation: even after removing answer-key leakage from the oracle, replacing prose witness
 claims with exact structured runtime observations, and enforcing protected review-target hashes,
 ordinary single-session security review still ties the top pair. Keep N89 diagnostic-only; use N78
-for staged security implementation/re-entry routing.
+only for the narrower synthetic staged security implementation/re-entry routing pattern.
+
+## Real-Repo Staged Security Incident W70 Diagnostic
+
+`N91-realrepo-staged-security-incident-reentry` repeats staged security as a real-repo-style repair
+task with hidden exploit execution, exact changed-path scope, protected starter hashes, regression
+tests, and reentry/closeout ledgers. It is not part of the `full-v2-hard` `/40` denominator.
+
+| Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Read |
+|---|---|---|---|
+| `N91` | `PASS`; wrapper `0`; hidden exploit runtime, ledgers, tests, protected hashes, and exact ten-path scope pass | `PASS`; wrapper `0`; same hardened implementation/reentry gates pass | `binary tie remains`; X3 is compact but not a binary winner |
+
+W70 interpretation: real-repo staged security incident repair is now top-pair near-tie despite N78's
+earlier X1-over-X3 split. Treat N78 as evidence for that narrower synthetic staged re-entry fixture,
+not as a universal rule for all staged security repair. Future separation should move to a different
+implementation axis, preferably interface/downstream migration with staged re-entry.
 
 ## Security Review Reproduction W62 Diagnostic
 
@@ -627,7 +642,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | single-session persisted-state replay migration | `X1` / `X3` binary near-tie after N75; X2 also passes, so harden via staged re-entry or real repo constraints before assigning a primary |
 | staged persisted-state replay migration | `X1` primary after N76; X3 fails runtime/schema/artifact contracts and X2 fails exact staged scope |
 | single-session security implementation patch | `X1` / `X3` binary near-tie after N77; X3 has scored compactness edge, but no semantic security primary |
-| staged security implementation / exploit re-entry | `X1` primary after N78; X3 fails hidden redirect exploit and staged artifact contracts, X2 fails scope/artifact layer |
+| staged security implementation / exploit re-entry | `X1` primary after N78 for the synthetic staged re-entry pattern; N91 real-repo staged incident repair ties X1/X3, so verify exact incident contract rather than assuming all staged security is separated |
 | lower-bound calibration | `X2` first, `X6` second when route produces scoreable output |
 | Gemini Pro | keep historical `X5` passes, but do not promote new claims until route/runtime health returns |
 
@@ -637,7 +652,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 |---|---|
 | `v2-core12-tie-hardened-results-2026-04-20.md` | admitted hardened core12 slots for `S03`, `S04`, `S05`, `S06`, `S07`, `S08`, `S09`, `S25`, `S27`, `N01`, `N02`, `N03`, `N04`, `N05`, `N06` |
 | `role-fit-scorecard-v1-2026-04-22.md` | lane-fit interpretation and current hardening wave summaries |
-| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N85` |
+| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N91` |
 | `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted mainline hardening record |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` through `../Evidence/n60-ui-reentry-rubric-2026-04-24.json` | machine-readable rubric/scorer evidence for promoted diagnostic slots |
 | `../Evidence/n61-visual-pixel-localization-rubric-2026-04-25.json` | machine-readable `E51` visual pixel-localization diagnostic evidence; post-fix score favors `X1`, not promoted into `/40` |
@@ -669,5 +684,6 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n88-ux-runtime-policy-rubric-2026-04-28.json` | machine-readable `W67` UX runtime event-policy evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/n89-security-runtime-witness-rubric-2026-04-28.json` | machine-readable `W68` security runtime witness review evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/n90-staged-ux-review-rubric-2026-04-28.json` | machine-readable `W69` staged UX review/reentry evidence; X1 and X3 both pass, so not promoted into `/40` |
+| `../Evidence/n91-staged-security-incident-rubric-2026-04-29.json` | machine-readable `W70` real-repo staged security incident evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence before N85 promotion; current X4 row is `31 PASS`, `8 FAIL`, `1 NOT-RUN` until N85 is run in final-only mode |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` plus `../Evidence/n85-performance-runtime-rubric-2026-04-28.json` | machine-readable X2/X6 fill evidence; X2 remains `12 / 40`, while X6 is now `13 / 40` with `9` timeout/auth-route `NOT-RUN` cells after N85 |

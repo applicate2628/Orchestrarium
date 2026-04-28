@@ -1,0 +1,39 @@
+id: N91
+surface_id: E81
+pack_id: E81
+role_class: implementation
+artifact_type: real-repo staged security incident repair with exploit reentry
+modality_family: staged security implementation, tenant-bound export incident, signed download capability, redirect hardening, audit redaction, regression tests, reentry closeout
+allowed_change_surface:
+  - candidate/incident-ledger.json
+  - candidate/repair-ledger.json
+  - candidate/exploit-validation.json
+  - candidate/reentry-state.json
+  - candidate/closeout.json
+  - candidate/workspace/src/incidentflow/audit.py
+  - candidate/workspace/src/incidentflow/download_tokens.py
+  - candidate/workspace/src/incidentflow/export_access.py
+  - candidate/workspace/src/incidentflow/redirects.py
+  - candidate/workspace/tests/test_incident_regression.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/src/incidentflow/__init__.py
+  - candidate/workspace/src/incidentflow/models.py
+  - candidate/workspace/src/incidentflow/service.py
+  - candidate/workspace/tests/test_visible_flow.py
+score_profile: "realrepo-staged-security-incident, exploit-reentry, exact-scope, hidden-runtime-oracle, patch-quality"
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - security-engineer
+  - staged-runner
+  - real-repo
+  - exploit-oracle
+  - reentry
+  - hidden-consumer
+  - patch-quality-rubric
+  - binary-separator-candidate
