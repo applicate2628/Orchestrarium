@@ -306,7 +306,7 @@ keep adding minor variants to a solved compact-output or staged-ledger family.
 | `E` N80 run | Run `X1` and `X3` only. | `PASS` on 2026-04-28; `X1 PASS 82`, `X3 FAIL 63`, both wrapper `0`. | Same as phase `C`. |
 | `F` N81 repo evidence-conflict/action-plan | Run the next advisory repo-understanding separator attempt after N79/N80. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS 100`, `X3 PASS 100`, so `binary tie remains` and no primary is assigned. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; `git diff --check`; `mcp-free`; top-pair run. |
 | `F2` N82 UX runtime-state spec | Run the objective UX-structure state-spec separator attempt after N81. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS 100`, `X3 PASS 100`, so `binary tie remains` and no primary is assigned. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; `git diff --check`; `mcp-free`; top-pair run. |
-| `F3` next P1 wave | Pick `N83` or a stronger UX runtime/visual simulation based on N82. | `NEXT`; current best next axis is `N83-interface-refactor-breakage-hunt` because N81/N82 show single-shot term anchors are weak separators. | Pre-run protocol plus live evidence update. |
+| `F3` N83 interface refactor breakage hunt | Run hidden batch-consumer and structured-report interface-refactor separator attempt after N82. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS`, `X3 PASS`, so `binary tie remains` and no primary is assigned for ordinary hidden-consumer refactor. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; `git diff --check`; `mcp-free`; top-pair run; runner cache-split fix. |
 | `G` promotion review | Decide whether any N79+ diagnostic replaces a weaker `/40` slot. | `PASS` only if the replacement has clearer role-fit value, stable scoring, and a named outgoing slot. | Update `full-v2-hard-results-current.md`, RF12, checkpoint, and evidence in one batch. |
 
 ## 2026-04-28 Gate Decision
@@ -353,8 +353,8 @@ source-authority/action-plan table is still solved by both top rows. The X3 work
 substring-gaming weakness in literal forbidden-snippet checks, so the next advisory hardening should
 use decision-context or staged review gates rather than another broad literal trap.
 
-Next concrete action: Phase `F2`, materialize `N82-ux-structure-runtime-state-spec` unless the manual
-priority switches to `N83-interface-refactor-breakage-hunt`.
+Completed follow-up: Phase `F2` materialized and ran `N82-ux-structure-runtime-state-spec`; W61/N83
+is also complete.
 
 ## W60 Results
 
@@ -367,4 +367,21 @@ affordance, copy, handoff, and non-goal anchors was still solved by both top row
 tightening this as a term-matched single-shot spec; switch to runtime simulation, staged UX review, or
 interface breakage where failures are behavioral.
 
-Next concrete action: Phase `F3`, materialize `N83-interface-refactor-breakage-hunt`.
+Completed follow-up: Phase `F3` materialized and ran `N83-interface-refactor-breakage-hunt`.
+
+## W61 Results
+
+| Wave | Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Calibration | Decision |
+|---|---|---|---|---|---|
+| `W61` | `N83 interface-refactor breakage hunt` | `PASS`; hidden batch consumer, structured report input, legacy method removal, exact ten-path scope, visible regression markers, and ledger pass | `PASS`; same hidden runtime and artifact gates pass | not launched by policy; `X4` final-only and Gemini parked | `binary tie remains`; ordinary hidden-consumer interface refactor stays near-tie |
+
+Decision: W61 does not separate X1/X3. It is useful negative evidence because the task moved away
+from term-matched ledgers into behavioral runtime checks: `handle_event_batch` had to preserve order,
+reuse router duplicate state, avoid dispatching rejected requests, and `build_audit_summary` had to
+consume structured result objects. Both top rows solved it.
+
+Operational note: the first N83 runs exposed a v2 runner issue where top-level `.pytest_cache/`
+was counted as benchmark scope drift. The runner now treats top-level `.pytest_cache/` and
+`.mypy_cache/` like nested cache directories: auxiliary generated artifacts, not model patch scope.
+
+Next concrete action: Phase `G` promotion review or W62 `N84-security-review-repro-gauntlet`.

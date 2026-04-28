@@ -1,0 +1,10 @@
+# N83 Scoring Anchors
+
+Score the run as an interface-refactor task, not as a style rewrite.
+
+- Correctness: structured interfaces, hidden consumer behavior, error semantics.
+- Runtime compatibility: batch API order, duplicate suppression, rejected-request non-dispatch,
+  and structured report input handling.
+- Migration quality: all call sites migrated, old methods removed, no compatibility shims.
+- Evidence: refactor ledger maps old interface to new interface and names validation.
+- Patch quality: changed paths stay within the allowed surface and avoid unrelated churn.

@@ -1,0 +1,86 @@
+{
+  "scenario": "N83",
+  "wave": "W61",
+  "batchName": "wave61-n83-interface-refactor-breakage-final-2026-04-28",
+  "verdict": "binary tie remains",
+  "note": "Both top-pair rows passed the hidden batch-consumer runtime oracle, structured-report compatibility oracle, exact changed-path scope, legacy-interface removal, and migration-ledger checks. The wave also fixed the v2 runner so top-level .pytest_cache/ output is classified as auxiliary generated test cache rather than benchmark scope drift.",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score_0_100": null,
+      "matched": "2/2 verifier commands",
+      "changedPaths": [
+        "candidate/refactor-ledger.json",
+        "candidate/workspace/src/interfaceflow/__init__.py",
+        "candidate/workspace/src/interfaceflow/api.py",
+        "candidate/workspace/src/interfaceflow/models.py",
+        "candidate/workspace/src/interfaceflow/orchestrator.py",
+        "candidate/workspace/src/interfaceflow/policy.py",
+        "candidate/workspace/src/interfaceflow/report.py",
+        "candidate/workspace/src/interfaceflow/router.py",
+        "candidate/workspace/src/interfaceflow/session_store.py",
+        "candidate/workspace/tests/test_interfaceflow.py"
+      ],
+      "auxiliaryChangedPaths": [
+        ".pytest_cache/.gitignore",
+        ".pytest_cache/CACHEDIR.TAG",
+        ".pytest_cache/README.md",
+        ".pytest_cache/v/cache/lastfailed",
+        ".pytest_cache/v/cache/nodeids",
+        "candidate/workspace/src/interfaceflow/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/api.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/orchestrator.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/policy.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/report.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/router.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/session_store.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_interfaceflow.cpython-314-pytest-9.0.3.pyc"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_18-32-26-X1-wave61-n83-interface-refactor-breakage-final-2026-04-28/N83/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_18-32-26-X1-wave61-n83-interface-refactor-breakage-final-2026-04-28/N83/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score_0_100": null,
+      "matched": "2/2 verifier commands",
+      "changedPaths": [
+        "candidate/refactor-ledger.json",
+        "candidate/workspace/src/interfaceflow/__init__.py",
+        "candidate/workspace/src/interfaceflow/api.py",
+        "candidate/workspace/src/interfaceflow/models.py",
+        "candidate/workspace/src/interfaceflow/orchestrator.py",
+        "candidate/workspace/src/interfaceflow/policy.py",
+        "candidate/workspace/src/interfaceflow/report.py",
+        "candidate/workspace/src/interfaceflow/router.py",
+        "candidate/workspace/src/interfaceflow/session_store.py",
+        "candidate/workspace/tests/test_interfaceflow.py"
+      ],
+      "auxiliaryChangedPaths": [
+        ".pytest_cache/.gitignore",
+        ".pytest_cache/CACHEDIR.TAG",
+        ".pytest_cache/README.md",
+        ".pytest_cache/v/cache/nodeids",
+        "candidate/workspace/src/interfaceflow/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/api.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/orchestrator.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/policy.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/report.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/router.cpython-314.pyc",
+        "candidate/workspace/src/interfaceflow/__pycache__/session_store.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_interfaceflow.cpython-314-pytest-9.0.3.pyc"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_18-32-26-X3-wave61-n83-interface-refactor-breakage-final-2026-04-28/N83/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_18-32-26-X3-wave61-n83-interface-refactor-breakage-final-2026-04-28/N83/meta/summary.json"
+    }
+  ]
+}

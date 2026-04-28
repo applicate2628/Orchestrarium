@@ -120,7 +120,10 @@ function Split-ChangedRelativePaths {
             if ($path.Contains('/__pycache__/') -or $path.EndsWith('.pyc', [System.StringComparison]::OrdinalIgnoreCase)) {
                 $isAuxiliary = $true
             }
-            elseif ($path.Contains('/.pytest_cache/') -or $path.Contains('/.mypy_cache/')) {
+            elseif ($path.StartsWith('.pytest_cache/', [System.StringComparison]::OrdinalIgnoreCase) -or
+                $path.StartsWith('.mypy_cache/', [System.StringComparison]::OrdinalIgnoreCase) -or
+                $path.Contains('/.pytest_cache/') -or
+                $path.Contains('/.mypy_cache/')) {
                 $isAuxiliary = $true
             }
         }

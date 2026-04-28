@@ -274,6 +274,22 @@ non-goals. It is not part of the `full-v2-hard` `/40` denominator.
 W60 interpretation: single-shot objective UX JSON does not split the top pair. Future UX separators
 need behavioral runtime simulation, staged UX review, or visual-grounded oracles.
 
+## Interface Refactor Breakage W61 Diagnostic
+
+`N83-interface-refactor-breakage-hunt` retests interface-refactor quality through behavioral hidden
+consumers rather than output budget. It requires a batch API hidden consumer, shared duplicate state,
+structured report inputs, legacy method removal, exact ten-path scope, visible regression markers,
+and a migration ledger. It is not part of the `full-v2-hard` `/40` denominator.
+
+| Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Read |
+|---|---|---|---|
+| `N83` | `PASS`; wrapper `0`; hidden batch consumer and structured-report gates pass | `PASS`; wrapper `0`; same runtime and artifact gates pass | `binary tie remains`; ordinary hidden-consumer interface refactor stays near-tie |
+
+W61 interpretation: N83 confirms that behavioral single-session interface-refactor checks alone do
+not split the top pair. Use X1 for staged interface/API migration after N35/N36, use X3 for compact
+operator-budget API migration after N57, and keep ordinary hidden-consumer refactor as near-tie.
+The v2 runner now classifies top-level `.pytest_cache/` as auxiliary generated cache.
+
 ## Real-Repo Patch Quality W47 Diagnostic
 
 `N69-realrepo-patch-quality-scorecard` probes a compact implementation patch with hidden ledger
@@ -541,7 +557,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 |---|---|
 | `v2-core12-tie-hardened-results-2026-04-20.md` | admitted hardened core12 slots for `S03`, `S04`, `S05`, `S06`, `S07`, `S08`, `S09`, `S25`, `S27`, `N01`, `N02`, `N03`, `N04`, `N05`, `N06` |
 | `role-fit-scorecard-v1-2026-04-22.md` | lane-fit interpretation and current hardening wave summaries |
-| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N82` |
+| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N83` |
 | `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted mainline hardening record |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` through `../Evidence/n60-ui-reentry-rubric-2026-04-24.json` | machine-readable rubric/scorer evidence for promoted diagnostic slots |
 | `../Evidence/n61-visual-pixel-localization-rubric-2026-04-25.json` | machine-readable `E51` visual pixel-localization diagnostic evidence; post-fix score favors `X1`, not promoted into `/40` |
@@ -565,5 +581,6 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n80-screenshot-grounding-rubric-2026-04-28.json` | machine-readable `W58` calibrated screenshot-grounding evidence; X1 passes, X3 fails scoreably, X4/Gemini not run by policy, not promoted into `/40` |
 | `../Evidence/n81-evidence-action-rubric-2026-04-28.json` | machine-readable `W59` evidence-conflict action-plan evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/n82-ux-state-rubric-2026-04-28.json` | machine-readable `W60` UX runtime-state evidence; X1 and X3 both pass, so not promoted into `/40` |
+| `../Evidence/n83-interface-refactor-breakage-rubric-2026-04-28.json` | machine-readable `W61` interface-refactor breakage evidence; X1 and X3 both pass hidden batch-consumer and structured-report gates, so not promoted into `/40` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence; `X4 / Claude China opus max` is `32 / 40` with `8` scoreable verifier failures and `0` runtime not-runs |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 fill evidence; X2 is now closed at `12 / 40`, while X6 is `13 / 40` with `8` remaining timeout/auth-route `NOT-RUN` cells |

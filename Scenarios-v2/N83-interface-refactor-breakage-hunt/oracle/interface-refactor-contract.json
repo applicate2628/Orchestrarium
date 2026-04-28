@@ -1,0 +1,159 @@
+{
+  "contractId": "N83-interface-refactor-breakage-hunt",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N83",
+    "surface_id": "E73",
+    "pack_id": "E73",
+    "role_class": "implementation",
+    "artifact_type": "interface refactor patch plus migration ledger",
+    "modality_family": "multi-module API refactor, batch API hidden consumer, structured report compatibility, source/reason preservation, idempotent dispatch",
+    "allowed_change_surface": [
+      "candidate/refactor-ledger.json",
+      "candidate/workspace/src/interfaceflow/__init__.py",
+      "candidate/workspace/src/interfaceflow/models.py",
+      "candidate/workspace/src/interfaceflow/session_store.py",
+      "candidate/workspace/src/interfaceflow/policy.py",
+      "candidate/workspace/src/interfaceflow/router.py",
+      "candidate/workspace/src/interfaceflow/orchestrator.py",
+      "candidate/workspace/src/interfaceflow/report.py",
+      "candidate/workspace/src/interfaceflow/api.py",
+      "candidate/workspace/tests/test_interfaceflow.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md"
+    ],
+    "score_profile": "interface-refactor, hidden-consumer, batch-api, structured-report, compatibility-preservation, patch-quality-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "interface-refactor",
+      "hidden-consumer",
+      "compatibility-preservation",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "candidate/README.md",
+    "candidate/refactor-ledger.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/interfaceflow/__init__.py",
+    "candidate/workspace/src/interfaceflow/models.py",
+    "candidate/workspace/src/interfaceflow/session_store.py",
+    "candidate/workspace/src/interfaceflow/policy.py",
+    "candidate/workspace/src/interfaceflow/router.py",
+    "candidate/workspace/src/interfaceflow/orchestrator.py",
+    "candidate/workspace/src/interfaceflow/report.py",
+    "candidate/workspace/src/interfaceflow/api.py",
+    "candidate/workspace/tests/test_interfaceflow.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/interface-refactor-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_interface_refactor.py",
+    "verifiers/check_scope.py"
+  ],
+  "ignoredRuntimeArtifacts": [
+    ".pytest_cache"
+  ],
+  "ignoredChangedPathPrefixes": [
+    ".pytest_cache/",
+    "candidate/workspace/src/interfaceflow/__pycache__/",
+    "candidate/workspace/tests/__pycache__/"
+  ],
+  "requiredChangedPaths": [
+    "candidate/refactor-ledger.json",
+    "candidate/workspace/src/interfaceflow/__init__.py",
+    "candidate/workspace/src/interfaceflow/models.py",
+    "candidate/workspace/src/interfaceflow/session_store.py",
+    "candidate/workspace/src/interfaceflow/policy.py",
+    "candidate/workspace/src/interfaceflow/router.py",
+    "candidate/workspace/src/interfaceflow/orchestrator.py",
+    "candidate/workspace/src/interfaceflow/report.py",
+    "candidate/workspace/src/interfaceflow/api.py",
+    "candidate/workspace/tests/test_interfaceflow.py"
+  ],
+  "legacyPublicMethods": {
+    "SessionStore": "get",
+    "PolicyEvaluator": "evaluate",
+    "EventRouter": "dispatch"
+  },
+  "requiredResultModels": [
+    "SessionLookup",
+    "PolicyDecision",
+    "DispatchResult"
+  ],
+  "requiredLedgerRows": {
+    "interfaceMap": [
+      "SessionStore.get -> SessionStore.lookup",
+      "PolicyEvaluator.evaluate -> PolicyEvaluator.evaluate_policy",
+      "EventRouter.dispatch -> EventRouter.dispatch_event"
+    ],
+    "callSites": [
+      "orchestrator.process_request",
+      "api.handle_event",
+      "api.handle_event_batch",
+      "report.build_audit_summary",
+      "hidden batch consumer",
+      "structured report inputs",
+      "tests.test_interfaceflow"
+    ],
+    "compatibilityCases": [
+      "missing-session",
+      "expired-session",
+      "revoked-session",
+      "blocked-tenant",
+      "requires-admin",
+      "transport-timeout",
+      "duplicate-event",
+      "accepted-event",
+      "batch-order",
+      "structured-report-input"
+    ],
+    "validationMarkers": [
+      "check_interface_refactor.py",
+      "test_interfaceflow.py"
+    ]
+  },
+  "requiredTestMarkers": [
+    "test_lookup_missing_session_contract",
+    "test_router_timeout_is_retryable",
+    "test_legacy_methods_removed",
+    "test_handle_event_batch_preserves_order",
+    "test_report_accepts_structured_results"
+  ],
+  "forbiddenStaticMarkers": [
+    "def get(",
+    "def evaluate(",
+    "def dispatch("
+  ],
+  "sessionNow": 50
+}

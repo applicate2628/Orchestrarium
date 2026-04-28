@@ -3863,3 +3863,40 @@ five copy-ledger entries, three handoff contracts, and five non-goals.
 separator evidence for `design.ui-ux-structure`: single-shot JSON anchors are not enough to split the
 top pair. Future UX/design separation should use runtime simulation, staged UX review, or calibrated
 visual grounding rather than term-matched JSON anchors.
+
+## 2026-04-28 Follow-Up: W61 Interface Refactor Breakage Hunt
+
+`N83-interface-refactor-breakage-hunt` retests interface-refactor quality without making visible
+operator-output budget the decisive gate. The hidden oracle requires structured result dataclasses,
+removal of the legacy `get/evaluate/dispatch` public methods, `handle_event_batch` order and
+duplicate-state behavior, rejected-request non-dispatch, structured-report compatibility, exact
+ten-path scope, visible regression markers, and a migration ledger.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N83` JSON parse and bundle-shape verifier | `PASS` |
+| `N83` starter verifier | expected `FAIL`; legacy methods, missing dataclasses, batch API, structured report, and ledger gaps |
+| `N83` synthesized reference probe in `.scratch/verifier-probes/2026-04-28-n83-interface-valid` | verifier `PASS`; exact changed paths accepted |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Changed paths | Primary failure |
+|---|---|---|---:|---|---|---|
+| `N83` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-28_18-32-26-X1-wave61-n83-interface-refactor-breakage-final-2026-04-28/N83/run` | `0` | `PASS` | ten required candidate paths; generated cache auxiliary | none |
+| `N83` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-28_18-32-26-X3-wave61-n83-interface-refactor-breakage-final-2026-04-28/N83/run` | `0` | `PASS` | ten required candidate paths; generated cache auxiliary | none |
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3` on N83. The batch hidden-consumer and structured-report
+runtime checks did not split the top pair. Interface-refactor routing remains execution-shape based:
+staged API/interface migration is X1-primary after N35/N36; compact operator-budget API migration is
+X3-primary after N57; ordinary single-session hidden-consumer interface refactor remains near-tie
+when generated cache is treated as auxiliary.
+
+Runner note: this wave fixed the v2 runner's generated-artifact split so top-level `.pytest_cache/`
+is classified as auxiliary cache, matching the existing nested cache behavior. Earlier N83 raw runs
+that failed only on top-level `.pytest_cache/` scope were harness false positives, not model failures.

@@ -1,0 +1,13 @@
+{
+  "contractId": "N83-interface-refactor-breakage-hunt",
+  "interfaceMap": [],
+  "callSiteMigration": [],
+  "compatibilityMatrix": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 10,
+    "requiredChangedPaths": []
+  }
+}
