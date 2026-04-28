@@ -358,6 +358,21 @@ model fail.
 | owner/orchestration | `X3` primary versus `X1` after `N23` and `N26`; `N56` adds a binary low-noise compact owner separator (`X1 FAIL 70`, `X3 PASS 100`); `X5` is a route-healthy owner contender after `N26 PASS 100`, but is quota-deferred and still needs another owner-family pass before policy promotion | one more owner-family `X5` check only after quota/route health returns; otherwise move to a different pass/pass lane or real-repo compact workflow |
 | visual/graphics | geometry tied on `S22`; `N21` ties X1/X3 on visual correctness and favors X3 on compactness; `N48` makes low-noise renderer-only raster hotfixes a binary `X1 FAIL / X3 PASS` separator; Gemini preference not proven | use X3 for compact single-session low-noise raster work; repeat Gemini only after semantic route health is fixed |
 
+## N79+ Continuation Queue
+
+Source design/plan: `rf12-primary-resolution-plan-2026-04-25.md`.
+
+| Wave | Status | Scenario | Primary Question | Run Policy | Gate |
+|---|---|---|---|---|---|
+| `W57` | `NEXT` | `N79-staged-ui-visual-state-reentry-v2` | Can staged UI/visual-state work produce scoreable X1/X3 evidence without N38-style no-summary runtime noise? | Run `X1` and `X3` first; no `X4`; Gemini rows parked. | PASS requires scoreable top-pair rows or explicit runtime classification plus bounded retry. |
+| `W58` | `QUEUED` | `N80-screenshot-grounding-review-v2` | Can actual screenshot visual review separate top-pair models with calibrated pixel windows and semantic defect tuples? | Run after W57; top pair only unless promoted to final comparison. | PASS requires calibrated nonzero tolerance, false-positive traps, and rubric/binary result in live evidence. |
+| `W59` | `QUEUED` | `N81-evidence-conflict-repo-action-plan` | Can repo-understanding/advisory work split under stale docs, changed code, command evidence, and non-claim discipline? | Run after visual/UI priority waves. | PASS requires source-bound action plan and explicit stale-source rejection. |
+| `W60` | `QUEUED` | `N82-ux-structure-runtime-state-spec` | Can UX structure become objective enough to assign a primary? | Top pair only. | PASS requires state/breakpoint/affordance invariants, not prose-only UX taste. |
+| `W61` | `QUEUED` | `N83-interface-refactor-breakage-hunt` | Can interface refactor quality split without output-budget as the decisive gate? | Top pair first; lower rows only after completed wave. | PASS requires hidden consumer/runtime breakage oracle and exact compatibility ledger. |
+| `W62` | `QUEUED` | `N84-security-review-repro-gauntlet` | Can ordinary security review split through exploit reproduction and false-positive suppression? | Top pair first. | PASS requires exact vuln tuples plus non-finding discipline. |
+| `W63` | `QUEUED` | `N85-performance-review-runtime-budget` | Can performance review/worker lanes split through measured speedup plus semantic drift checks? | Top pair first. | PASS requires deterministic runtime harness and stable budget. |
+| `W64` | `QUEUED` | `N86-final-promotion-candidate-sweep` | Which diagnostics deserve canonical `/40` slot replacement? | `X4` only if explicitly approved by user for final lanes. | PASS requires named outgoing slot and updated canonical `/40` table. |
+
 ## Resume Point
 
 Resume from this roadmap plus:

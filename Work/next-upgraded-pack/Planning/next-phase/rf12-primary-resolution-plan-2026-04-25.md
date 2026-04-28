@@ -1,6 +1,6 @@
 Date: 2026-04-25
 Owner: `$lead`
-Status: `DRAFT`
+Status: `ACTIVE`
 
 ## Purpose
 
@@ -9,6 +9,11 @@ compact-vs-staged axis indefinitely.
 
 Current canonical source: `Results-drafts/full-v2-hard-results-current.md`.
 Current format alias: `RF12+1 Short-Rule Table` / `RF12`.
+
+2026-04-28 continuation contract: use this file as the accepted roadmap -> design -> plan surface
+for `N79+` hardening. Do not create a competing roadmap for the same X1/X3 separation work.
+`hardening-wave-roadmap-2026-04-22.md` remains the live wave queue; this file defines why the
+next N scenarios exist and how they are admitted.
 
 External advisory check:
 
@@ -260,3 +265,49 @@ regression closeout, and re-entry state.
 Decision: W56 confirms the execution-shape rule on the security lane. Single-session exploit patching
 is near-tie after N77; staged security re-entry is X1-primary after N78. No Sonnet route was involved
 in this result: current X3 runner config and summary label are `opus 4.7max` with `--effort max`.
+
+## 2026-04-28 N79+ Roadmap
+
+This queue is for new N scenarios only where they test a new unresolved axis. It is not a license to
+keep adding minor variants to a solved compact-output or staged-ledger family.
+
+| Priority | Wave | Scenario | Target RF line | Why this exists |
+|---|---|---|---|---|
+| `P0` | `W57` | `N79-staged-ui-visual-state-reentry-v2` | `L03`, `L07`, `L12` | Replace brittle `N38` with a bounded staged UI/visual-state packet that can produce scoreable X1/X3 evidence instead of no-summary runtime noise. |
+| `P0` | `W58` | `N80-screenshot-grounding-review-v2` | `L12`, secondary `L08` | Convert the current actual-screenshot diagnostic into a calibrated visual-review task with pixel windows, semantic defect tuples, and false-positive traps. |
+| `P1` | `W59` | `N81-evidence-conflict-repo-action-plan` | `L01`, secondary `L02` | Test repository understanding under stale docs, changed code, failing command evidence, and non-claim discipline instead of prose confidence. |
+| `P1` | `W60` | `N82-ux-structure-runtime-state-spec` | `L03` | Make UX design objectively scoreable through state transitions, breakpoint invariants, copy/affordance ownership, and forbidden visual cues. |
+| `P1` | `W61` | `N83-interface-refactor-breakage-hunt` | `L05`, `L09` | Re-test interface refactor quality through hidden consumer breakage and caller contract preservation, not output budget. |
+| `P2` | `W62` | `N84-security-review-repro-gauntlet` | `L10` | Try to split ordinary security review with exploit reproduction evidence, exact vulnerability tuples, and false-positive suppression. |
+| `P2` | `W63` | `N85-performance-review-runtime-budget` | `L06`, `L11` | Test performance role fit through measured hot-path improvement, profiler evidence, and semantic drift checks. |
+| `P2` | `W64` | `N86-final-promotion-candidate-sweep` | `/40` slot policy | Decide which diagnostics, if any, replace weaker full-v2-hard slots before final X4 or lower-row comparison. |
+
+## 2026-04-28 Design Contract
+
+| Design rule | Required effect |
+|---|---|
+| new axis only | Every new N must state which unresolved RF line it targets and why previous evidence is insufficient. |
+| scoreable before persuasive | PASS/FAIL must come from oracle/scorer/verifier output, not narrative judgment or stdout noise. |
+| bounded staged tasks | Staged scenarios must keep phases short enough to avoid no-summary failures and must require exact source, implementation, re-entry, and closeout artifacts. |
+| visual tasks use real visual evidence | Visual/UI-review scenarios must include screenshots or rendered artifacts, calibrated coordinate tolerance, semantic defect tuples, and false-positive traps. |
+| no budget-only promotion | Operator-output budget can remain a diagnostic axis, but a new primary claim needs semantic/runtime evidence unless the lane explicitly owns low-noise operation. |
+| no Gemini dependency | `X5` and `X6` stay parked while route/auth health is broken or deprioritized. They are calibration rows only after a completed wave. |
+| X4 final only | `X4` stays out of iterative hardening. Run it only on final lanes when explicitly approved by the user. |
+| canonical `/40` discipline | New diagnostics do not enter `full-v2-hard /40` until a slot-replacement decision names the removed slot and why the replacement is stronger. |
+
+## 2026-04-28 Delivery Plan
+
+| Phase | Scope | Acceptance gate | Checks |
+|---|---|---|---|
+| `A` plan alignment | Update this plan, live wave roadmap, and status checkpoint to make `N79+` the active route. | `PASS` when all three surfaces agree on `X1/X3 first`, Gemini parked, and X4 final-only. | `git diff --check`; doc self-consistency read. |
+| `B` N79 materialization | Build bounded staged UI/visual-state re-entry v2. No changes to existing anchored rows. | `PASS` when bundle-shape, scorer, and a valid synthesized candidate pass locally. | JSON parse; `--bundle-shape-only`; synthesized dry-run; `git diff --check`. |
+| `C` N79 run | Run `X1` and `X3` only. | `PASS` when both rows are scoreable or a route/runtime issue is explicitly classified and retried up to the normal limit. | Read `summary.json`, verifier logs, scorer JSON; update live evidence. |
+| `D` N80 materialization | Build calibrated screenshot-grounding visual review v2. | `PASS` when reference/oracle windows are not 0px brittle and false positives are scoreable. | Image/oracle validation; local scorer probe; `git diff --check`. |
+| `E` N80 run | Run `X1` and `X3` only. | `PASS` when the result produces either a binary split or an honest near-tie/rubric read. | Same as phase `C`. |
+| `F` next P1 wave | Pick `N81`, `N82`, or `N83` based on which RF line remains least resolved after N79/N80. | `PASS` when the chosen scenario changes axis rather than repeating output-budget or staged-ledger proof. | Pre-run protocol plus live evidence update. |
+| `G` promotion review | Decide whether any N79+ diagnostic replaces a weaker `/40` slot. | `PASS` only if the replacement has clearer role-fit value, stable scoring, and a named outgoing slot. | Update `full-v2-hard-results-current.md`, RF12, checkpoint, and evidence in one batch. |
+
+## 2026-04-28 Gate Decision
+
+`PASS`: N79+ roadmap/design/plan is admitted. Next concrete action is Phase `B`:
+materialize `N79-staged-ui-visual-state-reentry-v2` and run `X1`/`X3` first.
