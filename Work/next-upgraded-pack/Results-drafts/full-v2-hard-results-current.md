@@ -290,6 +290,23 @@ not split the top pair. Use X1 for staged interface/API migration after N35/N36,
 operator-budget API migration after N57, and keep ordinary hidden-consumer refactor as near-tie.
 The v2 runner now classifies top-level `.pytest_cache/` as auxiliary generated cache.
 
+## Security Review Reproduction W62 Diagnostic
+
+`N84-security-review-repro-gauntlet` retests ordinary security review after N64 with JSON exploit
+reproduction binding instead of a markdown finding table. It requires exact finding tuples,
+`R1..R9` reproduction case binding, source evidence, violated invariant, fix-boundary ownership,
+`B1..B3` false-positive suppression, exact `REVISE` gate decision, and exact one-file report scope.
+It is not part of the `full-v2-hard` `/40` denominator.
+
+| Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Read |
+|---|---|---|---|
+| `N84` | `PASS`; wrapper `0`; exact JSON repro report gates pass | `PASS`; wrapper `0`; same exact JSON report gates pass | `binary tie remains`; ordinary single-session security review stays near-tie |
+
+W62 interpretation: exploit reproduction binding and false-positive suppression improve ordinary
+security-review scoreability, but they still do not split the top pair. Use X1 for staged security
+re-entry after N78; use compactness only as a secondary preference for ordinary single-session
+security review.
+
 ## Real-Repo Patch Quality W47 Diagnostic
 
 `N69-realrepo-patch-quality-scorecard` probes a compact implementation patch with hidden ledger
@@ -535,7 +552,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | staged delivery/re-entry, staged API/interface migration, staged systems recovery, staged owner recovery, staged review/ADR gate, staged UI visual-state reentry | `X1` |
 | compact single-session implementation, compact UI/visual/raster, compact owner packet, compact real-repo API migration, compact low-noise science/runtime | `X3` |
 | pure scientific correctness without strict output budget | `X1` / `X3` near-tie |
-| tuple-exact single-shot review/security/source investigation | `X1` / `X3` near-tie |
+| tuple-exact single-shot review/security/source investigation | `X1` / `X3` near-tie; N84 confirms exploit-reproduction security review still ties |
 | compact real-repo patch when cost matters | `X3` with patch-hygiene guard; W47 ties binary but scores X3 higher |
 | multi-file hidden-consumer migration | `X1` / `X3` binary near-tie; choose X3 for cost, X1 for hygiene |
 | small test-led regression patch | `X1` / `X3` binary near-tie; choose X3 for cost after N71 |
@@ -557,7 +574,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 |---|---|
 | `v2-core12-tie-hardened-results-2026-04-20.md` | admitted hardened core12 slots for `S03`, `S04`, `S05`, `S06`, `S07`, `S08`, `S09`, `S25`, `S27`, `N01`, `N02`, `N03`, `N04`, `N05`, `N06` |
 | `role-fit-scorecard-v1-2026-04-22.md` | lane-fit interpretation and current hardening wave summaries |
-| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N83` |
+| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N84` |
 | `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted mainline hardening record |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` through `../Evidence/n60-ui-reentry-rubric-2026-04-24.json` | machine-readable rubric/scorer evidence for promoted diagnostic slots |
 | `../Evidence/n61-visual-pixel-localization-rubric-2026-04-25.json` | machine-readable `E51` visual pixel-localization diagnostic evidence; post-fix score favors `X1`, not promoted into `/40` |
@@ -582,5 +599,6 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n81-evidence-action-rubric-2026-04-28.json` | machine-readable `W59` evidence-conflict action-plan evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/n82-ux-state-rubric-2026-04-28.json` | machine-readable `W60` UX runtime-state evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/n83-interface-refactor-breakage-rubric-2026-04-28.json` | machine-readable `W61` interface-refactor breakage evidence; X1 and X3 both pass hidden batch-consumer and structured-report gates, so not promoted into `/40` |
+| `../Evidence/n84-security-repro-rubric-2026-04-28.json` | machine-readable `W62` security-review reproduction evidence; X1 and X3 both pass exact JSON repro and false-positive gates, so not promoted into `/40` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence; `X4 / Claude China opus max` is `32 / 40` with `8` scoreable verifier failures and `0` runtime not-runs |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 fill evidence; X2 is now closed at `12 / 40`, while X6 is `13 / 40` with `8` remaining timeout/auth-route `NOT-RUN` cells |

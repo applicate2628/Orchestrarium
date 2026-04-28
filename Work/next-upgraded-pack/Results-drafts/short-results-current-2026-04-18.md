@@ -90,6 +90,11 @@ edge (`65.1 / 100` versus `50.0 / 100` versus `40.0 / 100`). Official `X5 / gemi
 `NOT-RUN` after a `600s` no-output timeout, and a separately labeled `gemini-3-flash-preview`
 fallback diagnostic also timed out after `240s`.
 
+W62 then added `N84-security-review-repro-gauntlet`: an ordinary security-review JSON report with
+exact vuln tuples, exploit reproduction binding, false-positive suppression, and exact report scope.
+`X1 / gpt-5.5` and `X3 / opus 4.7max` both passed with wrapper `0`; `binary tie remains`. This is
+diagnostic evidence only and does not change the `full-v2-hard /40` denominator.
+
 | ID | Label |
 |---|---|
 | `X1` | `gpt-5.5` active; older rows may cite `gpt-5.4` as model-of-run |
@@ -118,6 +123,7 @@ fallback diagnostic also timed out after `240s`.
 | `15` | hard-5 staged separator probe `N35,N36,N37,N39,N41` | `gpt-5.5` with `5 / 5`; explicit `gpt-5.4 xhigh` comparison also `5 / 5` | `Claude China` with `1 / 5` | `opus 4.7max`, official opus 4.5, and official opus 4.6 all `0 / 5` | official sonnet `0 / 3 scoreable` | official haiku `0 / 4 scoreable` | Sonnet/Haiku missing-summary cells are runtime-route, not model FAIL |
 | `16` | W22/W23/W24 inverse-separator search on immutable tests and hidden interface consumers | `X1 / gpt-5.5`: `N42 PASS`, `N43 PASS`, `N44 PASS 96` | `X3 / opus 4.7max`: `N42 PASS`, `N43 PASS`, `N44 FAIL 72` |  |  |  | no honest `X1 FAIL / X3 PASS`; `N44` X3 failure is `.pytest_cache` changed-path scope hygiene, not hidden `sourceIds` semantics |
 | `17` | W25 ownership-budget immutable report-consumer inverse probe | `X1 / gpt-5.5`: `N45 PASS 96` | `X3 / opus 4.7max`: `N45 PASS 100` |  |  |  | `binary tie remains`; X3 wins only by cost/output (`2628` bytes versus `180549`), not hidden replay/report semantics |
+| `18` | W62 security review reproduction | `X1 / gpt-5.5`: `N84 PASS` | `X3 / opus 4.7max`: `N84 PASS` |  | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; exact exploit reproduction and false-positive suppression did not split ordinary security review |
 | `18` | W26 operator-budget compact hotfix | `X1 / gpt-5.5`: `N46 FAIL 70` | `X3 / opus 4.7max`: `N46 PASS 100` |  |  |  | first honest compact single-session `X1 FAIL / X3 PASS`; X1 preserves hidden repair semantics but fails the visible operator-budget gate (`210369 > 40000`) |
 | `19` | W27 UI compact operator-budget hotfix | `X1 / gpt-5.5`: `N47 FAIL 70` | `X3 / opus 4.7max`: `N47 PASS 94` |  |  |  | second honest compact single-session `X1 FAIL / X3 PASS`; both pass hidden UI dirty-state semantics and exact scope, while X1 fails the visible operator-budget gate (`169913 > 40000`) |
 | `20` | W28 visual raster compact operator-budget hotfix | `X1 / gpt-5.5`: `N48 FAIL 70` | `X3 / opus 4.7max`: `N48 PASS 100` |  |  |  | third honest compact single-session `X1 FAIL / X3 PASS`; both pass exact raster semantics and renderer-only scope, while X1 fails the visible operator-budget gate (`77825 > 40000`) |

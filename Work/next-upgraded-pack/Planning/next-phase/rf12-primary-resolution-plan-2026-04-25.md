@@ -307,6 +307,7 @@ keep adding minor variants to a solved compact-output or staged-ledger family.
 | `F` N81 repo evidence-conflict/action-plan | Run the next advisory repo-understanding separator attempt after N79/N80. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS 100`, `X3 PASS 100`, so `binary tie remains` and no primary is assigned. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; `git diff --check`; `mcp-free`; top-pair run. |
 | `F2` N82 UX runtime-state spec | Run the objective UX-structure state-spec separator attempt after N81. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS 100`, `X3 PASS 100`, so `binary tie remains` and no primary is assigned. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; `git diff --check`; `mcp-free`; top-pair run. |
 | `F3` N83 interface refactor breakage hunt | Run hidden batch-consumer and structured-report interface-refactor separator attempt after N82. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS`, `X3 PASS`, so `binary tie remains` and no primary is assigned for ordinary hidden-consumer refactor. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; `git diff --check`; `mcp-free`; top-pair run; runner cache-split fix. |
+| `F4` N84 security review repro gauntlet | Run exploit-reproduction and false-positive suppression separator attempt for ordinary security review. | `PASS` on 2026-04-28 as a completed wave; `X1 PASS`, `X3 PASS`, so `binary tie remains` and no primary is assigned for ordinary single-session security review. | JSON parse; `--bundle-shape-only`; expected start-state fail; synthesized reference PASS; stale split-brain scan; `git diff --check`; `mcp-free`; top-pair run. |
 | `G` promotion review | Decide whether any N79+ diagnostic replaces a weaker `/40` slot. | `PASS` only if the replacement has clearer role-fit value, stable scoring, and a named outgoing slot. | Update `full-v2-hard-results-current.md`, RF12, checkpoint, and evidence in one batch. |
 
 ## 2026-04-28 Gate Decision
@@ -353,8 +354,7 @@ source-authority/action-plan table is still solved by both top rows. The X3 work
 substring-gaming weakness in literal forbidden-snippet checks, so the next advisory hardening should
 use decision-context or staged review gates rather than another broad literal trap.
 
-Completed follow-up: Phase `F2` materialized and ran `N82-ux-structure-runtime-state-spec`; W61/N83
-is also complete.
+Completed follow-up: Phases `F2`, `F3`, and `F4` materialized and ran `N82`, `N83`, and `N84`.
 
 ## W60 Results
 
@@ -384,4 +384,16 @@ Operational note: the first N83 runs exposed a v2 runner issue where top-level `
 was counted as benchmark scope drift. The runner now treats top-level `.pytest_cache/` and
 `.mypy_cache/` like nested cache directories: auxiliary generated artifacts, not model patch scope.
 
-Next concrete action: Phase `G` promotion review or W62 `N84-security-review-repro-gauntlet`.
+Next concrete action: W63 `N85-performance-review-runtime-budget` or Phase `G` promotion review.
+
+## W62 Results
+
+| Wave | Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Calibration | Decision |
+|---|---|---|---|---|---|
+| `W62` | `N84 security review repro gauntlet` | `PASS`; exact findings, exploit reproduction binding, false-positive suppression, and JSON scope pass | `PASS`; same exact report gates pass | not launched by policy; `X4` final-only and Gemini parked | `binary tie remains`; ordinary single-session security review stays near-tie |
+
+Decision: W62 does not separate X1/X3. It strengthens the ordinary security-review lane beyond N64
+by requiring exploit-case binding and non-finding discipline, but both top rows satisfy the oracle.
+Do not keep tightening ordinary single-session security review as a separator. Keep staged security
+implementation/re-entry as `X1 primary` after N78 and use output compactness only as a secondary
+preference for ordinary security review.

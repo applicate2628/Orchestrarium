@@ -344,6 +344,7 @@ model fail.
 47. Materialize and run `N81-evidence-conflict-repo-action-plan` as W59/E71. `DONE` on 2026-04-28; `X1 PASS 100`, `X3 PASS 100`; `binary tie remains` on source authority, command evidence, bounded action plan, non-claims, and re-intake trigger. Keep it as negative separator evidence and harden future advisory oracles against substring-gaming.
 48. Materialize and run `N82-ux-structure-runtime-state-spec` as W60/E72. `DONE` on 2026-04-28; `X1 PASS 100`, `X3 PASS 100`; `binary tie remains` on UX runtime states, breakpoint invariants, affordance rules, copy ledger, handoffs, and non-goals. Keep it as negative separator evidence; objective single-shot UX JSON still does not split top pair.
 49. Materialize and run `N83-interface-refactor-breakage-hunt` as W61/E73. `DONE` on 2026-04-28; `X1 PASS`, `X3 PASS`; `binary tie remains` on hidden batch consumer, structured report compatibility, legacy-interface removal, exact scope, visible regression markers, and migration ledger. Keep it as negative separator evidence for ordinary single-session interface refactor; staged/API and compact-budget interface reads remain execution-shape-specific.
+50. Materialize and run `N84-security-review-repro-gauntlet` as W62/E74. `DONE` on 2026-04-28; `X1 PASS`, `X3 PASS`; `binary tie remains` on exact vuln tuples, exploit reproduction binding, false-positive suppression, gate decision, and exact JSON scope. Keep it as negative separator evidence for ordinary security review; staged security remains X1-primary after N78.
 
 ## Current Routing Impact
 
@@ -360,6 +361,7 @@ model fail.
 | repo-understanding / evidence-conflict action planning | `X1 / X3 near-tie` after `N66` and `N81` both passed top pair at exact gate; N81 additionally shows forbidden-literal traps are too weak as a separator mechanism | future advisory separators must use decision-context, stale-claim semantics, staged source arbitration, or review-gate closure rather than another single-shot conflict table |
 | UX structure / runtime-state design | `X1 / X3 near-tie` after N82: both top rows pass an objective JSON state-machine UX spec at `100 / 100` | future UX separators need runtime simulation, staged UX review, or visual grounding; do not keep tightening term-matched JSON anchors |
 | interface refactor hidden-consumer patch | `X1 / X3 near-tie` after N83: both top rows pass hidden batch-consumer, structured-report, legacy-removal, exact-scope, and ledger gates | do not use ordinary hidden-consumer refactor as a top-pair separator; use staged interface/API for X1-primary or explicit compact operator-budget API migration for X3-primary |
+| ordinary single-session security review | `X1 / X3 near-tie` after N84: both top rows pass exact vuln tuples, exploit reproduction binding, false-positive suppression, gate decision, and exact JSON scope | do not use ordinary security-review reproduction as a top-pair separator; use staged security re-entry for X1-primary or compact output preference when low-noise review output is first-class |
 | owner recovery staged re-entry | `X1 primary` after `N40` produced `X1 PASS 98 / 100` versus `X3 FAIL 55 / 100` | strong enough for staged owner routing; next repeat should be a real repo owner workflow only if policy needs extra confirmation |
 | incident-budget staged re-entry | `X1 primary` after `N41` produced `X1 PASS 100 / 100` versus `X3 FAIL 78 / 100` | strong enough for staged incident-budget routing; next repeat should be a real repo repair workflow only if policy needs extra confirmation |
 | scientist/constraints | `X1/X3` correctness tie on `N18`, `N22`, `N31`, `N32`, `N34`, and `N49`; `N58` adds a compact low-noise science/runtime separator because X1 passes physics/runtime/scope but fails visible output budget while X3 passes all gates | co-primary for scientific correctness; use `X3` when compact operator-output is a hard requirement; use fresh measured runtime for true solver-speed decisions |
@@ -378,8 +380,8 @@ Source design/plan: `rf12-primary-resolution-plan-2026-04-25.md`.
 | `W59` | `DONE` | `N81-evidence-conflict-repo-action-plan` | Can repo-understanding/advisory work split under stale docs, changed code, command evidence, and non-claim discipline? | Ran `X1` and `X3`; no `X4`; Gemini rows parked. | `X1 PASS 100`; `X3 PASS 100`; `binary tie remains`; substring-gaming note captured. |
 | `W60` | `DONE` | `N82-ux-structure-runtime-state-spec` | Can UX structure become objective enough to assign a primary? | Ran `X1` and `X3`; no `X4`; Gemini rows parked. | `X1 PASS 100`; `X3 PASS 100`; `binary tie remains`; objective single-shot UX still near-tie. |
 | `W61` | `DONE` | `N83-interface-refactor-breakage-hunt` | Can interface refactor quality split without output-budget as the decisive gate? | Ran `X1` and `X3`; lower rows deferred. | `X1 PASS`; `X3 PASS`; `binary tie remains`; ordinary hidden-consumer interface refactor still near-tie. |
-| `W62` | `NEXT` | `N84-security-review-repro-gauntlet` | Can ordinary security review split through exploit reproduction and false-positive suppression? | Top pair first. | PASS requires exact vuln tuples plus non-finding discipline. |
-| `W63` | `QUEUED` | `N85-performance-review-runtime-budget` | Can performance review/worker lanes split through measured speedup plus semantic drift checks? | Top pair first. | PASS requires deterministic runtime harness and stable budget. |
+| `W62` | `DONE` | `N84-security-review-repro-gauntlet` | Can ordinary security review split through exploit reproduction and false-positive suppression? | Ran `X1` and `X3`; lower rows deferred. | `X1 PASS`; `X3 PASS`; `binary tie remains`; ordinary single-session security review still near-tie. |
+| `W63` | `NEXT` | `N85-performance-review-runtime-budget` | Can performance review/worker lanes split through measured speedup plus semantic drift checks? | Top pair first. | PASS requires deterministic runtime harness and stable budget. |
 | `W64` | `QUEUED` | `N86-final-promotion-candidate-sweep` | Which diagnostics deserve canonical `/40` slot replacement? | `X4` only if explicitly approved by user for final lanes. | PASS requires named outgoing slot and updated canonical `/40` table. |
 
 ## Resume Point
@@ -390,8 +392,8 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume from the `N83` interface-refactor closeout and then materialize
-`N84-security-review-repro-gauntlet`.
+If interrupted now, resume from the `N84` security-review reproduction closeout and then materialize
+`N85-performance-review-runtime-budget`.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`
 versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), staged owner recovery

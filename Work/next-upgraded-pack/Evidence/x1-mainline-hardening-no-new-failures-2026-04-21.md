@@ -3900,3 +3900,37 @@ when generated cache is treated as auxiliary.
 Runner note: this wave fixed the v2 runner's generated-artifact split so top-level `.pytest_cache/`
 is classified as auxiliary cache, matching the existing nested cache behavior. Earlier N83 raw runs
 that failed only on top-level `.pytest_cache/` scope were harness false positives, not model failures.
+
+## 2026-04-28 Follow-Up: W62 Security Review Reproduction Gauntlet
+
+`N84-security-review-repro-gauntlet` hardens ordinary single-session security review beyond N64's
+tuple-retelling shape. The editable artifact is a single JSON report. PASS requires nine exact
+security findings, `R1..R9` exploit reproduction binding, source evidence, violated invariant,
+fix-boundary ownership, `B1..B3` false-positive suppression, exact `REVISE` gate decision, and exact
+changed-path scope.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N84` JSON parse and bundle-shape verifier | `PASS` |
+| `N84` starter verifier | expected `FAIL`; empty findings and missing gate decision |
+| `N84` synthesized reference probe in `.scratch/verifier-probes/2026-04-28-n84-security-repro-valid` | verifier `PASS`; exact changed path accepted |
+| stale N64/markdown split-brain scan | `PASS`; no stale `review-report.md` / old verifier references |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Changed paths | Worker output | Primary failure |
+|---|---|---|---:|---|---|---:|---|
+| `N84` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-28_19-05-21-X1-wave62-n84-security-repro-2026-04-28/N84/run` | `0` | `PASS` | `candidate/review-report.json` | `247446` bytes | none |
+| `N84` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-28_19-05-21-X3-wave62-n84-security-repro-2026-04-28/N84/run` | `0` | `PASS` | `candidate/review-report.json` | `1628` bytes | none |
+
+### Verdict
+
+`binary tie remains` for `X1` and `X3` on N84. Exploit reproduction binding and false-positive
+suppression strengthen ordinary security review versus N64, but both top rows still satisfy the
+complete JSON oracle. Routing impact: ordinary single-session security review stays `X1 / X3
+near-tie`; choose `X3` when compact review output is first-class, choose `X1` when verbose
+traceability is preferred. Staged security implementation/re-entry remains `X1 primary` after N78.

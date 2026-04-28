@@ -1,0 +1,21 @@
+id: N84
+surface_id: E74
+pack_id: E74
+role_class: review
+artifact_type: security repro review JSON
+modality_family: multi-file security review with source-to-exploit repro binding and false-positive traps
+allowed_change_surface:
+  - candidate/review-report.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/review-target/**
+score_profile: "security-review, exact-findings, repro-binding, false-positive-control, depth-gauntlet"
+overlay_flags:
+  - top-pair-role-fit
+  - security-repro
+  - exact-vulnerability-tuples
+  - source-to-exploit-binding
+  - false-positive-control
+  - binary-separator-candidate

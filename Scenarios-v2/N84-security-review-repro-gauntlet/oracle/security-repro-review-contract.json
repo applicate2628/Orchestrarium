@@ -1,0 +1,265 @@
+{
+  "contractId": "N84-security-review-repro-gauntlet",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "required_bundle_paths": [
+    "candidate/README.md",
+    "candidate/review-report.json",
+    "candidate/review-target/README.md",
+    "candidate/review-target/security-depth/admin_api.py",
+    "candidate/review-target/security-depth/session_tokens.py",
+    "candidate/review-target/security-depth/webhook_handler.py",
+    "candidate/review-target/security-depth/audit_log.py",
+    "candidate/review-target/security-depth/export_links.py",
+    "candidate/review-target/security-depth/admin_console.html",
+    "inputs/README.md",
+    "inputs/accepted-security-claims.md",
+    "inputs/repro-cases.md",
+    "inputs/review-boundary.md",
+    "inputs/task.md",
+    "inputs/trust-boundary-notes.md",
+    "oracle/README.md",
+    "oracle/security-repro-review-contract.json",
+    "oracle/expected-findings.md",
+    "oracle/false-positive-traps.md",
+    "oracle/scoring-anchors.md",
+    "oracle/severity-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_security_repro_review.py"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N84",
+    "surface_id": "E74",
+    "pack_id": "E74",
+    "role_class": "review",
+    "artifact_type": "security repro review JSON",
+    "modality_family": "multi-file security review with source-to-exploit repro binding and false-positive traps",
+    "allowed_change_surface": [
+      "candidate/review-report.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "security-review, exact-findings, repro-binding, false-positive-control, depth-gauntlet",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "security-repro",
+      "exact-vulnerability-tuples",
+      "source-to-exploit-binding",
+      "false-positive-control",
+      "binary-separator-candidate"
+    ]
+  },
+  "editable_report": "candidate/review-report.json",
+  "required_top_level_report_keys": [
+    "contractId",
+    "findings",
+    "falsePositiveAvoided",
+    "gateDecision"
+  ],
+  "allowed_categories": [
+    "authz",
+    "tenant-boundary",
+    "session",
+    "webhook",
+    "secret-exposure",
+    "pii",
+    "replay"
+  ],
+  "allowed_severities": [
+    "high",
+    "medium",
+    "low"
+  ],
+  "exact_finding_count": 9,
+  "expected_gate_decision": "REVISE",
+  "required_findings": [
+    {
+      "id": "F1",
+      "file": "candidate/review-target/security-depth/admin_api.py",
+      "acceptable_lines": [6],
+      "category": "tenant-boundary",
+      "severity": "high",
+      "title_keywords": ["tenant", "body", "scope"],
+      "source_terms": ["tenant_id", "body"],
+      "repro": {
+        "caseId": "R1",
+        "attacker_terms": ["tenant-attacker", "tenant-victim"],
+        "impact_terms": ["ledger.approve_transfer", "tenant-victim"],
+        "invariant_terms": ["authenticated", "tenant"]
+      },
+      "fix_terms": ["authenticated", "tenant"]
+    },
+    {
+      "id": "F2",
+      "file": "candidate/review-target/security-depth/admin_api.py",
+      "acceptable_lines": [7, 13],
+      "category": "authz",
+      "severity": "high",
+      "title_keywords": ["role", "acting", "admin"],
+      "source_terms": ["acting_role", "finance-admin"],
+      "repro": {
+        "caseId": "R2",
+        "attacker_terms": ["viewer", "finance-admin"],
+        "impact_terms": ["approves", "transfer"],
+        "invariant_terms": ["role", "authenticated"]
+      },
+      "fix_terms": ["authenticated", "role"]
+    },
+    {
+      "id": "F3",
+      "file": "candidate/review-target/security-depth/admin_api.py",
+      "acceptable_lines": [20, 21],
+      "category": "pii",
+      "severity": "medium",
+      "title_keywords": ["hidden", "export", "include"],
+      "source_terms": ["include_hidden", "account_exporter.export"],
+      "repro": {
+        "caseId": "R3",
+        "attacker_terms": ["include_hidden"],
+        "impact_terms": ["hidden", "account_exporter.export"],
+        "invariant_terms": ["hidden", "authorization"]
+      },
+      "fix_terms": ["server-side", "authorization"]
+    },
+    {
+      "id": "F4",
+      "file": "candidate/review-target/security-depth/session_tokens.py",
+      "acceptable_lines": [5, 6],
+      "category": "session",
+      "severity": "high",
+      "title_keywords": ["predictable", "reset", "token"],
+      "source_terms": ["bucket", "user.email"],
+      "repro": {
+        "caseId": "R4",
+        "attacker_terms": ["five-minute", "email"],
+        "impact_terms": ["predicted", "id:bucket:emailprefix"],
+        "invariant_terms": ["unguessable", "secret"]
+      },
+      "fix_terms": ["random", "server-side"]
+    },
+    {
+      "id": "F5",
+      "file": "candidate/review-target/security-depth/session_tokens.py",
+      "acceptable_lines": [10],
+      "category": "session",
+      "severity": "medium",
+      "title_keywords": ["cookie", "httponly", "secure"],
+      "source_terms": ["httponly=False", "secure=False", "samesite=\"None\""],
+      "repro": {
+        "caseId": "R5",
+        "attacker_terms": ["admin_sid"],
+        "impact_terms": ["httponly=False", "secure=False", "samesite"],
+        "invariant_terms": ["HttpOnly", "Secure", "CSRF"]
+      },
+      "fix_terms": ["HttpOnly", "Secure", "SameSite"]
+    },
+    {
+      "id": "F6",
+      "file": "candidate/review-target/security-depth/webhook_handler.py",
+      "acceptable_lines": [10],
+      "category": "webhook",
+      "severity": "high",
+      "title_keywords": ["webhook", "signature", "bypass"],
+      "source_terms": ["debug_signature", "skip"],
+      "repro": {
+        "caseId": "R6",
+        "attacker_terms": ["debug_signature=skip"],
+        "impact_terms": ["accepted", "applied"],
+        "invariant_terms": ["verification", "bypass"]
+      },
+      "fix_terms": ["signature", "server"]
+    },
+    {
+      "id": "F7",
+      "file": "candidate/review-target/security-depth/webhook_handler.py",
+      "acceptable_lines": [16, 17],
+      "category": "replay",
+      "severity": "medium",
+      "title_keywords": ["webhook", "replay", "idempotency"],
+      "source_terms": ["event_store.record", "credits.grant"],
+      "repro": {
+        "caseId": "R7",
+        "attacker_terms": ["same", "event_id"],
+        "impact_terms": ["credits.grant", "each"],
+        "invariant_terms": ["idempotent", "before"]
+      },
+      "fix_terms": ["idempotency", "before", "side effects"]
+    },
+    {
+      "id": "F8",
+      "file": "candidate/review-target/security-depth/audit_log.py",
+      "acceptable_lines": [4, 5, 8],
+      "category": "secret-exposure",
+      "severity": "high",
+      "title_keywords": ["audit", "authorization", "cookie"],
+      "source_terms": ["Authorization", "Cookie", "audit_sink.write"],
+      "repro": {
+        "caseId": "R8",
+        "attacker_terms": ["Authorization", "Cookie"],
+        "impact_terms": ["audit_sink.write", "raw"],
+        "invariant_terms": ["Audit", "secrets"]
+      },
+      "fix_terms": ["redact", "headers"]
+    },
+    {
+      "id": "F9",
+      "file": "candidate/review-target/security-depth/export_links.py",
+      "acceptable_lines": [7],
+      "category": "secret-exposure",
+      "severity": "high",
+      "title_keywords": ["download", "service", "key"],
+      "source_terms": ["SERVICE_API_KEY", "owner_email", "api_key"],
+      "repro": {
+        "caseId": "R9",
+        "attacker_terms": ["owner_email", "path"],
+        "impact_terms": ["api_key", "owner@example.com"],
+        "invariant_terms": ["service", "PII"]
+      },
+      "fix_terms": ["server-side", "signed", "redact"]
+    }
+  ],
+  "required_false_positive_cases": [
+    {
+      "caseId": "B1",
+      "pattern_terms": ["MASKED_EXAMPLE_TOKEN", "sk_test_example"],
+      "reason_terms": ["synthetic", "sink"]
+    },
+    {
+      "caseId": "B2",
+      "pattern_terms": ["rel=\"noopener\""],
+      "reason_terms": ["hardening", "link"]
+    },
+    {
+      "caseId": "B3",
+      "pattern_terms": ["GET /health"],
+      "reason_terms": ["public", "privileged"]
+    }
+  ],
+  "prohibited_report_snippets": [
+    "ship it",
+    "looks fine",
+    "no findings"
+  ]
+}

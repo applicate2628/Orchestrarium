@@ -1,0 +1,41 @@
+{
+  "scenario": "N84",
+  "wave": "W62",
+  "batchName": "wave62-n84-security-repro-2026-04-28",
+  "verdict": "binary tie remains",
+  "note": "Both top-pair rows passed the JSON security review reproduction gauntlet: nine exact finding tuples, R1..R9 exploit reproduction binding, B1..B3 false-positive suppression, exact gateDecision, and exact changed-path scope. Ordinary single-session security review remains near-tie; staged security re-entry remains X1-primary after N78.",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score_0_100": null,
+      "matched": "verifier PASS",
+      "changedPaths": [
+        "candidate/review-report.json"
+      ],
+      "auxiliaryChangedPaths": [],
+      "workerOutputBytes": 247446,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_19-05-21-X1-wave62-n84-security-repro-2026-04-28/N84/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_19-05-21-X1-wave62-n84-security-repro-2026-04-28/N84/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score_0_100": null,
+      "matched": "verifier PASS",
+      "changedPaths": [
+        "candidate/review-report.json"
+      ],
+      "auxiliaryChangedPaths": [],
+      "workerOutputBytes": 1628,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_19-05-21-X3-wave62-n84-security-repro-2026-04-28/N84/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_19-05-21-X3-wave62-n84-security-repro-2026-04-28/N84/meta/summary.json"
+    }
+  ]
+}
