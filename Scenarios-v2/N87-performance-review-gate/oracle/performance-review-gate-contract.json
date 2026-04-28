@@ -1,0 +1,236 @@
+{
+  "contractId": "N87-performance-review-gate",
+  "planFingerprint": "n87-performance-review-gate-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N87",
+    "surface_id": "E77",
+    "pack_id": "E77",
+    "role_class": "review",
+    "artifact_type": "read-only performance architecture review gate with benchmark admissibility findings",
+    "modality_family": "staged source arbitration, performance-review ADR, benchmark admissibility, cache-boundary review, false-positive rejection, and response gate",
+    "allowed_change_surface": [
+      "candidate/review-state.json",
+      "candidate/decision-adr.md",
+      "candidate/findings.json",
+      "candidate/response-gate.json",
+      "candidate/closure.json"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/review-target/**"
+    ],
+    "score_profile": "performance-review-gate, benchmark-admissibility, cache-boundary, false-positive-avoidance, re-entry, scored-rubric",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "staged-runner",
+      "reentry",
+      "review",
+      "performance-review",
+      "architecture-review",
+      "benchmark-admissibility",
+      "cache-boundary",
+      "false-positive-traps",
+      "hidden-finding-tuples",
+      "source-binding",
+      "scored-rubric",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "candidate/README.md",
+    "candidate/review-state.json",
+    "candidate/decision-adr.md",
+    "candidate/findings.json",
+    "candidate/response-gate.json",
+    "candidate/closure.json",
+    "candidate/review-target/src/quoteperf/engine.py",
+    "candidate/review-target/src/quoteperf/catalog.py",
+    "candidate/review-target/benchmarks/warm-run.json",
+    "candidate/review-target/benchmarks/cold-mixed-run.json",
+    "candidate/review-target/benchmarks/memory-snapshot.json",
+    "candidate/review-target/benchmarks/perf-summary.md",
+    "candidate/review-target/docs/stale-ops-assumptions.md",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/review-feedback.md",
+    "inputs/decoy-map.md",
+    "inputs/phases/01-source-ledger.md",
+    "inputs/phases/02-adr-decision.md",
+    "inputs/phases/03-review-findings.md",
+    "inputs/phases/04-review-closeout.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/performance-review-gate-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_performance_review_gate.py",
+    "verifiers/check_review_scope.py"
+  ],
+  "expectedSourceIds": ["S1", "S2", "S3", "S4", "S5", "S6", "S7", "S8", "S9", "S10", "S11", "S12"],
+  "expectedPhaseIds": [
+    "01-source-ledger",
+    "02-adr-decision",
+    "03-review-findings",
+    "04-review-closeout"
+  ],
+  "requiredChangedPaths": [
+    "candidate/review-state.json",
+    "candidate/decision-adr.md",
+    "candidate/findings.json",
+    "candidate/response-gate.json",
+    "candidate/closure.json"
+  ],
+  "phasePathRules": {
+    "01-source-ledger": {
+      "allowed": ["candidate/review-state.json"],
+      "requiredAny": ["candidate/review-state.json"]
+    },
+    "02-adr-decision": {
+      "allowed": ["candidate/review-state.json", "candidate/decision-adr.md"],
+      "requiredAny": ["candidate/decision-adr.md"]
+    },
+    "03-review-findings": {
+      "allowed": ["candidate/review-state.json", "candidate/findings.json"],
+      "requiredAny": ["candidate/findings.json"]
+    },
+    "04-review-closeout": {
+      "allowed": [
+        "candidate/review-state.json",
+        "candidate/response-gate.json",
+        "candidate/closure.json"
+      ],
+      "requiredAny": ["candidate/closure.json"]
+    }
+  },
+  "requiredStateKeys": [
+    "contractId",
+    "planFingerprint",
+    "phases",
+    "sourceBindings",
+    "staleSourceRejections",
+    "findingLedger",
+    "falsePositiveLedger",
+    "validation",
+    "patchBudget"
+  ],
+  "requiredLedgerRows": {
+    "findings": [
+      "F1-warm-cache-benchmark-contamination",
+      "F2-cache-key-context-loss",
+      "F3-global-cache-lifetime-growth",
+      "F4-approval-gate-incomplete"
+    ],
+    "falsePositives": [
+      "FP1-json-serialization-hotpath",
+      "FP2-decimal-rounding",
+      "FP3-markdown-report-format"
+    ],
+    "staleRejections": [
+      "candidate/review-target/docs/stale-ops-assumptions.md",
+      "single-region-only",
+      "caller-normalizes-feature-flags",
+      "warm-cache-speedup-is-production-speedup"
+    ],
+    "validationMarkers": [
+      "python verifiers/check_performance_review_gate.py",
+      "python verifiers/check_review_scope.py"
+    ],
+    "adrMarkers": [
+      "reject warm-only benchmark",
+      "region and sorted feature flags",
+      "bound cache lifetime",
+      "cold-cache mixed-context reruns",
+      "reject stale ops assumptions"
+    ]
+  },
+  "expectedFindings": {
+    "F1-warm-cache-benchmark-contamination": {
+      "severity": "high",
+      "owner": "performance-reviewer",
+      "file": "candidate/review-target/benchmarks/warm-run.json",
+      "symbol": "B1-warm-only",
+      "evidenceCue": "warmCache",
+      "remediationCue": "cold-cache mixed-context reruns"
+    },
+    "F2-cache-key-context-loss": {
+      "severity": "high",
+      "owner": "architecture-reviewer",
+      "file": "candidate/review-target/src/quoteperf/engine.py",
+      "symbol": "_cache_key",
+      "evidenceCue": "return item",
+      "remediationCue": "region and sorted feature flags"
+    },
+    "F3-global-cache-lifetime-growth": {
+      "severity": "medium",
+      "owner": "performance-reviewer",
+      "file": "candidate/review-target/src/quoteperf/engine.py",
+      "symbol": "CATALOG_SNAPSHOTS",
+      "evidenceCue": "retainedCatalogSnapshots",
+      "remediationCue": "bound cache lifetime"
+    },
+    "F4-approval-gate-incomplete": {
+      "severity": "medium",
+      "owner": "performance-reviewer",
+      "file": "candidate/review-target/benchmarks/perf-summary.md",
+      "symbol": "reportedSpeedup",
+      "evidenceCue": "informational only",
+      "remediationCue": "REVISE"
+    }
+  },
+  "forbiddenFalsePositiveIds": [
+    "FP1-json-serialization-hotpath",
+    "FP2-decimal-rounding",
+    "FP3-markdown-report-format"
+  ],
+  "responseDecisions": {
+    "A1-approve-warm-only-speedup": "reject",
+    "A2-cache-key-sku-only": "reject",
+    "A3-add-region-only": "revise",
+    "A4-raise-memory-budget": "reject",
+    "A5-add-cold-mixed-benchmark": "accept",
+    "A6-bound-cache-lifetime": "accept"
+  },
+  "requiredNonClaimMarkers": [
+    "JSON output is not in the quote hot path",
+    "rounding is deterministic",
+    "markdown wording is not a hot-path blocker"
+  ],
+  "requiredClosureMarkers": [
+    "F1-warm-cache-benchmark-contamination",
+    "F2-cache-key-context-loss",
+    "F3-global-cache-lifetime-growth",
+    "F4-approval-gate-incomplete",
+    "A1-approve-warm-only-speedup",
+    "A2-cache-key-sku-only",
+    "A3-add-region-only",
+    "A4-raise-memory-budget",
+    "A5-add-cold-mixed-benchmark",
+    "A6-bound-cache-lifetime",
+    "REVISE"
+  ],
+  "requiredGateDecision": "REVISE"
+}

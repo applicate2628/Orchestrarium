@@ -1,0 +1,15 @@
+{
+  "runId": "B2-cold-mixed",
+  "dataset": "same-sku-mixed-region-and-flags",
+  "warmCache": false,
+  "catalogRefreshes": 8,
+  "mixedRegions": true,
+  "featureFlagPermutations": true,
+  "medianMs": 118.0,
+  "baselineMedianMs": 132.0,
+  "reportedSpeedup": "1.1x",
+  "wrongQuotes": [
+    {"sku": "A-100", "region": "eu", "expected": 156.0, "observed": 130.0},
+    {"sku": "A-100", "region": "apac", "expected": 175.5, "observed": 130.0}
+  ]
+}

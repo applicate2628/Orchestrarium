@@ -1,0 +1,47 @@
+{
+  "scenario": "N87",
+  "wave": "W66",
+  "batchName": "wave66-n87-performance-review-2026-04-28",
+  "replacementDecision": {
+    "promotedIntoFullV2Hard": false,
+    "replacesSlot": null,
+    "reason": "N87 is a diagnostic negative separator for performance-review gate work. Both top rows pass, so it does not replace N07 or any canonical /40 slot."
+  },
+  "verdict": "binary tie remains for read-only performance review gate without output budget",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "workerOutputBytes": 154170,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/decision-adr.md",
+        "candidate/findings.json",
+        "candidate/response-gate.json",
+        "candidate/review-state.json"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_21-05-51-X1-wave66-n87-performance-review-2026-04-28/N87/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_21-05-51-X1-wave66-n87-performance-review-2026-04-28/N87/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "workerOutputBytes": 2466,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/decision-adr.md",
+        "candidate/findings.json",
+        "candidate/response-gate.json",
+        "candidate/review-state.json"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-28_21-05-50-X3-wave66-n87-performance-review-2026-04-28/N87/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-28_21-05-50-X3-wave66-n87-performance-review-2026-04-28/N87/meta/summary.json"
+    }
+  ]
+}

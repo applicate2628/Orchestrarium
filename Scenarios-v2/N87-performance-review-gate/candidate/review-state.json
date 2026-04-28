@@ -1,0 +1,16 @@
+{
+  "contractId": "N87-performance-review-gate",
+  "planFingerprint": "",
+  "phases": [],
+  "sourceBindings": [],
+  "staleSourceRejections": [],
+  "findingLedger": [],
+  "falsePositiveLedger": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 5,
+    "requiredChangedPaths": []
+  }
+}

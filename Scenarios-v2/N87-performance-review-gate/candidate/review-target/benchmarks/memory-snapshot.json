@@ -1,0 +1,9 @@
+{
+  "runId": "B3-catalog-refresh-memory",
+  "iterations": 10000,
+  "catalogRefreshes": 10000,
+  "retainedCatalogSnapshots": 10000,
+  "peakMb": 918,
+  "steadyStateExpectationMb": 96,
+  "notes": "module-global CATALOG_SNAPSHOTS keeps every refreshed catalog object reachable"
+}

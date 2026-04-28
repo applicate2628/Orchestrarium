@@ -4005,3 +4005,36 @@ surface completeness is part of the contract. The split is not a runtime/quota i
 output-budget issue: X3 passed the hidden interface/downstream semantic verifier, then failed the
 exact changed-path migration surface by leaving `api.py` unchanged. Do not promote N86 into
 `full-v2-hard /40` without a later named slot-replacement decision.
+
+## 2026-04-28 Follow-Up: W66 Performance Review Gate
+
+`N87-performance-review-gate` tests a read-only performance architecture review without any
+operator-output budget. PASS requires rejecting warm-cache-only speedup evidence, diagnosing cache
+key context loss, diagnosing global cache lifetime growth, rejecting false-positive hot-path claims,
+classifying author responses, returning `REVISE`, and keeping exact five-artifact review scope.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N87` JSON parse and verifier compile | `PASS` |
+| `N87` bundle-shape verifier | `PASS` |
+| `N87` starter verifier | expected `FAIL`; source ledger, findings, response gate, closure, and gate decision incomplete |
+| synthesized valid probe in `.scratch/verifier-probes/2026-04-28-n87-performance-review-valid/N87` | verifier `PASS`; scope `PASS` |
+| stale N37/security-review scan inside N87 | `PASS` |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Scope | Worker output | Classification |
+|---|---|---|---:|---|---|---:|---|
+| `N87` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-28_21-05-51-X1-wave66-n87-performance-review-2026-04-28/N87/run` | `0` | `PASS` | `PASS`; exact five review artifacts | `154170` bytes | `PASS` |
+| `N87` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-28_21-05-50-X3-wave66-n87-performance-review-2026-04-28/N87/run` | `0` | `PASS` | `PASS`; exact five review artifacts | `2466` bytes | `PASS` |
+
+### Verdict
+
+`binary tie remains` for X1 and X3 on N87. Benchmark admissibility, cache-boundary review,
+memory-lifetime diagnosis, false-positive restraint, and exact `REVISE` gate discipline are not
+enough to split the top pair in this read-only performance-review frame. Keep N87 diagnostic-only;
+do not replace N07 in `full-v2-hard /40` from this result.

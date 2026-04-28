@@ -1,0 +1,33 @@
+id: N87
+surface_id: E77
+pack_id: E77
+role_class: review
+artifact_type: read-only performance architecture review gate with benchmark admissibility findings
+modality_family: staged source arbitration, performance-review ADR, benchmark admissibility, cache-boundary review, false-positive rejection, and response gate
+allowed_change_surface:
+  - candidate/review-state.json
+  - candidate/decision-adr.md
+  - candidate/findings.json
+  - candidate/response-gate.json
+  - candidate/closure.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/review-target/**
+score_profile: "performance-review-gate, benchmark-admissibility, cache-boundary, false-positive-avoidance, re-entry, scored-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - staged-runner
+  - reentry
+  - review
+  - performance-review
+  - architecture-review
+  - benchmark-admissibility
+  - cache-boundary
+  - false-positive-traps
+  - hidden-finding-tuples
+  - source-binding
+  - scored-rubric
+  - binary-separator-candidate

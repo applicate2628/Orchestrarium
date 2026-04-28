@@ -307,6 +307,19 @@ contract, then fails exact changed-path migration surface. Use this as X1-leanin
 interface migrations that require complete public-API consumer migration and exact changed-path
 discipline. Promotion into `/40` still requires a later named outgoing-slot decision.
 
+## Performance Review Gate W66 Diagnostic
+
+`N87-performance-review-gate` tests read-only performance architecture review without an output
+budget. It is not part of the `full-v2-hard` `/40` denominator.
+
+| Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Read |
+|---|---|---|---|
+| `N87` | `PASS`; wrapper `0`; benchmark admissibility, cache-boundary, response gate, and exact scope pass | `PASS`; wrapper `0`; same review gates pass | `binary tie remains`; X3 is compact but not a binary winner |
+
+W66 interpretation: benchmark-admissibility review, cache-key context diagnosis, global cache
+lifetime review, false-positive restraint, and exact `REVISE` gate discipline do not split the top
+pair in this read-only frame. Keep N87 diagnostic-only; do not replace N07 from this result.
+
 ## Security Review Reproduction W62 Diagnostic
 
 `N84-security-review-repro-gauntlet` retests ordinary security review after N64 with JSON exploit
@@ -570,6 +583,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | compact single-session implementation, compact UI/visual/raster, compact owner packet, compact real-repo API migration, compact performance hot path, compact low-noise science/runtime | `X3` |
 | pure scientific correctness without strict output budget | `X1` / `X3` near-tie |
 | tuple-exact single-shot review/security/source investigation | `X1` / `X3` near-tie; N84 confirms exploit-reproduction security review still ties |
+| read-only performance-review gate | `X1` / `X3` near-tie after N87; choose X3 only when compact review output is explicitly valued |
 | compact real-repo patch when cost matters | `X3` with patch-hygiene guard; W47 ties binary but scores X3 higher, and N85 makes compact performance hot-path work a binary X3 separator |
 | multi-file hidden-consumer migration | `X1` / `X3` binary near-tie on pure hidden semantics; choose X3 for cost, X1 for hygiene and exact migration-surface completeness after N86 |
 | small test-led regression patch | `X1` / `X3` binary near-tie; choose X3 for cost after N71 |
@@ -619,5 +633,6 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n84-security-repro-rubric-2026-04-28.json` | machine-readable `W62` security-review reproduction evidence; X1 and X3 both pass exact JSON repro and false-positive gates, so not promoted into `/40` |
 | `../Evidence/n85-performance-runtime-rubric-2026-04-28.json` | machine-readable `W63` performance runtime evidence; X1 fails only the hard operator-output budget after hidden runtime/scope pass, X3 passes all gates, promoted over N59 in `/40` |
 | `../Evidence/n86-interface-downstream-rubric-2026-04-28.json` | machine-readable `W65` real interface downstream migration evidence; X1 passes, while X3 passes hidden downstream semantics but scoreably fails exact migration-surface scope, not promoted into `/40` |
+| `../Evidence/n87-performance-review-gate-rubric-2026-04-28.json` | machine-readable `W66` performance-review gate evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence before N85 promotion; current X4 row is `31 PASS`, `8 FAIL`, `1 NOT-RUN` until N85 is run in final-only mode |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` plus `../Evidence/n85-performance-runtime-rubric-2026-04-28.json` | machine-readable X2/X6 fill evidence; X2 remains `12 / 40`, while X6 is now `13 / 40` with `9` timeout/auth-route `NOT-RUN` cells after N85 |

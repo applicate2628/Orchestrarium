@@ -1,0 +1,11 @@
+{
+  "runId": "B1-warm-only",
+  "dataset": "same-sku-same-region",
+  "warmCache": true,
+  "catalogRefreshes": 0,
+  "mixedRegions": false,
+  "featureFlagPermutations": false,
+  "medianMs": 4.8,
+  "baselineMedianMs": 132.0,
+  "reportedSpeedup": "27.5x"
+}
