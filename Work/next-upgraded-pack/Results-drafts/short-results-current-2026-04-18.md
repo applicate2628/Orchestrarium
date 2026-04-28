@@ -415,6 +415,7 @@ fallback diagnostic also timed out after `240s`.
 | `80` | `N78` was added on `2026-04-25` as W56 staged security re-entry diagnostic; it is not merged into `full-v2-hard` `/40`. It repeats N77's hidden exploit oracle but stages threat ledger, implementation, exploit validation, re-entry state, and closeout across four fresh invocations. `X1 / gpt-5.5` passes (`85 / 100`). `X3 / opus 4.7max` scoreably fails (`23 / 100`) on a percent-encoded CRLF redirect trap plus staged ledger/validation/closeout contract gaps. `X2` scoreably fails (`45 / 100`) despite passing runtime exploit gates because exact scope and staged artifacts fail. `X6` is runtime `NOT-RUN` after `2400s` with no `summary.json` | `N78 staged security reentry` |
 | `81` | `X4 / Claude China opus max` completed the admitted `full-v2-hard` closing run on `2026-04-26`: `32 / 40`, with `32 PASS`, `8 scoreable FAIL`, and `0 NOT-RUN`. Fails are `N25`, `N35`, `N36`, `N37`, `N39`, `N40`, `N43`, and `N57`. `N60` looked pending during polling but completed in the original batch as `PASS`; no retry result was admitted | `X4 full-v2-hard closing comparison` |
 | `82` | `X2 / gpt-spark` filled all `21` former `full-v2-hard` `NOT-RUN` slots with `wrapperExitCode=0`: `7` new PASS and `14` new scoreable FAIL. Canonical `X2` is now closed at `12 / 40`. `X6 / flash-lite` filled `25` additional cells before Gemini quota exhaustion: current score is `13 / 40`, with `8` remaining `NOT-RUN` cells (`N56`, `N57`, `N35`, `N36`, `N04`, `S27`, `N37`, `S29`). A post-reset retry of normal cells hit `IneligibleTierError` on the current Gemini account; API-key route probe found no `GEMINI_API_KEY`, so these remain route/auth requeues rather than model failures | `X2/X6 full-v2-hard fill` |
+| `83` | `N79` was added on `2026-04-28` as W57 staged UI/visual-state reentry diagnostic; it is not merged into `full-v2-hard` `/40`. It replaces brittle N38 with a four-phase source/state ledger, state/render implementation, layout/raster validation, and reentry closeout over the hidden N60 UI/raster oracle. `X1 / gpt-5.5` passes (`96 / 100`). `X3 / opus 4.7max` scoreably fails (`63 / 100`) after passing exact scope and phase-path discipline but missing visible blocked cue, focus return id, active descendant/accessibility, compact layout containment, raster overlay order, and ledger/closure markers. X4 and Gemini rows were not run by policy | `N79 staged UI visual-state reentry v2` |
 
 ## Source
 
@@ -438,7 +439,7 @@ fallback diagnostic also timed out after `240s`.
 | `../Evidence/x1-x3-top-pair-rubric-e3-2026-04-20.md` | diagnostic `E3` rubric evidence |
 | `../Evidence/x1-control-plane-override-rerun-s16-s19-s20-2026-04-20.md` | targeted `X1` rerun evidence for `S16`, `S19`, and `S20` |
 | `../Evidence/separator-audit-2026-04-21.md` | factual audit of answer-leakage, verifier strictness, and separation potential across all 43 scenarios; motivates the N06 tuple-exact hardening |
-| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, and N14..N74 hardening sections |
+| `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | contains the admitted N06, wave-2 review, wave-3 S06, wave-4 S22, and N14..N79 hardening sections |
 | `../Evidence/n16-long-horizon-rubric-2026-04-22.json` | machine-readable N16 scored-rubric output for admitted `X1` and `X3` runs |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` | machine-readable N17 owner-orchestration scored-rubric output for admitted `X1`, `X2`, `X3`, and `X6` runs |
 | `../Evidence/n18-scientist-constraints-rubric-2026-04-22.json` | machine-readable N18 scientist/constraints scored-rubric output for admitted `X1`, `X2`, `X3`, partial-route `X6`, and timeout `X5` runs |
@@ -498,5 +499,6 @@ fallback diagnostic also timed out after `240s`.
 | `../Evidence/n76-staged-persisted-state-rubric-2026-04-25.json` | machine-readable W54 staged persisted-state reentry evidence; X1 passes, X3/X2 fail scoreably, and X6 is runtime no-summary |
 | `../Evidence/n77-security-capability-rubric-2026-04-25.json` | machine-readable W55 security capability runtime patch evidence |
 | `../Evidence/n78-staged-security-rubric-2026-04-25.json` | machine-readable W56 staged security re-entry evidence |
+| `../Evidence/n79-staged-ui-reentry-rubric-2026-04-28.json` | machine-readable W57 staged UI visual-state reentry evidence |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 full-v2-hard closing comparison evidence |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` | machine-readable X2/X6 full-v2-hard fill evidence |

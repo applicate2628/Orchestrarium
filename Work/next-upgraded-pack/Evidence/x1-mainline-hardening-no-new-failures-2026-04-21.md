@@ -3725,3 +3725,38 @@ Role-fit read: security implementation should now follow the same execution-shap
 systems, owner, review, and persisted-state lanes. Use `X1 primary` for staged security re-entry,
 threat-ledger accountability, validation status, and closeout. Keep compact single-session security
 patching as `X1 / X3 near-tie`, with X3 only preferred when output compactness is first-class.
+
+## 2026-04-28 Follow-Up: W57 Staged UI Visual-State Reentry V2
+
+`N79-staged-ui-visual-state-reentry-v2` replaces the brittle `N38` staged UI branch with a bounded
+four-phase UI/visual-state packet: source/state ledger, state/render implementation,
+layout/raster validation, and reentry closeout. It keeps the hidden N60 UI state, accessibility,
+layout, raster-pixel, ledger, closure, test, and exact-scope oracle, but makes the staged evidence
+scoreable for the top pair.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N79` JSON parse and bundle-shape verifier | `PASS` |
+| `N79` starter verifier | expected `FAIL`; state/render/layout/raster/ledger/closure gaps |
+| `N79` synthesized reference probe in `.scratch/verifier-probes/2026-04-28-n79-staged-ui-valid` | verifier `PASS`; exact changed paths accepted |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | `STATS kill: none`; parent-owned helpers skipped |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Score | Output bytes | Primary failure |
+|---|---|---|---:|---|---:|---:|---|
+| `N79` | `X1 / gpt-5.5` | `.scratch/v2-staged-runs/2026-04-28_16-23-10-X1-w57-n79-staged-ui-reentry-2026-04-28/N79/` | `0` | `PASS` | `96 / 100` | `1296881` | none semantically; output-cost score `1` |
+| `N79` | `X3 / opus 4.7max` | `.scratch/v2-staged-runs/2026-04-28_16-23-10-X3-w57-n79-staged-ui-reentry-2026-04-28/N79/` | `0` | `FAIL` | `63 / 100` | `9604` | visible blocked cue, focus return id, active descendant/accessibility, compact layout containment, raster overlay order, ledger/closure markers |
+
+### Verdict
+
+This is a scoreable X1-over-X3 staged UI/visual-state separator. It is not a quota, timeout, or
+no-summary result: both wrappers exited `0`, both produced four phase summaries, and X3 passed exact
+changed-path scope plus phase-path discipline before failing the hidden UI/visual-state verifier.
+
+Role-fit read: compact single-session UI remains X3-primary when low-noise/output budget is explicit
+after N47/N60/N74. Staged UI/visual-state reentry is now X1-primary after N79 because X1 preserves
+state, accessibility, layout, raster, ledger, closeout, and exact scope across fresh invocations.

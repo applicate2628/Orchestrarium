@@ -1,0 +1,19 @@
+{
+  "cases": [
+    {
+      "id": "incident-preview-visible",
+      "width": 28,
+      "height": 18,
+      "background": "#111318",
+      "grid": { "x": 2, "y": 3, "cell": 4, "gap": 2 },
+      "values": [
+        [-1, 0, null, 2],
+        [0, 1, 2, -1],
+        [null, 1, 0, 2]
+      ],
+      "selected": { "row": 1, "col": 2 },
+      "alert": { "row": 1, "col": 2 },
+      "legend": { "x": 24, "y": 2, "width": 2, "values": [-1, 0, 1, 2] }
+    }
+  ]
+}

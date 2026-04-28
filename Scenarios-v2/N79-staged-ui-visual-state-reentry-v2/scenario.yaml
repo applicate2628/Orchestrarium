@@ -1,0 +1,37 @@
+id: N79
+surface_id: E69
+pack_id: E69
+role_class: implementation
+artifact_type: staged UI visual-state reentry packet with hidden raster and accessibility oracle
+modality_family: staged UI state machine, accessibility rendering, responsive layout, deterministic raster pixels, reentry closeout, and patch-quality discipline
+allowed_change_surface:
+  - candidate/workspace/src/console-state.mjs
+  - candidate/workspace/src/console-view.mjs
+  - candidate/workspace/src/console-layout.mjs
+  - candidate/workspace/src/console-raster.mjs
+  - candidate/workspace/src/console.css
+  - candidate/workspace/tests/console-contract.test.mjs
+  - candidate/workspace/implementation-ledger.json
+  - candidate/workspace/closure.json
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+  - candidate/workspace/docs/**
+  - candidate/workspace/src/protected-copy.mjs
+score_profile: "staged-ui-visual-state-reentry, accessibility, raster-oracle, reentry-ledger, scored-rubric"
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - staged-runner
+  - reentry
+  - ui-interaction
+  - visual-provider-fit
+  - accessibility
+  - raster-oracle
+  - layout-geometry
+  - source-binding
+  - scored-rubric
+  - binary-separator-candidate

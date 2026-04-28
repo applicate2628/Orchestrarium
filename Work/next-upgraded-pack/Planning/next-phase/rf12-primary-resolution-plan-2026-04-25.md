@@ -300,9 +300,9 @@ keep adding minor variants to a solved compact-output or staged-ledger family.
 | Phase | Scope | Acceptance gate | Checks |
 |---|---|---|---|
 | `A` plan alignment | Update this plan, live wave roadmap, and status checkpoint to make `N79+` the active route. | `PASS` when all three surfaces agree on `X1/X3 first`, Gemini parked, and X4 final-only. | `git diff --check`; doc self-consistency read. |
-| `B` N79 materialization | Build bounded staged UI/visual-state re-entry v2. No changes to existing anchored rows. | `PASS` when bundle-shape, scorer, and a valid synthesized candidate pass locally. | JSON parse; `--bundle-shape-only`; synthesized dry-run; `git diff --check`. |
-| `C` N79 run | Run `X1` and `X3` only. | `PASS` when both rows are scoreable or a route/runtime issue is explicitly classified and retried up to the normal limit. | Read `summary.json`, verifier logs, scorer JSON; update live evidence. |
-| `D` N80 materialization | Build calibrated screenshot-grounding visual review v2. | `PASS` when reference/oracle windows are not 0px brittle and false positives are scoreable. | Image/oracle validation; local scorer probe; `git diff --check`. |
+| `B` N79 materialization | Build bounded staged UI/visual-state re-entry v2. No changes to existing anchored rows. | `PASS` on 2026-04-28; bundle-shape, scorer syntax, expected start-state, and synthesized candidate dry-run passed. | JSON parse; `--bundle-shape-only`; synthesized dry-run; `git diff --check`. |
+| `C` N79 run | Run `X1` and `X3` only. | `PASS` on 2026-04-28; both rows scoreable. `X1 PASS 96`; `X3 FAIL 63`. | Read `summary.json`, verifier logs, scorer JSON; update live evidence. |
+| `D` N80 materialization | Build calibrated screenshot-grounding visual review v2. | `NEXT`; PASS when reference/oracle windows are not 0px brittle and false positives are scoreable. | Image/oracle validation; local scorer probe; `git diff --check`. |
 | `E` N80 run | Run `X1` and `X3` only. | `PASS` when the result produces either a binary split or an honest near-tie/rubric read. | Same as phase `C`. |
 | `F` next P1 wave | Pick `N81`, `N82`, or `N83` based on which RF line remains least resolved after N79/N80. | `PASS` when the chosen scenario changes axis rather than repeating output-budget or staged-ledger proof. | Pre-run protocol plus live evidence update. |
 | `G` promotion review | Decide whether any N79+ diagnostic replaces a weaker `/40` slot. | `PASS` only if the replacement has clearer role-fit value, stable scoring, and a named outgoing slot. | Update `full-v2-hard-results-current.md`, RF12, checkpoint, and evidence in one batch. |
@@ -311,3 +311,17 @@ keep adding minor variants to a solved compact-output or staged-ledger family.
 
 `PASS`: N79+ roadmap/design/plan is admitted. Next concrete action is Phase `B`:
 materialize `N79-staged-ui-visual-state-reentry-v2` and run `X1`/`X3` first.
+
+## W57 Results
+
+| Wave | Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Calibration | Decision |
+|---|---|---|---|---|---|
+| `W57` | `N79 staged UI visual-state reentry v2` | `PASS`; `96 / 100`; hidden UI state, accessibility, layout, raster, ledger, closure, tests, scope, and phase-path gates pass | scoreable `FAIL`; `63 / 100`; visible blocked cue, focus-return id, active descendant/accessibility, compact layout containment, raster overlay order, and ledger/closure completeness fail | not launched by policy; `X4` final-only and Gemini parked | X1 primary for staged UI/visual-state reentry |
+
+Decision: W57 replaces the unresolved `N38` staged UI branch with scoreable top-pair evidence. The
+failure is not route/runtime noise: both wrappers exited `0`, both rows completed four phases, and
+X3 passed exact scope plus phase-path discipline before failing the hidden UI/visual-state verifier.
+This changes staged UI/visual-state routing to `X1 primary`. Compact single-session UI remains
+X3-primary only when low-noise/output budget is part of the role contract.
+
+Next concrete action: Phase `D`, materialize `N80-screenshot-grounding-review-v2`.
