@@ -1,0 +1,9 @@
+{
+  "contractId": "N92-staged-interface-downstream-reentry-gauntlet",
+  "planFingerprint": "",
+  "phase": "",
+  "downstreamReplay": [],
+  "reentryChecks": [],
+  "sourceBindings": [],
+  "changedPaths": []
+}

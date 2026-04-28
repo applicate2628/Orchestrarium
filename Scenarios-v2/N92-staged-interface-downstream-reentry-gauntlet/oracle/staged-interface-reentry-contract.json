@@ -1,0 +1,283 @@
+{
+  "contractId": "N92-staged-interface-downstream-reentry-gauntlet",
+  "planFingerprint": "n92-subscriptionmesh-staged-interface-reentry-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N92",
+    "surface_id": "E82",
+    "pack_id": "E82",
+    "role_class": "implementation",
+    "artifact_type": "staged interface/downstream reentry migration",
+    "modality_family": "real-repo API migration, public package facade, legacy event adapter, staged source/reentry ledgers, hidden downstream SDK consumer",
+    "allowed_change_surface": [
+      ".pytest_cache/**",
+      "candidate/source-ledger.json",
+      "candidate/migration-state.json",
+      "candidate/review-response.json",
+      "candidate/reentry-state.json",
+      "candidate/closure.json",
+      "candidate/workspace/src/subscriptionmesh/__init__.py",
+      "candidate/workspace/src/subscriptionmesh/models.py",
+      "candidate/workspace/src/subscriptionmesh/customer_directory.py",
+      "candidate/workspace/src/subscriptionmesh/subscription_policy.py",
+      "candidate/workspace/src/subscriptionmesh/webhook_publisher.py",
+      "candidate/workspace/src/subscriptionmesh/service.py",
+      "candidate/workspace/src/subscriptionmesh/api.py",
+      "candidate/workspace/src/subscriptionmesh/reporting.py",
+      "candidate/workspace/src/subscriptionmesh/legacy_adapter.py",
+      "candidate/workspace/tests/test_subscriptionmesh.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md"
+    ],
+    "score_profile": "staged-interface-downstream-reentry, public-facade-runtime, legacy-event-migration, exact-scope, cache-ignored",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "staged-runner",
+      "reentry",
+      "api-migration",
+      "hidden-consumer",
+      "hidden-downstream-app",
+      "public-facade",
+      "legacy-adapter",
+      "compatibility-preservation",
+      "review-response",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "candidate/README.md",
+    "candidate/source-ledger.json",
+    "candidate/migration-state.json",
+    "candidate/review-response.json",
+    "candidate/reentry-state.json",
+    "candidate/closure.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/subscriptionmesh/__init__.py",
+    "candidate/workspace/src/subscriptionmesh/models.py",
+    "candidate/workspace/src/subscriptionmesh/customer_directory.py",
+    "candidate/workspace/src/subscriptionmesh/subscription_policy.py",
+    "candidate/workspace/src/subscriptionmesh/webhook_publisher.py",
+    "candidate/workspace/src/subscriptionmesh/service.py",
+    "candidate/workspace/src/subscriptionmesh/api.py",
+    "candidate/workspace/src/subscriptionmesh/reporting.py",
+    "candidate/workspace/src/subscriptionmesh/legacy_adapter.py",
+    "candidate/workspace/tests/test_subscriptionmesh.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/source-conflict.md",
+    "inputs/downstream-sdk-contract.md",
+    "inputs/review-feedback.md",
+    "inputs/phases/01-source-plan.md",
+    "inputs/phases/02-interface-migration.md",
+    "inputs/phases/03-downstream-reentry.md",
+    "inputs/phases/04-review-closeout.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/staged-interface-reentry-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_staged_interface_reentry.py"
+  ],
+  "expectedSourceIds": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6",
+    "S7",
+    "S8",
+    "S9",
+    "S10",
+    "S11",
+    "S12"
+  ],
+  "staleSourceIds": [
+    "S11",
+    "S12"
+  ],
+  "expectedPhaseIds": [
+    "01-source-plan",
+    "02-interface-migration",
+    "03-downstream-reentry",
+    "04-review-closeout"
+  ],
+  "requiredChangedPaths": [
+    "candidate/source-ledger.json",
+    "candidate/migration-state.json",
+    "candidate/review-response.json",
+    "candidate/reentry-state.json",
+    "candidate/closure.json",
+    "candidate/workspace/src/subscriptionmesh/__init__.py",
+    "candidate/workspace/src/subscriptionmesh/models.py",
+    "candidate/workspace/src/subscriptionmesh/customer_directory.py",
+    "candidate/workspace/src/subscriptionmesh/subscription_policy.py",
+    "candidate/workspace/src/subscriptionmesh/webhook_publisher.py",
+    "candidate/workspace/src/subscriptionmesh/service.py",
+    "candidate/workspace/src/subscriptionmesh/api.py",
+    "candidate/workspace/src/subscriptionmesh/reporting.py",
+    "candidate/workspace/src/subscriptionmesh/legacy_adapter.py",
+    "candidate/workspace/tests/test_subscriptionmesh.py"
+  ],
+  "legacyPublicMethods": {
+    "CustomerDirectory": "get_customer",
+    "SubscriptionPolicy": "check",
+    "WebhookPublisher": "publish"
+  },
+  "requiredResultModels": {
+    "CustomerLookup": [
+      "found",
+      "customer_id",
+      "customer",
+      "reason",
+      "owner",
+      "source_ids"
+    ],
+    "SubscriptionDecision": [
+      "allowed",
+      "reason",
+      "owner",
+      "source_ids"
+    ],
+    "WebhookPublishResult": [
+      "accepted",
+      "status",
+      "retryable",
+      "event_id",
+      "error_code",
+      "owner",
+      "reason",
+      "source_ids"
+    ]
+  },
+  "downstreamPublicExports": [
+    "CustomerDirectory",
+    "SubscriptionPolicy",
+    "WebhookPublisher",
+    "CustomerLookup",
+    "SubscriptionDecision",
+    "WebhookPublishResult",
+    "handle_subscription_event",
+    "process_subscription_request",
+    "build_subscription_summary",
+    "migrate_legacy_event"
+  ],
+  "requiredLedgerRows": {
+    "sourceOwners": [
+      "customer-directory",
+      "subscription-policy",
+      "webhook-publisher",
+      "public-facade",
+      "legacy-adapter",
+      "reporting"
+    ],
+    "interfaceMap": [
+      "CustomerDirectory.get_customer -> CustomerDirectory.lookup_customer",
+      "SubscriptionPolicy.check -> SubscriptionPolicy.evaluate_subscription",
+      "WebhookPublisher.publish -> WebhookPublisher.publish_webhook"
+    ],
+    "callSites": [
+      "service.process_subscription_request",
+      "api.handle_subscription_event",
+      "reporting.build_subscription_summary",
+      "legacy_adapter.migrate_legacy_event",
+      "tests.test_subscriptionmesh"
+    ],
+    "compatibilityCases": [
+      "missing-customer",
+      "suspended-customer",
+      "subscription-expired",
+      "tenant-disabled",
+      "feature-not-entitled",
+      "webhook-timeout",
+      "duplicate-event",
+      "denied-event-no-webhook",
+      "legacy-event-migration",
+      "accepted-webhook"
+    ],
+    "validationMarkers": [
+      "python candidate/workspace/tests/test_subscriptionmesh.py",
+      "check_staged_interface_reentry.py",
+      "hidden downstream SDK",
+      "clean-room public import"
+    ],
+    "reentryMarkers": [
+      "root exports replayed",
+      "dataclass serialization replayed",
+      "denied-event-no-webhook replayed",
+      "webhook-timeout replayed",
+      "duplicate-event replayed",
+      "legacy-event-migration replayed",
+      "mixed structured summary replayed",
+      "legacy shim not reintroduced",
+      "exact changed paths confirmed"
+    ]
+  },
+  "reviewDecisions": {
+    "R1-legacy-shim-request": "reject",
+    "R2-public-facade-required": "accept",
+    "R3-denied-webhook-no-send": "accept",
+    "R4-timeout-duplicate-summary": "accept",
+    "R5-legacy-event-migration": "accept",
+    "R6-stale-doc-only-decoy": "reject",
+    "R7-owner-boundary": "accept"
+  },
+  "requiredTestMarkers": [
+    "test_lookup_missing_customer_contract",
+    "test_timeout_is_retryable",
+    "test_legacy_methods_removed",
+    "test_denied_subscription_does_not_publish",
+    "test_legacy_event_migration",
+    "test_report_mixed_dataclass_and_dict"
+  ],
+  "currentTick": 100,
+  "ignored_top_level_entries": [
+    ".pytest_cache"
+  ],
+  "ignored_changed_path_prefixes": [
+    ".pytest_cache/",
+    "candidate/workspace/src/subscriptionmesh/__pycache__/",
+    "candidate/workspace/tests/__pycache__/"
+  ],
+  "protectedPaths": {
+    "candidate/README.md": "c927959bae68d08c34649ab3e5fb0b1bbb358eeb9575f0d80e2812a95c085913",
+    "candidate/workspace/README.md": "8a630abf153fea7e8f033490c226a770b4e85f8c879c136ddaa3d885b2621fee",
+    "inputs/README.md": "58b4005bb8d394ae13873a2c9828d4dd20f354cb6f350140abf80b8a012e89a2",
+    "inputs/task.md": "260f132652c39c05c1efbb1a88a13de560c79bdd09eac6b2ceac75b065561001",
+    "inputs/source-conflict.md": "de10fa49063b824ea45b740f81fcb99f0c0ddea92f3649954d4babf103b0fb57",
+    "inputs/downstream-sdk-contract.md": "88efe22b078008c5fdfb5e163a90c4af04b9723290db7ec3f1d9da76440031cb",
+    "inputs/review-feedback.md": "ac63574123ecc49288155ac1f6dfbf131483a402f096c8c89ee8f8e57f89e9a6",
+    "inputs/phases/01-source-plan.md": "74acc9eb6e5c82e92534e64269f5164ad0b2eb84c31e5bbf5054df7a3c396b96",
+    "inputs/phases/02-interface-migration.md": "6e41d491bc3044ce9ee2efd4d56fa7d205433daa847541e554f412f6e110337b",
+    "inputs/phases/03-downstream-reentry.md": "b1a8977866a0def286c3348b18a6672e9f3787663055d294e00da689264987bf",
+    "inputs/phases/04-review-closeout.md": "b38b195befaea1066b2a1ae830e5b8b358e0190b49aca47113cb287509740a0f",
+    "oracle/README.md": "8d5a266f0b3a1f8ab9fec6416f688e85154e620d533c66fbd0a2d269afce2586",
+    "oracle/scoring-anchors.md": "f4500a6973139ad5252a723f9b20563e3d046a84f186bfd5af35da34af998a34"
+  }
+}

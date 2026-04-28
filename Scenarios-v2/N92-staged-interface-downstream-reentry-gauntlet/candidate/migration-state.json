@@ -1,0 +1,15 @@
+{
+  "contractId": "N92-staged-interface-downstream-reentry-gauntlet",
+  "planFingerprint": "",
+  "phases": [],
+  "interfaceMap": [],
+  "callSiteMigration": [],
+  "compatibilityMatrix": [],
+  "validation": {
+    "commands": []
+  },
+  "patchBudget": {
+    "maxChangedPaths": 15,
+    "requiredChangedPaths": []
+  }
+}

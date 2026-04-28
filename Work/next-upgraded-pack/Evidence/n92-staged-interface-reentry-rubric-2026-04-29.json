@@ -1,0 +1,93 @@
+{
+  "scenario": "N92",
+  "wave": "W71",
+  "batchName": "wave71-n92-staged-interface-2026-04-29",
+  "replacementDecision": {
+    "promotedIntoFullV2Hard": false,
+    "replacesSlot": null,
+    "reason": "N92 is pending X1 retry after quota. X3 passed the hardened staged interface/downstream verifier, but X1 did not run due Codex usage limit."
+  },
+  "admissionNotes": {
+    "integrityHardening": [
+      "new SubscriptionMesh domain instead of a BillingMesh clone",
+      "public facade breakage is runtime-observable through root package exports and clean-room downstream import",
+      "hidden runtime probes cover dataclass wire contract, denied-without-webhook, timeout retryability, duplicate suppression, legacy event migration, and mixed structured reporting",
+      "source-ledger, migration-state, reentry-state, review-response, and closure artifacts are all required",
+      "exact final changed-path equality is required when changed paths are supplied",
+      "generated .pytest_cache and subscriptionmesh __pycache__ paths are auxiliary"
+    ],
+    "preRunValidation": [
+      "JSON parse PASS",
+      "bundle-shape PASS",
+      "starter candidate expected FAIL",
+      "synthesized valid probe PASS at 100.0 / 100",
+      "exact changed-path positive probe PASS",
+      "exact changed-path negative probe PASS when api.py is omitted",
+      "cache auxiliary probe PASS",
+      "public facade mutation probe FAIL as intended",
+      "legacy wrapper mutation probe FAIL as intended",
+      "git diff --check PASS",
+      "mcp-free first killed 2 orphan uvx.exe, second pass STATS kill: none"
+    ]
+  },
+  "verdict": "pending X1 retry; no top-pair classification yet",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 1,
+      "verificationPassed": false,
+      "binary": "NOT-RUN",
+      "routeClass": "quota",
+      "quotaMessage": "Codex usage limit; worker output says try again at 4:51 AM",
+      "workerOutputBytes": 893,
+      "changedPaths": [],
+      "auxiliaryChangedPaths": [],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_00-38-09-X1-wave71-n92-staged-interface-2026-04-29/N92/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-29_00-38-09-X1-wave71-n92-staged-interface-2026-04-29/N92/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score": 100.0,
+      "workerOutputBytes": 3189,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/migration-state.json",
+        "candidate/reentry-state.json",
+        "candidate/review-response.json",
+        "candidate/source-ledger.json",
+        "candidate/workspace/src/subscriptionmesh/__init__.py",
+        "candidate/workspace/src/subscriptionmesh/api.py",
+        "candidate/workspace/src/subscriptionmesh/customer_directory.py",
+        "candidate/workspace/src/subscriptionmesh/legacy_adapter.py",
+        "candidate/workspace/src/subscriptionmesh/models.py",
+        "candidate/workspace/src/subscriptionmesh/reporting.py",
+        "candidate/workspace/src/subscriptionmesh/service.py",
+        "candidate/workspace/src/subscriptionmesh/subscription_policy.py",
+        "candidate/workspace/src/subscriptionmesh/webhook_publisher.py",
+        "candidate/workspace/tests/test_subscriptionmesh.py"
+      ],
+      "auxiliaryChangedPaths": [
+        "candidate/workspace/src/subscriptionmesh/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/subscriptionmesh/__pycache__/api.cpython-314.pyc",
+        "candidate/workspace/src/subscriptionmesh/__pycache__/customer_directory.cpython-314.pyc",
+        "candidate/workspace/src/subscriptionmesh/__pycache__/legacy_adapter.cpython-314.pyc",
+        "candidate/workspace/src/subscriptionmesh/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/subscriptionmesh/__pycache__/reporting.cpython-314.pyc",
+        "candidate/workspace/src/subscriptionmesh/__pycache__/service.cpython-314.pyc",
+        "candidate/workspace/src/subscriptionmesh/__pycache__/subscription_policy.cpython-314.pyc",
+        "candidate/workspace/src/subscriptionmesh/__pycache__/webhook_publisher.cpython-314.pyc"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_00-38-09-X3-wave71-n92-staged-interface-2026-04-29/N92/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-29_00-38-09-X3-wave71-n92-staged-interface-2026-04-29/N92/meta/summary.json"
+    }
+  ],
+  "postRunVerification": [
+    "X1 did not perform model work because the worker hit Codex usage limit before edits; starter verifier failures are not model-quality evidence",
+    "X3 passed check_staged_interface_reentry.py with exact fifteen benchmark changed paths and cache-only auxiliary files"
+  ]
+}

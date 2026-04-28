@@ -1,0 +1,43 @@
+id: N92
+surface_id: E82
+pack_id: E82
+role_class: implementation
+artifact_type: staged interface/downstream reentry migration
+modality_family: real-repo API migration, public package facade, legacy event adapter, staged source/reentry ledgers, hidden downstream SDK consumer
+allowed_change_surface:
+  - .pytest_cache/**
+  - candidate/source-ledger.json
+  - candidate/migration-state.json
+  - candidate/review-response.json
+  - candidate/reentry-state.json
+  - candidate/closure.json
+  - candidate/workspace/src/subscriptionmesh/__init__.py
+  - candidate/workspace/src/subscriptionmesh/models.py
+  - candidate/workspace/src/subscriptionmesh/customer_directory.py
+  - candidate/workspace/src/subscriptionmesh/subscription_policy.py
+  - candidate/workspace/src/subscriptionmesh/webhook_publisher.py
+  - candidate/workspace/src/subscriptionmesh/service.py
+  - candidate/workspace/src/subscriptionmesh/api.py
+  - candidate/workspace/src/subscriptionmesh/reporting.py
+  - candidate/workspace/src/subscriptionmesh/legacy_adapter.py
+  - candidate/workspace/tests/test_subscriptionmesh.py
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+  - candidate/workspace/README.md
+score_profile: "staged-interface-downstream-reentry, public-facade-runtime, legacy-event-migration, exact-scope, cache-ignored"
+overlay_flags:
+  - top-pair-role-fit
+  - implementation
+  - staged-runner
+  - reentry
+  - api-migration
+  - hidden-consumer
+  - hidden-downstream-app
+  - public-facade
+  - legacy-adapter
+  - compatibility-preservation
+  - review-response
+  - binary-separator-candidate

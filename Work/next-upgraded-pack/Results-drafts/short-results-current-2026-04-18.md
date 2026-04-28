@@ -124,6 +124,12 @@ hashes, regression tests, and reentry/closeout ledgers. `X1 / gpt-5.5` and `X3 /
 pass at `100 / 100`; `binary tie remains`. This narrows N78's staged-security routing read rather
 than changing the canonical `/40`.
 
+W71 added `N92-staged-interface-downstream-reentry-gauntlet`: new SubscriptionMesh staged
+interface/downstream reentry with public facade, legacy adapter, clean-room downstream SDK import,
+source/reentry ledgers, and exact fifteen-path scope. `X3 / opus 4.7max` passes at `100 / 100`.
+`X1 / gpt-5.5` is `NOT-RUN / REQUEUE` because Codex hit usage quota before edits; retry after the
+quota reset is required before any top-pair verdict.
+
 | ID | Label |
 |---|---|
 | `X1` | `gpt-5.5` active; older rows may cite `gpt-5.4` as model-of-run |
@@ -160,6 +166,7 @@ than changing the canonical `/40`.
 | `23` | W68 security runtime witness review | `X1 / gpt-5.5`: `N89 PASS` | `X3 / opus 4.7max`: `N89 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; executable witness binding did not split ordinary security review |
 | `24` | W69 staged UX review/reentry | `X1 / gpt-5.5`: `N90 PASS` | `X3 / opus 4.7max`: `N90 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; staged UX review still near-tie without output budget |
 | `25` | W70 real-repo staged security incident | `X1 / gpt-5.5`: `N91 PASS` | `X3 / opus 4.7max`: `N91 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; real-repo staged security repair narrows, not replaces, N78 |
+| `26` | W71 staged interface/downstream reentry | `X1 / gpt-5.5`: `N92 NOT-RUN`; quota before edits | `X3 / opus 4.7max`: `N92 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | pending X1 retry; no top-pair verdict |
 | `18` | W26 operator-budget compact hotfix | `X1 / gpt-5.5`: `N46 FAIL 70` | `X3 / opus 4.7max`: `N46 PASS 100` |  |  |  | first honest compact single-session `X1 FAIL / X3 PASS`; X1 preserves hidden repair semantics but fails the visible operator-budget gate (`210369 > 40000`) |
 | `19` | W27 UI compact operator-budget hotfix | `X1 / gpt-5.5`: `N47 FAIL 70` | `X3 / opus 4.7max`: `N47 PASS 94` |  |  |  | second honest compact single-session `X1 FAIL / X3 PASS`; both pass hidden UI dirty-state semantics and exact scope, while X1 fails the visible operator-budget gate (`169913 > 40000`) |
 | `20` | W28 visual raster compact operator-budget hotfix | `X1 / gpt-5.5`: `N48 FAIL 70` | `X3 / opus 4.7max`: `N48 PASS 100` |  |  |  | third honest compact single-session `X1 FAIL / X3 PASS`; both pass exact raster semantics and renderer-only scope, while X1 fails the visible operator-budget gate (`77825 > 40000`) |

@@ -4190,3 +4190,41 @@ a binary winner because N91 has no output budget. Keep N91 diagnostic-only; do n
 any canonical `/40` slot from this result. The next useful top-pair separator should move to a
 different implementation axis, preferably real-repo staged interface/downstream reentry rather than
 more security/review-only hardening.
+
+## 2026-04-29 Follow-Up: W71 Staged Interface Downstream Reentry
+
+`N92-staged-interface-downstream-reentry-gauntlet` switches away from security/review-only hardening
+and tests a new SubscriptionMesh interface migration. It combines staged source/reentry artifacts,
+public package facade migration, a legacy-event adapter, hidden downstream SDK clean-room import,
+dataclass wire contracts, denied-without-webhook, timeout retryability, duplicate suppression, mixed
+structured reporting, protected input hashes, and exact fifteen-path changed scope.
+
+### Pre-run validation
+
+| Check | Result |
+|---|---|
+| `N92` JSON parse and verifier compile | `PASS` |
+| `N92` bundle-shape verifier | `PASS` |
+| `N92` starter verifier | expected `FAIL`; starter has legacy APIs, no dataclasses, incomplete public facade, and empty ledgers |
+| synthesized valid probe in `.scratch/verifier-probes/2026-04-29-n92-staged-interface-valid/N92` | verifier `PASS`; `100.0 / 100` |
+| exact changed-path positive probe | `PASS`; fifteen required artifacts accepted |
+| exact changed-path negative probe | `PASS`; omission of `candidate/workspace/src/subscriptionmesh/api.py` rejected |
+| cache auxiliary probe | `PASS`; subscriptionmesh `__pycache__` path ignored as generated cache |
+| public facade mutation probe | expected `FAIL`; missing root `handle_subscription_event` breaks clean-room import |
+| legacy wrapper mutation probe | expected `FAIL`; reintroduced `get_customer` fails static/runtime/test gates |
+| `git diff --check` before launch | `PASS` |
+| `mcp-free` before launch | first pass killed 2 orphan `uvx.exe`; second pass `STATS kill: none` |
+
+### Runs
+
+| Scenario | Row / model | Run root | Wrapper exit | Verifier | Changed paths | Worker output | Classification |
+|---|---|---|---:|---|---|---:|---|
+| `N92` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-29_00-38-09-X1-wave71-n92-staged-interface-2026-04-29/N92/run` | `1` | starter verifier failed after no edits | none | `893` bytes | `NOT-RUN`; quota, retry after worker reset |
+| `N92` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-29_00-38-09-X3-wave71-n92-staged-interface-2026-04-29/N92/run` | `0` | `PASS`; `100.0 / 100` | exact fifteen benchmark artifacts; subscriptionmesh `__pycache__` auxiliary | `3189` bytes | `PASS` |
+
+### Verdict
+
+No top-pair verdict yet. X1 hit the Codex usage limit before model work; the worker output says to
+try again at `4:51 AM`, and changed paths are empty. That is `NOT-RUN / REQUEUE`, not a scoreable
+model fail. X3 passed N92 with exact benchmark scope, so the next required action is an X1 retry on
+the same batch/scenario after quota reset.
