@@ -37,3 +37,4 @@ Only admitted later packages should become new dated snapshots under `Archive/`.
 | `../Evidence/n25-ui-dirty-repeat-rubric-2026-04-22.json` | machine-readable E15 UI dirty-state repeat read for `X1`, `X2`, `X3`, `X5`, and `X6`; confirms UI `X3 primary` versus `X1` and marks `X5` as a route-healthy UI contender |
 | `../Evidence/n26-owner-wave-rubric-2026-04-22.json` | machine-readable E16 owner recovery repeat read for `X1`, `X2`, `X3`, `X5`, and `X6`; confirms owner recovery `X3 primary` versus `X1` and marks `X5` as a route-healthy owner contender |
 | `short-results-current-2026-04-18.md` | compact operator-facing short table for the current six-row live state |
+| `../../../Archive/2026-04-29-scenarios-v2-deprecated/` | archived weak, superseded, or no-policy-impact scenario roots removed from active `Scenarios-v2` discovery |

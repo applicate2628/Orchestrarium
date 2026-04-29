@@ -17,6 +17,21 @@ This surface keeps the same `40` score-slot shape:
 - `1` owner/control line times `4` slots = `4`
 - total = `40`
 
+## Active Scenario Roots
+
+As of 2026-04-29, weak, superseded, and no-policy-impact scenario roots were moved out of
+top-level `Scenarios-v2/` into `Archive/2026-04-29-scenarios-v2-deprecated/`.
+
+| Set | Count | Use |
+|---|---:|---|
+| canonical `full-v2-hard` slots | `40` | current `/40` scoring denominator |
+| retained RF12 / separator diagnostics | `33` | role-fit routing evidence only |
+| archived deprecated roots | `54` | historical provenance; no default reruns |
+| active top-level `Scenarios-v2` roots | `73` | default active discovery set |
+
+The archive move does not change any score. It only removes weak and deprecated roots from default
+scenario discovery so future hardening starts from the useful surface.
+
 ## Current Hardened Score
 
 | Row | Model/profile | Hardened `/40` | Scoreable detail | Current read |
@@ -645,6 +660,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | active X1 | `X1` means active `gpt-5.5`; older `gpt-5.4` rows are used only where superseded by the `74 / 74` binary refresh or explicitly noted as historical rubric evidence |
 | rubric | `0..100` rubrics are secondary lane-fit evidence; they do not replace the `/40` binary count |
 | promotion | diagnostic rows become `full-v2-hard` score slots only after they have hardened verifier/scorer evidence and a clear role-line replacement reason |
+| archived roots | roots under `Archive/2026-04-29-scenarios-v2-deprecated/` are historical provenance only and must not be included in default `/40`, RF12, or hardening rerun batches |
 
 ## Current Routing Consequence
 

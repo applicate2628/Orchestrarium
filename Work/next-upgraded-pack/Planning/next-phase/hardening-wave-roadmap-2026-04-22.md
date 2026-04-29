@@ -28,6 +28,7 @@ a roadmap, and use spawns when that accelerates independent work.
 | write scope | main agent owns roadmap, scenario materialization, scorers, live result surfaces, and session logs |
 | spawn scope | spawned agents may do read-only design/recon or disjoint implementation slices only when explicitly assigned |
 | closeout | each admitted wave updates `x1-mainline-hardening-no-new-failures-2026-04-21.md`, role-fit scorecard, short results, status checkpoint, scorer JSON, and `.reports/2026-04/` |
+| active root set | default wave discovery uses only top-level `Scenarios-v2/`; weak, superseded, or no-policy-impact roots archived under `Archive/2026-04-29-scenarios-v2-deprecated/` are no-rerun unless a named slot-replacement decision restores one |
 
 ## Wave Queue
 

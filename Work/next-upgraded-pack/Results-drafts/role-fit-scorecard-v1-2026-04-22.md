@@ -61,6 +61,11 @@ It separates:
 
 ## Evidence Basis
 
+2026-04-29 retention update: weak, superseded, and no-policy-impact scenario roots were moved to
+`Archive/2026-04-29-scenarios-v2-deprecated/`. RF12 uses the remaining active top-level
+`Scenarios-v2/` roots plus historical evidence references; archived roots are no-rerun by default
+unless a named slot-replacement decision restores one.
+
 | Surface | Use in this scorecard |
 |---|---|
 | `full-v2-hard-results-current.md` | current canonical hardened `/40` surface after N85 promotion: `X1 34 / 40`, `X3 35 / 40`, `X4 31 / 40` with one N85 `NOT-RUN`, `X2 12 / 40`, `X6 13 / 40`; `X5` remains partial/runtime-unhealthy |

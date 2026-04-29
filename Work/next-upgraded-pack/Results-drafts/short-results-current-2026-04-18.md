@@ -21,6 +21,11 @@ Current canonical hardened classification lives in `full-v2-hard-results-current
 the same `40` score-slot shape, but replaces the weak full-v2 cells with admitted hardened
 equivalents across `12` routing lines plus one owner/control line.
 
+On 2026-04-29, weak, superseded, and no-policy-impact scenario roots were moved to
+`Archive/2026-04-29-scenarios-v2-deprecated/`. Active top-level `Scenarios-v2/` now contains
+`73` roots: `40` canonical score slots and `33` retained RF12 / separator diagnostics. The archive
+move changes discovery hygiene only; it does not change the current `/40` score.
+
 | Row | Current `full-v2-hard` score | Current read |
 |---|---:|---|
 | `X1 / gpt-5.5` | `34 / 40` | second globally after N85 replacement; fails compact operator-budget slots, not hidden correctness |
