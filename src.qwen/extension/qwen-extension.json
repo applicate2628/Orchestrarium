@@ -1,0 +1,10 @@
+{
+  "name": "orchestrarium-qwen",
+  "version": "0.1.0",
+  "description": "Orchestrarium Qwen example pack with shared governance, Qwen-native skills, agents, and command surfaces.",
+  "contextFileName": "QWEN.md",
+  "commands": "commands",
+  "skills": "skills",
+  "agents": "agents",
+  "mcpServers": {}
+}

@@ -1,0 +1,49 @@
+# Operating Model Diagram
+
+This file provides a visual companion to [subagent-operating-model.md](subagent-operating-model.md).
+Strategy comparison companion: [shared/references/workflow-strategy-comparison.md](../../shared/references/workflow-strategy-comparison.md).
+
+Platform note: диаграммы ниже описывают governance flow Orchestrarium на Qwen-линии. Это не обещание всех нативных деталей выполнения или runtime-оптимизаций Qwen Code.
+
+## 1. End-to-end operating flow
+
+```mermaid
+flowchart LR
+    PM["product-manager\nRoadmap decision"] --> L["lead\nCanonical brief"]
+    PA["product-analyst\nProduct brief"] -.-> L
+
+    L --> A["analyst\nResearch memo"]
+    A --> D["architect + constraints\nDesign package"]
+    D --> P["planner\nPhase plan"]
+    P --> I["implementer\nCode + tests"]
+    I --> INT["integration owner\n(if multi-phase)"]
+    INT --> QA["QA / reviewers\nVerification"]
+    QA --> H["Human gate"]
+    H --> L
+
+    L -. "scope drift" .-> PM
+```
+
+## 2. Main-session handoff topology
+
+```mermaid
+flowchart TB
+    U["user or roadmap admission"] --> L["lead"]
+    L -->|"facts"| AN["analyst / product-analyst"]
+    AN -->|"accepted artifact"| L
+    L -->|"design"| AR["architect / constraints"]
+    AR -->|"accepted artifact"| L
+    L -->|"plan"| PL["planner"]
+    PL -->|"accepted artifact"| L
+    L -->|"build"| IM["implementer"]
+    IM -->|"accepted artifact"| L
+    L -->|"verify"| QA["qa / reviewers"]
+    QA -->|"accepted artifact"| L
+    L -. "optional advisory" .-> CO["consultant"]
+```
+
+## 3. Minimal rules
+
+- Keep runtime surfaces official-first: `QWEN.md`, `/init`, `.qwen/settings.json` и `qwen-extension.json`.
+- Keep Orchestrarium routing overlays in `.qwen/.agents-mode.yaml`.
+- Keep maintainer-side governance references in `references-qwen/`.
