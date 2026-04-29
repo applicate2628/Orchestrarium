@@ -471,6 +471,8 @@ install_skill() {
   if [[ -d "$dst" ]]; then
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "    [dry-run] would replace $label"
+    elif diff -qr "$src" "$dst" >/dev/null; then
+      echo "    OK  $label unchanged"
     else
       rm -rf "$dst"
       cp -r "$src" "$dst"

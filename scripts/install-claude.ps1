@@ -274,6 +274,117 @@ function Copy-RequiredDirectory {
     }
 }
 
+function Get-DirectoryFileHashes {
+    param([string]$Root)
+
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]@('\', '/'))
+    $hashes = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File -Force | Sort-Object FullName) {
+        $fullName = [System.IO.Path]::GetFullPath($file.FullName)
+        $relative = $fullName.Substring($rootFull.Length).TrimStart([char[]]@('\', '/'))
+        $hashes[$relative] = (Get-FileHash -Algorithm SHA256 -LiteralPath $fullName).Hash
+    }
+    return $hashes
+}
+
+function Test-DirectoryContentEqual {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+        return $false
+    }
+
+    $sourceHashes = Get-DirectoryFileHashes -Root $SourceDir
+    $targetHashes = Get-DirectoryFileHashes -Root $TargetDir
+    if ($sourceHashes.Count -ne $targetHashes.Count) {
+        return $false
+    }
+
+    foreach ($key in $sourceHashes.Keys) {
+        if (-not $targetHashes.ContainsKey($key)) {
+            return $false
+        }
+        if ($sourceHashes[$key] -ne $targetHashes[$key]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-FileContentEqual {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetFile -PathType Leaf)) {
+        return $false
+    }
+
+    $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $SourceFile).Hash
+    $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $TargetFile).Hash
+    return $sourceHash -eq $targetHash
+}
+
+function Install-PackDirectoryItem {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir,
+        [string]$Label
+    )
+
+    if (Test-Path -LiteralPath $TargetDir) {
+        if (Test-DirectoryContentEqual -SourceDir $SourceDir -TargetDir $TargetDir) {
+            Write-Host "    OK  $Label unchanged"
+            return
+        }
+
+        if (-not $DryRun) {
+            Remove-Item -Recurse -Force $TargetDir
+            Copy-Item -Recurse -Force $SourceDir $TargetDir
+        } else {
+            Write-Host "    [dry-run] would replace $Label"
+        }
+    } else {
+        if (-not $DryRun) {
+            Copy-Item -Recurse -Force $SourceDir $TargetDir
+        } else {
+            Write-Host "    [dry-run] would install $Label"
+        }
+    }
+}
+
+function Install-PackFileItem {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        if (Test-FileContentEqual -SourceFile $SourceFile -TargetFile $TargetFile) {
+            Write-Host "    OK  $Label unchanged"
+            return
+        }
+
+        if (-not $DryRun) {
+            Copy-Item -Force $SourceFile $TargetFile
+        } else {
+            Write-Host "    [dry-run] would replace $Label"
+        }
+    } else {
+        if (-not $DryRun) {
+            Copy-Item -Force $SourceFile $TargetFile
+        } else {
+            Write-Host "    [dry-run] would install $Label"
+        }
+    }
+}
+
 function Ensure-LocalOnlyGitignoreEntries {
     param([string]$ProjectRoot)
 
@@ -646,12 +757,7 @@ foreach ($dir in $Dirs) {
     # Copy subdirectories (contracts/, team-templates/, scripts/) — full replace
     foreach ($sub in Get-ChildItem -LiteralPath $src -Directory -ErrorAction SilentlyContinue) {
         $subDst = Join-Path $dst $sub.Name
-        if (-not $DryRun) {
-            if (Test-Path -LiteralPath $subDst) { Remove-Item -Recurse -Force $subDst }
-            Copy-Item -Recurse -Force $sub.FullName $subDst
-        } else {
-            Write-Host "    [dry-run] would replace $dir/$($sub.Name)/"
-        }
+        Install-PackDirectoryItem -SourceDir $sub.FullName -TargetDir $subDst -Label "$dir/$($sub.Name)/"
     }
 
     # Copy individual files — per-file, preserve user files
@@ -659,15 +765,7 @@ foreach ($dir in $Dirs) {
     foreach ($item in Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue) {
         $packItems += $item.Name
         $itemDst = Join-Path $dst $item.Name
-        if (-not $DryRun) {
-            Copy-Item -Force $item.FullName $itemDst
-        } else {
-            if (Test-Path -LiteralPath $itemDst) {
-                Write-Host "    [dry-run] would replace $($item.Name)"
-            } else {
-                Write-Host "    [dry-run] would install $($item.Name)"
-            }
-        }
+        Install-PackFileItem -SourceFile $item.FullName -TargetFile $itemDst -Label "$dir/$($item.Name)"
     }
 
     # Report preserved user files

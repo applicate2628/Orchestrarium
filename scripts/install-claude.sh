@@ -425,18 +425,31 @@ if [[ ! -d "$TARGET" ]]; then
 fi
 
 # Per-item install: only replace pack items, preserve user-added files
-install_item() {
+items_equal() {
   local src="$1" dst="$2"
+  if [[ -d "$src" && -d "$dst" ]]; then
+    diff -qr "$src" "$dst" >/dev/null
+  elif [[ -f "$src" && -f "$dst" ]]; then
+    cmp -s "$src" "$dst"
+  else
+    return 1
+  fi
+}
+
+install_item() {
+  local src="$1" dst="$2" label="${3:-$(basename "$2")}"
   if [[ -e "$dst" ]]; then
     if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would replace $(basename "$dst")"
+      echo "    [dry-run] would replace $label"
+    elif items_equal "$src" "$dst"; then
+      echo "    OK  $label unchanged"
     else
       rm -rf "$dst"
       cp -r "$src" "$dst"
     fi
   else
     if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would install $(basename "$dst")"
+      echo "    [dry-run] would install $label"
     else
       cp -r "$src" "$dst"
     fi
@@ -682,12 +695,7 @@ for dir in "${DIRS[@]}"; do
   for sub in "$src"/*/; do
     [[ -d "$sub" ]] || continue
     sub_name="$(basename "$sub")"
-    if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would replace $dir/$sub_name/"
-    else
-      rm -rf "$dst/$sub_name"
-      cp -r "$sub" "$dst/$sub_name"
-    fi
+    install_item "$sub" "$dst/$sub_name" "$dir/$sub_name/"
   done
 
   # Copy individual files (e.g., agents/*.md, commands/*.md)
@@ -696,7 +704,7 @@ for dir in "${DIRS[@]}"; do
     [[ -f "$item" ]] || continue
     item_name="$(basename "$item")"
     pack_items+=("$item_name")
-    install_item "$item" "$dst/$item_name"
+    install_item "$item" "$dst/$item_name" "$dir/$item_name"
   done
 
   # Report preserved user files
