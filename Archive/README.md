@@ -18,6 +18,7 @@ Each snapshot is a dated package that preserves:
 | Snapshot | Role |
 |---|---|
 | `2026-04-16-first-baseline/` | first archived baseline package extracted from the benchmark line |
+| `2026-04-29-scenarios-v2-deprecated/` | archived weak, superseded, or no-policy-impact `Scenarios-v2` bundles removed from the active scenario root set |
 
 ## Archive rule
 
