@@ -4269,14 +4269,15 @@ compactly. X2 failed as a no-op and X6 failed semantic/scope gates with wrapper 
 diagnostic-only and must not change the canonical `full-v2-hard /40` surface unless a named
 slot-replacement decision is admitted later.
 
-## 2026-04-29 Follow-Up: W73 Staged Multipackage Protocol Reentry Prep
+## 2026-04-29 Follow-Up: W73 Staged Multipackage Protocol Reentry
 
-`N94-staged-multipackage-protocol-reentry` is prepared as the paired hardening task for N93. It keeps
+`N94-staged-multipackage-protocol-reentry` is the paired hardening task for N93. It keeps
 the same ProtocolMesh core/SDK/plugin/CLI migration surface, v2 wire dataclasses, legacy-envelope
 migration, plugin delivery, structured CLI return, clean-room public imports, and exact nineteen-path
 scope. The added separator axis is staged accountability: phaseBindings, exact phaseOrder,
 compatibility-case ownership, final fresh-session replay, review visible-return cues, and closeout
-readiness are now first-class JSON verifier inputs.
+readiness are now first-class JSON verifier inputs. Per current row policy, `X5` and `X6` are
+deprecated for new runs and were not launched.
 
 ### Preparation validation
 
@@ -4291,15 +4292,18 @@ readiness are now first-class JSON verifier inputs.
 
 | Scenario | Row / model | Classification |
 |---|---|---|
-| `N94` | `X1 / gpt-5.5` | `NOT-RUN`; prep-only, no launch |
-| `N94` | `X3 / opus 4.7max` | `NOT-RUN`; prep-only, no launch |
-| `N94` | `X2 / gpt-5.3-codex-spark` | `NOT-RUN` |
-| `N94` | `X4 / Claude China` | `NOT-RUN` |
-| `N94` | `X5 / gemini3.1pro` | `NOT-RUN` |
-| `N94` | `X6 / gemini3.1flash-lite-preview` | `NOT-RUN` |
+| `N94` | `X1 / gpt-5.5` | `PASS`; wrapper `0`; verifier `PASS`; exact 19 paths; worker output `2453724` bytes |
+| `N94` | `X3 / opus 4.7max` | `PASS`; wrapper `0`; verifier `PASS`; exact 19 paths; worker output `3164` bytes |
+| `N94` | `X2 / gpt-5.3-codex-spark` | scoreable `FAIL`; wrapper `0`; no-op/no candidate changes; worker output `1095` bytes |
+| `N94` | `X4 / Claude China` | `ROUTE-FAIL`; `UNKNOWN_CERTIFICATE_VERIFICATION_ERROR`; no candidate changes; not a model fail |
+| `N94` | `X5 / gemini3.1pro` | `DEPRECATED-NOT-RUN` |
+| `N94` | `X6 / gemini3.1flash-lite-preview` | `DEPRECATED-NOT-RUN` |
 
 ### Verdict
 
-No model verdict yet. N94 is admission-ready as a diagnostic candidate and does not change the
-canonical `full-v2-hard /40` surface. Resume point: launch N94 only after an explicit run decision;
-keep `X1` parked until the user authorizes model runs.
+`binary tie remains` for X1 and X3 on N94. Staging the N93 multipackage ProtocolMesh migration did
+not invert N93 into an X1-over-X3 separator: both top rows passed the exact same 19-path staged
+contract. The useful signal is cost/operational shape: X3 passed compactly, while X1 also passed but
+with very large output. X2 is a scoreable no-op fail. X4 is a route/API certificate failure, not a
+model capability result. N94 remains diagnostic-only and does not change the canonical
+`full-v2-hard /40` surface.

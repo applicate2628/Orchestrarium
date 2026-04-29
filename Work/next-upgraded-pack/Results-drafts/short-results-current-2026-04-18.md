@@ -138,11 +138,12 @@ scoreably fails as a no-op with no quota/timeout signature. `X2` also fails as n
 semantic/scope gates with wrapper `0`. N93 is diagnostic-only until a named `/40` slot-replacement
 decision exists.
 
-W73 prepared `N94-staged-multipackage-protocol-reentry` as the N93 paired hardening task. It keeps
-the ProtocolMesh runtime/API oracle and adds phaseBindings, exact phaseOrder, compatibility-case
-ownership, final fresh-session replay, visible review-return cues, and closeout readiness. Local
-oracle gates and a synthesized valid probe pass, but all model rows are `NOT-RUN`; no `/40` score
-changes.
+W73 ran `N94-staged-multipackage-protocol-reentry` for all non-deprecated rows. It keeps the
+ProtocolMesh runtime/API oracle and adds phaseBindings, exact phaseOrder, compatibility-case
+ownership, final fresh-session replay, visible review-return cues, and closeout readiness. `X1` and
+`X3` both pass; `binary tie remains`. `X3` is far more compact (`3164` worker bytes versus `2453724`
+for `X1`). `X2` is a scoreable no-op fail. `X4` route-fails with
+`UNKNOWN_CERTIFICATE_VERIFICATION_ERROR`; not a model fail. `X5` and `X6` are deprecated for new runs.
 
 | ID | Label |
 |---|---|
@@ -150,8 +151,8 @@ changes.
 | `X2` | `gpt-spark` |
 | `X3` | `opus 4.7max` |
 | `X4` | `Claude China` |
-| `X5` | `gemini3.1pro` |
-| `X6` | `gemini3.1flash-lite-preview` |
+| `X5` | `gemini3.1pro`; deprecated for new runs |
+| `X6` | `gemini3.1flash-lite-preview`; deprecated for new runs |
 
 | `#` | Surface | `1` | `2` | `3` | `4` | `5` | `6` |
 |---|---|---|---|---|---|---|---|
@@ -182,7 +183,7 @@ changes.
 | `25` | W70 real-repo staged security incident | `X1 / gpt-5.5`: `N91 PASS` | `X3 / opus 4.7max`: `N91 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; real-repo staged security repair narrows, not replaces, N78 |
 | `26` | W71 staged interface/downstream reentry | `X1 / gpt-5.5`: `N92 PASS` | `X3 / opus 4.7max`: `N92 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; diagnostic-only |
 | `27` | W72 multipackage protocol/SDK reentry | `X1 / gpt-5.5`: `N93 FAIL`; scoreable no-op | `X3 / opus 4.7max`: `N93 PASS` | `X2 / gpt-spark`: `FAIL`; no-op | `Claude China` final-only `NOT-RUN` | `X6` scoreable `FAIL`; `X5` parked | `X3 PASS over X1 FAIL`; diagnostic-only, not `/40` |
-| `28` | W73 staged multipackage protocol reentry prep | `X1 / gpt-5.5`: `N94 NOT-RUN` | `X3 / opus 4.7max`: `N94 NOT-RUN` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | prep-only; local gates and synthesized valid probe pass; no `/40` change |
+| `28` | W73 staged multipackage protocol reentry | `X1 / gpt-5.5`: `N94 PASS`; `2453724` worker bytes | `X3 / opus 4.7max`: `N94 PASS`; `3164` worker bytes | `X2 / gpt-spark`: scoreable no-op `FAIL` | `Claude China`: `ROUTE-FAIL`; certificate verification | `X5/X6` deprecated-not-run | `binary tie remains`; diagnostic-only, not `/40` |
 | `18` | W26 operator-budget compact hotfix | `X1 / gpt-5.5`: `N46 FAIL 70` | `X3 / opus 4.7max`: `N46 PASS 100` |  |  |  | first honest compact single-session `X1 FAIL / X3 PASS`; X1 preserves hidden repair semantics but fails the visible operator-budget gate (`210369 > 40000`) |
 | `19` | W27 UI compact operator-budget hotfix | `X1 / gpt-5.5`: `N47 FAIL 70` | `X3 / opus 4.7max`: `N47 PASS 94` |  |  |  | second honest compact single-session `X1 FAIL / X3 PASS`; both pass hidden UI dirty-state semantics and exact scope, while X1 fails the visible operator-budget gate (`169913 > 40000`) |
 | `20` | W28 visual raster compact operator-budget hotfix | `X1 / gpt-5.5`: `N48 FAIL 70` | `X3 / opus 4.7max`: `N48 PASS 100` |  |  |  | third honest compact single-session `X1 FAIL / X3 PASS`; both pass exact raster semantics and renderer-only scope, while X1 fails the visible operator-budget gate (`77825 > 40000`) |

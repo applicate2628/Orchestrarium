@@ -1,0 +1,92 @@
+{
+  "date": "2026-04-29",
+  "scenario": "N94-staged-multipackage-protocol-reentry",
+  "surface": "W73 diagnostic run",
+  "status": "COMPLETE",
+  "canonicalScoreImpact": "none",
+  "deprecatedRows": [
+    "X5",
+    "X6"
+  ],
+  "runPolicy": "X5 and X6 deprecated for new runs; N94 launched for X1, X2, X3, and X4 only",
+  "pairedWith": "N93-multipackage-protocol-sdk-reentry",
+  "primaryQuestion": "Does the N93 X3-over-X1 compact multipackage migration edge invert when the same ProtocolMesh API migration requires explicit staged phase ownership, fresh-session replay, and closeout proof?",
+  "localValidation": [
+    {
+      "check": "oracle JSON parse",
+      "result": "PASS"
+    },
+    {
+      "check": "bundle shape",
+      "command": "python Scenarios-v2/N94-staged-multipackage-protocol-reentry/verifiers/check_staged_multipackage_protocol_reentry.py --bundle-shape-only",
+      "result": "PASS"
+    },
+    {
+      "check": "expected starter failure profile",
+      "command": "python Scenarios-v2/N94-staged-multipackage-protocol-reentry/verifiers/check_staged_multipackage_protocol_reentry.py --expect-start-state",
+      "result": "PASS"
+    },
+    {
+      "check": "synthesized valid probe",
+      "probeRoot": ".scratch/verifier-probes/2026-04-29-n94-staged-valid/N94",
+      "result": "PASS",
+      "score": 100.0
+    }
+  ],
+  "rows": {
+    "X1": {
+      "model": "gpt-5.5",
+      "classification": "PASS",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "changedPathCount": 19,
+      "workerOutputBytes": 2453724,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_18-32-04-X1-wave73-n94-staged-protocol-X1-2026-04-29/N94/run"
+    },
+    "X2": {
+      "model": "gpt-5.3-codex-spark",
+      "classification": "scoreable FAIL",
+      "failureType": "no-op",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "changedPathCount": 0,
+      "workerOutputBytes": 1095,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_18-32-04-X2-wave73-n94-staged-protocol-X2-2026-04-29/N94/run"
+    },
+    "X3": {
+      "model": "opus 4.7max",
+      "classification": "PASS",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "changedPathCount": 19,
+      "workerOutputBytes": 3164,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_18-32-04-X3-wave73-n94-staged-protocol-X3-2026-04-29/N94/run"
+    },
+    "X4": {
+      "model": "Claude China",
+      "classification": "ROUTE-FAIL",
+      "failureType": "UNKNOWN_CERTIFICATE_VERIFICATION_ERROR",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "changedPathCount": 0,
+      "workerOutputBytes": 78,
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_18-32-04-X4-wave73-n94-staged-protocol-X4-2026-04-29/N94/run"
+    },
+    "X5": {
+      "classification": "DEPRECATED-NOT-RUN"
+    },
+    "X6": {
+      "classification": "DEPRECATED-NOT-RUN"
+    }
+  },
+  "topPairVerdict": "binary tie remains",
+  "routingRead": "N94 does not invert N93: both X1 and X3 pass the staged multipackage ProtocolMesh contract. X3 remains vastly lower-output on this exact task, while X1 passes only with a very large worker output.",
+  "verifierHighlights": [
+    "same ProtocolMesh runtime/API correctness layer as N93",
+    "phaseBindings required in source-ledger.json",
+    "phaseOrder and phase artifacts required in migration-state.json",
+    "compatibilityCases require owner, public API, source IDs, validation cue, and replay cue",
+    "reentry-state.json must set finalFreshSession=true and replay root exports, wire roundtrip, denied/no-delivery, timeout retry, duplicate idempotency, legacy migration, CLI JSON, CLI legacy JSON, legacy-wrapper removal, and exact changed paths",
+    "closure.json must mark ready-for-verifier, confirm no legacy wrappers, stale-source rejection, exact scope, and nextAction=run-hidden-verifier"
+  ]
+}
