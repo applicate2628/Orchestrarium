@@ -19,9 +19,9 @@ TARGET=""
 usage() {
   cat <<'EOF'
 Usage:
-  bash scripts/install-gemini.sh                    Install into current repo (GEMINI.md + AGENTS.md + .gemini/)
-  bash scripts/install-gemini.sh --global           Install into ~/.gemini/
-  bash scripts/install-gemini.sh --target DIR       Install into DIR as a project root
+  bash scripts/install-gemini.sh                    Install the Gemini example pack into current repo (GEMINI.md + AGENTS.md + .gemini/)
+  bash scripts/install-gemini.sh --global           Install the Gemini example pack into ~/.gemini/
+  bash scripts/install-gemini.sh --target DIR       Install the Gemini example pack into DIR as a project root
   bash scripts/install-gemini.sh --force            Skip confirmation prompts
   bash scripts/install-gemini.sh --dry-run          Print planned actions without changing files
   bash scripts/install-gemini.sh --allow-unsafe-target
@@ -32,38 +32,60 @@ EOF
 
 canonical_path() {
   local path="$1"
-  path="${path/#\~/$HOME}"
   case "$path" in
-    [A-Za-z]:/*|[A-Za-z]:\\*)
-      if command -v cygpath >/dev/null 2>&1; then
+    "~")
+      path="$HOME"
+      ;;
+    "~/"*|"~\\"*)
+      path="$HOME/${path#??}"
+      ;;
+  esac
+  path="${path//\\//}"
+  case "$path" in
+    [A-Za-z]:/*)
+      if command -v wslpath >/dev/null 2>&1; then
+        path="$(wslpath -u "$path")"
+      elif command -v cygpath >/dev/null 2>&1; then
         path="$(cygpath -u "$path")"
+      else
+        local drive rest
+        drive="$(printf '%s' "${path:0:1}" | tr '[:upper:]' '[:lower:]')"
+        rest="${path:3}"
+        if [[ -d "/mnt/$drive" ]]; then
+          path="/mnt/$drive/$rest"
+        else
+          path="/$drive/$rest"
+        fi
       fi
+      ;;
+    [A-Za-z]:*)
+      echo "FAIL: Windows drive-relative path '$path' is ambiguous; use C:/path or quote '~' so Bash expands it." >&2
+      return 1
       ;;
   esac
   if [[ -z "$path" ]]; then
     echo "" >&2
     return 1
   fi
-  local py_bin="python"
-  if ! command -v "$py_bin" >/dev/null 2>&1; then
-    py_bin="python3"
+
+  if command -v realpath >/dev/null 2>&1; then
+    realpath -m "$path"
+    return
   fi
-  if ! command -v "$py_bin" >/dev/null 2>&1; then
-    echo "FAIL: python or python3 is required for path normalization." >&2
-    return 1
-  fi
+
   if [[ -e "$path" || -L "$path" ]]; then
-    "$py_bin" - "$path" <<'PY'
-from pathlib import Path
-import sys
-print(Path(sys.argv[1]).resolve())
-PY
+    if [[ -d "$path" ]]; then
+      (cd "$path" && pwd -P)
+    else
+      local dir base
+      dir="$(dirname "$path")"
+      base="$(basename "$path")"
+      printf "%s/%s\n" "$(cd "$dir" && pwd -P)" "$base"
+    fi
+  elif [[ "$path" = /* ]]; then
+    printf "%s\n" "$path"
   else
-    "$py_bin" - "$path" <<'PY'
-from pathlib import Path
-import sys
-print(Path(sys.argv[1]).expanduser().resolve(strict=False))
-PY
+    printf "%s/%s\n" "$(pwd -P)" "$path"
   fi
 }
 
@@ -88,25 +110,13 @@ resolve_project_root() {
 
 extension_name_from_manifest() {
   local manifest="$1"
-  local py_bin="python"
-  if ! command -v "$py_bin" >/dev/null 2>&1; then
-    py_bin="python3"
-  fi
-  if ! command -v "$py_bin" >/dev/null 2>&1; then
-    echo "FAIL: python or python3 is required to read the Gemini extension manifest." >&2
+  local name
+  name="$(sed -nE 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "$manifest" | head -n 1)"
+  if [[ -z "$name" ]]; then
+    echo "FAIL: Gemini extension manifest is missing a non-empty 'name' field." >&2
     return 1
   fi
-  "$py_bin" - "$manifest" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-name = manifest.get("name", "").strip()
-if not name:
-    raise SystemExit("FAIL: Gemini extension manifest is missing a non-empty 'name' field.")
-print(name)
-PY
+  printf "%s\n" "$name"
 }
 
 ensure_dir() {
@@ -147,6 +157,17 @@ confirm_action() {
   done
 }
 
+items_equal() {
+  local src="$1" dst="$2"
+  if [[ -d "$src" && -d "$dst" ]]; then
+    diff -qr "$src" "$dst" >/dev/null
+  elif [[ -f "$src" && -f "$dst" ]]; then
+    cmp -s "$src" "$dst"
+  else
+    return 1
+  fi
+}
+
 install_tree() {
   local src="$1" dst="$2" label="$3"
   local item_name
@@ -160,6 +181,8 @@ install_tree() {
     if [[ -e "$dst/$item_name" ]]; then
       if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "    [dry-run] would replace $label/$item_name"
+      elif items_equal "$item" "$dst/$item_name"; then
+        echo "    OK  $label/$item_name unchanged"
       else
         rm -rf "$dst/$item_name"
         cp -r "$item" "$dst/$item_name"
@@ -500,7 +523,7 @@ remove_empty_dir_if_present() {
 
 remove_legacy_top_level_pack_entries() {
   local src="$1" dst="$2" label="$3"
-  [[ -d "$dst" ]] || return
+  [[ -d "$dst" ]] || return 0
   shopt -s nullglob
   for item in "$src"/*; do
     local item_name target_path
@@ -520,7 +543,7 @@ remove_legacy_top_level_pack_entries() {
 
 remove_legacy_mirrored_files() {
   local src="$1" dst="$2" label="$3"
-  [[ -d "$dst" ]] || return
+  [[ -d "$dst" ]] || return 0
   while IFS= read -r -d '' file; do
     local relative target_path
     relative="${file#$src/}"
@@ -630,7 +653,7 @@ EXTENSION_AGENTS_TARGET="$EXTENSION_ROOT/AGENTS.md"
 LEGACY_EXTENSION_SHARED_TARGET="$EXTENSION_ROOT/AGENTS.shared.md"
 LEGACY_EXTENSION_AGENTS_README_TARGET="$EXTENSION_ROOT/agents/README.md"
 
-echo "=== Orchestrarium Gemini Installer ==="
+echo "=== Orchestrarium Gemini Example Pack Installer ==="
 echo "Source: $SOURCE"
 echo "Mode:   $MODE"
 echo "Runtime root: $INSTALL_ROOT"
@@ -639,6 +662,7 @@ echo "AGENTS.md:    $SHARED_TARGET"
 echo "agents-mode:  $AGENTS_MODE_TARGET"
 echo "Extension:    $EXTENSION_ROOT"
 echo "Legacy user tier cleanup roots: $SKILLS_TARGET ; $AGENTS_TARGET ; $COMMANDS_TARGET"
+echo "Policy:       example-only / WEAK MODEL / NOT RECOMMENDED; production auto routing stays on codex|claude"
 [[ "$DRY_RUN" -eq 1 ]] && echo "Mode:   dry-run"
 echo
 
@@ -728,4 +752,4 @@ if [[ "$errors" -gt 0 ]]; then
 fi
 
 echo
-echo "RESULT: OK - Gemini pack installed"
+echo "RESULT: OK - Gemini example pack installed"

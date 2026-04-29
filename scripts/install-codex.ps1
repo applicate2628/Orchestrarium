@@ -275,6 +275,75 @@ function Copy-RequiredDirectory {
     }
 }
 
+function Get-DirectoryFileHashes {
+    param([string]$Root)
+
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]@('\', '/'))
+    $hashes = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File -Force | Sort-Object FullName) {
+        $fullName = [System.IO.Path]::GetFullPath($file.FullName)
+        $relative = $fullName.Substring($rootFull.Length).TrimStart([char[]]@('\', '/'))
+        $hashes[$relative] = (Get-FileHash -Algorithm SHA256 -LiteralPath $fullName).Hash
+    }
+    return $hashes
+}
+
+function Test-DirectoryContentEqual {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetDir)) {
+        return $false
+    }
+
+    $sourceHashes = Get-DirectoryFileHashes -Root $SourceDir
+    $targetHashes = Get-DirectoryFileHashes -Root $TargetDir
+    if ($sourceHashes.Count -ne $targetHashes.Count) {
+        return $false
+    }
+
+    foreach ($key in $sourceHashes.Keys) {
+        if (-not $targetHashes.ContainsKey($key)) {
+            return $false
+        }
+        if ($sourceHashes[$key] -ne $targetHashes[$key]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Install-SkillDirectory {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir,
+        [string]$Label
+    )
+
+    if (Test-Path -LiteralPath $TargetDir) {
+        if (Test-DirectoryContentEqual -SourceDir $SourceDir -TargetDir $TargetDir) {
+            Write-Host "    OK  $Label unchanged"
+            return
+        }
+
+        if (-not $DryRun) {
+            Remove-Item -Recurse -Force $TargetDir
+            Copy-Item -Recurse -Force $SourceDir $TargetDir
+        } else {
+            Write-Host "    [dry-run] would replace $Label"
+        }
+    } else {
+        if (-not $DryRun) {
+            Copy-Item -Recurse -Force $SourceDir $TargetDir
+        } else {
+            Write-Host "    [dry-run] would install $Label"
+        }
+    }
+}
+
 function Ensure-LocalOnlyGitignoreEntries {
     param([string]$ProjectRoot)
 
@@ -679,20 +748,7 @@ foreach ($skillDir in Get-ChildItem -LiteralPath (Join-Path $Source "skills") -D
     $skillName = $skillDir.Name
     $packSkills += $skillName
     $dst = Join-Path $SkillsTarget $skillName
-    if (Test-Path -LiteralPath $dst) {
-        if (-not $DryRun) {
-            Remove-Item -Recurse -Force $dst
-            Copy-Item -Recurse -Force $skillDir.FullName $dst
-        } else {
-            Write-Host "    [dry-run] would replace skills/$skillName"
-        }
-    } else {
-        if (-not $DryRun) {
-            Copy-Item -Recurse -Force $skillDir.FullName $dst
-        } else {
-            Write-Host "    [dry-run] would install skills/$skillName"
-        }
-    }
+    Install-SkillDirectory -SourceDir $skillDir.FullName -TargetDir $dst -Label "skills/$skillName"
 }
 Write-Host "  Installed $($packSkills.Count) pack skills."
 

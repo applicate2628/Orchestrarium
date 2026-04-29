@@ -1,9 +1,10 @@
 <#
 .SYNOPSIS
-    Install the Orchestrarium Gemini pack.
+    Install the Orchestrarium Gemini example pack.
 .DESCRIPTION
-    Installs Gemini-native runtime surfaces for project-local or global Gemini CLI use.
+    Installs Gemini-native runtime surfaces for project-local or global Gemini CLI example use.
     Project installs write GEMINI.md and AGENTS.md at the project root and runtime assets under .gemini/.
+    Production auto routing remains on codex/claude; Gemini is kept installable as an example/compatibility path.
 .EXAMPLE
     .\scripts\install-gemini.ps1
     .\scripts\install-gemini.ps1 -Global
@@ -31,6 +32,12 @@ $ManagedEnd = "<!-- ORCHESTRARIUM_GEMINI_PACK:END -->"
 function Get-CanonicalPath {
     param([string]$Path)
     $expanded = [Environment]::ExpandEnvironmentVariables($Path).Trim('"').Trim()
+    $homeRoot = if ($HOME) { $HOME } else { [Environment]::GetFolderPath("UserProfile") }
+    if ($expanded -eq "~") {
+        $expanded = $homeRoot
+    } elseif ($expanded.StartsWith("~/") -or $expanded.StartsWith("~\")) {
+        $expanded = Join-Path $homeRoot $expanded.Substring(2)
+    }
     if ([string]::IsNullOrWhiteSpace($expanded)) { throw "Path is empty." }
     try {
         return (Resolve-Path -LiteralPath $expanded -ErrorAction Stop).Path
@@ -150,6 +157,75 @@ function Get-PythonCommand {
     return $null
 }
 
+function Get-DirectoryFileHashes {
+    param([string]$Root)
+
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]@('\', '/'))
+    $hashes = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File -Force | Sort-Object FullName) {
+        $fullName = [System.IO.Path]::GetFullPath($file.FullName)
+        $relative = $fullName.Substring($rootFull.Length).TrimStart([char[]]@('\', '/'))
+        $hashes[$relative] = (Get-FileHash -Algorithm SHA256 -LiteralPath $fullName).Hash
+    }
+    return $hashes
+}
+
+function Test-DirectoryContentEqual {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+        return $false
+    }
+
+    $sourceHashes = Get-DirectoryFileHashes -Root $SourceDir
+    $targetHashes = Get-DirectoryFileHashes -Root $TargetDir
+    if ($sourceHashes.Count -ne $targetHashes.Count) {
+        return $false
+    }
+
+    foreach ($key in $sourceHashes.Keys) {
+        if (-not $targetHashes.ContainsKey($key)) {
+            return $false
+        }
+        if ($sourceHashes[$key] -ne $targetHashes[$key]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-FileContentEqual {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetFile -PathType Leaf)) {
+        return $false
+    }
+
+    $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $SourceFile).Hash
+    $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $TargetFile).Hash
+    return $sourceHash -eq $targetHash
+}
+
+function Test-ItemContentEqual {
+    param(
+        [string]$SourcePath,
+        [string]$TargetPath
+    )
+
+    $sourceItem = Get-Item -LiteralPath $SourcePath -Force
+    if ($sourceItem.PSIsContainer) {
+        return (Test-DirectoryContentEqual -SourceDir $SourcePath -TargetDir $TargetPath)
+    }
+    return (Test-FileContentEqual -SourceFile $SourcePath -TargetFile $TargetPath)
+}
+
 function Install-Tree {
     param([string]$SourceDir, [string]$TargetDir, [string]$Label)
 
@@ -161,6 +237,11 @@ function Install-Tree {
         $packNames += $item.Name
         $destination = Join-Path $TargetDir $item.Name
         if (Test-Path -LiteralPath $destination) {
+            if (Test-ItemContentEqual -SourcePath $item.FullName -TargetPath $destination) {
+                Write-Host "    OK  $Label/$($item.Name) unchanged"
+                continue
+            }
+
             if (-not $DryRun) {
                 Remove-Item -Recurse -Force $destination
                 Copy-Item -Recurse -Force $item.FullName $destination
@@ -626,7 +707,7 @@ $ExtensionAgentsTarget = Join-Path $ExtensionRoot "AGENTS.md"
 $LegacyExtensionSharedTarget = Join-Path $ExtensionRoot "AGENTS.shared.md"
 $LegacyExtensionAgentsReadmeTarget = Join-Path (Join-Path $ExtensionRoot "agents") "README.md"
 
-Write-Host "=== Orchestrarium Gemini Installer ===" -ForegroundColor Cyan
+Write-Host "=== Orchestrarium Gemini Example Pack Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
 Write-Host "Mode:   $Mode"
 Write-Host "Runtime root: $InstallRoot"
@@ -635,6 +716,7 @@ Write-Host "AGENTS.md:    $SharedTarget"
 Write-Host "agents-mode:  $AgentsModeTarget"
 Write-Host "Extension:    $ExtensionRoot"
 Write-Host "Legacy user tier cleanup roots: $SkillsTarget ; $AgentsTarget ; $CommandsTarget"
+Write-Host "Policy:       example-only / WEAK MODEL / NOT RECOMMENDED; production auto routing stays on codex|claude"
 if ($DryRun) { Write-Host "Mode:   dry-run" -ForegroundColor Yellow }
 Write-Host ""
 
@@ -732,4 +814,4 @@ if ($errors -gt 0) {
 }
 
 Write-Host ""
-Write-Host "RESULT: OK - Gemini pack installed" -ForegroundColor Green
+Write-Host "RESULT: OK - Gemini example pack installed" -ForegroundColor Green
