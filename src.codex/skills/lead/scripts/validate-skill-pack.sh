@@ -8,6 +8,7 @@ set -euo pipefail
 #   bash .agents/skills/lead/scripts/validate-skill-pack.sh     (repo-local install)
 
 # Auto-detect layout.
+SCRIPT_DIR_LOGICAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 DEV_REPO=0
 CODEX_RUNTIME_ROOT=""
@@ -20,6 +21,21 @@ if [[ -d "src.codex/skills" && -f "shared/AGENTS.shared.md" && -f "src.codex/AGE
   AGENTS_FILE="$(mktemp)"
   cat "shared/AGENTS.shared.md" "src.codex/AGENTS.codex.md" > "$AGENTS_FILE"
   trap "rm -f '$AGENTS_FILE'" EXIT
+elif [[ -d ".codex/skills" && -f ".codex/AGENTS.md" ]]; then
+  SKILLS_DIR="$(cd ".codex/skills" && pwd -P)"
+  SCRIPTS_DIR="$(cd ".codex/skills/lead/scripts" && pwd -P)"
+  AGENTS_FILE="$(cd ".codex" && pwd)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd ".codex" && pwd)"
+elif [[ -d ".agents/skills" && -f "AGENTS.md" ]]; then
+  SKILLS_DIR="$(cd ".agents/skills" && pwd -P)"
+  SCRIPTS_DIR="$(cd ".agents/skills/lead/scripts" && pwd -P)"
+  AGENTS_FILE="$(cd "." && pwd)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd "." && pwd)/.codex"
+elif [[ -d "$SCRIPT_DIR_LOGICAL/../.." && -f "$SCRIPT_DIR_LOGICAL/../SKILL.md" && -f "$SCRIPT_DIR_LOGICAL/../../../AGENTS.md" ]]; then
+  SKILLS_DIR="$(cd "$SCRIPT_DIR_LOGICAL/../.." && pwd -P)"
+  SCRIPTS_DIR="$SCRIPT_DIR"
+  AGENTS_FILE="$(cd "$SCRIPT_DIR_LOGICAL/../../.." && pwd)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd "$SCRIPT_DIR_LOGICAL/../../.." && pwd)"
 elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DIR/../../../AGENTS.md" ]]; then
   SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
   SCRIPTS_DIR="$SCRIPT_DIR"
@@ -30,16 +46,6 @@ elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DI
   SCRIPTS_DIR="$SCRIPT_DIR"
   AGENTS_FILE="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)/AGENTS.md"
   CODEX_RUNTIME_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)/.codex"
-elif [[ -d ".codex/skills" && -f ".codex/AGENTS.md" ]]; then
-  SKILLS_DIR="$(cd ".codex/skills" && pwd -P)"
-  SCRIPTS_DIR="$(cd ".codex/skills/lead/scripts" && pwd -P)"
-  AGENTS_FILE="$(cd ".codex" && pwd -P)/AGENTS.md"
-  CODEX_RUNTIME_ROOT="$(cd ".codex" && pwd -P)"
-elif [[ -d ".agents/skills" && -f "AGENTS.md" ]]; then
-  SKILLS_DIR="$(cd ".agents/skills" && pwd -P)"
-  SCRIPTS_DIR="$(cd ".agents/skills/lead/scripts" && pwd -P)"
-  AGENTS_FILE="$(cd "." && pwd -P)/AGENTS.md"
-  CODEX_RUNTIME_ROOT="$(cd "." && pwd -P)/.codex"
 else
   echo "FAIL: Could not detect Orchestrarium layout. Expected one of: src.codex/, .codex/, or .agents/ with root AGENTS.md." >&2
   exit 1
@@ -110,6 +116,88 @@ check_not_exists() {
   fi
 }
 
+check_normalizer_strips_example_auto_providers() {
+  local label="$1"
+  if [[ $DEV_REPO -ne 1 ]]; then
+    warn "$label (dev repo normalizer unavailable in installed layout)"
+    return
+  fi
+
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_cmd="python"
+  else
+    warn "$label (python unavailable)"
+    return
+  fi
+
+  local tmpdir target
+  tmpdir="$(mktemp -d)"
+  target="$tmpdir/.agents-mode.yaml"
+  cat > "$target" <<'EOF'
+externalProvider: auto
+externalPriorityProfile: custom-demo
+externalPriorityProfiles:
+  custom-demo:
+    advisory.repo-understanding: [claude, codex, claude-secret, gemini, qwen]
+    review.visual: [claude, codex, claude-secret, gemini]
+    worker.default-implementation: [claude-secret, claude, gemini, qwen, codex]
+    worker.secret-only: [claude-secret, gemini, qwen]
+externalOpinionCounts: {}
+EOF
+
+  if "$python_cmd" "$REPO_ROOT/scripts/normalize-agents-mode.py" \
+    --template "$REPO_ROOT/shared/agents-mode.defaults.yaml" \
+    --target "$target" \
+    --provider shared >/dev/null 2>&1 &&
+    grep -Fq "  custom-demo:" "$target" &&
+    grep -Fq "    advisory.repo-understanding: [claude, codex, claude-secret]" "$target" &&
+    grep -Fq "    review.visual: [claude, codex, claude-secret]" "$target" &&
+    grep -Fq "    worker.default-implementation: [claude, codex]" "$target" &&
+    ! grep -Fq "worker.secret-only" "$target" &&
+    ! grep -E '^[[:space:]]{4}.*: \[[^]]*(gemini|qwen)' "$target" >/dev/null &&
+    ! grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*claude-secret' "$target" >/dev/null; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+  rm -rf "$tmpdir"
+}
+
+check_shared_defaults_claude_secret_policy() {
+  local label="$1"
+  if [[ $DEV_REPO -ne 1 ]]; then
+    warn "$label (dev repo defaults unavailable in installed layout)"
+    return
+  fi
+
+  local defaults="$REPO_ROOT/shared/agents-mode.defaults.yaml"
+  if [[ ! -f "$defaults" ]]; then
+    fail "$label (shared defaults missing)"
+    return
+  fi
+
+  local lane
+  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.performance-architecture review.visual; do
+    if ! grep -Fq "    $lane: [claude, codex, claude-secret]" "$defaults"; then
+      fail "$label ($lane missing claude-secret as last advisory/review candidate)"
+      return
+    fi
+  done
+
+  if grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*(claude-secret|gemini|qwen)' "$defaults" >/dev/null; then
+    fail "$label (worker lane contains forbidden provider)"
+    return
+  fi
+  if grep -E '^[[:space:]]{4}(advisory|review|worker)\.[^:]+: \[[^]]*(gemini|qwen)' "$defaults" >/dev/null; then
+    fail "$label (Gemini/Qwen appear in shipped production profile)"
+    return
+  fi
+  pass "$label"
+}
+
 check_max_lines() {
   local file="$1"
   local max_lines="$2"
@@ -125,6 +213,182 @@ check_max_lines() {
     pass "$label ($actual_lines <= $max_lines)"
   else
     fail "$label ($actual_lines > $max_lines)"
+  fi
+}
+
+check_skill_frontmatter_yaml() {
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_cmd="python"
+  else
+    warn "Codex skill frontmatter is valid YAML (python unavailable)"
+    return
+  fi
+
+  local skill_files=()
+  local role
+  local skill_file
+
+  if [[ "$#" -gt 0 ]]; then
+    for role in "$@"; do
+      skill_file="$SKILLS_DIR/$role/SKILL.md"
+      [[ -f "$skill_file" ]] && skill_files+=("$skill_file")
+    done
+  else
+    for skill_file in "$SKILLS_DIR"/*/SKILL.md; do
+      [[ -f "$skill_file" ]] && skill_files+=("$skill_file")
+    done
+  fi
+
+  local output
+  if output="$("$python_cmd" - "${skill_files[@]}" <<'PY'
+import pathlib
+import re
+import sys
+
+try:
+    import yaml
+except Exception:
+    yaml = None
+
+bad = []
+
+def fallback_check(path, frontmatter):
+    for offset, line in enumerate(frontmatter.splitlines(), 2):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = re.match(r"^[A-Za-z0-9_-]+:\s*(.*)$", line)
+        if not match:
+            return f"line {offset}: unsupported frontmatter line"
+        value = match.group(1).split(" #", 1)[0].strip()
+        if value and not value.startswith(("'", '"', "[", "{", "|", ">")) and re.search(r":(\s|$)", value):
+            return f"line {offset}: unquoted colon in plain scalar"
+    return None
+
+for arg in sys.argv[1:]:
+    path = pathlib.Path(arg)
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        bad.append(f"{path}: missing opening frontmatter fence")
+        continue
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        bad.append(f"{path}: missing closing frontmatter fence")
+        continue
+    frontmatter = parts[1]
+    if yaml is not None:
+        try:
+            data = yaml.safe_load(frontmatter)
+        except Exception as exc:
+            bad.append(f"{path}: {exc}")
+            continue
+        if not isinstance(data, dict):
+            bad.append(f"{path}: frontmatter root is not a mapping")
+    else:
+        fallback_error = fallback_check(path, frontmatter)
+        if fallback_error:
+            bad.append(f"{path}: {fallback_error}")
+
+if bad:
+    print("\n".join(bad))
+    sys.exit(1)
+PY
+)"; then
+    pass "Codex skill frontmatter is valid YAML"
+  else
+    fail "Codex skill frontmatter is valid YAML"
+    if [[ -n "$output" ]]; then
+      printf '%s\n' "$output" | sed 's/^/       /'
+    fi
+  fi
+}
+
+check_skill_description_budget() {
+  local max_per_description="$1"
+  local max_total_description="$2"
+  shift 2
+  local total_chars=0
+  local offenders=()
+  local multiline_descriptions=()
+  local skill_file
+  local role
+
+  if [[ "$#" -gt 0 ]]; then
+    for role in "$@"; do
+      skill_file="$SKILLS_DIR/$role/SKILL.md"
+      [[ -f "$skill_file" ]] || continue
+
+      local description
+      local description_chars
+
+      description="$(grep -m 1 '^description:' "$skill_file" | sed 's/^description:[[:space:]]*//')"
+
+      if [[ -z "$description" ]]; then
+        offenders+=("$role=missing")
+        continue
+      fi
+
+      if [[ "$description" == ">" || "$description" == "|" ]]; then
+        multiline_descriptions+=("$role")
+        continue
+      fi
+
+      description_chars="${#description}"
+      total_chars=$((total_chars + description_chars))
+
+      if [[ "$description_chars" -gt "$max_per_description" ]]; then
+        offenders+=("$role=$description_chars")
+      fi
+    done
+  else
+
+    for skill_file in "$SKILLS_DIR"/*/SKILL.md; do
+      [[ -f "$skill_file" ]] || continue
+
+      local description
+      local description_chars
+
+      role="$(basename "$(dirname "$skill_file")")"
+      description="$(grep -m 1 '^description:' "$skill_file" | sed 's/^description:[[:space:]]*//')"
+
+      if [[ -z "$description" ]]; then
+        offenders+=("$role=missing")
+        continue
+      fi
+
+      if [[ "$description" == ">" || "$description" == "|" ]]; then
+        multiline_descriptions+=("$role")
+        continue
+      fi
+
+      description_chars="${#description}"
+      total_chars=$((total_chars + description_chars))
+
+      if [[ "$description_chars" -gt "$max_per_description" ]]; then
+        offenders+=("$role=$description_chars")
+      fi
+    done
+  fi
+
+  if [[ ${#multiline_descriptions[@]} -gt 0 ]]; then
+    fail "Codex skill descriptions are single-line metadata (${multiline_descriptions[*]})"
+  else
+    pass "Codex skill descriptions are single-line metadata"
+  fi
+
+  if [[ ${#offenders[@]} -gt 0 ]]; then
+    fail "Codex skill descriptions stay <= $max_per_description chars (${offenders[*]})"
+  else
+    pass "Codex skill descriptions stay <= $max_per_description chars"
+  fi
+
+  if [[ "$total_chars" -le "$max_total_description" ]]; then
+    pass "Codex skill description total stays <= $max_total_description chars ($total_chars)"
+  else
+    fail "Codex skill description total stays <= $max_total_description chars ($total_chars)"
   fi
 }
 
@@ -287,6 +551,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   CODEX_REF_DIR="$REPO_ROOT/references-codex"
   CLAUDE_REF_DIR="$REPO_ROOT/references-claude"
   GEMINI_REF_DIR="$REPO_ROOT/references-gemini"
+  QWEN_REF_DIR="$REPO_ROOT/references-qwen"
 
   echo ""
   echo "=== Common branch-level surface ==="
@@ -298,13 +563,15 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "$REPO_ROOT/src.codex/README.md" \
     "$REPO_ROOT/src.claude/README.md" \
     "$REPO_ROOT/src.gemini/README.md" \
+    "$REPO_ROOT/src.qwen/README.md" \
     "$DOCS_DIR/README.md" \
     "$DOCS_DIR/agents-mode-reference.md" \
     "$DOCS_DIR/external-worker-design.md" \
     "$DOCS_DIR/provider-runtime-layouts.md" \
     "$CODEX_REF_DIR/README.md" \
     "$CLAUDE_REF_DIR/README.md" \
-    "$GEMINI_REF_DIR/README.md"
+    "$GEMINI_REF_DIR/README.md" \
+    "$QWEN_REF_DIR/README.md"
   do
     if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
   done
@@ -351,8 +618,14 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Keep runtime-specific paths, provider dispatch details, execution-model differences, and repository concretization in the corresponding pack-local addendum." \
     "shared subagent-operating-model keeps runtime specifics in pack-local addenda"
   check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "pack-local addenda may extend it with provider-specific fields" \
+    "and any pack-local provider-specific fields" \
     "shared subagent-operating-model allows provider-specific addendum fields"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'A subagent `PASS`, report, or claimed test result is a claim, not proof' \
+    "shared subagent-operating-model requires subagent result verification"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Documentation terminology amendment" \
+    "shared subagent-operating-model documents terminology glossary discipline"
   check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode.yaml" \
     "shared subagent-operating-model stays free of Codex-specific agents-mode paths"
   check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".claude/.agents-mode.yaml" \
@@ -411,7 +684,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex runtime-notes section documents the Codex-only externalClaudeProfile field"
   check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
     "## Codex-specific runtime notes" \
-    "route eligible external work to Claude CLI or Gemini CLI" \
+    "Shipped production \`auto\` uses \`codex | claude\` only." \
     "Codex runtime-notes section documents profile-based Codex external dispatch"
   check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
     "## Codex-specific runtime notes" \
@@ -425,6 +698,8 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex addendum keeps the Codex runtime-notes section"
   check_contains "$GEMINI_REF_DIR/subagent-operating-model.md" "## Gemini-specific runtime notes" \
     "Gemini addendum keeps the Gemini runtime-notes section"
+  check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Qwen-specific runtime notes" \
+    "Qwen addendum keeps the Qwen runtime-notes section"
   check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
     "## Gemini-specific runtime notes" \
     ".gemini/.agents-mode.yaml" \
@@ -437,6 +712,12 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "## Gemini-specific runtime notes" \
     "sequential and human-steered" \
     "Gemini runtime-notes section keeps the sequential human-steered runtime note"
+  check_h2_section_contains "$QWEN_REF_DIR/subagent-operating-model.md" \
+    "## Qwen-specific runtime notes" \
+    "sequential and human-steered" \
+    "Qwen runtime-notes section keeps the sequential human-steered runtime note"
+  check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Shared core now owns" \
+    "Qwen addendum keeps the shared-core ownership handoff section"
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Codex-side repository concretization" \
     "Codex addendum keeps the Codex repository-concretization section"
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Shared core now owns" \
@@ -467,10 +748,10 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CODEX_REF_DIR/subagent-operating-model.md" 120 \
     "Codex addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "ee0710b133f9c5e56a19a4b455e3d73dc0cf99b02fbedbe787fc1d903aa89dca" \
+    "4bb18cd3df2d2b8e5cc78ff786191da3bbf832555fa80c182ddfda7e2ee097e8" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
-    "bfd2d9a456f5f0c6e100a07fd86efa1b8a07c8da697313837223dc13062ced5f" \
+    "160e9bb3bb3df73e611626bc814a45a0923a350a4bff5b43b82bf45409c06549" \
     "Codex addendum matches the current canonical normalized fingerprint"
 fi
 
@@ -502,9 +783,18 @@ for role in "${indexed_roles[@]}"; do
 done
 
 echo ""
-echo "=== Orphaned skill directories ==="
+echo "=== Skill metadata budget ==="
 
+CODEX_SKILL_DESCRIPTION_MAX_CHARS=180
+CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=5000
 UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes)
+PACK_BUDGET_SKILLS=("${indexed_roles[@]}" "${UTILITY_SKILLS[@]}")
+mapfile -t PACK_BUDGET_SKILLS < <(printf '%s\n' "${PACK_BUDGET_SKILLS[@]}" | sort -u)
+check_skill_frontmatter_yaml "${PACK_BUDGET_SKILLS[@]}"
+check_skill_description_budget "$CODEX_SKILL_DESCRIPTION_MAX_CHARS" "$CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS" "${PACK_BUDGET_SKILLS[@]}"
+
+echo ""
+echo "=== Orphaned skill directories ==="
 
 for dir in "$SKILLS_DIR"/*/; do
   role="$(basename "$dir")"
@@ -561,10 +851,18 @@ check_absent "$AGENTS_FILE" "Adapter host runtime" \
   "shared governance no longer allows adapter-host metadata for external execution"
 check_contains "$AGENTS_FILE" "must use direct external launch" \
   "shared governance requires direct external launch"
+check_contains "$AGENTS_FILE" "substantive task prompt must use file-based prompt delivery" \
+  "shared governance requires file-based external CLI prompts"
+check_contains "$AGENTS_FILE" "verify every subagent result before accepting it" \
+  "shared governance requires verification before trusting subagent results"
+check_contains "$AGENTS_FILE" "Documentation terminology discipline" \
+  "shared governance requires terminology and abbreviation explanations in documents"
 check_absent "$SKILLS_DIR/lead/external-dispatch.md" "Adapter host runtime:" \
   "external-dispatch no longer records adapter host runtime"
 check_contains "$SKILLS_DIR/lead/external-dispatch.md" "must use direct external launch" \
   "external-dispatch requires direct external launch"
+check_contains "$SKILLS_DIR/lead/external-dispatch.md" "substantive task prompt must use file-based prompt delivery" \
+  "external-dispatch requires file-based external CLI prompts"
 check_absent "$SKILLS_DIR/consultant/SKILL.md" "Adapter host runtime:" \
   "consultant no longer records adapter host runtime"
 check_contains "$SKILLS_DIR/consultant/SKILL.md" "must use direct external launch" \
@@ -573,10 +871,14 @@ check_absent "$SKILLS_DIR/external-worker/SKILL.md" "Adapter host runtime:" \
   "external-worker no longer records adapter host runtime"
 check_contains "$SKILLS_DIR/external-worker/SKILL.md" "direct external launch contract" \
   "external-worker requires direct external launch"
+check_contains "$SKILLS_DIR/external-worker/SKILL.md" "file-based prompt delivery" \
+  "external-worker requires file-based external CLI prompts"
 check_absent "$SKILLS_DIR/external-reviewer/SKILL.md" "Adapter host runtime:" \
   "external-reviewer no longer records adapter host runtime"
 check_contains "$SKILLS_DIR/external-reviewer/SKILL.md" "direct external launch contract" \
   "external-reviewer requires direct external launch"
+check_contains "$SKILLS_DIR/external-reviewer/SKILL.md" "file-based prompt delivery" \
+  "external-reviewer requires file-based external CLI prompts"
 check_absent "$SKILLS_DIR/consultant/SKILL.md" "Actual execution path:** <external CLI (provider name) | internal subagent" \
   "consultant does not mislabel internal subagent as actual execution path"
 check_contains "$SKILLS_DIR/external-brigade/SKILL.md" "same-provider brigade items may run in parallel" \
@@ -586,17 +888,83 @@ check_contains "$SKILLS_DIR/external-brigade/SKILL.md" "It does not cap how many
 check_contains "$SKILLS_DIR/lead/SKILL.md" "\$external-brigade" \
   "lead skill mentions the external-brigade utility"
 
+echo ""
+echo "=== Production auto provider canon ==="
+
+codex_phase_b_files=(
+  "$SKILLS_DIR/lead/SKILL.md"
+  "$SKILLS_DIR/lead/external-dispatch.md"
+  "$SKILLS_DIR/lead/operating-model.md"
+  "$SKILLS_DIR/lead/subagent-contracts.md"
+  "$SKILLS_DIR/consultant/SKILL.md"
+  "$SKILLS_DIR/external-worker/SKILL.md"
+  "$SKILLS_DIR/external-reviewer/SKILL.md"
+  "$SKILLS_DIR/external-brigade/SKILL.md"
+  "$SKILLS_DIR/second-opinion/SKILL.md"
+  "$SKILLS_DIR/init-project/SKILL.md"
+  "$SKILLS_DIR/graphics-engineer/SKILL.md"
+  "$SKILLS_DIR/visualization-engineer/SKILL.md"
+  "$SKILLS_DIR/consultant/agents/openai.yaml"
+  "$SKILLS_DIR/second-opinion/agents/openai.yaml"
+  "$SKILLS_DIR/init-project/agents/openai.yaml"
+)
+
+for file in "${codex_phase_b_files[@]}"; do
+  check_absent "$file" "gemini-crosscheck" \
+    "$file removes retired gemini-crosscheck profile"
+  check_absent "$file" "externalGeminiFallbackMode" \
+    "$file removes retired externalGeminiFallbackMode"
+  check_absent "$file" "externalGeminiWorkdirMode" \
+    "$file removes retired externalGeminiWorkdirMode"
+done
+
+check_h2_section_absent "$SKILLS_DIR/lead/external-dispatch.md" '### `externalPriorityProfiles`' "gemini" \
+  "Codex shipped externalPriorityProfiles keep Gemini out of auto"
+check_h2_section_absent "$SKILLS_DIR/lead/external-dispatch.md" '### `externalPriorityProfiles`' "qwen" \
+  "Codex shipped externalPriorityProfiles keep Qwen out of auto"
+check_h2_section_absent "$SKILLS_DIR/lead/external-dispatch.md" '## Shared lane-priority matrix' "gemini" \
+  "Codex shared lane matrix keeps Gemini out of auto"
+check_h2_section_absent "$SKILLS_DIR/lead/external-dispatch.md" '## Shared lane-priority matrix' "qwen" \
+  "Codex shared lane matrix keeps Qwen out of auto"
+
 if [[ $DEV_REPO -eq 1 ]]; then
   check_contains "$REPO_ROOT/src.codex/AGENTS.codex.md" "\$external-brigade" \
     "Codex platform rules mention the external-brigade utility skill"
+  check_contains "$REPO_ROOT/src.codex/AGENTS.codex.md" "auto | codex | claude | gemini | qwen" \
+    "Codex platform rules document the example-only Gemini/Qwen provider universe"
+  check_contains "$REPO_ROOT/shared/references/README.md" "current Gemini and Qwen example integrations" \
+    "shared reference index treats Gemini/Qwen as current example integrations"
 fi
+
+check_contains "$SKILLS_DIR/consultant/SKILL.md" 'Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED` example-only routes' \
+  "Codex consultant marks Gemini/Qwen as not recommended example routes"
+check_contains "$SKILLS_DIR/external-worker/SKILL.md" 'manual `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Codex external-worker marks Gemini/Qwen as not recommended example routes"
+  check_contains "$SKILLS_DIR/external-reviewer/SKILL.md" 'manual `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+    "Codex external-reviewer marks Gemini/Qwen as not recommended example routes"
+check_contains "$SKILLS_DIR/lead/operating-model.md" 'do not place Gemini or Qwen inside `externalPriorityProfiles`' \
+  "Codex operating model forbids Gemini/Qwen profile entries"
+check_contains "$SKILLS_DIR/consultant/agents/openai.yaml" 'explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Codex consultant prompt marks Gemini/Qwen as not recommended example routes"
+check_contains "$SKILLS_DIR/init-project/agents/openai.yaml" 'explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Codex init-project prompt marks Gemini/Qwen as not recommended example routes"
+check_contains "$SKILLS_DIR/second-opinion/agents/openai.yaml" 'explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Codex second-opinion prompt marks Gemini/Qwen as not recommended example routes"
 
 if [[ $DEV_REPO -eq 1 ]]; then
   check_contains "$DOCS_DIR/agents-mode-reference.md" "## Canonical maintenance" \
     "agents-mode reference defines canonical maintenance"
   check_contains "$DOCS_DIR/agents-mode-reference.md" "Read-time normalization preserves the effective values of known keys" \
     "agents-mode reference documents read-time normalization semantics"
+  check_contains "$DOCS_DIR/agents-mode-reference.md" 'removes example-only providers from every `externalPriorityProfiles` provider list' \
+    "agents-mode reference documents profile provider sanitization"
+  check_contains "$DOCS_DIR/agents-mode-reference.md" "Substantive task prompts are file-based by default" \
+    "agents-mode reference documents file-based external CLI prompts"
+  check_normalizer_strips_example_auto_providers \
+    "agents-mode normalizer strips Gemini/Qwen and worker claude-secret from custom auto profiles"
   check_file "$REPO_ROOT/shared/agents-mode.defaults.yaml" "shared/agents-mode.defaults.yaml"
+  check_shared_defaults_claude_secret_policy \
+    "shared agents-mode defaults keep claude-secret advisory/review-only"
   check_not_exists "$REPO_ROOT/src.codex/agents-mode.defaults.yaml" \
     "src.codex/agents-mode.defaults.yaml removed from the monorepo"
   check_contains "$REPO_ROOT/INSTALL.md" ".codex/agents/default.toml" \

@@ -169,6 +169,88 @@ check_h2_section_contains() {
   fi
 }
 
+check_normalizer_strips_example_auto_providers() {
+  local label="$1"
+  if [[ $DEV_REPO -ne 1 ]]; then
+    warn "$label (dev repo normalizer unavailable in installed layout)"
+    return
+  fi
+
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_cmd="python"
+  else
+    warn "$label (python unavailable)"
+    return
+  fi
+
+  local tmpdir target
+  tmpdir="$(mktemp -d)"
+  target="$tmpdir/.agents-mode.yaml"
+  cat > "$target" <<'EOF'
+externalProvider: auto
+externalPriorityProfile: custom-demo
+externalPriorityProfiles:
+  custom-demo:
+    advisory.repo-understanding: [claude, codex, claude-secret, gemini, qwen]
+    review.visual: [claude, codex, claude-secret, gemini]
+    worker.default-implementation: [claude-secret, claude, gemini, qwen, codex]
+    worker.secret-only: [claude-secret, gemini, qwen]
+externalOpinionCounts: {}
+EOF
+
+  if "$python_cmd" "$REPO_ROOT/scripts/normalize-agents-mode.py" \
+    --template "$REPO_ROOT/shared/agents-mode.defaults.yaml" \
+    --target "$target" \
+    --provider shared >/dev/null 2>&1 &&
+    grep -Fq "  custom-demo:" "$target" &&
+    grep -Fq "    advisory.repo-understanding: [claude, codex, claude-secret]" "$target" &&
+    grep -Fq "    review.visual: [claude, codex, claude-secret]" "$target" &&
+    grep -Fq "    worker.default-implementation: [claude, codex]" "$target" &&
+    ! grep -Fq "worker.secret-only" "$target" &&
+    ! grep -E '^[[:space:]]{4}.*: \[[^]]*(gemini|qwen)' "$target" >/dev/null &&
+    ! grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*claude-secret' "$target" >/dev/null; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+  rm -rf "$tmpdir"
+}
+
+check_shared_defaults_claude_secret_policy() {
+  local label="$1"
+  if [[ $DEV_REPO -ne 1 ]]; then
+    warn "$label (dev repo defaults unavailable in installed layout)"
+    return
+  fi
+
+  local defaults="$REPO_ROOT/shared/agents-mode.defaults.yaml"
+  if [[ ! -f "$defaults" ]]; then
+    fail "$label (shared defaults missing)"
+    return
+  fi
+
+  local lane
+  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.performance-architecture review.visual; do
+    if ! grep -Fq "    $lane: [claude, codex, claude-secret]" "$defaults"; then
+      fail "$label ($lane missing claude-secret as last advisory/review candidate)"
+      return
+    fi
+  done
+
+  if grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*(claude-secret|gemini|qwen)' "$defaults" >/dev/null; then
+    fail "$label (worker lane contains forbidden provider)"
+    return
+  fi
+  if grep -E '^[[:space:]]{4}(advisory|review|worker)\.[^:]+: \[[^]]*(gemini|qwen)' "$defaults" >/dev/null; then
+    fail "$label (Gemini/Qwen appear in shipped production profile)"
+    return
+  fi
+  pass "$label"
+}
+
 check_h2_section_absent() {
   local file="$1"
   local heading="$2"
@@ -293,8 +375,14 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Keep runtime-specific paths, provider dispatch details, execution-model differences, and repository concretization in the corresponding pack-local addendum." \
     "shared subagent-operating-model keeps runtime specifics in pack-local addenda"
   check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "pack-local addenda may extend it with provider-specific fields" \
+    "and any pack-local provider-specific fields" \
     "shared subagent-operating-model allows provider-specific addendum fields"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'A subagent `PASS`, report, or claimed test result is a claim, not proof' \
+    "shared subagent-operating-model requires subagent result verification"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Documentation terminology amendment" \
+    "shared subagent-operating-model documents terminology glossary discipline"
   check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode.yaml" \
     "shared subagent-operating-model stays free of Codex-specific agents-mode paths"
   check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".claude/.agents-mode.yaml" \
@@ -353,7 +441,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Claude runtime-notes section documents that externalClaudeProfile is not canonical on the Claude line"
   check_h2_section_contains "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "## Claude-specific runtime notes" \
-    "resolves by lane type through the active named priority profile" \
+    "shipped production \`auto\` uses \`codex | claude\` only" \
     "Claude runtime-notes section documents profile-based Claude external dispatch"
   check_h2_section_contains "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "## Claude-side repository concretization" \
@@ -395,10 +483,10 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CLAUDE_REF_DIR/subagent-operating-model.md" 120 \
     "Claude addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "ee0710b133f9c5e56a19a4b455e3d73dc0cf99b02fbedbe787fc1d903aa89dca" \
+    "4bb18cd3df2d2b8e5cc78ff786191da3bbf832555fa80c182ddfda7e2ee097e8" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
-    "380fb2bf3279607743f03b35f78391a0a9a2d0e9b4bc1605a3617e6b220f81fd" \
+    "f3b58ded2c928e4ad138e3ff966c75480b2f869c56c02bba8aafb4cbfe622cf6" \
     "Claude addendum matches the current canonical normalized fingerprint"
   echo ""
 fi
@@ -516,6 +604,8 @@ check_absent "$AGENTS_FILE" "Adapter host runtime" \
   "shared governance no longer allows adapter-host metadata for external execution"
 check_contains "$AGENTS_FILE" "must use direct external launch" \
   "shared governance requires direct external launch"
+check_contains "$AGENTS_FILE" "substantive task prompt must use file-based prompt delivery" \
+  "shared governance requires file-based external CLI prompts"
 check_contains "$PACK/agents/external-worker.md" "Read and normalize \`.claude/.agents-mode.yaml\` to the current canonical format before trusting its flags." \
   "external-worker normalizes agents-mode before routing"
 check_contains "$PACK/agents/external-reviewer.md" "Read and normalize \`.claude/.agents-mode.yaml\` to the current canonical format before trusting its flags." \
@@ -524,6 +614,12 @@ check_absent "$PACK/agents/contracts/external-dispatch.md" "Adapter host runtime
   "external-dispatch no longer records adapter host runtime"
 check_contains "$PACK/agents/contracts/external-dispatch.md" "must use direct external launch" \
   "external-dispatch requires direct external launch"
+check_contains "$PACK/agents/contracts/external-dispatch.md" "substantive task prompt must use file-based prompt delivery" \
+  "external-dispatch requires file-based external CLI prompts"
+check_contains "$AGENTS_FILE" "verify every subagent result before accepting it" \
+  "shared governance requires verification before trusting subagent results"
+check_contains "$AGENTS_FILE" "Documentation terminology discipline" \
+  "shared governance requires terminology and abbreviation explanations in documents"
 check_absent "$PACK/agents/consultant.md" "Adapter host runtime:" \
   "consultant no longer records adapter host runtime"
 check_contains "$PACK/agents/consultant.md" "must use direct external launch" \
@@ -540,8 +636,12 @@ check_contains "$PACK/agents/external-reviewer.md" "externalPriorityProfile" \
   "external-reviewer honors structured profile keys"
 check_contains "$PACK/agents/external-worker.md" "direct external launch contract" \
   "external-worker requires direct external launch"
+check_contains "$PACK/agents/external-worker.md" "file-based prompt delivery" \
+  "external-worker requires file-based external CLI prompts"
 check_contains "$PACK/agents/external-reviewer.md" "direct external launch contract" \
   "external-reviewer requires direct external launch"
+check_contains "$PACK/agents/external-reviewer.md" "file-based prompt delivery" \
+  "external-reviewer requires file-based external CLI prompts"
 check_contains "$PACK/agents/scripts/invoke-claude-api.sh" "SECRET.md" \
   "Claude API wrapper reads SECRET.md"
 check_contains "$PACK/agents/scripts/invoke-claude-api.sh" 'exec "$CLAUDE_CMD"' \
@@ -567,12 +667,69 @@ check_contains "$PACK/commands/agents-help.md" "/agents-external-brigade" \
 check_contains "$PACK/agents/lead.md" "/agents-external-brigade" \
   "lead guide mentions the external-brigade command"
 
+echo ""
+echo "=== Production auto provider canon ==="
+
+claude_phase_b_files=(
+  "$PACK/CLAUDE.md"
+  "$PACK/agents/contracts/external-dispatch.md"
+  "$PACK/agents/contracts/operating-model.md"
+  "$PACK/agents/contracts/subagent-contracts.md"
+  "$PACK/agents/consultant.md"
+  "$PACK/agents/external-worker.md"
+  "$PACK/agents/external-reviewer.md"
+  "$PACK/agents/graphics-engineer.md"
+  "$PACK/agents/visualization-engineer.md"
+  "$PACK/commands/agents-help.md"
+  "$PACK/commands/agents-init-project.md"
+  "$PACK/commands/agents-second-opinion.md"
+  "$PACK/commands/agents-external-brigade.md"
+)
+
+for file in "${claude_phase_b_files[@]}"; do
+  check_absent "$file" "gemini-crosscheck" \
+    "$file removes retired gemini-crosscheck profile"
+  check_absent "$file" "externalGeminiFallbackMode" \
+    "$file removes retired externalGeminiFallbackMode"
+  check_absent "$file" "externalGeminiWorkdirMode" \
+    "$file removes retired externalGeminiWorkdirMode"
+done
+
+check_contains "$PACK/CLAUDE.md" "auto | codex | claude | gemini | qwen" \
+  "Claude pack docs document the example-only Gemini/Qwen provider universe"
+check_contains "$PACK/CLAUDE.md" 'Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED`' \
+  "Claude entrypoint marks Gemini/Qwen as not recommended example routes"
+check_contains "$PACK/CLAUDE.md" 'never a provider entry inside `externalPriorityProfiles`' \
+  "Claude entrypoint forbids Gemini/Qwen profile entries"
+check_contains "$PACK/agents/consultant.md" 'Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Claude consultant marks Gemini/Qwen as not recommended example routes"
+check_contains "$PACK/agents/external-worker.md" 'manual `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Claude external-worker marks Gemini/Qwen as not recommended example routes"
+check_contains "$PACK/agents/external-reviewer.md" 'manual `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Claude external-reviewer marks Gemini/Qwen as not recommended example routes"
+check_contains "$PACK/agents/external-worker.md" 'instead of broadening shipped or repo-local `auto` profiles' \
+  "Claude external-worker forbids example-provider profile broadening"
+check_contains "$PACK/agents/external-reviewer.md" 'instead of broadening shipped or repo-local `auto` profiles' \
+  "Claude external-reviewer forbids example-provider profile broadening"
+check_contains "$PACK/agents/contracts/operating-model.md" 'Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Claude operating-model marks Gemini/Qwen as not recommended example routes"
+
 if [[ $DEV_REPO -eq 1 ]]; then
+  check_contains "$REPO_ROOT/shared/references/README.md" "current Gemini and Qwen example integrations" \
+    "shared reference index treats Gemini/Qwen as current example integrations"
   check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "## Canonical maintenance" \
     "agents-mode reference defines canonical maintenance"
   check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "Read-time normalization preserves the effective values of known keys" \
     "agents-mode reference documents read-time normalization semantics"
+  check_contains "$REPO_ROOT/docs/agents-mode-reference.md" 'removes example-only providers from every `externalPriorityProfiles` provider list' \
+    "agents-mode reference documents profile provider sanitization"
+  check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "Substantive task prompts are file-based by default" \
+    "agents-mode reference documents file-based external CLI prompts"
+  check_normalizer_strips_example_auto_providers \
+    "agents-mode normalizer strips Gemini/Qwen and worker claude-secret from custom auto profiles"
   check_file "$REPO_ROOT/shared/agents-mode.defaults.yaml" "shared/agents-mode.defaults.yaml"
+  check_shared_defaults_claude_secret_policy \
+    "shared agents-mode defaults keep claude-secret advisory/review-only"
   check_not_exists "$REPO_ROOT/src.claude/agents-mode.defaults.yaml" \
     "src.claude/agents-mode.defaults.yaml removed from the monorepo"
 fi
