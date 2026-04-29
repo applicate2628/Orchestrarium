@@ -31,14 +31,13 @@ What to install?
 Production installs:
   1) Codex pack
   2) Claude Code
-  3) Codex + Claude (production pair)
+  3) Codex + Claude (default production install)
 Example integrations:
   4) Gemini CLI (WEAK MODEL / NOT RECOMMENDED)
   5) Qwen (WEAK MODEL / NOT RECOMMENDED)
-  6) All available root installs
 ```
 
-For `All available root installs`, the router reuses the same forwarded arguments for every root-visible installer on the current platform. In the current checkout, that includes the Qwen example path because matching `scripts/install-qwen.*` entrypoints are present; if a future checkout lacks them, the router hides the dedicated Qwen slot.
+Pressing Enter selects the default production install, `Codex + Claude`. Gemini and Qwen stay explicit example-only choices and are never included in the default root install. In the current checkout, the router exposes the Qwen example slot because matching `scripts/install-qwen.*` entrypoints are present; if a future checkout lacks them, the router hides the dedicated Qwen slot.
 
 Maintainer note for this monorepo: `Orchestrarium/` is the installer/source tree, not automatically a repo-local installed Codex runtime. When you are editing this repository itself, a missing local `.agents/` tree can be perfectly valid if you are using the global install under `~/.codex/`. If you want this repository to behave as a repo-local install target, create that state intentionally through `scripts/install-codex.*` or the root router instead of hand-writing `.agents/` files.
 
@@ -161,28 +160,27 @@ Notes:
 
 ## Multi-pack setup
 
-To install any combination of packs into the same target project, either choose the matching option in the router or run the pack-specific installers with the same target arguments.
+To install any combination of packs into the same target project, either choose one explicit router option at a time or run the pack-specific installers with the same target arguments.
 
-The current root router covers the production Codex/Claude pair plus both example integrations, Gemini and Qwen. If a future checkout lacks root `scripts/install-qwen.*`, the router drops back to the Codex/Claude production path plus Gemini only.
+The current root router defaults to the production Codex/Claude pair and exposes Gemini and Qwen only as explicit example integration choices. It does not provide an "all available root installs" default because `WEAK MODEL / NOT RECOMMENDED` example providers must not be installed by default. If a future checkout lacks root `scripts/install-qwen.*`, the router drops the Qwen example choice and keeps the Codex/Claude default plus Gemini as the remaining explicit example.
 
-Expected project-level result:
+Expected default project-level result:
 
 ```text
 project/
   AGENTS.md
   .codex/
     agents/
-  GEMINI.md
   .agents/
+    .agents-mode.yaml
     skills/
   .claude/
+    .agents-mode.yaml
     AGENTS.md
     CLAUDE.md
-  .gemini/
-    .agents-mode.yaml
-    extensions/
-      orchestrarium-gemini/
 ```
+
+Explicit Gemini or Qwen example installs add their provider-native files and extension directories on top of that production baseline.
 
 Reference directories are development-only and are not installed:
 

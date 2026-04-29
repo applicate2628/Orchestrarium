@@ -7,7 +7,7 @@ A cross-provider agent orchestration monorepo that keeps the production Codex an
 - `src.gemini/` — the Gemini example-integration source tree around `GEMINI.md`; repository status: `WEAK MODEL / NOT RECOMMENDED`
 - `src.qwen/` — the Qwen native example-integration source tree around `QWEN.md`; repository status: `WEAK MODEL / NOT RECOMMENDED`
 
-The provider lines share one governance model and role vocabulary, while each keeps the runtime structure expected by its own provider. The root router install surface is production-first: Codex plus Claude are the shipped production path, while Gemini and Qwen are explicit example integrations. In the current checkout, matching root `scripts/install-qwen.*` entrypoints exist, so the router exposes both example slots directly.
+The provider lines share one governance model and role vocabulary, while each keeps the runtime structure expected by its own provider. The root router install surface is production-first: Codex plus Claude are the default shipped production install, while Gemini and Qwen are explicit example integrations. In the current checkout, matching root `scripts/install-qwen.*` entrypoints exist, so the router exposes both example slots directly without including them in the default.
 
 Warning: Orchestrarium is optimized for maximum execution effectiveness and low orchestration drag rather than for minimum token spend. On large tasks, multi-opinion review lanes, or aggressive external fan-out, usage can rise quickly and consume a substantial token budget in a short time.
 
@@ -72,14 +72,13 @@ What to install?
 Production installs:
   1) Codex pack
   2) Claude Code
-  3) Codex + Claude (production pair)
+  3) Codex + Claude (default production install)
 Example integrations:
   4) Gemini CLI (WEAK MODEL / NOT RECOMMENDED)
   5) Qwen (WEAK MODEL / NOT RECOMMENDED)
-  6) All available root installs
 ```
 
-Then it forwards the same arguments to the provider-specific installer in `scripts/`. Use `scripts/install-codex.*`, `scripts/install-claude.*`, `scripts/install-gemini.*`, or `scripts/install-qwen.*` directly when you want deterministic automation on one line. If a future checkout lacks the root `scripts/install-qwen.*` entrypoints, the router hides the dedicated Qwen slot and you should fall back to the Qwen source tree and provider-local docs directly.
+Pressing Enter selects the default production install, `Codex + Claude`. The router then forwards the same arguments to the selected provider-specific installer in `scripts/`. Use `scripts/install-codex.*`, `scripts/install-claude.*`, `scripts/install-gemini.*`, or `scripts/install-qwen.*` directly when you want deterministic automation on one line. If a future checkout lacks the root `scripts/install-qwen.*` entrypoints, the router hides the dedicated Qwen slot and you should fall back to the Qwen source tree and provider-local docs directly.
 
 Important: operator preferences now live only in pack-local `agents-mode` files.
 

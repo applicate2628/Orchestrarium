@@ -14,33 +14,25 @@ run_installer() {
   bash "$SCRIPT_DIR/scripts/$script_name" "${FORWARDED_ARGS[@]}"
 }
 
-run_all_available() {
-  run_installer install-codex.sh
-  run_installer install-claude.sh
-  run_installer install-gemini.sh
-  if [[ "$HAS_QWEN" == true ]]; then
-    run_installer install-qwen.sh
-  fi
-}
-
 echo "What to install?"
 echo "Production installs:"
 echo "  1) Codex pack"
 echo "  2) Claude Code"
-echo "  3) Codex + Claude (production pair)"
+echo "  3) Codex + Claude (default production install)"
 echo "Example integrations:"
 echo "  4) Gemini CLI (WEAK MODEL / NOT RECOMMENDED)"
 if [[ "$HAS_QWEN" == true ]]; then
   echo "  5) Qwen (WEAK MODEL / NOT RECOMMENDED)"
-  echo "  6) All available root installs"
-  prompt="Select 1, 2, 3, 4, 5, or 6: "
+  prompt="Select 1, 2, 3, 4, or 5 [default: 3]: "
 else
-  echo "  5) All available root installs"
   echo "     Qwen appears here once scripts/install-qwen.sh is available."
-  prompt="Select 1, 2, 3, 4, or 5: "
+  prompt="Select 1, 2, 3, or 4 [default: 3]: "
 fi
 read -r -p "$prompt" choice
 choice="${choice//$'\r'/}"
+if [[ -z "$choice" ]]; then
+  choice=3
+fi
 
 case "${choice:-}" in
   1)
@@ -59,13 +51,6 @@ case "${choice:-}" in
   5)
     if [[ "$HAS_QWEN" == true ]]; then
       run_installer install-qwen.sh
-    else
-      run_all_available
-    fi
-    ;;
-  6)
-    if [[ "$HAS_QWEN" == true ]]; then
-      run_all_available
     else
       echo "Invalid selection: ${choice:-<empty>}" >&2
       exit 1

@@ -939,6 +939,54 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex platform rules document the example-only Gemini/Qwen provider universe"
   check_contains "$REPO_ROOT/shared/references/README.md" "current Gemini and Qwen example integrations" \
     "shared reference index treats Gemini/Qwen as current example integrations"
+  check_contains "$REPO_ROOT/install.sh" "default production install" \
+    "root bash installer defaults to the Codex/Claude production pair"
+  check_contains "$REPO_ROOT/install.ps1" "default production install" \
+    "root PowerShell installer defaults to the Codex/Claude production pair"
+  check_absent "$REPO_ROOT/install.sh" "All available root installs" \
+    "root bash installer does not offer all-provider default installs"
+  check_absent "$REPO_ROOT/install.ps1" "All available root installs" \
+    "root PowerShell installer does not offer all-provider default installs"
+  check_contains "$REPO_ROOT/install.sh" "if [[ -z \"\$choice\" ]]; then" \
+    "root bash installer maps empty selection to the default"
+  check_contains "$REPO_ROOT/install.sh" "choice=3" \
+    "root bash installer maps default selection to option 3"
+  check_contains "$REPO_ROOT/install.ps1" '$normalizedChoice = "3"' \
+    "root PowerShell installer maps empty selection to option 3"
+  check_contains "$REPO_ROOT/install.sh" "run_installer install-codex.sh" \
+    "root bash installer option 3 includes Codex"
+  check_contains "$REPO_ROOT/install.sh" "run_installer install-claude.sh" \
+    "root bash installer option 3 includes Claude"
+  check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' \
+    "root PowerShell installer option 3 includes Codex"
+  check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' \
+    "root PowerShell installer option 3 includes Claude"
+  bash_default_block="$(awk '/^  3\)/,/^  4\)/ { print }' "$REPO_ROOT/install.sh")"
+  if grep -Fq "run_installer install-codex.sh" <<<"$bash_default_block" &&
+     grep -Fq "run_installer install-claude.sh" <<<"$bash_default_block" &&
+     ! grep -Eq 'install-(gemini|qwen)\.sh' <<<"$bash_default_block"; then
+    pass "root bash installer default dispatch is Codex plus Claude only"
+  else
+    fail "root bash installer default dispatch must be Codex plus Claude only"
+  fi
+  ps_default_block="$(awk '/^    "3" {/,/^    "4" {/ { print }' "$REPO_ROOT/install.ps1")"
+  if grep -Fq 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' <<<"$ps_default_block" &&
+     grep -Fq 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' <<<"$ps_default_block" &&
+     ! grep -Eq 'install-(gemini|qwen)\.ps1' <<<"$ps_default_block"; then
+    pass "root PowerShell installer default dispatch is Codex plus Claude only"
+  else
+    fail "root PowerShell installer default dispatch must be Codex plus Claude only"
+  fi
+  check_absent "$REPO_ROOT/install.sh" "run_all_available" \
+    "root bash installer has no aggregate all-provider helper"
+  check_absent "$REPO_ROOT/install.ps1" "Invoke-AllAvailableInstallers" \
+    "root PowerShell installer has no aggregate all-provider helper"
+  check_contains "$REPO_ROOT/README.md" "Pressing Enter selects the default production install" \
+    "README documents the Codex/Claude default root install"
+  check_contains "$REPO_ROOT/INSTALL.md" "Pressing Enter selects the default production install" \
+    "INSTALL.md documents the Codex/Claude default root install"
+  check_contains "$REPO_ROOT/INSTALL.md" ".agents-mode.yaml" \
+    "INSTALL.md default project result includes provider overlay files"
 fi
 
 check_contains "$SKILLS_DIR/consultant/SKILL.md" 'Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED` example-only routes' \

@@ -26,30 +26,19 @@ function Invoke-ChildInstaller {
     }
 }
 
-function Invoke-AllAvailableInstallers {
-    Invoke-ChildInstaller -ScriptName "install-codex.ps1"
-    Invoke-ChildInstaller -ScriptName "install-claude.ps1"
-    Invoke-ChildInstaller -ScriptName "install-gemini.ps1"
-    if ($hasQwen) {
-        Invoke-ChildInstaller -ScriptName "install-qwen.ps1"
-    }
-}
-
 Write-Host "What to install?"
 Write-Host "Production installs:"
 Write-Host "  1) Codex pack"
 Write-Host "  2) Claude Code"
-Write-Host "  3) Codex + Claude (production pair)"
+Write-Host "  3) Codex + Claude (default production install)"
 Write-Host "Example integrations:"
 Write-Host "  4) Gemini CLI (WEAK MODEL / NOT RECOMMENDED)"
 if ($hasQwen) {
     Write-Host "  5) Qwen (WEAK MODEL / NOT RECOMMENDED)"
-    Write-Host "  6) All available root installs"
-    Write-Host "Select 1, 2, 3, 4, 5, or 6: " -NoNewline
+    Write-Host "Select 1, 2, 3, 4, or 5 [default: 3]: " -NoNewline
 } else {
-    Write-Host "  5) All available root installs"
     Write-Host "     Qwen appears here once scripts/install-qwen.ps1 is available."
-    Write-Host "Select 1, 2, 3, 4, or 5: " -NoNewline
+    Write-Host "Select 1, 2, 3, or 4 [default: 3]: " -NoNewline
 }
 $choice = [Console]::In.ReadLine()
 
@@ -58,7 +47,12 @@ if ($null -eq $choice) {
     exit 1
 }
 
-switch ($choice.Trim()) {
+$normalizedChoice = $choice.Trim()
+if ($normalizedChoice -eq "") {
+    $normalizedChoice = "3"
+}
+
+switch ($normalizedChoice) {
     "1" { Invoke-ChildInstaller -ScriptName "install-codex.ps1" }
     "2" { Invoke-ChildInstaller -ScriptName "install-claude.ps1" }
     "3" {
@@ -71,13 +65,6 @@ switch ($choice.Trim()) {
     "5" {
         if ($hasQwen) {
             Invoke-ChildInstaller -ScriptName "install-qwen.ps1"
-        } else {
-            Invoke-AllAvailableInstallers
-        }
-    }
-    "6" {
-        if ($hasQwen) {
-            Invoke-AllAvailableInstallers
         } else {
             Write-Error "Invalid selection: $choice"
             exit 1
