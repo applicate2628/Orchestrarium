@@ -10,6 +10,28 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-04-29
+
+### Changed
+
+- Added an explicit shared verification rule for subagent output: a subagent `PASS`, summary, or claimed test result is now treated as a claim that the orchestrating owner or next accountable gate must verify against files, diffs, artifacts, logs, command output, or other repo-standard evidence before accepting, forwarding, or using it for completion. This matters because parallel and external helper work should reduce latency without turning agent reports into unverified truth; the Codex, Claude, Gemini, and Qwen validators now check that the governance surface keeps this rule.
+- Added a shared documentation terminology rule for new and materially revised human-facing documents. Documents that use domain terms, role names, provider/model names, workflow labels, acronyms, or potentially unclear English terms now need a final `Terms and Abbreviations` section, or a localized equivalent, that expands and explains those terms. This matters because mixed English/Russian governance and skill-pack docs should remain readable to operators without forcing them to infer abbreviations from context; existing documents are not mechanically rewritten unless a glossary cleanup pass is explicitly in scope.
+
+### Fixed
+
+- Fixed the provider installers so repeated installs skip unchanged runtime payload directories or files instead of deleting and copying every pack-owned item on each refresh. Codex now skips unchanged skill directories, Claude now skips unchanged agent subdirectories and command or agent files, Gemini/Qwen now skip unchanged extension payload items, and the example extension READMEs plus installed validators now carry the same not-recommended provider label without confusing source-root README requirements with installed extension README requirements. This matters for global installs whose runtime payload target is a junction into a OneDrive-backed directory: active provider sessions can scan metadata while an install is running, and unnecessarily rewriting unchanged files can surface transient Windows `os error 32` file-lock reads on unrelated runtime files. Changed payload items are still replaced, intentional legacy cleanup still runs, and user-added items are still preserved.
+- Fixed Codex skill frontmatter descriptions that used unquoted plain scalars containing `:`, which made YAML parsers reject affected `SKILL.md` files such as `visualization-engineer`. The Codex validator now also checks skill frontmatter as YAML, so future metadata-budget edits cannot pass while still being invalid startup metadata. This matters because Codex and editor tooling read the frontmatter before the skill body, and a single invalid description can break skill discovery even when the rest of the pack validates structurally.
+
+## 2026-04-28
+
+### Changed
+
+- Reduced Codex skill frontmatter descriptions to compact startup metadata and added a validator budget gate for the Codex skill catalog. This matters because Codex loads all installed skill descriptions before selecting a skill body, so verbose role metadata could trigger startup truncation warnings and hide useful routing cues. Detailed role contracts remain in each `SKILL.md` body, while `validate-skill-pack` now fails if descriptions grow past the per-skill or aggregate metadata budget.
+- Hardened installed Codex validation for real global `CODEX_HOME` layouts. The validator now resolves symlinked `skills/` and `AGENTS.md` without losing the actual `~/.codex/agents/` runtime root, and it keeps preserved user-added skills as non-blocking orphan warnings instead of treating their metadata as Orchestrarium pack-budget failures. This matters because long-lived global installs can keep custom skills and Windows/WSL link layouts while still receiving a strict pack-owned validation gate.
+- Added an explicit file-based prompt delivery rule for provider-backed CLI runs. External consultant, worker, and reviewer launches that carry substantive task prompts now write those prompts to temporary files and feed them through stdin or a provider-supported file-input mechanism, keeping argv limited to flags, model/profile options, and file paths. This matters because long inline prompts are fragile across Windows shells, quoting layers, logs, and process listings; tiny smoke checks and documented provider limitations remain allowed deviations when recorded.
+- Reclassified the secret-backed Claude wrapper from a fallback transport into the separate `claude-secret` advisory/review profile candidate. The shared defaults now place `claude-secret` only after primary `claude` and `codex` on advisory and review lanes, worker lanes strip it, and the normalizer plus pack validators enforce that Gemini/Qwen stay out of production profiles while `claude-secret` never becomes a scalar `externalProvider`. This matters because weaker secret-backed Claude can still provide an additional advisory or review opinion when explicitly enabled, without silently replacing primary Claude or leaking into implementation, editing, installer, publication, or other mutating work.
+- Reframed the root integration surfaces around the current provider posture instead of treating every provider line as equally production-ready. `README.md`, `INSTALL.md`, the shared runtime-layout note, the external-worker design spec, and the root router installers now present Codex plus Claude as the shipped production path, keep Gemini and Qwen labeled as explicit `WEAK MODEL / NOT RECOMMENDED` example integrations, remove the retired production-schema references to `gemini-crosscheck` and Gemini-specific fallback/workdir knobs, and make the root router expose Qwen only when matching `scripts/install-qwen.*` entrypoints actually exist. The `agents-mode` normalizer now also strips Gemini and Qwen out of any existing custom `externalPriorityProfiles` provider list during read or reinstall normalization, and the pack validators cover that migration plus the Qwen not-recommended label. This matters because maintainers now see the real production-vs-example boundary at the root entrypoints, stale local auto profiles cannot silently preserve Gemini/Qwen production routing, and the install menu no longer promises a Qwen root path before the repo has the necessary launcher scripts.
+
 ## 2026-04-17
 
 ### Changed
@@ -119,3 +141,31 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 - Fixed the publication-safety gate to inspect the actual staged file set instead of the whole index, which removes self-inflicted false positives from the checker scripts' own regex catalogs. The Claude PowerShell wrapper now also resolves its sibling bash checker correctly from `src.claude/agents/scripts/`, so the same publication gate works again from the repository source tree on Windows instead of pointing at a non-existent installed `.claude/...` path.
 - Claude-target external dispatch now treats the secret-backed wrapper path as the single named transport toggle under `externalClaudeApiMode: disabled | auto | force`. `auto` keeps the ordinary Claude CLI path first and allows one wrapper-backed fallback after CLI/auth/quota-style failures; `force` starts on the wrapper immediately. The contract still forbids silent profile downgrades or provider switches, so if the allowed Claude path still fails the provider is reported unavailable in the normal way.
 - Added a dedicated provider runtime-layout reference at `docs/provider-runtime-layouts.md` that splits `global` and `local` installed surfaces for Codex, Claude Code, and Gemini. This closes a recurrent source of confusion between monorepo source trees such as `src.codex/` and the paths the actual provider runtimes read after installation, and it also records one important Gemini boundary early: Gemini CLI is native around `GEMINI.md`, `.gemini/commands/`, and extensions rather than the `skills/` or `agents/` trees used by the current Codex and Claude packs.
+
+## Terms and Abbreviations
+
+- `AGENTS.md`: the Codex-readable governance and instruction file installed into a repository or provider home.
+- `API`: Application Programming Interface, a programmatic contract exposed by a tool, runtime, or service.
+- `Bash`: a Unix-style command shell used by the `.sh` installers.
+- `CLI`: Command-Line Interface, a terminal command surface such as `codex`, `claude`, or `gemini`.
+- `Codex`: the OpenAI Codex runtime and provider pack maintained by this repository.
+- `Claude Code`: Anthropic's Claude Code runtime and the matching provider pack maintained by this repository.
+- `Gemini CLI`: Google's Gemini command-line runtime and the example provider pack maintained by this repository.
+- `HTTP`: Hypertext Transfer Protocol, the web protocol whose status codes include quota and rate-limit signals such as `429`.
+- `INSTALL.md`: this repository's installation guide.
+- `junction`: a Windows directory link that redirects one path to another path on disk.
+- `MCP`: Model Context Protocol, a protocol used to expose tools and resources to agent runtimes.
+- `MSYS`: a Windows POSIX-style shell/runtime family commonly used by Git Bash and similar tooling.
+- `PATH`: the operating-system environment variable used to find executable commands.
+- `PASS`: a gate or validator result meaning the checked artifact may proceed.
+- `QA`: Quality Assurance, verification work focused on tests, regressions, and acceptance criteria.
+- `Qwen Code`: the Qwen command-line runtime and the example provider pack maintained by this repository.
+- `README.md`: the primary human-facing overview document for a repository or pack.
+- `SECRET.md`: a local-only file used for secret-backed Claude transport configuration; it must not be published.
+- `SKILL.md`: the entrypoint file for a Codex skill definition.
+- `OneDrive-backed directory`: a directory stored under Microsoft OneDrive synchronization, where sync and hydration behavior can affect file access timing.
+- `UI`: User Interface, the visible or interactive surface presented to a user.
+- `WEAK MODEL / NOT RECOMMENDED`: the repository's classification for example-only providers that must stay out of production `auto` routing.
+- `WSL`: Windows Subsystem for Linux, a Linux compatibility environment on Windows.
+- `YAML`: YAML Ain't Markup Language, the structured data format used by files such as `.agents-mode.yaml`.
+- `YYYY-MM-DD`: date format with four-digit year, two-digit month, and two-digit day.
