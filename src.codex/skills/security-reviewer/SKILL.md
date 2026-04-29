@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: Perform the security gate for an approved phase and return concrete findings or explicit approval. Use when Codex needs independent review of auth or authz flows, secret handling, dependency risk, data exposure, dangerous configuration, or vulnerability triage before merge or release.
+description: Gate approved work for auth, secrets, dependency risk, data exposure, dangerous config, or vulnerabilities.
 ---
 
 # Security Reviewer

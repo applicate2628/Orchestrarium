@@ -1,6 +1,6 @@
 ---
 name: architect
-description: Produce a design package from accepted research without writing implementation code. Use when Codex needs architecture decisions, ADR-style tradeoffs, diagrams, API contracts, data model changes, security-by-design constraints, observability requirements, or test strategy derived from an evidence-backed research artifact.
+description: "Design from accepted research: architecture decisions, tradeoffs, APIs, data models, security, observability, and tests."
 ---
 
 # Architect

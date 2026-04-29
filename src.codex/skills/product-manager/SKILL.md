@@ -1,6 +1,6 @@
 ---
 name: product-manager
-description: Own roadmap decisions and admission into discovery or delivery. Use when Codex needs initiative prioritization, roadmap sequencing, dependency-aware scope framing, milestone intent, or an approved item brief before research and design begin.
+description: "Own roadmap and admission decisions: priority, sequencing, milestone intent, and discovery or delivery entry."
 ---
 
 # Product Manager

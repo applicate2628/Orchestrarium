@@ -1,6 +1,6 @@
 ---
 name: qa-engineer
-description: Verify an approved phase against its acceptance criteria and test strategy. Use when Codex needs unit, integration, or end-to-end test coverage, regression checks, edge-case analysis, basic performance checks, and a clear go or no-go QA verdict before the phase advances.
+description: Verify approved phases with targeted tests, regression checks, edge cases, and a clear QA verdict.
 ---
 
 # QA Engineer

@@ -1,6 +1,6 @@
 ---
 name: security-engineer
-description: Define secure design constraints and threat-aware implementation requirements for an approved solution. Use when Codex needs threat modeling, trust-boundary analysis, required security controls, secure defaults, or must-fix security constraints before planning or implementation.
+description: "Define secure design constraints: trust boundaries, threats, required controls, safe defaults, and must-fix risks."
 ---
 
 # Security Engineer
