@@ -138,6 +138,12 @@ scoreably fails as a no-op with no quota/timeout signature. `X2` also fails as n
 semantic/scope gates with wrapper `0`. N93 is diagnostic-only until a named `/40` slot-replacement
 decision exists.
 
+W73 prepared `N94-staged-multipackage-protocol-reentry` as the N93 paired hardening task. It keeps
+the ProtocolMesh runtime/API oracle and adds phaseBindings, exact phaseOrder, compatibility-case
+ownership, final fresh-session replay, visible review-return cues, and closeout readiness. Local
+oracle gates and a synthesized valid probe pass, but all model rows are `NOT-RUN`; no `/40` score
+changes.
+
 | ID | Label |
 |---|---|
 | `X1` | `gpt-5.5` active; older rows may cite `gpt-5.4` as model-of-run |
@@ -176,6 +182,7 @@ decision exists.
 | `25` | W70 real-repo staged security incident | `X1 / gpt-5.5`: `N91 PASS` | `X3 / opus 4.7max`: `N91 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; real-repo staged security repair narrows, not replaces, N78 |
 | `26` | W71 staged interface/downstream reentry | `X1 / gpt-5.5`: `N92 PASS` | `X3 / opus 4.7max`: `N92 PASS` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | `binary tie remains`; diagnostic-only |
 | `27` | W72 multipackage protocol/SDK reentry | `X1 / gpt-5.5`: `N93 FAIL`; scoreable no-op | `X3 / opus 4.7max`: `N93 PASS` | `X2 / gpt-spark`: `FAIL`; no-op | `Claude China` final-only `NOT-RUN` | `X6` scoreable `FAIL`; `X5` parked | `X3 PASS over X1 FAIL`; diagnostic-only, not `/40` |
+| `28` | W73 staged multipackage protocol reentry prep | `X1 / gpt-5.5`: `N94 NOT-RUN` | `X3 / opus 4.7max`: `N94 NOT-RUN` | not launched | `Claude China` final-only `NOT-RUN` | Gemini rows parked | prep-only; local gates and synthesized valid probe pass; no `/40` change |
 | `18` | W26 operator-budget compact hotfix | `X1 / gpt-5.5`: `N46 FAIL 70` | `X3 / opus 4.7max`: `N46 PASS 100` |  |  |  | first honest compact single-session `X1 FAIL / X3 PASS`; X1 preserves hidden repair semantics but fails the visible operator-budget gate (`210369 > 40000`) |
 | `19` | W27 UI compact operator-budget hotfix | `X1 / gpt-5.5`: `N47 FAIL 70` | `X3 / opus 4.7max`: `N47 PASS 94` |  |  |  | second honest compact single-session `X1 FAIL / X3 PASS`; both pass hidden UI dirty-state semantics and exact scope, while X1 fails the visible operator-budget gate (`169913 > 40000`) |
 | `20` | W28 visual raster compact operator-budget hotfix | `X1 / gpt-5.5`: `N48 FAIL 70` | `X3 / opus 4.7max`: `N48 PASS 100` |  |  |  | third honest compact single-session `X1 FAIL / X3 PASS`; both pass exact raster semantics and renderer-only scope, while X1 fails the visible operator-budget gate (`77825 > 40000`) |

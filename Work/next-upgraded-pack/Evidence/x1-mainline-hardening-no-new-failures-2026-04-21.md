@@ -4268,3 +4268,38 @@ changes and failed against the starter contract. X3 passed the exact multipackag
 compactly. X2 failed as a no-op and X6 failed semantic/scope gates with wrapper exit `0`. N93 remains
 diagnostic-only and must not change the canonical `full-v2-hard /40` surface unless a named
 slot-replacement decision is admitted later.
+
+## 2026-04-29 Follow-Up: W73 Staged Multipackage Protocol Reentry Prep
+
+`N94-staged-multipackage-protocol-reentry` is prepared as the paired hardening task for N93. It keeps
+the same ProtocolMesh core/SDK/plugin/CLI migration surface, v2 wire dataclasses, legacy-envelope
+migration, plugin delivery, structured CLI return, clean-room public imports, and exact nineteen-path
+scope. The added separator axis is staged accountability: phaseBindings, exact phaseOrder,
+compatibility-case ownership, final fresh-session replay, review visible-return cues, and closeout
+readiness are now first-class JSON verifier inputs.
+
+### Preparation validation
+
+| Check | Result |
+|---|---|
+| `N94` oracle JSON parse | `PASS` |
+| `N94` bundle-shape verifier | `PASS` |
+| `N94` starter verifier | expected `FAIL`; starter exposes legacy APIs, incomplete public exports, weak runtime contracts, and empty staged ledgers |
+| synthesized valid probe in `.scratch/verifier-probes/2026-04-29-n94-staged-valid/N94` | verifier `PASS`; `100.0 / 100` |
+
+### Runs
+
+| Scenario | Row / model | Classification |
+|---|---|---|
+| `N94` | `X1 / gpt-5.5` | `NOT-RUN`; prep-only, no launch |
+| `N94` | `X3 / opus 4.7max` | `NOT-RUN`; prep-only, no launch |
+| `N94` | `X2 / gpt-5.3-codex-spark` | `NOT-RUN` |
+| `N94` | `X4 / Claude China` | `NOT-RUN` |
+| `N94` | `X5 / gemini3.1pro` | `NOT-RUN` |
+| `N94` | `X6 / gemini3.1flash-lite-preview` | `NOT-RUN` |
+
+### Verdict
+
+No model verdict yet. N94 is admission-ready as a diagnostic candidate and does not change the
+canonical `full-v2-hard /40` surface. Resume point: launch N94 only after an explicit run decision;
+keep `X1` parked until the user authorizes model runs.

@@ -396,8 +396,9 @@ Source design/plan: `rf12-primary-resolution-plan-2026-04-25.md`.
 | `W70` | `DONE` | `N91-realrepo-staged-security-incident-reentry` | Does the N78 staged-security split repeat in a real-repo incident repair with hidden exploit runtime and exact scope? | Ran `X1` and `X3`; no `X4`; Gemini rows parked. | `X1 PASS`; `X3 PASS`; `binary tie remains`; do not generalize N78 to all staged security repair. |
 | `W71` | `DONE` | `N92-staged-interface-downstream-reentry-gauntlet` | Does staged interface/downstream reentry split when public facade, legacy adapter, and clean-room downstream SDK are runtime-critical? | Ran `X3`, then retried `X1` after quota reset. | `X1 PASS`; `X3 PASS`; `binary tie remains`; do not promote without a separate replacement decision. |
 | `W72` | `DONE` | `N93-multipackage-protocol-sdk-reentry` | Does a multi-package protocol/SDK/CLI/plugin migration expose interface-refactor breakage beyond N92's single-package staged migration? | Ran `X1` and `X3`, then `X2`/`X6` calibration; no `X4`; `X5` parked. | `X3 PASS`; `X1 FAIL/no-op`; `X2 FAIL/no-op`; `X6 FAIL semantic/scope`; admitted diagnostic X3-over-X1 separator, not `/40` replacement. |
+| `W73` | `PREPARED-NOT-RUN` | `N94-staged-multipackage-protocol-reentry` | Does the N93 X3 multipackage edge invert when the same ProtocolMesh migration requires phase ownership, fresh-session replay, and closeout proof? | Prepared only by user instruction; no model rows launched. | Local oracle gates pass; synthesized valid probe passes; awaits explicit model-run decision. |
 
-## W72 Candidate Axes
+## W73 Candidate Axes
 
 | Candidate | Rationale | First action |
 |---|---|---|
@@ -406,6 +407,7 @@ Source design/plan: `rf12-primary-resolution-plan-2026-04-25.md`.
 | real repo staged security incident | W70/N91 completed and tied X1/X3 | do not keep tightening this axis unless a new scoreable contract is admitted |
 | real-repo staged interface/downstream reentry | N35/N36 split staged interface/API for X1, N57 splits compact API for X3, N86 adds X1 exact migration-surface evidence without output budget, and N83 ties ordinary hidden-consumer refactor | next best separator candidate; build a staged code/consumer/reentry task rather than review-only artifacts |
 | multipackage protocol/SDK/CLI migration | N93 is now materialized, validated, and run. It tests root exports across four packages, v2 wire format, legacy migration, plugin idempotency, structured CLI return, and exact 19-path staged ledgers | completed as diagnostic: `X3 PASS` over `X1 FAIL/no-op`; use only after separate slot-replacement review if promoting into `/40` |
+| staged multipackage protocol/SDK/CLI reentry | N94 is materialized as the N93 pair. It keeps the ProtocolMesh runtime/API oracle but requires phaseBindings, exact phaseOrder, compatibility case ownership, finalFreshSession replay, and closeout readiness | next runnable action: launch `X3` and the non-X1 rows only if desired; keep `X1` parked until explicit user approval |
 
 ## Resume Point
 
@@ -415,11 +417,11 @@ Resume from this roadmap plus:
 - `Work/next-upgraded-pack/Checkpoints/status-2026-04-16.md`
 - latest scorer JSON under `Work/next-upgraded-pack/Evidence/`
 
-If interrupted now, resume after W72/N93 closeout. W71/N92 is closed as PASS/PASS. W72/N93 is
+If interrupted now, resume from W73/N94 prep. W71/N92 is closed as PASS/PASS. W72/N93 is
 closed as `X3 PASS` over `X1` scoreable no-op `FAIL`, with `X2` no-op `FAIL` and `X6`
-semantic/scope `FAIL` as calibration context. Open action: choose W73 or run a named
-slot-replacement review; W64 promotion-candidate sweep stays parked until a named replacement
-decision is admitted.
+semantic/scope `FAIL` as calibration context. W73/N94 is materialized and locally validated, but
+all model rows are `NOT-RUN`; do not launch `X1` until the user explicitly approves model runs.
+W64 promotion-candidate sweep stays parked until a named replacement decision is admitted.
 Single-session systems/toolchain, UI implementation, owner recovery, compact long-horizon
 integration, cross-role incident repair, and ownership-budget repair still read `X3 primary`
 versus `X1`. Staged delivery (`N30`, `N35`, `N36`), staged review (`N37`), staged owner recovery

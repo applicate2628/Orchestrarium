@@ -364,17 +364,19 @@ earlier X1-over-X3 split. Treat N78 as evidence for that narrower synthetic stag
 not as a universal rule for all staged security repair. Future separation should move to a different
 implementation axis, preferably interface/downstream migration with staged re-entry.
 
-## Staged Interface And Protocol Reentry W71-W72 Diagnostics
+## Staged Interface And Protocol Reentry W71-W73 Diagnostics
 
 `N92-staged-interface-downstream-reentry-gauntlet` and `N93-multipackage-protocol-sdk-reentry` test
 interface-breakage axes outside the `full-v2-hard` `/40` denominator. N92 is closed as a PASS/PASS
 top-pair tie. N93 is closed as a diagnostic X3-over-X1 separator after X1 no-ops and X3 completes
-the multipackage protocol/SDK/CLI migration contract.
+the multipackage protocol/SDK/CLI migration contract. N94 is prepared as the staged counterpart to
+N93 but has no model evidence yet.
 
 | Scenario | `X1 / gpt-5.5` | `X3 / opus 4.7max` | Read |
 |---|---|---|---|
 | `N92` | `PASS`; wrapper `0`; exact fifteen-path staged interface/downstream scope passes after retry | `PASS`; wrapper `0`; exact fifteen-path staged interface/downstream scope passes | `binary tie remains`; diagnostic-only |
 | `N93` | `FAIL`; scoreable no-op, no quota/timeout signature, no candidate changes | `PASS`; wrapper `0`; exact nineteen-path multipackage protocol/SDK/CLI migration scope passes | `X3 PASS over X1 scoreable FAIL`; diagnostic-only |
+| `N94` | `NOT-RUN`; prep-only, no launch | `NOT-RUN`; prep-only | local oracle gates and synthesized valid probe pass; diagnostic candidate only |
 
 W72 interpretation: N93 separates the top pair on a multipackage ProtocolMesh core/SDK/plugin/CLI
 migration with clean-room public imports, v2 dataclass wire contracts, legacy-envelope migration,
@@ -382,6 +384,10 @@ plugin idempotency, structured CLI return, protected input hashes, and exact nin
 `X2` also fails as no-op; `X6` fails semantic/scope gates with wrapper `0` and Gemini post-run
 `AttachConsole` noise. N93 must remain diagnostic-only until a named slot-replacement decision
 exists.
+
+W73 interpretation: N94 adds phase ownership, fresh-session replay, review return cues, and closeout
+readiness to the N93 ProtocolMesh migration contract. It is admission-ready locally, but no rows have
+run and the canonical `/40` denominator is unchanged.
 
 ## Security Review Reproduction W62 Diagnostic
 
@@ -671,7 +677,7 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 |---|---|
 | `v2-core12-tie-hardened-results-2026-04-20.md` | admitted hardened core12 slots for `S03`, `S04`, `S05`, `S06`, `S07`, `S08`, `S09`, `S25`, `S27`, `N01`, `N02`, `N03`, `N04`, `N05`, `N06` |
 | `role-fit-scorecard-v1-2026-04-22.md` | lane-fit interpretation and current hardening wave summaries |
-| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N93` |
+| `short-results-current-2026-04-18.md` | compact operator-facing live status through `N94` prep |
 | `../Evidence/x1-mainline-hardening-no-new-failures-2026-04-21.md` | admitted mainline hardening record |
 | `../Evidence/n17-owner-routing-rubric-2026-04-22.json` through `../Evidence/n60-ui-reentry-rubric-2026-04-24.json` | machine-readable rubric/scorer evidence for promoted diagnostic slots |
 | `../Evidence/n61-visual-pixel-localization-rubric-2026-04-25.json` | machine-readable `E51` visual pixel-localization diagnostic evidence; post-fix score favors `X1`, not promoted into `/40` |
@@ -706,5 +712,6 @@ Legend: `P` = scoreable pass, `F` = scoreable fail, `NR` = not-run/runtime-route
 | `../Evidence/n91-staged-security-incident-rubric-2026-04-29.json` | machine-readable `W70` real-repo staged security incident evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/n92-staged-interface-reentry-rubric-2026-04-29.json` | machine-readable `W71` staged interface/downstream evidence; X1 and X3 both pass, so not promoted into `/40` |
 | `../Evidence/n93-multipackage-protocol-rubric-2026-04-29.json` | machine-readable `W72` multipackage protocol/SDK/CLI evidence; X3 passes while X1 and calibration rows fail scoreably, not promoted into `/40` |
+| `../Evidence/n94-staged-multipackage-protocol-prep-2026-04-29.json` | machine-readable `W73` prep evidence; local gates and synthesized valid probe pass, all model rows `NOT-RUN`, not promoted into `/40` |
 | `../Evidence/x4-full-v2-hard-2026-04-26.json` | machine-readable X4 final closing comparison evidence before N85 promotion; current X4 row is `31 PASS`, `8 FAIL`, `1 NOT-RUN` until N85 is run in final-only mode |
 | `../Evidence/x2-x6-fill-full-v2-hard-2026-04-26.json` plus `../Evidence/n85-performance-runtime-rubric-2026-04-28.json` | machine-readable X2/X6 fill evidence; X2 remains `12 / 40`, while X6 is now `13 / 40` with `9` timeout/auth-route `NOT-RUN` cells after N85 |

@@ -1,0 +1,420 @@
+{
+  "contractId": "N94-staged-multipackage-protocol-reentry",
+  "planFingerprint": "n94-protocolmesh-staged-multipackage-reentry-v1",
+  "required_top_level_entries": [
+    "README.md",
+    "candidate",
+    "inputs",
+    "oracle",
+    "scenario.yaml",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "expected_metadata": {
+    "id": "N94",
+    "surface_id": "E84",
+    "pack_id": "E84",
+    "role_class": "implementation",
+    "artifact_type": "staged multipackage protocol/sdk migration with resume and closeout reentry",
+    "modality_family": "cross-package interface migration, SDK wire compatibility, plugin adapter, CLI contract, hidden downstream app, staged phase ledger, fresh-session resume, closeout proof",
+    "allowed_change_surface": [
+      ".pytest_cache/**",
+      "candidate/source-ledger.json",
+      "candidate/migration-state.json",
+      "candidate/sdk-compat-ledger.json",
+      "candidate/reentry-state.json",
+      "candidate/review-response.json",
+      "candidate/closure.json",
+      "candidate/workspace/src/protocolmesh_core/__init__.py",
+      "candidate/workspace/src/protocolmesh_core/models.py",
+      "candidate/workspace/src/protocolmesh_core/registry.py",
+      "candidate/workspace/src/protocolmesh_core/router.py",
+      "candidate/workspace/src/protocolmesh_sdk/__init__.py",
+      "candidate/workspace/src/protocolmesh_sdk/client.py",
+      "candidate/workspace/src/protocolmesh_sdk/compat.py",
+      "candidate/workspace/src/protocolmesh_sdk/serializer.py",
+      "candidate/workspace/src/protocolmesh_plugins/__init__.py",
+      "candidate/workspace/src/protocolmesh_plugins/http_adapter.py",
+      "candidate/workspace/src/protocolmesh_cli/__init__.py",
+      "candidate/workspace/src/protocolmesh_cli/main.py",
+      "candidate/workspace/tests/test_protocolmesh.py"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md",
+      "candidate/workspace/README.md"
+    ],
+    "score_profile": "staged-multipackage-protocol-reentry, phase-ledger, fresh-session-resume, hidden-downstream-sdk, cli-contract, plugin-contract, exact-scope, cache-ignored",
+    "overlay_flags": [
+      "top-pair-role-fit",
+      "implementation",
+      "staged-runner",
+      "reentry",
+      "multi-session-reentry",
+      "phase-ledger",
+      "closeout",
+      "api-migration",
+      "sdk-compatibility",
+      "cli-contract",
+      "plugin-adapter",
+      "hidden-consumer",
+      "binary-separator-candidate"
+    ]
+  },
+  "required_bundle_paths": [
+    "README.md",
+    "scenario.yaml",
+    "candidate/README.md",
+    "candidate/source-ledger.json",
+    "candidate/migration-state.json",
+    "candidate/sdk-compat-ledger.json",
+    "candidate/reentry-state.json",
+    "candidate/review-response.json",
+    "candidate/closure.json",
+    "candidate/workspace/README.md",
+    "candidate/workspace/src/protocolmesh_core/__init__.py",
+    "candidate/workspace/src/protocolmesh_core/models.py",
+    "candidate/workspace/src/protocolmesh_core/registry.py",
+    "candidate/workspace/src/protocolmesh_core/router.py",
+    "candidate/workspace/src/protocolmesh_sdk/__init__.py",
+    "candidate/workspace/src/protocolmesh_sdk/client.py",
+    "candidate/workspace/src/protocolmesh_sdk/compat.py",
+    "candidate/workspace/src/protocolmesh_sdk/serializer.py",
+    "candidate/workspace/src/protocolmesh_plugins/__init__.py",
+    "candidate/workspace/src/protocolmesh_plugins/http_adapter.py",
+    "candidate/workspace/src/protocolmesh_cli/__init__.py",
+    "candidate/workspace/src/protocolmesh_cli/main.py",
+    "candidate/workspace/tests/test_protocolmesh.py",
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/source-conflict.md",
+    "inputs/downstream-sdk-contract.md",
+    "inputs/review-feedback.md",
+    "inputs/phases/01-source-plan.md",
+    "inputs/phases/02-core-protocol.md",
+    "inputs/phases/03-sdk-plugin-migration.md",
+    "inputs/phases/04-cli-downstream-reentry.md",
+    "inputs/phases/05-review-closeout.md",
+    "oracle/README.md",
+    "oracle/scoring-anchors.md",
+    "oracle/staged-multipackage-protocol-contract.json",
+    "verifiers/README.md",
+    "verifiers/check_staged_multipackage_protocol_reentry.py"
+  ],
+  "expectedSourceIds": [
+    "S1",
+    "S2",
+    "S3",
+    "S4",
+    "S5",
+    "S6",
+    "S7",
+    "S8",
+    "S9",
+    "S10",
+    "S11",
+    "S12",
+    "S13",
+    "S14"
+  ],
+  "staleSourceIds": [
+    "S13",
+    "S14"
+  ],
+  "expectedPhaseIds": [
+    "01-source-plan",
+    "02-core-protocol",
+    "03-sdk-plugin-migration",
+    "04-cli-downstream-reentry",
+    "05-review-closeout"
+  ],
+  "stagedRequirements": {
+    "phaseOwners": {
+      "01-source-plan": "source-owner",
+      "02-core-protocol": "core-router",
+      "03-sdk-plugin-migration": "sdk-client",
+      "04-cli-downstream-reentry": "downstream-consumer",
+      "05-review-closeout": "review-owner"
+    },
+    "phaseBindingRequiredKeys": [
+      "phaseId",
+      "owner",
+      "sourceIds",
+      "stateBefore",
+      "stateAfter",
+      "visibleArtifact",
+      "validationCue",
+      "handoffCue"
+    ],
+    "reentryReplayCases": [
+      "root-exports",
+      "dataclass-wire-roundtrip",
+      "denied-event-no-delivery",
+      "plugin-timeout",
+      "duplicate-event",
+      "legacy-envelope-migration",
+      "cli-json-envelope",
+      "cli-legacy-json-envelope",
+      "legacy-wrappers-removed",
+      "exact-changed-paths"
+    ],
+    "closureRequiredFlags": [
+      "noLegacyWrappers",
+      "staleSourcesRejected",
+      "exactScopeConfirmed"
+    ]
+  },
+  "requiredChangedPaths": [
+    "candidate/source-ledger.json",
+    "candidate/migration-state.json",
+    "candidate/sdk-compat-ledger.json",
+    "candidate/reentry-state.json",
+    "candidate/review-response.json",
+    "candidate/closure.json",
+    "candidate/workspace/src/protocolmesh_core/__init__.py",
+    "candidate/workspace/src/protocolmesh_core/models.py",
+    "candidate/workspace/src/protocolmesh_core/registry.py",
+    "candidate/workspace/src/protocolmesh_core/router.py",
+    "candidate/workspace/src/protocolmesh_sdk/__init__.py",
+    "candidate/workspace/src/protocolmesh_sdk/client.py",
+    "candidate/workspace/src/protocolmesh_sdk/compat.py",
+    "candidate/workspace/src/protocolmesh_sdk/serializer.py",
+    "candidate/workspace/src/protocolmesh_plugins/__init__.py",
+    "candidate/workspace/src/protocolmesh_plugins/http_adapter.py",
+    "candidate/workspace/src/protocolmesh_cli/__init__.py",
+    "candidate/workspace/src/protocolmesh_cli/main.py",
+    "candidate/workspace/tests/test_protocolmesh.py"
+  ],
+  "legacyForbiddenDefinitions": [
+    {
+      "path": "candidate/workspace/src/protocolmesh_core/router.py",
+      "snippets": [
+        "def route_event("
+      ]
+    },
+    {
+      "path": "candidate/workspace/src/protocolmesh_sdk/client.py",
+      "snippets": [
+        "def send_event("
+      ]
+    },
+    {
+      "path": "candidate/workspace/src/protocolmesh_sdk/serializer.py",
+      "snippets": [
+        "def serialize_event(",
+        "def deserialize_event("
+      ]
+    },
+    {
+      "path": "candidate/workspace/src/protocolmesh_sdk/compat.py",
+      "snippets": [
+        "def upgrade_legacy("
+      ]
+    },
+    {
+      "path": "candidate/workspace/src/protocolmesh_plugins/http_adapter.py",
+      "snippets": [
+        "class HttpAdapter",
+        "def publish("
+      ]
+    },
+    {
+      "path": "candidate/workspace/src/protocolmesh_cli/main.py",
+      "snippets": [
+        "def main("
+      ]
+    }
+  ],
+  "requiredResultModels": {
+    "WireEnvelope": [
+      "event_id",
+      "tenant",
+      "subject",
+      "action",
+      "payload",
+      "trace_id",
+      "source_id",
+      "schema_version"
+    ],
+    "RouteDecision": [
+      "accepted",
+      "status",
+      "reason",
+      "owner",
+      "handler",
+      "retryable",
+      "source_ids",
+      "trace_id"
+    ],
+    "PluginAck": [
+      "delivered",
+      "status",
+      "retryable",
+      "event_id",
+      "error_code",
+      "owner",
+      "reason",
+      "source_ids"
+    ],
+    "SendResult": [
+      "accepted",
+      "status",
+      "retryable",
+      "event_id",
+      "owner",
+      "reason",
+      "wire",
+      "ack",
+      "source_ids"
+    ]
+  },
+  "publicExports": {
+    "protocolmesh_core": [
+      "HandlerRegistry",
+      "WireEnvelope",
+      "RouteDecision",
+      "route_envelope"
+    ],
+    "protocolmesh_sdk": [
+      "ProtocolClient",
+      "SendResult",
+      "serialize_envelope",
+      "deserialize_envelope",
+      "migrate_legacy_envelope"
+    ],
+    "protocolmesh_plugins": [
+      "HttpPluginAdapter",
+      "PluginAck"
+    ],
+    "protocolmesh_cli": [
+      "run_cli"
+    ]
+  },
+  "requiredLedgerRows": {
+    "sourceOwners": [
+      "core-router",
+      "handler-registry",
+      "sdk-client",
+      "sdk-serializer",
+      "legacy-compat",
+      "plugin-adapter",
+      "cli-entrypoint",
+      "downstream-consumer"
+    ],
+    "interfaceMap": [
+      "route_event -> route_envelope",
+      "ProtocolClient.send_event -> ProtocolClient.send",
+      "serialize_event -> serialize_envelope",
+      "upgrade_legacy -> migrate_legacy_envelope",
+      "HttpAdapter.publish -> HttpPluginAdapter.deliver",
+      "main -> run_cli"
+    ],
+    "callSites": [
+      "protocolmesh_core.router.route_envelope",
+      "protocolmesh_sdk.client.ProtocolClient.send",
+      "protocolmesh_sdk.serializer.serialize_envelope",
+      "protocolmesh_sdk.compat.migrate_legacy_envelope",
+      "protocolmesh_plugins.http_adapter.HttpPluginAdapter.deliver",
+      "protocolmesh_cli.main.run_cli",
+      "tests.test_protocolmesh"
+    ],
+    "compatibilityCases": [
+      "accepted-delivery",
+      "denied-event-no-delivery",
+      "handler-not-found",
+      "invalid-schema-version",
+      "plugin-timeout",
+      "duplicate-event",
+      "legacy-envelope-migration",
+      "cli-json-envelope",
+      "clean-room-sdk-import",
+      "dataclass-asdict-wire"
+    ],
+    "validationMarkers": [
+      "python candidate/workspace/tests/test_protocolmesh.py",
+      "check_staged_multipackage_protocol_reentry.py",
+      "hidden downstream SDK",
+      "clean-room protocol/sdk import",
+      "CLI contract replay"
+    ],
+    "reentryMarkers": [
+      "root exports replayed",
+      "dataclass serialization replayed",
+      "denied-event-no-delivery replayed",
+      "plugin-timeout replayed",
+      "duplicate-event replayed",
+      "legacy-envelope-migration replayed",
+      "CLI contract replayed",
+      "legacy wrappers not reintroduced",
+      "exact changed paths confirmed"
+    ],
+    "sdkCompatMarkers": [
+      "wire schema v2 preserved",
+      "dataclasses.asdict roundtrip",
+      "legacy id tenant subject action source preserved",
+      "denied events do not deliver",
+      "timeout stays retryable",
+      "duplicate events do not republish",
+      "CLI returns structured JSON",
+      "legacy wrappers removed"
+    ]
+  },
+  "reviewDecisions": {
+    "R1-keep-legacy-wrapper": "reject",
+    "R2-public-root-exports": "accept",
+    "R3-denied-no-delivery": "accept",
+    "R4-timeout-duplicate-idempotency": "accept",
+    "R5-legacy-envelope-migration": "accept",
+    "R6-stale-cli-stdout": "reject",
+    "R7-owner-boundary": "accept"
+  },
+  "requiredTestMarkers": [
+    "test_route_missing_handler_contract",
+    "test_denied_route_does_not_deliver",
+    "test_timeout_is_retryable",
+    "test_duplicate_event_idempotent",
+    "test_legacy_envelope_migration",
+    "test_cli_run_returns_structured_result",
+    "test_legacy_methods_removed"
+  ],
+  "ignored_top_level_entries": [
+    ".pytest_cache"
+  ],
+  "ignored_changed_path_prefixes": [
+    ".pytest_cache/",
+    "candidate/workspace/src/protocolmesh_core/__pycache__/",
+    "candidate/workspace/src/protocolmesh_sdk/__pycache__/",
+    "candidate/workspace/src/protocolmesh_plugins/__pycache__/",
+    "candidate/workspace/src/protocolmesh_cli/__pycache__/",
+    "candidate/workspace/tests/__pycache__/"
+  ],
+  "protectedPaths": {
+    "candidate/README.md": "3b57ef73dff2f10ce78681a15356131e4b63a515b32070240a94c913cfbf99de",
+    "candidate/workspace/README.md": "3af4f4dce538ba3f632f39bfa79bf53bbc93951b9999fb094bb376d1b0c03a40",
+    "inputs/README.md": "ebb14c8bd211e65493279b0b88cd6ea0356e95f646fddc39aa463205a7b3e150",
+    "inputs/task.md": "610fd923ee905f7d518983307de29e5bfed8bad6c428a9128b9f77cf6cf1e5fa",
+    "inputs/source-conflict.md": "1444c081ebe637e255287bb7f989d0778f3a00bc7f9b48ad7195e68a7ee21b6d",
+    "inputs/downstream-sdk-contract.md": "ad5bd148fbc2a5eb353e248eb5eebd333ac356b07ffd582cef4c6b678b69c78f",
+    "inputs/review-feedback.md": "ee1f74c6d82269c05b499b71347ccebd8d183d09cc5b2e2a64ab12da964e9709",
+    "inputs/phases/01-source-plan.md": "7d1bda93c9b0fb77cc0424010d5ec60b0bfcbb64dce80e27498445f9312a0cfd",
+    "inputs/phases/02-core-protocol.md": "b87ce0d6373bd7577d42a231a593119fd8742003b94b6052f2e134e8de155c54",
+    "inputs/phases/03-sdk-plugin-migration.md": "168625e3dc8adee9c08e87fae8d91dcf255fe98599bcb6b845cca9f0539c8fb2",
+    "inputs/phases/04-cli-downstream-reentry.md": "9d58a71e119bf94460fd8149fa3bbfd9254d26442367e919252474747766f5ad",
+    "inputs/phases/05-review-closeout.md": "e63c68a1dd7f1ae686500b0d105cd1fc3a13d020e22fab0907ae2332cdb22f41",
+    "oracle/README.md": "9d257cabd840212e0e89fd954717a627752a97b883fdb4f8ec3ed5187b259dee",
+    "oracle/scoring-anchors.md": "d92e0bab6ef1e2f61d7bf54bf716ebcfa03f4a5f6d6ce9b84393ec6c8ee4cd4d"
+  }
+}
