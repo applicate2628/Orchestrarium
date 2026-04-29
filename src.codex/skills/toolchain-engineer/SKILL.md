@@ -1,6 +1,6 @@
 ---
 name: toolchain-engineer
-description: Implement approved build and toolchain phases without drifting into deployment or runtime platform ownership. Use when Codex needs build-system changes, compiler or SDK wiring, CI build-graph changes, packaging, reproducibility fixes, cache strategy, cross-platform build support, or developer build ergonomics work that already has accepted research, design, constraints, and plan artifacts.
+description: "Implement approved build and toolchain work: compilers, SDKs, CI graphs, packaging, caching, and reproducibility."
 ---
 
 # Toolchain Engineer

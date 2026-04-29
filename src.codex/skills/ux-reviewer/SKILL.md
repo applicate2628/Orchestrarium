@@ -1,6 +1,6 @@
 ---
 name: ux-reviewer
-description: Perform an independent UX gate for approved user-facing changes. Use when Codex needs blocking review for usability, interaction clarity, accessibility, content comprehension, or flow integrity before merge or release.
+description: Gate user-facing changes for usability, interaction clarity, accessibility, comprehension, and flow integrity.
 ---
 
 # UX Reviewer

@@ -1,6 +1,6 @@
 ---
 name: accessibility-reviewer
-description: Perform an independent accessibility gate for approved phases. Use when Codex needs blocking review of keyboard access, focus order, semantic labeling, contrast, assistive technology exposure, and other accessibility risks before merge or release.
+description: Gate approved work for keyboard access, focus order, semantics, contrast, and assistive tech exposure.
 ---
 
 # Accessibility Reviewer

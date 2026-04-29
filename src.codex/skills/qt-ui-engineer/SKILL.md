@@ -1,6 +1,6 @@
 ---
 name: qt-ui-engineer
-description: Implement an approved Qt desktop UI phase for Widgets-based screens, dialogs, signals and slots, focus, keyboard behavior, and plan-approved theme or high-DPI handling. Use when Codex needs Qt desktop UI work that already has accepted research, design, constraints, and plan artifacts.
+description: "Implement approved Qt Widgets UI work: dialogs, signals, slots, focus, keyboard, theme, and high-DPI behavior."
 ---
 
 # Qt UI Engineer

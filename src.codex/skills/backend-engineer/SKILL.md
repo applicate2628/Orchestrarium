@@ -1,6 +1,6 @@
 ---
 name: backend-engineer
-description: Implement an approved backend phase without redesigning the system. Use when Codex needs server-side, API, domain, persistence, or integration changes that already have accepted research, design, specialist constraints, and plan artifacts.
+description: Implement approved backend APIs, domain logic, persistence, or integrations within accepted design constraints.
 ---
 
 # Backend Engineer

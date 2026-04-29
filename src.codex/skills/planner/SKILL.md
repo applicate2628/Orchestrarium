@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Break an accepted design into small independent delivery phases with explicit file scope, dependencies, acceptance criteria, tests, checks, and quality gates. Use when Codex needs a commit-ready implementation plan before any coding starts.
+description: Turn accepted design into delivery phases with file scope, dependencies, acceptance criteria, checks, and gates.
 ---
 
 # Planner

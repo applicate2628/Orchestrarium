@@ -1,6 +1,6 @@
 ---
 name: ux-designer
-description: Own pre-implementation UX design for approved user-facing work without taking roadmap, architecture, or implementation ownership. Use when Codex needs interaction flows, screen structure, state behavior, content hierarchy, usability constraints, or UX acceptance guidance before planning and implementation begin.
+description: "Design approved user-facing flows: structure, state behavior, content hierarchy, and usability criteria."
 ---
 
 # UX Designer

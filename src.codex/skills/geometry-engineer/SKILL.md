@@ -1,6 +1,6 @@
 ---
 name: geometry-engineer
-description: Implement an approved geometry or spatial-computation phase without redefining the scientific model or system architecture. Use when Codex needs coordinate transforms, intersections, meshing, tessellation, spatial indexing, collision or containment logic, curve or surface operations, or robust geometric predicates that already have accepted research, design, constraints, and plan artifacts.
+description: "Implement approved geometry or spatial work: transforms, intersections, meshing, indexing, curves, and predicates."
 ---
 
 # Geometry Engineer

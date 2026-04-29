@@ -1,6 +1,6 @@
 ---
 name: knowledge-archivist
-description: Maintain repository knowledge hygiene without taking product delivery ownership. Use when Codex needs documentation updates, plan or report curation, ADR or reference maintenance, repository structure cleanup, canonical-source alignment, or archival consistency for accepted artifacts and decisions.
+description: Maintain docs, references, plans, reports, canonical-source alignment, and archive hygiene.
 ---
 
 # Knowledge Archivist

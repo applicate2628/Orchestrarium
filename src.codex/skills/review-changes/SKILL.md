@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Run a full read-only repository impact review starting from recent local changes, a specified diff, branch, commit range, or PR. Use when Codex needs to verify that recent fixes are complete, nothing important was forgotten, unchanged call sites or contracts were not broken, logic still holds across the wider repo, and regressions or missed edge cases are surfaced before commit.
+description: Review current or specified changes for repo-wide impact, missed dependents, contract breaks, and regressions.
 ---
 
 # Review Changes

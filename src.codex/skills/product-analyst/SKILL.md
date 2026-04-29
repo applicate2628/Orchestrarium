@@ -1,6 +1,6 @@
 ---
 name: product-analyst
-description: Produce a factual pre-design product brief from available evidence. Use when Codex needs user and business context, scope clarification, product constraints, relevant metrics, or open product questions before architecture or delivery planning begins.
+description: "Produce product discovery briefs: user context, constraints, metrics, scope questions, and evidence before design."
 ---
 
 # Product Analyst

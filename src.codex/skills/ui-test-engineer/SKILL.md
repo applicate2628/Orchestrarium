@@ -1,6 +1,6 @@
 ---
 name: ui-test-engineer
-description: Verify Qt UI regressions in approved phases. Use when Codex needs independent checks for interaction states, keyboard and focus behavior, high-DPI rendering, theme variance, and screenshot or visual regressions on Qt surfaces before a phase advances.
+description: "Verify Qt UI regressions: interaction states, focus, keyboard behavior, high-DPI rendering, themes, and screenshots."
 ---
 
 # UI Test Engineer

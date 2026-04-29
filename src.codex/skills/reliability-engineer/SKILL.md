@@ -1,6 +1,6 @@
 ---
 name: reliability-engineer
-description: Define reliability constraints for a change before planning or implementation. Use when Codex needs SLO targets, failure-mode analysis, resilience patterns, degradation behavior, observability requirements, rollout and rollback safety, or recovery readiness for an approved solution.
+description: "Define reliability constraints: SLOs, failure modes, resilience, degradation, observability, rollout, and rollback."
 ---
 
 # Reliability Engineer

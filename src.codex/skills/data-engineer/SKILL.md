@@ -1,6 +1,6 @@
 ---
 name: data-engineer
-description: Implement an approved data phase without changing upstream architecture decisions on the fly. Use when Codex needs SQL, warehouse, ETL, data model, migration, or pipeline changes that already have accepted research, design, specialist constraints, and plan artifacts.
+description: "Implement approved data work: SQL, warehouse, ETL, migrations, data models, or pipelines within accepted design."
 ---
 
 # Data Engineer

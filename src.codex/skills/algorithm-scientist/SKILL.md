@@ -1,6 +1,6 @@
 ---
 name: algorithm-scientist
-description: Formalize problem statements, invariants, objective functions, complexity tradeoffs, numerical stability, probabilistic assumptions, optimization strategy, and correctness arguments for algorithmic work before implementation. Use when Codex needs mathematical framing, feasibility analysis, or proof-oriented guidance instead of code generation.
+description: "Frame algorithms before implementation: invariants, objectives, complexity, stability, assumptions, and correctness."
 ---
 
 # Algorithm Scientist
