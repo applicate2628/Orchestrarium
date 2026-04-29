@@ -1,0 +1,15 @@
+---
+description: Plan or launch a bounded brigade of parallel external helpers.
+---
+
+Read `QWEN.md` and `skills/external-brigade/SKILL.md`.
+
+Then help the user define or run a bounded brigade of external helpers:
+
+- build a separate brigade item for each admitted external helper run
+- reject owner routes and overlapping write surfaces
+- read and normalize `.qwen/.agents-mode.yaml` before trusting any routing flags
+- treat `parallelMode` as the general helper fan-out rule and brigade launch as an explicit bounded overlay on top of it
+- keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements instead of using it as a general concurrency cap
+- allow repeated same-provider helper instances when different brigade items own different admitted artifacts or disjoint slices and the runtime supports concurrent non-interactive execution
+- return one brigade report with a launch table, aggregated findings or artifact pointers, blockers or shortfalls, and one final gate

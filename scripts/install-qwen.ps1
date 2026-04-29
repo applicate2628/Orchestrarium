@@ -1,0 +1,817 @@
+<#
+.SYNOPSIS
+    Install the Orchestrarium Qwen example pack.
+.DESCRIPTION
+    Installs Qwen-native runtime surfaces for project-local or global Qwen Code example use.
+    Project installs write QWEN.md and AGENTS.md at the project root and runtime assets under .qwen/.
+    Production auto routing remains on codex/claude; Qwen is kept installable as a WEAK MODEL / NOT RECOMMENDED example/compatibility path.
+.EXAMPLE
+    .\scripts\install-qwen.ps1
+    .\scripts\install-qwen.ps1 -Global
+    .\scripts\install-qwen.ps1 -Target "D:\my-repo"
+#>
+param(
+    [switch]$Global,
+    [string]$Target,
+    [switch]$Force,
+    [switch]$DryRun,
+    [switch]$AllowUnsafeTarget
+)
+
+$ErrorActionPreference = "Stop"
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RepoDir = Split-Path -Parent $ScriptDir
+$Source = Join-Path $RepoDir "src.qwen"
+$ExtensionSource = Join-Path $Source "extension"
+$ExtensionManifestSource = Join-Path $ExtensionSource "qwen-extension.json"
+$ExtensionReadmeSource = Join-Path $ExtensionSource "README.md"
+$DefaultAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
+$ManagedStart = "<!-- ORCHESTRARIUM_QWEN_PACK:START -->"
+$ManagedEnd = "<!-- ORCHESTRARIUM_QWEN_PACK:END -->"
+
+function Get-CanonicalPath {
+    param([string]$Path)
+    $expanded = [Environment]::ExpandEnvironmentVariables($Path).Trim('"').Trim()
+    $homeRoot = if ($HOME) { $HOME } else { [Environment]::GetFolderPath("UserProfile") }
+    if ($expanded -eq "~") {
+        $expanded = $homeRoot
+    } elseif ($expanded.StartsWith("~/") -or $expanded.StartsWith("~\")) {
+        $expanded = Join-Path $homeRoot $expanded.Substring(2)
+    }
+    if ([string]::IsNullOrWhiteSpace($expanded)) { throw "Path is empty." }
+    try {
+        return (Resolve-Path -LiteralPath $expanded -ErrorAction Stop).Path
+    } catch {
+        return [System.IO.Path]::GetFullPath($expanded)
+    }
+}
+
+function Get-RepoRoot {
+    try {
+        $repoRoot = git rev-parse --show-toplevel 2>$null
+        if ($repoRoot) { return (Get-CanonicalPath $repoRoot) }
+    } catch {}
+    return (Get-CanonicalPath (Get-Location).Path)
+}
+
+function Resolve-ProjectRoot {
+    param([string]$InputPath)
+    $resolved = Get-CanonicalPath $InputPath
+    if ((Split-Path -Leaf $resolved).ToLowerInvariant() -eq ".qwen") {
+        return (Split-Path -Parent $resolved)
+    }
+    return $resolved
+}
+
+function Get-QwenExtensionName {
+    param([string]$ManifestPath)
+
+    if (-not (Test-Path -LiteralPath $ManifestPath)) {
+        throw "Missing Qwen extension manifest at $ManifestPath"
+    }
+
+    $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
+    if ([string]::IsNullOrWhiteSpace($manifest.name)) {
+        throw "Qwen extension manifest is missing a non-empty 'name' field."
+    }
+
+    return $manifest.name
+}
+
+function Confirm-Action {
+    param([string]$Prompt)
+    if ($Force -or $DryRun) { return $true }
+    if (-not ([Environment]::UserInteractive -and -not [Console]::IsInputRedirected)) { return $true }
+    while ($true) {
+        $answer = Read-Host "$Prompt [y/N]"
+        if ($null -eq $answer) {
+            $normalized = ""
+        } else {
+            $normalized = $answer.Trim().ToLowerInvariant()
+        }
+        switch ($normalized) {
+            "y" { return $true }
+            "yes" { return $true }
+            "" { return $false }
+            "n" { return $false }
+            "no" { return $false }
+            default { Write-Host "Please answer y or n." -ForegroundColor Yellow }
+        }
+    }
+}
+
+function Assert-SafeProjectRoot {
+    param([string]$ProjectRoot, [string]$Mode)
+    $repoRoot = Get-RepoRoot
+    $normalizedProject = $ProjectRoot.ToLowerInvariant()
+    $normalizedRepo = $repoRoot.ToLowerInvariant()
+    if ($Mode -eq "target" -and -not $AllowUnsafeTarget -and $normalizedProject -ne $normalizedRepo) {
+        throw "Unsafe target denied for non-default project root '$ProjectRoot'. Use -AllowUnsafeTarget to override."
+    }
+}
+
+function Ensure-Dir {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        if (-not $DryRun) {
+            New-Item -ItemType Directory -Force -Path $Path | Out-Null
+        } else {
+            Write-Host "    [dry-run] would create $Path"
+        }
+    }
+}
+
+function Migrate-LegacyAgentsModeFile {
+    param(
+        [string]$LegacyFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        if (Test-Path -LiteralPath $LegacyFile) {
+            Write-Host "  Canonical $Label already exists; leaving legacy file untouched: $LegacyFile"
+        }
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $LegacyFile)) {
+        return
+    }
+
+    Write-Host "  Migrating legacy $Label to $TargetFile..."
+    if (-not $DryRun) {
+        Move-Item -LiteralPath $LegacyFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would move $LegacyFile -> $TargetFile"
+    }
+}
+
+function Get-PythonCommand {
+    foreach ($name in @("python", "python3")) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
+        }
+    }
+    return $null
+}
+
+function Get-DirectoryFileHashes {
+    param([string]$Root)
+
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]@('\', '/'))
+    $hashes = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File -Force | Sort-Object FullName) {
+        $fullName = [System.IO.Path]::GetFullPath($file.FullName)
+        $relative = $fullName.Substring($rootFull.Length).TrimStart([char[]]@('\', '/'))
+        $hashes[$relative] = (Get-FileHash -Algorithm SHA256 -LiteralPath $fullName).Hash
+    }
+    return $hashes
+}
+
+function Test-DirectoryContentEqual {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+        return $false
+    }
+
+    $sourceHashes = Get-DirectoryFileHashes -Root $SourceDir
+    $targetHashes = Get-DirectoryFileHashes -Root $TargetDir
+    if ($sourceHashes.Count -ne $targetHashes.Count) {
+        return $false
+    }
+
+    foreach ($key in $sourceHashes.Keys) {
+        if (-not $targetHashes.ContainsKey($key)) {
+            return $false
+        }
+        if ($sourceHashes[$key] -ne $targetHashes[$key]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-FileContentEqual {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetFile -PathType Leaf)) {
+        return $false
+    }
+
+    $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $SourceFile).Hash
+    $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $TargetFile).Hash
+    return $sourceHash -eq $targetHash
+}
+
+function Test-ItemContentEqual {
+    param(
+        [string]$SourcePath,
+        [string]$TargetPath
+    )
+
+    $sourceItem = Get-Item -LiteralPath $SourcePath -Force
+    if ($sourceItem.PSIsContainer) {
+        return (Test-DirectoryContentEqual -SourceDir $SourcePath -TargetDir $TargetPath)
+    }
+    return (Test-FileContentEqual -SourceFile $SourcePath -TargetFile $TargetPath)
+}
+
+function Install-Tree {
+    param([string]$SourceDir, [string]$TargetDir, [string]$Label)
+
+    Ensure-Dir $TargetDir
+    Write-Host "  Installing $Label (per-item, preserving user-added items)..."
+
+    $packNames = @()
+    foreach ($item in Get-ChildItem -LiteralPath $SourceDir -Force) {
+        $packNames += $item.Name
+        $destination = Join-Path $TargetDir $item.Name
+        if (Test-Path -LiteralPath $destination) {
+            if (Test-ItemContentEqual -SourcePath $item.FullName -TargetPath $destination) {
+                Write-Host "    OK  $Label/$($item.Name) unchanged"
+                continue
+            }
+
+            if (-not $DryRun) {
+                Remove-Item -Recurse -Force $destination
+                Copy-Item -Recurse -Force $item.FullName $destination
+            } else {
+                Write-Host "    [dry-run] would replace $Label/$($item.Name)"
+            }
+        } else {
+            if (-not $DryRun) {
+                Copy-Item -Recurse -Force $item.FullName $destination
+            } else {
+                Write-Host "    [dry-run] would install $Label/$($item.Name)"
+            }
+        }
+    }
+
+    if (Test-Path -LiteralPath $TargetDir) {
+        foreach ($existing in Get-ChildItem -LiteralPath $TargetDir -Force) {
+            if ($packNames -notcontains $existing.Name) {
+                Write-Host "  Preserved user item: $Label/$($existing.Name)"
+            }
+        }
+    }
+}
+
+function Ensure-LocalOnlyGitignoreEntries {
+    param([string]$ProjectRoot)
+
+    $gitignore = Join-Path $ProjectRoot ".gitignore"
+    $entries = @("/.reports/", "/work-items/")
+    $existingLines = @()
+    if (Test-Path -LiteralPath $gitignore) {
+        $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
+    }
+
+    $missing = @()
+    foreach ($entry in $entries) {
+        $alternate = $entry.TrimStart("/")
+        if ($existingLines -notcontains $entry -and $existingLines -notcontains $alternate) {
+            $missing += $entry
+        }
+    }
+
+    if ($missing.Count -eq 0) {
+        Write-Host "  .gitignore: local-only entries already present"
+        return
+    }
+
+    Write-Host "  Ensuring .gitignore ignores local-only task-memory paths..."
+    if ($DryRun) {
+        foreach ($entry in $missing) {
+            if (Test-Path -LiteralPath $gitignore) {
+                Write-Host "    [dry-run] would append '$entry' to $gitignore"
+            } else {
+                Write-Host "    [dry-run] would create $gitignore with '$entry'"
+            }
+        }
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $gitignore)) {
+        Set-Content -LiteralPath $gitignore -Value ($missing -join "`r`n")
+        return
+    }
+
+    foreach ($entry in $missing) {
+        Add-Content -LiteralPath $gitignore -Value "`r`n$entry"
+    }
+}
+
+function Get-PreservedQwenImports {
+    param(
+        [string[]]$Lines,
+        [int]$ManagedStartLine,
+        [int]$ManagedEndLine
+    )
+
+    $imports = @()
+    if ($ManagedStartLine -lt 0 -or $ManagedEndLine -le $ManagedStartLine) {
+        return $imports
+    }
+
+    $collectImports = $false
+    for ($i = $ManagedStartLine + 1; $i -lt $ManagedEndLine; $i++) {
+        $line = $Lines[$i]
+
+        if (-not $collectImports) {
+            if ($line -match '^@' -or [string]::IsNullOrWhiteSpace($line)) {
+                $collectImports = $true
+            } else {
+                break
+            }
+        }
+
+        if ($line -match '^@') {
+            if ($line -ne '@./AGENTS.md' -and $line -ne '@./AGENTS.shared.md' -and $imports -notcontains $line) {
+                $imports += $line
+            }
+            continue
+        }
+
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        break
+    }
+
+    return $imports
+}
+
+function Get-MergedQwenManagedContent {
+    param(
+        [string[]]$ExistingLines,
+        [int]$ManagedStartLine,
+        [int]$ManagedEndLine,
+        [string]$SourceFile
+    )
+
+    $preservedPrefix = @()
+    if ($ManagedStartLine -gt 0) {
+        $preservedPrefix = $ExistingLines[0..($ManagedStartLine - 1)]
+    }
+
+    $preservedSuffix = @()
+    if ($ManagedEndLine + 1 -lt $ExistingLines.Count) {
+        $preservedSuffix = $ExistingLines[($ManagedEndLine + 1)..($ExistingLines.Count - 1)]
+    }
+
+    $preservedImports = Get-PreservedQwenImports -Lines $ExistingLines -ManagedStartLine $ManagedStartLine -ManagedEndLine $ManagedEndLine
+    $sourceLines = @((Get-Content -LiteralPath $SourceFile) | ForEach-Object { $_ -replace '^@\./AGENTS\.shared\.md$', '@./AGENTS.md' })
+    $importLine = -1
+    for ($i = 0; $i -lt $sourceLines.Count; $i++) {
+        if ($sourceLines[$i] -match '^@') {
+            $importLine = $i
+            break
+        }
+    }
+
+    $mergedManagedLines = $sourceLines
+    if ($importLine -ge 0) {
+        $tailStart = $importLine + 1
+        while ($tailStart -lt $sourceLines.Count -and [string]::IsNullOrWhiteSpace($sourceLines[$tailStart])) {
+            $tailStart++
+        }
+
+        $tailLines = @()
+        if ($tailStart -lt $sourceLines.Count) {
+            $tailLines = $sourceLines[$tailStart..($sourceLines.Count - 1)]
+        }
+
+        $mergedManagedLines = @()
+        if ($importLine -gt 0) {
+            $mergedManagedLines += $sourceLines[0..($importLine - 1)]
+        }
+        $mergedManagedLines += $sourceLines[$importLine]
+        if ($preservedImports.Count -gt 0) {
+            $mergedManagedLines += $preservedImports
+        }
+        if ($tailLines.Count -gt 0) {
+            $mergedManagedLines += ""
+            $mergedManagedLines += $tailLines
+        }
+    }
+
+    $finalLines = @()
+    if ($preservedPrefix.Count -gt 0) {
+        $finalLines += $preservedPrefix
+    }
+    $finalLines += $mergedManagedLines
+    if ($preservedSuffix.Count -gt 0) {
+        $finalLines += $preservedSuffix
+    }
+
+    return ($finalLines -join "`n")
+}
+
+function Merge-QwenFile {
+    param([string]$SourceFile, [string]$TargetFile)
+
+    $managed = (Get-Content -LiteralPath $SourceFile -Raw) -replace '@\./AGENTS\.shared\.md', '@./AGENTS.md'
+    if (-not (Test-Path -LiteralPath $TargetFile)) {
+        Write-Host "  Creating QWEN.md..."
+        if (-not $DryRun) {
+            Set-Content -LiteralPath $TargetFile -Value $managed -NoNewline
+        } else {
+            Write-Host "    [dry-run] would create $TargetFile"
+        }
+        return
+    }
+
+    $existing = Get-Content -LiteralPath $TargetFile -Raw
+    $lines = Get-Content -LiteralPath $TargetFile
+    $managedStartLine = -1
+    $managedEndLine = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -eq $ManagedStart -and $managedStartLine -lt 0) {
+            $managedStartLine = $i
+        }
+        if ($lines[$i] -eq $ManagedEnd) {
+            $managedEndLine = $i
+            break
+        }
+    }
+
+    if ($managedStartLine -ge 0 -and $managedEndLine -ge $managedStartLine) {
+        Write-Host "  QWEN.md: replacing managed Orchestrarium block..."
+        if (-not $DryRun) {
+            $updated = Get-MergedQwenManagedContent -ExistingLines $lines -ManagedStartLine $managedStartLine -ManagedEndLine $managedEndLine -SourceFile $SourceFile
+            Set-Content -LiteralPath $TargetFile -Value $updated -NoNewline
+        } else {
+            Write-Host "    [dry-run] would replace managed QWEN.md block"
+        }
+        return
+    }
+
+    Write-Host "  QWEN.md: prepending managed Orchestrarium block..."
+    if (-not $DryRun) {
+        Set-Content -LiteralPath $TargetFile -Value ($managed + "`r`n`r`n" + $existing) -NoNewline
+    } else {
+        Write-Host "    [dry-run] would prepend managed QWEN.md block"
+    }
+}
+
+function Install-PackFile {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile,
+        [string]$Label,
+        [switch]$PreserveExisting
+    )
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        if ($PreserveExisting) {
+            Write-Host "  Preserving existing $Label..."
+            return
+        }
+        Write-Host "  Replacing $Label..."
+        if (-not $DryRun) {
+            Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
+        } else {
+            Write-Host "    [dry-run] would replace $TargetFile"
+        }
+        return
+    }
+
+    Write-Host "  Installing $Label..."
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
+function Sync-AgentsModeFile {
+    param(
+        [string]$TemplateFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    $normalizer = Join-Path $RepoDir "scripts\normalize-agents-mode.py"
+    $python = Get-PythonCommand
+
+    if ($null -ne $python -and (Test-Path -LiteralPath $normalizer)) {
+        if (Test-Path -LiteralPath $TargetFile) {
+            Write-Host "  Normalizing existing $Label to current canonical format..."
+        } else {
+            Write-Host "  Installing canonical $Label..."
+        }
+
+        if (-not $DryRun) {
+            & $python $normalizer --template $TemplateFile --target $TargetFile --provider shared
+            if ($LASTEXITCODE -ne 0) {
+                throw "agents-mode normalization failed for $TargetFile"
+            }
+        } else {
+            Write-Host "    [dry-run] would normalize $TargetFile"
+        }
+        return
+    }
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        throw "Python is required to normalize existing $Label at $TargetFile."
+    }
+
+    Write-Host "  Installing canonical $Label..."
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $TemplateFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
+function Install-PackContent {
+    param(
+        [string]$Content,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    Ensure-Dir (Split-Path -Parent $TargetFile)
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        Write-Host "  Replacing $Label..."
+        if (-not $DryRun) {
+            Set-Content -LiteralPath $TargetFile -Value $Content -NoNewline
+        } else {
+            Write-Host "    [dry-run] would replace $TargetFile"
+        }
+        return
+    }
+
+    Write-Host "  Installing $Label..."
+    if (-not $DryRun) {
+        Set-Content -LiteralPath $TargetFile -Value $Content -NoNewline
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
+function Remove-LegacyPackFile {
+    param([string]$TargetFile, [string]$Label)
+
+    if (-not (Test-Path -LiteralPath $TargetFile)) {
+        return
+    }
+
+    Write-Host "  Removing legacy $Label..."
+    if (-not $DryRun) {
+        Remove-Item -LiteralPath $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would remove $TargetFile"
+    }
+}
+
+function Remove-EmptyDirIfPresent {
+    param([string]$TargetDir)
+
+    if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+        return
+    }
+
+    $children = @(Get-ChildItem -LiteralPath $TargetDir -Force)
+    if ($children.Count -gt 0) {
+        return
+    }
+
+    if (-not $DryRun) {
+        Remove-Item -LiteralPath $TargetDir -Force
+    } else {
+        Write-Host "    [dry-run] would remove empty directory $TargetDir"
+    }
+}
+
+function Remove-LegacyTopLevelPackEntries {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir,
+        [string]$Label
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+        return
+    }
+
+    foreach ($item in Get-ChildItem -LiteralPath $SourceDir -Force) {
+        $targetPath = Join-Path $TargetDir $item.Name
+        if (-not (Test-Path -LiteralPath $targetPath)) {
+            continue
+        }
+
+        Write-Host "  Removing legacy $Label/$($item.Name)..."
+        if (-not $DryRun) {
+            Remove-Item -LiteralPath $targetPath -Recurse -Force
+        } else {
+            Write-Host "    [dry-run] would remove $targetPath"
+        }
+    }
+
+    Remove-EmptyDirIfPresent -TargetDir $TargetDir
+}
+
+function Remove-LegacyMirroredFiles {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir,
+        [string]$Label
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+        return
+    }
+
+    $sourceRoot = [System.IO.Path]::GetFullPath($SourceDir)
+    foreach ($file in Get-ChildItem -LiteralPath $SourceDir -Recurse -File -Force) {
+        $relativePath = $file.FullName.Substring($sourceRoot.Length).TrimStart('\', '/')
+        $targetPath = Join-Path $TargetDir $relativePath
+        if (-not (Test-Path -LiteralPath $targetPath -PathType Leaf)) {
+            continue
+        }
+
+        Write-Host "  Removing legacy $Label/$relativePath..."
+        if (-not $DryRun) {
+            Remove-Item -LiteralPath $targetPath -Force
+        } else {
+            Write-Host "    [dry-run] would remove $targetPath"
+        }
+    }
+
+    $directories = @(Get-ChildItem -LiteralPath $TargetDir -Recurse -Directory -Force | Sort-Object FullName -Descending)
+    foreach ($directory in $directories) {
+        Remove-EmptyDirIfPresent -TargetDir $directory.FullName
+    }
+    Remove-EmptyDirIfPresent -TargetDir $TargetDir
+}
+
+if ($Global) {
+    if (-not $env:USERPROFILE) { throw "USERPROFILE is not set." }
+    $Mode = "global"
+    $InstallRoot = Get-CanonicalPath (Join-Path $env:USERPROFILE ".qwen")
+} elseif ($Target) {
+    $Mode = "target"
+    $ProjectRoot = Resolve-ProjectRoot $Target
+    Assert-SafeProjectRoot -ProjectRoot $ProjectRoot -Mode $Mode
+} else {
+    $Mode = "repo"
+    $ProjectRoot = Get-RepoRoot
+}
+
+$ExtensionName = Get-QwenExtensionName -ManifestPath $ExtensionManifestSource
+
+if ($Mode -eq "global") {
+    $SkillsTarget = Join-Path $InstallRoot "skills"
+    $AgentsTarget = Join-Path $InstallRoot "agents"
+    $CommandsTarget = Join-Path $InstallRoot "commands"
+    $ExtensionsTarget = Join-Path $InstallRoot "extensions"
+    $ExtensionRoot = Join-Path $ExtensionsTarget $ExtensionName
+    $AgentsModeTarget = Join-Path $InstallRoot ".agents-mode.yaml"
+    $LegacyAgentsModeTarget = Join-Path $InstallRoot ".agents-mode"
+    $QwenTarget = Join-Path $InstallRoot "QWEN.md"
+    $SharedTarget = Join-Path $InstallRoot "AGENTS.md"
+    $LegacySharedTarget = Join-Path $InstallRoot "AGENTS.shared.md"
+    $LegacyAgentsReadmeTarget = Join-Path $AgentsTarget "README.md"
+} else {
+    $InstallRoot = Join-Path $ProjectRoot ".qwen"
+    $SkillsTarget = Join-Path $InstallRoot "skills"
+    $AgentsTarget = Join-Path $InstallRoot "agents"
+    $CommandsTarget = Join-Path $InstallRoot "commands"
+    $ExtensionsTarget = Join-Path $InstallRoot "extensions"
+    $ExtensionRoot = Join-Path $ExtensionsTarget $ExtensionName
+    $AgentsModeTarget = Join-Path $InstallRoot ".agents-mode.yaml"
+    $LegacyAgentsModeTarget = Join-Path $InstallRoot ".agents-mode"
+    $QwenTarget = Join-Path $ProjectRoot "QWEN.md"
+    $SharedTarget = Join-Path $ProjectRoot "AGENTS.md"
+    $LegacySharedTarget = Join-Path $ProjectRoot "AGENTS.shared.md"
+    $LegacyAgentsReadmeTarget = Join-Path $AgentsTarget "README.md"
+}
+
+$ExtensionManifestTarget = Join-Path $ExtensionRoot "qwen-extension.json"
+$ExtensionReadmeTarget = Join-Path $ExtensionRoot "README.md"
+$ExtensionQwenTarget = Join-Path $ExtensionRoot "QWEN.md"
+$ExtensionAgentsTarget = Join-Path $ExtensionRoot "AGENTS.md"
+$LegacyExtensionSharedTarget = Join-Path $ExtensionRoot "AGENTS.shared.md"
+$LegacyExtensionAgentsReadmeTarget = Join-Path (Join-Path $ExtensionRoot "agents") "README.md"
+
+Write-Host "=== Orchestrarium Qwen Example Pack Installer ===" -ForegroundColor Cyan
+Write-Host "Source: $Source"
+Write-Host "Mode:   $Mode"
+Write-Host "Runtime root: $InstallRoot"
+Write-Host "QWEN.md:    $QwenTarget"
+Write-Host "AGENTS.md:    $SharedTarget"
+Write-Host "agents-mode:  $AgentsModeTarget"
+Write-Host "Extension:    $ExtensionRoot"
+Write-Host "Legacy user tier cleanup roots: $SkillsTarget ; $AgentsTarget ; $CommandsTarget"
+Write-Host "Policy:       example-only / WEAK MODEL / NOT RECOMMENDED; production auto routing stays on codex|claude"
+if ($DryRun) { Write-Host "Mode:   dry-run" -ForegroundColor Yellow }
+Write-Host ""
+
+if (-not (Test-Path -LiteralPath (Join-Path $Source "skills"))) { throw "Missing source skills/ directory." }
+if (-not (Test-Path -LiteralPath (Join-Path $Source "agents"))) { throw "Missing source agents/ directory." }
+if (-not (Test-Path -LiteralPath (Join-Path $Source "commands"))) { throw "Missing source commands/ directory." }
+if (-not (Test-Path -LiteralPath $ExtensionManifestSource)) { throw "Missing source Qwen extension manifest." }
+if (-not (Test-Path -LiteralPath $ExtensionReadmeSource)) { throw "Missing source Qwen extension README." }
+if (-not (Test-Path -LiteralPath (Join-Path $Source "QWEN.md"))) { throw "Missing source QWEN.md." }
+if (-not (Test-Path -LiteralPath (Join-Path $Source "AGENTS.shared.md"))) { throw "Missing source AGENTS.shared.md." }
+if (-not (Test-Path -LiteralPath $DefaultAgentsModeSource)) { throw "Missing source agents-mode.defaults.yaml." }
+
+if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $AgentsTarget) -or (Test-Path -LiteralPath $CommandsTarget) -or (Test-Path -LiteralPath $ExtensionRoot) -or (Test-Path -LiteralPath $QwenTarget) -or (Test-Path -LiteralPath $SharedTarget)) {
+    if (-not (Confirm-Action "Proceed with reinstall/update of the Qwen pack?")) {
+        Write-Host "Install cancelled by user." -ForegroundColor Yellow
+        exit 1
+    }
+}
+
+Ensure-Dir $InstallRoot
+Install-Tree -SourceDir (Join-Path $Source "skills") -TargetDir (Join-Path $ExtensionRoot "skills") -Label "extension/skills"
+Install-Tree -SourceDir (Join-Path $Source "agents") -TargetDir (Join-Path $ExtensionRoot "agents") -Label "extension/agents"
+Install-Tree -SourceDir (Join-Path $Source "commands") -TargetDir (Join-Path $ExtensionRoot "commands") -Label "extension/commands"
+Merge-QwenFile -SourceFile (Join-Path $Source "QWEN.md") -TargetFile $QwenTarget
+if ($Mode -eq "global") {
+    Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.md"
+} else {
+    Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.md" -PreserveExisting
+    Ensure-LocalOnlyGitignoreEntries -ProjectRoot $ProjectRoot
+}
+Install-PackFile -SourceFile $ExtensionManifestSource -TargetFile $ExtensionManifestTarget -Label "extension manifest"
+Install-PackFile -SourceFile $ExtensionReadmeSource -TargetFile $ExtensionReadmeTarget -Label "extension README"
+Install-PackContent -Content ((Get-Content -LiteralPath (Join-Path $Source "QWEN.md") -Raw) -replace '@\./AGENTS\.shared\.md', '@./AGENTS.md') -TargetFile $ExtensionQwenTarget -Label "extension QWEN.md"
+Install-PackContent -Content (Get-Content -LiteralPath (Join-Path $Source "AGENTS.shared.md") -Raw) -TargetFile $ExtensionAgentsTarget -Label "extension AGENTS.md"
+Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
+Sync-AgentsModeFile -TemplateFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
+Remove-LegacyPackFile -TargetFile $LegacySharedTarget -Label "AGENTS.shared.md"
+Remove-LegacyPackFile -TargetFile $LegacyAgentsReadmeTarget -Label "agents/README.md"
+Remove-LegacyPackFile -TargetFile $LegacyExtensionSharedTarget -Label "extension AGENTS.shared.md"
+Remove-LegacyPackFile -TargetFile $LegacyExtensionAgentsReadmeTarget -Label "extension agents/README.md"
+Remove-LegacyTopLevelPackEntries -SourceDir (Join-Path $Source "skills") -TargetDir $SkillsTarget -Label "skills"
+Remove-LegacyMirroredFiles -SourceDir (Join-Path $Source "agents") -TargetDir $AgentsTarget -Label "agents"
+Remove-LegacyMirroredFiles -SourceDir (Join-Path $Source "commands") -TargetDir $CommandsTarget -Label "commands"
+
+if ($DryRun) {
+    Write-Host ""
+    Write-Host "RESULT: DRY-RUN complete (no files modified)."
+    exit 0
+}
+
+Write-Host ""
+Write-Host "=== Verification ===" -ForegroundColor Cyan
+$errors = 0
+foreach ($path in @(
+    $QwenTarget,
+    $SharedTarget,
+    $AgentsModeTarget,
+    $ExtensionManifestTarget,
+    $ExtensionQwenTarget,
+    $ExtensionAgentsTarget,
+    (Join-Path $ExtensionRoot "skills\lead\SKILL.md"),
+    (Join-Path $ExtensionRoot "skills\init-project\SKILL.md"),
+    (Join-Path $ExtensionRoot "agents\lead.md"),
+    (Join-Path $ExtensionRoot "agents\team-templates\full-delivery.json"),
+    (Join-Path $ExtensionRoot "commands\agents\help.md")
+)) {
+    if (Test-Path -LiteralPath $path) {
+        Write-Host "  OK  $path" -ForegroundColor Green
+    } else {
+        Write-Host "  FAIL  $path" -ForegroundColor Red
+        $errors++
+    }
+}
+
+foreach ($legacyPath in @(
+    (Join-Path $SkillsTarget "lead\SKILL.md"),
+    (Join-Path $AgentsTarget "lead.md"),
+    (Join-Path $AgentsTarget "team-templates\full-delivery.json"),
+    (Join-Path $CommandsTarget "agents\help.md"),
+    (Join-Path $CommandsTarget "agents\external-brigade.md"),
+    (Join-Path $CommandsTarget "agents\init-project.md")
+)) {
+    if (Test-Path -LiteralPath $legacyPath) {
+        Write-Host "  FAIL  legacy duplicate still present: $legacyPath" -ForegroundColor Red
+        $errors++
+    } else {
+        Write-Host "  OK  no legacy duplicate at $legacyPath" -ForegroundColor Green
+    }
+}
+
+if ($errors -gt 0) {
+    Write-Host ""
+    Write-Host "RESULT: FAIL ($errors errors)" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host ""
+Write-Host "RESULT: OK - Qwen example pack installed" -ForegroundColor Green
