@@ -25,14 +25,12 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
 | `preferExternalReviewer` | `false` | `true` | `true` | `true` | `false` |
 | `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `gemini-crosscheck` | `balanced` |
+| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` |
 | `externalPriorityProfiles` | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is |
 | `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review lanes `2`, others `1` | all `1` |
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
-| `externalGeminiWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `runtime-default` |
-| `externalGeminiFallbackMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 
 `correctness-first` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
@@ -91,8 +89,7 @@ Routing conventions (not persisted as keys):
       - `externalOpinionCounts`
       - `externalCodexWorkdirMode`
       - `externalClaudeWorkdirMode`
-      - `externalGeminiWorkdirMode`
-      - `externalGeminiFallbackMode`
+      - `externalModelMode`
     - Use the existing value when present, the preset-expanded value if one was selected, or otherwise default to:
       - `consultantMode: disabled`
       - `externalClaudeApiMode: auto`
@@ -107,9 +104,8 @@ Routing conventions (not persisted as keys):
       - `externalOpinionCounts` defaulting each documented lane to `1`
       - `externalCodexWorkdirMode: neutral`
       - `externalClaudeWorkdirMode: neutral`
-      - `externalGeminiWorkdirMode: neutral`
-      - `externalGeminiFallbackMode: auto`
-    - `externalProvider: auto` resolves by lane type through the active named priority profile rather than a Claude-line default provider. Explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible; if a repository wants Gemini-first visual routing, express that through an explicit provider override or a repo-local custom profile.
+      - `externalModelMode: runtime-default`
+    - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on `codex | claude`; explicit `codex`, `claude`, `gemini`, or `qwen` may still be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths.
     - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
 6. **Confirm choices.**
@@ -130,21 +126,19 @@ Routing conventions (not persisted as keys):
 
    ```yaml
    consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-   externalClaudeApiMode: {value}  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
+   externalClaudeApiMode: {value}  # controls advisory/review-only claude-secret candidate: disabled | auto | force; default: auto
    delegationMode: {value}  # allowed: manual | auto | force; default: manual
    parallelMode: {value}  # allowed: manual | auto | force; default: auto
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
    preferExternalReviewer: {value}  # allowed: false | true; default: false
-   externalProvider: {value}  # allowed here: auto | codex | claude | gemini; default: auto
-   externalPriorityProfile: {value}  # allowed: balanced | gemini-crosscheck | <repo-local profile>; default: balanced
+   externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
+   externalPriorityProfile: {value}  # allowed: balanced | <repo-local production profile>; default: balanced
    externalPriorityProfiles: {value}  # allowed: structured profile map
    externalOpinionCounts: {value}  # allowed: structured lane-count map
    externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
-   externalGeminiWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-   externalGeminiFallbackMode: {value}  # allowed when Gemini CLI is the resolved provider for this run: disabled | auto | force; default: auto
    ```
 
 8. **Write to CLAUDE.md.** Add or replace the `## Project policies` section in `.claude/CLAUDE.md`. Place it between `## Engineering hygiene` and `## Publication safety`. Use this format:

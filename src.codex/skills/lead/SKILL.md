@@ -1,6 +1,6 @@
 ---
 name: lead
-description: Coordinate multi-agent work as a lead or orchestrator rather than a coder. Use when Codex needs to route work through narrow roles, assign owners for critical risks such as architecture, algorithms, numerics, performance, security, quality, or maintainability, define approved inputs and gates, and keep a single source of truth for accepted decisions. Use by default whenever delegation is needed and no narrower role has already been delegated.
+description: Coordinate approved delivery across specialist stages, artifacts, gates, recovery state, and risk owners.
 ---
 
 # Lead
@@ -32,7 +32,7 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 - Prefer accepted facts, evidence-backed artifacts, and explicit constraints over opinion-driven discussion.
 - Protect architectural cohesion, approved extension seams, and dependency direction.
 - Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible worker/review roles; prefer them when `.agents/.agents-mode.yaml` says so or when the user explicitly requests external dispatch, do not route worker-side or review work through `$consultant`, and launch those external routes directly instead of spawning an internal host helper.
-- Any spawned internal subagent is internal by definition even if the prompt assigns it a provider label or model such as Gemini Pro. Do not satisfy an external route with an internal subagent impersonating that provider.
+- Any spawned internal subagent is internal by definition even if the prompt assigns it a provider label or model such as Gemini Pro or Qwen. Do not satisfy an external route with an internal subagent impersonating that provider.
 - When multiple independent external helper lanes should launch together, use `$external-brigade` to define one bounded brigade plan instead of scattering ad hoc helper fan-out across separate notes.
 - One subagent equals one profession, one artifact, and one gate.
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.

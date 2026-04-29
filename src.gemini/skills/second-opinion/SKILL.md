@@ -23,21 +23,20 @@ Manage these keys in `.gemini/.agents-mode.yaml`:
 - `externalPriorityProfile`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
-- `externalGeminiFallbackMode`
+- `externalModelMode`
 - `externalClaudeApiMode`
 
 Gemini-line rules:
 
 - `externalProvider: auto` resolves through the active named priority profile, not a Gemini-line default provider
 - `externalPriorityProfile` defaults to `balanced`
-- `balanced` is the ordinary profile; `gemini-crosscheck` is the profile that intentionally keeps Gemini in the non-visual advisory and review cross-check set
-- explicit providers are `codex`, `claude`, and `gemini`
-- `externalProvider: gemini` is allowed only as an explicit self-provider override
-- `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion
-- `externalGeminiFallbackMode` matters only when provider resolves to Gemini and the model policy is pinned
-- Under `externalModelMode: pinned-top-pro`, `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures
+- `balanced` is the ordinary shipped production profile and keeps `auto` routing on `codex | claude`
+- explicit providers are `codex`, `claude`, `gemini`, and `qwen`
+- `externalProvider: gemini` is allowed only as an explicit self-provider override for a manual example or compatibility run
+- `externalProvider: qwen` is allowed only as an explicit native example or compatibility run
+- `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved production provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile on the production provider paths
 - `externalClaudeApiMode` matters only when provider resolves to Claude
-- if a repository wants Gemini-first routing for eligible image/icon/decorative visual lanes, express that through an explicit provider override or a repo-local custom profile
+- Gemini is `WEAK MODEL / NOT RECOMMENDED`; shipped and repo-local production `auto` profiles must keep Gemini and Qwen out of provider-order lists
 - same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce
 - preserve unknown keys and keep the three new profile/count keys in expanded multi-key form rather than collapsing them into a consultant-only shape
 - `parallelMode` is the general helper fan-out rule across internal and external lanes

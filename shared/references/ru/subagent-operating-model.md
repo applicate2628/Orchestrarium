@@ -39,17 +39,18 @@ Lead назначает задачу такого вида:
 2. **Не передавайте лишний контекст.** Каждому субагенту давайте только то, что нужно его роли.
 3. **Ограничивайте инструменты по роли.** Research остаётся read-only; implementation остаётся внутри утверждённой фазы; reviewer не заменяет implementer'а.
 4. **Не пропускайте gates.** Пока артефакт не принят, следующая стадия не стартует.
-5. **Не допускайте тихого роста scope.** Субагент не меняет архитектуру, план или требования сам по себе.
-6. **Разделяйте delivery и ownership рисков.** Хороший патч всё равно неполон, если критичный риск не проверен.
-7. **QA проверяет интегрированный результат, включая базовую acceptance для производительности, когда это уместно, но не заменяет algorithm, performance, security или reliability специалистов.**
-8. **Принятые решения должны жить рядом с кодом как один source of truth.**
-9. **Предпочитайте факты мнениям.** Используйте factual-роли, чтобы снизить неопределённость, прежде чем просить interpretive-роли делать tradeoff'ы или принимать решения.
-10. **Используйте re-intake, когда admitted item изменился.** Если scope, priority или milestone intent достаточно сдвинулись, чтобы переопределить item, верните его `product-manager` вместо того, чтобы перепридумывать работу внутри delivery.
-11. **Явно называйте ownership интеграции.** Если несколько implementation-фаз или специалистов должны слиться в один результат, один назначенный владелец собирает integrated result перед QA.
-12. **Сбрасывайте derived `PASS` состояния при материальной правке upstream.** Если принятый upstream artifact был materially revised после того, как downstream artifacts уже получили `PASS`, lead отмечает затронутые derived artifacts на re-review до продолжения delivery. `PASS` не сохраняется автоматически после material upstream change.
-13. **Классифицируйте изменение перед routing.** Используйте `cosmetic`, `additive`, `behavioral` или `breaking-or-cross-cutting`, чтобы определить, насколько сильно lead должен маршрутизировать и gate'ить работу; `breaking-or-cross-cutting` должен усиливать routing, re-review затронутых downstream artifacts и ownership интеграции, когда это нужно.
-14. **Считайте core role map каноническим, но не исчерпывающим.** Role index называет только core team. Lead может выбрать narrower installed specialist вне core team, если он лучше подходит для scoped work, и может выбрать repo-local specialist только когда текущий repo/workspace явно задаёт или явно подразумевает его. Такое использование не добавляет специалиста в canonical team map автоматически.
-15. **Поддерживайте durable task memory для lead-routed работы.** Храните roadmap, brief, status и plan artifacts в repo-local storage, чтобы после прерывания можно было продолжить работу без зависимости от памяти сессии.
+5. **Проверяйте результаты субагентов перед доверием к ним.** `PASS`, отчёт или заявленный test result от субагента - это claim, а не proof; orchestrating owner или следующий gate сверяет artifact, diff, logs, command output или другое repo-standard evidence перед acceptance или forwarding.
+6. **Не допускайте тихого роста scope.** Субагент не меняет архитектуру, план или требования сам по себе.
+7. **Разделяйте delivery и ownership рисков.** Хороший патч всё равно неполон, если критичный риск не проверен.
+8. **QA проверяет интегрированный результат, включая базовую acceptance для производительности, когда это уместно, но не заменяет algorithm, performance, security или reliability специалистов.**
+9. **Принятые решения должны жить рядом с кодом как один source of truth.**
+10. **Предпочитайте факты мнениям.** Используйте factual-роли, чтобы снизить неопределённость, прежде чем просить interpretive-роли делать tradeoff'ы или принимать решения.
+11. **Используйте re-intake, когда admitted item изменился.** Если scope, priority или milestone intent достаточно сдвинулись, чтобы переопределить item, верните его `product-manager` вместо того, чтобы перепридумывать работу внутри delivery.
+12. **Явно называйте ownership интеграции.** Если несколько implementation-фаз или специалистов должны слиться в один результат, один назначенный владелец собирает integrated result перед QA.
+13. **Сбрасывайте derived `PASS` состояния при материальной правке upstream.** Если принятый upstream artifact был materially revised после того, как downstream artifacts уже получили `PASS`, lead отмечает затронутые derived artifacts на re-review до продолжения delivery. `PASS` не сохраняется автоматически после material upstream change.
+14. **Классифицируйте изменение перед routing.** Используйте `cosmetic`, `additive`, `behavioral` или `breaking-or-cross-cutting`, чтобы определить, насколько сильно lead должен маршрутизировать и gate'ить работу; `breaking-or-cross-cutting` должен усиливать routing, re-review затронутых downstream artifacts и ownership интеграции, когда это нужно.
+15. **Считайте core role map каноническим, но не исчерпывающим.** Role index называет только core team. Lead может выбрать narrower installed specialist вне core team, если он лучше подходит для scoped work, и может выбрать repo-local specialist только когда текущий repo/workspace явно задаёт или явно подразумевает его. Такое использование не добавляет специалиста в canonical team map автоматически.
+16. **Поддерживайте durable task memory для lead-routed работы.** Храните roadmap, brief, status и plan artifacts в repo-local storage, чтобы после прерывания можно было продолжить работу без зависимости от памяти сессии.
 
 ---
 
@@ -146,17 +147,20 @@ product-manager
 
 AI gates не заменяют внешнюю engineering policy.
 
+`PASS` от субагента всё равно требует проверки orchestrating owner'ом или следующим accountable gate перед тем, как стать accepted artifact.
+
 ### 3.8 Топология взаимодействия
 
 - Roadmap и intake по умолчанию идут через hub-and-spoke через `product-manager`.
 - Delivery по умолчанию идёт через hub-and-spoke через `lead`.
 - Существенный drift scope, priority или milestone возвращается через `lead` к `product-manager` для re-intake.
 - Субагенты обмениваются принятыми артефактами, а не прямыми peer task assignments.
+- Orchestrating owner проверяет artifacts и evidence субагента перед тем, как считать `PASS` или summary accepted handoff.
 - Недостающее evidence следует вернуть к factual-роли через orchestrating owner до продолжения interpretive work.
 - Если роль не согласна с upstream artifact, она возвращает `REVISE` или `BLOCKED` orchestrating owner'у вместо приватного переписывания scope.
 - Reviewer'ы остаются независимыми и возвращают findings orchestrating owner'у, а не начинают напрямую управлять implementation.
 - Прямая specialist-to-specialist collaboration допустима только когда orchestrating owner явно одобряет edge, scope и границу артефакта.
-- `$consultant` — опциональная независимая advisory-роль; она может исполняться внешним провайдером или внутренним независимым subagent, но никогда не становится delivery gate. Репозиторий может явно запросить consultant input на closeout, но `consultantMode: disabled` снимает использование consultant вместо того, чтобы оставлять скрытый closeout-blocker, а любой запрошенный consultant sweep остаётся advisory-only и не заменяет review или human gates. Consultant включается через pack-local `agents-mode` file. Нет config-файла = disabled. Shared schema: `consultantMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalModelMode`, `externalGeminiFallbackMode`, `externalClaudeApiMode`; pack-local addendum может расширять её provider-specific fields, например более узкими line-specific override-полями. `consultantMode` управляет consultant в строгом наборе `external | internal | disabled`, `delegationMode: manual` оставляет explicit-request режим, `auto` оставляет обычное делегирование включённым по routing judgment, а `force` делает делегирование постоянным указанием везде, где есть подходящий specialist и рабочий tool path; `parallelMode: manual` оставляет обычный параллельный fan-out только по явному запросу, `auto` включает безопасный параллелизм по routing judgment, а `force` делает безопасный параллельный запуск постоянным указанием везде, где scopes независимы; `mcpMode: auto` оставляет решение об MCP на усмотрение агента, а `force` делает использование релевантных MCP явным постоянным указанием; флаги preference направляют eligible worker-side роли в `$external-worker`, а eligible review/QA-роли — в `$external-reviewer`, а `externalProvider` использует общий provider universe `auto | codex | claude | gemini`. `consultantMode: external` всегда external-only и не разрешает fallback на внутренний consultant path. `externalProvider: auto` разрешается через active named priority profile, а не через line-default asymmetry, не должен молча self-bounce'иться в тот же host provider и может честно уточняться только документированными repo-local routing rules или явными provider override. `externalPriorityProfile` выбирает именованную карту provider order, `externalPriorityProfiles` хранит per-profile lane order, `externalOpinionCounts` поднимает конкретные lanes выше дефолтного single-opinion режима, когда одного external мнения недостаточно, `externalModelMode` задаёт общий model-policy layer, а transport-ключи вроде `externalClaudeApiMode` остаются частью shared schema, а не отдельными provider'ами. `externalOpinionCounts` и brigade-routing остаются внешним overlay поверх общего правила `parallelMode`. Pack-local addendum может задавать детали разрешённого wrapper transport для таких путей, но сам transport всё равно остаётся внутри выбранного provider, а не превращается в нового provider'а.
+- `$consultant` — опциональная независимая advisory-роль; она может исполняться внешним провайдером или внутренним независимым subagent, но никогда не становится delivery gate. Репозиторий может явно запросить consultant input на closeout, но `consultantMode: disabled` снимает использование consultant вместо того, чтобы оставлять скрытый closeout-blocker, а любой запрошенный consultant sweep остаётся advisory-only и не заменяет review или human gates. Consultant включается через pack-local `agents-mode` file. Нет config-файла = disabled. Shared schema: `consultantMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalModelMode`, `externalClaudeApiMode` и pack-local provider-specific fields. `consultantMode` управляет consultant в строгом наборе `external | internal | disabled`, `delegationMode: manual` оставляет explicit-request режим, `auto` оставляет обычное делегирование включённым по routing judgment, а `force` делает делегирование постоянным указанием везде, где есть подходящий specialist и рабочий tool path; `parallelMode: manual` оставляет обычный параллельный fan-out только по явному запросу, `auto` включает безопасный параллелизм по routing judgment, а `force` делает безопасный параллельный запуск постоянным указанием везде, где scopes независимы; `mcpMode: auto` оставляет решение об MCP на усмотрение агента, а `force` делает использование релевантных MCP явным постоянным указанием; флаги preference направляют eligible worker-side роли в `$external-worker`, а eligible review/QA-роли — в `$external-reviewer`, а `externalProvider: auto` использует только production-recommended providers. `consultantMode: external` всегда external-only и не разрешает fallback на внутренний consultant path. `externalProvider: auto` разрешается через active named production priority profile, а не через line-default asymmetry, не должен молча self-bounce'иться в тот же host provider и может честно уточняться только документированными repo-local routing rules или явными provider override. Example-only providers вроде Gemini и Qwen могут документироваться как explicit demonstration paths, но не должны попадать в shipped production `auto` profiles. `externalPriorityProfile` выбирает именованную карту provider order, `externalPriorityProfiles` хранит per-profile lane order, `externalOpinionCounts` поднимает конкретные lanes выше дефолтного single-opinion режима, когда одного external мнения недостаточно, а `externalModelMode` задаёт общий model-policy layer. Pack-local addendum может определять supplemental profile candidates вроде `claude-secret`, но такие candidates не являются scalar providers и обязаны соблюдать lane restrictions. `externalOpinionCounts` и brigade-routing остаются внешним overlay поверх общего правила `parallelMode`.
 - `$external-worker` и `$external-reviewer` — это двусторонние external adapters, а не новые узкие профессии. Каждый pack определяет provider path и runtime invocation details в local addendum. Сам adapter не делает silent fallback на внутреннего specialist. Если внешний CLI недоступен, роль считается disabled, а orchestrator может reroute'ить работу в обычную internal role.
 - Независимые external adapters могут работать параллельно, если их scopes не пересекаются, их artifacts не конфликтуют, а выбранные provider runtimes поддерживают concurrent non-interactive execution. Если native internal thread или slot limit иначе блокирует дополнительные независимые eligible lanes, предпочитайте доступные external adapters вместо тихой сериализации или потери lane.
 - External routing разрешается в порядке `role eligibility -> provider selection -> CLI availability`. Не проверяйте доступность провайдера, пока не подтверждено, что работа вообще относится к consultant-advisory, worker-side или review/QA-side bucket.
@@ -717,9 +721,10 @@ lead -> product-manager -> lead
 - **Change-surface minimization amendment:** добавляйте или обновляйте тесты только там, где они материально верифицируют изменённое поведение или контракт; не добавляйте спекулятивно несвязанное тестовое покрытие.
 - **Readability amendment:** перед модификацией функции или интерфейса проверьте ближайшие call sites и зависимости — локальный fix, который ломает вызывающий код, не является fix-ом. (Примечание: Local-reasoning test объединён в это правило.)
 - **Contract test amendment:** сохраняйте существующие внешние контракты по умолчанию. Не вводите breaking changes, если пользователь или admitted scope явно не авторизует их; если breakage авторизован, назовите затронутые поверхности и impact миграции или deprecation.
-- **Evidence-based completion amendment:** никогда не говорите "fixed" или "done" для непроверенной работы; используйте "implemented, not yet verified" до тех пор, пока evidence не подтвердит fix.
+- **Evidence-based completion amendment:** никогда не говорите "fixed" или "done" для непроверенной работы; используйте "implemented, not yet verified" до тех пор, пока evidence не подтвердит fix. Success reports от agents или subagents недостаточны сами по себе; проверяйте их artifacts и заявленные checks против текущего workspace evidence.
 - **Ambiguity resolution discipline:** не угадывайте; проверяйте. Разрешайте фактическую неоднозначность путём инспекции кода, конфигурации, данных, документации, installed artifacts, runtime behavior или других canonical sources. Если неоднозначность касается intent пользователя и инспекция не может её разрешить, либо спросите, либо действуйте с наименьшим безопасным reversible подмножеством, которое не фиксирует неразрешённый выбор. Implementation-relevant решения должны прослеживаться к verified evidence или явной инструкции пользователя.
 - **Canonical-source maintenance discipline:** если изменение затрагивает поведение, policy, workflow, schema конфигурации, runtime layout или другой документированный source of truth, обновляйте владеющий canonical artifact в том же изменении, а не оставляйте репозиторий со stale competing guidance. Если ownership неясен, явно зафиксируйте этот gap и обновите самый узкий подтверждённый canonical surface вместо дублирования правила.
+- **Documentation terminology amendment:** когда создаёте или materially updating human-facing document, завершайте его разделом `## Термины и сокращения` или локализованным аналогом, если документ использует domain terms, role names, provider/model names, workflow labels, acronyms или English terms, которые могут быть неочевидны intended reader'у. В этом разделе расшифровывайте и кратко объясняйте такие термины, особенно English abbreviations и mixed-language terms в non-English documents.
 - **Explicit bounds for background and fan-out work:** не создавайте долгоживущие фоновые процессы, автоматизацию вне прямого пути запроса или network listeners без явного одобрения пользователя. Обоснуйте и спросите перед реализацией.
 - **Autonomous external side effects:** не создавайте тикеты, не отправляйте сообщения, не публикуйте во внешние сервисы, не мутируйте состояние SaaS или cloud, не запускайте действия, видимые третьим сторонам, без явного одобрения пользователя.
 
@@ -820,6 +825,7 @@ accessibility-reviewer
 - Требуйте один ясный артефакт на шаг.
 - Держите один source of truth для brief, решений, budgets, constraints, phase plan и status.
 - Не двигайте процесс дальше, пока текущий артефакт не принят.
+- Завершайте terminology-heavy human-facing documents разделом терминов и сокращений.
 
 ---
 
@@ -828,8 +834,27 @@ accessibility-reviewer
 > **Разделяйте subagents по стадии работы и по типу риска.**  
 > **Architecture, algorithms, numerics, performance, security, quality, maintainability, repository hygiene и toolchain integrity должны иметь ясного owner'а или reviewer'а всякий раз, когда цена отказа это оправдывает.**  
 > **Субагент не получает задачу «сделай фичу». Он получает роль, минимальный контекст, ограниченные инструменты, один артефакт и явный критерий приемки.**  
-> **Ни один результат не двигается дальше, пока соответствующий gate не пройден.**
+> **Ни один результат не двигается дальше, пока соответствующий gate не пройден, а отчеты субагентов не проверены по фактическому evidence.**
 
 Короткая формула команды:
 
 > **Одна роль. Один артефакт. Один gate. Один явный владелец на каждый критичный риск.**
+
+### Термины и сокращения
+
+- `accepted artifact`: артефакт, который прошёл обязательный gate и может использоваться downstream-ролями.
+- `ADR`: Architecture Decision Record; долговечный документ, фиксирующий архитектурное решение, контекст и последствия.
+- `artifact`: конкретный рабочий результат: brief, memo, design, plan, patch, review или closure note.
+- `BLOCKED`: состояние workflow для реального внешнего blocker'а, недоступного prerequisite или отсутствующего required decision.
+- `CI`: Continuous Integration; автоматизированные repository checks, например builds, linters и tests.
+- `gate`: acceptance checkpoint, который проверяет, можно ли двигать artifact дальше.
+- `lead`: orchestration role, которая маршрутизирует работу, отслеживает artifacts и принимает или отклоняет gates.
+- `PASS`: состояние workflow, означающее, что scoped artifact прошёл relevant gate.
+- `QA`: Quality Assurance; verification work, проверяющая behavior, regressions и acceptance criteria.
+- `REVISE`: состояние workflow, означающее возврат artifact той же роли для bounded correction.
+- `role`: узкая professional responsibility, назначенная agent'у или human participant.
+- `SLA`: Service-Level Agreement; внешнее reliability или performance commitment.
+- `SLO`: Service-Level Objective; внутренний reliability или performance target.
+- `subagent`: делегированный agent instance с узкой role, limited context, одним expected artifact и explicit gate.
+- `UI`: User Interface; user-facing interaction surface.
+- `UX`: User Experience; usability, flow, comprehension и interaction quality.

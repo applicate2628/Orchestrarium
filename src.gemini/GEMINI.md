@@ -3,9 +3,9 @@
 
 # Gemini Provider Pack
 
-This file is the Gemini-native runtime entrypoint template for the Orchestrarium Gemini pack.
+This file is the Gemini-native runtime entrypoint template for the Orchestrarium Gemini example pack.
 
-Use this pack as a full Gemini-line runtime surface built on official Gemini entrypoints plus explicit Orchestrarium orchestration layers:
+Use this pack as an example-only Gemini-line runtime surface built on official Gemini entrypoints plus explicit Orchestrarium orchestration layers:
 
 - `GEMINI.md` is the native runtime instruction file.
 - Gemini CLI `/init` is the official way to create or refresh the project `GEMINI.md`.
@@ -26,5 +26,7 @@ Important distinctions:
 - orchestration stays in the main Gemini session under `skills/lead/SKILL.md` because Gemini subagents cannot recursively call other subagents
 - MCP servers such as Serena, Fetch, or Context7 remain a `.gemini/settings.json` or `gemini-extension.json` concern rather than a markdown-import concern
 - `.gemini/.agents-mode.yaml` is an Orchestrarium routing overlay, not a replacement for official Gemini settings
+- this repository classifies Gemini as `WEAK MODEL / NOT RECOMMENDED`; shipped `externalProvider: auto` profiles stay on `codex | claude` only
+- explicit `externalProvider: gemini` is a manual example or compatibility path only, not a production recommendation
 - decision-driving reads of `.gemini/.agents-mode.yaml` must normalize stale, comment-free, or older-layout overlays to the current canonical format before trusting flags
 <!-- ORCHESTRARIUM_GEMINI_PACK:END -->

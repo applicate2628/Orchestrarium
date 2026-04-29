@@ -1,6 +1,6 @@
 ---
 name: external-brigade
-description: Launch and aggregate a bounded brigade of parallel external helpers when multiple independent external lanes or slices should run together.
+description: Launch and aggregate a bounded parallel set of independent external helper lanes.
 ---
 
 # External Brigade
@@ -44,7 +44,7 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 1. Read and normalize `.agents/.agents-mode.yaml` before trusting any flags.
 2. Honor the current external routing fields, including:
    - `consultantMode` (allowed: `external | internal | disabled`; default: `disabled`)
-   - `externalClaudeApiMode` (allowed when Claude Code is the resolved provider for this run: `disabled | auto | force`; default: `auto`)
+   - `externalClaudeApiMode` (controls advisory/review-only `claude-secret`: `disabled | auto | force`; default: `auto`)
    - `parallelMode` (allowed: `manual | auto | force`; default: `auto`)
    - `externalProvider`
    - `externalPriorityProfile`
@@ -52,9 +52,7 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
    - `externalOpinionCounts`
    - `externalCodexWorkdirMode`
    - `externalClaudeWorkdirMode`
-   - `externalGeminiWorkdirMode`
    - `externalModelMode`
-   - `externalGeminiFallbackMode`
    - `externalClaudeProfile`
 3. Reject unsupported owner routes before provider resolution.
 4. Keep `parallelMode` as the general helper fan-out rule. Brigade launch is an explicit bounded overlay on top of that rule, not a second general concurrency model.
@@ -77,7 +75,7 @@ The launch table must keep these columns explicit:
 
 | Item | Execution role | Assigned / replaced internal role | Requested provider | Resolved provider | Scope | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
+| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini | qwen>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
 
 ## Gate rules
 

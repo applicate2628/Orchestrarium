@@ -62,8 +62,8 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - If the requested work is not advisory consultant work, worker-side work, or review/QA-side work, fail fast instead of probing provider availability.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`.
 - An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The lead must say the route is unsupported and reroute honestly.
-- `externalProvider: auto` is the ordinary default only; explicit user override or documented repo-local heuristics may still choose a different honest provider for the task domain.
-- The shipped shared profiles do not hardwire Gemini-first visual routing. If a clearly visual worker or review lane should prefer Gemini, do that through an explicit provider override or a repo-local custom profile.
+- `externalProvider: auto` is the ordinary default only; it resolves through the active production profile and uses shipped production providers `codex | claude` only. Explicit user override or documented repo-local heuristics may still choose a different honest provider for the task domain.
+- The shipped shared profiles do not hardwire example-only providers into visual lanes. If a clearly visual worker or review lane should demonstrate Qwen, or deliberately use the weaker/not-recommended Gemini path, do that through a scalar explicit provider override only; do not place Gemini or Qwen inside `externalPriorityProfiles`.
 - `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external fan-out is one overlay on top of that rule.
 - Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support it. If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters over silent serialization or dropped lanes.
 - Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the lead may launch repeated same-provider external helpers concurrently.
@@ -120,7 +120,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - Graphics work with hard frame, memory, or GPU budgets:
   `lead -> analyst -> architect -> performance-engineer -> planner -> graphics-engineer -> qa-engineer -> performance-reviewer -> lead`
 - Decorative visual, icon, or image-generation-heavy work:
-  `lead -> analyst -> architect -> planner -> external-worker (Gemini preferred when the lane is genuinely visual) -> external-reviewer / qa-engineer -> lead`
+  `lead -> analyst -> architect -> planner -> external-worker (explicit example-only provider override when the lane is genuinely decorative visual) -> external-reviewer / qa-engineer -> lead`
 - Bounded bundle of independent external helper lanes:
   `lead -> external-brigade -> lead`
 - Scientific or data-visualization work:

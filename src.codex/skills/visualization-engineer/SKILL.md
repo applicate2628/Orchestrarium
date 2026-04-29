@@ -1,6 +1,6 @@
 ---
 name: visualization-engineer
-description: Implement an approved scientific or data-visualization phase without redefining the domain model or rendering stack. Use when Codex needs charts, plots, overlays, scientific 2D or 3D views, exploration interactions, color mapping, legends, axes, coordinate transforms, or visualization state that already has accepted research, design, constraints, and plan artifacts.
+description: "Implement approved scientific or data visualization: charts, plots, overlays, axes, legends, coordinates, and exploration."
 ---
 
 # Visualization Engineer
@@ -32,7 +32,7 @@ description: Implement an approved scientific or data-visualization phase withou
 - Prefer visual fidelity to the approved domain model over cosmetic convenience.
 - Make units, color-scale choices, coordinate transforms, and aggregation assumptions explicit.
 - Escalate conflicts between domain truth and visual design instead of silently biasing the visualization.
-- Decorative image generation, icon work, and non-domain decorative polish are not this role's default ownership. When the lane is primarily visual styling rather than truthful scientific or data representation, the orchestrator may use an explicit Gemini route or an explicitly Gemini-routed `$external-worker`.
+- Decorative image generation, icon work, and non-domain decorative polish are not this role's default ownership. When the lane is primarily visual styling rather than truthful scientific or data representation, the orchestrator may use an explicit example-only provider route such as Qwen, or the weaker/not-recommended Gemini path.
 
 ## Adjacent findings protocol
 

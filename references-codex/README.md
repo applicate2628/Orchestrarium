@@ -21,3 +21,7 @@ Use together with:
 - [../docs/README.md](../docs/README.md) for the common branch-level docs index
 - [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) for shared operator semantics when the Codex line matters
 - [../src.codex/README.md](../src.codex/README.md) for the Codex source tree
+
+Provider-backed external CLI prompt delivery inherits the shared file-based prompt rule; use the Codex dispatch docs for the exact Codex-line runtime contract.
+
+Codex skill frontmatter descriptions are startup metadata, not the full role contract. Keep detailed trigger logic and gate rules in each `SKILL.md` body; the Codex validator enforces the compact metadata budget so installed skill catalogs do not overflow the startup skill-description context.

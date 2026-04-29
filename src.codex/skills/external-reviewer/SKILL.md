@@ -1,6 +1,6 @@
 ---
 name: external-reviewer
-description: Review approved Codex work through an external provider when the routing decision selects the external adapter for an eligible reviewer or QA role. Use when Codex needs a universal review/QA adapter with fail-fast handling and no role-internal fallback.
+description: Run eligible review or QA work through the selected external provider with clear provenance and fail-fast handling.
 ---
 
 # External Reviewer
@@ -27,25 +27,25 @@ description: Review approved Codex work through an external provider when the ro
 - Read the effective Codex overlay first.
 - Resolve in this order: local `.agents/.agents-mode.yaml`, local legacy `.agents/.agents-mode`, global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`.
 - Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file or synthesize a local override on read alone.
-- `externalProvider: auto` resolves by the active priority profile and opinion-count policy, then applies explicit-only self-provider exclusion and CLI availability.
+- `externalProvider: auto` resolves by the active production priority profile and opinion-count policy, then applies explicit-only self-provider exclusion and CLI availability. Shipped `auto` profiles use `codex | claude` only.
 - `externalProvider: codex` routes the same adapter through Codex CLI instead.
 - `externalProvider: claude` routes the same adapter through Claude CLI instead.
 - `externalProvider: gemini` routes the same adapter through Gemini CLI instead.
+- `externalProvider: qwen` routes the same adapter through Qwen Code instead.
 - Check the selected provider first:
   - Codex path: `codex`
   - Claude path: `claude`, `claude.exe`, or `claude.cmd`
   - Gemini path: `gemini`
+  - Qwen path: `qwen`
 - Honor `externalClaudeProfile` only when the selected provider is Claude. On the Codex line, this is a narrower override than the shared `externalModelMode`: `sonnet-high` maps to `--model sonnet --effort high`; `opus-max` maps to `--model opus --effort max`.
-- Honor `parallelMode`, `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts` when `externalProvider: auto` is in effect. Multi-opinion lanes collect fail-closed rather than silently dropping shortfalls, and Gemini can be selected outside visual lanes when the active profile ranks it there.
+- Honor `parallelMode`, `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts` when `externalProvider: auto` is in effect. Multi-opinion lanes collect fail-closed rather than silently dropping shortfalls, and example-only providers stay out of shipped `auto` profiles.
 - `parallelMode` is the general helper fan-out rule across internal and external lanes; `externalOpinionCounts` governs distinct-provider opinions for one lane and does not cap how many same-provider review instances may run in parallel for different disjoint lanes or slices.
-- Honor `externalModelMode` before provider-specific model fallbacks: `runtime-default` keeps the selected provider on its runtime default model/profile; `pinned-top-pro` uses the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion.
-- When `externalModelMode: pinned-top-pro` and the selected provider is Gemini, `externalGeminiFallbackMode` controls the explicit Gemini path: `disabled` keeps `gemini-3.1-pro` only; `auto` starts on `gemini-3.1-pro` and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures; `force` starts on `gemini-3-flash` immediately.
-- Treat `gemini-3-flash` as a bounded mechanical overflow path only. `externalGeminiFallbackMode: force` is for tightly scoped low-reasoning work, not for broad reasoning or cleanup just to save tokens.
-- Honor `externalClaudeApiMode` when the selected provider is Claude: `auto` keeps the installed secret-backed Claude wrapper as the named fallback after the allowed Claude CLI path is exhausted; `force` uses that wrapper-backed path as the primary Claude transport immediately.
-- Treat the secret-backed Claude wrapper as the approved economical near-full-strength Claude transport. `force` is an explicit budget choice as well as a limit fallback.
-- Use stdin or a file for the prompt; do not pass multiline prompts as direct command-line arguments.
-- If the selected Claude CLI path fails after its allowed retries and `externalClaudeApiMode` permits the Claude API path, try the installed secret-backed wrapper before treating Claude as unavailable.
-- If the provider is missing, unauthenticated, or errors after the allowed Claude path and any permitted secret-backed Claude transport, stop and return `BLOCKED:dependency` with the reason.
+- Honor `externalModelMode` before provider-specific model fallbacks: `runtime-default` keeps the selected provider on its runtime default model/profile; `pinned-top-pro` uses the strongest documented production-provider model/profile and allows one named same-provider fallback on retryable provider exhaustion where the production contract defines one.
+- Honor `externalClaudeApiMode` only for the supplemental `claude-secret` reviewer/QA profile candidate: `auto` allows it when a `review.*` order reaches `claude-secret` after primary `claude`/`codex`, and `force` keeps it available for review lanes even when plain Claude is unavailable. It is not a retry for primary Claude and does not let the reviewer adapter edit files or take implementation ownership.
+- Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths. Neither example-only provider gains separate shared production fallback keys in this pack.
+- Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
+- If the selected primary Claude CLI path fails, do not silently convert that same run to the wrapper. A review lane may later collect `claude-secret` as a separate profile candidate when enabled; otherwise stop with the provider reason.
+- If the provider is missing, unauthenticated, or errors after the allowed resolved provider path, stop and return `BLOCKED:dependency` with the reason.
 - Where Codex is the selected provider, do not treat `gpt-5.3-codex-spark` as the ordinary cheaper mode. It remains a bounded mechanical overflow path for fully autonomous low-reasoning work only.
 - This adapter is a direct external launch contract. Do not spawn it as an internal specialist or helper; the orchestrator must launch the selected external provider directly or fail closed.
 - Do not silently fall back to an internal reviewer or to `$consultant`.
@@ -59,9 +59,9 @@ description: Review approved Codex work through an external provider when the ro
 Provenance header:
 - `Execution role: external-reviewer`
 - `Assigned / replaced internal role: <eligible internal reviewer or QA role>`
-- `Requested provider: <internal | codex | claude | gemini>`
-- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | none>`
-- `Actual execution path: <external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | role disabled>`
+- `Requested provider: <internal | codex | claude | gemini | qwen>`
+- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>`
+- `Actual execution path: <external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role disabled>`
 - `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
 - `Deviation reason: <none | external unavailable: [reason] | explicit override>`
 

@@ -1,6 +1,6 @@
 ---
 name: consultant
-description: Provide an independent advisory memo for the lead without becoming a reviewer, approver, or delivery owner. Use when Codex needs a non-blocking second opinion on tradeoffs, ambiguity, or cross-cutting concerns before choosing a route.
+description: Give non-blocking advice to the lead on tradeoffs, ambiguity, or cross-cutting concerns; never approve gates.
 ---
 
 # Consultant
@@ -41,16 +41,14 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 - `externalOpinionCounts`
 - `externalCodexWorkdirMode`
 - `externalClaudeWorkdirMode`
-- `externalGeminiWorkdirMode`
 - `externalModelMode`
-- `externalGeminiFallbackMode`
 - `externalClaudeApiMode`
 - `externalClaudeProfile`
 
 Read and normalize the effective Codex overlay before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode`. Normalize whichever file supplied the effective config in place and do not recreate any legacy file.
 
-When changing `consultantMode`, preserve the other keys, including the profile, opinion-count, workdir, model-policy, Gemini-fallback, transport, Claude-profile, and general `parallelMode` fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `externalClaudeApiMode` to `auto`, `delegationMode` to `manual`, `parallelMode` to `auto`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` / `externalGeminiWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, `externalGeminiFallbackMode` to `auto`, and `externalClaudeProfile` to `opus-max` unless the user explicitly requested a different Claude profile override.
+When changing `consultantMode`, preserve the other keys, including the profile, opinion-count, workdir, model-policy, transport, Claude-profile, and general `parallelMode` fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `externalClaudeApiMode` to `auto`, `delegationMode` to `manual`, `parallelMode` to `auto`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, and `externalClaudeProfile` to `opus-max` unless the user explicitly requested a different Claude profile override.
 Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 
 ## When to invoke
@@ -81,8 +79,8 @@ Do not invoke for:
 - Every consultant memo must include a provenance header:
   - **Execution role:** `consultant`
   - **Assigned / replaced internal role:** `none`
-  - **Requested provider:** <internal | claude | gemini>
-  - **Resolved provider:** <Claude CLI | Gemini CLI | none>
+  - **Requested provider:** <internal | codex | claude | gemini | qwen>
+  - **Resolved provider:** <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>
   - **Requested consultant mode:** <external | internal | disabled>
   - **Actual execution path:** <internal consultant | external CLI (provider name) | role-play (violation)>
   - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
@@ -107,8 +105,10 @@ See the shared dispatch contract in [../lead/external-dispatch.md](../lead/exter
 
 Check the selected provider first:
 
+- Codex path: `codex`
 - Claude path: `claude` (macOS/Linux) or `claude.exe` / `claude.cmd` (Windows)
 - Gemini path: `gemini`
+- Qwen path: `qwen`
 
 If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfile`, map it as follows:
 
@@ -116,56 +116,45 @@ If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfil
 - `opus-max` → `--model opus --effort max`
 - key missing → use the current default Claude CLI invocation for this pack unless `externalModelMode: pinned-top-pro` requests the stronger Claude path
 
-If `.agents/.agents-mode.yaml` selects Gemini (`externalProvider: gemini`), honor `externalModelMode` first.
+Honor `externalModelMode` before provider-specific transport selection:
 
-- `runtime-default` → use Gemini CLI without forcing an explicit model/profile override.
-- `pinned-top-pro` → use Gemini CLI in non-interactive mode starting from the explicit Pro path below.
-
-Pinned Gemini example:
-
-**Windows / macOS / Linux:**
-```bash
-printf '%s' "$PROMPT" | gemini -p "" --model gemini-3.1-pro --approval-mode yolo
-```
-
-Gemini fallback mode under `externalModelMode: pinned-top-pro`:
-- If `externalGeminiFallbackMode: disabled`, use `gemini-3.1-pro` only. If that call fails, disclose Gemini unavailability instead of switching models or providers silently.
-- If `externalGeminiFallbackMode: auto`, run the first Gemini call with `gemini-3.1-pro`. If that call fails with quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures, rerun the same one-line Gemini command once with `--model gemini-3-flash`.
-- If `externalGeminiFallbackMode: force`, use `gemini-3-flash` as the primary Gemini model immediately instead of spending time on a preceding `gemini-3.1-pro` attempt.
+- `runtime-default` → keep the selected provider on its native runtime default model/profile.
+- `pinned-top-pro` on the Codex line → use `gpt-5.4 --reasoning-effort xhigh` for consultant work. Do not downgrade consultant memos to `gpt-5.3-codex-spark`.
+- Gemini and Qwen routes stay manual demonstration or compatibility paths only. Both are `WEAK MODEL / NOT RECOMMENDED` example-only routes, and this pack does not add shared production fallback keys for them.
 
 Examples:
 
 **macOS / Linux:**
 ```bash
-printf '%s' "$PROMPT" | claude -p --model sonnet --effort high --permission-mode bypassPermissions
-printf '%s' "$PROMPT" | claude -p --model opus --effort max --permission-mode bypassPermissions
+claude -p --model sonnet --effort high --permission-mode bypassPermissions < "$PROMPT_FILE"
+claude -p --model opus --effort max --permission-mode bypassPermissions < "$PROMPT_FILE"
 ```
 
 **Windows (Git Bash inside Codex):**
 ```bash
-printf '%s' "$PROMPT" | cmd.exe /c claude.exe -p --model sonnet --effort high --permission-mode bypassPermissions
-printf '%s' "$PROMPT" | cmd.exe /c claude.exe -p --model opus --effort max --permission-mode bypassPermissions
+cmd.exe /c claude.exe -p --model sonnet --effort high --permission-mode bypassPermissions < "$PROMPT_FILE"
+cmd.exe /c claude.exe -p --model opus --effort max --permission-mode bypassPermissions < "$PROMPT_FILE"
 ```
 Fallback if `claude.exe` is not on PATH: use `claude.cmd` instead.
 
-Claude API transport:
-- If `externalClaudeApiMode: auto`, treat the installed secret-backed Claude wrapper as the named secondary Claude transport after the allowed Claude CLI path is exhausted.
-- If `externalClaudeApiMode: force`, use that wrapper-backed path as the primary Claude transport immediately instead of spending time on a preceding Claude CLI call.
-- The secret-backed Claude path must preserve the same provider intent and requested profile/model family; it is a Claude transport change, not a provider switch.
+Claude secret advisory candidate:
+- If an advisory profile order reaches `claude-secret`, `externalClaudeApiMode: auto` allows the installed secret-backed Claude wrapper after primary `claude`/`codex` candidates have been considered.
+- If an advisory profile order reaches `claude-secret`, `externalClaudeApiMode: force` keeps that supplemental candidate available even when plain Claude is unavailable; it still does not skip earlier profile candidates or replace primary `claude`.
+- The secret-backed Claude path is a weaker supplemental advisory candidate, not a scalar provider and not a fallback, retry, or transport swap for a failed primary Claude run.
 
 **Rules:**
 - If `externalClaudeProfile` is present, use it instead of improvising a different Claude model or effort level.
-- If `externalProvider: gemini` is selected, do not silently reroute to Claude; honor `externalModelMode` first, then any allowed Gemini same-provider fallback, and disclose provider failure explicitly if the route still fails.
+- If `externalProvider: gemini` or `externalProvider: qwen` is selected, keep the route explicit. Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED` example-only routes, and neither route should be described as shipped production `auto`.
 - If the requested Claude profile is unavailable because of auth, client support, or non-limit CLI failures, treat that as external-provider unavailability and return an unavailable memo.
-- If the requested Claude profile fails on the plain Claude CLI path because of CLI availability, auth, plan limits, quota, or reset-style errors and `externalClaudeApiMode` permits the Claude API path, try the installed secret-backed wrapper before declaring Claude unavailable. Do not silently downgrade to another Claude profile.
-- If `externalClaudeApiMode` requires the Claude API path and that wrapper is unavailable, disclose a dependency/config failure instead of pretending the Claude path was complete.
-- If Gemini returns quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style errors, honor `externalGeminiFallbackMode`: `auto` allows one retry on `gemini-3-flash`, while `force` treats the already-flash primary call as the full allowed Gemini path. Do not silently downgrade below Gemini 3 or switch providers.
-- Do not pass multiline prompts as direct command-line arguments — use `stdin` or a file.
+- If the requested primary Claude profile fails on the plain Claude CLI path, do not silently convert that same run to the wrapper. Advisory lanes may later collect `claude-secret` as a separate profile candidate when enabled; otherwise return an unavailable memo.
+- If an advisory route resolves to `claude-secret` and that wrapper is unavailable, disclose a dependency/config failure instead of pretending the advisory path was complete.
+- If an example-only Gemini or Qwen route fails, disclose provider failure explicitly instead of inventing a hidden production fallback or silently switching providers.
+- Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
 - Do not use TTY when a non-interactive invocation is available.
 - On Windows, keep command-line prompts short enough to avoid `cmd.exe` truncation.
 - On Windows, keep the ordinary shell path unchanged and try the native Windows shell first. If that shell path fails because of shell bootstrap, execution-policy, or environment-policy problems, retry once through Git-for-Windows Bash / MSYS when available. Do not use the WSL `bash.exe` stub as a fallback, and do not reinterpret ordinary provider auth, quota, or model failures as shell-fallback triggers.
 - Wait 5–15 minutes before treating a single advisory run as stalled. Do not launch a duplicate advisory call for the same memo while the first may still be running; independent external lanes may still run in parallel when their scopes are disjoint and the routing contract allows it.
-- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note, including the resolved `externalClaudeApiMode`, whether the wrapper-backed Claude path was attempted, and how it ended. Do not silently fall back; return an unavailable memo and require the lead to keep routing honest.
+- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note, including whether the failing candidate was primary `claude` or supplemental `claude-secret`. Do not silently fall back; return an unavailable memo and require the lead to keep routing honest.
 
 ### No implicit fallback
 

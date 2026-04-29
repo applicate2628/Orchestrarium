@@ -1,24 +1,25 @@
-description = "Summarize the Gemini provider-pack structure, role surface, and orchestration layers."
+description = "Summarize the Gemini example-pack structure, role surface, and orchestration layers."
 prompt = """
 Read GEMINI.md, README.md, skills/README.md, skills/lead/SKILL.md, and agents/lead.md.
 
 Summarize:
-- the current Gemini provider-pack structure
+- the current Gemini example-pack structure
 - the role of GEMINI.md
 - the distinction between stable skills and preview specialist agents
 - the role of agents/team-templates in the shared role principle
 - why Gemini orchestration stays in the main session under the lead skill
 - why external routing must check role eligibility before provider or CLI feasibility
 - how the three external roles split advisory, worker-side, and review-side substitution
-- how `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts` switch between `balanced` and `gemini-crosscheck`
+- how `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts` shape `auto` routing under the shipped `balanced` profile and any repo-local production profile
 - how multi-opinion external lanes fail closed when the requested opinion count cannot be satisfied
 - how `external-brigade` launches a bounded parallel helper set without turning `externalOpinionCounts` into a generic concurrency cap
 - how the same external helper and provider may be reused across multiple disjoint brigade items when the runtime supports concurrent non-interactive execution
 - which owner roles remain unsupported without a dedicated external owner adapter
-- that Gemini-first visual routing now requires an explicit provider override or a repo-local custom profile rather than a hidden shipped heuristic
-- how the shared `externalModelMode` distinguishes runtime-default provider selection from pinned top-model execution
-- how `externalGeminiFallbackMode` only applies under pinned Gemini runs, keeping Gemini on `gemini-3.1-pro` or allowing a single retry on `gemini-3-flash` without dropping below Gemini 3
-- how `externalClaudeApiMode` changes Claude transport behavior when Gemini routes external work to Claude
+- that this repository classifies Gemini as `WEAK MODEL / NOT RECOMMENDED`
+- that shipped `externalProvider: auto` routing uses `codex | claude` only and keeps Gemini/Qwen out of production profiles
+- that explicit `externalProvider: gemini` or `externalProvider: qwen` remains a manual `WEAK MODEL / NOT RECOMMENDED` example or compatibility path only
+- how the shared `externalModelMode` distinguishes runtime-default provider selection from pinned top-model execution on the production provider paths
+- how `externalClaudeApiMode` controls only the advisory/review `claude-secret` candidate
 - the role of Gemini CLI /init, .gemini/settings.json, and .gemini/.agents-mode.yaml
 - the local command namespace
 """

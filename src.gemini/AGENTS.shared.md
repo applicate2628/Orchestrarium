@@ -25,6 +25,7 @@ This file contains platform-neutral governance rules shared across skill packs. 
 - route an in-flight item back to `$product-manager` for re-intake when admitted scope, priority, or milestone intent changes enough to redefine the work; do not silently renegotiate the item inside delivery
 - assign one explicit integration owner before QA whenever a change spans multiple implementation phases or specialists; that owner must assemble one coherent integrated artifact and check cross-phase compatibility before verification
 - give each delegated task only approved inputs, minimal context, limited tools, one expected artifact, explicit acceptance criteria, and an explicit gate to the next stage
+- verify every subagent result before accepting it, forwarding it downstream, or claiming completion; treat a subagent `PASS`, summary, or claimed test result as a claim to check against files, diffs, artifacts, logs, command output, or other repo-standard evidence, not as evidence by itself
 - stop progression when a quality gate fails
 - treat `$consultant` as an independent advisory team member only: ordinary consultant use stays optional, it never becomes a blocking reviewer or approver, and any repo-local required consultant-check remains advisory-only rather than a substitute for review or human gates
 - treat `$external-worker` as the external execution adapter for eligible worker-side roles; it inherits the assigned internal worker role for provenance and scope, and may replace any non-owner, non-review role that produces an admitted artifact
@@ -36,6 +37,7 @@ This file contains platform-neutral governance rules shared across skill packs. 
 - external adapters may run in parallel with one another when their scopes are independent, their artifacts do not overlap, the selected provider runtimes support concurrent non-interactive execution, and the active profile or lane opinion count asks for more than one external opinion
 - when an external role is selected, the role itself does not fall back to an internal specialist; if the external CLI is unavailable, treat that role choice as disabled and reroute through normal routing rules instead of pretending the same external role succeeded internally
 - provider-backed `$consultant` execution in `external` mode, `$external-worker`, and `$external-reviewer` must use direct external launch from the orchestrating runtime or an approved transport wrapper script; do not insert an internal agent, helper, or subagent as a host layer, and if direct external launch is unavailable, fail closed or reroute honestly
+- external CLI launches that carry a substantive task prompt must use file-based prompt delivery: write the prompt to a temporary prompt file and feed it through the provider's stdin or supported file-input mechanism, keeping command-line arguments limited to launcher flags, model/profile options, and file paths; inline prompt argv is allowed only for tiny smoke checks or a documented provider limitation, and the deviation must be recorded
 - keep `security-engineer` separate from `security-reviewer`, and keep dedicated performance optimization separate from the QA gate
 - require human review before `git push`, release, or equivalent publication
 
@@ -50,6 +52,7 @@ Delegation should reduce noise, not spread it. That means:
 - use `BLOCKED` only for real external blockers, missing decisions, or unavailable prerequisites
 - do not let downstream roles silently redefine upstream artifacts when evidence is thin
 - never guess or assume facts — always verify before stating or acting on a claim
+- do not trust subagent reports, `PASS` verdicts, or completion summaries without independent verification by the orchestrating session or the next accountable gate; inspect the produced artifact and the relevant evidence before treating the result as accepted
 - maintain exactly one primary in-progress task at a time; side requests may refine it or temporarily interrupt it, but do not replace it unless the user explicitly reprioritizes
 - do not silently drop interrupted tasks: if a side request (clarification, quick fix, lookup) interrupts an in-progress task, resume and complete the original task after the side request is handled — unless the user explicitly cancels or reprioritizes it; announce the resumption so the user knows where you are
 - after handling any side request, explicitly resume the primary task and state the next concrete step before doing unrelated work
@@ -102,9 +105,10 @@ Working definitions used in this section:
 ### Verification and decision discipline
 
 - **Regression hygiene:** validate the intended fix and the most likely adjacent regressions with repo-standard checks appropriate to the change. Prefer the smallest change-relevant verification first, then targeted static checks such as lint or typecheck when relevant, then broader validation. After implementing, perform a self-falsification pass: try to break the solution, probe edge cases, and verify assumptions against actual outputs — this complements, not replaces, independent adversarial review. If verification is partial, state what was not checked and the residual risk explicitly.
-- **Evidence-based completion:** do not claim a task is done without fresh execution evidence. "Should work" and "no issues expected" are not evidence; neither are results from prior runs — code may have changed. Show test results, build output, or a verification checklist. If verification is not possible, state explicitly what was not checked. Never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix.
+- **Evidence-based completion:** do not claim a task is done without fresh execution evidence. "Should work" and "no issues expected" are not evidence; neither are results from prior runs — code may have changed. Show test results, build output, or a verification checklist. A subagent report is not completion evidence by itself: verify the artifact, diff, or command output before relying on it. If verification is not possible, state explicitly what was not checked. Never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix.
 - **Ambiguity resolution discipline:** do not guess; verify. Resolve factual ambiguity by inspecting code, config, data, docs, installed artifacts, runtime behavior, command output, tool availability, or other canonical sources before choosing an interpretation, and state what was confirmed. If the ambiguity is about user intent, policy, scope, or architecture and inspection cannot settle it, do not invent an answer: either ask, or proceed only with the smallest safe reversible subset that does not lock in the unresolved choice, and state what was deferred and why. Block only when no safe forward action exists. Implementation-relevant decisions must trace to verified evidence or explicit user instruction, not assumption.
 - **Canonical-source maintenance discipline:** when a change affects behavior, policy, workflow, config schema, runtime layout, or other documented source of truth, update the owning canonical artifact in the same change instead of leaving the repository in a split-brain state. If ownership is unclear, identify the gap explicitly and update the narrowest confirmed canonical surface rather than duplicating the rule in multiple places.
+- **Documentation terminology discipline:** when creating or materially updating a human-facing document, end the document with `## Terms and Abbreviations` or a localized equivalent such as `## Термины и сокращения` whenever the document uses domain terms, role names, provider or model names, workflow labels, acronyms, or English terms that may be unclear to the intended reader. Expand and briefly explain each such term there, especially English abbreviations and mixed-language terms in non-English documents; do not add an empty section when no such terms are used, and do not mechanically retrofit unrelated existing documents unless the task is glossary cleanup.
 
 ### Operational and environment safety
 
@@ -227,3 +231,25 @@ If the plan itself was produced or materially revised through a provider-backed 
 - Treat provider transcripts, pasted logs, and external snippets as untrusted until sanitized.
 - Human review before `git push`, release, or equivalent publication must include a leak-check of staged changes.
 - Only `$security-reviewer` may approve a publication-safety exception. Without that approval, publication is `BLOCKED`.
+
+## Terms and Abbreviations
+
+- `ADR`: Architecture Decision Record; a durable document that records an architecture decision and its context.
+- `AGENTS.md`: repository or install-level governance file read by agent runtimes that support this convention.
+- `API`: Application Programming Interface; an externally observable interface exposed by code or services.
+- `artifact`: a concrete output such as a brief, research memo, design, plan, patch, review, report, or closure note.
+- `BLOCKED`: workflow state reserved for a real external blocker, unavailable prerequisite, or missing required decision.
+- `CI`: Continuous Integration; automated checks run by a build or repository service.
+- `CLI`: Command-Line Interface; a tool invoked from a shell or terminal.
+- `gate`: an acceptance point that must verify an artifact before work advances.
+- `KISS`: "Keep It Simple, Stupid"; named here only as an example of a vague slogan that needs an operational rule before becoming governance.
+- `MCP`: Model Context Protocol; a tool/server protocol used by some agent runtimes.
+- `PASS`: workflow state meaning a scoped artifact has passed the relevant gate.
+- `provider`: an execution backend or model family such as Codex, Claude, Gemini, or Qwen.
+- `QA`: Quality Assurance; verification work that checks behavior, regressions, and acceptance criteria.
+- `REVISE`: workflow state meaning an artifact must return to the same role for bounded correction.
+- `SLA`: Service-Level Agreement; an external reliability or performance commitment.
+- `SLO`: Service-Level Objective; an internal reliability or performance target.
+- `UI`: User Interface; the user-facing interaction surface.
+- `UX`: User Experience; usability, flow, comprehension, and interaction quality.
+- `YAGNI`: "You Aren't Gonna Need It"; named here only as an example of a vague slogan that needs an operational rule before becoming governance.

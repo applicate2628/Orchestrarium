@@ -17,6 +17,8 @@ Do not use `shared/references/` for:
 
 Exact operational instructions belong in the root repository docs and the corresponding agent pack runtime docs.
 
+Cross-provider dispatch invariants may be named here at design level. For example, provider-backed external CLI launches treat substantive prompt payloads as file-based inputs; exact provider commands and shell syntax stay in runtime pack docs.
+
 For exact provider runtime layout differences such as `global` vs `local` install roots, instruction entrypoints, and native command or extension directories, keep that reference outside `shared/references/`; the current canonical runtime-layout note lives in [`docs/provider-runtime-layouts.md`](../../docs/provider-runtime-layouts.md).
 
 Provider-specific reference trees such as `references-codex/` and `references-claude/` should keep only provider-specific material plus thin compatibility pointers when an older path must remain stable for existing links, reports, or notes.
@@ -26,4 +28,4 @@ Shared-core documents may still keep provider-local addenda when the shared blue
 Intentional pack-local exceptions:
 - `periodic-control-matrix` stays pack-local because it still embeds provider/runtime vocabulary, task-memory layout, and runtime-doc links rather than a generic shared skeleton.
 
-Future provider packs, including a possible Gemini pack, should reuse these shared cross-provider references as a foundation instead of creating another duplicated reference set, but may still need provider-local overlays, wrappers, or vocabulary mapping where a document is not yet fully pack-agnostic.
+Provider packs, including the current Gemini and Qwen example integrations, should reuse these shared cross-provider references as a foundation instead of creating another duplicated reference set, but may still need provider-local overlays, wrappers, or vocabulary mapping where a document is not yet fully pack-agnostic.

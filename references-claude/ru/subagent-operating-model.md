@@ -12,7 +12,7 @@
 
 - Claude runtime использует Agent tool и текущие Claude operator reference surfaces. Считайте этот файл локальным runtime addendum к shared blueprint, а не канонической полной копией методологии.
 - Consultant config живёт в `.claude/.agents-mode.yaml`.
-- Claude-line canonical config не включает `externalClaudeProfile`; Claude-side `externalProvider: auto` разрешается через active named priority profile, а не через жёсткий Codex-only default, а explicit provider selection может честно отправить eligible external work в Codex CLI, Claude CLI или Gemini CLI.
+- Claude-line canonical config не включает `externalClaudeProfile`; Claude-side `externalProvider: auto` разрешается через active named production priority profile, shipped production `auto` использует только `codex | claude`, а explicit provider selection всё ещё может честно отправить eligible external work в Codex CLI, Claude CLI, в слабый/не рекомендуемый Gemini CLI path или в Qwen Code как example-only route.
 - `$external-worker` и `$external-reviewer` dispatch'ят из Claude Code в провайдера, выбранного `.claude/.agents-mode.yaml`.
 
 ## Claude-side repository concretization

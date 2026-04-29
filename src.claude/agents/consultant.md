@@ -41,21 +41,20 @@ The local config file is `.claude/.agents-mode.yaml`. The canonical file may con
 
 ```yaml
 consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-externalClaudeApiMode: {value}  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
+externalClaudeApiMode: {value}  # controls advisory/review-only claude-secret candidate: disabled | auto | force; default: auto
 delegationMode: {value}  # allowed: manual | auto | force; default: manual
 parallelMode: {value}  # allowed: manual | auto | force; default: auto
 mcpMode: {value}  # allowed: auto | force; default: auto
 preferExternalWorker: {value}  # allowed: false | true; default: false
 preferExternalReviewer: {value}  # allowed: false | true; default: false
-externalProvider: {value}  # allowed here: auto | codex | claude | gemini; default: auto
-externalPriorityProfile: {value}  # allowed: balanced | gemini-crosscheck | <repo-local profile>; default: balanced
-externalPriorityProfiles: {...}  # structured profile map; default seed ships balanced + gemini-crosscheck
+externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
+externalPriorityProfile: {value}  # allowed: balanced | <repo-local production profile>; default: balanced
+externalPriorityProfiles: {...}  # structured profile map; default seed ships balanced only
 externalOpinionCounts: {...}  # structured lane-count map; default seed keeps documented lanes at 1
 externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-externalGeminiFallbackMode: {value}  # allowed when Gemini CLI is the resolved provider for this run: disabled | auto | force; default: auto
 ```
 
-`consultantMode` continues to govern consultant behavior. `externalClaudeApiMode` is the single Claude wrapper-transport knob: `disabled` keeps only plain Claude CLI, `auto` keeps plain Claude CLI first and allows one wrapper retry on Claude CLI/auth/usage-limit or quota-style failure, and `force` starts on the wrapper immediately. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may still be selected when the route is eligible. If a repository wants Gemini-first visual routing, express that through an explicit provider override or a repo-local custom profile. When the resolved provider is `gemini`, `externalModelMode` is the shared model-selection knob and `externalGeminiFallbackMode` controls the explicit pinned Gemini path. When the resolved provider is `claude`, `externalModelMode` may request the stronger Claude path while `externalClaudeApiMode` decides whether the approved wrapper is forbidden, secondary, or primary; plain Claude CLI never receives a later SECRET-backed retry outside that wrapper path. `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
+`consultantMode` continues to govern consultant behavior. `externalClaudeApiMode` controls only the supplemental `claude-secret` advisory/review profile candidate: `disabled` removes it, `auto` allows it when an advisory order reaches `claude-secret` after primary `claude`/`codex`, and `force` keeps that candidate available for advisory/review even when plain Claude is unavailable. It is independent of primary `claude` and is not a retry, fallback, or transport swap for a failed Claude CLI run. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default. Shipped `auto` stays on `codex | claude`; explicit `codex`, `claude`, `gemini`, or `qwen` may still be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths. `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
 
 Read and normalize `.claude/.agents-mode.yaml` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.claude/.agents-mode.yaml` and then global legacy `~/.claude/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
@@ -68,8 +67,8 @@ For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md]
 - Every consultant memo must include a provenance header:
   - **Execution role:** `consultant`
   - **Assigned / replaced internal role:** `none`
-  - **Requested provider:** <internal | codex | claude | gemini>
-  - **Resolved provider:** <Codex CLI | Claude CLI | Gemini CLI | none>
+  - **Requested provider:** <internal | codex | claude | gemini | qwen>
+  - **Resolved provider:** <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>
   - **Requested consultant mode:** <external | internal | disabled>
   - **Actual execution path:** <internal consultant | external CLI (provider name) | role-play (violation)>
   - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
@@ -108,45 +107,37 @@ Check the selected provider first:
 - Codex path: `which codex` on Unix, `where codex` on Windows, or `command -v codex`
 - Claude path: `claude`
 - Gemini path: `gemini`
+- Qwen path: `qwen`
 
 If Codex is selected:
 
 ```bash
-codex --quiet --full-auto "$PROMPT"
+codex --quiet --full-auto < "$PROMPT_FILE"
 ```
 
 - For hard tasks, use `--model gpt-5.4 --reasoning-effort xhigh`.
-- Prefer passing context via file references in the prompt rather than piping large artifacts through stdin.
+- `PROMPT_FILE` is a temporary file containing the full prompt payload. Prefer passing large context as file references inside that prompt rather than embedding raw artifacts.
 - Wait 5–15 minutes before treating a single advisory run as stalled. Do not launch a duplicate advisory call for the same memo while the first may still be running; independent external lanes may still run in parallel when their scopes are disjoint and the routing contract allows it.
 - If Codex is not installed, fails, times out, or hits quota/auth limits, do not silently degrade the consultant requirement. Return an unavailable memo and keep routing honest.
 
-If Claude is selected explicitly, `externalClaudeApiMode` still governs the Claude transport:
+If the advisory profile resolves to primary Claude, run the plain Claude CLI path:
 
 ```bash
-claude --quiet --full-auto "$PROMPT"
+claude --quiet --full-auto < "$PROMPT_FILE"
 ```
 
-- `externalClaudeApiMode: disabled` keeps this plain Claude CLI path only.
-- `externalClaudeApiMode: auto` tries the plain Claude CLI path first and, on Claude CLI/auth/usage-limit or quota-style failure, retries once through the approved wrapper transport.
-- `externalClaudeApiMode: force` starts on the approved wrapper transport immediately.
+- If the plain Claude CLI path fails, do not silently convert that same primary `claude` run to the wrapper.
+- If the advisory profile later resolves to `claude-secret`, `externalClaudeApiMode: auto` allows the approved wrapper after primary `claude`/`codex`; `force` keeps it available even when plain Claude is unavailable.
+- If `claude-secret` is unavailable or fails, return an unavailable memo and keep routing honest.
 - Do not silently downgrade from a selected Claude path to Codex or Gemini.
 
-If Gemini is selected explicitly, honor `externalModelMode` first.
+If Gemini or Qwen is selected explicitly, keep it explicit and example-only.
 
-- `runtime-default` leaves Gemini on its runtime default model/profile.
-- `pinned-top-pro` starts on the explicit Pro path below.
-
-Pinned Gemini example:
-
-```bash
-printf '%s' "$PROMPT" | gemini -p "" --model gemini-3.1-pro --approval-mode yolo
-```
-
-- If `externalGeminiFallbackMode: disabled`, keep `gemini-3.1-pro` only.
-- If `externalGeminiFallbackMode: auto`, retry once on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures.
-- If `externalGeminiFallbackMode: force`, start on `gemini-3-flash` immediately.
-- Do not silently downgrade from a selected Gemini path back to Codex.
-- Use stdin or a prompt file rather than trying to push a multiline prompt through a single command-line string.
+- Gemini remains `WEAK MODEL / NOT RECOMMENDED`.
+- Qwen remains an explicit native `WEAK MODEL / NOT RECOMMENDED` example-only path.
+- Use the native CLI surface without inventing separate shared production fallback keys in this pack.
+- Do not silently downgrade from a selected example-only path back to Codex or Claude.
+- Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
 
 ### No implicit fallback
 

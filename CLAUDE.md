@@ -52,9 +52,11 @@ When modifying `shared/AGENTS.shared.md`, `src.claude/CLAUDE.md`, `operating-mod
 - Treat `shared/references/subagent-operating-model.md` as the canonical shared blueprint and `references-claude/subagent-operating-model.md` only as the Claude-specific runtime and repository addendum. Do not reintroduce a second full Claude-side methodology copy in `references-claude/`.
 - **MUST** update `README.md` and `INSTALL.md` when pack structure, skill count, install targets, or entry points change. A structural change without doc update is incomplete.
 - **MUST** update `RELEASE_NOTES.md` in the same change when staged tracked content changes installed behavior, governance, routing, role contracts, install surface, developer or operator workflow, or other release-relevant user-facing expectations. Keep the log in reverse-chronological `## YYYY-MM-DD` sections: append new explanatory bullets under the current date heading or create today's heading if it is missing, and do not keep a long-lived `## Unreleased` bucket. The release-notes entry must explain the improvement, why it matters, and the affected user or operator workflow, not just list filenames or terse labels. Purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, and non-semantic wording cleanup do not require a release-notes entry, but that exemption must be an explicit reviewer determination at publication time rather than an untracked assumption.
+- When updating human-facing repo documentation, apply the shared documentation terminology discipline: end terminology-heavy documents with `## Terms and Abbreviations` or a localized equivalent, and explain unclear terms, abbreviations, provider names, role names, workflow labels, and mixed-language terms there.
 - **No mechanical application:** do not copy, move, rename, merge, or propagate content mechanically — between packs, between files, or within the same file — without verifying that the result is correct in the target context. Platform-specific semantics (execution model, parallelism, invocation mechanism, paths, tool capabilities), ownership boundaries, and behavioral implications must be checked before the change lands. "The other pack has it" or "the source file said so" is not sufficient justification. Every change must be independently valid where it lands.
 - **Cross-pack sync:** when editing shared semantic blocks in `operating-model.md` or `subagent-contracts.md`, consult [`cross-pack-reconciliation.md`](cross-pack-reconciliation.md) to identify and update the matching block in the other pack.
 - Keep `src.claude/agents/contracts/external-dispatch.md` aligned with `src.codex/skills/lead/external-dispatch.md` whenever the agents-mode schema, provider paths, provenance rules, or external dispatch semantics change.
+- For external CLI prompt behavior, keep provider-backed consultant, worker, and reviewer launches file-based: substantive task prompts go into a temporary prompt file fed through stdin or provider-supported file input; argv stays for flags, model/profile options, and file paths.
 - Run `/agents-validate` after changes.
 - Test install: `scripts/install-claude.ps1 -Global` and verify CLAUDE.md sections.
 
@@ -101,3 +103,20 @@ scripts/                 ← platform-specific installers
 - `src.claude/CLAUDE.md` must NOT contain repo-local content — that goes here
 - `$consultant` stays advisory-only; external execution and external review/QA belong to `$external-worker` and `$external-reviewer`
 - Team template JSON stays unchanged when external dispatch semantics change; routing substitutions belong in contracts and role docs
+
+## Terms and Abbreviations
+
+- `AGENTS.md`: the shared governance file imported by the Claude Code pack.
+- `AGENTS.shared.md`: the shared governance source merged into installable provider packs.
+- `API`: Application Programming Interface, a programmatic contract exposed by a tool, runtime, or service.
+- `argv`: the command-line argument vector passed to a process.
+- `CLAUDE.md`: the Claude Code-readable instruction file for a repository or installed pack.
+- `CLI`: Command-Line Interface, a terminal command surface such as `claude`, `codex`, or `gemini`.
+- `Codex`: the OpenAI Codex runtime and provider pack maintained by this repository.
+- `Claude Code`: Anthropic's Claude Code runtime and matching provider pack.
+- `Gemini`: the Google Gemini runtime/provider family; in this repository it is example-only unless explicitly selected.
+- `JSON`: JavaScript Object Notation, a structured data format used by team template files.
+- `MCP`: Model Context Protocol, a protocol used to expose tools and resources to agent runtimes.
+- `QA`: Quality Assurance, verification work focused on tests, regressions, and acceptance criteria.
+- `RELEASE_NOTES.md`: the tracked release log for release-relevant repository changes.
+- `stdin`: standard input, the input stream provided to a process.
