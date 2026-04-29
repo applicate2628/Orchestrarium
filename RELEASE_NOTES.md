@@ -15,6 +15,7 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 ### Changed
 
 - Added an explicit shared verification rule for subagent output: a subagent `PASS`, summary, or claimed test result is now treated as a claim that the orchestrating owner or next accountable gate must verify against files, diffs, artifacts, logs, command output, or other repo-standard evidence before accepting, forwarding, or using it for completion. This matters because parallel and external helper work should reduce latency without turning agent reports into unverified truth; the Codex, Claude, Gemini, and Qwen validators now check that the governance surface keeps this rule.
+- Added a shared visual-artifact verification rule for generated images, diagrams, drawings, renders, charts, plots, screenshots, CAD/exported drawings, and similar artifacts. These outputs now require actual visual inspection before acceptance, commit, user delivery, or evidentiary use; file existence, generation logs, metadata, hashes, and model claims are not enough. Pack validators now guard both the shared governance rule and the shared operating-model reference where that source is available. This matters because visual artifacts can be syntactically generated but visually blank, clipped, mislabeled, corrupted, or semantically wrong.
 - Added a shared documentation terminology rule for new and materially revised human-facing documents. Documents that use domain terms, role names, provider/model names, workflow labels, acronyms, or potentially unclear English terms now need a final `Terms and Abbreviations` section, or a localized equivalent, that expands and explains those terms. This matters because mixed English/Russian governance and skill-pack docs should remain readable to operators without forcing them to infer abbreviations from context; existing documents are not mechanically rewritten unless a glossary cleanup pass is explicitly in scope.
 
 ### Fixed
@@ -148,14 +149,17 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 - `AGENTS.md`: the Codex-readable governance and instruction file installed into a repository or provider home.
 - `API`: Application Programming Interface, a programmatic contract exposed by a tool, runtime, or service.
 - `Bash`: a Unix-style command shell used by the `.sh` installers.
+- `CAD`: Computer-Aided Design, software and file formats used for technical drawings, geometry, or engineered layouts.
 - `CLI`: Command-Line Interface, a terminal command surface such as `codex`, `claude`, or `gemini`.
 - `Codex`: the OpenAI Codex runtime and provider pack maintained by this repository.
 - `Claude Code`: Anthropic's Claude Code runtime and the matching provider pack maintained by this repository.
 - `Gemini CLI`: Google's Gemini command-line runtime and the example provider pack maintained by this repository.
+- `hash`: a deterministic digest of file bytes or content; useful for identity checks but not a substitute for visual inspection.
 - `HTTP`: Hypertext Transfer Protocol, the web protocol whose status codes include quota and rate-limit signals such as `429`.
 - `INSTALL.md`: this repository's installation guide.
 - `junction`: a Windows directory link that redirects one path to another path on disk.
 - `MCP`: Model Context Protocol, a protocol used to expose tools and resources to agent runtimes.
+- `metadata`: descriptive file or runtime information such as dimensions, timestamps, MIME type, or generator fields.
 - `MSYS`: a Windows POSIX-style shell/runtime family commonly used by Git Bash and similar tooling.
 - `PATH`: the operating-system environment variable used to find executable commands.
 - `PASS`: a gate or validator result meaning the checked artifact may proceed.
@@ -166,6 +170,7 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 - `SKILL.md`: the entrypoint file for a Codex skill definition.
 - `OneDrive-backed directory`: a directory stored under Microsoft OneDrive synchronization, where sync and hydration behavior can affect file access timing.
 - `UI`: User Interface, the visible or interactive surface presented to a user.
+- `visual artifact`: an image, diagram, drawing, render, chart, plot, screenshot, CAD/exported drawing, or similar visible output.
 - `WEAK MODEL / NOT RECOMMENDED`: the repository's classification for example-only providers that must stay out of production `auto` routing.
 - `WSL`: Windows Subsystem for Linux, a Linux compatibility environment on Windows.
 - `YAML`: YAML Ain't Markup Language, the structured data format used by files such as `.agents-mode.yaml`.

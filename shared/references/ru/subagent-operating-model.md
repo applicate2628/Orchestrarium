@@ -722,6 +722,7 @@ lead -> product-manager -> lead
 - **Readability amendment:** перед модификацией функции или интерфейса проверьте ближайшие call sites и зависимости — локальный fix, который ломает вызывающий код, не является fix-ом. (Примечание: Local-reasoning test объединён в это правило.)
 - **Contract test amendment:** сохраняйте существующие внешние контракты по умолчанию. Не вводите breaking changes, если пользователь или admitted scope явно не авторизует их; если breakage авторизован, назовите затронутые поверхности и impact миграции или deprecation.
 - **Evidence-based completion amendment:** никогда не говорите "fixed" или "done" для непроверенной работы; используйте "implemented, not yet verified" до тех пор, пока evidence не подтвердит fix. Success reports от agents или subagents недостаточны сами по себе; проверяйте их artifacts и заявленные checks против текущего workspace evidence.
+- **Visual artifact verification amendment:** для generated или exported visual artifacts добавляется обязательный evidence-шаг: нужно посмотреть сам визуальный результат. Нельзя принимать image, diagram, drawing, render, chart, plot, screenshot, CAD/exported drawing или похожий artifact только по факту существования файла, generation logs, metadata, hash или model claim. Используйте доступный viewer, renderer, screenshot path или repo-standard visual check и явно фиксируйте, если визуальная проверка невозможна.
 - **Ambiguity resolution discipline:** не угадывайте; проверяйте. Разрешайте фактическую неоднозначность путём инспекции кода, конфигурации, данных, документации, installed artifacts, runtime behavior или других canonical sources. Если неоднозначность касается intent пользователя и инспекция не может её разрешить, либо спросите, либо действуйте с наименьшим безопасным reversible подмножеством, которое не фиксирует неразрешённый выбор. Implementation-relevant решения должны прослеживаться к verified evidence или явной инструкции пользователя.
 - **Canonical-source maintenance discipline:** если изменение затрагивает поведение, policy, workflow, schema конфигурации, runtime layout или другой документированный source of truth, обновляйте владеющий canonical artifact в том же изменении, а не оставляйте репозиторий со stale competing guidance. Если ownership неясен, явно зафиксируйте этот gap и обновите самый узкий подтверждённый canonical surface вместо дублирования правила.
 - **Documentation terminology amendment:** когда создаёте или materially updating human-facing document, завершайте его разделом `## Термины и сокращения` или локализованным аналогом, если документ использует domain terms, role names, provider/model names, workflow labels, acronyms или English terms, которые могут быть неочевидны intended reader'у. В этом разделе расшифровывайте и кратко объясняйте такие термины, особенно English abbreviations и mixed-language terms в non-English documents.
@@ -846,9 +847,12 @@ accessibility-reviewer
 - `ADR`: Architecture Decision Record; долговечный документ, фиксирующий архитектурное решение, контекст и последствия.
 - `artifact`: конкретный рабочий результат: brief, memo, design, plan, patch, review или closure note.
 - `BLOCKED`: состояние workflow для реального внешнего blocker'а, недоступного prerequisite или отсутствующего required decision.
+- `CAD`: Computer-Aided Design; software и file formats для technical drawings, geometry или engineered layouts.
 - `CI`: Continuous Integration; автоматизированные repository checks, например builds, linters и tests.
 - `gate`: acceptance checkpoint, который проверяет, можно ли двигать artifact дальше.
+- `hash`: deterministic digest bytes или content файла; полезен для identity checks, но не заменяет visual inspection.
 - `lead`: orchestration role, которая маршрутизирует работу, отслеживает artifacts и принимает или отклоняет gates.
+- `metadata`: descriptive file или runtime information, например dimensions, timestamps, MIME type или generator fields.
 - `PASS`: состояние workflow, означающее, что scoped artifact прошёл relevant gate.
 - `QA`: Quality Assurance; verification work, проверяющая behavior, regressions и acceptance criteria.
 - `REVISE`: состояние workflow, означающее возврат artifact той же роли для bounded correction.
@@ -858,3 +862,4 @@ accessibility-reviewer
 - `subagent`: делегированный agent instance с узкой role, limited context, одним expected artifact и explicit gate.
 - `UI`: User Interface; user-facing interaction surface.
 - `UX`: User Experience; usability, flow, comprehension и interaction quality.
+- `visual artifact`: image, diagram, drawing, render, chart, plot, screenshot, CAD/exported drawing или похожий visible output.

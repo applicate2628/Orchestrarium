@@ -100,6 +100,7 @@ if [[ -d "$ROOT/src.qwen" ]]; then
   PACK_ROOT="$ROOT/src.qwen"
   QWEN_FILE="$PACK_ROOT/QWEN.md"
   SHARED_SOURCE_FILE="$ROOT/shared/AGENTS.shared.md"
+  SHARED_REF_FILE="$ROOT/shared/references/subagent-operating-model.md"
   RUNTIME_AGENTS_FILE="$PACK_ROOT/AGENTS.md"
   LEGACY_RUNTIME_ROOT=""
 elif [[ -f "$ROOT/QWEN.md" && -d "$ROOT/extensions/orchestrarium-qwen" ]]; then
@@ -107,6 +108,7 @@ elif [[ -f "$ROOT/QWEN.md" && -d "$ROOT/extensions/orchestrarium-qwen" ]]; then
   PACK_ROOT="$ROOT/extensions/orchestrarium-qwen"
   QWEN_FILE="$ROOT/QWEN.md"
   SHARED_SOURCE_FILE="$ROOT/AGENTS.shared.md"
+  SHARED_REF_FILE=""
   RUNTIME_AGENTS_FILE="$ROOT/AGENTS.md"
   LEGACY_RUNTIME_ROOT="$ROOT"
 elif [[ -f "$ROOT/QWEN.md" && -d "$ROOT/.qwen/extensions/orchestrarium-qwen" ]]; then
@@ -114,6 +116,7 @@ elif [[ -f "$ROOT/QWEN.md" && -d "$ROOT/.qwen/extensions/orchestrarium-qwen" ]];
   PACK_ROOT="$ROOT/.qwen/extensions/orchestrarium-qwen"
   QWEN_FILE="$ROOT/QWEN.md"
   SHARED_SOURCE_FILE="$ROOT/AGENTS.shared.md"
+  SHARED_REF_FILE=""
   RUNTIME_AGENTS_FILE="$ROOT/AGENTS.md"
   LEGACY_RUNTIME_ROOT="$ROOT/.qwen"
 else
@@ -150,6 +153,7 @@ done
 
 if [[ "$MODE" == "source" ]]; then
   [[ -f "$SHARED_SOURCE_FILE" ]] || fail "missing $SHARED_SOURCE_FILE"
+  [[ -f "$SHARED_REF_FILE" ]] || fail "missing $SHARED_REF_FILE"
   [[ ! -e "$PACK_ROOT/AGENTS.shared.md" ]] || fail "$PACK_ROOT/AGENTS.shared.md should not duplicate shared/AGENTS.shared.md"
   [[ ! -e "$RUNTIME_AGENTS_FILE" ]] || fail "$RUNTIME_AGENTS_FILE should not exist in the source tree"
   [[ -f "$EXTENSION_README_FILE" ]] || fail "missing $EXTENSION_README_FILE"
@@ -265,12 +269,15 @@ if [[ "$MODE" == "source" ]]; then
   grep -Fq 'must use direct external launch' "$SHARED_SOURCE_FILE" || fail "shared governance should require direct external launch"
   grep -Fq 'substantive task prompt must use file-based prompt delivery' "$SHARED_SOURCE_FILE" || fail "shared governance should require file-based external CLI prompts"
   grep -Fq 'verify every subagent result before accepting it' "$SHARED_SOURCE_FILE" || fail "shared governance should require verification before trusting subagent results"
+  grep -Fq 'Visual artifact verification discipline' "$SHARED_SOURCE_FILE" || fail "shared governance should require visual inspection for generated visual artifacts"
   grep -Fq 'Documentation terminology discipline' "$SHARED_SOURCE_FILE" || fail "shared governance should require terminology and abbreviation explanations in documents"
+  grep -Fq 'Visual artifact verification amendment' "$SHARED_REF_FILE" || fail "shared subagent-operating-model should require visual artifact inspection"
 else
   grep -Fq 'Adapter host runtime' "$RUNTIME_AGENTS_FILE" && fail "shared governance should not allow adapter-host metadata for external execution"
   grep -Fq 'must use direct external launch' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require direct external launch"
   grep -Fq 'substantive task prompt must use file-based prompt delivery' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require file-based external CLI prompts"
   grep -Fq 'verify every subagent result before accepting it' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require verification before trusting subagent results"
+  grep -Fq 'Visual artifact verification discipline' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require visual inspection for generated visual artifacts"
   grep -Fq 'Documentation terminology discipline' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require terminology and abbreviation explanations in documents"
 fi
 

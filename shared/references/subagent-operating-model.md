@@ -729,6 +729,7 @@ Key hygiene amendments (full rules in the installed AGENTS.md / CLAUDE.md):
 - **Readability amendment:** before modifying a function or interface, check nearby call sites and dependents — a local fix that breaks callers is not a fix. (Note: Local-reasoning test merged into this rule.)
 - **Contract test amendment:** preserve existing external contracts by default. Do not introduce breaking changes unless the user or admitted scope explicitly authorizes them; if breakage is authorized, name the affected surfaces and migration or deprecation impact.
 - **Evidence-based completion amendment:** never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix. Agent or subagent success reports are not enough; verify their artifacts and claimed checks against current workspace evidence.
+- **Visual artifact verification amendment:** generated or exported visual artifacts add one mandatory evidence step: inspect the visual result itself. Do not accept an image, diagram, drawing, render, chart, plot, screenshot, CAD/exported drawing, or similar artifact based only on file existence, generation logs, metadata, hashes, or model claims. Use an available viewer, renderer, screenshot path, or repo-standard visual check, and record when visual inspection could not be performed.
 - **Completion reconciliation amendment:** never present partial scope coverage as full completion. If admitted-scope work remains, keep the task open or state the remaining obligations explicitly instead of implying closure.
 - **Ambiguity resolution discipline:** do not guess; verify. Resolve factual ambiguity by inspecting code, config, data, docs, installed artifacts, runtime behavior, or other canonical sources before choosing an interpretation. If ambiguity is about user intent and inspection cannot settle it, either ask or proceed with the smallest safe reversible subset that does not lock in the unresolved choice. Implementation-relevant decisions must trace to verified evidence or explicit user instruction.
 - **Canonical-source maintenance discipline:** when a change affects behavior, policy, workflow, config schema, runtime layout, or another documented source of truth, update the owning canonical artifact in the same change instead of leaving stale competing guidance behind. If ownership is unclear, identify the gap explicitly and update the narrowest confirmed canonical surface rather than duplicating the rule.
@@ -854,9 +855,12 @@ Short team formula:
 - `ADR`: Architecture Decision Record; a durable document that records an architecture decision, context, and consequences.
 - `artifact`: a concrete work product such as a brief, memo, design, plan, patch, review, or closure note.
 - `BLOCKED`: workflow state for a real external blocker, unavailable prerequisite, or missing required decision.
+- `CAD`: Computer-Aided Design; software and file formats used for technical drawings, geometry, or engineered layouts.
 - `CI`: Continuous Integration; automated repository checks such as builds, linters, and tests.
 - `gate`: an acceptance checkpoint that verifies whether an artifact may move forward.
+- `hash`: a deterministic digest of file bytes or content; useful for identity checks but not a substitute for visual inspection.
 - `lead`: the orchestration role that routes work, tracks artifacts, and accepts or rejects gates.
+- `metadata`: descriptive file or runtime information such as dimensions, timestamps, MIME type, or generator fields.
 - `PASS`: workflow state meaning the scoped artifact passed the relevant gate.
 - `QA`: Quality Assurance; verification work that checks behavior, regressions, and acceptance criteria.
 - `REVISE`: workflow state meaning the artifact returns to the same role for bounded correction.
@@ -866,3 +870,4 @@ Short team formula:
 - `subagent`: a delegated agent instance with a narrow role, limited context, one expected artifact, and an explicit gate.
 - `UI`: User Interface; the user-facing interaction surface.
 - `UX`: User Experience; usability, flow, comprehension, and interaction quality.
+- `visual artifact`: an image, diagram, drawing, render, chart, plot, screenshot, CAD/exported drawing, or similar visible output.

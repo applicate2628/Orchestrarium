@@ -624,6 +624,9 @@ if [[ $DEV_REPO -eq 1 ]]; then
     'A subagent `PASS`, report, or claimed test result is a claim, not proof' \
     "shared subagent-operating-model requires subagent result verification"
   check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Visual artifact verification amendment" \
+    "shared subagent-operating-model requires visual artifact inspection"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
     "Documentation terminology amendment" \
     "shared subagent-operating-model documents terminology glossary discipline"
   check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode.yaml" \
@@ -748,7 +751,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CODEX_REF_DIR/subagent-operating-model.md" 120 \
     "Codex addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "4bb18cd3df2d2b8e5cc78ff786191da3bbf832555fa80c182ddfda7e2ee097e8" \
+    "36e67ee86f8cc7af63b6c28a37650e2d84e381a88e7956e2cc90e2531cfe7e60" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
     "160e9bb3bb3df73e611626bc814a45a0923a350a4bff5b43b82bf45409c06549" \
@@ -855,6 +858,8 @@ check_contains "$AGENTS_FILE" "substantive task prompt must use file-based promp
   "shared governance requires file-based external CLI prompts"
 check_contains "$AGENTS_FILE" "verify every subagent result before accepting it" \
   "shared governance requires verification before trusting subagent results"
+check_contains "$AGENTS_FILE" "Visual artifact verification discipline" \
+  "shared governance requires visual inspection for generated visual artifacts"
 check_contains "$AGENTS_FILE" "Documentation terminology discipline" \
   "shared governance requires terminology and abbreviation explanations in documents"
 check_absent "$SKILLS_DIR/lead/external-dispatch.md" "Adapter host runtime:" \
