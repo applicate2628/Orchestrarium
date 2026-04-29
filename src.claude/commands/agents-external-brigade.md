@@ -48,7 +48,7 @@ Plan or launch a bounded parallel set of external helpers for independent admitt
 
 | Item | Execution role | Assigned / replaced internal role | Requested provider | Resolved provider | Scope | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
+| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini | qwen>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
 
 ## Rules
 

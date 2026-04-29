@@ -1,6 +1,8 @@
 # Orchestrarium Gemini
 
-A standalone Gemini CLI provider pack built around the official Gemini runtime model plus the full Orchestrarium shared role principle.
+A standalone Gemini CLI example pack built around the official Gemini runtime model plus the full Orchestrarium shared role principle.
+
+This pack remains installable and inspectable, but the repository classifies Gemini as `WEAK MODEL / NOT RECOMMENDED`. Production `externalProvider: auto` routing stays on `codex | claude`; explicit Gemini routes are manual example or compatibility paths only.
 
 This branch keeps only Gemini-specific source, but it now ships the same full role vocabulary as the neighboring packs:
 
@@ -40,12 +42,13 @@ LICENSE                     Apache License 2.0
 
 ## Current scope
 
-This branch is a standalone Gemini pack with a full Gemini-line role surface.
+This branch is a standalone Gemini example pack with a full Gemini-line role surface.
 
 - It ships Gemini-native installers for project-local and global installs.
 - It carries one required provider-local reference tree: `references-gemini/`.
 - It does not carry Codex or Claude provider trees.
 - It does not carry shared monorepo reference trees or cross-provider maintenance overlays.
+- It keeps Gemini installable for example, compatibility, and inspection use without presenting Gemini as a production-recommended auto-routing target.
 
 ## Gemini bootstrap model
 

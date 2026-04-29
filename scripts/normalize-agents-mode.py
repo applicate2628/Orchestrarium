@@ -17,6 +17,9 @@ from dataclasses import dataclass, field
 TOP_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9]*):(?:\s*(.*))?$")
 INDENT2_KEY_RE = re.compile(r"^ {2}([^:#][^:]*):(?:\s*(.*))?$")
 INDENT4_KEY_RE = re.compile(r"^ {4}([^:#][^:]*):\s*(.*)$")
+RETIRED_PROFILE_NAMES = {"gemini-crosscheck"}
+PRODUCTION_PROFILE_PROVIDERS = {"codex", "claude"}
+ADVISORY_REVIEW_PROFILE_PROVIDERS = {"codex", "claude", "claude-secret"}
 
 
 @dataclass
@@ -143,6 +146,25 @@ def comment_suffix(comment: str) -> str:
     return f"  {comment}" if comment else ""
 
 
+def is_advisory_or_review_lane(lane_name: str) -> bool:
+    return lane_name.startswith("advisory.") or lane_name.startswith("review.")
+
+
+def sanitize_profile_providers(value: str, lane_name: str) -> str:
+    """Keep profile providers on production-approved providers for the lane."""
+    allowed = (
+        ADVISORY_REVIEW_PROFILE_PROVIDERS
+        if is_advisory_or_review_lane(lane_name)
+        else PRODUCTION_PROFILE_PROVIDERS
+    )
+    providers: list[str] = []
+    for raw_part in value.split(","):
+        provider = raw_part.strip().lower()
+        if provider in allowed and provider not in providers:
+            providers.append(provider)
+    return ", ".join(providers)
+
+
 def read_text_lines(path: str) -> list[str]:
     with open(path, "r", encoding="utf-8") as handle:
         return handle.read().splitlines()
@@ -209,6 +231,8 @@ def existing_metadata(
 def render_scalar(key: str, meta: ScalarMeta, existing: dict[str, ScalarMeta]) -> list[str]:
     current = existing.get(key)
     value = current.value if current and current.value else meta.value
+    if key == "externalPriorityProfile" and value in RETIRED_PROFILE_NAMES:
+        value = meta.value
     return [f"{key}: {value}{comment_suffix(meta.comment)}"]
 
 
@@ -242,12 +266,17 @@ def render_profiles(
             if lane_name in profile_meta.lanes:
                 continue
             extra_lane = existing_lanes[lane_name]
+            sanitized_value = sanitize_profile_providers(extra_lane.value, lane_name)
+            if not sanitized_value:
+                continue
             lines.append(
-                f"    {lane_name}: [{extra_lane.value}]{comment_suffix(extra_lane.comment)}"
+                f"    {lane_name}: [{sanitized_value}]{comment_suffix(extra_lane.comment)}"
             )
 
     for profile_name in existing_order:
         if profile_name in meta.entries:
+            continue
+        if profile_name in RETIRED_PROFILE_NAMES:
             continue
         existing_profile = existing_profiles.get(profile_name)
         if not isinstance(existing_profile, ProfileMeta):
@@ -255,8 +284,11 @@ def render_profiles(
         lines.append(f"  {profile_name}:{comment_suffix(existing_profile.comment)}")
         for lane_name in existing_profile.lane_order:
             lane = existing_profile.lanes[lane_name]
+            sanitized_value = sanitize_profile_providers(lane.value, lane_name)
+            if not sanitized_value:
+                continue
             lines.append(
-                f"    {lane_name}: [{lane.value}]{comment_suffix(lane.comment)}"
+                f"    {lane_name}: [{sanitized_value}]{comment_suffix(lane.comment)}"
             )
 
     return lines
@@ -292,7 +324,11 @@ def render_counts(meta: BlockMeta, existing: BlockMeta | None) -> list[str]:
 def normalize_file(template: str, target: str, provider: str) -> str:
     order, scalar_meta, profiles_meta, counts_meta = template_metadata(template, provider)
     known_keys = set(order) | {"externalPriorityProfiles", "externalOpinionCounts"}
-    retired_keys = {"externalClaudeSecretMode"}
+    retired_keys = {
+        "externalClaudeSecretMode",
+        "externalGeminiFallbackMode",
+        "externalGeminiWorkdirMode",
+    }
     if provider != "codex":
         retired_keys.add("externalClaudeProfile")
 

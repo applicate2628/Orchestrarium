@@ -11,7 +11,7 @@
 - Codex использует sequential skill invocation. Нативного parallel skill dispatch нет, поэтому даже теоретически независимая работа на Codex-линии оркестрируется последовательно.
 - Consultant config живёт в `.agents/.agents-mode.yaml`.
 - Codex может расширять shared `agents-mode` schema полем `externalClaudeProfile` для выбора Claude CLI execution profile (`sonnet-high` или `opus-max`).
-- `externalProvider: auto` разрешается по active named priority profile, а не по Codex-line default; `$external-worker` и `$external-reviewer` могут честно dispatch'иться в Claude CLI или Gemini CLI, а Gemini-first routing для image/icon/decorative lanes нужно выражать явным provider override или repo-local custom profile, а не скрытой эвристикой по умолчанию.
+- `externalProvider: auto` разрешается по active named production priority profile, а не по Codex-line default; shipped production `auto` использует только `codex | claude`, а явный provider override всё ещё может честно отправить eligible external work в Claude CLI, в слабый/не рекомендуемый Gemini CLI path или в Qwen Code как example-only route вместо скрытой shipped-эвристики.
 
 ## Codex-side repository concretization
 

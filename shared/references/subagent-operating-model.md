@@ -39,17 +39,18 @@ The lead assigns a task like this:
 2. **Do not pass extra context.** Each subagent gets only what its role needs.
 3. **Limit tools by role.** Research stays read-only; implementation stays inside an approved phase; reviewers do not replace implementers.
 4. **Do not skip gates.** Until an artifact is accepted, the next stage does not start.
-5. **Do not allow silent scope growth.** A subagent does not change architecture, plan, or requirements on its own.
-6. **Separate delivery from risk ownership.** A good patch is still incomplete if a critical risk has not been checked.
-7. **QA verifies the integrated result, including basic performance acceptance when relevant, but does not replace algorithm, performance, security, or reliability specialists.**
-8. **Accepted decisions should live near the code as one source of truth.**
-9. **Prefer facts over opinions.** Use factual roles to reduce uncertainty before asking interpretive roles to make tradeoffs or decisions.
-10. **Use re-intake when the admitted item changes.** If scope, priority, or milestone intent drifts enough to redefine the item, send it back to `product-manager` instead of renegotiating it inside delivery.
-11. **Name integration ownership explicitly.** If multiple implementation phases or specialists must land together, one named owner assembles the integrated result before QA.
-12. **Invalidate derived `PASS` states on material upstream revision.** If an accepted upstream artifact is revised materially after downstream artifacts have already passed, the lead must mark the affected derived artifacts for re-review before delivery continues. `PASS` does not survive a material upstream change automatically.
-13. **Classify change impact before routing.** Use `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting` to decide how strongly the lead should route and gate the work; `breaking-or-cross-cutting` must force stronger routing, re-review of affected downstream artifacts, and integration ownership when needed.
-14. **Treat the core role map as canonical, not exhaustive.** The role index names the core team only. The lead may choose a narrower installed specialist outside the core team when it is a better fit for the scoped work, and may choose a repo-local specialist only when the current repo/workspace defines or clearly implies it. Using such a specialist does not add it to the canonical team map automatically.
-15. **Preserve durable task memory for lead-routed work.** Keep roadmap, brief, status, and plan artifacts in repo-local storage so interrupted work can resume without relying on session memory.
+5. **Verify subagent results before trusting them.** A subagent `PASS`, report, or claimed test result is a claim, not proof; the orchestrating owner or next gate checks the artifact, diff, logs, command output, or other repo-standard evidence before accepting or forwarding it.
+6. **Do not allow silent scope growth.** A subagent does not change architecture, plan, or requirements on its own.
+7. **Separate delivery from risk ownership.** A good patch is still incomplete if a critical risk has not been checked.
+8. **QA verifies the integrated result, including basic performance acceptance when relevant, but does not replace algorithm, performance, security, or reliability specialists.**
+9. **Accepted decisions should live near the code as one source of truth.**
+10. **Prefer facts over opinions.** Use factual roles to reduce uncertainty before asking interpretive roles to make tradeoffs or decisions.
+11. **Use re-intake when the admitted item changes.** If scope, priority, or milestone intent drifts enough to redefine the item, send it back to `product-manager` instead of renegotiating it inside delivery.
+12. **Name integration ownership explicitly.** If multiple implementation phases or specialists must land together, one named owner assembles the integrated result before QA.
+13. **Invalidate derived `PASS` states on material upstream revision.** If an accepted upstream artifact is revised materially after downstream artifacts have already passed, the lead must mark the affected derived artifacts for re-review before delivery continues. `PASS` does not survive a material upstream change automatically.
+14. **Classify change impact before routing.** Use `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting` to decide how strongly the lead should route and gate the work; `breaking-or-cross-cutting` must force stronger routing, re-review of affected downstream artifacts, and integration ownership when needed.
+15. **Treat the core role map as canonical, not exhaustive.** The role index names the core team only. The lead may choose a narrower installed specialist outside the core team when it is a better fit for the scoped work, and may choose a repo-local specialist only when the current repo/workspace defines or clearly implies it. Using such a specialist does not add it to the canonical team map automatically.
+16. **Preserve durable task memory for lead-routed work.** Keep roadmap, brief, status, and plan artifacts in repo-local storage so interrupted work can resume without relying on session memory.
 
 ---
 
@@ -146,23 +147,26 @@ Even if all subagents return `PASS`, the team may still require:
 
 AI gates do not replace external engineering policy.
 
+A subagent `PASS` still requires verification by the orchestrating owner or the next accountable gate before it becomes an accepted artifact.
+
 ### 3.8 Interaction topology
 
 - Roadmap and intake default to hub-and-spoke through `product-manager`.
 - Delivery defaults to hub-and-spoke through `lead`.
 - Material scope, priority, or milestone drift routes back through `lead` to `product-manager` for re-intake.
 - Subagents exchange accepted artifacts, not direct peer task assignments.
+- The orchestrating owner verifies subagent artifacts and evidence before treating `PASS` or summaries as accepted handoffs.
 - Missing evidence should route back to a factual role through the orchestrating owner before interpretive work continues.
 - If a role disagrees with an upstream artifact, it returns `REVISE` or `BLOCKED` to the orchestrating owner instead of renegotiating scope privately.
 - Reviewers stay independent and return findings to the orchestrating owner instead of driving implementation directly.
 - Direct specialist-to-specialist collaboration is allowed only when the orchestrating owner explicitly approves the edge, scope, and artifact boundary.
-- `$consultant` is an independent advisory role; ordinary consultant use remains optional, and it never becomes a reviewer or approver. A repository may explicitly request consultant input at closeout, but `consultantMode: disabled` waives consultant use instead of leaving a hidden closeout blocker, and any requested consultant sweep remains advisory-only rather than a substitute for review or human gates. Consultant is configured via the pack-local `agents-mode` file. No config file = disabled. The shared schema is `consultantMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalGeminiWorkdirMode`, `externalModelMode`, `externalGeminiFallbackMode`, and `externalClaudeApiMode`; pack-local addenda may extend it with provider-specific fields such as narrower line-specific overrides. `consultantMode` governs consultant behavior with the strict set `external | internal | disabled`, `delegationMode: manual` keeps explicit-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist; `parallelMode: manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent; `mcpMode: auto` uses MCP by judgment while `force` treats relevant MCP use as an explicit standing instruction, the preference flags route eligible worker-side roles through `$external-worker` and eligible review or QA roles through `$external-reviewer`, and `externalProvider` uses the shared provider universe `auto | codex | claude | gemini`. `consultantMode: external` is external-only and never authorizes fallback to an internal consultant path. `externalProvider: auto` resolves through the active named priority profile rather than by line-default asymmetry, must not silently self-bounce into the same host provider, and may still be honestly refined only by documented repo-local routing rules or explicit provider overrides. `externalPriorityProfile` selects the named provider-order map, `externalPriorityProfiles` stores the per-profile lane order, `externalOpinionCounts` raises specific lanes above the default single-opinion behavior when one external opinion is not enough, `externalModelMode` governs the shared model-policy layer, and provider-scoped transport keys such as `externalClaudeApiMode` remain shared schema keys rather than separate providers. External opinion counts and brigade routing remain overlays on top of the general `parallelMode` rule. Provider-local addenda may define the approved wrapper details for those transports, but the transport still stays inside the selected provider rather than becoming a new provider of its own.
+- `$consultant` is an independent advisory role; ordinary consultant use remains optional, and it never becomes a reviewer or approver. A repository may explicitly request consultant input at closeout, but `consultantMode: disabled` waives consultant use instead of leaving a hidden closeout blocker, and any requested consultant sweep remains advisory-only rather than a substitute for review or human gates. Consultant is configured via the pack-local `agents-mode` file. No config file = disabled. The shared schema is `consultantMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalModelMode`, `externalClaudeApiMode`, and any pack-local provider-specific fields. `consultantMode` governs consultant behavior with the strict set `external | internal | disabled`, `delegationMode: manual` keeps explicit-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist; `parallelMode: manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent; `mcpMode: auto` uses MCP by judgment while `force` treats relevant MCP use as an explicit standing instruction, the preference flags route eligible worker-side roles through `$external-worker` and eligible review or QA roles through `$external-reviewer`, and `externalProvider: auto` uses production-recommended providers only. `consultantMode: external` is external-only and never authorizes fallback to an internal consultant path. `externalProvider: auto` resolves through the active named production priority profile rather than by line-default asymmetry, must not silently self-bounce into the same host provider, and may still be honestly refined only by documented repo-local routing rules or explicit provider overrides. Example-only providers such as Gemini and Qwen may be documented as explicit demonstration paths, but they must not appear in shipped production `auto` profiles. `externalPriorityProfile` selects the named provider-order map, `externalPriorityProfiles` stores the per-profile lane order, `externalOpinionCounts` raises specific lanes above the default single-opinion behavior when one external opinion is not enough, and `externalModelMode` governs the shared model-policy layer. Pack-local addenda may define supplemental profile candidates such as `claude-secret`, but those candidates are not scalar providers and must obey their lane restrictions. External opinion counts and brigade routing remain overlays on top of the general `parallelMode` rule.
 - `$external-worker` and `$external-reviewer` are bidirectional external adapters, not new narrow professions. Each pack defines its provider path and runtime invocation details in the local addendum. The adapter itself does not silently fall back to an internal specialist. If the external CLI is unavailable, the role is disabled and the orchestrator may reroute through a normal internal role.
 - External routing resolves in this order: `role eligibility -> provider selection -> CLI availability`. Do not probe provider availability until the requested work is already known to be consultant-advisory, worker-side, or review/QA-side.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead` unless a repository defines one explicitly. If a user asks for `external` on those roles, fail fast with an unsupported-route explanation and reroute honestly instead of pretending provider availability could make the role valid.
 - If native internal slot or thread limits would otherwise block more independent eligible lanes, prefer available external adapters over silent serialization when the needed accepted artifacts already exist.
 - External adapters may run in parallel with one another when the scopes are independent, the artifacts do not overlap, and the selected provider runtimes support concurrent non-interactive execution.
-- Provider-specific addenda may define a secondary transport for a selected external provider. Use that allowed secondary transport before declaring the provider unavailable.
+- Provider-specific addenda may define supplemental profile candidates or wrapper details. Follow the pack-local lane restrictions exactly; do not infer a generic provider fallback, primary-transport retry, or worker-side route from a wrapper's existence.
 
 ### 3.9 Rolling-loop execution
 
@@ -724,10 +728,11 @@ Key hygiene amendments (full rules in the installed AGENTS.md / CLAUDE.md):
 - **Change-surface minimization amendment:** add or update tests only where they materially verify the changed behavior or contract; do not speculatively add unrelated test coverage.
 - **Readability amendment:** before modifying a function or interface, check nearby call sites and dependents — a local fix that breaks callers is not a fix. (Note: Local-reasoning test merged into this rule.)
 - **Contract test amendment:** preserve existing external contracts by default. Do not introduce breaking changes unless the user or admitted scope explicitly authorizes them; if breakage is authorized, name the affected surfaces and migration or deprecation impact.
-- **Evidence-based completion amendment:** never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix.
+- **Evidence-based completion amendment:** never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix. Agent or subagent success reports are not enough; verify their artifacts and claimed checks against current workspace evidence.
 - **Completion reconciliation amendment:** never present partial scope coverage as full completion. If admitted-scope work remains, keep the task open or state the remaining obligations explicitly instead of implying closure.
 - **Ambiguity resolution discipline:** do not guess; verify. Resolve factual ambiguity by inspecting code, config, data, docs, installed artifacts, runtime behavior, or other canonical sources before choosing an interpretation. If ambiguity is about user intent and inspection cannot settle it, either ask or proceed with the smallest safe reversible subset that does not lock in the unresolved choice. Implementation-relevant decisions must trace to verified evidence or explicit user instruction.
 - **Canonical-source maintenance discipline:** when a change affects behavior, policy, workflow, config schema, runtime layout, or another documented source of truth, update the owning canonical artifact in the same change instead of leaving stale competing guidance behind. If ownership is unclear, identify the gap explicitly and update the narrowest confirmed canonical surface rather than duplicating the rule.
+- **Documentation terminology amendment:** when creating or materially updating a human-facing document, end it with `## Terms and Abbreviations` or a localized equivalent whenever it uses domain terms, role names, provider or model names, workflow labels, acronyms, or English terms that may be unclear to the intended reader. Expand and briefly explain those terms there, especially English abbreviations and mixed-language terms in non-English documents.
 - **Explicit bounds for background and fan-out work:** do not introduce long-lived background processes, automation outside the direct request path, or network listeners without explicit user approval. State justification and ask before implementing.
 - **Autonomous external side effects:** do not create tickets, send messages, post to external services, mutate SaaS or cloud state, or trigger actions visible to third parties without explicit user approval.
 
@@ -828,6 +833,7 @@ accessibility-reviewer
 - Require one clear artifact per step.
 - Keep one source of truth for brief, decisions, budgets, constraints, phase plan, and status.
 - Stop progression until the current artifact is accepted.
+- End terminology-heavy human-facing documents with a terms and abbreviations section.
 
 ---
 
@@ -836,8 +842,27 @@ accessibility-reviewer
 > **Split subagents by stage of work and by type of risk.**  
 > **Architecture, algorithms, numerics, performance, security, quality, maintainability, repository hygiene, and toolchain integrity should each have a clear owner or reviewer whenever the cost of failure justifies it.**  
 > **A subagent does not receive "build the feature." It receives a role, minimal context, limited tools, one artifact, and an explicit acceptance criterion.**  
-> **No result moves forward until the relevant gate has passed.**
+> **No result moves forward until the relevant gate has passed, and subagent reports are verified against actual evidence before they are trusted.**
 
 Short team formula:
 
 > **One role. One artifact. One gate. One explicit owner for every critical risk.**
+
+### Terms and Abbreviations
+
+- `accepted artifact`: an output that has passed its required gate and may be used by downstream roles.
+- `ADR`: Architecture Decision Record; a durable document that records an architecture decision, context, and consequences.
+- `artifact`: a concrete work product such as a brief, memo, design, plan, patch, review, or closure note.
+- `BLOCKED`: workflow state for a real external blocker, unavailable prerequisite, or missing required decision.
+- `CI`: Continuous Integration; automated repository checks such as builds, linters, and tests.
+- `gate`: an acceptance checkpoint that verifies whether an artifact may move forward.
+- `lead`: the orchestration role that routes work, tracks artifacts, and accepts or rejects gates.
+- `PASS`: workflow state meaning the scoped artifact passed the relevant gate.
+- `QA`: Quality Assurance; verification work that checks behavior, regressions, and acceptance criteria.
+- `REVISE`: workflow state meaning the artifact returns to the same role for bounded correction.
+- `role`: a narrow professional responsibility assigned to an agent or human participant.
+- `SLA`: Service-Level Agreement; an external reliability or performance commitment.
+- `SLO`: Service-Level Objective; an internal reliability or performance target.
+- `subagent`: a delegated agent instance with a narrow role, limited context, one expected artifact, and an explicit gate.
+- `UI`: User Interface; the user-facing interaction surface.
+- `UX`: User Experience; usability, flow, comprehension, and interaction quality.

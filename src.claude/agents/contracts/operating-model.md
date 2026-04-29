@@ -50,14 +50,14 @@ When lead coordinates, or when the main conversation needs to decide between rol
 Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 
 - `consultantMode` continues to govern `$consultant`.
-- `externalClaudeApiMode: disabled | auto | force` is the single Claude wrapper-transport knob. `auto` keeps plain Claude CLI first and then tries the approved wrapper as the named secondary Claude transport, while `force` starts on that wrapper immediately.
+- `externalClaudeApiMode: disabled | auto | force` controls the supplemental `claude-secret` advisory/review profile candidate. `auto` allows `claude-secret` only when an `advisory.*` or `review.*` order reaches it after primary `claude`/`codex`, while `force` keeps that candidate available for advisory/review even when plain Claude is unavailable. It is independent of primary `claude` and must not be used for worker, mutating implementation, code-generation, file-editing, installer, publication, or write-producing repository-hygiene routes.
 - `delegationMode: manual` keeps delegation explicit-by-request, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
-- `externalProvider: auto` resolves by the active named priority profile instead of a host-line default; explicit `codex`, `claude`, or `gemini` may be selected when the route is eligible. If a repository wants Gemini-first routing for image/icon/decorative visual work, express that through an explicit provider override or a repo-local custom profile.
-- The Claude-line canonical schema may include the shared `externalModelMode`, `externalGeminiFallbackMode` when the resolved provider is Gemini, and `externalClaudeApiMode` when the resolved provider is Claude; `externalClaudeProfile` remains Codex-line only.
+- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses `codex | claude` only. Explicit `codex`, `claude`, `gemini`, or `qwen` may be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths.
+- The Claude-line canonical schema may include the shared `externalModelMode` and `externalClaudeApiMode` when the resolved provider is Claude; `externalClaudeProfile` remains Codex-line only.
 - The team template JSON does not change; routing substitutions happen at execution time.
 - `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.
 - Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.

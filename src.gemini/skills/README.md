@@ -22,4 +22,4 @@ The common role principle depends on both:
 - skills provide the full durable role catalog
 - agents provide the explicit team members that the main Gemini session can delegate to
 
-Orchestration remains in `skills/lead`, not in a recursive lead subagent. The lead skill also owns the overlay-aware external routing story so the pack can switch between `balanced` and `gemini-crosscheck` without changing the role vocabulary.
+Orchestration remains in `skills/lead`, not in a recursive lead subagent. The lead skill also owns the overlay-aware external routing story so the Gemini line stays inspectable as an example pack while shipped production `auto` routing remains on `codex | claude`.

@@ -21,3 +21,5 @@ Use together with:
 - [../docs/README.md](../docs/README.md) for the common branch-level docs index
 - [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) for shared operator semantics when the Claude line matters
 - [../src.claude/README.md](../src.claude/README.md) for the Claude source tree
+
+Provider-backed external CLI prompt delivery inherits the shared file-based prompt rule; use the Claude dispatch docs for the exact Claude-line runtime contract.

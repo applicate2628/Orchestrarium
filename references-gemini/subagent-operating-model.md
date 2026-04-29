@@ -14,7 +14,10 @@ This file keeps only Gemini-specific runtime and repository concretization for t
 - `.gemini/.agents-mode.yaml` is the Orchestrarium routing overlay seeded by install, not a replacement for `.gemini/settings.json`.
 - Gemini runtime assets live in `src.gemini/skills/`, `src.gemini/commands/`, and `src.gemini/extension/`.
 - The current Gemini source tree stays sequential and human-steered for native internal execution; do not assume native internal parallel dispatch. Independent external adapters may still run in parallel when the routing contract and selected provider runtimes allow it.
-- Gemini-line `externalProvider: auto` resolves by lane type through the active named priority profile rather than by a single Gemini-line default. If a repository wants Gemini-first visual routing, express that through an explicit provider override or a repo-local custom profile instead of assuming the shipped shared profiles already do it. When Gemini resolves to Claude, honor `externalClaudeApiMode` as the single Claude wrapper-transport toggle (`disabled | auto | force`, default `auto`).
+- Gemini is an example-only integration on this line: the repository classifies it as `WEAK MODEL / NOT RECOMMENDED`.
+- Gemini-line `externalProvider: auto` still resolves by lane type through the active named priority profile rather than by a single Gemini-line default, but the shipped production profile excludes Gemini and Qwen and stays on `codex | claude`.
+- Explicit `externalProvider: gemini` is a manual example or compatibility path only, not a production recommendation.
+- On Gemini-line external routing, `externalClaudeApiMode` controls only the supplemental `claude-secret` advisory/review candidate (`disabled | auto | force`, default `auto`); worker lanes must not use it.
 
 ## Gemini-side repository concretization
 

@@ -40,14 +40,12 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
 | `preferExternalReviewer` | `false` | `true` | `true` | `true` | `false` |
 | `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `gemini-crosscheck` | `balanced` |
+| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` |
 | `externalPriorityProfiles` | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is |
 | `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review lanes `2`, others `1` | all `1` |
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
-| `externalGeminiWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `runtime-default` |
-| `externalGeminiFallbackMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 
 `correctness-first` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
@@ -106,9 +104,7 @@ Routing conventions (not persisted as keys):
      - `externalOpinionCounts`
      - `externalCodexWorkdirMode`
      - `externalClaudeWorkdirMode`
-     - `externalGeminiWorkdirMode`
      - `externalModelMode`
-     - `externalGeminiFallbackMode`
    - Use existing values when present, the preset-expanded value if one was selected, or otherwise default to:
      - `consultantMode: disabled`
      - `externalClaudeApiMode: auto`
@@ -117,16 +113,13 @@ Routing conventions (not persisted as keys):
      - `mcpMode: auto`
      - `preferExternalWorker: false`
      - `preferExternalReviewer: false`
-     - `externalProvider: auto`  (shared-universe default; lane-driven via active profile)
+     - `externalProvider: auto`  (shared-universe default; shipped production profiles stay on `codex | claude`; explicit `gemini` / `qwen` remain example-only)
      - `externalPriorityProfile: balanced`
-     - `externalPriorityProfiles.balanced`: current shared matrix
-     - `externalPriorityProfiles.gemini-crosscheck`: Gemini present in non-visual advisory and pre-PR review cross-check lanes
+     - `externalPriorityProfiles.balanced`: current shared production matrix over `codex | claude`
      - `externalOpinionCounts`: `1` for ordinary lanes unless a repo-local policy explicitly asks for more
      - `externalCodexWorkdirMode: neutral`
      - `externalClaudeWorkdirMode: neutral`
-     - `externalGeminiWorkdirMode: neutral`
-     - `externalGeminiFallbackMode: auto`
-   - Accept shorthand such as `force`, `external reviewer only`, `balanced profile`, or `gemini crosscheck`.
+   - Accept shorthand such as `force`, `external reviewer only`, `balanced profile`, or `explicit gemini example`.
 
 6. **Confirm before writing.**
    - Present one summary table for the final `.gemini/.agents-mode.yaml` values.
@@ -143,39 +136,27 @@ Routing conventions (not persisted as keys):
 
    ```yaml
    consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-   externalClaudeApiMode: {value}  # allowed when Claude Code is the resolved provider for this run: disabled | auto | force; default: auto
+   externalClaudeApiMode: {value}  # controls advisory/review-only claude-secret candidate: disabled | auto | force; default: auto
    delegationMode: {value}  # allowed: manual | auto | force; default: manual
    parallelMode: {value}  # allowed: manual | auto | force; default: auto
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
    preferExternalReviewer: {value}  # allowed: false | true; default: false
-   externalProvider: {value}  # allowed here: auto | codex | claude | gemini; default: auto
-   externalPriorityProfile: {value}  # allowed: balanced | gemini-crosscheck; default: balanced
+   externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
+   externalPriorityProfile: {value}  # allowed: balanced | <repo-local production profile>; default: balanced
    externalPriorityProfiles:
      balanced:
-       advisory.repo-understanding: [claude, codex, gemini]
-       advisory.design-adr: [claude, codex, gemini]
-       review.pre-pr: [claude, codex, gemini]
-       review.performance-architecture: [claude, codex, gemini]
-       worker.default-implementation: [codex, claude, gemini]
-       worker.systems-performance-implementation: [codex, claude, gemini]
-       worker.long-autonomous: [claude, codex, gemini]
-       worker.ui-structural-modernization: [codex, claude, gemini]
-       worker.ui-surgical-patch-cleanup: [codex, claude, gemini]
-       worker.visual-icon-decorative: [codex, claude, gemini]
-       review.visual: [claude, codex, gemini]
-     gemini-crosscheck:
-       advisory.repo-understanding: [claude, gemini, codex]
-       advisory.design-adr: [claude, gemini, codex]
-       review.pre-pr: [claude, gemini, codex]
-       review.performance-architecture: [claude, codex, gemini]
-       worker.default-implementation: [codex, claude, gemini]
-       worker.systems-performance-implementation: [codex, claude, gemini]
-       worker.long-autonomous: [claude, codex, gemini]
-       worker.ui-structural-modernization: [codex, claude, gemini]
-       worker.ui-surgical-patch-cleanup: [codex, claude, gemini]
-       worker.visual-icon-decorative: [codex, claude, gemini]
-       review.visual: [claude, codex, gemini]
+       advisory.repo-understanding: [claude, codex]
+       advisory.design-adr: [claude, codex]
+       review.pre-pr: [claude, codex]
+       review.performance-architecture: [claude, codex]
+       worker.default-implementation: [codex, claude]
+       worker.systems-performance-implementation: [codex, claude]
+       worker.long-autonomous: [claude, codex]
+       worker.ui-structural-modernization: [codex, claude]
+       worker.ui-surgical-patch-cleanup: [codex, claude]
+       worker.visual-icon-decorative: [codex, claude]
+       review.visual: [claude, codex]
    externalOpinionCounts:
      advisory.repo-understanding: 1
      advisory.design-adr: 1
@@ -190,9 +171,7 @@ Routing conventions (not persisted as keys):
      review.visual: 1
    externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
-   externalGeminiWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-   externalGeminiFallbackMode: {value}  # allowed when Gemini CLI is the resolved provider for this run: disabled | auto | force; default: auto
    ```
 
 8. **Confirm completion.**
@@ -200,6 +179,7 @@ Routing conventions (not persisted as keys):
      - `/init` owns `GEMINI.md`
      - `.gemini/settings.json` remains Gemini-native runtime config
      - `.gemini/.agents-mode.yaml` now holds the Orchestrarium shared-routing overlay, including the named priority profiles and lane opinion counts
+     - shipped production `auto` routing remains on `codex | claude`, while explicit Gemini or Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths
 
 ## Rules
 
@@ -207,4 +187,5 @@ Routing conventions (not persisted as keys):
 - Do not pretend `.gemini/.agents-mode.yaml` is a Gemini-native runtime setting.
 - Do not invent extra keys beyond the canonical overlay schema.
 - Any read that drives a decision should prefer local `.gemini/.agents-mode.yaml`, then local legacy `.gemini/.agents-mode`, then global `~/.gemini/.agents-mode.yaml`, then global legacy `~/.gemini/.agents-mode`; normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
-- If the user asks for `externalProvider: gemini` on the Gemini line, accept it only as an explicit self-provider override; ordinary `auto` routing must still avoid same-provider self-bounce.
+- Gemini is `WEAK MODEL / NOT RECOMMENDED` on this line. If the user asks for `externalProvider: gemini`, accept it only as an explicit self-provider override for a manual example or compatibility run; ordinary `auto` routing must still avoid same-provider self-bounce.
+- If the user asks for `externalProvider: qwen`, treat it as the same kind of manual example or compatibility run and keep it out of shipped or repo-local production profiles.

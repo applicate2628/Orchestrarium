@@ -58,7 +58,7 @@ Show 3-4 natural language examples of how to invoke agents:
 - "build a new export feature for reports" → full-delivery
 - "$external-worker implement this approved phase through Codex CLI" → direct invocation
 - "$external-reviewer audit this change through Codex CLI" → direct invocation
-- "/agents-external-brigade run two external-reviewer lanes plus one Gemini visual worker lane" → direct invocation
+- "/agents-external-brigade run two external-reviewer lanes plus one explicit example-only Gemini visual worker lane" → direct invocation
 - "$consultant what do you think about this approach?" → direct invocation
 
 ### Project policies
