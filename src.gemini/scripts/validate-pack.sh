@@ -99,7 +99,7 @@ if [[ -d "$ROOT/src.gemini" ]]; then
   MODE="source"
   PACK_ROOT="$ROOT/src.gemini"
   GEMINI_FILE="$PACK_ROOT/GEMINI.md"
-  SHARED_SOURCE_FILE="$PACK_ROOT/AGENTS.shared.md"
+  SHARED_SOURCE_FILE="$ROOT/shared/AGENTS.shared.md"
   RUNTIME_AGENTS_FILE="$PACK_ROOT/AGENTS.md"
   LEGACY_RUNTIME_ROOT=""
 elif [[ -f "$ROOT/GEMINI.md" && -d "$ROOT/extensions/orchestrarium-gemini" ]]; then
@@ -150,6 +150,7 @@ done
 
 if [[ "$MODE" == "source" ]]; then
   [[ -f "$SHARED_SOURCE_FILE" ]] || fail "missing $SHARED_SOURCE_FILE"
+  [[ ! -e "$PACK_ROOT/AGENTS.shared.md" ]] || fail "$PACK_ROOT/AGENTS.shared.md should not duplicate shared/AGENTS.shared.md"
   [[ ! -e "$RUNTIME_AGENTS_FILE" ]] || fail "$RUNTIME_AGENTS_FILE should not exist in the source tree"
   [[ -f "$EXTENSION_README_FILE" ]] || fail "missing $EXTENSION_README_FILE"
   [[ -f "$EXTENSION_MANIFEST_FILE" ]] || fail "missing $EXTENSION_MANIFEST_FILE"
@@ -217,7 +218,7 @@ if [[ "$MODE" != "source" ]]; then
 fi
 
 if [[ "$MODE" == "source" ]]; then
-  grep -q '^@\./AGENTS\.shared\.md$' "$GEMINI_FILE" || fail "source GEMINI.md should import @./AGENTS.shared.md"
+  grep -q '^@\.\./shared/AGENTS\.shared\.md$' "$GEMINI_FILE" || fail "source GEMINI.md should import @../shared/AGENTS.shared.md"
 else
   grep -q '^@\./AGENTS\.md$' "$GEMINI_FILE" || fail "installed GEMINI.md should import @./AGENTS.md"
   grep -q '^@\./AGENTS\.md$' "$EXTENSION_GEMINI_FILE" || fail "installed extension GEMINI.md should import @./AGENTS.md"

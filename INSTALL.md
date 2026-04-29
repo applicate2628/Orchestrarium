@@ -212,7 +212,7 @@ When both packs are installed, keep shared project policies aligned across both 
 The monorepo still keeps the full Gemini line as a validated example source tree in addition to the root-router example path:
 
 - runtime entrypoint: `src.gemini/GEMINI.md`
-- shared-governance import module: `src.gemini/AGENTS.shared.md`
+- shared-governance source: `shared/AGENTS.shared.md`
 - branch-level docs entrypoint: `docs/README.md`
 - built-in initialization: Gemini CLI `/init` writes or tailors the project `GEMINI.md`
 - expertise layer: `src.gemini/skills/<name>/SKILL.md`

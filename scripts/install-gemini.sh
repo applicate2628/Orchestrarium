@@ -7,6 +7,7 @@ SOURCE="$REPO_DIR/src.gemini"
 EXTENSION_SOURCE="$SOURCE/extension"
 EXTENSION_MANIFEST_SOURCE="$EXTENSION_SOURCE/gemini-extension.json"
 EXTENSION_README_SOURCE="$EXTENSION_SOURCE/README.md"
+SHARED_AGENTS_SOURCE="$REPO_DIR/shared/AGENTS.shared.md"
 DEFAULT_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 MANAGED_START='<!-- ORCHESTRARIUM_GEMINI_PACK:START -->'
 MANAGED_END='<!-- ORCHESTRARIUM_GEMINI_PACK:END -->'
@@ -264,7 +265,7 @@ collect_preserved_gemini_imports() {
         }
       }
       if ($0 ~ /^@/) {
-        if ($0 != "@./AGENTS.md" && $0 != "@./AGENTS.shared.md" && !seen[$0]++) {
+        if ($0 != "@./AGENTS.md" && $0 != "@./AGENTS.shared.md" && $0 != "@../shared/AGENTS.shared.md" && !seen[$0]++) {
           print $0
         }
         next
@@ -293,7 +294,7 @@ write_merged_gemini_md() {
       close(imports_file)
     }
     {
-      if ($0 == "@./AGENTS.shared.md") {
+      if ($0 == "@./AGENTS.shared.md" || $0 == "@../shared/AGENTS.shared.md") {
         $0 = "@./AGENTS.md"
       }
       source[++source_count] = $0
@@ -356,7 +357,7 @@ write_merged_gemini_md() {
 merge_gemini_file() {
   local src="$1" dst="$2"
   local managed existing start_line end_line
-  managed="$(sed 's|^@\./AGENTS\.shared\.md$|@./AGENTS.md|' "$src")"
+  managed="$(sed -E 's|^@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)$|@./AGENTS.md|' "$src")"
   if [[ ! -f "$dst" ]]; then
     echo "  Creating GEMINI.md..."
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -597,7 +598,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -d "$SOURCE/skills" || ! -d "$SOURCE/agents" || ! -d "$SOURCE/commands" || ! -f "$SOURCE/GEMINI.md" || ! -f "$SOURCE/AGENTS.shared.md" ]]; then
+if [[ ! -d "$SOURCE/skills" || ! -d "$SOURCE/agents" || ! -d "$SOURCE/commands" || ! -f "$SOURCE/GEMINI.md" || ! -f "$SHARED_AGENTS_SOURCE" ]]; then
   echo "FAIL: src.gemini is incomplete at $SOURCE" >&2
   exit 1
 fi
@@ -679,18 +680,18 @@ install_tree "$SOURCE/agents" "$EXTENSION_ROOT/agents" "extension/agents"
 install_tree "$SOURCE/commands" "$EXTENSION_ROOT/commands" "extension/commands"
 merge_gemini_file "$SOURCE/GEMINI.md" "$GEMINI_TARGET"
 if [[ "$MODE" == "global" ]]; then
-  install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md"
+  install_pack_file "$SHARED_AGENTS_SOURCE" "$SHARED_TARGET" "AGENTS.md"
 else
-  install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md" 1
+  install_pack_file "$SHARED_AGENTS_SOURCE" "$SHARED_TARGET" "AGENTS.md" 1
   ensure_local_only_gitignore_entries "$PROJECT_ROOT"
 fi
 install_pack_file "$EXTENSION_MANIFEST_SOURCE" "$EXTENSION_MANIFEST_TARGET" "extension manifest"
 install_pack_file "$EXTENSION_README_SOURCE" "$EXTENSION_README_TARGET" "extension README"
 extension_gemini_tmp="$(mktemp)"
 trap 'rm -f "$extension_gemini_tmp"' EXIT
-sed 's|@\./AGENTS\.shared\.md|@./AGENTS.md|' "$SOURCE/GEMINI.md" > "$extension_gemini_tmp"
+sed -E 's|@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)|@./AGENTS.md|' "$SOURCE/GEMINI.md" > "$extension_gemini_tmp"
 install_pack_content_file "$extension_gemini_tmp" "$EXTENSION_GEMINI_TARGET" "extension GEMINI.md"
-install_pack_file "$SOURCE/AGENTS.shared.md" "$EXTENSION_AGENTS_TARGET" "extension AGENTS.md"
+install_pack_file "$SHARED_AGENTS_SOURCE" "$EXTENSION_AGENTS_TARGET" "extension AGENTS.md"
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"

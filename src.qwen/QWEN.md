@@ -1,5 +1,5 @@
 <!-- ORCHESTRARIUM_QWEN_PACK:START -->
-@./AGENTS.shared.md
+@../shared/AGENTS.shared.md
 
 # Qwen Provider Pack
 

@@ -99,7 +99,7 @@ if [[ -d "$ROOT/src.qwen" ]]; then
   MODE="source"
   PACK_ROOT="$ROOT/src.qwen"
   QWEN_FILE="$PACK_ROOT/QWEN.md"
-  SHARED_SOURCE_FILE="$PACK_ROOT/AGENTS.shared.md"
+  SHARED_SOURCE_FILE="$ROOT/shared/AGENTS.shared.md"
   RUNTIME_AGENTS_FILE="$PACK_ROOT/AGENTS.md"
   LEGACY_RUNTIME_ROOT=""
 elif [[ -f "$ROOT/QWEN.md" && -d "$ROOT/extensions/orchestrarium-qwen" ]]; then
@@ -150,6 +150,7 @@ done
 
 if [[ "$MODE" == "source" ]]; then
   [[ -f "$SHARED_SOURCE_FILE" ]] || fail "missing $SHARED_SOURCE_FILE"
+  [[ ! -e "$PACK_ROOT/AGENTS.shared.md" ]] || fail "$PACK_ROOT/AGENTS.shared.md should not duplicate shared/AGENTS.shared.md"
   [[ ! -e "$RUNTIME_AGENTS_FILE" ]] || fail "$RUNTIME_AGENTS_FILE should not exist in the source tree"
   [[ -f "$EXTENSION_README_FILE" ]] || fail "missing $EXTENSION_README_FILE"
   [[ -f "$EXTENSION_MANIFEST_FILE" ]] || fail "missing $EXTENSION_MANIFEST_FILE"
@@ -217,7 +218,7 @@ if [[ "$MODE" != "source" ]]; then
 fi
 
 if [[ "$MODE" == "source" ]]; then
-  grep -q '^@\./AGENTS\.shared\.md$' "$QWEN_FILE" || fail "source QWEN.md should import @./AGENTS.shared.md"
+  grep -q '^@\.\./shared/AGENTS\.shared\.md$' "$QWEN_FILE" || fail "source QWEN.md should import @../shared/AGENTS.shared.md"
 else
   grep -q '^@\./AGENTS\.md$' "$QWEN_FILE" || fail "installed QWEN.md should import @./AGENTS.md"
   grep -q '^@\./AGENTS\.md$' "$EXTENSION_QWEN_FILE" || fail "installed extension QWEN.md should import @./AGENTS.md"
@@ -381,7 +382,6 @@ PY
 
 stale_pattern='help\.toml|init-project\.toml|external-brigade\.toml|externalQwenFallbackMode|externalQwenWorkdirMode|gemini-3\.1-pro|gemini-3-flash|gemini-crosscheck|orchestrarium-gemini|gemini-extension\.json|cannot recursively call'
 stale_targets=(
-  "$PACK_ROOT/AGENTS.shared.md"
   "$PACK_ROOT/QWEN.md"
   "$PACK_ROOT/README.md"
   "$PACK_ROOT/agents"

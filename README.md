@@ -19,9 +19,9 @@ docs/               Common branch-level docs index and operator/runtime referenc
 src.codex/          Codex provider-pack source
 src.claude/         Claude Code provider-pack source
 src.gemini/         Gemini example-provider source tree with `GEMINI.md`,
-                    `AGENTS.shared.md`, stable `skills/`, and preview `agents/`
+                    stable `skills/`, and preview `agents/`
 src.qwen/           Qwen example-pack source tree with `QWEN.md`,
-                    `AGENTS.shared.md`, stable `skills/`, and preview `agents/`
+                    stable `skills/`, and preview `agents/`
 references-codex/   Codex-specific addenda and compatibility pointers
 references-claude/  Claude Code-specific addenda and compatibility pointers
 references-gemini/  Gemini-specific addenda and compatibility pointers
@@ -40,8 +40,8 @@ CLAUDE.md           Dev overlay for Claude Code pack maintenance
 | --- | --- | --- | --- | --- | --- |
 | Codex | Production | `src.codex/` | assembled installed `AGENTS.md` from `shared/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | root router installers plus `scripts/install-codex.*` | `validate-skill-pack.sh` and `validate-skill-pack.ps1` |
 | Claude Code | Production | `src.claude/` | `src.claude/CLAUDE.md` | root router installers plus `scripts/install-claude.*` | `validate-skill-pack.sh` and `validate-skill-pack.ps1` |
-| Gemini CLI | Explicit example integration (`WEAK MODEL / NOT RECOMMENDED`) | `src.gemini/` | `src.gemini/GEMINI.md` importing `src.gemini/AGENTS.shared.md` | root router installers plus `scripts/install-gemini.*` | `validate-pack.sh` and `validate-pack.ps1` |
-| Qwen | Native explicit example integration (`WEAK MODEL / NOT RECOMMENDED`) | `src.qwen/` | `src.qwen/QWEN.md` importing `src.qwen/AGENTS.shared.md` | root router installers plus `scripts/install-qwen.*` | `validate-pack.sh` and `validate-pack.ps1` |
+| Gemini CLI | Explicit example integration (`WEAK MODEL / NOT RECOMMENDED`) | `src.gemini/` | `src.gemini/GEMINI.md` importing `shared/AGENTS.shared.md` | root router installers plus `scripts/install-gemini.*` | `validate-pack.sh` and `validate-pack.ps1` |
+| Qwen | Native explicit example integration (`WEAK MODEL / NOT RECOMMENDED`) | `src.qwen/` | `src.qwen/QWEN.md` importing `shared/AGENTS.shared.md` | root router installers plus `scripts/install-qwen.*` | `validate-pack.sh` and `validate-pack.ps1` |
 
 Shared design references now live in `shared/references/`. Provider-local `references-codex/`, `references-claude/`, `references-gemini/`, and `references-qwen/` keep provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each provider-local tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
 

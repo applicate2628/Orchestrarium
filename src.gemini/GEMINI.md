@@ -1,5 +1,5 @@
 <!-- ORCHESTRARIUM_GEMINI_PACK:START -->
-@./AGENTS.shared.md
+@../shared/AGENTS.shared.md
 
 # Gemini Provider Pack
 

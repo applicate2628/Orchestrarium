@@ -7,7 +7,7 @@ This pack remains installable and inspectable, but the repository classifies Gem
 This branch keeps only Gemini-specific source, but it now ships the same full role vocabulary as the neighboring packs:
 
 - Gemini owns `GEMINI.md` through the built-in `/init` flow.
-- Orchestrarium keeps one source-side shared-governance module in `src.gemini/AGENTS.shared.md`, which installers materialize as runtime `AGENTS.md`.
+- Orchestrarium keeps one shared-governance source in `shared/AGENTS.shared.md`, which `src.gemini/GEMINI.md` imports in the monorepo and installers materialize as runtime `AGENTS.md`.
 - Gemini runtime config stays in `.gemini/settings.json`.
 - Orchestrarium seeds `.gemini/.agents-mode.yaml` as the shared routing overlay for named priority profiles and per-lane opinion counts.
 - Stable expertise lives in `src.gemini/skills/`.
@@ -23,7 +23,6 @@ install-gemini.sh           POSIX installer
 references-gemini/          Required Gemini-side maintainer references
 src.gemini/                 Gemini pack source tree
   GEMINI.md                 Native Gemini entrypoint
-  AGENTS.shared.md          Source-side shared-governance module for installed AGENTS.md
   skills/<name>/SKILL.md    Gemini Agent Skills
   agents/*.md               Gemini preview specialist subagents only
   agents/team-templates/    Repo-local team compositions
@@ -36,6 +35,7 @@ docs/agents-mode-reference.md
                             `.gemini/.agents-mode.yaml` overlay
 docs/provider-runtime-layout.md
                             Source-vs-installed Gemini surface map
+shared/AGENTS.shared.md     Canonical shared governance source for installed AGENTS.md
 INSTALL.md                  Installation and usage notes for this standalone branch
 LICENSE                     Mozilla Public License 2.0
 ```

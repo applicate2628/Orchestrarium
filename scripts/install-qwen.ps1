@@ -25,6 +25,7 @@ $Source = Join-Path $RepoDir "src.qwen"
 $ExtensionSource = Join-Path $Source "extension"
 $ExtensionManifestSource = Join-Path $ExtensionSource "qwen-extension.json"
 $ExtensionReadmeSource = Join-Path $ExtensionSource "README.md"
+$SharedAgentsSource = Join-Path (Join-Path $RepoDir "shared") "AGENTS.shared.md"
 $DefaultAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
 $ManagedStart = "<!-- ORCHESTRARIUM_QWEN_PACK:START -->"
 $ManagedEnd = "<!-- ORCHESTRARIUM_QWEN_PACK:END -->"
@@ -336,7 +337,7 @@ function Get-PreservedQwenImports {
         }
 
         if ($line -match '^@') {
-            if ($line -ne '@./AGENTS.md' -and $line -ne '@./AGENTS.shared.md' -and $imports -notcontains $line) {
+            if ($line -ne '@./AGENTS.md' -and $line -ne '@./AGENTS.shared.md' -and $line -ne '@../shared/AGENTS.shared.md' -and $imports -notcontains $line) {
                 $imports += $line
             }
             continue
@@ -371,7 +372,7 @@ function Get-MergedQwenManagedContent {
     }
 
     $preservedImports = Get-PreservedQwenImports -Lines $ExistingLines -ManagedStartLine $ManagedStartLine -ManagedEndLine $ManagedEndLine
-    $sourceLines = @((Get-Content -LiteralPath $SourceFile) | ForEach-Object { $_ -replace '^@\./AGENTS\.shared\.md$', '@./AGENTS.md' })
+    $sourceLines = @((Get-Content -LiteralPath $SourceFile) | ForEach-Object { $_ -replace '^@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)$', '@./AGENTS.md' })
     $importLine = -1
     for ($i = 0; $i -lt $sourceLines.Count; $i++) {
         if ($sourceLines[$i] -match '^@') {
@@ -421,7 +422,7 @@ function Get-MergedQwenManagedContent {
 function Merge-QwenFile {
     param([string]$SourceFile, [string]$TargetFile)
 
-    $managed = (Get-Content -LiteralPath $SourceFile -Raw) -replace '@\./AGENTS\.shared\.md', '@./AGENTS.md'
+    $managed = (Get-Content -LiteralPath $SourceFile -Raw) -replace '@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)', '@./AGENTS.md'
     if (-not (Test-Path -LiteralPath $TargetFile)) {
         Write-Host "  Creating QWEN.md..."
         if (-not $DryRun) {
@@ -726,7 +727,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $Source "commands"))) { throw "Missi
 if (-not (Test-Path -LiteralPath $ExtensionManifestSource)) { throw "Missing source Qwen extension manifest." }
 if (-not (Test-Path -LiteralPath $ExtensionReadmeSource)) { throw "Missing source Qwen extension README." }
 if (-not (Test-Path -LiteralPath (Join-Path $Source "QWEN.md"))) { throw "Missing source QWEN.md." }
-if (-not (Test-Path -LiteralPath (Join-Path $Source "AGENTS.shared.md"))) { throw "Missing source AGENTS.shared.md." }
+if (-not (Test-Path -LiteralPath $SharedAgentsSource)) { throw "Missing shared AGENTS.shared.md." }
 if (-not (Test-Path -LiteralPath $DefaultAgentsModeSource)) { throw "Missing source agents-mode.defaults.yaml." }
 
 if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $AgentsTarget) -or (Test-Path -LiteralPath $CommandsTarget) -or (Test-Path -LiteralPath $ExtensionRoot) -or (Test-Path -LiteralPath $QwenTarget) -or (Test-Path -LiteralPath $SharedTarget)) {
@@ -742,15 +743,15 @@ Install-Tree -SourceDir (Join-Path $Source "agents") -TargetDir (Join-Path $Exte
 Install-Tree -SourceDir (Join-Path $Source "commands") -TargetDir (Join-Path $ExtensionRoot "commands") -Label "extension/commands"
 Merge-QwenFile -SourceFile (Join-Path $Source "QWEN.md") -TargetFile $QwenTarget
 if ($Mode -eq "global") {
-    Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.md"
+    Install-PackFile -SourceFile $SharedAgentsSource -TargetFile $SharedTarget -Label "AGENTS.md"
 } else {
-    Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.md" -PreserveExisting
+    Install-PackFile -SourceFile $SharedAgentsSource -TargetFile $SharedTarget -Label "AGENTS.md" -PreserveExisting
     Ensure-LocalOnlyGitignoreEntries -ProjectRoot $ProjectRoot
 }
 Install-PackFile -SourceFile $ExtensionManifestSource -TargetFile $ExtensionManifestTarget -Label "extension manifest"
 Install-PackFile -SourceFile $ExtensionReadmeSource -TargetFile $ExtensionReadmeTarget -Label "extension README"
-Install-PackContent -Content ((Get-Content -LiteralPath (Join-Path $Source "QWEN.md") -Raw) -replace '@\./AGENTS\.shared\.md', '@./AGENTS.md') -TargetFile $ExtensionQwenTarget -Label "extension QWEN.md"
-Install-PackContent -Content (Get-Content -LiteralPath (Join-Path $Source "AGENTS.shared.md") -Raw) -TargetFile $ExtensionAgentsTarget -Label "extension AGENTS.md"
+Install-PackContent -Content ((Get-Content -LiteralPath (Join-Path $Source "QWEN.md") -Raw) -replace '@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)', '@./AGENTS.md') -TargetFile $ExtensionQwenTarget -Label "extension QWEN.md"
+Install-PackContent -Content (Get-Content -LiteralPath $SharedAgentsSource -Raw) -TargetFile $ExtensionAgentsTarget -Label "extension AGENTS.md"
 Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
 Sync-AgentsModeFile -TemplateFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
 Remove-LegacyPackFile -TargetFile $LegacySharedTarget -Label "AGENTS.shared.md"
