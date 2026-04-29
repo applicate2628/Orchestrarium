@@ -1,0 +1,211 @@
+{
+  "date": "2026-04-29",
+  "wave": "W72",
+  "scenarioId": "N93",
+  "scenarioPath": "Scenarios-v2/N93-multipackage-protocol-sdk-reentry/",
+  "status": "complete",
+  "batchNames": [
+    "wave72-n93-protocol-sdk-2026-04-29",
+    "wave72-n93-protocol-sdk-calibration-2026-04-29"
+  ],
+  "localValidation": [
+    {
+      "check": "verifier py_compile",
+      "result": "PASS"
+    },
+    {
+      "check": "oracle JSON parse",
+      "result": "PASS"
+    },
+    {
+      "check": "bundle-shape-only",
+      "result": "PASS"
+    },
+    {
+      "check": "expect-start-state",
+      "result": "PASS"
+    },
+    {
+      "check": "synthesized valid probe",
+      "path": ".scratch/verifier-probes/2026-04-29-n93-protocol-valid/N93",
+      "result": "PASS",
+      "score": 100.0
+    },
+    {
+      "check": "exact changed-path negative probe",
+      "mutation": "omit candidate/workspace/src/protocolmesh_sdk/serializer.py",
+      "result": "EXPECTED-FAIL"
+    },
+    {
+      "check": "cache auxiliary probe",
+      "mutation": "add candidate/workspace/src/protocolmesh_sdk/__pycache__/client.cpython-313.pyc changed path",
+      "result": "PASS"
+    },
+    {
+      "check": "public export mutation probe",
+      "path": ".scratch/verifier-probes/2026-04-29-n93-protocol-missing-export/N93",
+      "mutation": "remove protocolmesh_sdk.migrate_legacy_envelope root export",
+      "result": "EXPECTED-FAIL"
+    },
+    {
+      "check": "legacy wrapper mutation probe",
+      "path": ".scratch/verifier-probes/2026-04-29-n93-protocol-legacy-wrapper/N93",
+      "mutation": "reintroduce send_event wrapper",
+      "result": "EXPECTED-FAIL"
+    }
+  ],
+  "replacementDecision": {
+    "promotedIntoFullV2Hard": false,
+    "replacesSlot": null,
+    "reason": "N93 is an admitted diagnostic separator for multipackage protocol/SDK/CLI migration. It is not promoted into full-v2-hard /40 until a separate slot-replacement decision names the outgoing slot."
+  },
+  "verdict": "X3 PASS over X1 scoreable FAIL",
+  "rows": [
+    {
+      "rowId": "X1",
+      "modelLabel": "gpt-5.5",
+      "wrapperExitCode": 1,
+      "verificationPassed": false,
+      "binary": "FAIL",
+      "classification": "scoreable no-op/model fail",
+      "workerOutputBytes": 161555,
+      "changedPaths": [],
+      "auxiliaryChangedPaths": [],
+      "failureSummary": [
+        "no candidate files changed",
+        "verifier ran against starter and failed legacy API/static gates",
+        "missing dataclass models, root exports, route_envelope, HandlerRegistry.get, SDK/CLI/plugin contracts, ledgers, closure, and visible test markers",
+        "no quota, timeout, or usage-limit signature was found in worker output"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_13-48-35-X1-wave72-n93-protocol-sdk-2026-04-29/N93/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-29_13-48-35-X1-wave72-n93-protocol-sdk-2026-04-29/N93/meta/summary.json"
+    },
+    {
+      "rowId": "X3",
+      "modelLabel": "opus 4.7max",
+      "wrapperExitCode": 0,
+      "verificationPassed": true,
+      "binary": "PASS",
+      "score": 100.0,
+      "workerOutputBytes": 4251,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/migration-state.json",
+        "candidate/reentry-state.json",
+        "candidate/review-response.json",
+        "candidate/sdk-compat-ledger.json",
+        "candidate/source-ledger.json",
+        "candidate/workspace/src/protocolmesh_cli/__init__.py",
+        "candidate/workspace/src/protocolmesh_cli/main.py",
+        "candidate/workspace/src/protocolmesh_core/__init__.py",
+        "candidate/workspace/src/protocolmesh_core/models.py",
+        "candidate/workspace/src/protocolmesh_core/registry.py",
+        "candidate/workspace/src/protocolmesh_core/router.py",
+        "candidate/workspace/src/protocolmesh_plugins/__init__.py",
+        "candidate/workspace/src/protocolmesh_plugins/http_adapter.py",
+        "candidate/workspace/src/protocolmesh_sdk/__init__.py",
+        "candidate/workspace/src/protocolmesh_sdk/client.py",
+        "candidate/workspace/src/protocolmesh_sdk/compat.py",
+        "candidate/workspace/src/protocolmesh_sdk/serializer.py",
+        "candidate/workspace/tests/test_protocolmesh.py"
+      ],
+      "auxiliaryChangedPaths": [
+        "candidate/workspace/src/protocolmesh_cli/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_cli/__pycache__/main.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_core/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_core/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_core/__pycache__/registry.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_core/__pycache__/router.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_plugins/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_plugins/__pycache__/http_adapter.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_sdk/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_sdk/__pycache__/client.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_sdk/__pycache__/compat.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_sdk/__pycache__/serializer.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_protocolmesh.cpython-314.pyc"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_13-48-35-X3-wave72-n93-protocol-sdk-2026-04-29/N93/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-29_13-48-35-X3-wave72-n93-protocol-sdk-2026-04-29/N93/meta/summary.json"
+    },
+    {
+      "rowId": "X2",
+      "modelLabel": "gpt-5.3-codex-spark",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "binary": "FAIL",
+      "classification": "scoreable no-op/model fail",
+      "workerOutputBytes": 45077,
+      "changedPaths": [],
+      "auxiliaryChangedPaths": [],
+      "failureSummary": [
+        "no candidate files changed",
+        "verifier ran against starter and failed legacy API/static, runtime, ledger, closure, and visible test marker gates"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_14-01-51-X2-wave72-n93-protocol-sdk-calibration-2026-04-29/N93/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-29_14-01-51-X2-wave72-n93-protocol-sdk-calibration-2026-04-29/N93/meta/summary.json"
+    },
+    {
+      "rowId": "X6",
+      "modelLabel": "gemini3.1flash-lite-preview",
+      "wrapperExitCode": 0,
+      "verificationPassed": false,
+      "binary": "FAIL",
+      "classification": "scoreable semantic/scope fail with post-run Gemini AttachConsole noise",
+      "workerOutputBytes": 20276,
+      "changedPaths": [
+        "candidate/closure.json",
+        "candidate/migration-state.json",
+        "candidate/reentry-state.json",
+        "candidate/review-response.json",
+        "candidate/sdk-compat-ledger.json",
+        "candidate/source-ledger.json",
+        "candidate/workspace/src/protocolmesh_cli/__init__.py",
+        "candidate/workspace/src/protocolmesh_cli/main.py",
+        "candidate/workspace/src/protocolmesh_core/__init__.py",
+        "candidate/workspace/src/protocolmesh_core/models.py",
+        "candidate/workspace/src/protocolmesh_core/router.py",
+        "candidate/workspace/src/protocolmesh_plugins/__init__.py",
+        "candidate/workspace/src/protocolmesh_plugins/http_adapter.py",
+        "candidate/workspace/src/protocolmesh_sdk/__init__.py",
+        "candidate/workspace/src/protocolmesh_sdk/client.py",
+        "candidate/workspace/src/protocolmesh_sdk/compat.py",
+        "candidate/workspace/src/protocolmesh_sdk/serializer.py",
+        "candidate/workspace/tests/test_protocolmesh.py"
+      ],
+      "auxiliaryChangedPaths": [
+        ".pytest_cache/.gitignore",
+        ".pytest_cache/CACHEDIR.TAG",
+        ".pytest_cache/README.md",
+        ".pytest_cache/v/cache/lastfailed",
+        ".pytest_cache/v/cache/nodeids",
+        "candidate/workspace/src/protocolmesh_cli/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_cli/__pycache__/main.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_core/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_core/__pycache__/models.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_core/__pycache__/registry.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_core/__pycache__/router.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_sdk/__pycache__/__init__.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_sdk/__pycache__/client.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_sdk/__pycache__/compat.cpython-314.pyc",
+        "candidate/workspace/src/protocolmesh_sdk/__pycache__/serializer.cpython-314.pyc",
+        "candidate/workspace/tests/__pycache__/test_protocolmesh.cpython-314-pytest-9.0.3.pyc"
+      ],
+      "failureSummary": [
+        "exact scope missed candidate/workspace/src/protocolmesh_core/registry.py",
+        "route accepted path returned false",
+        "legacy migration returned schema_version '2.0' instead of integer 2",
+        "duplicate delivery republished",
+        "client and CLI success paths returned error/rejected statuses",
+        "source, migration, sdk-compat, reentry, review, closure, and visible test marker ledgers incomplete"
+      ],
+      "runRoot": ".scratch/v2-cohort-runs/2026-04-29_14-01-51-X6-wave72-n93-protocol-sdk-calibration-2026-04-29/N93/run",
+      "summaryPath": ".scratch/v2-cohort-runs/2026-04-29_14-01-51-X6-wave72-n93-protocol-sdk-calibration-2026-04-29/N93/meta/summary.json"
+    }
+  ],
+  "postRunVerification": [
+    "X3 passed check_multipackage_protocol_reentry.py with exact nineteen benchmark changed paths and cache-only auxiliary files",
+    "X1 did not change candidate files and failed the verifier against the starter; worker output contains no quota/timeout/usage-limit signature",
+    "X2 did not change candidate files and failed the verifier against the starter with wrapperExitCode 0",
+    "X6 changed files but failed exact scope and hidden runtime/ledger gates with wrapperExitCode 0; Gemini AttachConsole text is recorded as post-run route noise, not the verifier failure source"
+  ]
+}

@@ -4219,23 +4219,24 @@ structured reporting, protected input hashes, and exact fifteen-path changed sco
 
 | Scenario | Row / model | Run root | Wrapper exit | Verifier | Changed paths | Worker output | Classification |
 |---|---|---|---:|---|---|---:|---|
-| `N92` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-29_00-38-09-X1-wave71-n92-staged-interface-2026-04-29/N92/run` | `1` | starter verifier failed after no edits | none | `893` bytes | `NOT-RUN`; quota, retry after worker reset |
+| `N92` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-29_13-37-12-X1-wave71-n92-x1-retry-2026-04-29/N92/run` | `0` | `PASS`; `100.0 / 100` | exact fifteen benchmark artifacts | `454833` bytes | `PASS` |
 | `N92` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-29_00-38-09-X3-wave71-n92-staged-interface-2026-04-29/N92/run` | `0` | `PASS`; `100.0 / 100` | exact fifteen benchmark artifacts; subscriptionmesh `__pycache__` auxiliary | `3189` bytes | `PASS` |
 
 ### Verdict
 
-No top-pair verdict yet. X1 hit the Codex usage limit before model work; the worker output says to
-try again at `4:51 AM`, and changed paths are empty. That is `NOT-RUN / REQUEUE`, not a scoreable
-model fail. X3 passed N92 with exact benchmark scope, so the next required action is an X1 retry on
-the same batch/scenario after quota reset.
+`binary tie remains` for X1 and X3 on N92. The earlier X1 quota row is superseded by the
+`2026-04-29_13-37-12` retry: wrapper exit `0`, verifier PASS, and exact fifteen benchmark changed
+paths. X3 also passed with exact benchmark scope. N92 is diagnostic-only and does not change the
+canonical `full-v2-hard /40` surface without a separate slot-replacement decision.
 
-## 2026-04-29 Follow-Up: W72 Multipackage Protocol SDK Reentry Prep
+## 2026-04-29 Follow-Up: W72 Multipackage Protocol SDK Reentry
 
-`N93-multipackage-protocol-sdk-reentry` was prepared as the next interface-breakage separator axis
-without launching `X1`, per user instruction. It extends the N92 idea into a multi-package
-ProtocolMesh SDK/CLI/plugin migration: core routing, SDK v2 wire serialization, legacy envelope
-migration, plugin delivery, CLI structured return, staged source/migration/sdk-compat/reentry
-ledgers, protected input hashes, clean-room public package imports, and exact nineteen-path scope.
+`N93-multipackage-protocol-sdk-reentry` was prepared and then run as the next interface-breakage
+separator axis. It extends the N92 idea into a multi-package ProtocolMesh SDK/CLI/plugin migration:
+core routing, SDK v2 wire serialization, legacy envelope migration, plugin delivery, CLI structured
+return, staged source/migration/sdk-compat/reentry ledgers, protected input hashes, clean-room
+public package imports, and exact nineteen-path scope. Top-pair runs used `X1` and `X3`; calibration
+then ran `X2` and `X6`. `X4` remained final-only and `X5` remained parked.
 
 ### Preparation validation
 
@@ -4255,11 +4256,15 @@ ledgers, protected input hashes, clean-room public package imports, and exact ni
 
 | Scenario | Row / model | Run root | Wrapper exit | Verifier | Changed paths | Worker output | Classification |
 |---|---|---|---:|---|---|---:|---|
-| `N93` | `X1 / gpt-5.5` | not launched | n/a | n/a | n/a | n/a | `NOT-RUN`; user requested prep only |
-| `N93` | `X3 / opus 4.7max` | not launched | n/a | n/a | n/a | n/a | `NOT-RUN`; prep only |
+| `N93` | `X1 / gpt-5.5` | `.scratch/v2-cohort-runs/2026-04-29_13-48-35-X1-wave72-n93-protocol-sdk-2026-04-29/N93/run` | `1` | `FAIL`; starter verifier failures after no edits | none | `161555` | scoreable `FAIL`; no-op, not quota/timeout |
+| `N93` | `X3 / opus 4.7max` | `.scratch/v2-cohort-runs/2026-04-29_13-48-35-X3-wave72-n93-protocol-sdk-2026-04-29/N93/run` | `0` | `PASS`; `100 / 100` | exact 19 benchmark artifacts; pycache auxiliary only | `4251` | `PASS` |
+| `N93` | `X2 / gpt-5.3-codex-spark` | `.scratch/v2-cohort-runs/2026-04-29_14-01-51-X2-wave72-n93-protocol-sdk-calibration-2026-04-29/N93/run` | `0` | `FAIL`; starter verifier failures after no edits | none | `45077` | scoreable `FAIL`; no-op |
+| `N93` | `X6 / gemini3.1flash-lite-preview` | `.scratch/v2-cohort-runs/2026-04-29_14-01-51-X6-wave72-n93-protocol-sdk-calibration-2026-04-29/N93/run` | `0` | `FAIL`; scope/runtime/ledger failures | 18 benchmark artifacts; missing `registry.py`; cache auxiliary | `20276` | scoreable `FAIL`; Gemini `AttachConsole` post-run noise is not the failure reason |
 
 ### Verdict
 
-No top-pair verdict yet. N93 is admission-ready for a future X1/X3 launch, but this pass deliberately
-did not start X1 or X3. It stays diagnostic-only and must not change the canonical `full-v2-hard /40`
-surface unless complete model results and a named slot-replacement decision are admitted later.
+`X3 PASS over X1 scoreable FAIL` on N93. X1 did not hit quota or timeout; it produced no candidate
+changes and failed against the starter contract. X3 passed the exact multipackage migration contract
+compactly. X2 failed as a no-op and X6 failed semantic/scope gates with wrapper exit `0`. N93 remains
+diagnostic-only and must not change the canonical `full-v2-hard /40` surface unless a named
+slot-replacement decision is admitted later.
