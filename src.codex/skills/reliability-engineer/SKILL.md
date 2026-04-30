@@ -1,6 +1,6 @@
 ---
 name: reliability-engineer
-description: "Define reliability constraints: SLOs, failure modes, resilience, degradation, observability, rollout, and rollback."
+description: "Define SLOs, failure modes, resilience, observability, rollout, rollback."
 ---
 
 # Reliability Engineer

@@ -1,6 +1,6 @@
 ---
 name: external-worker
-description: Run eligible worker-side roles through the selected external provider with clear provenance and fail-fast handling.
+description: "Run eligible worker roles via external provider; keep provenance."
 ---
 
 # External Worker

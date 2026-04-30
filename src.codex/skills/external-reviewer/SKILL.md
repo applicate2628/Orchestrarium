@@ -1,6 +1,6 @@
 ---
 name: external-reviewer
-description: Run eligible review or QA work through the selected external provider with clear provenance and fail-fast handling.
+description: "Run eligible review/QA via external provider; keep provenance."
 ---
 
 # External Reviewer

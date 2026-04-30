@@ -1,6 +1,6 @@
 ---
 name: architect
-description: "Design from accepted research: architecture decisions, tradeoffs, APIs, data models, security, observability, and tests."
+description: "Design from accepted research: architecture, APIs, data, security, tests."
 ---
 
 # Architect

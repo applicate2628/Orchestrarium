@@ -1,6 +1,6 @@
 ---
 name: ux-reviewer
-description: Gate user-facing changes for usability, interaction clarity, accessibility, comprehension, and flow integrity.
+description: "Review usability, interaction clarity, accessibility, comprehension, flow."
 ---
 
 # UX Reviewer

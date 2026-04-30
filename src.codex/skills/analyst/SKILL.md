@@ -1,6 +1,6 @@
 ---
 name: analyst
-description: Investigate repo evidence read-only and return factual file, symbol, data-flow, contract, and risk findings.
+description: "Investigate repo evidence read-only: files, symbols, flows, contracts, risks."
 ---
 
 # Analyst

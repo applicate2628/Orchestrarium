@@ -1,6 +1,6 @@
 ---
 name: algorithm-scientist
-description: "Frame algorithms before implementation: invariants, objectives, complexity, stability, assumptions, and correctness."
+description: "Frame algorithms: invariants, assumptions, complexity, stability, correctness."
 ---
 
 # Algorithm Scientist

@@ -1,6 +1,6 @@
 ---
 name: external-brigade
-description: Launch and aggregate a bounded parallel set of independent external helper lanes.
+description: "Launch bounded parallel external helper lanes."
 ---
 
 # External Brigade

@@ -1,6 +1,6 @@
 ---
 name: toolchain-engineer
-description: "Implement approved build and toolchain work: compilers, SDKs, CI graphs, packaging, caching, and reproducibility."
+description: "Implement toolchains, builds, CI graphs, packaging, caches, reproducibility."
 ---
 
 # Toolchain Engineer

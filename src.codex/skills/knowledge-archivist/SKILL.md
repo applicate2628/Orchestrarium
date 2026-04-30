@@ -1,6 +1,6 @@
 ---
 name: knowledge-archivist
-description: Maintain docs, references, plans, reports, canonical-source alignment, and archive hygiene.
+description: "Maintain docs, references, plans, reports, canonical alignment, archives."
 ---
 
 # Knowledge Archivist

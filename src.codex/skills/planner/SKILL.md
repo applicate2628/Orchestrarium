@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Turn accepted design into delivery phases with file scope, dependencies, acceptance criteria, checks, and gates.
+description: "Plan accepted design into phases, scope, dependencies, checks, gates."
 ---
 
 # Planner

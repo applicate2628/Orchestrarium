@@ -1,6 +1,6 @@
 ---
 name: model-view-engineer
-description: "Implement approved Qt model/view work: models, proxies, delegates, selection, sorting, filtering, and indexes."
+description: "Implement Qt model/view: models, proxies, delegates, selection, indexes."
 ---
 
 # Model-View Engineer

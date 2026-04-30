@@ -1,6 +1,6 @@
 ---
 name: backend-engineer
-description: Implement approved backend APIs, domain logic, persistence, or integrations within accepted design constraints.
+description: "Implement backend APIs, domain logic, persistence, integrations."
 ---
 
 # Backend Engineer

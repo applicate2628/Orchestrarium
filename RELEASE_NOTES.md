@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-05-01
+
+### Changed
+
+- Compressed Codex skill frontmatter descriptions into balanced startup metadata and tightened the Codex skill catalog budget from 5000 to 3000 description characters. This preserves role-selection anchors such as Qt, ETL, IaC, SLOs, high-DPI, auth, secrets, CI/CD, and external-provider provenance while keeping detailed role contracts in each skill body. This matters because Codex loads descriptions before selecting skill bodies, and compact metadata reduces startup truncation warnings without degrading role discovery quality.
+
 ## 2026-04-30
 
 ### Changed

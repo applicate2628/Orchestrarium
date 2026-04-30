@@ -1,6 +1,6 @@
 ---
 name: qt-ui-engineer
-description: "Implement approved Qt Widgets UI work: dialogs, signals, slots, focus, keyboard, theme, and high-DPI behavior."
+description: "Implement Qt Widgets UI: dialogs, signals, focus, theme, high-DPI."
 ---
 
 # Qt UI Engineer

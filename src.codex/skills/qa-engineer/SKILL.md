@@ -1,6 +1,6 @@
 ---
 name: qa-engineer
-description: Verify approved phases with targeted tests, regression checks, edge cases, and a clear QA verdict.
+description: "Verify phases with tests, regressions, edge cases, QA verdicts."
 ---
 
 # QA Engineer

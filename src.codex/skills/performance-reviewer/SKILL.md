@@ -1,6 +1,6 @@
 ---
 name: performance-reviewer
-description: Gate approved work against performance budgets, latency, throughput, memory, CPU, scalability, or cost risk.
+description: "Review performance budgets, latency, throughput, memory, CPU, scale, cost."
 ---
 
 # Performance Reviewer

@@ -1,6 +1,6 @@
 ---
 name: product-manager
-description: "Own roadmap and admission decisions: priority, sequencing, milestone intent, and discovery or delivery entry."
+description: "Own roadmap, priority, milestones, and discovery/delivery admission."
 ---
 
 # Product Manager

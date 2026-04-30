@@ -1,6 +1,6 @@
 ---
 name: consultant
-description: Give non-blocking advice to the lead on tradeoffs, ambiguity, or cross-cutting concerns; never approve gates.
+description: "Advise on tradeoffs, ambiguity, cross-cutting concerns; never approve gates."
 ---
 
 # Consultant

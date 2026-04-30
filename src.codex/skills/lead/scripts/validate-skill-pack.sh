@@ -836,7 +836,7 @@ echo ""
 echo "=== Skill metadata budget ==="
 
 CODEX_SKILL_DESCRIPTION_MAX_CHARS=180
-CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=5000
+CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=3000
 UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes)
 PACK_BUDGET_SKILLS=("${indexed_roles[@]}" "${UTILITY_SKILLS[@]}")
 mapfile -t PACK_BUDGET_SKILLS < <(printf '%s\n' "${PACK_BUDGET_SKILLS[@]}" | sort -u)

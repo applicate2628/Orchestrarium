@@ -1,6 +1,6 @@
 ---
 name: platform-engineer
-description: "Implement approved platform or infra work: CI/CD, deployment config, runtime wiring, IaC, or observability."
+description: "Implement CI/CD, deployment config, runtime wiring, IaC, observability."
 ---
 
 # Platform Engineer

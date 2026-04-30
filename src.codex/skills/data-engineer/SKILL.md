@@ -1,6 +1,6 @@
 ---
 name: data-engineer
-description: "Implement approved data work: SQL, warehouse, ETL, migrations, data models, or pipelines within accepted design."
+description: "Implement data work: SQL, ETL, migrations, models, pipelines."
 ---
 
 # Data Engineer

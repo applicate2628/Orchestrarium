@@ -1,6 +1,6 @@
 ---
 name: frontend-engineer
-description: Implement approved web or client UI work within accepted product, design, accessibility, and architecture constraints.
+description: "Implement web/client UI within design, accessibility, architecture constraints."
 ---
 
 # Frontend Engineer

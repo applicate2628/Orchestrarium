@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Review current or specified changes for repo-wide impact, missed dependents, contract breaks, and regressions.
+description: "Review changes for repo impact, dependents, contracts, regressions."
 ---
 
 # Review Changes

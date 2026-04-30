@@ -1,6 +1,6 @@
 ---
 name: ux-designer
-description: "Design approved user-facing flows: structure, state behavior, content hierarchy, and usability criteria."
+description: "Design user flows, state behavior, hierarchy, usability criteria."
 ---
 
 # UX Designer

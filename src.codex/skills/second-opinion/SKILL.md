@@ -1,6 +1,6 @@
 ---
 name: second-opinion
-description: Get an independent consultant opinion or manage the consultant toggle state.
+description: "Get independent consultant opinion or manage consultant toggle."
 ---
 
 # Second Opinion

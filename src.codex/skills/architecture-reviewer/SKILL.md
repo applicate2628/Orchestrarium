@@ -1,6 +1,6 @@
 ---
 name: architecture-reviewer
-description: Review approved work for maintainability, cohesion, contract fit, complexity, and semantic control-plane drift.
+description: "Review maintainability, cohesion, contracts, complexity, control-plane drift."
 ---
 
 # Architecture Reviewer
