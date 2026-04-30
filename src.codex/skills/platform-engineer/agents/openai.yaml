@@ -1,4 +1,0 @@
-interface:
-  display_name: "Platform Engineer"
-  short_description: "Implement platform phases"
-  default_prompt: "Use $platform-engineer to implement the approved platform phase and return one scoped implementation package."

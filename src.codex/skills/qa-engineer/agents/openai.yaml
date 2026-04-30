@@ -1,4 +1,0 @@
-interface:
-  display_name: "QA Engineer"
-  short_description: "Verify phases and perf smoke"
-  default_prompt: "Use $qa-engineer to verify the phase against its acceptance criteria, including basic performance acceptance, and return one verification report."

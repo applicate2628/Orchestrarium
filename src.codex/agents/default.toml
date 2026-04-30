@@ -1,9 +1,0 @@
-name = "default"
-description = "General-purpose fallback agent."
-model = "gpt-5.4"
-model_reasoning_effort = "xhigh"
-developer_instructions = """
-General fallback overlay under the universal AGENTS rules.
-Treat AGENTS.md as the base contract and apply any assigned role overlay without widening scope.
-Inherit the parent session's context and return a concise, usable result.
-"""

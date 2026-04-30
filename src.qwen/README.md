@@ -7,7 +7,7 @@ This pack remains installable and inspectable, but the repository classifies Qwe
 This branch keeps only Qwen-specific source, but it ships the same full role vocabulary as the neighboring packs:
 
 - Qwen owns `QWEN.md` through the Qwen `/init` flow.
-- Orchestrarium keeps one shared-governance source in `shared/AGENTS.shared.md`, which `src.qwen/QWEN.md` imports in the monorepo and installers materialize as runtime `AGENTS.md`.
+- Orchestrarium keeps one shared-governance source in `shared/AGENTS.shared.md`, which `src.qwen/QWEN.md` imports in this branch and installers materialize as runtime `AGENTS.md`.
 - Qwen runtime config stays in `.qwen/settings.json`.
 - Orchestrarium seeds `.qwen/.agents-mode.yaml` as the shared routing overlay for named priority profiles and per-lane opinion counts.
 - Stable expertise lives in `src.qwen/skills/`.
@@ -36,7 +36,7 @@ docs/agents-mode-reference.md
 docs/provider-runtime-layouts.md
                             Source-vs-installed Qwen surface map
 shared/AGENTS.shared.md     Canonical shared governance source for installed AGENTS.md
-INSTALL.md                  Installation and usage notes for this monorepo
+INSTALL.md                  Installation and usage notes for this standalone branch
 LICENSE                     Mozilla Public License 2.0
 ```
 

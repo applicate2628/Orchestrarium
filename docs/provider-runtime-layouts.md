@@ -1,186 +1,40 @@
 # Provider Runtime Layouts
 
-This document records the installed runtime layout for the provider lines used by Orchestrarium today, including provider source trees that already exist in the monorepo. It is an install/runtime reference, not a source-layout reference.
+This document records the installed runtime layout for the standalone Qwen example pack. Qwen is classified as `WEAK MODEL / NOT RECOMMENDED`; production `externalProvider: auto` routing stays on `codex | claude`.
 
-Production auto-routing in the root integration contract is limited to Codex plus Claude Code. Gemini CLI and Qwen are documented here as explicit example integrations only; both are classified in this repository as `WEAK MODEL / NOT RECOMMENDED`.
+## Quick Comparison
 
-Do not confuse these runtime surfaces with the monorepo authoring trees such as `src.codex/`, `src.claude/`, `src.gemini/`, or `src.qwen/`.
+| Provider | Global root | Project root | Production auto-routing |
+|---|---|---|---|
+| Qwen | `~/.qwen/` | `<project>/.qwen/` | no, explicit example-only route |
 
-Architecture note: on the Codex line, the installed `AGENTS.md` is intentionally the compact universal minimum. Detailed installed role contracts and runtime guidance belong in the installed `skills/<role>/SKILL.md` files and the built-in `.codex/agents/*.toml` overrides; shared/provider reference trees are source-maintainer canon, not target-project install payload. Claude already follows the analogous pattern through a short `CLAUDE.md` entrypoint plus `.claude/agents/*.md` role files.
-
-Read the tables with three layers in mind:
-
-- `Official provider behavior` means the provider's own documented runtime surface or configuration model.
-- `Orchestrarium runtime contract` means the install shape and conventions introduced by this repository.
-- `Observed installed behavior` means the result verified in an installed target.
-
-Do not collapse those layers into one claim. When a row is Orchestrarium-owned rather than provider-native, the notes call that out explicitly.
-
-## Scope legend
-
-| Scope | Meaning |
-| --- | --- |
-| `Global` | User-level installed runtime surface, usually under the provider's home directory |
-| `Local` | Project-level installed runtime surface inside the current repository or target project |
-
-## Codex
+## Qwen
 
 ### Global
 
 | Item | Path or shape | Notes |
-| --- | --- | --- |
-| Installed pack root | `~/.codex/` | Global Codex pack install target |
-| Governance entrypoint | `~/.codex/AGENTS.md` | Installed Codex runtime entrypoint; intentionally the compact universal minimum rather than the full role/runtime manual |
-| Skill tree | `~/.codex/skills/<role>/SKILL.md` | Orchestrarium Codex runtime organizes each role as a skill directory |
-| Built-in subagent overrides | `~/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Orchestrarium-installed custom agents that override Codex built-ins and pin them to `gpt-5.4` + `xhigh`; preserved on reinstall |
-| Validation script | `~/.codex/skills/lead/scripts/validate-skill-pack.sh` | Same lead script tree as the repo source |
-| Publication-safety scan | `~/.codex/skills/lead/scripts/check-publication-safety.sh` | PowerShell wrapper exists alongside the shell script |
-| Global operator overlay | `~/.codex/.agents-mode.yaml` | Orchestrarium-owned default operator file seeded on first global install and preserved on reinstall; legacy sibling `~/.codex/.agents-mode` is compatibility input only |
+|---|---|---|
+| Global context file | `~/.qwen/QWEN.md` | Qwen-native instruction entrypoint managed by the installer block |
+| Shared governance copy | `~/.qwen/AGENTS.md` | Orchestrarium shared governance materialized from `shared/AGENTS.shared.md` |
+| Extension package | `~/.qwen/extensions/orchestrarium-qwen/` | Qwen extension payload for skills, agents, commands, and manifest |
+| Global operator overlay | `~/.qwen/.agents-mode.yaml` | Orchestrarium routing overlay seeded on first global install and preserved on reinstall |
+| Native runtime config | `~/.qwen/settings.json` | Qwen-native runtime config surface; Orchestrarium does not replace it |
 
 ### Local
 
 | Item | Path or shape | Notes |
-| --- | --- | --- |
-| Installed pack root | `<project>/.agents/skills/` | Role skills are copied here |
-| Governance entrypoint | `<project>/AGENTS.md` | Codex pack section is merged into the project-root `AGENTS.md`; the installed Codex section stays intentionally compact and defers detailed installed role/runtime guidance to the skill tree and `.codex/agents/` overrides |
-| Skill tree | `<project>/.agents/skills/<role>/SKILL.md` | Mirrors the global `skills/` structure |
-| Built-in subagent overrides | `<project>/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Project-level custom agents that override Codex built-ins and pin them to `gpt-5.4` + `xhigh`; seeded on first install and preserved on reinstall |
-| Local config | `<project>/.agents/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `$init-project` reviews or updates it, while legacy sibling `<project>/.agents/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Codex overlay when the local scope is absent. |
-| Validation script | `<project>/.agents/skills/lead/scripts/validate-skill-pack.sh` | Run from the target project root after install |
-| Publication-safety scan | `<project>/.agents/skills/lead/scripts/check-publication-safety.sh` | PowerShell wrapper exists alongside the shell script |
-
-## Claude Code
-
-### Global
-
-| Item | Path or shape | Notes |
-| --- | --- | --- |
-| Global context file | `~/.claude/CLAUDE.md` | Official user-level Claude Code instruction file; intentionally short while detailed role behavior lives under `~/.claude/agents/` |
-| Global personal skills | `~/.claude/skills/<skill-name>/SKILL.md` | Official preferred user-level extension surface |
-| Global personal subagents | `~/.claude/agents/*.md` | Official user-level custom subagent surface |
-| Global legacy commands | `~/.claude/commands/*.md` | Still supported, but Claude docs now recommend skills as the preferred model |
-| Global operator overlay | `~/.claude/.agents-mode.yaml` | Orchestrarium-owned default operator file seeded on first global install and preserved on reinstall; not a Claude-native file from official docs, and legacy sibling `~/.claude/.agents-mode` is compatibility input only |
-
-### Local
-
-| Item | Path or shape | Notes |
-| --- | --- | --- |
-| Project context file | `<project>/.claude/CLAUDE.md` or `<project>/CLAUDE.md` | Official project-level Claude instruction entrypoints; keep the entrypoint short and the detailed role files under `.claude/agents/` |
-| Local personal override | `<project>/CLAUDE.local.md` | Official personal, uncommitted project override layer |
-| Project skills | `<project>/.claude/skills/<skill-name>/SKILL.md` | Official preferred project-level extension surface |
-| Project subagents | `<project>/.claude/agents/*.md` | Official project-level custom subagent surface |
-| Legacy commands | `<project>/.claude/commands/*.md` | Still work, but lose precedence to a skill with the same name |
-| Orchestrarium shared governance copy | `<project>/.claude/AGENTS.md` | Repo-local overlay copied by Orchestrarium install scripts; not a Claude-native runtime requirement |
-| Orchestrarium local config | `<project>/.claude/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `/agents-init-project` reviews or updates it, while legacy sibling `<project>/.claude/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Claude overlay when the local scope is absent. |
-| Pack memory | `<project>/.claude/memory/` | Repo-local installed memory payload for the Orchestrarium Claude pack |
-
-## Gemini CLI (Example Integration)
-
-### Global
-
-| Item | Path or shape | Notes |
-| --- | --- | --- |
-| Global context file | `~/.gemini/GEMINI.md` | Official user-level Gemini context file |
-| Global shared-governance import | `~/.gemini/AGENTS.md` | Orchestrarium-installed markdown module imported by `GEMINI.md`; not a Gemini-native required filename |
-| Global user skills | `~/.gemini/skills/` | Official user-level skill location; Orchestrarium leaves this tier for user overrides instead of mirroring the pack here |
-| Global user skills alias | `~/.agents/skills/` | Official alias; within the user tier, the alias takes precedence over `~/.gemini/skills/` |
-| Global user subagents | `~/.gemini/agents/` | Official preview user-level subagent location; Orchestrarium leaves this tier for deliberate user overrides |
-| Global custom commands | `~/.gemini/commands/` | Official user-level Gemini custom commands; Orchestrarium does not mirror its own commands here |
-| Global settings | `~/.gemini/settings.json` | Official CLI configuration, including optional `context.fileName` overrides |
-| Global operator overlay | `~/.gemini/.agents-mode.yaml` | Orchestrarium-owned shared-routing overlay seeded on first global install and preserved on reinstall; not a Gemini-native settings surface, and legacy sibling `~/.gemini/.agents-mode` is compatibility input only |
-| Global extensions | `~/.gemini/extensions/<extension>/` | Official runtime location for installed or linked extensions; Orchestrarium materializes `orchestrarium-gemini` here on global Gemini install |
-| Extension manifest | `gemini-extension.json` inside an extension | Official extension manifest; extensions can bundle skills, commands, context, and MCP servers |
-
-### Local
-
-| Item | Path or shape | Notes |
-| --- | --- | --- |
-| Project context file | `<project>/GEMINI.md` | Official default project-level Gemini context file; built-in `/init` generates or tailors this file |
-| Project shared-governance import | `<project>/AGENTS.md` | Orchestrarium-installed markdown module imported by `GEMINI.md`; not a Gemini-native required filename |
-| Parent-context hierarchy | `<project>/../GEMINI.md` up to project root | Gemini walks parent directories until the `.git` root |
-| Sub-directory context | `<project>/<subdir>/GEMINI.md` | Gemini also loads more specific context files below the current working directory |
-| Workspace skills | `<project>/.gemini/skills/` | Official workspace skill location; Orchestrarium leaves this tier for explicit repo-local overrides instead of mirroring the pack here |
-| Workspace skills alias | `<project>/.agents/skills/` | Official alias; within the workspace tier, the alias takes precedence over `.gemini/skills/` |
-| Workspace subagents | `<project>/.gemini/agents/` | Official preview project-level subagent location; Orchestrarium leaves this tier for deliberate repo-local overrides |
-| Workspace custom commands | `<project>/.gemini/commands/` | Official project-local Gemini custom commands; Orchestrarium does not mirror its own commands here |
-| Workspace extensions | `<project>/.gemini/extensions/<extension>/` | Official workspace extension location; Orchestrarium materializes `orchestrarium-gemini` here on project-local Gemini install |
-| Workspace settings | `<project>/.gemini/settings.json` | Official project-local Gemini settings |
-| Orchestrarium operator overlay | `<project>/.gemini/.agents-mode.yaml` | Repo-local shared routing overlay for consultant, delegation, MCP, external-provider preferences, named priority profiles, and opinion counts; local install seeds the default, Gemini `/init` still owns `GEMINI.md`, the Orchestrarium Gemini init helper reviews or updates the overlay when project-specific choices are needed, and legacy sibling `<project>/.gemini/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Gemini overlay when the local scope is absent. |
-| Optional context filename override | `context.fileName` in settings | `AGENTS.md` is not a default Gemini entrypoint; Orchestrarium uses `GEMINI.md` imports instead of taking over this settings-owned surface |
-| Extension-provided skills | installed extension content | Official third discovery tier after workspace and user skills |
-| Important overlap note | workspace `.agents/skills/` | If a repository already uses `.agents/skills/` for Codex, Gemini will also discover those skills because this alias is official Gemini behavior |
-| Conflict-avoidance note | user/workspace tiers vs extension | Gemini resolves precedence as `workspace > user > extension`, so Orchestrarium's Gemini installer keeps the pack in the extension tier and cleans legacy mirrored duplicates from top-level user/workspace tiers on reinstall |
-
-## Qwen (Example Integration)
-
-Qwen is maintained in this monorepo as a native explicit example integration classified as `WEAK MODEL / NOT RECOMMENDED`, not as a production auto-routing line. The tables below record the Orchestrarium-owned Qwen example runtime contract verified from this checkout and installer dry-runs; they do not promote Qwen into production `auto`.
-
-### Global
-
-| Item | Path or shape | Notes |
-| --- | --- | --- |
-| Global context file | `~/.qwen/QWEN.md` | Orchestrarium Qwen example entrypoint installed by the Qwen installer |
-| Global shared-governance import | `~/.qwen/AGENTS.md` | Orchestrarium-installed markdown module imported by `QWEN.md`; not a production routing surface |
-| Global user skills | `~/.qwen/skills/` | Left for deliberate user overrides instead of mirroring the pack here |
-| Global user subagents | `~/.qwen/agents/` | Left for deliberate user overrides instead of mirroring the pack here |
-| Global custom commands | `~/.qwen/commands/` | Left for deliberate user overrides instead of mirroring the pack here |
-| Global settings | `~/.qwen/settings.json` | Qwen-native runtime configuration surface; Orchestrarium does not own this file |
-| Global operator overlay | `~/.qwen/.agents-mode.yaml` | Orchestrarium-owned shared-routing overlay seeded on first global install and preserved on reinstall; legacy sibling `~/.qwen/.agents-mode` is compatibility input only |
-| Global extensions | `~/.qwen/extensions/<extension>/` | Runtime location where Orchestrarium materializes `orchestrarium-qwen` on global Qwen install |
-| Extension manifest | `qwen-extension.json` inside an extension | Orchestrarium Qwen extension manifest source; carries context file, skills, agents, and commands fields for the example payload |
-
-### Local
-
-| Item | Path or shape | Notes |
-| --- | --- | --- |
-| Project context file | `<project>/QWEN.md` | Qwen-line project entrypoint managed by the Orchestrarium installer |
-| Project shared-governance import | `<project>/AGENTS.md` | Orchestrarium-installed markdown module imported by `QWEN.md`; not a production routing surface |
-| Workspace skills | `<project>/.qwen/skills/` | Left for explicit repo-local overrides instead of mirroring the pack here |
-| Workspace subagents | `<project>/.qwen/agents/` | Left for deliberate repo-local overrides instead of mirroring the pack here |
-| Workspace custom commands | `<project>/.qwen/commands/` | Left for deliberate repo-local overrides instead of mirroring the pack here |
-| Workspace extensions | `<project>/.qwen/extensions/<extension>/` | Runtime location where Orchestrarium materializes `orchestrarium-qwen` on project-local Qwen install |
-| Workspace settings | `<project>/.qwen/settings.json` | Qwen-native project runtime configuration surface; Orchestrarium does not own this file |
-| Orchestrarium operator overlay | `<project>/.qwen/.agents-mode.yaml` | Repo-local shared routing overlay for consultant, delegation, MCP, external-provider preferences, named priority profiles, and opinion counts; local install seeds the default and Qwen init helpers review or update it when project-specific choices are needed. Legacy sibling `<project>/.qwen/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Qwen overlay when the local scope is absent. |
-| Extension-provided skills | installed extension content | Orchestrarium example payload installed under the extension root |
-| Extension-provided agents | installed extension content | Orchestrarium example specialist-agent payload installed under the extension root |
-| Extension-provided commands | installed extension content | Orchestrarium example custom-command payload installed under the extension root |
-| Conflict-avoidance note | user/workspace tiers vs extension | The Qwen installer keeps the pack in the extension tier and leaves top-level user/workspace tiers for explicit overrides, mirroring the Gemini example-line isolation model |
-
-## Quick comparison
-
-| Provider | Global runtime root | Local runtime root | Native instruction entrypoint |
-| --- | --- | --- | --- |
-| Codex | `~/.codex/` | `<project>/.agents/` plus root `AGENTS.md` | `AGENTS.md` |
-| Claude Code | `~/.claude/` | `<project>/.claude/` and optional root `CLAUDE.md` | `CLAUDE.md` |
-| Gemini CLI | `~/.gemini/` | `<project>/.gemini/` plus `GEMINI.md` hierarchy | `GEMINI.md` |
-| Qwen | `~/.qwen/` | `<project>/.qwen/` plus root `QWEN.md` | `QWEN.md` |
-
-## Sources
-
-- Orchestrarium install and runtime contracts: `INSTALL.md`, `docs/agents-mode-reference.md`, `install.sh`, `install.ps1`, `src.codex/AGENTS.codex.md`, `src.codex/skills/consultant/SKILL.md`, `src.claude/CLAUDE.md`, `src.claude/agents/consultant.md`, `src.gemini/GEMINI.md`, `src.gemini/skills/init-project/SKILL.md`, `src.qwen/QWEN.md`, `src.qwen/README.md`, `src.qwen/skills/init-project/SKILL.md`, `scripts/install-codex.sh`, `scripts/install-codex.ps1`, `scripts/install-claude.sh`, `scripts/install-claude.ps1`, `scripts/install-gemini.sh`, `scripts/install-gemini.ps1`, `scripts/install-qwen.sh`, `scripts/install-qwen.ps1`
-- Claude Code documentation:
-  - Memory and `CLAUDE.md` locations: <https://code.claude.com/docs/en/memory>
-  - Skills and legacy commands: <https://code.claude.com/docs/en/slash-commands>
-  - Subagents: <https://code.claude.com/docs/en/sub-agents>
-- Gemini CLI documentation:
-  - `GEMINI.md` hierarchy: <https://google-gemini.github.io/gemini-cli/docs/cli/gemini-md.html>
-  - Agent skills discovery tiers and aliases: <https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/skills.md>
-  - Creating skills: <https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/creating-skills.md>
-  - Custom commands: <https://google-gemini.github.io/gemini-cli/docs/cli/custom-commands.html>
-  - Extensions and `gemini-extension.json`: <https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/extensions/reference.md>
+|---|---|---|
+| Project context file | `<project>/QWEN.md` | Qwen-native project instruction entrypoint managed by the installer block |
+| Shared governance copy | `<project>/AGENTS.md` | Orchestrarium shared governance materialized when absent or within the managed block |
+| Extension package | `<project>/.qwen/extensions/orchestrarium-qwen/` | Project-local Qwen extension payload |
+| Local operator overlay | `<project>/.qwen/.agents-mode.yaml` | Orchestrarium routing overlay seeded on first local install and preserved on reinstall |
+| Native runtime config | `<project>/.qwen/settings.json` | Qwen-native runtime config surface |
 
 ## Terms and Abbreviations
 
-- `AGENTS.md`: agent governance file used directly by Codex and installed as a shared-governance module for example providers.
-- `agents-mode`: Orchestrarium routing and operator overlay file for provider preferences and execution policy.
-- `CLI`: Command-Line Interface, a terminal command surface for a provider runtime.
-- `Codex`: OpenAI Codex runtime and production provider line.
-- `Claude Code`: Anthropic's Claude runtime and production provider line.
-- `extension`: provider-supported package directory that can bundle context, skills, agents, commands, or manifests.
-- `Gemini CLI`: Google's Gemini command-line runtime, documented here as an explicit example integration.
-- `global`: user-level install scope such as `~/.codex/`, `~/.claude/`, `~/.gemini/`, or `~/.qwen/`.
-- `local`: project-level install scope under a target repository.
-- `MCP`: Model Context Protocol; a mechanism for exposing tool and resource servers to agent runtimes.
-- `Qwen`: Qwen provider line, documented here as an explicit example integration.
-- `runtime root`: provider-facing directory where installed context, skills, agents, commands, or overlays live.
-- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example integrations that do not belong in production `auto` routing.
+- `AGENTS.md`: Orchestrarium shared-governance file materialized next to `QWEN.md`.
+- `agents-mode`: Orchestrarium routing overlay for provider preferences and execution policy.
+- `Qwen`: Qwen provider line, kept here as an explicit example integration.
+- `runtime`: installed provider-facing files and directories used by Qwen.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for Qwen as example-only and excluded from production defaults.
+- `YAML`: YAML Ain't Markup Language, the configuration format used by `.agents-mode.yaml`.
