@@ -16,3 +16,12 @@ Source surface:
 - `memory/` carries the optional experience-based feedback surface
 
 This subtree is the Claude runtime source owned by the monorepo. Shared governance and shared references stay one level up; only the provider-specific runtime source lives here.
+
+## Terms and Abbreviations
+
+- `CLAUDE.md`: Claude Code instruction entrypoint for user or project context.
+- `Claude Code`: Anthropic's Claude runtime and production provider line.
+- `Claude API wrapper`: Orchestrarium secret-backed helper that launches plain `claude` for advisory/review use.
+- `commands`: Claude-side slash-command helper files maintained by this pack.
+- `memory`: optional experience-based feedback surface installed for the Claude pack.
+- `runtime`: installed provider-facing files used by Claude Code outside the source tree.

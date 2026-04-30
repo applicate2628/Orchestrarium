@@ -10,6 +10,16 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-04-30
+
+### Changed
+
+- Promoted the global Markdown formula hotfix back into the shared governance source and operating-model references. Human-facing Markdown docs that add or materially revise formulas now must use dollar-delimited inline math by default, avoid multi-line `$$...$$` display blocks unless the target renderer is explicitly verified, avoid `\sb` / `\sp` compatibility hacks, scan for unbalanced dollars and broken Markdown table pipes, keep formulas out of headings, brace subscripts and superscripts, and state each formula's applicability, assumptions, units or dimensions, variable meanings, and owning source when those facts are not obvious. This matters because scientific and engineering notes should render reliably while making special-case formulas and reduced models visibly scoped.
+- Revised the existing shared "never guess" rule instead of adding a second competing AXIOM. Root-cause, bug-fix, runtime/UI, native API, and "it does not work" claims now require concrete observable data that rules out plausible alternatives before behavior changes proceed; the Claude feedback memory carries the same measurement-first guidance. This matters because faster iteration is only useful when each iteration is anchored in evidence rather than plausible-sounding diagnosis.
+- Clarified the installed runtime-entrypoint split for the production Codex and Claude lines. Root docs now state explicitly that installed Codex `AGENTS.md` should stay the compact universal minimum while detailed installed role/runtime guidance lives in the installed skill bodies and built-in `.codex/agents/*.toml` overrides; shared/provider references remain source-tree maintainer canon, and Claude remains the analogous short `CLAUDE.md` entrypoint plus `.claude/agents/*.md` role-file model. This matters because maintainers now have one clear place for detailed guidance without re-expanding the installed Codex `AGENTS.md`, and the production-vs-example routing boundary for Gemini/Qwen is unchanged.
+- Aligned operator-facing README and install documents with the shared terminology discipline by adding concise terms-and-abbreviations sections to the main repo docs, provider runtime layout reference, and provider source-tree READMEs. This matters because the production-vs-example provider boundary, runtime/install surfaces, and mixed CLI/MCP/agents-mode vocabulary should be readable without relying on tribal context.
+- Hardened the Windows PowerShell validation wrappers so installed global Codex and Claude packs can validate from their runtime roots even when the current directory is not inside a git checkout. This makes the documented global install verification path reliable for ordinary Windows operator shells.
+
 ## 2026-04-29
 
 ### Changed
@@ -149,18 +159,22 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 
 - `AGENTS.md`: the Codex-readable governance and instruction file installed into a repository or provider home.
 - `API`: Application Programming Interface, a programmatic contract exposed by a tool, runtime, or service.
+- `AXIOM`: a top-priority rule label; in this change it refers to a global-only "never guess" rule that was folded into the existing shared discipline instead of copied as a competing section.
 - `Bash`: a Unix-style command shell used by the `.sh` installers.
 - `CAD`: Computer-Aided Design, software and file formats used for technical drawings, geometry, or engineered layouts.
 - `CLI`: Command-Line Interface, a terminal command surface such as `codex`, `claude`, or `gemini`.
 - `Codex`: the OpenAI Codex runtime and provider pack maintained by this repository.
 - `Claude Code`: Anthropic's Claude Code runtime and the matching provider pack maintained by this repository.
+- `data point`: one concrete observed value, log line, field, return code, screenshot fact, or command result used as evidence.
 - `Gemini CLI`: Google's Gemini command-line runtime and the example provider pack maintained by this repository.
 - `hash`: a deterministic digest of file bytes or content; useful for identity checks but not a substitute for visual inspection.
 - `HTTP`: Hypertext Transfer Protocol, the web protocol whose status codes include quota and rate-limit signals such as `429`.
 - `INSTALL.md`: this repository's installation guide.
 - `junction`: a Windows directory link that redirects one path to another path on disk.
+- `Markdown`: a lightweight markup format used for repository documentation.
 - `MCP`: Model Context Protocol, a protocol used to expose tools and resources to agent runtimes.
 - `metadata`: descriptive file or runtime information such as dimensions, timestamps, MIME type, or generator fields.
+- `native API`: an operating-system or runtime interface called directly by code, where return codes and structure fields often carry the evidence needed for debugging.
 - `MSYS`: a Windows POSIX-style shell/runtime family commonly used by Git Bash and similar tooling.
 - `PATH`: the operating-system environment variable used to find executable commands.
 - `PASS`: a gate or validator result meaning the checked artifact may proceed.
@@ -171,6 +185,7 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 - `SECRET.md`: a local-only file used for secret-backed Claude transport configuration; it must not be published.
 - `SKILL.md`: the entrypoint file for a Codex skill definition.
 - `OneDrive-backed directory`: a directory stored under Microsoft OneDrive synchronization, where sync and hydration behavior can affect file access timing.
+- `TeX`: a typesetting system and math-notation language used by many Markdown math renderers.
 - `UI`: User Interface, the visible or interactive surface presented to a user.
 - `visual artifact`: an image, diagram, drawing, render, chart, plot, screenshot, CAD/exported drawing, or similar visible output.
 - `WEAK MODEL / NOT RECOMMENDED`: the repository's classification for example-only providers that must stay out of production `auto` routing.

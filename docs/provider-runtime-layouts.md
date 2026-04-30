@@ -6,6 +6,8 @@ Production auto-routing in the root integration contract is limited to Codex plu
 
 Do not confuse these runtime surfaces with the monorepo authoring trees such as `src.codex/`, `src.claude/`, `src.gemini/`, or `src.qwen/`.
 
+Architecture note: on the Codex line, the installed `AGENTS.md` is intentionally the compact universal minimum. Detailed installed role contracts and runtime guidance belong in the installed `skills/<role>/SKILL.md` files and the built-in `.codex/agents/*.toml` overrides; shared/provider reference trees are source-maintainer canon, not target-project install payload. Claude already follows the analogous pattern through a short `CLAUDE.md` entrypoint plus `.claude/agents/*.md` role files.
+
 Read the tables with three layers in mind:
 
 - `Official provider behavior` means the provider's own documented runtime surface or configuration model.
@@ -28,7 +30,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Item | Path or shape | Notes |
 | --- | --- | --- |
 | Installed pack root | `~/.codex/` | Global Codex pack install target |
-| Governance entrypoint | `~/.codex/AGENTS.md` | Installed Codex runtime entrypoint |
+| Governance entrypoint | `~/.codex/AGENTS.md` | Installed Codex runtime entrypoint; intentionally the compact universal minimum rather than the full role/runtime manual |
 | Skill tree | `~/.codex/skills/<role>/SKILL.md` | Orchestrarium Codex runtime organizes each role as a skill directory |
 | Built-in subagent overrides | `~/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Orchestrarium-installed custom agents that override Codex built-ins and pin them to `gpt-5.4` + `xhigh`; preserved on reinstall |
 | Validation script | `~/.codex/skills/lead/scripts/validate-skill-pack.sh` | Same lead script tree as the repo source |
@@ -40,7 +42,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Item | Path or shape | Notes |
 | --- | --- | --- |
 | Installed pack root | `<project>/.agents/skills/` | Role skills are copied here |
-| Governance entrypoint | `<project>/AGENTS.md` | Codex pack section is merged into the project-root `AGENTS.md` |
+| Governance entrypoint | `<project>/AGENTS.md` | Codex pack section is merged into the project-root `AGENTS.md`; the installed Codex section stays intentionally compact and defers detailed installed role/runtime guidance to the skill tree and `.codex/agents/` overrides |
 | Skill tree | `<project>/.agents/skills/<role>/SKILL.md` | Mirrors the global `skills/` structure |
 | Built-in subagent overrides | `<project>/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Project-level custom agents that override Codex built-ins and pin them to `gpt-5.4` + `xhigh`; seeded on first install and preserved on reinstall |
 | Local config | `<project>/.agents/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `$init-project` reviews or updates it, while legacy sibling `<project>/.agents/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Codex overlay when the local scope is absent. |
@@ -53,7 +55,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 
 | Item | Path or shape | Notes |
 | --- | --- | --- |
-| Global context file | `~/.claude/CLAUDE.md` | Official user-level Claude Code instruction file |
+| Global context file | `~/.claude/CLAUDE.md` | Official user-level Claude Code instruction file; intentionally short while detailed role behavior lives under `~/.claude/agents/` |
 | Global personal skills | `~/.claude/skills/<skill-name>/SKILL.md` | Official preferred user-level extension surface |
 | Global personal subagents | `~/.claude/agents/*.md` | Official user-level custom subagent surface |
 | Global legacy commands | `~/.claude/commands/*.md` | Still supported, but Claude docs now recommend skills as the preferred model |
@@ -63,7 +65,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 
 | Item | Path or shape | Notes |
 | --- | --- | --- |
-| Project context file | `<project>/.claude/CLAUDE.md` or `<project>/CLAUDE.md` | Official project-level Claude instruction entrypoints |
+| Project context file | `<project>/.claude/CLAUDE.md` or `<project>/CLAUDE.md` | Official project-level Claude instruction entrypoints; keep the entrypoint short and the detailed role files under `.claude/agents/` |
 | Local personal override | `<project>/CLAUDE.local.md` | Official personal, uncommitted project override layer |
 | Project skills | `<project>/.claude/skills/<skill-name>/SKILL.md` | Official preferred project-level extension surface |
 | Project subagents | `<project>/.claude/agents/*.md` | Official project-level custom subagent surface |
@@ -166,3 +168,19 @@ Qwen is maintained in this monorepo as a native explicit example integration cla
   - Creating skills: <https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/cli/creating-skills.md>
   - Custom commands: <https://google-gemini.github.io/gemini-cli/docs/cli/custom-commands.html>
   - Extensions and `gemini-extension.json`: <https://raw.githubusercontent.com/google-gemini/gemini-cli/main/docs/extensions/reference.md>
+
+## Terms and Abbreviations
+
+- `AGENTS.md`: agent governance file used directly by Codex and installed as a shared-governance module for example providers.
+- `agents-mode`: Orchestrarium routing and operator overlay file for provider preferences and execution policy.
+- `CLI`: Command-Line Interface, a terminal command surface for a provider runtime.
+- `Codex`: OpenAI Codex runtime and production provider line.
+- `Claude Code`: Anthropic's Claude runtime and production provider line.
+- `extension`: provider-supported package directory that can bundle context, skills, agents, commands, or manifests.
+- `Gemini CLI`: Google's Gemini command-line runtime, documented here as an explicit example integration.
+- `global`: user-level install scope such as `~/.codex/`, `~/.claude/`, `~/.gemini/`, or `~/.qwen/`.
+- `local`: project-level install scope under a target repository.
+- `MCP`: Model Context Protocol; a mechanism for exposing tool and resource servers to agent runtimes.
+- `Qwen`: Qwen provider line, documented here as an explicit example integration.
+- `runtime root`: provider-facing directory where installed context, skills, agents, commands, or overlays live.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example integrations that do not belong in production `auto` routing.

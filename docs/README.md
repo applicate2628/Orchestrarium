@@ -22,3 +22,13 @@ Current docs in this branch:
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
 - [provider-runtime-layouts.md](provider-runtime-layouts.md) for cross-provider runtime path mapping
 - [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md)
+
+## Terms and Abbreviations
+
+- `agents-mode`: Orchestrarium operator overlay for delegation, provider routing, MCP use, and parallelism.
+- `Codex`: OpenAI Codex runtime and provider line.
+- `Claude`: Anthropic Claude runtime and provider line.
+- `Gemini`: Google Gemini CLI provider line, documented here as an example integration.
+- `MCP`: Model Context Protocol; a protocol for exposing tools and resources to agent runtimes.
+- `Qwen`: Qwen provider line, documented here as an example integration.
+- `runtime`: installed provider-facing files and directories used by an agent tool.

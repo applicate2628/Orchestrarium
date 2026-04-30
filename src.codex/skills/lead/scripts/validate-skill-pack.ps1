@@ -28,12 +28,28 @@ if (-not $shellExecutable) {
   throw "Unable to locate bundled bash.exe or sh.exe under $gitInstallRoot."
 }
 
-$repoRoot = (& $gitExecutable rev-parse --show-toplevel).Trim()
-if (-not $repoRoot) {
-  throw "Unable to determine repository root."
+$repoRootOutput = $null
+$repoRootExitCode = 1
+try {
+  $repoRootOutput = & $gitExecutable rev-parse --show-toplevel 2>$null
+  $repoRootExitCode = $LASTEXITCODE
+} catch {
+  $repoRootOutput = $null
+  $repoRootExitCode = 1
 }
 
-Set-Location $repoRoot
+$repoRoot = if ($repoRootExitCode -eq 0 -and $repoRootOutput) {
+  ($repoRootOutput | Select-Object -First 1).Trim()
+} else {
+  $null
+}
+
+if ($repoRoot) {
+  Set-Location $repoRoot
+} else {
+  $runtimeRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..\..\..')
+  Set-Location $runtimeRoot
+}
 $scriptPath = Join-Path $PSScriptRoot 'validate-skill-pack.sh'
 if (-not (Test-Path -LiteralPath $scriptPath)) {
   throw "Unable to locate sibling validate-skill-pack.sh next to $PSCommandPath."

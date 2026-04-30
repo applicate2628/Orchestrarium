@@ -45,6 +45,8 @@ CLAUDE.md           Dev overlay for Claude Code pack maintenance
 
 Shared design references now live in `shared/references/`. Provider-local `references-codex/`, `references-claude/`, `references-gemini/`, and `references-qwen/` keep provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each provider-local tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
 
+Installed Codex now follows the same compact-entrypoint pattern that Claude already uses: the installed `AGENTS.md` is intentionally the compact universal minimum, while installed runtime guidance lives in the Codex skill bodies under `skills/<role>/SKILL.md` and the built-in `.codex/agents/*.toml` overrides. Shared and provider-specific reference trees remain source-maintainer canon rather than installed target-project docs. Claude keeps the analogous split through a short `CLAUDE.md` entrypoint plus detailed role files under `.claude/agents/`.
+
 Maintainer note: this repository is the installer/source monorepo, not automatically a repo-local Codex install target. When working inside `Orchestrarium/`, it is valid to rely on the global Codex install under `~/.codex/`. A missing local `.agents/` tree in this monorepo does not by itself mean the Codex runtime is misconfigured; create `.agents/` here only by running the installers intentionally.
 
 Cross-provider execution is available through two routing adapters:
@@ -175,3 +177,17 @@ bash scripts/check-publication-gate.sh
 ## License
 
 This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE).
+
+## Terms and Abbreviations
+
+- `AGENTS.md`: agent governance entrypoint assembled or read by Codex-compatible runtimes.
+- `agents-mode`: Orchestrarium operator configuration overlay for delegation, provider routing, MCP use, and parallelism.
+- `CLI`: Command-Line Interface, a terminal command surface such as `codex`, `claude`, `gemini`, or `qwen`.
+- `Codex`: the OpenAI Codex runtime and production provider line in this repository.
+- `Claude Code`: Anthropic's Claude Code runtime and production provider line in this repository.
+- `externalProvider: auto`: Orchestrarium routing mode that uses only production-recommended providers, currently Codex and Claude.
+- `Gemini`: Google Gemini CLI provider line, kept here as an explicit example integration.
+- `MCP`: Model Context Protocol; a protocol for exposing tools and resources to agent runtimes.
+- `Qwen`: Qwen provider line, kept here as an explicit example integration.
+- `runtime`: installed provider-facing files and directories used by an agent tool outside the source tree.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers that must stay out of production defaults and `auto` routing.

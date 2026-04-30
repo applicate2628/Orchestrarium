@@ -185,7 +185,7 @@ AI gates не заменяют внешнюю engineering policy.
 ## 3.10 Периодические controls
 
 - Периодические controls дополняют stage gates, но не заменяют их.
-- Используйте [periodic-control-matrix.md](periodic-control-matrix.md) как каноническую матрицу cadence, owner, evidence и fail action.
+- Используйте соответствующий pack-local `periodic-control-matrix.md`, названный в локальном addendum, как каноническую матрицу cadence, owner, evidence и fail action.
 - Периодические controls ловят drift между переходами: stale активные items, missing recovery state, repo consistency drift, archive hygiene, refactor debt и publication-safety spot checks.
 - Stage-gated артефакты по-прежнему определяют, может ли работа перейти на следующую фазу.
 
@@ -723,9 +723,11 @@ lead -> product-manager -> lead
 - **Contract test amendment:** сохраняйте существующие внешние контракты по умолчанию. Не вводите breaking changes, если пользователь или admitted scope явно не авторизует их; если breakage авторизован, назовите затронутые поверхности и impact миграции или deprecation.
 - **Evidence-based completion amendment:** никогда не говорите "fixed" или "done" для непроверенной работы; используйте "implemented, not yet verified" до тех пор, пока evidence не подтвердит fix. Success reports от agents или subagents недостаточны сами по себе; проверяйте их artifacts и заявленные checks против текущего workspace evidence.
 - **Visual artifact verification amendment:** для generated или exported visual artifacts добавляется обязательный evidence-шаг: нужно посмотреть сам визуальный результат. Нельзя принимать image, diagram, drawing, render, chart, plot, screenshot, CAD/exported drawing или похожий artifact только по факту существования файла, generation logs, metadata, hash или model claim. Используйте доступный viewer, renderer, screenshot path или repo-standard visual check и явно фиксируйте, если визуальная проверка невозможна.
-- **Ambiguity resolution discipline:** не угадывайте; проверяйте. Разрешайте фактическую неоднозначность путём инспекции кода, конфигурации, данных, документации, installed artifacts, runtime behavior или других canonical sources. Если неоднозначность касается intent пользователя и инспекция не может её разрешить, либо спросите, либо действуйте с наименьшим безопасным reversible подмножеством, которое не фиксирует неразрешённый выбор. Implementation-relevant решения должны прослеживаться к verified evidence или явной инструкции пользователя.
+- **Ambiguity resolution discipline:** не угадывайте; проверяйте. Перед тем как назвать root cause, предложить fix или изменить поведение для bug/runtime failure, соберите concrete observable data: log line, return code, field dump, screenshot, failing assertion, command output или reproduction result, а затем проверьте, что эти данные несовместимы с правдоподобными альтернативами. Если это не так, добавьте diagnostics или соберите один конкретный недостающий data point перед следующей итерацией. Factual ambiguity разрешайте через inspection code, config, data, docs, installed artifacts, runtime behavior, command output, tool availability или других canonical sources. Если ambiguity относится к user intent, policy, scope или architecture и inspection не решает её, спросите или двигайтесь только минимальным safe reversible subset, который не фиксирует нерешённый выбор. Implementation-relevant решения должны прослеживаться к verified evidence или явной инструкции пользователя.
 - **Canonical-source maintenance discipline:** если изменение затрагивает поведение, policy, workflow, schema конфигурации, runtime layout или другой документированный source of truth, обновляйте владеющий canonical artifact в том же изменении, а не оставляйте репозиторий со stale competing guidance. Если ownership неясен, явно зафиксируйте этот gap и обновите самый узкий подтверждённый canonical surface вместо дублирования правила.
 - **Documentation terminology amendment:** когда создаёте или materially updating human-facing document, завершайте его разделом `## Термины и сокращения` или локализованным аналогом, если документ использует domain terms, role names, provider/model names, workflow labels, acronyms или English terms, которые могут быть неочевидны intended reader'у. В этом разделе расшифровывайте и кратко объясняйте такие термины, особенно English abbreviations и mixed-language terms в non-English documents.
+- **Markdown formula rendering amendment:** когда пишете или materially updating Markdown documentation, используйте portable formula format по умолчанию: пишите formulas как dollar-delimited inline math (`$...$`), включая standalone formulas на отдельном paragraph; не используйте `\(...\)` в body text, tables, lists или glossary items; не используйте multi-line `$$...$$` display blocks, если target renderer явно не verified и task действительно не требует display math; если есть сомнение, делите long derivations на несколько short one-line `$...$` formulas; держите headings plain text; используйте ordinary TeX с braces вокруг каждого subscript/superscript, например `$a_{i}$`, `$A_{ij}$`, `$\alpha_{k}$`, `$\mathbf v_{i}$`, `$T^{H}A_{p}x_{p}$` и `$\phi_{m}^{\ast}$`, а не `a_i`, `A_ij`, `\alpha_k`, `\mathbf v_i`, `T^HA_px_p` или `\phi_m^\ast`; не используйте compatibility hacks вроде `\sb` или `\sp`; предпочитайте short inline formulas в tables/lists; делайте финальный scan на `$$`, stale delimiters, `\sb` / `\sp`, math/code in headings, raw underscore/caret patterns in math, unbalanced dollar delimiters и broken Markdown table pipe counts.
+- **Formula scope and assumptions amendment:** когда пишете или materially updating formulas в human-facing documentation, рядом с формулой указывайте applicability, assumptions, restrictions, units/dimensions, variable meanings и source/owning implementation, если это не очевидно; не выдавайте special-case formulas, empirical fits, reduced models, domain-specific relations или convention-dependent identities за generalized theory, и явно называйте generalized path, когда он существует.
 - **Explicit bounds for background and fan-out work:** не создавайте долгоживущие фоновые процессы, автоматизацию вне прямого пути запроса или network listeners без явного одобрения пользователя. Обоснуйте и спросите перед реализацией.
 - **Autonomous external side effects:** не создавайте тикеты, не отправляйте сообщения, не публикуйте во внешние сервисы, не мутируйте состояние SaaS или cloud, не запускайте действия, видимые третьим сторонам, без явного одобрения пользователя.
 
@@ -827,6 +829,7 @@ accessibility-reviewer
 - Держите один source of truth для brief, решений, budgets, constraints, phase plan и status.
 - Не двигайте процесс дальше, пока текущий артефакт не принят.
 - Завершайте terminology-heavy human-facing documents разделом терминов и сокращений.
+- Форматируйте Markdown formulas для fragile previewers и документируйте scope, assumptions, units и owning source каждой формулы, когда эти факты не очевидны.
 
 ---
 
@@ -849,10 +852,13 @@ accessibility-reviewer
 - `BLOCKED`: состояние workflow для реального внешнего blocker'а, недоступного prerequisite или отсутствующего required decision.
 - `CAD`: Computer-Aided Design; software и file formats для technical drawings, geometry или engineered layouts.
 - `CI`: Continuous Integration; автоматизированные repository checks, например builds, linters и tests.
+- `data point`: одно конкретное наблюдаемое значение, log line, field, return code, screenshot fact или command result, используемые как evidence.
 - `gate`: acceptance checkpoint, который проверяет, можно ли двигать artifact дальше.
 - `hash`: deterministic digest bytes или content файла; полезен для identity checks, но не заменяет visual inspection.
 - `lead`: orchestration role, которая маршрутизирует работу, отслеживает artifacts и принимает или отклоняет gates.
+- `Markdown`: lightweight markup format, используемый для repository documentation.
 - `metadata`: descriptive file или runtime information, например dimensions, timestamps, MIME type или generator fields.
+- `MIME`: Multipurpose Internet Mail Extensions; стандартная family content-type labels для описания file или payload formats.
 - `PASS`: состояние workflow, означающее, что scoped artifact прошёл relevant gate.
 - `QA`: Quality Assurance; verification work, проверяющая behavior, regressions и acceptance criteria.
 - `REVISE`: состояние workflow, означающее возврат artifact той же роли для bounded correction.
@@ -860,6 +866,7 @@ accessibility-reviewer
 - `SLA`: Service-Level Agreement; внешнее reliability или performance commitment.
 - `SLO`: Service-Level Objective; внутренний reliability или performance target.
 - `subagent`: делегированный agent instance с узкой role, limited context, одним expected artifact и explicit gate.
+- `TeX`: typesetting system и math-notation language, которую используют многие Markdown math renderers.
 - `UI`: User Interface; user-facing interaction surface.
 - `UX`: User Experience; usability, flow, comprehension и interaction quality.
 - `visual artifact`: image, diagram, drawing, render, chart, plot, screenshot, CAD/exported drawing или похожий visible output.

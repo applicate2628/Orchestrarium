@@ -18,8 +18,8 @@ This branch keeps only Qwen-specific source, but it ships the same full role voc
 ## Repository Layout
 
 ```text
-install-qwen.ps1            Windows installer
-install-qwen.sh             POSIX installer
+scripts/install-qwen.ps1    Windows installer
+scripts/install-qwen.sh     POSIX installer
 references-qwen/            Required Qwen-side maintainer references
 src.qwen/                   Qwen pack source tree
   QWEN.md                   Native Qwen entrypoint
@@ -77,3 +77,14 @@ Branch-local docs start at [../docs/README.md](../docs/README.md).
 ## License
 
 This repository is licensed under the Mozilla Public License 2.0. See [../LICENSE](../LICENSE).
+
+## Terms and Abbreviations
+
+- `AGENTS.md`: Orchestrarium shared-governance module materialized for Qwen installs and imported by `QWEN.md`.
+- `agents-mode`: Orchestrarium routing overlay for provider preferences and execution policy.
+- `MCP`: Model Context Protocol; runtime mechanism for tool and resource servers.
+- `Qwen`: Qwen provider line, kept here as an explicit example integration.
+- `runtime`: installed provider-facing files used by Qwen outside the source tree.
+- `TOML`: Tom's Obvious Minimal Language, the configuration format used by Gemini command payloads in this repository.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for Qwen as example-only and excluded from production defaults.
+- `YAML`: YAML Ain't Markup Language, the frontmatter and configuration format used by several pack files.

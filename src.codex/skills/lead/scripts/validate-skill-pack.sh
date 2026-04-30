@@ -19,7 +19,13 @@ if [[ -d "src.codex/skills" && -f "shared/AGENTS.shared.md" && -f "src.codex/AGE
   REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)"
   DEV_REPO=1
   AGENTS_FILE="$(mktemp)"
-  cat "shared/AGENTS.shared.md" "src.codex/AGENTS.codex.md" > "$AGENTS_FILE"
+  {
+    printf '%s\n' '<!-- BEGIN ORCHESTRARIUM CODEX PACK -->'
+    cat "shared/AGENTS.shared.md"
+    printf '\n'
+    cat "src.codex/AGENTS.codex.md"
+    printf '\n%s\n' '<!-- END ORCHESTRARIUM CODEX PACK -->'
+  } > "$AGENTS_FILE"
   trap "rm -f '$AGENTS_FILE'" EXIT
 elif [[ -d ".codex/skills" && -f ".codex/AGENTS.md" ]]; then
   SKILLS_DIR="$(cd ".codex/skills" && pwd -P)"
@@ -80,6 +86,23 @@ check_contains() {
     pass "$label"
   else
     fail "$label"
+  fi
+}
+
+count_codex_pack_lines() {
+  local file="$1"
+  local begin='<!-- BEGIN ORCHESTRARIUM CODEX PACK -->'
+  local end='<!-- END ORCHESTRARIUM CODEX PACK -->'
+  local start=""
+  local finish=""
+
+  start="$(grep -nFx "$begin" "$file" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+  finish="$(grep -nFx "$end" "$file" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+
+  if [[ -n "$start" && -n "$finish" && "$finish" -ge "$start" ]]; then
+    sed -n "${start},${finish}p" "$file" | wc -l | tr -d '[:space:]'
+  else
+    wc -l < "$file" | tr -d '[:space:]'
   fi
 }
 
@@ -629,6 +652,30 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
     "Documentation terminology amendment" \
     "shared subagent-operating-model documents terminology glossary discipline"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Markdown formula rendering amendment" \
+    "shared subagent-operating-model documents Markdown formula rendering discipline"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "split long derivations into several short one-line" \
+    "shared subagent-operating-model preserves fragile previewer formula fallback"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'do not use multi-line `$$...$$` display blocks' \
+    "shared subagent-operating-model rejects unverified multi-line display math"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'compatibility hacks such as `\sb` or `\sp`' \
+    "shared subagent-operating-model forbids formula compatibility hacks"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "unbalanced dollar delimiters" \
+    "shared subagent-operating-model scans for delimiter and table breakage"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Formula scope and assumptions amendment" \
+    "shared subagent-operating-model documents formula scope discipline"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "tool availability" \
+    "shared subagent-operating-model preserves canonical-source ambiguity inspection"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "smallest safe reversible subset" \
+    "shared subagent-operating-model preserves user-intent fallback discipline"
   check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode.yaml" \
     "shared subagent-operating-model stays free of Codex-specific agents-mode paths"
   check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".claude/.agents-mode.yaml" \
@@ -751,7 +798,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CODEX_REF_DIR/subagent-operating-model.md" 120 \
     "Codex addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "36e67ee86f8cc7af63b6c28a37650e2d84e381a88e7956e2cc90e2531cfe7e60" \
+    "3901809876c178947ce1903527b5175447bf64a735d3fe3ea35526e73e7b001b" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
     "160e9bb3bb3df73e611626bc814a45a0923a350a4bff5b43b82bf45409c06549" \
@@ -762,7 +809,7 @@ echo ""
 echo "=== Role index consistency ==="
 
 mapfile -t indexed_roles < <(
-  grep -oE '\$[a-z][-a-z]*' "$AGENTS_FILE" \
+  grep -oE '\$[a-z][a-z-]{2,}' "$AGENTS_FILE" \
     | sed 's/^\$//' \
     | sort -u
 )
@@ -862,6 +909,22 @@ check_contains "$AGENTS_FILE" "Visual artifact verification discipline" \
   "shared governance requires visual inspection for generated visual artifacts"
 check_contains "$AGENTS_FILE" "Documentation terminology discipline" \
   "shared governance requires terminology and abbreviation explanations in documents"
+check_contains "$AGENTS_FILE" "Markdown formula rendering format" \
+  "shared governance requires previewer-safe Markdown formula formatting"
+check_contains "$AGENTS_FILE" "split long derivations into several short one-line" \
+  "shared governance prefers one-line formulas for fragile previewers"
+check_contains "$AGENTS_FILE" 'Do not use multi-line `$$...$$` display blocks' \
+  "shared governance rejects unverified multi-line display math"
+check_contains "$AGENTS_FILE" 'compatibility hacks such as `\sb` or `\sp`' \
+  "shared governance forbids formula compatibility hacks"
+check_contains "$AGENTS_FILE" "broken Markdown table pipe counts" \
+  "shared governance scans formula edits for delimiter and table breakage"
+check_contains "$AGENTS_FILE" "Formula scope and assumptions discipline" \
+  "shared governance requires formula scope and assumption disclosure"
+check_contains "$AGENTS_FILE" "concrete observable data" \
+  "shared governance requires measured evidence before root-cause or fix claims"
+check_contains "$AGENTS_FILE" "smallest safe reversible subset" \
+  "shared governance preserves user-intent fallback discipline"
 check_absent "$SKILLS_DIR/lead/external-dispatch.md" "Adapter host runtime:" \
   "external-dispatch no longer records adapter host runtime"
 check_contains "$SKILLS_DIR/lead/external-dispatch.md" "must use direct external launch" \
@@ -1038,6 +1101,13 @@ fi
 
 echo ""
 echo "=== AGENTS.md required sections ==="
+
+agents_line_count="$(count_codex_pack_lines "$AGENTS_FILE")"
+if [[ "$agents_line_count" -le 300 ]]; then
+  pass "Codex AGENTS.md pack section line budget <= 300 ($agents_line_count)"
+else
+  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 300)"
+fi
 
 for section in "delegation" "Role index" "Engineering hygiene"; do
   if grep -qi "$section" "$AGENTS_FILE"; then

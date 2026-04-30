@@ -17,6 +17,17 @@ Source surface:
 - `skills/consultant/` and `skills/second-opinion/` carry the advisory and explicit consultant routing surfaces
 - `skills/external-brigade/` carries the bounded parallel external-helper orchestration surface
 
+Architecture decision: the installed Codex `AGENTS.md` is intentionally the compact universal minimum, not the place for the full role catalog or long runtime manuals. Keep the universal entrypoint thin and put detailed role contracts in `skills/<role>/SKILL.md`, shared methodology in `../shared/references/`, Codex-specific addenda in `../references-codex/`, and built-in runtime override behavior in `.codex/agents/*.toml`. This mirrors the Claude-side pattern where `CLAUDE.md` stays short and `.claude/agents/*.md` carries the detailed role files.
+
 Keep `SKILL.md` frontmatter `description:` values compact because Codex loads them as startup metadata before any one skill body is selected. Put detailed trigger logic, scope, and gate rules in the body of the skill instead; `skills/lead/scripts/validate-skill-pack.*` enforces the Codex metadata budget.
 
 This subtree is the Codex runtime source owned by the monorepo. Shared governance and shared references stay one level up; only the provider-specific runtime source lives here.
+
+## Terms and Abbreviations
+
+- `AGENTS.md`: Codex governance entrypoint assembled from shared and Codex-specific source files.
+- `Codex`: OpenAI Codex runtime and production provider line.
+- `frontmatter`: YAML metadata block at the top of a skill or agent file.
+- `runtime`: installed provider-facing files used by Codex outside the source tree.
+- `SKILL.md`: Codex skill entrypoint containing role instructions, scope, artifact, and gate rules.
+- `startup metadata`: compact metadata Codex reads before loading a specific skill body.

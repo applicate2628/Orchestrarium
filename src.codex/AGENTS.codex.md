@@ -2,28 +2,28 @@
 
 Platform-specific rules for OpenAI Codex. Merged with shared governance (`AGENTS.shared.md`) into a single `AGENTS.md` at install time.
 
+Treat `AGENTS.md` as the universal minimum contract for Codex work in a repository. Installed skills and custom-agent overrides provide the detailed role overlays: they narrow execution posture, scope, and prompting for a specific role, but they do not replace the base `AGENTS.md` rules.
+
 ## Default delegation entry point
 
-If subagent delegation is appropriate for approved delivery work and no more specific delegated role has already been named, use `$lead` from `$CODEX_HOME/skills/lead` as the default delivery lead and coordinator.
-
-If the task is about roadmap ownership, prioritization, milestone shaping, or admission into discovery or delivery, use `$product-manager` instead of treating it as ordinary delivery orchestration.
+If approved delivery work needs delegation and no narrower delegated role is already named, use `$lead` from `$CODEX_HOME/skills/lead` as the default coordinator. If the task is about roadmap ownership, prioritization, milestone shaping, or admission into discovery or delivery, use `$product-manager` instead.
 
 ## Template routing
 
-Classify the task and select the matching workflow shape. Simple chains do not require `$lead`. Codex processes one skill at a time for native internal skill execution (sequential execution model — no native parallel dispatch), but independent external adapters may still run in parallel when the routing contract and provider runtimes allow it.
+Classify the task, choose the narrowest matching workflow shape, and re-classify if scope widens. Simple chains do not require `$lead`. Native Codex skill execution is sequential, but independent external adapters may still run in parallel when the routing contract and provider runtimes allow it.
 
 **Decision tree:**
 
-1. Does the user explicitly name a role? Invoke it directly. No template needed.
-2. Is this roadmap, prioritization, or milestone shaping? Route to `$product-manager`. No template needed.
-3. Is it investigation, ADR, or alternatives exploration with no implementation? Use **research** below.
-4. Is it a PR review, quality gate, or post-implementation validation with no new code? Use **review** below.
-5. Is it a local additive change in one module, no new risk owner, contracts unchanged? Use **quick-fix** below.
-6. Does it touch auth, trust boundaries, credentials, or a vulnerability? Use **security-sensitive** below.
-7. Does it have hard performance budgets, SLAs, or latency targets? Use **performance-sensitive** below.
-8. Does it involve spatial computation, transforms, meshing, or geometry? Use **geometry-review** below.
-9. Does it touch multiple risk domains simultaneously? Use **combined-critical** below.
-10. Otherwise, it is a new feature or substantial change. Use **full-delivery** below.
+1. User explicitly names a role: invoke it directly.
+2. Roadmap, prioritization, or milestone shaping: route to `$product-manager`.
+3. Investigation, ADR, or alternatives exploration with no implementation: use **research**.
+4. PR review, quality gate, or post-implementation validation with no new code: use **review**.
+5. Local additive change in one module, no new risk owner, contracts unchanged: use **quick-fix**.
+6. Auth, trust boundaries, credentials, or vulnerability work: use **security-sensitive**.
+7. Hard performance budgets, SLAs, or latency targets: use **performance-sensitive**.
+8. Spatial computation, transforms, meshing, or geometry: use **geometry-review**.
+9. Multiple risk domains at once: use **combined-critical**.
+10. Otherwise: use **full-delivery**.
 
 | Template | Lead needed? | Chain |
 |---|---|---|
@@ -36,23 +36,21 @@ Classify the task and select the matching workflow shape. Simple chains do not r
 | `geometry-review` | Yes | `$lead` coordinates; `$computational-scientist` and `$architecture-reviewer` mandatory |
 | `combined-critical` | Yes | `$lead` coordinates all risk owners and reviewers |
 
-When the template says "No" for lead, the main conversation manages the chain directly: invoke specialists sequentially, pass each accepted artifact to the next role. Re-classify immediately if scope widens beyond the current template.
+When the template says "No" for lead, the main conversation runs the chain directly: invoke the listed specialists in order and pass each accepted artifact downstream. Re-classify immediately if scope widens beyond the current template.
 
-For a direct full repository impact review of recent changes, use `$review-changes`. It starts from the current local diff or a specified review target, but checks the wider affected surface, including unchanged dependents and adjacent logic.
-
-A bugfix with a known file or function maps to the `quick-fix` template by default, even if adjacent issues are discovered during analysis. Adjacent issues go to the configured bug registry path, not into the current plan.
+For a direct full repository impact review of recent changes, use `$review-changes`. It starts from the current local diff or a specified review target, but checks the wider affected surface, including unchanged dependents and adjacent logic. A bugfix with a known file or function stays on `quick-fix` by default; log adjacent issues in the configured bug registry instead of widening the current plan.
 
 ## Recovery rule
 
 - For lead-managed chains (`full-delivery`, `security-sensitive`, `performance-sensitive`, `geometry-review`, `combined-critical`), `$lead` manages recovery through the configured task-memory directory.
-- For main-conversation-managed chains with 2+ stages (`research`, `review`), save recovery state after each accepted artifact: `status.md` (template name, current stage, next role) and the accepted artifact itself.
-- For single-specialist invocations (user names a role directly), no recovery file is needed.
+- For main-conversation-managed chains with 2+ stages (`research`, `review`), save recovery state after each accepted stage as `status.md` (template name, current stage, next role) plus the accepted artifact.
+- For direct single-specialist invocations, no recovery file is needed.
 
 ## Role resolution paths
 
 Role definitions live in the installed skills tree: `.agents/skills/<role>/SKILL.md` for repo-local installs, or `$CODEX_HOME/skills/<role>/SKILL.md` / `~/.codex/skills/<role>/SKILL.md` for global installs.
 
-Utility skills live in the same installed skills tree and may be invoked directly when their workflow fits. In particular, use `$init-project` to initialize project policies in the root `AGENTS.md` and bootstrap `.agents/.agents-mode.yaml` for a new Codex project, and use `$external-brigade` when a bounded set of independent external helpers should launch together instead of being orchestrated ad hoc.
+Use the skill or custom-agent overlay that matches the assigned role. Utility skills live in the same installed skills tree and may be invoked directly when their workflow fits. In particular, use `$init-project` to initialize project policies in the root `AGENTS.md` and bootstrap `.agents/.agents-mode.yaml` for a new Codex project, and use `$external-brigade` when a bounded set of independent external helpers should launch together instead of being orchestrated ad hoc.
 
 Use these global anchor roles:
 
@@ -65,15 +63,13 @@ External dispatch roles also exist in the installed skills tree as bidirectional
 - `$external-worker`: external worker-side adapter for eligible non-owner, non-review roles; dispatches through the shared provider universe `auto | codex | claude | gemini | qwen`, where shipped production `auto` profiles use `codex | claude` only and `gemini` / `qwen` stay explicit example-only overrides
 - `$external-reviewer`: external review/QA adapter for eligible review-side roles; dispatches through the shared provider universe `auto | codex | claude | gemini | qwen`, where shipped production `auto` profiles use `codex | claude` only and `gemini` / `qwen` stay explicit example-only overrides
 
-These roles are not aliases for `$consultant`.
+These roles are adapters, not aliases for `$consultant`.
 
-For all other work, use the narrowest matching installed specialist. The role index in shared governance names the canonical core team only; installed specialists outside that core team and repo-local specialists may be used by `$lead` when they are a better fit.
-
-Repository-specific `AGENTS.md` files should add local priorities, canonical paths, build/test rules, and source-of-truth references without redefining the whole global role catalog.
+For all other work, use the narrowest matching installed specialist. The shared role index names the canonical core team, but installed specialists outside that core team and repo-local specialists may still be the better fit. Repository-specific `AGENTS.md` files should add local priorities, canonical paths, build/test rules, and source-of-truth references instead of restating the full global role catalog.
 
 ## Project bootstrap
 
-If the project root `AGENTS.md` lacks `## Project policies`, or if neither `.agents/.agents-mode.yaml` nor the matching global fallback `~/.codex/.agents-mode.yaml` exists, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred. If the project-local overlay is missing but the global overlay exists, ordinary reads should use the global file honestly until the user wants a project-local override.
+If the project root `AGENTS.md` lacks `## Project policies`, or if neither `.agents/.agents-mode.yaml` nor the matching global fallback `~/.codex/.agents-mode.yaml` exists, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred. If the project-local overlay is missing but the global overlay exists, read the global file honestly until the user wants a project-local override.
 
 ## Publication safety scan
 

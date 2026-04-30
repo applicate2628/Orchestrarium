@@ -731,9 +731,11 @@ Key hygiene amendments (full rules in the installed AGENTS.md / CLAUDE.md):
 - **Evidence-based completion amendment:** never say "fixed" or "done" for unverified work; use "implemented, not yet verified" until evidence confirms the fix. Agent or subagent success reports are not enough; verify their artifacts and claimed checks against current workspace evidence.
 - **Visual artifact verification amendment:** generated or exported visual artifacts add one mandatory evidence step: inspect the visual result itself. Do not accept an image, diagram, drawing, render, chart, plot, screenshot, CAD/exported drawing, or similar artifact based only on file existence, generation logs, metadata, hashes, or model claims. Use an available viewer, renderer, screenshot path, or repo-standard visual check, and record when visual inspection could not be performed.
 - **Completion reconciliation amendment:** never present partial scope coverage as full completion. If admitted-scope work remains, keep the task open or state the remaining obligations explicitly instead of implying closure.
-- **Ambiguity resolution discipline:** do not guess; verify. Resolve factual ambiguity by inspecting code, config, data, docs, installed artifacts, runtime behavior, or other canonical sources before choosing an interpretation. If ambiguity is about user intent and inspection cannot settle it, either ask or proceed with the smallest safe reversible subset that does not lock in the unresolved choice. Implementation-relevant decisions must trace to verified evidence or explicit user instruction.
+- **Ambiguity resolution discipline:** do not guess; verify. Before naming a root cause, proposing a fix, or changing behavior for a bug or runtime failure, capture concrete observable data such as a log line, return code, field dump, screenshot, failing assertion, command output, or reproduction result, then verify that it is inconsistent with plausible alternatives. If it is not, add diagnostics or collect one specific missing data point before iterating. Resolve factual ambiguity by inspecting code, config, data, docs, installed artifacts, runtime behavior, command output, tool availability, or other canonical sources. If ambiguity is about user intent, policy, scope, or architecture and inspection cannot settle it, ask or proceed only with the smallest safe reversible subset that does not lock in the unresolved choice. Implementation-relevant decisions must trace to verified evidence or explicit user instruction.
 - **Canonical-source maintenance discipline:** when a change affects behavior, policy, workflow, config schema, runtime layout, or another documented source of truth, update the owning canonical artifact in the same change instead of leaving stale competing guidance behind. If ownership is unclear, identify the gap explicitly and update the narrowest confirmed canonical surface rather than duplicating the rule.
 - **Documentation terminology amendment:** when creating or materially updating a human-facing document, end it with `## Terms and Abbreviations` or a localized equivalent whenever it uses domain terms, role names, provider or model names, workflow labels, acronyms, or English terms that may be unclear to the intended reader. Expand and briefly explain those terms there, especially English abbreviations and mixed-language terms in non-English documents.
+- **Markdown formula rendering amendment:** when writing or materially updating Markdown documentation, use the portable formula format by default: write formulas as dollar-delimited inline math (`$...$`), including standalone formulas placed on their own paragraph; do not use `\(...\)` in body text, tables, lists, or glossary items; do not use multi-line `$$...$$` display blocks unless the target renderer is explicitly verified to support them and the task genuinely needs display math; when in doubt, split long derivations into several short one-line `$...$` formulas; keep headings plain text; use ordinary TeX with braces around every subscript and superscript, for example `$a_{i}$`, `$A_{ij}$`, `$\alpha_{k}$`, `$\mathbf v_{i}$`, `$T^{H}A_{p}x_{p}$`, and `$\phi_{m}^{\ast}$`, not `a_i`, `A_ij`, `\alpha_k`, `\mathbf v_i`, `T^HA_px_p`, or `\phi_m^\ast`; do not use compatibility hacks such as `\sb` or `\sp`; prefer short inline formulas in tables and lists; and run a final scan for `$$`, stale delimiters, `\sb` / `\sp`, math/code in headings, raw underscore/caret patterns in math, unbalanced dollar delimiters, and broken Markdown table pipe counts.
+- **Formula scope and assumptions amendment:** when writing or materially updating formulas in human-facing documentation, state applicability, assumptions, restrictions, units or dimensions, variable meanings, and source or owning implementation near the formula when those facts are not obvious; do not present special-case formulas, empirical fits, reduced models, domain-specific relations, or convention-dependent identities as generalized theory, and explicitly name the generalized path when one exists.
 - **Explicit bounds for background and fan-out work:** do not introduce long-lived background processes, automation outside the direct request path, or network listeners without explicit user approval. State justification and ask before implementing.
 - **Autonomous external side effects:** do not create tickets, send messages, post to external services, mutate SaaS or cloud state, or trigger actions visible to third parties without explicit user approval.
 
@@ -835,6 +837,7 @@ accessibility-reviewer
 - Keep one source of truth for brief, decisions, budgets, constraints, phase plan, and status.
 - Stop progression until the current artifact is accepted.
 - End terminology-heavy human-facing documents with a terms and abbreviations section.
+- Format Markdown formulas for fragile previewers and document each formula's scope, assumptions, units, and owning source when those facts are not obvious.
 
 ---
 
@@ -857,10 +860,13 @@ Short team formula:
 - `BLOCKED`: workflow state for a real external blocker, unavailable prerequisite, or missing required decision.
 - `CAD`: Computer-Aided Design; software and file formats used for technical drawings, geometry, or engineered layouts.
 - `CI`: Continuous Integration; automated repository checks such as builds, linters, and tests.
+- `data point`: one concrete observed value, log line, field, return code, screenshot fact, or command result used as evidence.
 - `gate`: an acceptance checkpoint that verifies whether an artifact may move forward.
 - `hash`: a deterministic digest of file bytes or content; useful for identity checks but not a substitute for visual inspection.
 - `lead`: the orchestration role that routes work, tracks artifacts, and accepts or rejects gates.
+- `Markdown`: a lightweight markup format used for repository documentation.
 - `metadata`: descriptive file or runtime information such as dimensions, timestamps, MIME type, or generator fields.
+- `MIME`: Multipurpose Internet Mail Extensions; a standard content-type label family used to describe file or payload formats.
 - `PASS`: workflow state meaning the scoped artifact passed the relevant gate.
 - `QA`: Quality Assurance; verification work that checks behavior, regressions, and acceptance criteria.
 - `REVISE`: workflow state meaning the artifact returns to the same role for bounded correction.
@@ -868,6 +874,7 @@ Short team formula:
 - `SLA`: Service-Level Agreement; an external reliability or performance commitment.
 - `SLO`: Service-Level Objective; an internal reliability or performance target.
 - `subagent`: a delegated agent instance with a narrow role, limited context, one expected artifact, and an explicit gate.
+- `TeX`: a typesetting system and math-notation language used by many Markdown math renderers.
 - `UI`: User Interface; the user-facing interaction surface.
 - `UX`: User Experience; usability, flow, comprehension, and interaction quality.
 - `visual artifact`: an image, diagram, drawing, render, chart, plot, screenshot, CAD/exported drawing, or similar visible output.

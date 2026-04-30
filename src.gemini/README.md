@@ -18,8 +18,8 @@ This branch keeps only Gemini-specific source, but it now ships the same full ro
 ## Repository layout
 
 ```text
-install-gemini.ps1          Windows installer
-install-gemini.sh           POSIX installer
+scripts/install-gemini.ps1  Windows installer
+scripts/install-gemini.sh   POSIX installer
 references-gemini/          Required Gemini-side maintainer references
 src.gemini/                 Gemini pack source tree
   GEMINI.md                 Native Gemini entrypoint
@@ -33,7 +33,7 @@ src.gemini/                 Gemini pack source tree
 docs/agents-mode-reference.md
                             Canonical reference for the installed Orchestrarium
                             `.gemini/.agents-mode.yaml` overlay
-docs/provider-runtime-layout.md
+docs/provider-runtime-layouts.md
                             Source-vs-installed Gemini surface map
 shared/AGENTS.shared.md     Canonical shared governance source for installed AGENTS.md
 INSTALL.md                  Installation and usage notes for this standalone branch
@@ -59,7 +59,7 @@ This branch is a standalone Gemini example pack with a full Gemini-line role sur
 5. Keep top-level `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` free for deliberate user overrides instead of mirroring the same Orchestrarium pack there, because Gemini gives those tiers precedence over extension content.
 6. Use the Orchestrarium Gemini `init-project` helper to review or update the installed default `.gemini/.agents-mode.yaml` overlay after `/init`.
 
-The overlay reference in [docs/agents-mode-reference.md](docs/agents-mode-reference.md) also records task continuity, continue-by-default execution expectations, and the named priority profiles used for multi-opinion routing.
+The overlay reference in [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) also records task continuity, continue-by-default execution expectations, and the named priority profiles used for multi-opinion routing.
 7. Keep `.gemini/settings.json` and extension manifests as the Gemini-native MCP and runtime-config surface; servers such as Serena, Fetch, or Context7 belong there, not in installed `AGENTS.md`.
 
 ## Validation
@@ -72,8 +72,19 @@ bash src.gemini/scripts/validate-pack.sh .
 .\src.gemini\scripts\validate-pack.ps1
 ```
 
-Branch-local docs start at [docs/README.md](docs/README.md).
+Branch-local docs start at [../docs/README.md](../docs/README.md).
 
 ## License
 
-This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE).
+This repository is licensed under the Mozilla Public License 2.0. See [../LICENSE](../LICENSE).
+
+## Terms and Abbreviations
+
+- `AGENTS.md`: Orchestrarium shared-governance module materialized for Gemini installs and imported by `GEMINI.md`.
+- `agents-mode`: Orchestrarium routing overlay for provider preferences and execution policy.
+- `CLI`: Command-Line Interface, the terminal runtime surface for Gemini.
+- `Gemini`: Google Gemini CLI provider line, kept here as an explicit example integration.
+- `MCP`: Model Context Protocol; runtime mechanism for tool and resource servers.
+- `runtime`: installed provider-facing files used by Gemini outside the source tree.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for Gemini as example-only and excluded from production defaults.
+- `YAML`: YAML Ain't Markup Language, the frontmatter and configuration format used by several pack files.

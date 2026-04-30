@@ -71,6 +71,7 @@ Use `scripts/install-codex.sh` or `scripts/install-codex.ps1` when you want the 
 Notes:
 
 - Project-level Codex installs use `.agents/skills/` plus the project root `AGENTS.md`.
+- The installed Codex `AGENTS.md` is intentionally the compact universal minimum: it carries the shared governance layer plus the thin Codex runtime entrypoint, while detailed installed role behavior lives in the `skills/<role>/SKILL.md` files and the `.codex/agents/*.toml` built-in override files. Shared/provider reference docs remain source-tree maintainer canon and are not copied into target projects.
 - Codex installs also seed built-in subagent overrides into `.codex/agents/default.toml`, `.codex/agents/worker.toml`, and `.codex/agents/explorer.toml` for project installs, or `~/.codex/agents/` for global installs.
 - Those shipped override files pin the built-in `default`, `worker`, and `explorer` subagents to `gpt-5.4` with `xhigh` reasoning effort; reinstall preserves any existing custom files at those paths instead of overwriting them.
 - Installed Codex validation treats preserved user-added skills as warnings rather than pack metadata-budget failures. The strict metadata budget applies to Orchestrarium-owned roles and utility skills, while extra global skills remain visible as non-blocking orphan warnings.
@@ -104,6 +105,7 @@ Use `scripts/install-claude.sh` or `scripts/install-claude.ps1` when you want th
 Notes:
 
 - Project-level Claude installs create or update `.claude/AGENTS.md` and `.claude/CLAUDE.md`.
+- Claude already uses the same split in its native shape: keep `.claude/CLAUDE.md` short and let `.claude/agents/*.md` hold the detailed role instructions and team-template routing.
 - Project-level installs ensure `/.reports/` and `/work-items/` are present in the target repo `.gitignore` if they are missing, because session logs and repo-local task memory are local-only runtime output.
 - Claude memory is shipped in `src.claude/memory/` and preserved across reinstalls by the existing installer behavior.
 - User-side Claude imports such as `@memory/...` are preserved across reinstalls when they live in the installed `.claude/CLAUDE.md` import block alongside `@AGENTS.md`.
@@ -225,3 +227,18 @@ The monorepo still keeps the full Gemini line as a validated example source tree
 - Orchestrarium overlay bootstrap: `src.gemini/commands/agents/init-project.toml` and `src.gemini/skills/init-project/SKILL.md`
 
 It intentionally keeps the full Gemini payload in `src.gemini/` while materializing the installed runtime as one official extension package plus the adjacent Gemini-native context files and `.agents-mode.yaml` overlay. Use Gemini's built-in `/init` for the official `GEMINI.md` bootstrap first. Orchestrarium install seeds `.gemini/.agents-mode.yaml` with the current default overlay in either the project target or `~/.gemini/`, and it materializes the canonical runtime payload under `.gemini/extensions/orchestrarium-gemini/` or `~/.gemini/extensions/orchestrarium-gemini/`; use the Orchestrarium Gemini init helper to review or update that installed default rather than replacing Gemini's official `.gemini/settings.json`. Top-level `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` stay reserved for deliberate user overrides and are not used as a second mirrored install target, because Gemini gives user/workspace tiers precedence over extension content. MCP wiring for servers such as Serena, Fetch, or Context7 remains a `settings.json` or `gemini-extension.json` concern. In the root integration contract, Gemini stays an explicit example path: shipped production `externalProvider: auto` routing remains on `codex | claude`, while any broader Gemini routing behavior belongs to provider-local example documentation instead of the root production schema. Full operator semantics, including task continuity and continue-by-default execution expectations, live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
+
+## Terms and Abbreviations
+
+- `AGENTS.md`: agent governance file installed for Codex and materialized as a shared-governance module for example providers.
+- `agents-mode`: Orchestrarium YAML overlay that records delegation, provider, consultant, parallelism, MCP, and workdir preferences.
+- `Claude Code`: Anthropic's Claude runtime and production provider line.
+- `Codex`: OpenAI Codex runtime and production provider line.
+- `externalProvider: auto`: production routing mode that stays on `codex | claude` in shipped defaults.
+- `Gemini`: Google Gemini CLI provider line, installable here only as an explicit example or compatibility path.
+- `global install`: install into a user-level provider runtime root such as `~/.codex/` or `~/.claude/`.
+- `MCP`: Model Context Protocol; provider/runtime mechanism for tool and resource servers.
+- `Qwen`: Qwen provider line, installable here only as an explicit example or compatibility path.
+- `runtime`: installed provider-facing files and directories read by the provider tool.
+- `stdin`: standard input stream used by CLIs and wrappers.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only provider integrations that are excluded from default installs and production `auto` routing.

@@ -386,6 +386,30 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
     "Documentation terminology amendment" \
     "shared subagent-operating-model documents terminology glossary discipline"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Markdown formula rendering amendment" \
+    "shared subagent-operating-model documents Markdown formula rendering discipline"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "split long derivations into several short one-line" \
+    "shared subagent-operating-model preserves fragile previewer formula fallback"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'do not use multi-line `$$...$$` display blocks' \
+    "shared subagent-operating-model rejects unverified multi-line display math"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'compatibility hacks such as `\sb` or `\sp`' \
+    "shared subagent-operating-model forbids formula compatibility hacks"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "unbalanced dollar delimiters" \
+    "shared subagent-operating-model scans for delimiter and table breakage"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Formula scope and assumptions amendment" \
+    "shared subagent-operating-model documents formula scope discipline"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "tool availability" \
+    "shared subagent-operating-model preserves canonical-source ambiguity inspection"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "smallest safe reversible subset" \
+    "shared subagent-operating-model preserves user-intent fallback discipline"
   check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode.yaml" \
     "shared subagent-operating-model stays free of Codex-specific agents-mode paths"
   check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".claude/.agents-mode.yaml" \
@@ -486,7 +510,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CLAUDE_REF_DIR/subagent-operating-model.md" 120 \
     "Claude addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "36e67ee86f8cc7af63b6c28a37650e2d84e381a88e7956e2cc90e2531cfe7e60" \
+    "3901809876c178947ce1903527b5175447bf64a735d3fe3ea35526e73e7b001b" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "f3b58ded2c928e4ad138e3ff966c75480b2f869c56c02bba8aafb4cbfe622cf6" \
@@ -498,7 +522,7 @@ fi
 echo "[Role index consistency]"
 if [[ -f "$AGENTS_FILE" ]]; then
   # Extract role names from AGENTS.md (shared governance, lines with $role-name pattern)
-  roles=$(grep -oE '\$[a-z][-a-z]*' "$AGENTS_FILE" | sed 's/^\$//' | sort -u)
+  roles=$(grep -oE '\$[a-z][a-z-]{2,}' "$AGENTS_FILE" | sed 's/^\$//' | sort -u)
   for role in $roles; do
     if [[ -f "$PACK/agents/${role}.md" ]]; then
       pass "$role has agent file"
@@ -625,6 +649,22 @@ check_contains "$AGENTS_FILE" "Visual artifact verification discipline" \
   "shared governance requires visual inspection for generated visual artifacts"
 check_contains "$AGENTS_FILE" "Documentation terminology discipline" \
   "shared governance requires terminology and abbreviation explanations in documents"
+check_contains "$AGENTS_FILE" "Markdown formula rendering format" \
+  "shared governance requires previewer-safe Markdown formula formatting"
+check_contains "$AGENTS_FILE" "split long derivations into several short one-line" \
+  "shared governance prefers one-line formulas for fragile previewers"
+check_contains "$AGENTS_FILE" 'Do not use multi-line `$$...$$` display blocks' \
+  "shared governance rejects unverified multi-line display math"
+check_contains "$AGENTS_FILE" 'compatibility hacks such as `\sb` or `\sp`' \
+  "shared governance forbids formula compatibility hacks"
+check_contains "$AGENTS_FILE" "broken Markdown table pipe counts" \
+  "shared governance scans formula edits for delimiter and table breakage"
+check_contains "$AGENTS_FILE" "Formula scope and assumptions discipline" \
+  "shared governance requires formula scope and assumption disclosure"
+check_contains "$AGENTS_FILE" "concrete observable data" \
+  "shared governance requires measured evidence before root-cause or fix claims"
+check_contains "$AGENTS_FILE" "smallest safe reversible subset" \
+  "shared governance preserves user-intent fallback discipline"
 check_absent "$PACK/agents/consultant.md" "Adapter host runtime:" \
   "consultant no longer records adapter host runtime"
 check_contains "$PACK/agents/consultant.md" "must use direct external launch" \
