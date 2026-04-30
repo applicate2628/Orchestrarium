@@ -633,6 +633,14 @@ check_contains "$AGENTS_FILE" "must use direct external launch" \
   "shared governance requires direct external launch"
 check_contains "$AGENTS_FILE" "substantive task prompt must use file-based prompt delivery" \
   "shared governance requires file-based external CLI prompts"
+check_contains "$AGENTS_FILE" "Mechanism inventory before new paths" \
+  "shared governance requires owner inventory before new mechanisms"
+check_contains "$AGENTS_FILE" "State-synchronization ownership" \
+  "shared governance requires state synchronization ownership discipline"
+check_contains "$AGENTS_FILE" "split-brain state sync as an architecture bug" \
+  "shared governance rejects split-brain state synchronization"
+check_contains "$AGENTS_FILE" "correlation IDs" \
+  "shared governance requires traceable state synchronization diagnostics"
 check_contains "$PACK/agents/external-worker.md" "Read and normalize \`.claude/.agents-mode.yaml\` to the current canonical format before trusting its flags." \
   "external-worker normalizes agents-mode before routing"
 check_contains "$PACK/agents/external-reviewer.md" "Read and normalize \`.claude/.agents-mode.yaml\` to the current canonical format before trusting its flags." \
