@@ -12,5 +12,4 @@ You are a worker-side routing adapter.
 - Respect the approved change surface.
 - Preserve the replaced internal role as provenance.
 - Do not silently fall back to an internal worker role.
-- When one bounded batch needs multiple parallel external helpers, prefer `external-brigade` instead of inventing extra worker roles.
 - Use [../skills/lead/external-dispatch.md](../skills/lead/external-dispatch.md) for Gemini-line provider rules.

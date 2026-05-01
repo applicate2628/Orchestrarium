@@ -13,26 +13,25 @@ Use the shared Gemini dispatch contract in [../lead/external-dispatch.md](../lea
 - No silent internal fallback.
 - Respect the approved role contract and change surface.
 - Preserve the replaced internal worker role as provenance.
+- Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
 
 ## Gemini-line provider rules
 
 - Read and normalize `.gemini/.agents-mode.yaml` to the current canonical format before trusting its flags.
-- If the canonical file is missing, read legacy `.gemini/.agents-mode` as compatibility input only, normalize it forward into `.gemini/.agents-mode.yaml`, and do not recreate the legacy file.
-- Honor `.gemini/.agents-mode.yaml`, including `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`.
-- `externalOpinionCounts` governs distinct-provider opinions for one lane; it does not cap how many same-provider worker instances may run in parallel for different disjoint lanes or slices.
+- Read and normalize `.gemini/.agents-mode.yaml` to the current canonical format before trusting its flags. If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
+- Honor `.gemini/.agents-mode.yaml`, including `parallelMode`, `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`.
+- `parallelMode` is the general helper fan-out rule across internal and external lanes; `externalOpinionCounts` governs distinct-provider opinions for one lane and does not cap how many same-provider worker instances may run in parallel for different disjoint lanes or slices.
 - `externalProvider: auto` resolves through the active named priority profile, not a Gemini-line default provider.
-- `externalPriorityProfile` defaults to `balanced`; `gemini-crosscheck` is a valid profile when the lane policy wants Gemini to appear in a non-visual cross-check set.
+- `externalPriorityProfile` defaults to `balanced`; shipped and repo-local production profiles must keep example-only providers out of `auto` provider orders.
 - `externalProvider: codex` resolves to Codex CLI explicitly.
 - `externalProvider: claude` resolves to Claude CLI explicitly.
-- Honor `externalModelMode` first when Gemini is selected: `runtime-default` keeps Gemini on its runtime default model/profile. Under `pinned-top-pro`, `externalGeminiFallbackMode` controls the explicit Gemini path: `disabled` keeps `gemini-3.1-pro` only, `auto` starts on `gemini-3.1-pro` and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures, and `force` starts on `gemini-3-flash` immediately.
-- Treat `gemini-3-flash` as a bounded mechanical overflow path only. `externalGeminiFallbackMode: force` is for tightly scoped low-reasoning work, not for broad reasoning or cleanup just to save tokens.
-  - If Claude is selected, honor `externalClaudeSecretMode`.
-- If Claude is selected, honor `externalClaudeApiMode`.
-- Treat `claude-api` as the approved economical near-full-strength Claude transport. `externalClaudeApiMode: force` is an explicit budget choice as well as a limit fallback.
-  - This adapter is a direct external launch contract. Do not spawn it as an internal Gemini agent/helper host for another provider.
-  - `externalProvider: gemini` is allowed only as an explicit self-provider override.
-- Image generation, icon work, decorative visual polish, and other clearly visual worker-side lanes are the shared-matrix cases where Gemini should be preferred when that routing remains honest.
-- Same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce.
+- Honor `externalModelMode` first on the production provider paths. `runtime-default` keeps the resolved provider on its runtime default model/profile. `pinned-top-pro` pins the strongest documented production-provider model/profile path without introducing Gemini-specific fallback knobs.
+- Do not honor `claude-secret` or the secret-backed Claude wrapper for worker-side lanes. `externalClaudeApiMode` only controls the supplemental `claude-secret` candidate in `advisory.*` and `review.*` profile orders, after primary `claude`/`codex`; it is not a worker transport, not a retry for primary Claude, and not an implementation/editing fallback.
+- This adapter is a direct external launch contract. Do not spawn it as an internal Gemini agent/helper host for another provider.
+- `externalProvider: gemini` is allowed only as an explicit self-provider override for a manual example or compatibility run.
+- `externalProvider: qwen` is allowed only as an explicit native example or compatibility run.
+- Gemini is `WEAK MODEL / NOT RECOMMENDED`; explicit Gemini or Qwen worker runs are example-only and must not be presented as production-recommended routing.
+- Same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce and must not select example-only providers.
 - If the active lane policy requests more than one external worker-side opinion, the lead may launch more than one eligible external worker in parallel and aggregate the returned worker artifacts fail closed.
 - Multiple simultaneous instances of this adapter may target the same provider when each instance owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
 

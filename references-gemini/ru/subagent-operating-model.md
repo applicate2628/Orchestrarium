@@ -1,37 +1,33 @@
-# Модель работы субагентов — Gemini Reference
+# Модель работы субагентов — Gemini Addendum
+
+Канонический shared core: [shared/references/ru/subagent-operating-model.md](../../shared/references/ru/subagent-operating-model.md)
 
 Визуальное дополнение: [operating-model-diagram.md](operating-model-diagram.md)
 
-Эта standalone ветка хранит один Gemini-local operating-model reference как addendum. Каноническая operator truth для `.gemini/.agents-mode.yaml`, принятого init-time preset family, общей lane matrix и Claude transport semantics живёт в [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md).
+Этот файл хранит только Gemini-specific runtime и repository concretization для общей модели работы субагентов. Канонический blueprint, routing, role и governance-model текст живёт в shared core.
 
-## Gemini runtime notes
+## Gemini-specific runtime notes
 
-- `GEMINI.md` — Gemini runtime entrypoint.
-- Встроенная команда Gemini CLI `/init` — канонический способ создать или обновить project `GEMINI.md`.
+- `src.gemini/GEMINI.md` — Gemini runtime entrypoint в этом монорепозитории.
+- Встроенный Gemini CLI `/init` — канонический способ создать или обновить project `GEMINI.md`.
 - `.gemini/settings.json` остаётся Gemini-native runtime config surface.
 - `.gemini/.agents-mode.yaml` — routing overlay Orchestrarium, который seedится при установке, а не замена `.gemini/settings.json`.
-- Принятое init-time preset family: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `max-speed`. Это только shortcuts на этапе init; имя preset'а не сохраняется после разворачивания в канонические ключи.
-- Skills живут в `skills/<name>/SKILL.md`.
-- Пользовательские command helpers живут в `commands/**/*.toml`.
-- Текущий pack surface остаётся последовательным и human-steered для native internal execution; не предполагайте native parallel dispatch. Независимые external adapters всё ещё могут идти параллельно, когда routing contract и выбранные provider runtimes это допускают.
-
-## Delivery model
-
-- `$lead` координирует approved work и держит pipeline по стадиям: `Research -> Design -> Plan -> Implement -> Review/QA/Security`.
-- Factual roles идут раньше interpretive roles.
-- Downstream передаются accepted artifacts, а не raw transcripts.
-- `PASS` двигает дальше, `REVISE` остаётся локально до 3 циклов, а `BLOCKED` зарезервирован для реальных external blockers.
+- Gemini runtime assets живут в `src.gemini/skills/`, `src.gemini/commands/` и `src.gemini/extension/`.
+- Текущее Gemini source tree остаётся sequential и human-steered; не предполагайте native parallel dispatch.
+- Gemini на этой линии поддерживается как example-only integration: репозиторий классифицирует его как `WEAK MODEL / NOT RECOMMENDED`.
+- На Gemini-линии `externalProvider: auto` по-прежнему разрешается по lane type через active named priority profile, а не через один жёсткий Gemini-line default, но shipped production profile исключает Gemini и Qwen и остаётся на `codex | claude`.
+- Явный `externalProvider: gemini` — это только manual example или compatibility path, а не production recommendation.
+- На Gemini-line external routing `externalClaudeApiMode` управляет только supplemental `claude-secret` candidate для advisory/review (`disabled | auto | force`, default `auto`); worker lanes не должны его использовать.
 
 ## Gemini-side repository concretization
 
-- `references-gemini/` — обязательное standalone reference tree.
-- [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md) — канонический operator reference для `.gemini/.agents-mode.yaml`.
-- Task-memory root, recovery entry point, active-item directory и archive location остаются repository-defined, когда task memory включён.
-- Periodic controls живут в [periodic-control-matrix.md](periodic-control-matrix.md).
-- Publication safety живёт в [repository-publication-safety.md](repository-publication-safety.md).
-- `externalProvider: auto` использует active named priority profile, но documented repo-local visual heuristics всё ещё могут предпочесть сам Gemini для image, icon, decorative visual и других явно visual lanes.
-- `.gemini/.agents-mode.yaml` может содержать `externalPriorityProfile`, `externalPriorityProfiles` и `externalOpinionCounts`; shipped profiles сейчас `balanced` и `gemini-crosscheck`.
-- Если Gemini маршрутизирует eligible external work в сам Gemini через explicit self-provider override, сначала нужно уважать `externalModelMode`. При `runtime-default` Gemini остаётся на runtime default model/profile. При `pinned-top-pro` уже действует `externalGeminiFallbackMode`: при `disabled` оставаться на `gemini-3.1-pro`, при `auto` разрешать один retry на `gemini-3-flash`, и не падать молча ниже Gemini 3.
-- Текущая shared lane taxonomy включает `review.performance-architecture`, `worker.systems-performance-implementation`, `worker.ui-structural-modernization` и `worker.ui-surgical-patch-cleanup` вместе с более старыми advisory, review, implementation, long-autonomous, visual и decorative lanes.
-- `externalOpinionCounts` задают same-lane distinct-opinion requirements, а не cap на количество same-provider helper instances; bounded helper batches используют `external-brigade`.
-- Если Gemini маршрутизирует eligible external work в Claude, нужно уважать и `externalClaudeSecretMode`, и `externalClaudeApiMode`; `claude-api` остаётся Claude transport, а не отдельным provider.
+- `references-gemini/` хранит Gemini-specific addenda и compatibility pointers для common layer монорепозитория.
+- [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md) — канонический operator reference, когда важно поведение Gemini-line `.gemini/.agents-mode.yaml`.
+- Task-memory root, recovery entry point, active-item directory и archive location остаются repository-defined, когда tracked task memory включён.
+- Периодические проверки остаются pack-local в [periodic-control-matrix.md](periodic-control-matrix.md).
+
+## Shared core теперь владеет
+
+- Основным правилом, core management rules, delivery loops, routing patterns, role map, prompts, gates и team composition
+- Shared review/gate semantics, periodic-controls model, parallel-work guidance и generic task-memory expectations
+- Универсальной запиской для lead и финальной формулировкой

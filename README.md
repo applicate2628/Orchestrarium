@@ -1,65 +1,48 @@
 # Orchestrarium Gemini
 
-A standalone Gemini CLI provider pack built around the official Gemini runtime model plus the full Orchestrarium shared role principle.
+A standalone Gemini CLI example pack built on Gemini-native runtime surfaces plus the Orchestrarium shared role principle.
 
-This branch keeps only Gemini-specific source, but it now ships the same full role vocabulary as the neighboring packs:
+Gemini is maintained here as an installable and inspectable example integration, but it is classified as `WEAK MODEL / NOT RECOMMENDED`. Production `externalProvider: auto` routing stays on `codex | claude`; explicit Gemini routes are manual example or compatibility paths only.
 
-- Gemini owns `GEMINI.md` through the built-in `/init` flow.
-- Orchestrarium keeps one source-side shared-governance module in `src.gemini/AGENTS.shared.md`, which installers materialize as runtime `AGENTS.md`.
-- Gemini runtime config stays in `.gemini/settings.json`.
-- Gemini installers also materialize the official extension package under `.gemini/extensions/orchestrarium-gemini/`.
-- Orchestrarium seeds `.gemini/.agents-mode.yaml` as the shared routing overlay for named priority profiles and per-lane opinion counts.
-- Legacy extensionless `.gemini/.agents-mode` remains compatibility input only and is normalized forward into `.gemini/.agents-mode.yaml`.
-- Stable expertise lives in `src.gemini/skills/`.
-- Preview specialist-team execution lives in `src.gemini/agents/`.
-- Bounded parallel external-helper orchestration lives in `src.gemini/skills/external-brigade/` and `src.gemini/commands/agents/external-brigade.toml`.
+This branch intentionally keeps only the Gemini pack, its Gemini references, and the shared governance files required for Gemini installation and validation. It does not carry the Codex, Claude, or Qwen source trees.
 
-## Repository layout
+The full monorepo root installer uses Codex plus Claude as the default production install. Pressing Enter selects the default production install there. This standalone Gemini branch exposes only the explicit Gemini example installer.
+
+## Repository Layout
 
 ```text
-install-gemini.ps1          Windows installer
-install-gemini.sh           POSIX installer
-references-gemini/          Required Gemini-side maintainer references
-src.gemini/                 Gemini pack source tree
-  GEMINI.md                 Native Gemini entrypoint
-  AGENTS.shared.md          Source-side shared-governance module for installed AGENTS.md
-  skills/<name>/SKILL.md    Gemini Agent Skills
-  agents/*.md               Gemini preview specialist subagents
-  agents/team-templates/    Repo-local team compositions
-  commands/**/*.toml        Gemini custom commands
-  extension/                Source manifest/readme for the installed Gemini extension package
-  scripts/validate-pack.sh  Standalone pack validation (bash)
-  scripts/validate-pack.ps1 Standalone pack validation (PowerShell)
-docs/agents-mode-reference.md
-                            Canonical reference for the installed Orchestrarium
-                            `.gemini/.agents-mode.yaml` overlay
-docs/provider-runtime-layout.md
-                            Source-vs-installed Gemini surface map
-INSTALL.md                  Installation and usage notes for this standalone branch
-LICENSE                     Mozilla Public License 2.0
+scripts/install-gemini.ps1        Windows installer
+scripts/install-gemini.sh         POSIX installer
+references-gemini/                Gemini-side maintainer references and compatibility pointers
+shared/                           Shared governance and operator defaults required by Gemini install
+src.gemini/                       Gemini pack source tree
+  GEMINI.md                       Native Gemini entrypoint template
+  skills/<name>/SKILL.md          Gemini skills
+  agents/*.md                     Gemini preview specialist subagents
+  agents/team-templates/          Repo-local team compositions
+  commands/**/*.toml              Gemini custom commands
+  extension/                      Installed extension manifest source
+  scripts/validate-pack.*         Standalone pack validation
+docs/                             Branch-local operator and runtime docs
+INSTALL.md                        Installation and usage notes
+LICENSE                           Mozilla Public License 2.0
 ```
 
-## Current scope
+## Current Scope
 
-This branch is a standalone Gemini pack with a full Gemini-line role surface.
+- Ships Gemini-native project-local and global installers.
+- Keeps a full Gemini-line role surface for example, compatibility, and inspection use.
+- Keeps Gemini out of production `auto` routing.
+- Uses `shared/AGENTS.shared.md` as the canonical shared governance source.
+- Installs the Gemini extension payload under `.gemini/extensions/orchestrarium-gemini/`.
 
-- It ships Gemini-native installers for project-local and global installs.
-- It carries one required provider-local reference tree: `references-gemini/`.
-- It does not carry Codex or Claude provider trees.
-- It does not carry shared monorepo reference trees or cross-provider maintenance overlays.
+## Gemini Bootstrap Model
 
-## Gemini bootstrap model
-
-1. Install the pack with `install-gemini.ps1` or `install-gemini.sh`.
+1. Install the pack with `scripts/install-gemini.ps1` or `scripts/install-gemini.sh`.
 2. If the target repository already has a user-owned `GEMINI.md`, the installer preserves it and prepends only the managed Orchestrarium pack block.
-3. Run Gemini's built-in `/init` when you want Gemini to refresh or extend the user-owned portion of `GEMINI.md`.
+3. Run Gemini `/init` when you want Gemini to refresh or extend the user-owned portion of `GEMINI.md`.
 4. Use the installed extension payload under `.gemini/extensions/orchestrarium-gemini/` for the full shared role principle.
-5. Keep top-level `.gemini/skills/`, `.gemini/agents/`, and `.gemini/commands/` free for deliberate user overrides instead of mirroring the same Orchestrarium pack there, because Gemini gives those tiers precedence over extension content.
-6. Use the Orchestrarium Gemini `init-project` helper to review or update the installed default `.gemini/.agents-mode.yaml` overlay after `/init`. If only legacy `.gemini/.agents-mode` exists, normalize it forward into the canonical `.yaml` file.
-7. Use `external-brigade` when one bounded batch needs multiple parallel external helpers instead of trying to squeeze that through `externalOpinionCounts`.
-
-The overlay reference in [docs/agents-mode-reference.md](docs/agents-mode-reference.md) also records task continuity, continue-by-default execution expectations, the current init-time preset family (`default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `max-speed`), the named priority profiles used for multi-opinion routing, and the explicit `worker.systems-performance-implementation` lane for initialized projects.
-8. Keep `.gemini/settings.json` and the installed extension package under `.gemini/extensions/orchestrarium-gemini/` as the Gemini-native MCP and runtime-config surface; servers such as Serena, Fetch, or Context7 belong there, not in installed `AGENTS.md`.
+5. Use `.gemini/.agents-mode.yaml` as the Orchestrarium routing overlay; `.gemini/settings.json` remains the Gemini-native runtime config surface.
 
 ## Validation
 
@@ -73,6 +56,16 @@ bash src.gemini/scripts/validate-pack.sh .
 
 Branch-local docs start at [docs/README.md](docs/README.md).
 
-## License
+## Terms and Abbreviations
 
-This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE).
+- `AGENTS.md`: Orchestrarium shared-governance file materialized for Gemini installs.
+- `agents-mode`: Orchestrarium routing overlay for provider preferences and execution policy.
+- `CLI`: Command-Line Interface; a terminal command surface.
+- `Codex`: OpenAI Codex runtime and production-recommended provider line.
+- `Claude`: Anthropic Claude runtime and production-recommended provider line.
+- `Gemini`: Google Gemini provider line, kept here as an explicit example integration.
+- `MCP`: Model Context Protocol; runtime mechanism for tool and resource servers.
+- `Qwen`: Qwen provider line, kept outside production auto routing.
+- `runtime`: installed provider-facing files used by Gemini outside the source tree.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for Gemini as example-only and excluded from production defaults.
+- `YAML`: YAML Ain't Markup Language, the configuration format used by `.agents-mode.yaml`.

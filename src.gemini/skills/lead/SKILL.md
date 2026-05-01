@@ -22,7 +22,6 @@ That means:
 - specialist execution happens through matching Gemini subagents in `../../agents/*.md`
 - `../../agents/team-templates/*.json` is the repo-local team map for the common role principle
 - the lead skill is the canonical orchestration contract; `agents/lead.md` is only a bounded lead-side helper, not the recursive dispatcher
-- `external-brigade` is the bounded helper-batch utility when multiple independent external lanes should launch together
 
 ## Responsibilities
 
@@ -37,6 +36,7 @@ That means:
   - `.gemini/settings.json` remains the official Gemini runtime config surface
   - `.gemini/.agents-mode.yaml` is the Orchestrarium routing overlay only
 - keep external dispatch honest through `.gemini/.agents-mode.yaml` and the Gemini-line provider matrix in `external-dispatch.md`, with direct provider launch only for provider-backed external routes
+- use `external-brigade` when multiple independent external helper lanes should launch together instead of scattering ad hoc helper fan-out across separate notes
 
 ## Required references
 

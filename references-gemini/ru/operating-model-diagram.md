@@ -1,11 +1,11 @@
 # Диаграмма operating model
 
-Этот файл является визуальным дополнением к [subagent-operating-model.md](subagent-operating-model.md).
-Справочник по стратегиям: [workflow-strategy-comparison.md](workflow-strategy-comparison.md).
+Этот файл — визуальное дополнение к [subagent-operating-model.md](../subagent-operating-model.md).
+Справочник по стратегиям: [shared/references/ru/workflow-strategy-comparison.md](../../shared/references/ru/workflow-strategy-comparison.md).
 
-Platform note: текущий standalone Gemini pack остаётся последовательным и human-steered. Диаграммы ниже показывают целевую governance-модель, а не обещание native parallel dispatch.
+Platform note: Gemini-линия остаётся sequential и human-steered. Диаграммы ниже показывают intended governance flow, а не обещание native parallel dispatch.
 
-## 1. Сквозной поток работы
+## 1. Сквозной operating flow
 
 ```mermaid
 flowchart LR
@@ -24,7 +24,7 @@ flowchart LR
     L -. "scope drift" .-> PM
 ```
 
-## 2. Последовательная topology handoff
+## 2. Последовательная топология handoff
 
 ```mermaid
 flowchart TB

@@ -1,19 +1,12 @@
 # Gemini References
 
-This directory is the required Gemini-side reference tree for the standalone Orchestrarium Gemini branch.
+This directory is the provider-local Gemini reference tree for the Orchestrarium monorepo.
 
-Use it for repository-maintainer methodology and governance references that must remain present in the source branch even though they are not copied into target projects.
+Gemini is maintained here as an example-only integration. The repository classifies Gemini as `WEAK MODEL / NOT RECOMMENDED`, so these references document an installable compatibility/example surface rather than a production-recommended auto-routing line.
 
-Use together with:
+`shared/references/` holds the canonical shared design cores. `references-gemini/` keeps the Gemini-specific addenda plus compatibility pointers that still need stable legacy paths.
 
-- [../README.md](../README.md) for the standalone branch layout
-- [../INSTALL.md](../INSTALL.md) for installer and runtime-surface rules
-- [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) for the optional `.gemini/.agents-mode.yaml` overlay
-- [../src.gemini/](../src.gemini/README.md) for the actual runtime pack surface
-
-This standalone branch intentionally keeps `references-gemini/` self-contained instead of reintroducing the monorepo `shared/` reference layer.
-
-This tree now follows the common provider-local reference layout used across the four branches:
+This tree follows the common provider-local reference layout used across the four branches:
 
 - `README.md`
 - `evidence-based-answer-pipeline.md`
@@ -24,3 +17,11 @@ This tree now follows the common provider-local reference layout used across the
 - `subagent-operating-model.md`
 - `workflow-strategy-comparison.md`
 - `ru/` translations for the diagram, periodic controls, publication safety, task memory, subagent operating model, and workflow strategy comparison
+
+Use together with:
+
+- [../docs/README.md](../docs/README.md) for the common branch-level docs index
+- [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) for shared operator semantics when the Gemini line matters
+- [../src.gemini/README.md](../src.gemini/README.md) for the Gemini source tree
+
+Provider-backed external CLI prompt delivery inherits the shared file-based prompt rule; use the Gemini dispatch docs for the exact Gemini-line example runtime contract.

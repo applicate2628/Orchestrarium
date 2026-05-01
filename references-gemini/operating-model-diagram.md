@@ -1,9 +1,9 @@
 # Operating Model Diagram
 
 This file provides a visual companion to [subagent-operating-model.md](subagent-operating-model.md).
-Strategy comparison companion: [workflow-strategy-comparison.md](workflow-strategy-comparison.md).
+Strategy comparison companion: [shared/references/workflow-strategy-comparison.md](../shared/references/workflow-strategy-comparison.md).
 
-Platform note: this standalone Gemini pack keeps execution sequential and human-steered. The diagrams below show the intended governance flow, not a promise of native parallel dispatch.
+Platform note: the Gemini line keeps execution sequential and human-steered. The diagrams below show the intended governance flow, not a promise of native parallel dispatch.
 
 ## 1. End-to-end operating flow
 

@@ -1,37 +1,33 @@
-# Subagent Operating Model - Gemini Reference
+# Subagent Operating Model — Gemini Addendum
+
+Canonical shared core: [shared/references/subagent-operating-model.md](../shared/references/subagent-operating-model.md)
 
 Visual companion: [operating-model-diagram.md](operating-model-diagram.md)
 
-This standalone branch keeps one Gemini-local operating-model reference as an addendum. Canonical operator truth for `.gemini/.agents-mode.yaml`, the accepted init-time preset family, the shared lane matrix, and Claude transport semantics lives in [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md).
+This file keeps only Gemini-specific runtime and repository concretization for the shared subagent operating model. Use the shared core for canonical blueprint, routing, role, and governance-model text.
 
-## Gemini runtime notes
+## Gemini-specific runtime notes
 
-- `GEMINI.md` is the Gemini runtime entrypoint.
+- `src.gemini/GEMINI.md` is the Gemini runtime entrypoint in this monorepo.
 - Gemini CLI's built-in `/init` is the canonical way to create or refresh project `GEMINI.md`.
 - `.gemini/settings.json` stays the Gemini-native runtime config surface.
 - `.gemini/.agents-mode.yaml` is the Orchestrarium routing overlay seeded by install, not a replacement for `.gemini/settings.json`.
-- The accepted init-time preset family is `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, and `max-speed`. These are init shortcuts only; the preset name is not persisted after expansion into canonical keys.
-- Skills live in `skills/<name>/SKILL.md`.
-- User-invoked command helpers live in `commands/**/*.toml`.
-- The current pack surface stays sequential and human-steered for native internal execution; do not assume native internal parallel dispatch. Independent external adapters may still run in parallel when the routing contract and selected provider runtimes allow it. If native internal slot or thread limits would otherwise block independent eligible lanes, prefer available external adapters over silent serialization or dropping a lane.
-
-## Delivery model
-
-- `$lead` coordinates approved work and keeps the pipeline staged: `Research -> Design -> Plan -> Implement -> Review/QA/Security`.
-- Factual roles come before interpretive ones.
-- Accepted artifacts, not raw transcripts, are passed downstream.
-- `PASS` advances, `REVISE` stays local for up to 3 cycles, and `BLOCKED` is reserved for real external blockers.
+- Gemini runtime assets live in `src.gemini/skills/`, `src.gemini/commands/`, and `src.gemini/extension/`.
+- The current Gemini source tree stays sequential and human-steered for native internal execution; do not assume native internal parallel dispatch. Independent external adapters may still run in parallel when the routing contract and selected provider runtimes allow it.
+- Gemini is an example-only integration on this line: the repository classifies it as `WEAK MODEL / NOT RECOMMENDED`.
+- Gemini-line `externalProvider: auto` still resolves by lane type through the active named priority profile rather than by a single Gemini-line default, but the shipped production profile excludes Gemini and Qwen and stays on `codex | claude`.
+- Explicit `externalProvider: gemini` is a manual example or compatibility path only, not a production recommendation.
+- On Gemini-line external routing, `externalClaudeApiMode` controls only the supplemental `claude-secret` advisory/review candidate (`disabled | auto | force`, default `auto`); worker lanes must not use it.
 
 ## Gemini-side repository concretization
 
-- `references-gemini/` is the required standalone reference tree.
-- [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) is the canonical operator reference for `.gemini/.agents-mode.yaml`.
-- Task-memory root, recovery entry point, active-item directory, and archive location remain repository-defined when task memory is enabled.
-- Periodic controls live in [periodic-control-matrix.md](periodic-control-matrix.md).
-- Publication safety lives in [repository-publication-safety.md](repository-publication-safety.md).
-- `externalProvider: auto` keeps the active named priority profile as the routing source, while documented repo-local visual-routing heuristics may still prefer Gemini itself for image, icon, decorative visual, and other clearly visual lanes.
-- `.gemini/.agents-mode.yaml` may carry `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`; the shipped profiles are `balanced` and `gemini-crosscheck`.
-- If Gemini routes eligible external work to Gemini itself through an explicit self-provider override, honor `externalModelMode` first. Under `runtime-default`, leave Gemini on its runtime default model/profile. Under `pinned-top-pro`, honor `externalGeminiFallbackMode`: stay on `gemini-3.1-pro` when disabled, allow one retry on `gemini-3-flash` when `auto`, and do not silently drop below Gemini 3.
-- The current shared lane taxonomy includes `review.performance-architecture`, `worker.systems-performance-implementation`, `worker.ui-structural-modernization`, and `worker.ui-surgical-patch-cleanup` alongside the older advisory, review, implementation, long-autonomous, visual, and decorative lanes.
-- `externalOpinionCounts` are lane-local distinct-opinion requirements, not a cap on how many same-provider helper instances may run in parallel across disjoint slices; bounded helper batches use `external-brigade`.
-- If Gemini routes eligible external work to Claude, honor both `externalClaudeSecretMode` and `externalClaudeApiMode`; `claude-api` remains a Claude transport, not a separate provider.
+- `references-gemini/` keeps Gemini-specific addenda plus compatibility pointers for the shared core.
+- [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) is the canonical operator reference when Gemini-line `.gemini/.agents-mode.yaml` behavior matters.
+- Task-memory root, recovery entry point, active-item directory, and archive location remain repository-defined when tracked task memory is enabled.
+- Periodic controls stay pack-local in [periodic-control-matrix.md](periodic-control-matrix.md).
+
+## Shared core now owns
+
+- Main rule, core management rules, delivery loops, routing patterns, role map, prompts, gates, and team composition
+- Shared review/gate semantics, periodic-controls model, parallel-work guidance, and generic task-memory expectations
+- The generic lead memo and final wording

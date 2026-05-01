@@ -41,7 +41,7 @@ Parallel specialist runs are allowed only when:
 
 The main Gemini session launches the parallel specialist subagents. A Gemini subagent does not launch peers.
 
-When the active external-routing profile asks for more than one external opinion, the main session may also launch multiple independent external adapters in parallel and aggregate them fail closed.
+`parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all. When the active external-routing profile asks for more than one external opinion, the main session may also launch multiple independent external adapters in parallel and aggregate them fail closed on top of that rule.
 
 ## Primary-task lock
 
@@ -65,24 +65,26 @@ Canonical provider semantics:
 
 | Key | Meaning |
 |---|---|
-| `externalProvider: auto` | Resolve by the active named priority profile and then apply the self-provider filter; `balanced` is the ordinary baseline and `gemini-crosscheck` keeps Gemini present in non-visual advisory and review cross-check lanes |
+| `consultantMode` | consultant behavior toggle for Gemini-line routing; `disabled` skips consultant work by default, `internal` keeps consultant internal-only, and `external` allows consultant requests to use external routing |
+| `externalClaudeApiMode` | controls the supplemental `claude-secret` candidate for `advisory.*` and `review.*` profile orders only; `disabled` removes it, `auto` allows it after primary `claude`/`codex`, and `force` keeps it available for advisory/review even when plain Claude is unavailable; never a primary-Claude retry, worker transport, or editing path; default `auto` |
+| `parallelMode` | general helper parallelism rule across internal and external lanes; `manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified |
+| `externalProvider: auto` | Resolve by the active named production priority profile and then apply the self-provider filter; shipped `balanced` keeps `auto` on `codex | claude` only |
 | `externalProvider: codex` | explicit Codex CLI path |
 | `externalProvider: claude` | explicit Claude CLI path |
-| `externalProvider: gemini` | explicit self-provider override only |
+| `externalProvider: gemini` | explicit self-provider override only; manual example or compatibility path, not a production recommendation |
+| `externalProvider: qwen` | explicit native example or compatibility path only; not a production recommendation |
 | `externalPriorityProfile` | selects the active named profile used for `auto` |
 | `externalPriorityProfiles` | stores the profile -> lane -> ordered provider lists |
 | `externalOpinionCounts` | stores how many distinct external opinions to collect per lane |
-| `externalModelMode` | shared cross-provider model policy; `runtime-default` keeps provider runtime selection, `pinned-top-pro` pins the strongest documented provider-native model/profile with one named same-provider fallback |
-| `externalGeminiFallbackMode` | valid only when the resolved provider is Gemini and the model policy is pinned; `auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for limit-style Gemini failures |
-| `externalClaudeSecretMode` | valid only when the resolved provider is Claude |
-| `externalClaudeApiMode` | valid only when the resolved provider is Claude; `auto` allows a `claude-api` fallback after the allowed Claude CLI path, `force` starts on `claude-api` immediately |
+| `externalModelMode` | shared cross-provider model policy; `runtime-default` keeps provider runtime selection, `pinned-top-pro` pins the strongest documented production-provider model/profile path |
 
 Gemini does not write `externalProvider: gemini` into the Gemini-line overlay because that would collapse into the current provider.
 - Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.
 - Unsupported external requests fail fast. There is no generic external adapter for owner roles such as `$product-manager` or `$lead` on the Gemini line.
 - An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The main Gemini session must say the route is unsupported and reroute honestly.
-- Image generation, icon work, decorative visual polish, and other clearly visual worker, review, or advisory lanes should prefer Gemini when Gemini is installed and the lane is actually visual.
-- Independent external adapters may run in parallel when their scopes are disjoint, provider runtimes support concurrent non-interactive execution, and the active profile or lane count asks for more than one opinion.
+- Gemini is `WEAK MODEL / NOT RECOMMENDED` on this line. Shipped and repo-local production `auto` profiles must keep Gemini and Qwen out of provider-order lists.
+- Explicit Gemini or Qwen routing remains available only as a manual example or compatibility path.
+- Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, provider runtimes support concurrent non-interactive execution, and the active profile or lane count asks for more than one opinion.
 - Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the main Gemini session may launch repeated same-provider external helpers concurrently.
-- Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices.
+- Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices on top of the general `parallelMode` rule.
 - If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.

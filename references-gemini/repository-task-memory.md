@@ -4,7 +4,7 @@ This repository uses durable repo-local artifacts, not chat memory, as the sourc
 
 Tracked task memory is optional and repository-defined. When the repository chooses to use it, the task-memory directory, recovery entry point, active-item directory, and archive location are all configured by the repository.
 
-`references-gemini/` is the canonical home for stable repository-wide Gemini-side governance and methodology references in this standalone branch. `docs/agents-mode-reference.md` is the canonical operator reference for the optional `.gemini/.agents-mode.yaml` overlay. When enabled, the configured task-memory directory is still the home for item-specific execution memory.
+`shared/references/` is the canonical home for stable repository-wide design methodology. `references-gemini/` keeps Gemini-specific reference material plus compatibility pointers. `docs/agents-mode-reference.md` is the shared operator reference when `.gemini/.agents-mode.yaml` behavior matters.
 
 ## Mandatory artifact set
 
@@ -37,5 +37,5 @@ Additional artifacts are required when the workflow calls for them:
 ## Public-git safety
 
 - The configured tracked task-memory directory, when used, is tracked repository documentation and must be safe for publication.
-- The repo-wide policy for all tracked content lives in [repository-publication-safety.md](repository-publication-safety.md).
+- The repo-wide policy for all tracked content lives in [shared/references/repository-publication-safety.md](../shared/references/repository-publication-safety.md).
 - Do not place secrets, tokens, credentials, customer data, private identifiers, raw logs, full command transcripts, or machine-specific absolute paths into tracked task-memory artifacts.

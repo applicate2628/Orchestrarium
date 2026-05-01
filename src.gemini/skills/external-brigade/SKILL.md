@@ -41,25 +41,33 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 ## Routing rules
 
 1. Read and normalize `.gemini/.agents-mode.yaml` before trusting any flags.
-2. If the canonical file is missing, read legacy `.gemini/.agents-mode` as compatibility input only, normalize it forward into `.gemini/.agents-mode.yaml`, and do not recreate the legacy file.
+2. If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 3. Honor the current external routing fields, including:
+   - `consultantMode`
+   - `externalClaudeApiMode`
+   - `parallelMode`
    - `externalProvider`
    - `externalPriorityProfile`
    - `externalPriorityProfiles`
    - `externalOpinionCounts`
    - `externalCodexWorkdirMode`
    - `externalClaudeWorkdirMode`
-   - `externalGeminiWorkdirMode`
    - `externalModelMode`
-   - `externalGeminiFallbackMode`
-   - `externalClaudeSecretMode`
-   - `externalClaudeApiMode`
 4. Reject unsupported owner routes before provider resolution.
-5. Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. It does not cap how many same-provider brigade items may run in parallel across different disjoint lanes or slices.
-6. Allow repeated same-provider fan-out when each brigade item owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
-7. If a brigade item itself requires `2+` same-lane opinions, satisfy that distinct-provider requirement first or fail that item closed.
-8. Honor `externalModelMode` before provider-specific fallback knobs. If the resolved provider is Gemini and the model policy is pinned, honor `externalGeminiFallbackMode` inside the Gemini provider path only.
-9. Do not silently downgrade external items to internal execution inside the brigade.
+5. Keep `parallelMode` as the general helper fan-out rule. Brigade launch is an explicit bounded overlay on top of that rule, not a second general concurrency model.
+6. Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. It does not cap how many same-provider brigade items may run in parallel across different disjoint lanes or slices.
+7. Allow repeated same-provider fan-out when each brigade item owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
+8. If a brigade item itself requires `2+` same-lane opinions, satisfy that distinct-provider requirement first or fail that item closed.
+9. Honor `externalModelMode` before provider-specific transport knobs. On shipped production paths that means Codex/Claude behavior only; explicit Gemini or Qwen runs remain manual example or compatibility paths rather than a separate production fallback policy.
+10. Do not silently downgrade external items to internal execution inside the brigade.
+
+When a brigade review/advisory item resolves to `claude-secret`, `externalClaudeApiMode` controls whether that supplemental candidate is available (`disabled | auto | force`, default `auto`). Worker-side brigade items must not use `claude-secret`.
+
+Example-only provider rule:
+
+- Gemini is `WEAK MODEL / NOT RECOMMENDED`.
+- Gemini and Qwen must stay out of shipped or repo-local production `auto` profiles.
+- A brigade item may still request `gemini` or `qwen` explicitly for a manual example or compatibility run.
 
 ## Return exactly one artifact
 
@@ -75,7 +83,7 @@ The launch table must keep these columns explicit:
 
 | Item | Execution role | Assigned / replaced internal role | Requested provider | Resolved provider | Scope | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
+| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini | qwen>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
 
 ## Gate rules
 

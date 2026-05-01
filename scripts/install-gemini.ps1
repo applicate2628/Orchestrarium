@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-    Install the Orchestrarium Gemini pack.
+    Install the Orchestrarium Gemini example pack.
 .DESCRIPTION
-    Installs Gemini-native runtime surfaces for project-local or global Gemini CLI use.
+    Installs Gemini-native runtime surfaces for project-local or global Gemini CLI example use.
     Project installs write GEMINI.md and AGENTS.md at the project root and runtime assets under .gemini/.
+    Production auto routing remains on codex/claude; Gemini is kept installable as an example/compatibility path.
 .EXAMPLE
-    .\install-gemini.ps1
-    .\install-gemini.ps1 -Global
-    .\install-gemini.ps1 -Target "D:\my-repo"
+    .\scripts\install-gemini.ps1
+    .\scripts\install-gemini.ps1 -Global
+    .\scripts\install-gemini.ps1 -Target "D:\my-repo"
 #>
 param(
     [switch]$Global,
@@ -19,17 +20,25 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Source = Join-Path $ScriptDir "src.gemini"
+$RepoDir = Split-Path -Parent $ScriptDir
+$Source = Join-Path $RepoDir "src.gemini"
 $ExtensionSource = Join-Path $Source "extension"
 $ExtensionManifestSource = Join-Path $ExtensionSource "gemini-extension.json"
 $ExtensionReadmeSource = Join-Path $ExtensionSource "README.md"
-$DefaultAgentsModeSource = Join-Path $ScriptDir "agents-mode.defaults.yaml"
+$SharedAgentsSource = Join-Path (Join-Path $RepoDir "shared") "AGENTS.shared.md"
+$DefaultAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
 $ManagedStart = "<!-- ORCHESTRARIUM_GEMINI_PACK:START -->"
 $ManagedEnd = "<!-- ORCHESTRARIUM_GEMINI_PACK:END -->"
 
 function Get-CanonicalPath {
     param([string]$Path)
     $expanded = [Environment]::ExpandEnvironmentVariables($Path).Trim('"').Trim()
+    $homeRoot = if ($HOME) { $HOME } else { [Environment]::GetFolderPath("UserProfile") }
+    if ($expanded -eq "~") {
+        $expanded = $homeRoot
+    } elseif ($expanded.StartsWith("~/") -or $expanded.StartsWith("~\")) {
+        $expanded = Join-Path $homeRoot $expanded.Substring(2)
+    }
     if ([string]::IsNullOrWhiteSpace($expanded)) { throw "Path is empty." }
     try {
         return (Resolve-Path -LiteralPath $expanded -ErrorAction Stop).Path
@@ -139,6 +148,85 @@ function Migrate-LegacyAgentsModeFile {
     }
 }
 
+function Get-PythonCommand {
+    foreach ($name in @("python", "python3")) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
+        }
+    }
+    return $null
+}
+
+function Get-DirectoryFileHashes {
+    param([string]$Root)
+
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]@('\', '/'))
+    $hashes = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File -Force | Sort-Object FullName) {
+        $fullName = [System.IO.Path]::GetFullPath($file.FullName)
+        $relative = $fullName.Substring($rootFull.Length).TrimStart([char[]]@('\', '/'))
+        $hashes[$relative] = (Get-FileHash -Algorithm SHA256 -LiteralPath $fullName).Hash
+    }
+    return $hashes
+}
+
+function Test-DirectoryContentEqual {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetDir -PathType Container)) {
+        return $false
+    }
+
+    $sourceHashes = Get-DirectoryFileHashes -Root $SourceDir
+    $targetHashes = Get-DirectoryFileHashes -Root $TargetDir
+    if ($sourceHashes.Count -ne $targetHashes.Count) {
+        return $false
+    }
+
+    foreach ($key in $sourceHashes.Keys) {
+        if (-not $targetHashes.ContainsKey($key)) {
+            return $false
+        }
+        if ($sourceHashes[$key] -ne $targetHashes[$key]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-FileContentEqual {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetFile -PathType Leaf)) {
+        return $false
+    }
+
+    $sourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $SourceFile).Hash
+    $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $TargetFile).Hash
+    return $sourceHash -eq $targetHash
+}
+
+function Test-ItemContentEqual {
+    param(
+        [string]$SourcePath,
+        [string]$TargetPath
+    )
+
+    $sourceItem = Get-Item -LiteralPath $SourcePath -Force
+    if ($sourceItem.PSIsContainer) {
+        return (Test-DirectoryContentEqual -SourceDir $SourcePath -TargetDir $TargetPath)
+    }
+    return (Test-FileContentEqual -SourceFile $SourcePath -TargetFile $TargetPath)
+}
+
 function Install-Tree {
     param([string]$SourceDir, [string]$TargetDir, [string]$Label)
 
@@ -150,6 +238,11 @@ function Install-Tree {
         $packNames += $item.Name
         $destination = Join-Path $TargetDir $item.Name
         if (Test-Path -LiteralPath $destination) {
+            if (Test-ItemContentEqual -SourcePath $item.FullName -TargetPath $destination) {
+                Write-Host "    OK  $Label/$($item.Name) unchanged"
+                continue
+            }
+
             if (-not $DryRun) {
                 Remove-Item -Recurse -Force $destination
                 Copy-Item -Recurse -Force $item.FullName $destination
@@ -171,6 +264,51 @@ function Install-Tree {
                 Write-Host "  Preserved user item: $Label/$($existing.Name)"
             }
         }
+    }
+}
+
+function Ensure-LocalOnlyGitignoreEntries {
+    param([string]$ProjectRoot)
+
+    $gitignore = Join-Path $ProjectRoot ".gitignore"
+    $entries = @("/.reports/", "/work-items/")
+    $existingLines = @()
+    if (Test-Path -LiteralPath $gitignore) {
+        $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
+    }
+
+    $missing = @()
+    foreach ($entry in $entries) {
+        $alternate = $entry.TrimStart("/")
+        if ($existingLines -notcontains $entry -and $existingLines -notcontains $alternate) {
+            $missing += $entry
+        }
+    }
+
+    if ($missing.Count -eq 0) {
+        Write-Host "  .gitignore: local-only entries already present"
+        return
+    }
+
+    Write-Host "  Ensuring .gitignore ignores local-only task-memory paths..."
+    if ($DryRun) {
+        foreach ($entry in $missing) {
+            if (Test-Path -LiteralPath $gitignore) {
+                Write-Host "    [dry-run] would append '$entry' to $gitignore"
+            } else {
+                Write-Host "    [dry-run] would create $gitignore with '$entry'"
+            }
+        }
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $gitignore)) {
+        Set-Content -LiteralPath $gitignore -Value ($missing -join "`r`n")
+        return
+    }
+
+    foreach ($entry in $missing) {
+        Add-Content -LiteralPath $gitignore -Value "`r`n$entry"
     }
 }
 
@@ -199,7 +337,7 @@ function Get-PreservedGeminiImports {
         }
 
         if ($line -match '^@') {
-            if ($line -ne '@./AGENTS.md' -and $line -ne '@./AGENTS.shared.md' -and $imports -notcontains $line) {
+            if ($line -ne '@./AGENTS.md' -and $line -ne '@./AGENTS.shared.md' -and $line -ne '@../shared/AGENTS.shared.md' -and $imports -notcontains $line) {
                 $imports += $line
             }
             continue
@@ -234,7 +372,7 @@ function Get-MergedGeminiManagedContent {
     }
 
     $preservedImports = Get-PreservedGeminiImports -Lines $ExistingLines -ManagedStartLine $ManagedStartLine -ManagedEndLine $ManagedEndLine
-    $sourceLines = @((Get-Content -LiteralPath $SourceFile) | ForEach-Object { $_ -replace '^@\./AGENTS\.shared\.md$', '@./AGENTS.md' })
+    $sourceLines = @((Get-Content -LiteralPath $SourceFile) | ForEach-Object { $_ -replace '^@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)$', '@./AGENTS.md' })
     $importLine = -1
     for ($i = 0; $i -lt $sourceLines.Count; $i++) {
         if ($sourceLines[$i] -match '^@') {
@@ -284,7 +422,7 @@ function Get-MergedGeminiManagedContent {
 function Merge-GeminiFile {
     param([string]$SourceFile, [string]$TargetFile)
 
-    $managed = (Get-Content -LiteralPath $SourceFile -Raw) -replace '@\./AGENTS\.shared\.md', '@./AGENTS.md'
+    $managed = (Get-Content -LiteralPath $SourceFile -Raw) -replace '@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)', '@./AGENTS.md'
     if (-not (Test-Path -LiteralPath $TargetFile)) {
         Write-Host "  Creating GEMINI.md..."
         if (-not $DryRun) {
@@ -353,6 +491,46 @@ function Install-PackFile {
     Write-Host "  Installing $Label..."
     if (-not $DryRun) {
         Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
+function Sync-AgentsModeFile {
+    param(
+        [string]$TemplateFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    $normalizer = Join-Path $RepoDir "scripts\normalize-agents-mode.py"
+    $python = Get-PythonCommand
+
+    if ($null -ne $python -and (Test-Path -LiteralPath $normalizer)) {
+        if (Test-Path -LiteralPath $TargetFile) {
+            Write-Host "  Normalizing existing $Label to current canonical format..."
+        } else {
+            Write-Host "  Installing canonical $Label..."
+        }
+
+        if (-not $DryRun) {
+            & $python $normalizer --template $TemplateFile --target $TargetFile --provider shared
+            if ($LASTEXITCODE -ne 0) {
+                throw "agents-mode normalization failed for $TargetFile"
+            }
+        } else {
+            Write-Host "    [dry-run] would normalize $TargetFile"
+        }
+        return
+    }
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        throw "Python is required to normalize existing $Label at $TargetFile."
+    }
+
+    Write-Host "  Installing canonical $Label..."
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $TemplateFile -Destination $TargetFile -Force
     } else {
         Write-Host "    [dry-run] would create $TargetFile"
     }
@@ -503,10 +681,11 @@ if ($Mode -eq "global") {
     $ExtensionsTarget = Join-Path $InstallRoot "extensions"
     $ExtensionRoot = Join-Path $ExtensionsTarget $ExtensionName
     $AgentsModeTarget = Join-Path $InstallRoot ".agents-mode.yaml"
-    $LegacyAgentsModeTarget = Join-Path $InstallRoot ".agents-mode.yaml"
+    $LegacyAgentsModeTarget = Join-Path $InstallRoot ".agents-mode"
     $GeminiTarget = Join-Path $InstallRoot "GEMINI.md"
     $SharedTarget = Join-Path $InstallRoot "AGENTS.md"
     $LegacySharedTarget = Join-Path $InstallRoot "AGENTS.shared.md"
+    $LegacyAgentsReadmeTarget = Join-Path $AgentsTarget "README.md"
 } else {
     $InstallRoot = Join-Path $ProjectRoot ".gemini"
     $SkillsTarget = Join-Path $InstallRoot "skills"
@@ -515,10 +694,11 @@ if ($Mode -eq "global") {
     $ExtensionsTarget = Join-Path $InstallRoot "extensions"
     $ExtensionRoot = Join-Path $ExtensionsTarget $ExtensionName
     $AgentsModeTarget = Join-Path $InstallRoot ".agents-mode.yaml"
-    $LegacyAgentsModeTarget = Join-Path $InstallRoot ".agents-mode.yaml"
+    $LegacyAgentsModeTarget = Join-Path $InstallRoot ".agents-mode"
     $GeminiTarget = Join-Path $ProjectRoot "GEMINI.md"
     $SharedTarget = Join-Path $ProjectRoot "AGENTS.md"
     $LegacySharedTarget = Join-Path $ProjectRoot "AGENTS.shared.md"
+    $LegacyAgentsReadmeTarget = Join-Path $AgentsTarget "README.md"
 }
 
 $ExtensionManifestTarget = Join-Path $ExtensionRoot "gemini-extension.json"
@@ -526,10 +706,9 @@ $ExtensionReadmeTarget = Join-Path $ExtensionRoot "README.md"
 $ExtensionGeminiTarget = Join-Path $ExtensionRoot "GEMINI.md"
 $ExtensionAgentsTarget = Join-Path $ExtensionRoot "AGENTS.md"
 $LegacyExtensionSharedTarget = Join-Path $ExtensionRoot "AGENTS.shared.md"
-$LegacyAgentsReadmeTarget = Join-Path $AgentsTarget "README.md"
 $LegacyExtensionAgentsReadmeTarget = Join-Path (Join-Path $ExtensionRoot "agents") "README.md"
 
-Write-Host "=== Orchestrarium Gemini Installer ===" -ForegroundColor Cyan
+Write-Host "=== Orchestrarium Gemini Example Pack Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
 Write-Host "Mode:   $Mode"
 Write-Host "Runtime root: $InstallRoot"
@@ -538,6 +717,7 @@ Write-Host "AGENTS.md:    $SharedTarget"
 Write-Host "agents-mode:  $AgentsModeTarget"
 Write-Host "Extension:    $ExtensionRoot"
 Write-Host "Legacy user tier cleanup roots: $SkillsTarget ; $AgentsTarget ; $CommandsTarget"
+Write-Host "Policy:       example-only / WEAK MODEL / NOT RECOMMENDED; production auto routing stays on codex|claude"
 if ($DryRun) { Write-Host "Mode:   dry-run" -ForegroundColor Yellow }
 Write-Host ""
 
@@ -547,7 +727,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $Source "commands"))) { throw "Missi
 if (-not (Test-Path -LiteralPath $ExtensionManifestSource)) { throw "Missing source Gemini extension manifest." }
 if (-not (Test-Path -LiteralPath $ExtensionReadmeSource)) { throw "Missing source Gemini extension README." }
 if (-not (Test-Path -LiteralPath (Join-Path $Source "GEMINI.md"))) { throw "Missing source GEMINI.md." }
-if (-not (Test-Path -LiteralPath (Join-Path $Source "AGENTS.shared.md"))) { throw "Missing source AGENTS.shared.md." }
+if (-not (Test-Path -LiteralPath $SharedAgentsSource)) { throw "Missing shared AGENTS.shared.md." }
 if (-not (Test-Path -LiteralPath $DefaultAgentsModeSource)) { throw "Missing source agents-mode.defaults.yaml." }
 
 if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $AgentsTarget) -or (Test-Path -LiteralPath $CommandsTarget) -or (Test-Path -LiteralPath $ExtensionRoot) -or (Test-Path -LiteralPath $GeminiTarget) -or (Test-Path -LiteralPath $SharedTarget)) {
@@ -563,16 +743,17 @@ Install-Tree -SourceDir (Join-Path $Source "agents") -TargetDir (Join-Path $Exte
 Install-Tree -SourceDir (Join-Path $Source "commands") -TargetDir (Join-Path $ExtensionRoot "commands") -Label "extension/commands"
 Merge-GeminiFile -SourceFile (Join-Path $Source "GEMINI.md") -TargetFile $GeminiTarget
 if ($Mode -eq "global") {
-    Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.md"
+    Install-PackFile -SourceFile $SharedAgentsSource -TargetFile $SharedTarget -Label "AGENTS.md"
 } else {
-    Install-PackFile -SourceFile (Join-Path $Source "AGENTS.shared.md") -TargetFile $SharedTarget -Label "AGENTS.md" -PreserveExisting
+    Install-PackFile -SourceFile $SharedAgentsSource -TargetFile $SharedTarget -Label "AGENTS.md" -PreserveExisting
+    Ensure-LocalOnlyGitignoreEntries -ProjectRoot $ProjectRoot
 }
 Install-PackFile -SourceFile $ExtensionManifestSource -TargetFile $ExtensionManifestTarget -Label "extension manifest"
 Install-PackFile -SourceFile $ExtensionReadmeSource -TargetFile $ExtensionReadmeTarget -Label "extension README"
-Install-PackContent -Content ((Get-Content -LiteralPath (Join-Path $Source "GEMINI.md") -Raw) -replace '@\./AGENTS\.shared\.md', '@./AGENTS.md') -TargetFile $ExtensionGeminiTarget -Label "extension GEMINI.md"
-Install-PackContent -Content (Get-Content -LiteralPath (Join-Path $Source "AGENTS.shared.md") -Raw) -TargetFile $ExtensionAgentsTarget -Label "extension AGENTS.md"
+Install-PackContent -Content ((Get-Content -LiteralPath (Join-Path $Source "GEMINI.md") -Raw) -replace '@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)', '@./AGENTS.md') -TargetFile $ExtensionGeminiTarget -Label "extension GEMINI.md"
+Install-PackContent -Content (Get-Content -LiteralPath $SharedAgentsSource -Raw) -TargetFile $ExtensionAgentsTarget -Label "extension AGENTS.md"
 Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
-Install-PackFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml" -PreserveExisting
+Sync-AgentsModeFile -TemplateFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
 Remove-LegacyPackFile -TargetFile $LegacySharedTarget -Label "AGENTS.shared.md"
 Remove-LegacyPackFile -TargetFile $LegacyAgentsReadmeTarget -Label "agents/README.md"
 Remove-LegacyPackFile -TargetFile $LegacyExtensionSharedTarget -Label "extension AGENTS.shared.md"
@@ -634,4 +815,4 @@ if ($errors -gt 0) {
 }
 
 Write-Host ""
-Write-Host "RESULT: OK - Gemini pack installed" -ForegroundColor Green
+Write-Host "RESULT: OK - Gemini example pack installed" -ForegroundColor Green

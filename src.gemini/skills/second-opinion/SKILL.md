@@ -11,10 +11,11 @@ Use this skill to invoke `$consultant` or to change Gemini-line consultant mode.
 
 Manage these keys in `.gemini/.agents-mode.yaml`:
 
-- Legacy `.gemini/.agents-mode` is compatibility input only. Prefer `.gemini/.agents-mode.yaml`, fall back only if it is missing, normalize forward into `.gemini/.agents-mode.yaml`, and do not recreate the legacy file.
+- Legacy `.gemini/.agents-mode` is compatibility input only. Resolve Gemini overlay state in this order: local `.gemini/.agents-mode.yaml`, local legacy `.gemini/.agents-mode`, global `~/.gemini/.agents-mode.yaml`, then global legacy `~/.gemini/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope, do not recreate any legacy file, and do not synthesize a local override on read alone.
 
 - `consultantMode`
 - `delegationMode`
+- `parallelMode`
 - `mcpMode`
 - `preferExternalWorker`
 - `preferExternalReviewer`
@@ -22,26 +23,24 @@ Manage these keys in `.gemini/.agents-mode.yaml`:
 - `externalPriorityProfile`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
-- `externalGeminiFallbackMode`
-- `externalClaudeSecretMode`
+- `externalModelMode`
 - `externalClaudeApiMode`
 
 Gemini-line rules:
 
 - `externalProvider: auto` resolves through the active named priority profile, not a Gemini-line default provider
 - `externalPriorityProfile` defaults to `balanced`
-- `balanced` is the ordinary profile; `gemini-crosscheck` is the profile that intentionally keeps Gemini in the non-visual advisory and review cross-check set
-- explicit providers are `codex`, `claude`, and `gemini`
-- `externalProvider: gemini` is allowed only as an explicit self-provider override
-- `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion
-- `externalGeminiFallbackMode` matters only when provider resolves to Gemini and the model policy is pinned
-- Under `externalModelMode: pinned-top-pro`, `externalGeminiFallbackMode: auto` keeps `gemini-3.1-pro` first and allows one retry on `gemini-3-flash` only for quota, limit, capacity, HTTP `429`, or `RESOURCE_EXHAUSTED`-style Gemini failures
-- `externalClaudeSecretMode` matters only when provider resolves to Claude
+- `balanced` is the ordinary shipped production profile and keeps `auto` routing on `codex | claude`
+- explicit providers are `codex`, `claude`, `gemini`, and `qwen`
+- `externalProvider: gemini` is allowed only as an explicit self-provider override for a manual example or compatibility run
+- `externalProvider: qwen` is allowed only as an explicit native example or compatibility run
+- `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved production provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile on the production provider paths
 - `externalClaudeApiMode` matters only when provider resolves to Claude
-- documented repo-local visual heuristics may still keep eligible image/icon/decorative visual lanes on Gemini itself when that routing remains honest
+- Gemini is `WEAK MODEL / NOT RECOMMENDED`; shipped and repo-local production `auto` profiles must keep Gemini and Qwen out of provider-order lists
 - same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce
 - preserve unknown keys and keep the three new profile/count keys in expanded multi-key form rather than collapsing them into a consultant-only shape
-- `externalOpinionCounts` is lane-specific; when a lane asks for more than one opinion, the lead may invoke the matching external skill repeatedly and aggregate fail closed
+- `parallelMode` is the general helper fan-out rule across internal and external lanes
+- `externalOpinionCounts` is lane-specific; when a lane asks for more than one opinion, the lead may invoke the matching external skill repeatedly and aggregate fail closed on top of `parallelMode`
 
 ## Toggle actions
 
@@ -49,7 +48,7 @@ Gemini-line rules:
 - `internal` -> `consultantMode: internal`
 - `disable` -> `consultantMode: disabled`
 - `status` -> read and normalize `.gemini/.agents-mode.yaml`, then print the current resolved values
-- If the canonical file is missing, read legacy `.gemini/.agents-mode` as compatibility input only and normalize it forward into `.gemini/.agents-mode.yaml` before reporting status
+- If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode` before reporting status
 
 Preserve unknown keys on write and normalize comment-free, partial, or older-layout files to the current canonical format on read. Keep one key per line with inline allowed-value comments. Legacy `.gemini/.agents-mode` is compatibility input only and must not be recreated.
 

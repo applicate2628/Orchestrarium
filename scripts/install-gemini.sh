@@ -2,11 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE="$SCRIPT_DIR/src.gemini"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SOURCE="$REPO_DIR/src.gemini"
 EXTENSION_SOURCE="$SOURCE/extension"
 EXTENSION_MANIFEST_SOURCE="$EXTENSION_SOURCE/gemini-extension.json"
 EXTENSION_README_SOURCE="$EXTENSION_SOURCE/README.md"
-DEFAULT_AGENTS_MODE_SOURCE="$SCRIPT_DIR/agents-mode.defaults.yaml"
+SHARED_AGENTS_SOURCE="$REPO_DIR/shared/AGENTS.shared.md"
+DEFAULT_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 MANAGED_START='<!-- ORCHESTRARIUM_GEMINI_PACK:START -->'
 MANAGED_END='<!-- ORCHESTRARIUM_GEMINI_PACK:END -->'
 FORCE=0
@@ -18,12 +20,12 @@ TARGET=""
 usage() {
   cat <<'EOF'
 Usage:
-  bash install-gemini.sh                    Install into current repo (GEMINI.md + AGENTS.md + .gemini/)
-  bash install-gemini.sh --global           Install into ~/.gemini/
-  bash install-gemini.sh --target DIR       Install into DIR as a project root
-  bash install-gemini.sh --force            Skip confirmation prompts
-  bash install-gemini.sh --dry-run          Print planned actions without changing files
-  bash install-gemini.sh --allow-unsafe-target
+  bash scripts/install-gemini.sh                    Install the Gemini example pack into current repo (GEMINI.md + AGENTS.md + .gemini/)
+  bash scripts/install-gemini.sh --global           Install the Gemini example pack into ~/.gemini/
+  bash scripts/install-gemini.sh --target DIR       Install the Gemini example pack into DIR as a project root
+  bash scripts/install-gemini.sh --force            Skip confirmation prompts
+  bash scripts/install-gemini.sh --dry-run          Print planned actions without changing files
+  bash scripts/install-gemini.sh --allow-unsafe-target
                                            Allow a custom project root outside the current repo
 EOF
   exit 1
@@ -31,38 +33,60 @@ EOF
 
 canonical_path() {
   local path="$1"
-  path="${path/#\~/$HOME}"
   case "$path" in
-    [A-Za-z]:/*|[A-Za-z]:\\*)
-      if command -v cygpath >/dev/null 2>&1; then
+    "~")
+      path="$HOME"
+      ;;
+    "~/"*|"~\\"*)
+      path="$HOME/${path#??}"
+      ;;
+  esac
+  path="${path//\\//}"
+  case "$path" in
+    [A-Za-z]:/*)
+      if command -v wslpath >/dev/null 2>&1; then
+        path="$(wslpath -u "$path")"
+      elif command -v cygpath >/dev/null 2>&1; then
         path="$(cygpath -u "$path")"
+      else
+        local drive rest
+        drive="$(printf '%s' "${path:0:1}" | tr '[:upper:]' '[:lower:]')"
+        rest="${path:3}"
+        if [[ -d "/mnt/$drive" ]]; then
+          path="/mnt/$drive/$rest"
+        else
+          path="/$drive/$rest"
+        fi
       fi
+      ;;
+    [A-Za-z]:*)
+      echo "FAIL: Windows drive-relative path '$path' is ambiguous; use C:/path or quote '~' so Bash expands it." >&2
+      return 1
       ;;
   esac
   if [[ -z "$path" ]]; then
     echo "" >&2
     return 1
   fi
-  local py_bin="python"
-  if ! command -v "$py_bin" >/dev/null 2>&1; then
-    py_bin="python3"
+
+  if command -v realpath >/dev/null 2>&1; then
+    realpath -m "$path"
+    return
   fi
-  if ! command -v "$py_bin" >/dev/null 2>&1; then
-    echo "FAIL: python or python3 is required for path normalization." >&2
-    return 1
-  fi
+
   if [[ -e "$path" || -L "$path" ]]; then
-    "$py_bin" - "$path" <<'PY'
-from pathlib import Path
-import sys
-print(Path(sys.argv[1]).resolve())
-PY
+    if [[ -d "$path" ]]; then
+      (cd "$path" && pwd -P)
+    else
+      local dir base
+      dir="$(dirname "$path")"
+      base="$(basename "$path")"
+      printf "%s/%s\n" "$(cd "$dir" && pwd -P)" "$base"
+    fi
+  elif [[ "$path" = /* ]]; then
+    printf "%s\n" "$path"
   else
-    "$py_bin" - "$path" <<'PY'
-from pathlib import Path
-import sys
-print(Path(sys.argv[1]).expanduser().resolve(strict=False))
-PY
+    printf "%s/%s\n" "$(pwd -P)" "$path"
   fi
 }
 
@@ -87,25 +111,13 @@ resolve_project_root() {
 
 extension_name_from_manifest() {
   local manifest="$1"
-  local py_bin="python"
-  if ! command -v "$py_bin" >/dev/null 2>&1; then
-    py_bin="python3"
-  fi
-  if ! command -v "$py_bin" >/dev/null 2>&1; then
-    echo "FAIL: python or python3 is required to read the Gemini extension manifest." >&2
+  local name
+  name="$(sed -nE 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"([^"]+)".*$/\1/p' "$manifest" | head -n 1)"
+  if [[ -z "$name" ]]; then
+    echo "FAIL: Gemini extension manifest is missing a non-empty 'name' field." >&2
     return 1
   fi
-  "$py_bin" - "$manifest" <<'PY'
-import json
-import sys
-from pathlib import Path
-
-manifest = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-name = manifest.get("name", "").strip()
-if not name:
-    raise SystemExit("FAIL: Gemini extension manifest is missing a non-empty 'name' field.")
-print(name)
-PY
+  printf "%s\n" "$name"
 }
 
 ensure_dir() {
@@ -117,6 +129,18 @@ ensure_dir() {
       mkdir -p "$path"
     fi
   fi
+}
+
+resolve_python_command() {
+  if command -v python >/dev/null 2>&1; then
+    printf '%s' "python"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "python3"
+    return 0
+  fi
+  return 1
 }
 
 confirm_action() {
@@ -134,6 +158,17 @@ confirm_action() {
   done
 }
 
+items_equal() {
+  local src="$1" dst="$2"
+  if [[ -d "$src" && -d "$dst" ]]; then
+    diff -qr "$src" "$dst" >/dev/null
+  elif [[ -f "$src" && -f "$dst" ]]; then
+    cmp -s "$src" "$dst"
+  else
+    return 1
+  fi
+}
+
 install_tree() {
   local src="$1" dst="$2" label="$3"
   local item_name
@@ -147,6 +182,8 @@ install_tree() {
     if [[ -e "$dst/$item_name" ]]; then
       if [[ "$DRY_RUN" -eq 1 ]]; then
         echo "    [dry-run] would replace $label/$item_name"
+      elif items_equal "$item" "$dst/$item_name"; then
+        echo "    OK  $label/$item_name unchanged"
       else
         rm -rf "$dst/$item_name"
         cp -r "$item" "$dst/$item_name"
@@ -175,6 +212,46 @@ install_tree() {
   shopt -u nullglob
 }
 
+ensure_local_only_gitignore_entries() {
+  local project_root="$1"
+  local gitignore="$project_root/.gitignore"
+  local entries=("/.reports/" "/work-items/")
+  local missing=()
+
+  for entry in "${entries[@]}"; do
+    local alternate="${entry#/}"
+    if [[ -f "$gitignore" ]] && { grep -Fxq "$entry" "$gitignore" || grep -Fxq "$alternate" "$gitignore"; }; then
+      continue
+    fi
+    missing+=("$entry")
+  done
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    echo "  .gitignore: local-only entries already present"
+    return
+  fi
+
+  echo "  Ensuring .gitignore ignores local-only task-memory paths..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    for entry in "${missing[@]}"; do
+      if [[ -f "$gitignore" ]]; then
+        echo "    [dry-run] would append '$entry' to $gitignore"
+      else
+        echo "    [dry-run] would create $gitignore with '$entry'"
+      fi
+    done
+    return
+  fi
+
+  if [[ ! -f "$gitignore" ]]; then
+    printf '%s\n' "${missing[@]}" > "$gitignore"
+  else
+    for entry in "${missing[@]}"; do
+      printf '\n%s\n' "$entry" >> "$gitignore"
+    done
+  fi
+}
+
 collect_preserved_gemini_imports() {
   local existing="$1" start_line="$2" end_line="$3"
   awk -v start="$start_line" -v end="$end_line" '
@@ -188,7 +265,7 @@ collect_preserved_gemini_imports() {
         }
       }
       if ($0 ~ /^@/) {
-        if ($0 != "@./AGENTS.md" && $0 != "@./AGENTS.shared.md" && !seen[$0]++) {
+        if ($0 != "@./AGENTS.md" && $0 != "@./AGENTS.shared.md" && $0 != "@../shared/AGENTS.shared.md" && !seen[$0]++) {
           print $0
         }
         next
@@ -217,7 +294,7 @@ write_merged_gemini_md() {
       close(imports_file)
     }
     {
-      if ($0 == "@./AGENTS.shared.md") {
+      if ($0 == "@./AGENTS.shared.md" || $0 == "@../shared/AGENTS.shared.md") {
         $0 = "@./AGENTS.md"
       }
       source[++source_count] = $0
@@ -280,7 +357,7 @@ write_merged_gemini_md() {
 merge_gemini_file() {
   local src="$1" dst="$2"
   local managed existing start_line end_line
-  managed="$(sed 's|^@\./AGENTS\.shared\.md$|@./AGENTS.md|' "$src")"
+  managed="$(sed -E 's|^@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)$|@./AGENTS.md|' "$src")"
   if [[ ! -f "$dst" ]]; then
     echo "  Creating GEMINI.md..."
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -333,6 +410,41 @@ install_pack_file() {
     echo "    [dry-run] would create $dst"
   else
     cp -f "$src" "$dst"
+  fi
+}
+
+sync_agents_mode_file() {
+  local template="$1" dst="$2" label="$3"
+  local normalizer="$REPO_DIR/scripts/normalize-agents-mode.py"
+  local python_cmd=""
+
+  python_cmd="$(resolve_python_command || true)"
+
+  if [[ -n "$python_cmd" && -f "$normalizer" ]]; then
+    if [[ -f "$dst" ]]; then
+      echo "  Normalizing existing $label to current canonical format..."
+    else
+      echo "  Installing canonical $label..."
+    fi
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "    [dry-run] would normalize $dst"
+    else
+      "$python_cmd" "$normalizer" --template "$template" --target "$dst" --provider shared
+    fi
+    return
+  fi
+
+  if [[ -f "$dst" ]]; then
+    echo "FAIL: python or python3 is required to normalize existing $label at $dst" >&2
+    exit 1
+  fi
+
+  echo "  Installing canonical $label..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp -f "$template" "$dst"
   fi
 }
 
@@ -412,7 +524,7 @@ remove_empty_dir_if_present() {
 
 remove_legacy_top_level_pack_entries() {
   local src="$1" dst="$2" label="$3"
-  [[ -d "$dst" ]] || return
+  [[ -d "$dst" ]] || return 0
   shopt -s nullglob
   for item in "$src"/*; do
     local item_name target_path
@@ -432,7 +544,7 @@ remove_legacy_top_level_pack_entries() {
 
 remove_legacy_mirrored_files() {
   local src="$1" dst="$2" label="$3"
-  [[ -d "$dst" ]] || return
+  [[ -d "$dst" ]] || return 0
   while IFS= read -r -d '' file; do
     local relative target_path
     relative="${file#$src/}"
@@ -486,7 +598,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -d "$SOURCE/skills" || ! -d "$SOURCE/agents" || ! -d "$SOURCE/commands" || ! -f "$SOURCE/GEMINI.md" || ! -f "$SOURCE/AGENTS.shared.md" ]]; then
+if [[ ! -d "$SOURCE/skills" || ! -d "$SOURCE/agents" || ! -d "$SOURCE/commands" || ! -f "$SOURCE/GEMINI.md" || ! -f "$SHARED_AGENTS_SOURCE" ]]; then
   echo "FAIL: src.gemini is incomplete at $SOURCE" >&2
   exit 1
 fi
@@ -506,7 +618,7 @@ if [[ "$MODE" == "global" ]]; then
   EXTENSIONS_TARGET="$INSTALL_ROOT/extensions"
   EXTENSION_ROOT="$EXTENSIONS_TARGET/$EXTENSION_NAME"
   AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode.yaml"
-  LEGACY_AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode.yaml"
+  LEGACY_AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode"
   GEMINI_TARGET="$INSTALL_ROOT/GEMINI.md"
   SHARED_TARGET="$INSTALL_ROOT/AGENTS.md"
   LEGACY_SHARED_TARGET="$INSTALL_ROOT/AGENTS.shared.md"
@@ -526,7 +638,7 @@ else
   EXTENSIONS_TARGET="$INSTALL_ROOT/extensions"
   EXTENSION_ROOT="$EXTENSIONS_TARGET/$EXTENSION_NAME"
   AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode.yaml"
-  LEGACY_AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode.yaml"
+  LEGACY_AGENTS_MODE_TARGET="$INSTALL_ROOT/.agents-mode"
   GEMINI_TARGET="$PROJECT_ROOT/GEMINI.md"
   SHARED_TARGET="$PROJECT_ROOT/AGENTS.md"
   LEGACY_SHARED_TARGET="$PROJECT_ROOT/AGENTS.shared.md"
@@ -542,7 +654,7 @@ EXTENSION_AGENTS_TARGET="$EXTENSION_ROOT/AGENTS.md"
 LEGACY_EXTENSION_SHARED_TARGET="$EXTENSION_ROOT/AGENTS.shared.md"
 LEGACY_EXTENSION_AGENTS_README_TARGET="$EXTENSION_ROOT/agents/README.md"
 
-echo "=== Orchestrarium Gemini Installer ==="
+echo "=== Orchestrarium Gemini Example Pack Installer ==="
 echo "Source: $SOURCE"
 echo "Mode:   $MODE"
 echo "Runtime root: $INSTALL_ROOT"
@@ -551,6 +663,7 @@ echo "AGENTS.md:    $SHARED_TARGET"
 echo "agents-mode:  $AGENTS_MODE_TARGET"
 echo "Extension:    $EXTENSION_ROOT"
 echo "Legacy user tier cleanup roots: $SKILLS_TARGET ; $AGENTS_TARGET ; $COMMANDS_TARGET"
+echo "Policy:       example-only / WEAK MODEL / NOT RECOMMENDED; production auto routing stays on codex|claude"
 [[ "$DRY_RUN" -eq 1 ]] && echo "Mode:   dry-run"
 echo
 
@@ -567,19 +680,20 @@ install_tree "$SOURCE/agents" "$EXTENSION_ROOT/agents" "extension/agents"
 install_tree "$SOURCE/commands" "$EXTENSION_ROOT/commands" "extension/commands"
 merge_gemini_file "$SOURCE/GEMINI.md" "$GEMINI_TARGET"
 if [[ "$MODE" == "global" ]]; then
-  install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md"
+  install_pack_file "$SHARED_AGENTS_SOURCE" "$SHARED_TARGET" "AGENTS.md"
 else
-  install_pack_file "$SOURCE/AGENTS.shared.md" "$SHARED_TARGET" "AGENTS.md" 1
+  install_pack_file "$SHARED_AGENTS_SOURCE" "$SHARED_TARGET" "AGENTS.md" 1
+  ensure_local_only_gitignore_entries "$PROJECT_ROOT"
 fi
 install_pack_file "$EXTENSION_MANIFEST_SOURCE" "$EXTENSION_MANIFEST_TARGET" "extension manifest"
 install_pack_file "$EXTENSION_README_SOURCE" "$EXTENSION_README_TARGET" "extension README"
 extension_gemini_tmp="$(mktemp)"
 trap 'rm -f "$extension_gemini_tmp"' EXIT
-sed 's|@\./AGENTS\.shared\.md|@./AGENTS.md|' "$SOURCE/GEMINI.md" > "$extension_gemini_tmp"
+sed -E 's|@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)|@./AGENTS.md|' "$SOURCE/GEMINI.md" > "$extension_gemini_tmp"
 install_pack_content_file "$extension_gemini_tmp" "$EXTENSION_GEMINI_TARGET" "extension GEMINI.md"
-install_pack_file "$SOURCE/AGENTS.shared.md" "$EXTENSION_AGENTS_TARGET" "extension AGENTS.md"
+install_pack_file "$SHARED_AGENTS_SOURCE" "$EXTENSION_AGENTS_TARGET" "extension AGENTS.md"
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
-install_pack_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml" 1
+sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"
 remove_legacy_pack_file "$LEGACY_AGENTS_README_TARGET" "agents/README.md"
 remove_legacy_pack_file "$LEGACY_EXTENSION_SHARED_TARGET" "extension AGENTS.shared.md"
@@ -639,4 +753,4 @@ if [[ "$errors" -gt 0 ]]; then
 fi
 
 echo
-echo "RESULT: OK - Gemini pack installed"
+echo "RESULT: OK - Gemini example pack installed"
