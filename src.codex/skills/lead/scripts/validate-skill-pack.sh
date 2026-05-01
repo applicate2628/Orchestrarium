@@ -1141,6 +1141,19 @@ if [[ $DEV_REPO -eq 1 ]]; then
     check_contains "$REPO_ROOT/src.codex/skills/init-project/SKILL.md" "$lane: 2" \
       "Codex init-project correctness-first/power-mode presets raise $lane"
   done
+  if command -v python3 >/dev/null 2>&1; then
+    contract_python_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    contract_python_cmd="python"
+  else
+    contract_python_cmd=""
+  fi
+  if [[ -n "$contract_python_cmd" ]] &&
+     "$contract_python_cmd" "$REPO_ROOT/scripts/validate-agents-mode-contract.py" --root "$REPO_ROOT" >/dev/null; then
+    pass "agents-mode machine-readable contract matches docs and init preset surfaces"
+  else
+    fail "agents-mode machine-readable contract matches docs and init preset surfaces"
+  fi
 fi
 
 check_contains "$SKILLS_DIR/consultant/SKILL.md" 'Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED` example-only routes' \

@@ -13,7 +13,7 @@ Canonical value-by-value operator reference for pack-local `agents-mode` files. 
 
 Canonical operator-overlay output is now `.agents-mode.yaml` on every provider line. Legacy extensionless `.agents-mode` files remain compatibility input only and must not be recreated as the preferred output.
 
-The exemplar shared default lives in `shared/agents-mode.defaults.yaml`. In the monorepo, installers seed project-local and global `agents-mode` files directly from that shared exemplar and must normalize existing files on reinstall when schema or shipped defaults drift; any provider-only additions are applied at install time instead of living in separate `src.<provider>/agents-mode.defaults.yaml` files. Standalone pack roots still ship one canonical pack-root seed file so those repositories remain self-contained outside the monorepo.
+The exemplar shared default lives in `shared/agents-mode.defaults.yaml`. The machine-readable contract for allowed scalar keys, production provider sets, shared priority lanes, opinion counts, and init-time preset expansions lives in `shared/agents-mode.schema.json` plus `shared/agents-mode.presets.json`; `scripts/validate-agents-mode-contract.py` checks those sources against this reference and the provider init surfaces. In the monorepo, installers seed project-local and global `agents-mode` files directly from the shared YAML exemplar and must normalize existing files on reinstall when schema or shipped defaults drift; any provider-only additions are applied at install time instead of living in separate `src.<provider>/agents-mode.defaults.yaml` files. Standalone pack roots still ship one canonical pack-root seed file so those repositories remain self-contained outside the monorepo.
 
 The shipped shared exemplar is intentionally a quiet baseline for first install:
 - consultant disabled by default
@@ -30,7 +30,8 @@ The shipped shared exemplar is intentionally a quiet baseline for first install:
 - Any tool or skill that reads an existing `agents-mode` file to make a routing or operator-mode decision must normalize that file to the current canonical format before trusting the flags.
 - Read the provider-local `.agents-mode.yaml` first. If it is missing, read the legacy extensionless `.agents-mode` file in the same provider directory as compatibility input only. If both local files are missing, fall back to the matching global provider overlay (`~/.codex/.agents-mode.yaml`, `~/.claude/.agents-mode.yaml`, or `~/.gemini/.agents-mode.yaml`) and then to its legacy extensionless sibling as compatibility input only. Normalize whichever file supplied the effective config forward into the canonical `.yaml` path in the same scope, do not recreate any legacy file, and do not synthesize a project-local override on read alone.
 - Installers are part of that maintenance contract: if `.agents-mode.yaml` already exists and the canonical schema or shipped defaults have changed, reinstall must rewrite it to the current canonical form instead of preserving stale pack-owned structure verbatim.
-- In the monorepo, edit only `shared/agents-mode.defaults.yaml`; do not reintroduce provider-local `src.<provider>/agents-mode.defaults.yaml` duplicates.
+- In the monorepo, edit the shared YAML exemplar plus the matching machine-readable contract files together: `shared/agents-mode.defaults.yaml`, `shared/agents-mode.schema.json`, and `shared/agents-mode.presets.json`. Do not reintroduce provider-local `src.<provider>/agents-mode.defaults.yaml` duplicates.
+- Run `python scripts/validate-agents-mode-contract.py --root .` after changing scalar keys, provider sets, priority profiles, opinion counts, or init-time preset expansions; the pack validators call the same contract check in source-mode validation.
 - Treat comment-free files, partially populated files, older layouts, and stale shipped profile blocks as legacy input that must be rewritten rather than preserved verbatim.
 - Read-time normalization preserves the effective values of known keys, preserves unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys and retired profile lanes, removes example-only providers from every `externalPriorityProfiles` provider list, strips `reserve` from non-advisory/non-review lanes or whenever `reserveResolver: disabled`, refreshes inline comments on every canonical scalar key plus every shipped profile/count entry, rewrites the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks to the current pack version, and restores canonical key order.
 - This maintenance rewrite happens on read, not only on explicit toggle or init writes. A status-style read is still expected to leave the file in current canonical form after parsing.
@@ -430,10 +431,12 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 - `CLI`: Command-Line Interface; a provider or tool invoked from a shell.
 - `Codex`: the OpenAI Codex runtime and production provider line.
 - `Gemini`: Google Gemini provider line; in this repository it is explicit example-only and `WEAK MODEL / NOT RECOMMENDED`.
+- `JSON`: JavaScript Object Notation; structured data format used here for machine-readable contract files.
 - `L00`: owner/control routing line in the release-backed `12 + 1` read; it is documented evidence but not an external provider profile lane.
 - `MCP`: Model Context Protocol; protocol for exposing tools and resources to agent runtimes.
 - `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency; expands to forced delegation, forced parallelism, forced MCP use, top production-provider policy, and multi-opinion advisory/review lanes.
 - `Qwen`: Qwen provider line; in this repository it is explicit example-only and `WEAK MODEL / NOT RECOMMENDED`.
 - `12 + 1`: twelve external routing lines plus one owner/control line from the release-backed RF12 interpretation.
+- `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.
 - `stdin`: standard input stream for a process.
 - `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.

@@ -52,11 +52,12 @@ After first-time project bootstrap, the provider init helpers can start from one
 - `power-mode`
 - `max-speed`
 
-The preset name itself is not persisted; the helper writes the resolved canonical key values instead. Full preset expansion tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
+The preset name itself is not persisted; the helper writes the resolved canonical key values instead. Full preset expansion tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), with machine-readable copies in `shared/agents-mode.presets.json`.
 If the user wants the preset unchanged, the helper should write the preset-expanded `.agents-mode.yaml` directly; key-by-key fine-tuning is optional rather than mandatory.
 
 Canonical operator-overlay output now uses `.agents-mode.yaml` on every provider line. Legacy extensionless `.agents-mode` files remain compatibility input only: decision-driving reads should resolve provider overlays in this order — local `.agents-mode.yaml`, local legacy `.agents-mode`, matching global `~/.<provider>/.agents-mode.yaml`, then matching global legacy `.agents-mode` — normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope, and not recreate any legacy path.
 The same rule now applies to reinstall: if an existing `.agents-mode.yaml` is older than the current shipped schema or defaults, the installer must normalize it to the current canonical form instead of preserving stale pack-owned structure verbatim.
+Maintainers changing scalar keys, provider sets, priority profiles, opinion counts, or preset expansions must keep `shared/agents-mode.defaults.yaml`, `shared/agents-mode.schema.json`, `shared/agents-mode.presets.json`, and the provider init surfaces aligned; `python scripts/validate-agents-mode-contract.py --root .` checks that contract directly, and the pack validators invoke it in source-mode validation.
 
 ## Codex install details
 
@@ -238,9 +239,11 @@ It intentionally keeps the full Gemini payload in `src.gemini/` while materializ
 - `externalProvider: auto`: production routing mode that stays on `codex | claude` in shipped defaults.
 - `Gemini`: Google Gemini CLI provider line, installable here only as an explicit example or compatibility path.
 - `global install`: install into a user-level provider runtime root such as `~/.codex/` or `~/.claude/`.
+- `JSON`: JavaScript Object Notation; structured data format used here for machine-readable contract files.
 - `MCP`: Model Context Protocol; provider/runtime mechanism for tool and resource servers.
 - `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency.
 - `Qwen`: Qwen provider line, installable here only as an explicit example or compatibility path.
 - `runtime`: installed provider-facing files and directories read by the provider tool.
+- `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.
 - `stdin`: standard input stream used by CLIs and wrappers.
 - `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only provider integrations that are excluded from default installs and production `auto` routing.

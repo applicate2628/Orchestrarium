@@ -346,6 +346,14 @@ if [[ "$MODE" == "source" && -f "$ROOT/docs/agents-mode-reference.md" ]]; then
   grep -Fq '## Canonical maintenance' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should define canonical maintenance"
   grep -Fq '`power-mode` | hardest-task maximum result' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document power-mode preset"
   grep -Fq '`power-mode` (hardest-task maximum result)' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "Qwen init-project should expose power-mode preset"
+  if command -v python >/dev/null 2>&1; then
+    CONTRACT_PYTHON_BIN=python
+  elif command -v python3 >/dev/null 2>&1; then
+    CONTRACT_PYTHON_BIN=python3
+  else
+    fail "python or python3 is required to validate the agents-mode contract"
+  fi
+  "$CONTRACT_PYTHON_BIN" "$ROOT/scripts/validate-agents-mode-contract.py" --root "$ROOT" >/dev/null || fail "agents-mode machine-readable contract should match docs and init preset surfaces"
   for lane in review.security review.ui-visual-correctness; do
     grep -Fq "$lane: 2" "$PACK_ROOT/skills/init-project/SKILL.md" || fail "Qwen init-project correctness-first/power-mode presets raise $lane"
   done

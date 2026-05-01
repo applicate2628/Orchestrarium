@@ -111,6 +111,7 @@ Important: operator preferences now live only in pack-local `agents-mode` files.
 - Qwen remains a native explicit example integration. Use Qwen's built-in `/init` to generate or tailor `QWEN.md`, keep official runtime config and MCP wiring in `.qwen/settings.json` or extension manifests, and treat Qwen routing as manual example or compatibility work rather than part of the shipped production `auto` contract. The current checkout exposes Qwen through root `scripts/install-qwen.*`, while checkouts without those entrypoints should fall back to the Qwen source tree directly.
 - Explicit user role requests still override the toggle state in either direction.
 - Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity, continue-by-default execution expectations for initialized projects, and the current init-time preset family: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `power-mode`, and `max-speed`. Init helpers can either write the chosen preset as-is or open an optional fine-tune pass before saving `.agents-mode.yaml`.
+- Machine-readable `agents-mode` contract sources live in [`shared/agents-mode.schema.json`](shared/agents-mode.schema.json) and [`shared/agents-mode.presets.json`](shared/agents-mode.presets.json). [`scripts/validate-agents-mode-contract.py`](scripts/validate-agents-mode-contract.py) checks those sources against the shared YAML exemplar, the operator reference, and provider init surfaces.
 
 Shipped production provider-order profile:
 
@@ -138,7 +139,7 @@ See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, d
 ## References and maintenance
 
 - `shared/references/` contains the shared cross-provider design core that current and future provider packs can reuse.
-- `shared/agents-mode.defaults.yaml` is the single editable exemplar for provider default overlays in the monorepo. Main installers seed provider-local or global `agents-mode` files directly from that shared exemplar, with any provider-only additions applied at install time. Standalone pack repositories keep one shipped pack-root default for self-contained install seeding.
+- `shared/agents-mode.defaults.yaml` is the single editable YAML exemplar for provider default overlays in the monorepo. Keep it aligned with the machine-readable contract files, `shared/agents-mode.schema.json` and `shared/agents-mode.presets.json`; the pack validators call the shared contract check so docs, init helpers, defaults, and provider-order policy do not drift silently. Main installers seed provider-local or global `agents-mode` files directly from that shared exemplar, with any provider-only additions applied at install time. Standalone pack repositories keep one shipped pack-root default for self-contained install seeding.
 - `docs/README.md` is the common branch-level docs entrypoint for operator semantics and runtime-layout references.
 - [`docs/provider-runtime-layouts.md`](docs/provider-runtime-layouts.md) records the installed production runtime layout for Codex and Claude Code, plus the current example-integration status for Gemini and Qwen, with `global` and `local` scopes split explicitly so install/runtime paths are not confused with repo source trees.
 - `references-codex/` contains Codex-specific addenda plus compatibility pointers for older reference paths.
@@ -192,8 +193,10 @@ This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](
 - `externalPriorityProfile`: the active named provider-order profile used when `externalProvider: auto`.
 - `externalPriorityProfiles`: the map of named routing profiles to lane-specific provider priority lists.
 - `Gemini`: Google Gemini CLI provider line, kept here as an explicit example integration.
+- `JSON`: JavaScript Object Notation; structured data format used here for machine-readable contract files.
 - `MCP`: Model Context Protocol; a protocol for exposing tools and resources to agent runtimes.
 - `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency.
 - `Qwen`: Qwen provider line, kept here as an explicit example integration.
 - `runtime`: installed provider-facing files and directories used by an agent tool outside the source tree.
+- `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.
 - `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers that must stay out of production defaults and `auto` routing.
