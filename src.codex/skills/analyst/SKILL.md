@@ -1,6 +1,6 @@
 ---
 name: analyst
-description: Investigate a repository in read-only mode and return a factual research memo with file and line references. Use when Codex needs to locate relevant files, symbols, data flows, contracts, tests, similar implementations, or change risks before design or implementation. Do not use for recommendations, plans, or code changes.
+description: Investigate repo evidence read-only and return factual file, symbol, data-flow, contract, and risk findings.
 ---
 
 # Analyst

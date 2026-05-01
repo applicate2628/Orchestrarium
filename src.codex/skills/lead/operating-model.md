@@ -8,7 +8,7 @@ Use this reference when the lead needs routing, gate, or governance guidance bey
   `product-manager -> product-analyst -> lead`
 - Delivery loop for an approved item:
   `lead -> research -> design -> plan -> implement -> QA/review -> lead`
-- Batch-close loop for a completed lead-managed item:
+- Optional batch-close advisory loop for a completed lead-managed item:
   `lead -> consultant -> lead`
 - Re-intake loop for an in-flight item whose admitted scope, priority, or milestone intent has changed:
   `lead -> product-manager -> lead`
@@ -23,11 +23,10 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - Default `REVISE` cap: no more than 3 consecutive `REVISE` cycles for the same role and artifact before the lead must escalate to the user with a summary of all iterations, remaining findings, and a recommendation.
 - A handoff interrupt or worker stall without an artifact is not a completed `REVISE` artifact. Keep the stage open, record the interruption in `status.md`, then either re-dispatch the same role with a narrower slice or route to the proper factual role.
 - `BLOCKED` is reserved for real external blockers, missing decisions, or unavailable prerequisites.
-- Every completed lead-managed batch ends with one or more external consultant-checks before closure. The memo is advisory-only, but the lead must record the required opinion set before marking the batch closed.
+- A consultant sweep is advisory-only. Run it only when the lead explicitly wants a second opinion or a repo-local lane policy explicitly asks for one and `consultantMode` is not `disabled`.
 - Close specialist sessions once their artifact is accepted, handed off, or explicitly parked. Keep them open only for a bounded `REVISE` or an immediate same-scope follow-up; close `BLOCKED` and advisory-only consultant sessions once routing or advisory handoff is complete.
 - A material revision to an accepted upstream artifact invalidates dependent downstream `PASS` states; the lead marks the affected artifacts for re-review before continuing the pipeline.
 - Handoff latency should stay low: do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
-- When several independent external helper items are ready at once, launch them as a bounded external brigade instead of scattering them across separate ad hoc notes. Same-provider fan-out is allowed when the slices are disjoint and the provider runtime supports concurrent non-interactive execution.
 
 ## Primary-task lock
 
@@ -63,6 +62,12 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - If the requested work is not advisory consultant work, worker-side work, or review/QA-side work, fail fast instead of probing provider availability.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`.
 - An explicit request for `external` on an unsupported owner role changes the disclosure, not the eligibility. The lead must say the route is unsupported and reroute honestly.
+- `externalProvider: auto` is the ordinary default only; it resolves through the active production profile and uses shipped production providers `codex | claude` only. Explicit user override or documented repo-local heuristics may still choose a different honest provider for the task domain.
+- The shipped shared profiles do not hardwire example-only providers into visual lanes. If a clearly visual worker or review lane should demonstrate Qwen, or deliberately use the weaker/not-recommended Gemini path, do that through a scalar explicit provider override only; do not place Gemini or Qwen inside `externalPriorityProfiles`.
+- `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all; external fan-out is one overlay on top of that rule.
+- Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support it. If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters over silent serialization or dropped lanes.
+- Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the lead may launch repeated same-provider external helpers concurrently.
+- Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices on top of the general `parallelMode` rule.
 
 ## Canonical routing patterns
 
@@ -72,14 +77,12 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
   `product-manager -> product-analyst -> lead`
 - Advisory-only independent consultation:
   `lead -> consultant`
-- Completed task-batch closure sweep:
+- Optional task-batch closure sweep when consultant input is explicitly requested:
   `lead -> consultant -> lead`
 - Explicit external implementation through the best-fit adapter:
   `lead -> analyst -> architect -> planner -> external-worker -> external-reviewer -> lead`
 - External review/QA through the best-fit adapter:
   `lead -> analyst -> architect -> planner -> implementation -> external-reviewer -> lead`
-- Explicit parallel external brigade:
-  `lead -> external-brigade -> external-worker / external-reviewer / consultant -> lead`
 - In-flight item whose admitted scope, priority, or milestone intent has drifted:
   `lead -> product-manager -> lead`
 - Clearly local additive work:
@@ -116,6 +119,10 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
   `lead -> analyst -> architect -> planner -> graphics-engineer -> qa-engineer -> lead`
 - Graphics work with hard frame, memory, or GPU budgets:
   `lead -> analyst -> architect -> performance-engineer -> planner -> graphics-engineer -> qa-engineer -> performance-reviewer -> lead`
+- Decorative visual, icon, or image-generation-heavy work:
+  `lead -> analyst -> architect -> planner -> external-worker (explicit example-only provider override when the lane is genuinely decorative visual) -> external-reviewer / qa-engineer -> lead`
+- Bounded bundle of independent external helper lanes:
+  `lead -> external-brigade -> lead`
 - Scientific or data-visualization work:
   `lead -> analyst -> architect -> computational-scientist -> planner -> visualization-engineer -> qa-engineer -> lead`
 - Geometry or spatial-computation work:
@@ -162,7 +169,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - After `ux-reviewer`: there are no blocking usability, accessibility, or flow-quality issues.
 - After `accessibility-reviewer`: there are no blocking keyboard, focus, labeling, contrast, or assistive-technology issues for the scoped surface.
 - After the human or CI gate: required approvals and automated checks are complete, and for publication the approver is not the same role that accepted the artifact into the pipeline.
-- Before a completed lead-managed batch is marked closed: the required external consultant-check memo set exists, ends with a reusable second prompt that begins with a direct imperative to continue and names the next concrete action, records residual concerns, overlooked surfaces, and follow-up recommendations, and the lead has reconciled the requested outcome against remaining open obligations.
+- Before a completed lead-managed batch is marked closed: if a consultant sweep was explicitly requested or required by repo-local policy while `consultantMode` is enabled, the memo set exists, ends with a reusable second prompt that begins with a direct imperative to continue and names the next concrete action, records residual concerns, overlooked surfaces, and follow-up recommendations, and the lead has reconciled the requested outcome against remaining open obligations.
 
 ## Repository task memory
 
@@ -191,7 +198,7 @@ Do:
 - route an in-flight item back to `product-manager` when admitted scope, priority, or milestone intent changes materially
 - route unknowns to factual roles before escalating into opinion-heavy discussion
 - assign one explicit integration owner before QA when multiple implementation phases or specialists must land together
-- run the required external consultant-checks before closing any completed lead-managed batch
+- run a consultant sweep only when it was explicitly requested or required by repo-local policy while `consultantMode` is enabled
 
 Do not:
 
@@ -395,6 +402,7 @@ When NOT to save:
 ## Parallelism guidance
 
 - Parallelize read-heavy work such as research, triage, and test analysis when scopes are independent.
+- `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - Parallelize write-heavy work only after contracts and phase boundaries are frozen.
 - Do not run two writing roles in the same area without explicit ownership boundaries.
 

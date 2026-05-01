@@ -1,6 +1,6 @@
 ---
 name: performance-engineer
-description: Define performance budgets, measurement strategy, bottleneck models, and performance constraints for performance-sensitive work. Use when Codex needs latency, throughput, memory, CPU, I/O, query plan, rendering, build-time, runtime, scalability, or cost analysis before planning or before a critical release gate.
+description: Set performance budgets, bottleneck models, measurement plans, and constraints before performance-sensitive work.
 ---
 
 # Performance Engineer

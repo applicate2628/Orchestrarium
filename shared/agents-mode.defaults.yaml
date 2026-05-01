@@ -1,0 +1,37 @@
+consultantMode: disabled  # allowed: external | internal | disabled; default: disabled
+externalClaudeApiMode: auto  # controls advisory/review-only claude-secret candidate: disabled | auto | force; default: auto
+delegationMode: manual  # allowed: manual | auto | force; default: manual
+parallelMode: auto  # allowed: manual | auto | force; default: auto
+mcpMode: auto  # allowed: auto | force; default: auto
+preferExternalWorker: false  # allowed: false | true; default: false
+preferExternalReviewer: false  # allowed: false | true; default: false
+externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
+externalPriorityProfile: balanced  # allowed: balanced | <repo-local production profile>; default: balanced
+externalPriorityProfiles:  # allowed: profile -> lane -> ordered provider priority used when externalProvider=auto
+  balanced:  # default shared routing profile
+    advisory.repo-understanding: [claude, codex, claude-secret]  # advisory rank: claude > codex > weak claude-secret
+    advisory.design-adr: [claude, codex, claude-secret]  # design/ADR advisory rank
+    review.pre-pr: [claude, codex, claude-secret]  # pre-PR review and review-side QA rank
+    review.performance-architecture: [claude, codex, claude-secret]  # performance/architecture review and hot-path cross-check
+    worker.default-implementation: [codex, claude]  # ordinary worker-side implementation
+    worker.systems-performance-implementation: [codex, claude]  # Rust hot path, systems/perf implementation, and media pipeline lane
+    worker.long-autonomous: [claude, codex]  # long-running autonomous worker lane
+    worker.ui-structural-modernization: [codex, claude]  # production worker rank: codex > claude
+    worker.ui-surgical-patch-cleanup: [codex, claude]  # exact UI patch, cleanup, and partial-edit correction lane
+    worker.visual-icon-decorative: [codex, claude]  # visual/icon worker lane kept on the worker-side rank
+    review.visual: [claude, codex, claude-secret]  # visual review rank with weak claude-secret last
+externalOpinionCounts:  # allowed: lane -> minimum distinct external opinions required before closure
+  advisory.repo-understanding: 1  # repo-understanding advisory opinions
+  advisory.design-adr: 1  # design/ADR advisory opinions
+  review.pre-pr: 1  # pre-PR review opinions
+  review.performance-architecture: 1  # performance/architecture review opinions
+  worker.default-implementation: 1  # worker implementation opinions
+  worker.systems-performance-implementation: 1  # systems/perf worker opinions
+  worker.long-autonomous: 1  # long-autonomous worker opinions
+  worker.ui-structural-modernization: 1  # broad UI modernization worker opinions
+  worker.ui-surgical-patch-cleanup: 1  # surgical UI patch/cleanup worker opinions
+  worker.visual-icon-decorative: 1  # visual/icon/decorative worker opinions
+  review.visual: 1  # visual review opinions
+externalCodexWorkdirMode: neutral  # allowed: neutral | project; default: neutral
+externalClaudeWorkdirMode: neutral  # allowed: neutral | project; default: neutral
+externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default

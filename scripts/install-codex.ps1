@@ -1,13 +1,13 @@
 <#
 .SYNOPSIS
-    Install Orchestrarium skill-pack.
+    Install Codex pack.
 .DESCRIPTION
     Copies the skills tree and AGENTS.md to the target location.
     Re-running = reinstall.
 .EXAMPLE
-    .\install-codex.ps1                          # Install into current repo (.agents/ + AGENTS.md)
-    .\install-codex.ps1 -Global                  # Install into ~/.codex/
-    .\install-codex.ps1 -Target "D:\my-repo"     # Install into D:\my-repo as a project (.agents/ + AGENTS.md)
+    .\scripts\install-codex.ps1                          # Install into current repo (.agents/ + AGENTS.md)
+    .\scripts\install-codex.ps1 -Global                  # Install into ~/.codex/
+    .\scripts\install-codex.ps1 -Target "D:\my-repo"     # Install into D:\my-repo as a project (.agents/ + AGENTS.md)
 #>
 param(
     [switch]$Global,
@@ -19,9 +19,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Source = Join-Path $ScriptDir "src.codex"
+$RepoDir = Split-Path -Parent $ScriptDir
+$Source = Join-Path $RepoDir "src.codex"
 $AgentsSource = Join-Path $Source "agents"
-$DefaultAgentsModeSource = Join-Path $ScriptDir "agents-mode.defaults.yaml"
+$SharedAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
+$script:CodexPackBeginMarker = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
+$script:CodexPackEndMarker = "<!-- END ORCHESTRARIUM CODEX PACK -->"
 
 $script:PromptMode = $null
 
@@ -245,12 +248,172 @@ function Confirm-Removal {
 
 # Per-skill install preserves user-added skills — no destructive directory wipe needed.
 
+function Copy-RequiredDirectory {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir,
+        [string]$Label
+    )
+
+    if (Test-Path -LiteralPath $TargetDir) {
+        Write-Host "  Removing old $Label..."
+        if (-not (Confirm-Removal $TargetDir)) {
+            Write-Host "Install cancelled: existing directory not removed: $TargetDir" -ForegroundColor Red
+            exit 1
+        }
+        if (-not $DryRun) {
+            Remove-Item -Recurse -Force $TargetDir
+        } else {
+            Write-Host "    [dry-run] would remove $TargetDir"
+        }
+    }
+    Write-Host "  Installing $Label..."
+    if (-not $DryRun) {
+        Copy-Item -Recurse -Force $SourceDir $TargetDir
+    } else {
+        Write-Host "    [dry-run] would copy $SourceDir -> $TargetDir"
+    }
+}
+
+function Get-DirectoryFileHashes {
+    param([string]$Root)
+
+    $rootFull = [System.IO.Path]::GetFullPath($Root).TrimEnd([char[]]@('\', '/'))
+    $hashes = @{}
+    foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File -Force | Sort-Object FullName) {
+        $fullName = [System.IO.Path]::GetFullPath($file.FullName)
+        $relative = $fullName.Substring($rootFull.Length).TrimStart([char[]]@('\', '/'))
+        $hashes[$relative] = (Get-FileHash -Algorithm SHA256 -LiteralPath $fullName).Hash
+    }
+    return $hashes
+}
+
+function Test-DirectoryContentEqual {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetDir)) {
+        return $false
+    }
+
+    $sourceHashes = Get-DirectoryFileHashes -Root $SourceDir
+    $targetHashes = Get-DirectoryFileHashes -Root $TargetDir
+    if ($sourceHashes.Count -ne $targetHashes.Count) {
+        return $false
+    }
+
+    foreach ($key in $sourceHashes.Keys) {
+        if (-not $targetHashes.ContainsKey($key)) {
+            return $false
+        }
+        if ($sourceHashes[$key] -ne $targetHashes[$key]) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Install-SkillDirectory {
+    param(
+        [string]$SourceDir,
+        [string]$TargetDir,
+        [string]$Label
+    )
+
+    if (Test-Path -LiteralPath $TargetDir) {
+        if (Test-DirectoryContentEqual -SourceDir $SourceDir -TargetDir $TargetDir) {
+            Write-Host "    OK  $Label unchanged"
+            return
+        }
+
+        if (-not $DryRun) {
+            Remove-Item -Recurse -Force $TargetDir
+            Copy-Item -Recurse -Force $SourceDir $TargetDir
+        } else {
+            Write-Host "    [dry-run] would replace $Label"
+        }
+    } else {
+        if (-not $DryRun) {
+            Copy-Item -Recurse -Force $SourceDir $TargetDir
+        } else {
+            Write-Host "    [dry-run] would install $Label"
+        }
+    }
+}
+
+function Ensure-LocalOnlyGitignoreEntries {
+    param([string]$ProjectRoot)
+
+    $gitignore = Join-Path $ProjectRoot ".gitignore"
+    $entries = @("/.reports/", "/work-items/")
+    $existingLines = @()
+    if (Test-Path -LiteralPath $gitignore) {
+        $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
+    }
+
+    $missing = @()
+    foreach ($entry in $entries) {
+        $alternate = $entry.TrimStart("/")
+        if ($existingLines -notcontains $entry -and $existingLines -notcontains $alternate) {
+            $missing += $entry
+        }
+    }
+
+    if ($missing.Count -eq 0) {
+        Write-Host "  .gitignore: local-only entries already present"
+        return
+    }
+
+    Write-Host "  Ensuring .gitignore ignores local-only task-memory paths..."
+    if ($DryRun) {
+        foreach ($entry in $missing) {
+            if (Test-Path -LiteralPath $gitignore) {
+                Write-Host "    [dry-run] would append '$entry' to $gitignore"
+            } else {
+                Write-Host "    [dry-run] would create $gitignore with '$entry'"
+            }
+        }
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $gitignore)) {
+        Set-Content -LiteralPath $gitignore -Value ($missing -join "`r`n")
+        return
+    }
+
+    foreach ($entry in $missing) {
+        Add-Content -LiteralPath $gitignore -Value "`r`n$entry"
+    }
+}
+
+function Remove-DanglingLink {
+    param(
+        [string]$Path,
+        [string]$Label
+    )
+
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -ne $item -and (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) -and -not (Test-Path -LiteralPath $Path)) {
+        Write-Host "  Removing dangling symlink for $Label..."
+        if ($DryRun) {
+            Write-Host "    [dry-run] would remove dangling symlink $Path"
+        } else {
+            Remove-Item -LiteralPath $Path -Force
+        }
+    }
+}
+
 function Ensure-DefaultFile {
     param(
         [string]$SourceFile,
         [string]$TargetFile,
         [string]$Label
     )
+
+    Remove-DanglingLink -Path $TargetFile -Label $Label
 
     if (Test-Path -LiteralPath $TargetFile) {
         Write-Host "  Preserving existing $Label..."
@@ -294,31 +457,158 @@ function Migrate-LegacyAgentsModeFile {
     }
 }
 
-function Copy-RequiredDirectory {
+function Get-PythonCommand {
+    foreach ($name in @("python", "python3")) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
+        }
+    }
+    return $null
+}
+
+function Write-CodexDefaultAgentsModeFile {
     param(
-        [string]$SourceDir,
-        [string]$TargetDir,
-        [string]$Label
+        [string]$TemplateFile,
+        [string]$TargetFile
     )
 
-    if (Test-Path -LiteralPath $TargetDir) {
-        Write-Host "  Removing old $Label..."
-        if (-not (Confirm-Removal $TargetDir)) {
-            Write-Host "Install cancelled: existing directory not removed: $TargetDir" -ForegroundColor Red
-            exit 1
+    $content = Get-Content -LiteralPath $TemplateFile -Raw
+    if ($content -notmatch "(?m)^externalClaudeProfile:") {
+        if (-not $content.EndsWith("`n")) {
+            $content += "`n"
         }
-        if (-not $DryRun) {
-            Remove-Item -Recurse -Force $TargetDir
+        $content += "externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opus-max`n"
+    }
+    Set-Content -LiteralPath $TargetFile -Value $content -NoNewline
+}
+
+function Sync-AgentsModeFile {
+    param(
+        [string]$TemplateFile,
+        [string]$TargetFile,
+        [string]$Label,
+        [ValidateSet("codex", "shared")]
+        [string]$Provider
+    )
+
+    Remove-DanglingLink -Path $TargetFile -Label $Label
+
+    $normalizer = Join-Path $RepoDir "scripts\normalize-agents-mode.py"
+    $python = Get-PythonCommand
+
+    if ($null -ne $python -and (Test-Path -LiteralPath $normalizer)) {
+        if (Test-Path -LiteralPath $TargetFile) {
+            Write-Host "  Normalizing existing $Label to current canonical format..."
         } else {
-            Write-Host "    [dry-run] would remove $TargetDir"
+            Write-Host "  Installing canonical $Label..."
+        }
+
+        if (-not $DryRun) {
+            & $python $normalizer --template $TemplateFile --target $TargetFile --provider $Provider
+            if ($LASTEXITCODE -ne 0) {
+                throw "agents-mode normalization failed for $TargetFile"
+            }
+        } else {
+            Write-Host "    [dry-run] would normalize $TargetFile"
+        }
+        return
+    }
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        throw "Python is required to normalize existing $Label at $TargetFile."
+    }
+
+    Write-Host "  Installing canonical $Label..."
+    if (-not $DryRun) {
+        if ($Provider -eq "codex") {
+            Write-CodexDefaultAgentsModeFile -TemplateFile $TemplateFile -TargetFile $TargetFile
+        } else {
+            Copy-Item -LiteralPath $TemplateFile -Destination $TargetFile -Force
+        }
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
+function Get-CodexPackStartIndex {
+    param([string[]]$Lines)
+
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        if ($Lines[$i] -eq $script:CodexPackBeginMarker) {
+            return $i
+        }
+        if ($Lines[$i] -match "^# Shared Governance$" -or $Lines[$i] -match "^# Codex Platform Rules$" -or $Lines[$i] -match "^# Default Delegation Rule$") {
+            return $i
         }
     }
-    Write-Host "  Installing $Label..."
-    if (-not $DryRun) {
-        Copy-Item -Recurse -Force $SourceDir $TargetDir
-    } else {
-        Write-Host "    [dry-run] would copy $SourceDir -> $TargetDir"
+
+    return -1
+}
+
+function Get-CodexPackEndIndex {
+    param(
+        [string[]]$ExistingLines,
+        [int]$PackStart,
+        [string[]]$SourceLines
+)
+
+    for ($i = $PackStart; $i -lt $ExistingLines.Count; $i++) {
+        if ($ExistingLines[$i] -eq $script:CodexPackEndMarker) {
+            return $i
+        }
     }
+
+    for ($i = ($PackStart + 1); $i -lt $ExistingLines.Count; $i++) {
+        if ($ExistingLines[$i] -eq "## Project policies") {
+            return ($i - 1)
+        }
+    }
+
+    $footer = $null
+    for ($i = $SourceLines.Count - 1; $i -ge 0; $i--) {
+        if (-not [string]::IsNullOrWhiteSpace($SourceLines[$i])) {
+            $footer = $SourceLines[$i]
+            break
+        }
+    }
+
+    if ($footer) {
+        for ($i = $PackStart; $i -lt $ExistingLines.Count; $i++) {
+            if ($ExistingLines[$i] -eq $footer) {
+                return $i
+            }
+        }
+    }
+
+    $fallback = $PackStart + $SourceLines.Count - 1
+    if ($fallback -ge $ExistingLines.Count) {
+        return ($ExistingLines.Count - 1)
+    }
+
+    return $fallback
+}
+
+function Get-MergedCodexAgentsContent {
+    param(
+        [string[]]$ExistingLines,
+        [int]$PackStart,
+        [string]$SourcePath
+    )
+
+    $sourceLines = Get-Content $SourcePath
+    $packEnd = Get-CodexPackEndIndex -ExistingLines $ExistingLines -PackStart $PackStart -SourceLines $sourceLines
+
+    $finalLines = @()
+    if ($PackStart -gt 0) {
+        $finalLines += $ExistingLines[0..($PackStart - 1)]
+    }
+    $finalLines += $sourceLines
+    if ($packEnd + 1 -lt $ExistingLines.Count) {
+        $finalLines += $ExistingLines[($packEnd + 1)..($ExistingLines.Count - 1)]
+    }
+
+    return ($finalLines -join "`n")
 }
 
 # Determine target
@@ -354,7 +644,7 @@ if ($Global) {
         }
     } else {
         Write-Host "FAIL: No install target specified and not running interactively." -ForegroundColor Red
-        Write-Host "Use: .\install-codex.ps1 -Global  or  .\install-codex.ps1 -Target <path>" -ForegroundColor Yellow
+        Write-Host "Use: .\scripts\install-codex.ps1 -Global  or  .\scripts\install-codex.ps1 -Target <path>" -ForegroundColor Yellow
         exit 1
     }
 }
@@ -374,13 +664,13 @@ if ($Mode -eq "global") {
     $AgentsRoot = Join-Path $ProjectRoot ".agents"
     $SkillsTarget = Join-Path $AgentsRoot "skills"
     $AgentOverridesTarget = Join-Path $TargetRoot "agents"
-    $LeadScriptsTarget = Join-Path $AgentsRoot "skills\lead\scripts"
+    $LeadScriptsTarget = Join-Path $SkillsTarget "lead\scripts"
     $MdTarget = Join-Path $ProjectRoot "AGENTS.md"
 }
 $AgentsModeTarget = Join-Path $AgentsRoot ".agents-mode.yaml"
-$LegacyAgentsModeTarget = Join-Path $AgentsRoot ".agents-mode.yaml"
+$LegacyAgentsModeTarget = Join-Path $AgentsRoot ".agents-mode"
 
-Write-Host "=== Orchestrarium Installer ===" -ForegroundColor Cyan
+Write-Host "=== Codex Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
 Write-Host "Skills target: $SkillsTarget"
 Write-Host "Built-in agent overrides: $AgentOverridesTarget"
@@ -403,8 +693,8 @@ if (-not (Test-Path -LiteralPath $AgentsSource)) {
     Write-Host "Run this script from the Orchestrarium repo root."
     exit 1
 }
-if (-not (Test-Path -LiteralPath $DefaultAgentsModeSource)) {
-    Write-Host "FAIL: Missing default agents-mode template at $DefaultAgentsModeSource." -ForegroundColor Red
+if (-not (Test-Path -LiteralPath $SharedAgentsModeSource)) {
+    Write-Host "FAIL: Missing shared agents-mode template at $SharedAgentsModeSource." -ForegroundColor Red
     exit 1
 }
 
@@ -458,20 +748,7 @@ foreach ($skillDir in Get-ChildItem -LiteralPath (Join-Path $Source "skills") -D
     $skillName = $skillDir.Name
     $packSkills += $skillName
     $dst = Join-Path $SkillsTarget $skillName
-    if (Test-Path -LiteralPath $dst) {
-        if (-not $DryRun) {
-            Remove-Item -Recurse -Force $dst
-            Copy-Item -Recurse -Force $skillDir.FullName $dst
-        } else {
-            Write-Host "    [dry-run] would replace skills/$skillName"
-        }
-    } else {
-        if (-not $DryRun) {
-            Copy-Item -Recurse -Force $skillDir.FullName $dst
-        } else {
-            Write-Host "    [dry-run] would install skills/$skillName"
-        }
-    }
+    Install-SkillDirectory -SourceDir $skillDir.FullName -TargetDir $dst -Label "skills/$skillName"
 }
 Write-Host "  Installed $($packSkills.Count) pack skills."
 
@@ -500,7 +777,7 @@ foreach ($agentFile in Get-ChildItem -LiteralPath $AgentsSource -File) {
 }
 
 # AGENTS.md: assemble from shared + codex-specific, then merge or create
-$srcShared = Join-Path $Source "AGENTS.shared.md"
+$srcShared = Join-Path (Join-Path $RepoDir "shared") "AGENTS.shared.md"
 $srcPlatform = Join-Path $Source "AGENTS.codex.md"
 
 if (-not (Test-Path $srcShared) -or -not (Test-Path $srcPlatform)) {
@@ -511,36 +788,31 @@ if (-not (Test-Path $srcShared) -or -not (Test-Path $srcPlatform)) {
 $srcMd = Join-Path $env:TEMP "orchestrarium-agents-assembled.md"
 $sharedContent = Get-Content $srcShared -Raw
 $platformContent = Get-Content $srcPlatform -Raw
-Set-Content -Path $srcMd -Value ($sharedContent + "`n" + $platformContent) -NoNewline
+$assembledContent = @(
+    $script:CodexPackBeginMarker
+    $sharedContent.TrimEnd()
+    ""
+    $platformContent.TrimEnd()
+    $script:CodexPackEndMarker
+) -join "`n"
+Set-Content -Path $srcMd -Value $assembledContent -NoNewline
 
 $dstMd = $MdTarget
+
+Remove-DanglingLink -Path $dstMd -Label "AGENTS.md"
 
 if (Test-Path $dstMd) {
     $content = Get-Content $dstMd -Raw
     if ($content -match "## Template routing") {
-        if ($content -match "(?m)^# Default Delegation Rule") {
-            # Extract content before "# Default Delegation Rule", replace rest
-            $lines = Get-Content $dstMd
-            $idx = 0
-            for ($i = 0; $i -lt $lines.Count; $i++) {
-                if ($lines[$i] -match "^# Default Delegation Rule") { $idx = $i; break }
-            }
-            if ($idx -gt 0) {
-                Write-Host "  AGENTS.md: replacing Orchestrarium section..."
-                $userContent = ($lines[0..($idx-1)] -join "`n") + "`n"
-                $newContent = Get-Content $srcMd -Raw
-                if (-not $DryRun) {
-                    Set-Content -Path $dstMd -Value ($userContent + $newContent) -NoNewline
-                } else {
-                    Write-Host "    [dry-run] would replace Orchestrarium section in AGENTS.md"
-                }
+        $lines = Get-Content $dstMd
+        $packStart = Get-CodexPackStartIndex -Lines $lines
+        if ($packStart -ge 0) {
+            Write-Host "  AGENTS.md: replacing Codex pack section..."
+            if (-not $DryRun) {
+                $newContent = Get-MergedCodexAgentsContent -ExistingLines $lines -PackStart $packStart -SourcePath $srcMd
+                Set-Content -Path $dstMd -Value $newContent -NoNewline
             } else {
-                Write-Host "  AGENTS.md: full replace..."
-                if (-not $DryRun) {
-                    Copy-Item -Force $srcMd $dstMd
-                } else {
-                    Write-Host "    [dry-run] would replace AGENTS.md"
-                }
+                Write-Host "    [dry-run] would replace Codex pack section in AGENTS.md"
             }
         } else {
             Write-Host "  AGENTS.md: full replace..."
@@ -551,7 +823,7 @@ if (Test-Path $dstMd) {
             }
         }
     } else {
-        Write-Host "  AGENTS.md: prepending Orchestrarium content..."
+        Write-Host "  AGENTS.md: prepending Codex pack content..."
         $existing = Get-Content $dstMd -Raw
         $new = Get-Content $srcMd -Raw
         if (-not $DryRun) {
@@ -569,8 +841,12 @@ if (Test-Path $dstMd) {
     }
 }
 
+if ($Mode -ne "global") {
+    Ensure-LocalOnlyGitignoreEntries -ProjectRoot $ProjectRoot
+}
+
 Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
-Ensure-DefaultFile -SourceFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
+Sync-AgentsModeFile -TemplateFile $SharedAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml" -Provider codex
 
 if ($DryRun) {
     Write-Host ""
@@ -649,12 +925,12 @@ if ($errors -gt 0) {
     Write-Host "RESULT: FAIL ($errors errors)" -ForegroundColor Red
     exit 1
 } else {
-    Write-Host "RESULT: OK - Orchestrarium installed" -ForegroundColor Green
+    Write-Host "RESULT: OK - Codex pack installed" -ForegroundColor Green
     Write-Host "  Skills: $SkillsTarget"
     Write-Host "  Built-in agent overrides: $AgentOverridesTarget"
     Write-Host "  AGENTS.md: $MdTarget"
     Write-Host "  agents-mode: $AgentsModeTarget"
     Write-Host ""
-    Write-Host "Next: run '`$init-project' to review/update project policies and the installed default .agents/.agents-mode.yaml."
-    Write-Host "Then run 'bash $LeadScriptsTarget/validate-skill-pack.sh' to verify the installation."
+    Write-Host "Next: open Codex in the target project and run '`$init-project' to review/update project policies and the installed default .agents/.agents-mode.yaml."
+    Write-Host "Then run 'bash $LeadScriptsTarget/validate-skill-pack.sh' if you are validating the installation from a maintainer shell."
 }

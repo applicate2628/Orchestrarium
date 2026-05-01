@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# Install Orchestrarium skill-pack.
+# Install Codex pack.
 # Usage:
-#   bash install-codex.sh                  install into current repo (.agents/ + AGENTS.md)
-#   bash install-codex.sh --global         install into ~/.codex/
-#   bash install-codex.sh --target DIR     install into DIR as a project (.agents/ + AGENTS.md)
+#   bash scripts/install-codex.sh                  install into current repo (.agents/ + AGENTS.md)
+#   bash scripts/install-codex.sh --global         install into ~/.codex/
+#   bash scripts/install-codex.sh --target DIR     install into DIR as a project (.agents/ + AGENTS.md)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE="$SCRIPT_DIR/src.codex"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SOURCE="$REPO_DIR/src.codex"
 AGENTS_SOURCE="$SOURCE/agents"
-DEFAULT_AGENTS_MODE_SOURCE="$SCRIPT_DIR/agents-mode.defaults.yaml"
+SHARED_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
+CODEX_PACK_BEGIN_MARKER='<!-- BEGIN ORCHESTRARIUM CODEX PACK -->'
+CODEX_PACK_END_MARKER='<!-- END ORCHESTRARIUM CODEX PACK -->'
 
 # Directories to install (order doesn't matter)
 DIRS=(skills)
@@ -22,13 +25,13 @@ TARGET=""
 
 usage() {
   echo "Usage:"
-  echo "  bash install-codex.sh                          Install into current repo (.agents/ + AGENTS.md)"
-  echo "  bash install-codex.sh --global                 Install into ~/.codex/"
-  echo "  bash install-codex.sh --target DIR             Install into DIR as a project (.agents/ + AGENTS.md)"
-  echo "  bash install-codex.sh --force                  Skip deletion prompts"
-  echo "  bash install-codex.sh --dry-run                Print planned actions without changing files"
-  echo "  bash install-codex.sh --allow-unsafe-target    Override allowlist for custom target path"
-  echo "  bash install-codex.sh --help                   Show help"
+  echo "  bash scripts/install-codex.sh                          Install into current repo (.agents/ + AGENTS.md)"
+  echo "  bash scripts/install-codex.sh --global                 Install into ~/.codex/"
+  echo "  bash scripts/install-codex.sh --target DIR             Install into DIR as a project (.agents/ + AGENTS.md)"
+  echo "  bash scripts/install-codex.sh --force                  Skip deletion prompts"
+  echo "  bash scripts/install-codex.sh --dry-run                Print planned actions without changing files"
+  echo "  bash scripts/install-codex.sh --allow-unsafe-target    Override allowlist for custom target path"
+  echo "  bash scripts/install-codex.sh --help                   Show help"
   exit 1
 }
 
@@ -282,51 +285,10 @@ confirm_removal() {
 
 # Per-skill install preserves user-added skills — no destructive directory wipe needed.
 
-ensure_default_file() {
-  local src="$1" dst="$2" label="$3"
-
-  if [[ -f "$dst" ]]; then
-    echo "  Preserving existing $label..."
-    return
-  fi
-
-  echo "  Installing default $label..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    [dry-run] would create $dst"
-  else
-    cp "$src" "$dst"
-  fi
-}
-
-migrate_legacy_agents_mode_file() {
-  local legacy="$1" dst="$2" label="$3"
-
-  remove_dangling_symlink "$legacy" "legacy $label"
-  remove_dangling_symlink "$dst" "$label"
-
-  if [[ -f "$dst" ]]; then
-    if [[ -f "$legacy" ]]; then
-      echo "  Canonical $label already exists; leaving legacy file untouched: $legacy"
-    fi
-    return
-  fi
-
-  if [[ ! -f "$legacy" ]]; then
-    return
-  fi
-
-  echo "  Migrating legacy $label to $dst..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    [dry-run] would move $legacy -> $dst"
-  else
-    mv "$legacy" "$dst"
-  fi
-}
-
 prompt_install_mode() {
   if [ ! -t 0 ]; then
     echo "FAIL: No install target specified and not running interactively." >&2
-    echo "Use: bash install-codex.sh --global  or  bash install-codex.sh --target <path>" >&2
+    echo "Use: bash scripts/install-codex.sh --global  or  bash scripts/install-codex.sh --target <path>" >&2
     exit 1
   fi
 
@@ -461,9 +423,9 @@ else
   MD_TARGET="$PROJECT_ROOT/AGENTS.md"
 fi
 AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode.yaml"
-LEGACY_AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode.yaml"
+LEGACY_AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode"
 
-echo "=== Orchestrarium Installer ==="
+echo "=== Codex Installer ==="
 echo "Source: $SOURCE"
 echo "Skills target: $SKILLS_TARGET"
 echo "Built-in agent overrides: $AGENT_OVERRIDES_TARGET"
@@ -486,8 +448,8 @@ if [[ ! -d "$AGENTS_SOURCE" ]]; then
   echo "Run this script from the Orchestrarium repo root."
   exit 1
 fi
-if [[ ! -f "$DEFAULT_AGENTS_MODE_SOURCE" ]]; then
-  echo "FAIL: missing default agents-mode template at $DEFAULT_AGENTS_MODE_SOURCE"
+if [[ ! -f "$SHARED_AGENTS_MODE_SOURCE" ]]; then
+  echo "FAIL: missing shared agents-mode template at $SHARED_AGENTS_MODE_SOURCE" >&2
   exit 1
 fi
 
@@ -509,6 +471,8 @@ install_skill() {
   if [[ -d "$dst" ]]; then
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "    [dry-run] would replace $label"
+    elif diff -qr "$src" "$dst" >/dev/null; then
+      echo "    OK  $label unchanged"
     else
       rm -rf "$dst"
       cp -r "$src" "$dst"
@@ -520,6 +484,238 @@ install_skill() {
       cp -r "$src" "$dst"
     fi
   fi
+}
+
+ensure_local_only_gitignore_entries() {
+  local project_root="$1"
+  local gitignore="$project_root/.gitignore"
+  local entries=("/.reports/" "/work-items/")
+  local missing=()
+
+  for entry in "${entries[@]}"; do
+    local alternate="${entry#/}"
+    if [[ -f "$gitignore" ]] && { grep -Fxq "$entry" "$gitignore" || grep -Fxq "$alternate" "$gitignore"; }; then
+      continue
+    fi
+    missing+=("$entry")
+  done
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    echo "  .gitignore: local-only entries already present"
+    return
+  fi
+
+  echo "  Ensuring .gitignore ignores local-only task-memory paths..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    for entry in "${missing[@]}"; do
+      if [[ -f "$gitignore" ]]; then
+        echo "    [dry-run] would append '$entry' to $gitignore"
+      else
+        echo "    [dry-run] would create $gitignore with '$entry'"
+      fi
+    done
+    return
+  fi
+
+  if [[ ! -f "$gitignore" ]]; then
+    printf '%s\n' "${missing[@]}" > "$gitignore"
+  else
+    for entry in "${missing[@]}"; do
+      printf '\n%s\n' "$entry" >> "$gitignore"
+    done
+  fi
+}
+
+remove_dangling_symlink() {
+  local path="$1"
+  local label="$2"
+
+  if [[ -L "$path" && ! -e "$path" ]]; then
+    echo "  Removing dangling symlink for $label..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would remove dangling symlink $path"
+    else
+      rm -f "$path"
+    fi
+  fi
+}
+
+resolve_python_command() {
+  if command -v python >/dev/null 2>&1; then
+    printf '%s' "python"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "python3"
+    return 0
+  fi
+  return 1
+}
+
+ensure_default_file() {
+  local src="$1" dst="$2" label="$3"
+
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    echo "  Preserving existing $label..."
+    return
+  fi
+
+  echo "  Installing default $label..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp "$src" "$dst"
+  fi
+}
+
+write_codex_default_agents_mode_file() {
+  local template="$1" dst="$2"
+  cat "$template" > "$dst"
+  if ! grep -q '^externalClaudeProfile:' "$dst"; then
+    printf '\nexternalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opus-max\n' >> "$dst"
+  fi
+}
+
+migrate_legacy_agents_mode_file() {
+  local legacy="$1" dst="$2" label="$3"
+
+  remove_dangling_symlink "$legacy" "legacy $label"
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    if [[ -f "$legacy" ]]; then
+      echo "  Canonical $label already exists; leaving legacy file untouched: $legacy"
+    fi
+    return
+  fi
+
+  if [[ ! -f "$legacy" ]]; then
+    return
+  fi
+
+  echo "  Migrating legacy $label to $dst..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would move $legacy -> $dst"
+  else
+    mv "$legacy" "$dst"
+  fi
+}
+
+sync_agents_mode_file() {
+  local template="$1" dst="$2" label="$3" provider="$4"
+  local normalizer="$REPO_DIR/scripts/normalize-agents-mode.py"
+  local python_cmd=""
+
+  remove_dangling_symlink "$dst" "$label"
+  python_cmd="$(resolve_python_command || true)"
+
+  if [[ -n "$python_cmd" && -f "$normalizer" ]]; then
+    if [[ -f "$dst" ]]; then
+      echo "  Normalizing existing $label to current canonical format..."
+    else
+      echo "  Installing canonical $label..."
+    fi
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "    [dry-run] would normalize $dst"
+    else
+      "$python_cmd" "$normalizer" --template "$template" --target "$dst" --provider "$provider"
+    fi
+    return
+  fi
+
+  if [[ -f "$dst" ]]; then
+    echo "FAIL: python or python3 is required to normalize existing $label at $dst" >&2
+    exit 1
+  fi
+
+  echo "  Installing canonical $label..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would create $dst"
+  elif [[ "$provider" == "codex" ]]; then
+    write_codex_default_agents_mode_file "$template" "$dst"
+  else
+    cp "$template" "$dst"
+  fi
+}
+
+find_codex_pack_start_line() {
+  local file="$1"
+  local marker_line
+  marker_line="$(grep -n "^$CODEX_PACK_BEGIN_MARKER$" "$file" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+  if [[ -n "$marker_line" ]]; then
+    printf "%s" "$marker_line"
+    return
+  fi
+  grep -n "^# Shared Governance$\|^# Codex Platform Rules$\|^# Default Delegation Rule$" "$file" 2>/dev/null | head -1 | cut -d: -f1
+}
+
+find_codex_pack_end_line() {
+  local existing="$1"
+  local src="$2"
+  local pack_start="$3"
+  local footer
+
+  if awk -v start="$pack_start" -v marker="$CODEX_PACK_END_MARKER" '
+    NR < start { next }
+    $0 == marker { print NR; found=1; exit }
+    END { exit(found ? 0 : 1) }
+  ' "$existing"; then
+    return
+  fi
+
+  if awk -v start="$pack_start" '
+    NR <= start { next }
+    $0 == "## Project policies" { print NR - 1; found=1; exit }
+    END { exit(found ? 0 : 1) }
+  ' "$existing"; then
+    return
+  fi
+
+  footer="$(awk 'NF { line=$0 } END { print line }' "$src")"
+
+  if [[ -n "$footer" ]]; then
+    awk -v start="$pack_start" -v footer="$footer" '
+      NR < start { next }
+      $0 == footer { print NR; exit }
+    ' "$existing"
+  fi
+}
+
+write_merged_codex_agents_md() {
+  local existing="$1"
+  local src="$2"
+  local output="$3"
+  local pack_start="$4"
+  local total_lines head_lines tail_start pack_end new_lines footer_end
+
+  total_lines=$(wc -l < "$existing")
+  new_lines=$(wc -l < "$src")
+  footer_end="$(find_codex_pack_end_line "$existing" "$src" "$pack_start")"
+
+  if [[ -n "$footer_end" ]]; then
+    pack_end="$footer_end"
+  else
+    pack_end=$((pack_start + new_lines - 1))
+    if [[ "$pack_end" -gt "$total_lines" ]]; then
+      pack_end="$total_lines"
+    fi
+  fi
+
+  head_lines=$((pack_start - 1))
+  tail_start=$((pack_end + 1))
+
+  {
+    if [[ "$head_lines" -gt 0 ]]; then
+      head -n "$head_lines" "$existing"
+    fi
+    cat "$src"
+    if [[ "$tail_start" -le "$total_lines" ]]; then
+      tail -n "+$tail_start" "$existing"
+    fi
+  } > "$output"
 }
 
 echo "  Installing skills (per-skill, preserving user-added skills)..."
@@ -601,7 +797,7 @@ for agent_file in "$AGENTS_SOURCE"/*.toml; do
 done
 
 # AGENTS.md: assemble from shared + codex-specific, then merge or create
-src_shared="$SOURCE/AGENTS.shared.md"
+src_shared="$REPO_DIR/shared/AGENTS.shared.md"
 src_platform="$SOURCE/AGENTS.codex.md"
 
 if [[ ! -f "$src_shared" ]] || [[ ! -f "$src_platform" ]]; then
@@ -611,36 +807,28 @@ fi
 
 # Assemble pack AGENTS.md from two source files
 src_md="$(mktemp)"
-cat "$src_shared" "$src_platform" > "$src_md"
+{
+  printf '%s\n' "$CODEX_PACK_BEGIN_MARKER"
+  cat "$src_shared"
+  printf '\n'
+  cat "$src_platform"
+  printf '\n%s\n' "$CODEX_PACK_END_MARKER"
+} > "$src_md"
 trap "rm -f '$src_md'" EXIT
 
 dst_md="$MD_TARGET"
 
+remove_dangling_symlink "$dst_md" "AGENTS.md"
+
 if [[ -f "$dst_md" ]]; then
   if grep -q "## Template routing" "$dst_md" 2>/dev/null; then
-    if grep -qn "^# Default Delegation Rule" "$dst_md"; then
-      echo "  AGENTS.md: replacing Orchestrarium section..."
-      pack_start=$(grep -n "^# Default Delegation Rule" "$dst_md" | head -1 | cut -d: -f1)
-      total_lines=$(wc -l < "$dst_md")
-      new_lines=$(wc -l < "$src_md")
-      pack_end=$((pack_start + new_lines - 1))
-      if [ "$pack_end" -gt "$total_lines" ]; then
-        pack_end="$total_lines"
-      fi
-      head_lines=$((pack_start - 1))
-      tail_start=$((pack_end + 1))
+    pack_start="$(find_codex_pack_start_line "$dst_md")"
+    if [[ -n "$pack_start" ]]; then
+      echo "  AGENTS.md: replacing Codex pack section..."
       if [ "$DRY_RUN" -eq 1 ]; then
-        echo "    [dry-run] would replace Orchestrarium section in AGENTS.md (lines $pack_start-$pack_end)"
+        echo "    [dry-run] would replace Codex pack section in AGENTS.md"
       else
-        {
-          if [ "$head_lines" -gt 0 ]; then
-            head -n "$head_lines" "$dst_md"
-          fi
-          cat "$src_md"
-          if [ "$tail_start" -le "$total_lines" ]; then
-            tail -n "+$tail_start" "$dst_md"
-          fi
-        } > "$dst_md.tmp"
+        write_merged_codex_agents_md "$dst_md" "$src_md" "$dst_md.tmp" "$pack_start"
         mv "$dst_md.tmp" "$dst_md"
       fi
     else
@@ -652,7 +840,7 @@ if [[ -f "$dst_md" ]]; then
       fi
     fi
   else
-    echo "  AGENTS.md: prepending Orchestrarium content..."
+    echo "  AGENTS.md: prepending Codex pack content..."
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "    [dry-run] would prepend AGENTS.md"
     else
@@ -670,8 +858,12 @@ else
   fi
 fi
 
+if [ "$MODE" != "global" ]; then
+  ensure_local_only_gitignore_entries "$PROJECT_ROOT"
+fi
+
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
-ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+sync_agents_mode_file "$SHARED_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml" "codex"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
@@ -741,12 +933,12 @@ if [[ $errors -gt 0 ]]; then
   echo "RESULT: FAIL ($errors errors)"
   exit 1
 else
-  echo "RESULT: OK — Orchestrarium installed"
+  echo "RESULT: OK — Codex pack installed"
   echo "  Skills: $SKILLS_TARGET"
   echo "  Built-in agent overrides: $AGENT_OVERRIDES_TARGET"
   echo "  AGENTS.md: $MD_TARGET"
   echo "  agents-mode: $AGENTS_MODE_TARGET"
   echo ""
-  echo "Next: run '\$init-project' to review/update project policies and the installed default .agents/.agents-mode.yaml."
-  echo "Then run 'bash $SKILLS_TARGET/lead/scripts/validate-skill-pack.sh' to verify the installation."
+  echo "Next: open Codex in the target project and run '\$init-project' to review/update project policies and the installed default .agents/.agents-mode.yaml."
+  echo "Then run 'bash $SKILLS_TARGET/lead/scripts/validate-skill-pack.sh' if you are validating the installation from a maintainer shell."
 fi

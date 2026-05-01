@@ -1,6 +1,6 @@
 ---
 name: init-project
-description: Configure project policies in the root AGENTS.md and initialize or update .agents/.agents-mode.yaml for the current project.
+description: Configure project policies in AGENTS.md and review or update .agents/.agents-mode.yaml.
 ---
 
 # Init Project
@@ -23,22 +23,20 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | Key | `default` (safe-init) | `absolute-balance` (everyday center) | `external-aggressive` (aggressive external use) | `correctness-first` (no-time-limit correctness) | `max-speed` (speed-first) |
 |---|---|---|---|---|---|
 | `consultantMode` | `disabled` | `internal` | `external` | `external` | `disabled` |
+| `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
 | `delegationMode` | `manual` | `auto` | `force` | `force` | `auto` |
+| `parallelMode` | `auto` | `auto` | `force` | `auto` | `force` |
 | `mcpMode` | `auto` | `auto` | `auto` | `force` | `auto` |
 | `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
 | `preferExternalReviewer` | `false` | `true` | `true` | `true` | `false` |
 | `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `gemini-crosscheck` | `balanced` |
+| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` |
 | `externalPriorityProfiles` | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is |
 | `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review lanes `2`, others `1` | all `1` |
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
-| `externalGeminiWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `runtime-default` |
-| `externalGeminiFallbackMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalClaudeSecretMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalClaudeProfile` | `sonnet-high` | `sonnet-high` | `sonnet-high` | `opus-max` | `sonnet-high` |
+| `externalClaudeProfile` | `opus-max` | `sonnet-high` | `sonnet-high` | `opus-max` | `sonnet-high` |
 
 `correctness-first` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
@@ -57,8 +55,10 @@ Routing conventions (not persisted as keys):
    - Read the project's root `AGENTS.md` and check whether a `## Project policies` section already exists.
    - Read `.agents/.agents-mode.yaml` first.
    - If it is missing, read legacy `.agents/.agents-mode` as compatibility input only.
+   - If both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode` as compatibility input.
    - If either file exists, normalize it to the current canonical format before presenting or trusting the current values.
-   - Normalize either input forward into `.agents/.agents-mode.yaml` and do not recreate legacy `.agents/.agents-mode`.
+   - If any file exists, normalize the effective file to the current canonical format before presenting or trusting the current values.
+   - Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file. If the effective config came from the global scope, use it as the starting point for the project-local review instead of pretending there was no prior state.
    - If either surface already exists, show the current values and ask whether to keep them, review them, or start fresh.
 
 2. **Read the installed canonical sources.**
@@ -87,22 +87,23 @@ Routing conventions (not persisted as keys):
    - Run this step only when the user started from `custom`, skipped preset selection, or explicitly asked to fine-tune after selecting a preset.
    - Walk through the canonical `agents-mode` keys one at a time:
      - `consultantMode`
+     - `externalClaudeApiMode`
      - `delegationMode`
+     - `parallelMode`
      - `mcpMode`
      - `preferExternalWorker`
      - `preferExternalReviewer`
      - `externalProvider`
+     - `externalPriorityProfile`
      - `externalCodexWorkdirMode`
      - `externalClaudeWorkdirMode`
-     - `externalGeminiWorkdirMode`
      - `externalModelMode`
-     - `externalGeminiFallbackMode`
-     - `externalClaudeSecretMode`
-     - `externalClaudeApiMode`
      - `externalClaudeProfile`
    - Use the existing value when present, the preset-expanded value if one was selected, or otherwise default to:
      - `consultantMode: disabled`
-     - `delegationMode: manual`
+   - `externalClaudeApiMode: auto`
+   - `delegationMode: manual`
+   - `parallelMode: auto`
      - `mcpMode: auto`
    - `preferExternalWorker: false`
    - `preferExternalReviewer: false`
@@ -112,12 +113,8 @@ Routing conventions (not persisted as keys):
    - `externalOpinionCounts` defaulting each documented lane to `1`
    - `externalCodexWorkdirMode: neutral`
    - `externalClaudeWorkdirMode: neutral`
-   - `externalGeminiWorkdirMode: neutral`
    - `externalModelMode: runtime-default`
-   - `externalGeminiFallbackMode: auto`
-   - `externalClaudeSecretMode: auto`
-   - `externalClaudeApiMode: auto`
-   - `externalClaudeProfile: sonnet-high`
+   - `externalClaudeProfile: opus-max`
    - Accept shorthand answers such as `force`, `external reviewer only`, `opus`, or `defaults for the rest`.
 
 6. **Confirm the final choices.**
@@ -136,23 +133,21 @@ Routing conventions (not persisted as keys):
    Use this canonical shape:
 
    ```yaml
-   consultantMode: {value}  # allowed: external | internal | disabled
-   delegationMode: {value}  # allowed: manual | auto | force
-   mcpMode: {value}  # allowed: auto | force
-   preferExternalWorker: {value}  # allowed: false | true
-   preferExternalReviewer: {value}  # allowed: false | true
-   externalProvider: {value}  # allowed here: auto | codex | claude | gemini
-   externalPriorityProfile: {value}  # allowed: balanced | gemini-crosscheck | <repo-local profile>
+   consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
+   externalClaudeApiMode: {value}  # controls advisory/review-only claude-secret candidate: disabled | auto | force; default: auto
+   delegationMode: {value}  # allowed: manual | auto | force; default: manual
+   parallelMode: {value}  # allowed: manual | auto | force; default: auto
+   mcpMode: {value}  # allowed: auto | force; default: auto
+   preferExternalWorker: {value}  # allowed: false | true; default: false
+   preferExternalReviewer: {value}  # allowed: false | true; default: false
+   externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
+   externalPriorityProfile: {value}  # allowed: balanced | <repo-local production profile>; default: balanced
    externalPriorityProfiles: {value}  # allowed: structured profile map
    externalOpinionCounts: {value}  # allowed: structured lane-count map
-   externalCodexWorkdirMode: {value}  # allowed: neutral | project
-   externalClaudeWorkdirMode: {value}  # allowed: neutral | project
-   externalGeminiWorkdirMode: {value}  # allowed: neutral | project
-   externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro
-   externalGeminiFallbackMode: {value}  # allowed when Gemini is selected: disabled | auto | force
-   externalClaudeSecretMode: {value}  # allowed when Claude is selectable: auto | force
-   externalClaudeApiMode: {value}  # allowed when Claude is selectable: disabled | auto | force
-   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max
+   externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
+   externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
+   externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
+   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max; default: opus-max
    ```
 
 8. **Write `## Project policies` to `AGENTS.md`.**
@@ -185,6 +180,7 @@ Routing conventions (not persisted as keys):
 - Do not invent extra policy keys or extra `agents-mode` keys.
 - Preserve unknown keys in `.agents/.agents-mode.yaml` when updating.
 - Any read of `.agents/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
-- Any read that drives a decision should prefer `.agents/.agents-mode.yaml`, fall back to legacy `.agents/.agents-mode` only if the canonical file is missing, normalize either input forward into `.agents/.agents-mode.yaml`, and not recreate the legacy file.
+- Any read of the effective Codex overlay that drives a decision should normalize that file to the current canonical format before trusting the flags.
+- Any read that drives a decision should prefer local `.agents/.agents-mode.yaml`, then local legacy `.agents/.agents-mode`, then global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`; normalize whichever file supplied the effective config in the same scope and do not recreate any legacy file.
 - Do not modify any other section of `AGENTS.md`.
 - Treat root `AGENTS.md` as the project-runtime target, not the Orchestrarium monorepo maintenance overlay.

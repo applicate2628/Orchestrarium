@@ -1,25 +1,47 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Validate structural integrity of the Orchestrarium Codex skill pack.
+# Validate structural integrity of the Codex pack.
 # Supported layouts:
 #   bash src.codex/skills/lead/scripts/validate-skill-pack.sh   (dev repo)
 #   bash .codex/skills/lead/scripts/validate-skill-pack.sh      (global install)
 #   bash .agents/skills/lead/scripts/validate-skill-pack.sh     (repo-local install)
 
 # Auto-detect layout.
+SCRIPT_DIR_LOGICAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 DEV_REPO=0
 CODEX_RUNTIME_ROOT=""
-if [[ -d "src.codex/skills" && -f "src.codex/AGENTS.shared.md" ]]; then
+if [[ -d "src.codex/skills" && -f "shared/AGENTS.shared.md" && -f "src.codex/AGENTS.codex.md" ]]; then
   # Dev repo: assemble AGENTS.md from split source files for validation
   SKILLS_DIR="$(cd "src.codex/skills" && pwd -P)"
   SCRIPTS_DIR="$(cd "src.codex/skills/lead/scripts" && pwd -P)"
-  DOCS_DIR="$(cd "docs" && pwd -P)"
-  AGENTS_FILE="$(mktemp)"
+  REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)"
   DEV_REPO=1
-  cat "src.codex/AGENTS.shared.md" "src.codex/AGENTS.codex.md" > "$AGENTS_FILE"
+  AGENTS_FILE="$(mktemp)"
+  {
+    printf '%s\n' '<!-- BEGIN ORCHESTRARIUM CODEX PACK -->'
+    cat "shared/AGENTS.shared.md"
+    printf '\n'
+    cat "src.codex/AGENTS.codex.md"
+    printf '\n%s\n' '<!-- END ORCHESTRARIUM CODEX PACK -->'
+  } > "$AGENTS_FILE"
   trap "rm -f '$AGENTS_FILE'" EXIT
+elif [[ -d ".codex/skills" && -f ".codex/AGENTS.md" ]]; then
+  SKILLS_DIR="$(cd ".codex/skills" && pwd -P)"
+  SCRIPTS_DIR="$(cd ".codex/skills/lead/scripts" && pwd -P)"
+  AGENTS_FILE="$(cd ".codex" && pwd)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd ".codex" && pwd)"
+elif [[ -d ".agents/skills" && -f "AGENTS.md" ]]; then
+  SKILLS_DIR="$(cd ".agents/skills" && pwd -P)"
+  SCRIPTS_DIR="$(cd ".agents/skills/lead/scripts" && pwd -P)"
+  AGENTS_FILE="$(cd "." && pwd)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd "." && pwd)/.codex"
+elif [[ -d "$SCRIPT_DIR_LOGICAL/../.." && -f "$SCRIPT_DIR_LOGICAL/../SKILL.md" && -f "$SCRIPT_DIR_LOGICAL/../../../AGENTS.md" ]]; then
+  SKILLS_DIR="$(cd "$SCRIPT_DIR_LOGICAL/../.." && pwd -P)"
+  SCRIPTS_DIR="$SCRIPT_DIR"
+  AGENTS_FILE="$(cd "$SCRIPT_DIR_LOGICAL/../../.." && pwd)/AGENTS.md"
+  CODEX_RUNTIME_ROOT="$(cd "$SCRIPT_DIR_LOGICAL/../../.." && pwd)"
 elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DIR/../../../AGENTS.md" ]]; then
   SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
   SCRIPTS_DIR="$SCRIPT_DIR"
@@ -30,16 +52,6 @@ elif [[ -d "$SCRIPT_DIR/../.." && -f "$SCRIPT_DIR/../SKILL.md" && -f "$SCRIPT_DI
   SCRIPTS_DIR="$SCRIPT_DIR"
   AGENTS_FILE="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)/AGENTS.md"
   CODEX_RUNTIME_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)/.codex"
-elif [[ -d ".codex/skills" && -f ".codex/AGENTS.md" ]]; then
-  SKILLS_DIR="$(cd ".codex/skills" && pwd -P)"
-  SCRIPTS_DIR="$(cd ".codex/skills/lead/scripts" && pwd -P)"
-  AGENTS_FILE="$(cd ".codex" && pwd -P)/AGENTS.md"
-  CODEX_RUNTIME_ROOT="$(cd ".codex" && pwd -P)"
-elif [[ -d ".agents/skills" && -f "AGENTS.md" ]]; then
-  SKILLS_DIR="$(cd ".agents/skills" && pwd -P)"
-  SCRIPTS_DIR="$(cd ".agents/skills/lead/scripts" && pwd -P)"
-  AGENTS_FILE="$(cd "." && pwd -P)/AGENTS.md"
-  CODEX_RUNTIME_ROOT="$(cd "." && pwd -P)/.codex"
 else
   echo "FAIL: Could not detect Orchestrarium layout. Expected one of: src.codex/, .codex/, or .agents/ with root AGENTS.md." >&2
   exit 1
@@ -52,6 +64,489 @@ pass()  { PASS=$((PASS + 1)); echo "  PASS  $1"; }
 warn()  { WARN=$((WARN + 1)); echo "  WARN  $1"; }
 fail()  { FAIL=$((FAIL + 1)); echo "  FAIL  $1"; }
 
+check_pointer() {
+  local file="$1"
+  local target="$2"
+  if [[ ! -f "$file" ]]; then
+    fail "$file missing"
+  elif grep -Fq "$target" "$file"; then
+    pass "$file points to $target"
+  else
+    fail "$file missing canonical shared link $target"
+  fi
+}
+
+check_contains() {
+  local file="$1"
+  local pattern="$2"
+  local label="$3"
+  if [[ ! -f "$file" ]]; then
+    fail "$label (file missing: $file)"
+  elif grep -Fq "$pattern" "$file"; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+}
+
+count_codex_pack_lines() {
+  local file="$1"
+  local begin='<!-- BEGIN ORCHESTRARIUM CODEX PACK -->'
+  local end='<!-- END ORCHESTRARIUM CODEX PACK -->'
+  local start=""
+  local finish=""
+
+  start="$(grep -nFx "$begin" "$file" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+  finish="$(grep -nFx "$end" "$file" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+
+  if [[ -n "$start" && -n "$finish" && "$finish" -ge "$start" ]]; then
+    sed -n "${start},${finish}p" "$file" | wc -l | tr -d '[:space:]'
+  else
+    wc -l < "$file" | tr -d '[:space:]'
+  fi
+}
+
+check_absent() {
+  local file="$1"
+  local pattern="$2"
+  local label="$3"
+  if [[ ! -f "$file" ]]; then
+    fail "$label (file missing: $file)"
+  elif grep -Fq "$pattern" "$file"; then
+    fail "$label"
+  else
+    pass "$label"
+  fi
+}
+
+check_file() {
+  local file="$1"
+  local label="$2"
+  if [[ -f "$file" ]]; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+}
+
+check_not_exists() {
+  local path="$1"
+  local label="$2"
+  if [[ ! -e "$path" ]]; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+}
+
+check_normalizer_strips_example_auto_providers() {
+  local label="$1"
+  if [[ $DEV_REPO -ne 1 ]]; then
+    warn "$label (dev repo normalizer unavailable in installed layout)"
+    return
+  fi
+
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_cmd="python"
+  else
+    warn "$label (python unavailable)"
+    return
+  fi
+
+  local tmpdir target
+  tmpdir="$(mktemp -d)"
+  target="$tmpdir/.agents-mode.yaml"
+  cat > "$target" <<'EOF'
+externalProvider: auto
+externalPriorityProfile: custom-demo
+externalPriorityProfiles:
+  custom-demo:
+    advisory.repo-understanding: [claude, codex, claude-secret, gemini, qwen]
+    review.visual: [claude, codex, claude-secret, gemini]
+    worker.default-implementation: [claude-secret, claude, gemini, qwen, codex]
+    worker.secret-only: [claude-secret, gemini, qwen]
+externalOpinionCounts: {}
+EOF
+
+  if "$python_cmd" "$REPO_ROOT/scripts/normalize-agents-mode.py" \
+    --template "$REPO_ROOT/shared/agents-mode.defaults.yaml" \
+    --target "$target" \
+    --provider shared >/dev/null 2>&1 &&
+    grep -Fq "  custom-demo:" "$target" &&
+    grep -Fq "    advisory.repo-understanding: [claude, codex, claude-secret]" "$target" &&
+    grep -Fq "    review.visual: [claude, codex, claude-secret]" "$target" &&
+    grep -Fq "    worker.default-implementation: [claude, codex]" "$target" &&
+    ! grep -Fq "worker.secret-only" "$target" &&
+    ! grep -E '^[[:space:]]{4}.*: \[[^]]*(gemini|qwen)' "$target" >/dev/null &&
+    ! grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*claude-secret' "$target" >/dev/null; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+  rm -rf "$tmpdir"
+}
+
+check_shared_defaults_claude_secret_policy() {
+  local label="$1"
+  if [[ $DEV_REPO -ne 1 ]]; then
+    warn "$label (dev repo defaults unavailable in installed layout)"
+    return
+  fi
+
+  local defaults="$REPO_ROOT/shared/agents-mode.defaults.yaml"
+  if [[ ! -f "$defaults" ]]; then
+    fail "$label (shared defaults missing)"
+    return
+  fi
+
+  local lane
+  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.performance-architecture review.visual; do
+    if ! grep -Fq "    $lane: [claude, codex, claude-secret]" "$defaults"; then
+      fail "$label ($lane missing claude-secret as last advisory/review candidate)"
+      return
+    fi
+  done
+
+  if grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*(claude-secret|gemini|qwen)' "$defaults" >/dev/null; then
+    fail "$label (worker lane contains forbidden provider)"
+    return
+  fi
+  if grep -E '^[[:space:]]{4}(advisory|review|worker)\.[^:]+: \[[^]]*(gemini|qwen)' "$defaults" >/dev/null; then
+    fail "$label (Gemini/Qwen appear in shipped production profile)"
+    return
+  fi
+  pass "$label"
+}
+
+check_max_lines() {
+  local file="$1"
+  local max_lines="$2"
+  local label="$3"
+  if [[ ! -f "$file" ]]; then
+    fail "$label (file missing: $file)"
+    return
+  fi
+
+  local actual_lines
+  actual_lines="$(wc -l < "$file")"
+  if [[ "$actual_lines" -le "$max_lines" ]]; then
+    pass "$label ($actual_lines <= $max_lines)"
+  else
+    fail "$label ($actual_lines > $max_lines)"
+  fi
+}
+
+check_skill_frontmatter_yaml() {
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_cmd="python"
+  else
+    warn "Codex skill frontmatter is valid YAML (python unavailable)"
+    return
+  fi
+
+  local skill_files=()
+  local role
+  local skill_file
+
+  if [[ "$#" -gt 0 ]]; then
+    for role in "$@"; do
+      skill_file="$SKILLS_DIR/$role/SKILL.md"
+      [[ -f "$skill_file" ]] && skill_files+=("$skill_file")
+    done
+  else
+    for skill_file in "$SKILLS_DIR"/*/SKILL.md; do
+      [[ -f "$skill_file" ]] && skill_files+=("$skill_file")
+    done
+  fi
+
+  local output
+  if output="$("$python_cmd" - "${skill_files[@]}" <<'PY'
+import pathlib
+import re
+import sys
+
+try:
+    import yaml
+except Exception:
+    yaml = None
+
+bad = []
+
+def fallback_check(path, frontmatter):
+    for offset, line in enumerate(frontmatter.splitlines(), 2):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        match = re.match(r"^[A-Za-z0-9_-]+:\s*(.*)$", line)
+        if not match:
+            return f"line {offset}: unsupported frontmatter line"
+        value = match.group(1).split(" #", 1)[0].strip()
+        if value and not value.startswith(("'", '"', "[", "{", "|", ">")) and re.search(r":(\s|$)", value):
+            return f"line {offset}: unquoted colon in plain scalar"
+    return None
+
+for arg in sys.argv[1:]:
+    path = pathlib.Path(arg)
+    text = path.read_text(encoding="utf-8")
+    if not text.startswith("---"):
+        bad.append(f"{path}: missing opening frontmatter fence")
+        continue
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        bad.append(f"{path}: missing closing frontmatter fence")
+        continue
+    frontmatter = parts[1]
+    if yaml is not None:
+        try:
+            data = yaml.safe_load(frontmatter)
+        except Exception as exc:
+            bad.append(f"{path}: {exc}")
+            continue
+        if not isinstance(data, dict):
+            bad.append(f"{path}: frontmatter root is not a mapping")
+    else:
+        fallback_error = fallback_check(path, frontmatter)
+        if fallback_error:
+            bad.append(f"{path}: {fallback_error}")
+
+if bad:
+    print("\n".join(bad))
+    sys.exit(1)
+PY
+)"; then
+    pass "Codex skill frontmatter is valid YAML"
+  else
+    fail "Codex skill frontmatter is valid YAML"
+    if [[ -n "$output" ]]; then
+      printf '%s\n' "$output" | sed 's/^/       /'
+    fi
+  fi
+}
+
+check_skill_description_budget() {
+  local max_per_description="$1"
+  local max_total_description="$2"
+  shift 2
+  local total_chars=0
+  local offenders=()
+  local multiline_descriptions=()
+  local skill_file
+  local role
+
+  if [[ "$#" -gt 0 ]]; then
+    for role in "$@"; do
+      skill_file="$SKILLS_DIR/$role/SKILL.md"
+      [[ -f "$skill_file" ]] || continue
+
+      local description
+      local description_chars
+
+      description="$(grep -m 1 '^description:' "$skill_file" | sed 's/^description:[[:space:]]*//')"
+
+      if [[ -z "$description" ]]; then
+        offenders+=("$role=missing")
+        continue
+      fi
+
+      if [[ "$description" == ">" || "$description" == "|" ]]; then
+        multiline_descriptions+=("$role")
+        continue
+      fi
+
+      description_chars="${#description}"
+      total_chars=$((total_chars + description_chars))
+
+      if [[ "$description_chars" -gt "$max_per_description" ]]; then
+        offenders+=("$role=$description_chars")
+      fi
+    done
+  else
+
+    for skill_file in "$SKILLS_DIR"/*/SKILL.md; do
+      [[ -f "$skill_file" ]] || continue
+
+      local description
+      local description_chars
+
+      role="$(basename "$(dirname "$skill_file")")"
+      description="$(grep -m 1 '^description:' "$skill_file" | sed 's/^description:[[:space:]]*//')"
+
+      if [[ -z "$description" ]]; then
+        offenders+=("$role=missing")
+        continue
+      fi
+
+      if [[ "$description" == ">" || "$description" == "|" ]]; then
+        multiline_descriptions+=("$role")
+        continue
+      fi
+
+      description_chars="${#description}"
+      total_chars=$((total_chars + description_chars))
+
+      if [[ "$description_chars" -gt "$max_per_description" ]]; then
+        offenders+=("$role=$description_chars")
+      fi
+    done
+  fi
+
+  if [[ ${#multiline_descriptions[@]} -gt 0 ]]; then
+    fail "Codex skill descriptions are single-line metadata (${multiline_descriptions[*]})"
+  else
+    pass "Codex skill descriptions are single-line metadata"
+  fi
+
+  if [[ ${#offenders[@]} -gt 0 ]]; then
+    fail "Codex skill descriptions stay <= $max_per_description chars (${offenders[*]})"
+  else
+    pass "Codex skill descriptions stay <= $max_per_description chars"
+  fi
+
+  if [[ "$total_chars" -le "$max_total_description" ]]; then
+    pass "Codex skill description total stays <= $max_total_description chars ($total_chars)"
+  else
+    fail "Codex skill description total stays <= $max_total_description chars ($total_chars)"
+  fi
+}
+
+check_exact_h2_inventory() {
+  local file="$1"
+  local label="$2"
+  shift 2
+  local expected=("$@")
+  local actual=()
+
+  if [[ ! -f "$file" ]]; then
+    fail "$label (file missing: $file)"
+    return
+  fi
+
+  mapfile -t actual < <(grep '^## ' "$file" || true)
+
+  if [[ ${#actual[@]} -ne ${#expected[@]} ]]; then
+    fail "$label"
+    return
+  fi
+
+  local idx
+  for idx in "${!expected[@]}"; do
+    if [[ "${actual[$idx]}" != "${expected[$idx]}" ]]; then
+      fail "$label"
+      return
+    fi
+  done
+
+  pass "$label"
+}
+
+extract_h2_section() {
+  local file="$1"
+  local heading="$2"
+  awk -v heading="$heading" '
+    $0 == heading { in_section=1; print; next }
+    in_section && /^## / { exit }
+    in_section { print }
+  ' "$file"
+}
+
+check_h2_section_contains() {
+  local file="$1"
+  local heading="$2"
+  local pattern="$3"
+  local label="$4"
+  local section_text
+
+  if [[ ! -f "$file" ]]; then
+    fail "$label (file missing: $file)"
+    return
+  fi
+
+  section_text="$(extract_h2_section "$file" "$heading")"
+  if [[ -z "$section_text" ]]; then
+    fail "$label (missing section: $heading)"
+  elif grep -Fq "$pattern" <<<"$section_text"; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+}
+
+check_h2_section_absent() {
+  local file="$1"
+  local heading="$2"
+  local pattern="$3"
+  local label="$4"
+  local section_text
+
+  if [[ ! -f "$file" ]]; then
+    fail "$label (file missing: $file)"
+    return
+  fi
+
+  section_text="$(extract_h2_section "$file" "$heading")"
+  if [[ -z "$section_text" ]]; then
+    fail "$label (missing section: $heading)"
+  elif grep -Fq "$pattern" <<<"$section_text"; then
+    fail "$label"
+  else
+    pass "$label"
+  fi
+}
+
+normalized_sha256() {
+  local file="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sed 's/\r$//' "$file" | sha256sum | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    sed 's/\r$//' "$file" | shasum -a 256 | awk '{print $1}'
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 - "$file" <<'PY'
+import hashlib, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+data = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+print(hashlib.sha256(data).hexdigest())
+PY
+  elif command -v python >/dev/null 2>&1; then
+    python - "$file" <<'PY'
+import hashlib, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+data = path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+print(hashlib.sha256(data).hexdigest())
+PY
+  else
+    return 1
+  fi
+}
+
+check_normalized_sha256() {
+  local file="$1"
+  local expected="$2"
+  local label="$3"
+  local actual
+
+  if [[ ! -f "$file" ]]; then
+    fail "$label (file missing: $file)"
+    return
+  fi
+
+  if ! actual="$(normalized_sha256 "$file")"; then
+    fail "$label (no SHA-256 tool available)"
+    return
+  fi
+
+  if [[ "$actual" == "$expected" ]]; then
+    pass "$label"
+  else
+    fail "$label"
+  fi
+}
+
 echo "=== Core files ==="
 
 for f in \
@@ -62,6 +557,8 @@ for f in \
   "$SKILLS_DIR/lead/external-dispatch.md" \
   "$SKILLS_DIR/init-project/SKILL.md" \
   "$SKILLS_DIR/init-project/agents/openai.yaml" \
+  "$SKILLS_DIR/external-brigade/SKILL.md" \
+  "$SKILLS_DIR/external-brigade/agents/openai.yaml" \
   "$SKILLS_DIR/consultant/SKILL.md" \
   "$SKILLS_DIR/second-opinion/SKILL.md" \
   "$SCRIPTS_DIR/check-publication-safety.sh" \
@@ -71,48 +568,271 @@ do
   if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
 done
 
-for f in \
-  "$SKILLS_DIR/external-brigade/SKILL.md" \
-  "$SKILLS_DIR/external-brigade/agents/openai.yaml"
-do
-  if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
-done
+if [[ $DEV_REPO -eq 1 ]]; then
+  DOCS_DIR="$REPO_ROOT/docs"
+  SHARED_REF_DIR="$REPO_ROOT/shared/references"
+  CODEX_REF_DIR="$REPO_ROOT/references-codex"
+  CLAUDE_REF_DIR="$REPO_ROOT/references-claude"
+  GEMINI_REF_DIR="$REPO_ROOT/references-gemini"
+  QWEN_REF_DIR="$REPO_ROOT/references-qwen"
+  STANDALONE_PROVIDER_REPO=0
+  if [[ ! -f "$REPO_ROOT/install.sh" && ! -f "$REPO_ROOT/install.ps1" ]]; then
+    STANDALONE_PROVIDER_REPO=1
+  fi
 
-if [[ -d "src.codex/skills" && -f "src.codex/AGENTS.shared.md" ]]; then
   echo ""
-  echo "=== Branch-level docs surface ==="
+  echo "=== Common branch-level surface ==="
+
+  common_branch_files=(
+    "$REPO_ROOT/src.codex/agents/default.toml" \
+    "$REPO_ROOT/src.codex/agents/worker.toml" \
+    "$REPO_ROOT/src.codex/agents/explorer.toml" \
+    "$REPO_ROOT/src.codex/README.md" \
+    "$DOCS_DIR/README.md" \
+    "$DOCS_DIR/agents-mode-reference.md" \
+    "$DOCS_DIR/provider-runtime-layouts.md" \
+    "$CODEX_REF_DIR/README.md"
+  )
+  if [[ $STANDALONE_PROVIDER_REPO -eq 0 ]]; then
+    common_branch_files+=(
+      "$REPO_ROOT/src.claude/README.md" \
+      "$REPO_ROOT/src.gemini/README.md" \
+      "$REPO_ROOT/src.qwen/README.md" \
+      "$DOCS_DIR/external-worker-design.md" \
+      "$CLAUDE_REF_DIR/README.md" \
+      "$GEMINI_REF_DIR/README.md" \
+      "$QWEN_REF_DIR/README.md"
+    )
+  fi
+
+  for f in "${common_branch_files[@]}"; do
+    if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
+  done
+
+  echo ""
+  echo "=== Shared references ==="
+
   for f in \
-    src.codex/agents/default.toml \
-    src.codex/agents/worker.toml \
-    src.codex/agents/explorer.toml \
-    src.codex/README.md \
-    docs/README.md \
-    docs/provider-runtime-layout.md \
-    docs/agents-mode-reference.md \
-    references-codex/README.md \
-    references-codex/evidence-based-answer-pipeline.md \
-    references-codex/operating-model-diagram.md \
-    references-codex/periodic-control-matrix.md \
-    references-codex/repository-publication-safety.md \
-    references-codex/repository-task-memory.md \
-    references-codex/subagent-operating-model.md \
-    references-codex/workflow-strategy-comparison.md \
-    references-codex/ru/operating-model-diagram.md \
-    references-codex/ru/periodic-control-matrix.md \
-    references-codex/ru/repository-publication-safety.md \
-    references-codex/ru/repository-task-memory.md \
-    references-codex/ru/subagent-operating-model.md \
-    references-codex/ru/workflow-strategy-comparison.md
+    "$SHARED_REF_DIR/README.md" \
+    "$SHARED_REF_DIR/evidence-based-answer-pipeline.md" \
+    "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "$SHARED_REF_DIR/workflow-strategy-comparison.md" \
+    "$SHARED_REF_DIR/repository-publication-safety.md" \
+    "$SHARED_REF_DIR/ru/subagent-operating-model.md" \
+    "$SHARED_REF_DIR/ru/workflow-strategy-comparison.md" \
+    "$SHARED_REF_DIR/ru/repository-publication-safety.md"
   do
     if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
   done
+
+  echo ""
+  echo "=== Codex compatibility pointers ==="
+
+  check_pointer "$CODEX_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
+  check_pointer "$CODEX_REF_DIR/subagent-operating-model.md" "../shared/references/subagent-operating-model.md"
+  check_pointer "$CODEX_REF_DIR/workflow-strategy-comparison.md" "../shared/references/workflow-strategy-comparison.md"
+  check_pointer "$CODEX_REF_DIR/repository-publication-safety.md" "../shared/references/repository-publication-safety.md"
+  check_pointer "$CODEX_REF_DIR/ru/subagent-operating-model.md" "../../shared/references/ru/subagent-operating-model.md"
+  check_pointer "$CODEX_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
+  check_pointer "$CODEX_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
+  if [[ $STANDALONE_PROVIDER_REPO -eq 0 ]]; then
+    check_pointer "$GEMINI_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
+    check_pointer "$GEMINI_REF_DIR/workflow-strategy-comparison.md" "../shared/references/workflow-strategy-comparison.md"
+    check_pointer "$GEMINI_REF_DIR/repository-publication-safety.md" "../shared/references/repository-publication-safety.md"
+    check_pointer "$GEMINI_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
+    check_pointer "$GEMINI_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
+  fi
+
+  echo ""
+  echo "=== Shared core / addendum semantics ==="
+
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "This file is the canonical shared core for the repository's subagent operating model." \
+    "shared subagent-operating-model declares canonical shared-core ownership"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Keep runtime-specific paths, provider dispatch details, execution-model differences, and repository concretization in the corresponding pack-local addendum." \
+    "shared subagent-operating-model keeps runtime specifics in pack-local addenda"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "and any pack-local provider-specific fields" \
+    "shared subagent-operating-model allows provider-specific addendum fields"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'A subagent `PASS`, report, or claimed test result is a claim, not proof' \
+    "shared subagent-operating-model requires subagent result verification"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Visual artifact verification amendment" \
+    "shared subagent-operating-model requires visual artifact inspection"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Documentation terminology amendment" \
+    "shared subagent-operating-model documents terminology glossary discipline"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Markdown formula rendering amendment" \
+    "shared subagent-operating-model documents Markdown formula rendering discipline"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "split long derivations into several short one-line" \
+    "shared subagent-operating-model preserves fragile previewer formula fallback"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'do not use multi-line `$$...$$` display blocks' \
+    "shared subagent-operating-model rejects unverified multi-line display math"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'compatibility hacks such as `\sb` or `\sp`' \
+    "shared subagent-operating-model forbids formula compatibility hacks"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "unbalanced dollar delimiters" \
+    "shared subagent-operating-model scans for delimiter and table breakage"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "Formula scope and assumptions amendment" \
+    "shared subagent-operating-model documents formula scope discipline"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "tool availability" \
+    "shared subagent-operating-model preserves canonical-source ambiguity inspection"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "smallest safe reversible subset" \
+    "shared subagent-operating-model preserves user-intent fallback discipline"
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".agents/.agents-mode.yaml" \
+    "shared subagent-operating-model stays free of Codex-specific agents-mode paths"
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" ".claude/.agents-mode.yaml" \
+    "shared subagent-operating-model stays free of Claude-specific agents-mode paths"
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "work-items/index.md" \
+    "shared subagent-operating-model stays free of Claude task-memory concretization"
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "externalClaudeProfile" \
+    "shared subagent-operating-model stays free of provider-specific profile fields"
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "Claude CLI" \
+    "shared subagent-operating-model stays free of provider-specific dispatch destinations"
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "Codex CLI" \
+    "shared subagent-operating-model stays free of provider-specific dispatch origins"
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "## Codex-specific runtime notes" \
+    "shared subagent-operating-model stays free of Codex addendum sections"
+  check_absent "$SHARED_REF_DIR/subagent-operating-model.md" "## Claude-specific runtime notes" \
+    "shared subagent-operating-model stays free of Claude addendum sections"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" "## 1. Main rule for the lead" \
+    "shared subagent-operating-model keeps the main-rule section in the shared core"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" "## 6. Role map" \
+    "shared subagent-operating-model keeps the role-map section in the shared core"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" "## 8. Gates: what each stage must prove" \
+    "shared subagent-operating-model keeps the gate model in the shared core"
+  check_h2_section_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "## 3.10 Periodic controls" \
+    'Use the corresponding pack-local `periodic-control-matrix.md` named in the local addendum as the canonical cadence, owner, evidence, and fail-action matrix.' \
+    "shared periodic-controls section routes ownership back through the pack-local addendum"
+  check_h2_section_absent "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "## 3.10 Periodic controls" \
+    "[periodic-control-matrix.md](periodic-control-matrix.md)" \
+    "shared periodic-controls section does not keep a broken shared periodic-control link"
+  check_exact_h2_inventory "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "shared subagent-operating-model keeps the canonical shared-core H2 skeleton" \
+    "## 1. Main rule for the lead" \
+    "## 2. What this means in practice" \
+    "## 3. Team operating model" \
+    "## 3.10 Periodic controls" \
+    "## 4. Standard task template for any subagent" \
+    "## 5. Shared system preamble for all subagents" \
+    "## 6. Role map" \
+    "## 7. Ready-made role prompts" \
+    "## 8. Gates: what each stage must prove" \
+    "## 9. Practical routing patterns" \
+    "## 10. Rules for parallel work" \
+    "## 11. Governance notes" \
+    "## 12. Team composition" \
+    "## 13. Short memo for the lead" \
+    "## 14. Final wording to give the lead"
+
+  check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
+    "## Codex-specific runtime notes" \
+    'Consultant config lives in `.agents/.agents-mode.yaml`' \
+    "Codex runtime-notes section documents the Codex agents-mode path"
+  check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
+    "## Codex-specific runtime notes" \
+    "externalClaudeProfile" \
+    "Codex runtime-notes section documents the Codex-only externalClaudeProfile field"
+  check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
+    "## Codex-specific runtime notes" \
+    "Shipped production \`auto\` uses \`codex | claude\` only." \
+    "Codex runtime-notes section documents profile-based Codex external dispatch"
+  check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
+    "## Codex-specific runtime notes" \
+    "sequential skill invocation" \
+    "Codex runtime-notes section keeps the sequential-execution runtime note"
+  check_h2_section_absent "$CODEX_REF_DIR/subagent-operating-model.md" \
+    "## Codex-specific runtime notes" \
+    ".claude/.agents-mode.yaml" \
+    "Codex runtime-notes section does not accidentally carry Claude agents-mode paths"
+  check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Codex-specific runtime notes" \
+    "Codex addendum keeps the Codex runtime-notes section"
+  if [[ $STANDALONE_PROVIDER_REPO -eq 0 ]]; then
+    check_contains "$GEMINI_REF_DIR/subagent-operating-model.md" "## Gemini-specific runtime notes" \
+      "Gemini addendum keeps the Gemini runtime-notes section"
+    check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Qwen-specific runtime notes" \
+      "Qwen addendum keeps the Qwen runtime-notes section"
+    check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+      "## Gemini-specific runtime notes" \
+      ".gemini/.agents-mode.yaml" \
+      "Gemini runtime-notes section documents the Gemini agents-mode overlay"
+    check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+      "## Gemini-specific runtime notes" \
+      ".gemini/settings.json" \
+      "Gemini runtime-notes section documents the Gemini native runtime config surface"
+    check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+      "## Gemini-specific runtime notes" \
+      "sequential and human-steered" \
+      "Gemini runtime-notes section keeps the sequential human-steered runtime note"
+    check_h2_section_contains "$QWEN_REF_DIR/subagent-operating-model.md" \
+      "## Qwen-specific runtime notes" \
+      "sequential and human-steered" \
+      "Qwen runtime-notes section keeps the sequential human-steered runtime note"
+    check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Shared core now owns" \
+      "Qwen addendum keeps the shared-core ownership handoff section"
+  else
+    check_not_exists "$REPO_ROOT/src.claude" \
+      "standalone Codex branch omits Claude source tree"
+    check_not_exists "$REPO_ROOT/src.gemini" \
+      "standalone Codex branch omits Gemini source tree"
+    check_not_exists "$REPO_ROOT/src.qwen" \
+      "standalone Codex branch omits Qwen source tree"
+    check_contains "$REPO_ROOT/README.md" "does not carry the Claude, Gemini, or Qwen source trees" \
+      "standalone Codex README states other provider trees are absent"
+  fi
+  check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Codex-side repository concretization" \
+    "Codex addendum keeps the Codex repository-concretization section"
+  check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Shared core now owns" \
+    "Codex addendum keeps the shared-core ownership handoff section"
+  check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
+    "## Codex-side repository concretization" \
+    "[periodic-control-matrix.md](periodic-control-matrix.md)" \
+    "Codex repository-concretization section keeps the pack-local periodic-control reference"
+  check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
+    "## Shared core now owns" \
+    "Main rule, core management rules, delivery loops, routing patterns, role map, prompts, gates, and team composition" \
+    "Codex shared-core handoff section states which methodology stays in the shared core"
+  check_exact_h2_inventory "$CODEX_REF_DIR/subagent-operating-model.md" \
+    "Codex addendum keeps the exact addendum-only H2 skeleton" \
+    "## Codex-specific runtime notes" \
+    "## Codex-side repository concretization" \
+    "## Shared core now owns"
+  check_absent "$CODEX_REF_DIR/subagent-operating-model.md" "## 1. Main rule for the lead" \
+    "Codex addendum does not reintroduce the shared main-rule section"
+  check_absent "$CODEX_REF_DIR/subagent-operating-model.md" "## 6. Role map" \
+    "Codex addendum does not reintroduce the shared role-map section"
+  check_absent "$CODEX_REF_DIR/subagent-operating-model.md" "## 8. Gates: what each stage must prove" \
+    "Codex addendum does not reintroduce the shared gate section"
+  check_absent "$CODEX_REF_DIR/subagent-operating-model.md" "## 9. Practical routing patterns" \
+    "Codex addendum does not reintroduce the shared routing-patterns section"
+  check_absent "$CODEX_REF_DIR/subagent-operating-model.md" "## 12. Team composition" \
+    "Codex addendum does not reintroduce the shared team-composition section"
+  check_max_lines "$CODEX_REF_DIR/subagent-operating-model.md" 120 \
+    "Codex addendum stays bounded instead of regrowing into a full blueprint copy"
+  check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
+    "3901809876c178947ce1903527b5175447bf64a735d3fe3ea35526e73e7b001b" \
+    "shared subagent-operating-model matches the current canonical normalized fingerprint"
+  check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
+    "160e9bb3bb3df73e611626bc814a45a0923a350a4bff5b43b82bf45409c06549" \
+    "Codex addendum matches the current canonical normalized fingerprint"
 fi
 
 echo ""
 echo "=== Role index consistency ==="
 
 mapfile -t indexed_roles < <(
-  grep -oE '\$[a-z][-a-z]*' "$AGENTS_FILE" \
+  grep -oE '\$[a-z][a-z-]{2,}' "$AGENTS_FILE" \
     | sed 's/^\$//' \
     | sort -u
 )
@@ -136,9 +856,18 @@ for role in "${indexed_roles[@]}"; do
 done
 
 echo ""
-echo "=== Orphaned skill directories ==="
+echo "=== Skill metadata budget ==="
 
-UTILITY_SKILLS=(second-opinion external-brigade)
+CODEX_SKILL_DESCRIPTION_MAX_CHARS=180
+CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=5000
+UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes)
+PACK_BUDGET_SKILLS=("${indexed_roles[@]}" "${UTILITY_SKILLS[@]}")
+mapfile -t PACK_BUDGET_SKILLS < <(printf '%s\n' "${PACK_BUDGET_SKILLS[@]}" | sort -u)
+check_skill_frontmatter_yaml "${PACK_BUDGET_SKILLS[@]}"
+check_skill_description_budget "$CODEX_SKILL_DESCRIPTION_MAX_CHARS" "$CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS" "${PACK_BUDGET_SKILLS[@]}"
+
+echo ""
+echo "=== Orphaned skill directories ==="
 
 for dir in "$SKILLS_DIR"/*/; do
   role="$(basename "$dir")"
@@ -171,194 +900,241 @@ done
 echo ""
 echo "=== Consultant no-fallback canon ==="
 
-if grep -Fq "consultantMode: auto" "$SKILLS_DIR/consultant/SKILL.md"; then
-  fail "consultant skill does not document consultantMode auto"
-else
-  pass "consultant skill does not document consultantMode auto"
-fi
-if grep -Fq "fallback approved by user" "$SKILLS_DIR/consultant/SKILL.md"; then
-  fail "consultant skill does not reserve consultant fallback deviations"
-else
-  pass "consultant skill does not reserve consultant fallback deviations"
-fi
-if grep -Fq "consultantMode: auto" "$SKILLS_DIR/second-opinion/SKILL.md"; then
-  fail "second-opinion skill does not expose consultantMode auto"
-else
-  pass "second-opinion skill does not expose consultantMode auto"
-fi
-if grep -Fq "allowed: external | auto | internal | disabled" "$SKILLS_DIR/init-project/SKILL.md"; then
-  fail "init-project skill restricts consultantMode to external/internal/disabled"
-else
-  pass "init-project skill restricts consultantMode to external/internal/disabled"
-fi
-if grep -Fq "allowed: external | auto | internal | disabled" "$SKILLS_DIR/lead/external-dispatch.md"; then
-  fail "external-dispatch schema restricts consultantMode to external/internal/disabled"
-else
-  pass "external-dispatch schema restricts consultantMode to external/internal/disabled"
-fi
-if grep -Fq "fallback approved by user" "$SKILLS_DIR/lead/external-dispatch.md"; then
-  fail "external-dispatch does not record consultant fallback approvals"
-else
-  pass "external-dispatch does not record consultant fallback approvals"
-fi
-if grep -Fq 'Read and normalize `.agents/.agents-mode.yaml` before trusting its flags.' "$SKILLS_DIR/lead/subagent-contracts.md"; then
-  pass "subagent-contracts require read-time agents-mode normalization"
-else
-  fail "subagent-contracts require read-time agents-mode normalization"
-fi
-if grep -Fq "normalize it to the current canonical format before presenting or trusting the current values." "$SKILLS_DIR/init-project/SKILL.md"; then
-  pass "init-project normalizes existing agents-mode before reading values"
-else
-  fail "init-project normalizes existing agents-mode before reading values"
-fi
-if grep -Fq 'Any read of `.agents/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.' "$SKILLS_DIR/init-project/SKILL.md"; then
-  pass "init-project requires read-time agents-mode normalization"
-else
-  fail "init-project requires read-time agents-mode normalization"
-fi
-if grep -Fq 'read and normalize `.agents/.agents-mode.yaml` first.' "$SKILLS_DIR/second-opinion/SKILL.md"; then
-  pass "second-opinion normalizes agents-mode before reporting status"
-else
-  fail "second-opinion normalizes agents-mode before reporting status"
-fi
-if grep -Fq 'Adapter host runtime' "$AGENTS_FILE"; then
-  fail "shared governance no longer allows adapter-host metadata for external execution"
-else
-  pass "shared governance no longer allows adapter-host metadata for external execution"
-fi
-if grep -Fq 'must use direct external launch' "$AGENTS_FILE"; then
-  pass "shared governance requires direct external launch"
-else
-  fail "shared governance requires direct external launch"
-fi
-if grep -Fq 'Adapter host runtime:' "$SKILLS_DIR/lead/external-dispatch.md"; then
-  fail "external-dispatch no longer records adapter host runtime"
-else
-  pass "external-dispatch no longer records adapter host runtime"
-fi
-if grep -Fq 'must use direct external launch' "$SKILLS_DIR/lead/external-dispatch.md"; then
-  pass "external-dispatch requires direct external launch"
-else
-  fail "external-dispatch requires direct external launch"
-fi
-if grep -Fq 'Adapter host runtime:' "$SKILLS_DIR/consultant/SKILL.md"; then
-  fail "consultant no longer records adapter host runtime"
-else
-  pass "consultant no longer records adapter host runtime"
-fi
-if grep -Fq 'must use direct external launch' "$SKILLS_DIR/consultant/SKILL.md"; then
-  pass "consultant requires direct external launch when external"
-else
-  fail "consultant requires direct external launch when external"
-fi
-if grep -Fq 'Adapter host runtime:' "$SKILLS_DIR/external-worker/SKILL.md"; then
-  fail "external-worker no longer records adapter host runtime"
-else
-  pass "external-worker no longer records adapter host runtime"
-fi
-if grep -Fq 'direct external launch contract' "$SKILLS_DIR/external-worker/SKILL.md"; then
-  pass "external-worker requires direct external launch"
-else
-  fail "external-worker requires direct external launch"
-fi
-if grep -Fq 'Adapter host runtime:' "$SKILLS_DIR/external-reviewer/SKILL.md"; then
-  fail "external-reviewer no longer records adapter host runtime"
-else
-  pass "external-reviewer no longer records adapter host runtime"
-fi
-if grep -Fq 'direct external launch contract' "$SKILLS_DIR/external-reviewer/SKILL.md"; then
-  pass "external-reviewer requires direct external launch"
-else
-  fail "external-reviewer requires direct external launch"
-fi
-if grep -Fq 'Actual execution path:** <external CLI (provider name) | internal subagent' "$SKILLS_DIR/consultant/SKILL.md"; then
-  fail "consultant does not mislabel internal subagent as actual execution path"
-else
-  pass "consultant does not mislabel internal subagent as actual execution path"
-fi
+check_absent "$SKILLS_DIR/consultant/SKILL.md" "consultantMode: auto" \
+  "consultant skill does not document consultantMode auto"
+check_absent "$SKILLS_DIR/consultant/SKILL.md" "fallback approved by user" \
+  "consultant skill does not reserve consultant fallback deviations"
+check_absent "$SKILLS_DIR/second-opinion/SKILL.md" "consultantMode: auto" \
+  "second-opinion skill does not expose consultantMode auto"
+check_absent "$SKILLS_DIR/init-project/SKILL.md" "allowed: external | auto | internal | disabled" \
+  "init-project skill restricts consultantMode to external/internal/disabled"
+check_absent "$SKILLS_DIR/lead/external-dispatch.md" "allowed: external | auto | internal | disabled" \
+  "external-dispatch schema restricts consultantMode to external/internal/disabled"
+check_absent "$SKILLS_DIR/lead/external-dispatch.md" "fallback approved by user" \
+  "external-dispatch does not record consultant fallback approvals"
+check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "Read and normalize \`.agents/.agents-mode.yaml\` before trusting its flags." \
+  "subagent-contracts require read-time agents-mode normalization"
+check_contains "$SKILLS_DIR/init-project/SKILL.md" "normalize it to the current canonical format before presenting or trusting the current values." \
+  "init-project normalizes existing agents-mode before reading values"
+check_contains "$SKILLS_DIR/init-project/SKILL.md" "Any read of \`.agents/.agents-mode.yaml\` that drives a decision should normalize the file to the current canonical format before trusting the flags." \
+  "init-project requires read-time agents-mode normalization"
+check_contains "$SKILLS_DIR/second-opinion/SKILL.md" "read and normalize \`.agents/.agents-mode.yaml\` first." \
+  "second-opinion normalizes agents-mode before reporting status"
+check_absent "$AGENTS_FILE" "Adapter host runtime" \
+  "shared governance no longer allows adapter-host metadata for external execution"
+check_contains "$AGENTS_FILE" "must use direct external launch" \
+  "shared governance requires direct external launch"
+check_contains "$AGENTS_FILE" "substantive task prompt must use file-based prompt delivery" \
+  "shared governance requires file-based external CLI prompts"
+check_contains "$AGENTS_FILE" "verify every subagent result before accepting it" \
+  "shared governance requires verification before trusting subagent results"
+check_contains "$AGENTS_FILE" "Visual artifact verification discipline" \
+  "shared governance requires visual inspection for generated visual artifacts"
+check_contains "$AGENTS_FILE" "Documentation terminology discipline" \
+  "shared governance requires terminology and abbreviation explanations in documents"
+check_contains "$AGENTS_FILE" "Markdown formula rendering format" \
+  "shared governance requires previewer-safe Markdown formula formatting"
+check_contains "$AGENTS_FILE" "split long derivations into several short one-line" \
+  "shared governance prefers one-line formulas for fragile previewers"
+check_contains "$AGENTS_FILE" 'Do not use multi-line `$$...$$` display blocks' \
+  "shared governance rejects unverified multi-line display math"
+check_contains "$AGENTS_FILE" 'compatibility hacks such as `\sb` or `\sp`' \
+  "shared governance forbids formula compatibility hacks"
+check_contains "$AGENTS_FILE" "broken Markdown table pipe counts" \
+  "shared governance scans formula edits for delimiter and table breakage"
+check_contains "$AGENTS_FILE" "Formula scope and assumptions discipline" \
+  "shared governance requires formula scope and assumption disclosure"
+check_contains "$AGENTS_FILE" "concrete observable data" \
+  "shared governance requires measured evidence before root-cause or fix claims"
+check_contains "$AGENTS_FILE" "smallest safe reversible subset" \
+  "shared governance preserves user-intent fallback discipline"
+check_absent "$SKILLS_DIR/lead/external-dispatch.md" "Adapter host runtime:" \
+  "external-dispatch no longer records adapter host runtime"
+check_contains "$SKILLS_DIR/lead/external-dispatch.md" "must use direct external launch" \
+  "external-dispatch requires direct external launch"
+check_contains "$SKILLS_DIR/lead/external-dispatch.md" "substantive task prompt must use file-based prompt delivery" \
+  "external-dispatch requires file-based external CLI prompts"
+check_absent "$SKILLS_DIR/consultant/SKILL.md" "Adapter host runtime:" \
+  "consultant no longer records adapter host runtime"
+check_contains "$SKILLS_DIR/consultant/SKILL.md" "must use direct external launch" \
+  "consultant requires direct external launch when external"
+check_absent "$SKILLS_DIR/external-worker/SKILL.md" "Adapter host runtime:" \
+  "external-worker no longer records adapter host runtime"
+check_contains "$SKILLS_DIR/external-worker/SKILL.md" "direct external launch contract" \
+  "external-worker requires direct external launch"
+check_contains "$SKILLS_DIR/external-worker/SKILL.md" "file-based prompt delivery" \
+  "external-worker requires file-based external CLI prompts"
+check_absent "$SKILLS_DIR/external-reviewer/SKILL.md" "Adapter host runtime:" \
+  "external-reviewer no longer records adapter host runtime"
+check_contains "$SKILLS_DIR/external-reviewer/SKILL.md" "direct external launch contract" \
+  "external-reviewer requires direct external launch"
+check_contains "$SKILLS_DIR/external-reviewer/SKILL.md" "file-based prompt delivery" \
+  "external-reviewer requires file-based external CLI prompts"
+check_absent "$SKILLS_DIR/consultant/SKILL.md" "Actual execution path:** <external CLI (provider name) | internal subagent" \
+  "consultant does not mislabel internal subagent as actual execution path"
+check_contains "$SKILLS_DIR/external-brigade/SKILL.md" "same-provider brigade items may run in parallel" \
+  "external-brigade documents same-provider parallel reuse"
+check_contains "$SKILLS_DIR/external-brigade/SKILL.md" "It does not cap how many same-provider brigade items may run in parallel" \
+  "external-brigade keeps opinion counts separate from concurrency"
+check_contains "$SKILLS_DIR/lead/SKILL.md" "\$external-brigade" \
+  "lead skill mentions the external-brigade utility"
+
+echo ""
+echo "=== Production auto provider canon ==="
+
+codex_phase_b_files=(
+  "$SKILLS_DIR/lead/SKILL.md"
+  "$SKILLS_DIR/lead/external-dispatch.md"
+  "$SKILLS_DIR/lead/operating-model.md"
+  "$SKILLS_DIR/lead/subagent-contracts.md"
+  "$SKILLS_DIR/consultant/SKILL.md"
+  "$SKILLS_DIR/external-worker/SKILL.md"
+  "$SKILLS_DIR/external-reviewer/SKILL.md"
+  "$SKILLS_DIR/external-brigade/SKILL.md"
+  "$SKILLS_DIR/second-opinion/SKILL.md"
+  "$SKILLS_DIR/init-project/SKILL.md"
+  "$SKILLS_DIR/graphics-engineer/SKILL.md"
+  "$SKILLS_DIR/visualization-engineer/SKILL.md"
+  "$SKILLS_DIR/consultant/agents/openai.yaml"
+  "$SKILLS_DIR/second-opinion/agents/openai.yaml"
+  "$SKILLS_DIR/init-project/agents/openai.yaml"
+)
+
+for file in "${codex_phase_b_files[@]}"; do
+  check_absent "$file" "gemini-crosscheck" \
+    "$file removes retired gemini-crosscheck profile"
+  check_absent "$file" "externalGeminiFallbackMode" \
+    "$file removes retired externalGeminiFallbackMode"
+  check_absent "$file" "externalGeminiWorkdirMode" \
+    "$file removes retired externalGeminiWorkdirMode"
+done
+
+check_h2_section_absent "$SKILLS_DIR/lead/external-dispatch.md" '### `externalPriorityProfiles`' "gemini" \
+  "Codex shipped externalPriorityProfiles keep Gemini out of auto"
+check_h2_section_absent "$SKILLS_DIR/lead/external-dispatch.md" '### `externalPriorityProfiles`' "qwen" \
+  "Codex shipped externalPriorityProfiles keep Qwen out of auto"
+check_h2_section_absent "$SKILLS_DIR/lead/external-dispatch.md" '## Shared lane-priority matrix' "gemini" \
+  "Codex shared lane matrix keeps Gemini out of auto"
+check_h2_section_absent "$SKILLS_DIR/lead/external-dispatch.md" '## Shared lane-priority matrix' "qwen" \
+  "Codex shared lane matrix keeps Qwen out of auto"
 
 if [[ $DEV_REPO -eq 1 ]]; then
-  if grep -Fq "## Canonical maintenance" "$DOCS_DIR/agents-mode-reference.md"; then
-    pass "agents-mode reference defines canonical maintenance"
-  else
-    fail "agents-mode reference defines canonical maintenance"
-  fi
-  if grep -Fq "Read-time normalization preserves the effective values of known keys" "$DOCS_DIR/agents-mode-reference.md"; then
-    pass "agents-mode reference documents read-time normalization semantics"
-  else
-    fail "agents-mode reference documents read-time normalization semantics"
-  fi
-  if grep -Fq '### `externalModelMode`' "$DOCS_DIR/agents-mode-reference.md"; then
-    pass "agents-mode reference defines externalModelMode"
-  else
-    fail "agents-mode reference defines externalModelMode"
-  fi
-  if grep -Fq '### `externalGeminiFallbackMode`' "$DOCS_DIR/agents-mode-reference.md"; then
-    pass "agents-mode reference defines externalGeminiFallbackMode"
-  else
-    fail "agents-mode reference defines externalGeminiFallbackMode"
-  fi
-  if grep -Fq ".codex/agents/default.toml" "INSTALL.md"; then
-    pass "INSTALL.md documents Codex built-in agent override seeding"
-  else
-    fail "INSTALL.md documents Codex built-in agent override seeding"
-  fi
-  if grep -Fq "~/.codex/agents/" "docs/provider-runtime-layout.md"; then
-    pass "provider runtime layout documents global Codex built-in agent overrides"
-  else
-    fail "provider runtime layout documents global Codex built-in agent overrides"
-  fi
-  if grep -Fq "agents/default.toml" "src.codex/README.md"; then
-    pass "src.codex/README.md documents the built-in agent override payload"
-  else
-    fail "src.codex/README.md documents the built-in agent override payload"
-  fi
-  for f in \
-    "src.codex/agents/default.toml" \
-    "src.codex/agents/worker.toml" \
-    "src.codex/agents/explorer.toml"
-  do
-    if grep -Fq 'model = "gpt-5.4"' "$f" && grep -Fq 'model_reasoning_effort = "xhigh"' "$f"; then
-      pass "$f pins Codex built-in model to gpt-5.4 xhigh"
+  check_contains "$REPO_ROOT/src.codex/AGENTS.codex.md" "\$external-brigade" \
+    "Codex platform rules mention the external-brigade utility skill"
+  check_contains "$REPO_ROOT/src.codex/AGENTS.codex.md" "auto | codex | claude | gemini | qwen" \
+    "Codex platform rules document the example-only Gemini/Qwen provider universe"
+  check_contains "$REPO_ROOT/shared/references/README.md" "current Gemini and Qwen example integrations" \
+    "shared reference index treats Gemini/Qwen as current example integrations"
+  if [[ -f "$REPO_ROOT/install.sh" || -f "$REPO_ROOT/install.ps1" ]]; then
+    check_contains "$REPO_ROOT/install.sh" "default production install" \
+      "root bash installer defaults to the Codex/Claude production pair"
+    check_contains "$REPO_ROOT/install.ps1" "default production install" \
+      "root PowerShell installer defaults to the Codex/Claude production pair"
+    check_absent "$REPO_ROOT/install.sh" "All available root installs" \
+      "root bash installer does not offer all-provider default installs"
+    check_absent "$REPO_ROOT/install.ps1" "All available root installs" \
+      "root PowerShell installer does not offer all-provider default installs"
+    check_contains "$REPO_ROOT/install.sh" "if [[ -z \"\$choice\" ]]; then" \
+      "root bash installer maps empty selection to the default"
+    check_contains "$REPO_ROOT/install.sh" "choice=3" \
+      "root bash installer maps default selection to option 3"
+    check_contains "$REPO_ROOT/install.ps1" '$normalizedChoice = "3"' \
+      "root PowerShell installer maps empty selection to option 3"
+    check_contains "$REPO_ROOT/install.sh" "run_installer install-codex.sh" \
+      "root bash installer option 3 includes Codex"
+    check_contains "$REPO_ROOT/install.sh" "run_installer install-claude.sh" \
+      "root bash installer option 3 includes Claude"
+    check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' \
+      "root PowerShell installer option 3 includes Codex"
+    check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' \
+      "root PowerShell installer option 3 includes Claude"
+    bash_default_block="$(awk '/^  3\)/,/^  4\)/ { print }' "$REPO_ROOT/install.sh")"
+    if grep -Fq "run_installer install-codex.sh" <<<"$bash_default_block" &&
+       grep -Fq "run_installer install-claude.sh" <<<"$bash_default_block" &&
+       ! grep -Eq 'install-(gemini|qwen)\.sh' <<<"$bash_default_block"; then
+      pass "root bash installer default dispatch is Codex plus Claude only"
     else
-      fail "$f pins Codex built-in model to gpt-5.4 xhigh"
+      fail "root bash installer default dispatch must be Codex plus Claude only"
     fi
-  done
+    ps_default_block="$(awk '/^    "3" {/,/^    "4" {/ { print }' "$REPO_ROOT/install.ps1")"
+    if grep -Fq 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' <<<"$ps_default_block" &&
+       grep -Fq 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' <<<"$ps_default_block" &&
+       ! grep -Eq 'install-(gemini|qwen)\.ps1' <<<"$ps_default_block"; then
+      pass "root PowerShell installer default dispatch is Codex plus Claude only"
+    else
+      fail "root PowerShell installer default dispatch must be Codex plus Claude only"
+    fi
+    check_absent "$REPO_ROOT/install.sh" "run_all_available" \
+      "root bash installer has no aggregate all-provider helper"
+    check_absent "$REPO_ROOT/install.ps1" "Invoke-AllAvailableInstallers" \
+      "root PowerShell installer has no aggregate all-provider helper"
+  else
+    pass "standalone provider branch omits root router installers"
+  fi
+  check_contains "$REPO_ROOT/README.md" "Pressing Enter selects the default production install" \
+    "README documents the Codex/Claude default root install"
+  check_contains "$REPO_ROOT/INSTALL.md" "Pressing Enter selects the default production install" \
+    "INSTALL.md documents the Codex/Claude default root install"
+  check_contains "$REPO_ROOT/INSTALL.md" ".agents-mode.yaml" \
+    "INSTALL.md default project result includes provider overlay files"
+fi
+
+check_contains "$SKILLS_DIR/consultant/SKILL.md" 'Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED` example-only routes' \
+  "Codex consultant marks Gemini/Qwen as not recommended example routes"
+check_contains "$SKILLS_DIR/external-worker/SKILL.md" 'manual `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Codex external-worker marks Gemini/Qwen as not recommended example routes"
+  check_contains "$SKILLS_DIR/external-reviewer/SKILL.md" 'manual `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+    "Codex external-reviewer marks Gemini/Qwen as not recommended example routes"
+check_contains "$SKILLS_DIR/lead/operating-model.md" 'do not place Gemini or Qwen inside `externalPriorityProfiles`' \
+  "Codex operating model forbids Gemini/Qwen profile entries"
+check_contains "$SKILLS_DIR/consultant/agents/openai.yaml" 'explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Codex consultant prompt marks Gemini/Qwen as not recommended example routes"
+check_contains "$SKILLS_DIR/init-project/agents/openai.yaml" 'explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Codex init-project prompt marks Gemini/Qwen as not recommended example routes"
+check_contains "$SKILLS_DIR/second-opinion/agents/openai.yaml" 'explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths' \
+  "Codex second-opinion prompt marks Gemini/Qwen as not recommended example routes"
+
+if [[ $DEV_REPO -eq 1 ]]; then
+  check_contains "$DOCS_DIR/agents-mode-reference.md" "## Canonical maintenance" \
+    "agents-mode reference defines canonical maintenance"
+  check_contains "$DOCS_DIR/agents-mode-reference.md" "Read-time normalization preserves the effective values of known keys" \
+    "agents-mode reference documents read-time normalization semantics"
+  check_contains "$DOCS_DIR/agents-mode-reference.md" 'removes example-only providers from every `externalPriorityProfiles` provider list' \
+    "agents-mode reference documents profile provider sanitization"
+  check_contains "$DOCS_DIR/agents-mode-reference.md" "Substantive task prompts are file-based by default" \
+    "agents-mode reference documents file-based external CLI prompts"
+  check_normalizer_strips_example_auto_providers \
+    "agents-mode normalizer strips Gemini/Qwen and worker claude-secret from custom auto profiles"
+  check_file "$REPO_ROOT/shared/agents-mode.defaults.yaml" "shared/agents-mode.defaults.yaml"
+  check_shared_defaults_claude_secret_policy \
+    "shared agents-mode defaults keep claude-secret advisory/review-only"
+  check_not_exists "$REPO_ROOT/src.codex/agents-mode.defaults.yaml" \
+    "src.codex/agents-mode.defaults.yaml removed from the monorepo"
+  check_contains "$REPO_ROOT/INSTALL.md" ".codex/agents/default.toml" \
+    "INSTALL.md documents Codex built-in agent override seeding"
+  check_contains "$DOCS_DIR/provider-runtime-layouts.md" "~/.codex/agents/default.toml" \
+    "provider runtime layouts document global Codex built-in agent overrides"
+  check_contains "$REPO_ROOT/src.codex/README.md" "agents/default.toml" \
+    "src.codex/README.md documents the built-in agent override payload"
 fi
 
 if [[ -n "$CODEX_RUNTIME_ROOT" ]]; then
   echo ""
   echo "=== Codex built-in agent overrides ==="
-  if [[ -f "$CODEX_RUNTIME_ROOT/agents/default.toml" ]]; then
-    pass "agents/default.toml installed"
-  else
-    fail "agents/default.toml installed"
-  fi
-  if [[ -f "$CODEX_RUNTIME_ROOT/agents/worker.toml" ]]; then
-    pass "agents/worker.toml installed"
-  else
-    fail "agents/worker.toml installed"
-  fi
-  if [[ -f "$CODEX_RUNTIME_ROOT/agents/explorer.toml" ]]; then
-    pass "agents/explorer.toml installed"
-  else
-    fail "agents/explorer.toml installed"
-  fi
-  for f in \
-    "$CODEX_RUNTIME_ROOT/agents/default.toml" \
-    "$CODEX_RUNTIME_ROOT/agents/worker.toml" \
-    "$CODEX_RUNTIME_ROOT/agents/explorer.toml"
-  do
-    if [[ -f "$f" ]] && grep -Fq 'model = "gpt-5.4"' "$f" && grep -Fq 'model_reasoning_effort = "xhigh"' "$f"; then
-      pass "${f#$CODEX_RUNTIME_ROOT/} pins Codex built-in model to gpt-5.4 xhigh"
-    else
-      fail "${f#$CODEX_RUNTIME_ROOT/} pins Codex built-in model to gpt-5.4 xhigh"
-    fi
-  done
+  check_file "$CODEX_RUNTIME_ROOT/agents/default.toml" "agents/default.toml installed"
+  check_file "$CODEX_RUNTIME_ROOT/agents/worker.toml" "agents/worker.toml installed"
+  check_file "$CODEX_RUNTIME_ROOT/agents/explorer.toml" "agents/explorer.toml installed"
 fi
 
 echo ""
 echo "=== AGENTS.md required sections ==="
+
+agents_line_count="$(count_codex_pack_lines "$AGENTS_FILE")"
+if [[ "$agents_line_count" -le 300 ]]; then
+  pass "Codex AGENTS.md pack section line budget <= 300 ($agents_line_count)"
+else
+  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 300)"
+fi
 
 for section in "delegation" "Role index" "Engineering hygiene"; do
   if grep -qi "$section" "$AGENTS_FILE"; then

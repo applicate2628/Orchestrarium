@@ -1,7 +1,7 @@
 # Operating Model Diagram
 
 This file provides a visual companion to [subagent-operating-model.md](subagent-operating-model.md).
-Strategy comparison companion: [workflow-strategy-comparison.md](workflow-strategy-comparison.md).
+Strategy comparison companion: [shared/references/workflow-strategy-comparison.md](../shared/references/workflow-strategy-comparison.md).
 
 **Platform note:** Orchestrarium targets Codex, which uses sequential skill invocation. Unlike Claude Code's parallel Agent tool dispatch, Codex processes one skill at a time. Diagrams below reflect this sequential execution model.
 
@@ -135,7 +135,7 @@ flowchart TB
 Notes:
 
 - `knowledge-archivist` is cross-cutting hygiene, usually invoked outside the main feature phase.
-- `consultant` is advisory-only and never a required delivery gate.
+- `consultant` is advisory-only and never becomes a reviewer or approver; ordinary consultant use is optional, and a closeout consultant sweep should run only when explicitly requested or required by repo-local policy while `consultantMode` is enabled.
 
 ## 8. Claims chain
 
@@ -171,5 +171,5 @@ Lifecycle of `constraints/claims.md` in the work-item folder:
 - Reviewers stay independent and report to the orchestrating owner.
 - Interaction types: `LEAD_MED` (default), `DIRECT` (sequential, lead-authorized), `CLAIMS`, `RETURN`, `ESCALATE`, `ADVISORY`, `NONE`. Note: `PARALLEL` is not natively supported in Codex — independent scopes are handled sequentially.
 - Reviewers tag cross-domain findings with `[CROSS-DOMAIN: <target-domain>]`; the orchestrator routes them to the appropriate specialist.
-- Any role files adjacent findings in the configured bug registry path, if the repository uses one, without expanding scope.
+- Any role files adjacent findings in `work-items/bugs/` without expanding scope.
 - Every completed chain persists artifacts: canonical docs in `work-items/`, session logs in `.reports/`, plan logs in `.plans/`.

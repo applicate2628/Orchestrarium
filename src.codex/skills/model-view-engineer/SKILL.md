@@ -1,6 +1,6 @@
 ---
 name: model-view-engineer
-description: Implement an approved Qt model or view phase without redesigning the UI or data layer. Use when Codex needs QAbstractItemModel, proxy models, delegates, selection, tree/table/list views, lazy loading, sorting or filtering, persistent indexes, or view-performance and correctness changes that already have accepted research, design, constraints, and plan artifacts.
+description: "Implement approved Qt model/view work: models, proxies, delegates, selection, sorting, filtering, and indexes."
 ---
 
 # Model-View Engineer

@@ -1,6 +1,6 @@
 ---
 name: external-brigade
-description: Launch and aggregate a bounded brigade of parallel external helpers when multiple independent external lanes or slices should run together.
+description: Launch and aggregate a bounded parallel set of independent external helper lanes.
 ---
 
 # External Brigade
@@ -43,23 +43,23 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 
 1. Read and normalize `.agents/.agents-mode.yaml` before trusting any flags.
 2. Honor the current external routing fields, including:
+   - `consultantMode` (allowed: `external | internal | disabled`; default: `disabled`)
+   - `externalClaudeApiMode` (controls advisory/review-only `claude-secret`: `disabled | auto | force`; default: `auto`)
+   - `parallelMode` (allowed: `manual | auto | force`; default: `auto`)
    - `externalProvider`
    - `externalPriorityProfile`
    - `externalPriorityProfiles`
    - `externalOpinionCounts`
    - `externalCodexWorkdirMode`
    - `externalClaudeWorkdirMode`
-   - `externalGeminiWorkdirMode`
    - `externalModelMode`
-   - `externalGeminiFallbackMode`
-   - `externalClaudeSecretMode`
-   - `externalClaudeApiMode`
    - `externalClaudeProfile`
 3. Reject unsupported owner routes before provider resolution.
-4. Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. It does not cap how many same-provider brigade items may run in parallel across different disjoint lanes or slices.
-5. Allow repeated same-provider fan-out when each brigade item owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
-6. If a brigade item itself requires `2+` same-lane opinions, satisfy that distinct-provider requirement first or fail that item closed.
-7. Do not silently downgrade external items to internal execution inside the brigade.
+4. Keep `parallelMode` as the general helper fan-out rule. Brigade launch is an explicit bounded overlay on top of that rule, not a second general concurrency model.
+5. Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. It does not cap how many same-provider brigade items may run in parallel across different disjoint lanes or slices.
+6. Allow repeated same-provider fan-out when each brigade item owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
+7. If a brigade item itself requires `2+` same-lane opinions, satisfy that distinct-provider requirement first or fail that item closed.
+8. Do not silently downgrade external items to internal execution inside the brigade.
 
 ## Return exactly one artifact
 
@@ -75,7 +75,7 @@ The launch table must keep these columns explicit:
 
 | Item | Execution role | Assigned / replaced internal role | Requested provider | Resolved provider | Scope | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
+| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini | qwen>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
 
 ## Gate rules
 

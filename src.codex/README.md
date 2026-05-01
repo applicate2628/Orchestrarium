@@ -1,19 +1,33 @@
 # Codex Pack Source
 
-This directory contains the installable source tree for the standalone Orchestrarium Codex pack.
+This directory contains the Codex-provider source tree for the standalone Codex branch.
 
 Use it together with:
 
-- [../docs/README.md](../docs/README.md) for branch-level operator and layout docs
-- [../references-codex/README.md](../references-codex/README.md) for the provider-local reference tree
+- [../docs/README.md](../docs/README.md) for the branch-level docs surface
+- [../shared/references/README.md](../shared/references/README.md) for the shared design core
+- [../references-codex/README.md](../references-codex/README.md) for the Codex-side provider addendum
 
 Source surface:
 
-- `AGENTS.shared.md` + `AGENTS.codex.md` are merged into the installed `AGENTS.md`
+- `../shared/AGENTS.shared.md` + `AGENTS.codex.md` assemble the installed Codex `AGENTS.md`
 - `agents/default.toml`, `agents/worker.toml`, and `agents/explorer.toml` seed the Codex built-in custom-agent overrides installed under `.codex/agents/`
 - `skills/<role>/SKILL.md` and `skills/<role>/agents/openai.yaml` define the role catalog
 - `skills/lead/` carries operating-model notes, handoff contracts, and validation/publication-safety scripts
 - `skills/consultant/` and `skills/second-opinion/` carry the advisory and explicit consultant routing surfaces
-- `skills/external-brigade/` carries the bounded parallel external helper orchestration surface
+- `skills/external-brigade/` carries the bounded parallel external-helper orchestration surface
 
-This tree is the runtime payload copied by the install scripts. `../docs/` and `../references-codex/` are maintainer-only source-branch surfaces and are not installed into target projects. The runtime payload now includes switchable external priority profiles, opinion-count defaults, and the external-brigade utility in `.agents/.agents-mode.yaml` / `skills/`, so the installed pack can ask for multiple independent external opinions or launch a bounded parallel helper batch when routing requires it.
+Architecture decision: the installed Codex `AGENTS.md` is intentionally the compact universal minimum, not the place for the full role catalog or long runtime manuals. Keep the universal entrypoint thin and put detailed role contracts in `skills/<role>/SKILL.md`, shared methodology in `../shared/references/`, Codex-specific addenda in `../references-codex/`, and built-in runtime override behavior in `.codex/agents/*.toml`. This mirrors the Claude-side pattern where `CLAUDE.md` stays short and `.claude/agents/*.md` carries the detailed role files.
+
+Keep `SKILL.md` frontmatter `description:` values compact because Codex loads them as startup metadata before any one skill body is selected. Put detailed trigger logic, scope, and gate rules in the body of the skill instead; `skills/lead/scripts/validate-skill-pack.*` enforces the Codex metadata budget.
+
+This subtree is the Codex runtime source owned by this branch. Shared governance and shared references stay one level up; only the provider-specific runtime source lives here.
+
+## Terms and Abbreviations
+
+- `AGENTS.md`: Codex governance entrypoint assembled from shared and Codex-specific source files.
+- `Codex`: OpenAI Codex runtime and production provider line.
+- `frontmatter`: YAML metadata block at the top of a skill or agent file.
+- `runtime`: installed provider-facing files used by Codex outside the source tree.
+- `SKILL.md`: Codex skill entrypoint containing role instructions, scope, artifact, and gate rules.
+- `startup metadata`: compact metadata Codex reads before loading a specific skill body.

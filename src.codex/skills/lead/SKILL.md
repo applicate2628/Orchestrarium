@@ -1,6 +1,6 @@
 ---
 name: lead
-description: Coordinate multi-agent work as a lead or orchestrator rather than a coder. Use when Codex needs to route work through narrow roles, assign owners for critical risks such as architecture, algorithms, numerics, performance, security, quality, or maintainability, define approved inputs and gates, and keep a single source of truth for accepted decisions. Use by default whenever delegation is needed and no narrower role has already been delegated.
+description: Coordinate approved delivery across specialist stages, artifacts, gates, recovery state, and risk owners.
 ---
 
 # Lead
@@ -32,7 +32,7 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 - Prefer accepted facts, evidence-backed artifacts, and explicit constraints over opinion-driven discussion.
 - Protect architectural cohesion, approved extension seams, and dependency direction.
 - Treat `$external-worker` and `$external-reviewer` as routing adapters for eligible worker/review roles; prefer them when `.agents/.agents-mode.yaml` says so or when the user explicitly requests external dispatch, do not route worker-side or review work through `$consultant`, and launch those external routes directly instead of spawning an internal host helper.
-- Any spawned internal subagent is internal by definition even if the prompt assigns it a provider label or model such as Gemini Pro. Do not satisfy an external route with an internal subagent impersonating that provider.
+- Any spawned internal subagent is internal by definition even if the prompt assigns it a provider label or model such as Gemini Pro or Qwen. Do not satisfy an external route with an internal subagent impersonating that provider.
 - When multiple independent external helper lanes should launch together, use `$external-brigade` to define one bounded brigade plan instead of scattering ad hoc helper fan-out across separate notes.
 - One subagent equals one profession, one artifact, and one gate.
 - Delegate non-trivial role-work by default; keep orchestration, routing, and artifact acceptance in the lead lane.
@@ -40,7 +40,7 @@ description: Coordinate multi-agent work as a lead or orchestrator rather than a
 - Keep implementation work inside explicitly approved implementation roles only.
 - Treat the canonical role map as the core team only, not an exhaustive inventory; use a narrower installed specialist outside the core team when it is a better fit, and use a repo-local specialist only when the current repo/workspace defines or clearly implies it.
 - Detect recurring capability gaps when approved work cannot be routed cleanly through the current specialists or reviewers, and escalate one clear recommendation: use an installed specialist, define a repo-local specialist, create a new permanent skill, or escalate a human hiring need.
-- Keep `$consultant` advisory-only and non-approving. Every completed lead-managed task-batch must still end with one or more external consultant-checks before the lead marks the batch closed.
+- Keep `$consultant` advisory-only and non-approving. Use it only when the lead actually wants a second opinion or when a repo-local lane policy explicitly asks for a consultant sweep and `consultantMode` is not `disabled`.
 - Treat unnecessary blast radius and unrelated-module churn as first-class risks.
 
 ## Canonical brief
@@ -110,9 +110,10 @@ The canonical brief should capture:
 7. Human or CI gate
    - Output: explicit human approval, CI status, or documented external blocker.
    - For publication, `$lead` runs the publication-safety scan and `$knowledge-archivist` is the default publication-gate approver; the approver must be a different role than the role that accepted the artifact into the pipeline.
-8. Batch-close external consultant-checks
+8. Optional batch-close consultant sweep
    - Role: `$consultant`
    - Output: one non-binding advisory memo that performs a final missed-change and residual-risk sweep, then ends with an explicit reusable second prompt for continuing the work.
+   - Run this stage only when the lead explicitly wants consultant input or a repo-local lane policy explicitly requests it and `consultantMode` is not `disabled`.
 
 Roadmap ownership stays upstream of the lead lane. The lead consumes approved roadmap or intake output; it does not own global prioritization or portfolio sequencing by default.
 
@@ -197,7 +198,7 @@ Require every pipeline subagent to end with exactly one gate status:
 
 Do not advance work on optimism or partial acceptance.
 
-`$consultant` is the explicit exception: it returns advisory input, not a pipeline gate. A completed lead-managed batch is not considered closed until the required external consultant-check memo set is recorded.
+`$consultant` is the explicit exception: it returns advisory input, not a pipeline gate. A consultant memo only becomes a closeout prerequisite when the lead explicitly requested it or a repo-local lane policy explicitly requires it while `consultantMode` is enabled.
 `PASS` advances the pipeline, but it does not by itself close the batch. Batch closure requires requested-scope reconciliation and no remaining open obligations unless the user explicitly parks or reprioritizes them.
 
 ## Rolling-loop rule
@@ -259,8 +260,9 @@ Do not advance work on optimism or partial acceptance.
 ## Parallelism rule
 
 - Parallelize read-heavy work such as research, triage, summarization, and test analysis when the scopes are independent.
+- `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - Be conservative with write-heavy work. Parallel edits are acceptable only when write scopes and contracts are already fixed.
-- Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane.
+- Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.
 - If merge or coordination cost is likely to exceed the benefit, do not parallelize.
 
 ## Governance rule
@@ -282,7 +284,7 @@ If the user is asking what should be worked on, what should be prioritized next,
 
 If delivery discovers that the admitted item itself has changed materially, route back to `$product-manager` for re-intake instead of letting the change drift sideways inside the delivery lane.
 
-Invoke `$consultant` when the lead wants a second opinion on ambiguity, tradeoffs, or cross-cutting concerns that are not well covered by the current specialist lane, and always for the final external consultant-check set that closes a completed lead-managed batch. The consultant never replaces a required reviewer or approver.
+Invoke `$consultant` when the lead wants a second opinion on ambiguity, tradeoffs, or cross-cutting concerns that are not well covered by the current specialist lane, and optionally for a final closure sweep when the lead or repo-local lane policy explicitly asks for it. The consultant never replaces a required reviewer or approver.
 
 ## Using Consultant
 
@@ -291,12 +293,12 @@ Invoke `$consultant` when the lead wants a second opinion on ambiguity, tradeoff
 Lead rules for `$consultant`:
 
 - Use it for hard planning or complex workspace-modifying tasks when an independent view is helpful.
-- Every completed lead-managed task-batch must end with the required external consultant-checks before the lead marks the batch closed, even if the consultant was not used earlier in the batch.
+- Do not invent a consultant closeout blocker when `consultantMode: disabled` or the consultant was never explicitly requested.
 - Ask for discussion first, then compare options, and only then ask for a saved plan if a plan is needed.
 - Do not use it for trivial tasks, routine git or admin work, or ordinary read-only investigation.
 - If the selected execution path is an external provider, use the documented `stdin` invocation pattern and do not rely on multiline command-line arguments or TTY.
 - Wait about 5 to 15 minutes before treating an external-provider run as stalled, and avoid starting a parallel fresh chat while one may still be running.
-- If the external-provider run fails, times out, or hits quota or auth limits, record that in the plan file. Do not silently swap `$consultant` to an internal path; if the chosen consultant mode or required external consultant-check cannot be satisfied, escalate honestly instead.
+- If the external-provider run fails, times out, or hits quota or auth limits, record that in the plan file. Do not silently swap `$consultant` to an internal path; if an explicitly requested or repo-policy-required consultant sweep cannot be satisfied in the selected mode, escalate honestly instead.
 - When mode is `external`, keep the consultant lane external-only. Internal fallback is not part of the consultant contract anymore.
 - Require the consultant-check memo set to end with a ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action.
 
