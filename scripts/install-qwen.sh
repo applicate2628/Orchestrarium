@@ -357,7 +357,7 @@ write_merged_qwen_md() {
 merge_qwen_file() {
   local src="$1" dst="$2"
   local managed existing start_line end_line
-  managed="$(sed -E 's|^@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)$|@./AGENTS.md|' "$src")"
+  managed="$(sed -E 's#^@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)$#@./AGENTS.md#' "$src")"
   if [[ ! -f "$dst" ]]; then
     echo "  Creating QWEN.md..."
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -689,7 +689,7 @@ install_pack_file "$EXTENSION_MANIFEST_SOURCE" "$EXTENSION_MANIFEST_TARGET" "ext
 install_pack_file "$EXTENSION_README_SOURCE" "$EXTENSION_README_TARGET" "extension README"
 extension_qwen_tmp="$(mktemp)"
 trap 'rm -f "$extension_qwen_tmp"' EXIT
-sed -E 's|@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)|@./AGENTS.md|' "$SOURCE/QWEN.md" > "$extension_qwen_tmp"
+sed -E 's#@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)#@./AGENTS.md#' "$SOURCE/QWEN.md" > "$extension_qwen_tmp"
 install_pack_content_file "$extension_qwen_tmp" "$EXTENSION_QWEN_TARGET" "extension QWEN.md"
 install_pack_file "$SHARED_AGENTS_SOURCE" "$EXTENSION_AGENTS_TARGET" "extension AGENTS.md"
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"

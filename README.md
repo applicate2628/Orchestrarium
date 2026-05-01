@@ -157,6 +157,7 @@ bash src.codex/skills/lead/scripts/validate-skill-pack.sh
 bash src.claude/agents/scripts/validate-skill-pack.sh
 bash src.gemini/scripts/validate-pack.sh
 bash src.qwen/scripts/validate-pack.sh
+python scripts/validate-agents-mode-installers.py --root .
 ```
 
 ```powershell
@@ -164,7 +165,10 @@ bash src.qwen/scripts/validate-pack.sh
 .\src.claude\agents\scripts\validate-skill-pack.ps1
 .\src.gemini\scripts\validate-pack.ps1
 .\src.qwen\scripts\validate-pack.ps1
+python .\scripts\validate-agents-mode-installers.py --root .
 ```
+
+The installer regression command creates disposable targets under `/.scratch/`, runs the Bash installers for all four provider lines, and verifies that stale `agents-mode` overlays are normalized to the current schema-backed contract.
 
 For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title. Keep release notes in reverse-chronological `## YYYY-MM-DD` sections instead of one long-lived `## Unreleased` bucket, and run the repo-local gate before publication:
 
