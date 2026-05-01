@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -472,6 +473,29 @@ def validate_raised_count_bullets(
         )
 
 
+def validate_generated_docs_sync(root: Path) -> None:
+    script = root / "scripts" / "sync-agents-mode-docs.py"
+    if not script.is_file():
+        raise ContractError(f"missing {script}")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--root",
+            str(root),
+            "--check",
+        ],
+        cwd=root,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise ContractError(
+            "generated agents-mode docs are out of sync:\n"
+            f"{result.stdout}{result.stderr}"
+        )
+
+
 def role_from_preset_name(preset: str, role: str) -> str:
     # The init tables use compact column labels that intentionally differ from
     # the operator-facing role wording for a few presets.
@@ -640,6 +664,7 @@ def main() -> int:
         schema_data = load_json(root / "shared" / "agents-mode.schema.json")
         presets_data = load_json(root / "shared" / "agents-mode.presets.json")
         validate_schema(schema_data, presets_data)
+        validate_generated_docs_sync(root)
         validate_defaults(root, schema_data)
         validate_available_presets(root, presets_data)
         validate_reference_expansion(root, presets_data)

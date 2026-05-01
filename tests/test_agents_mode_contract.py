@@ -38,6 +38,7 @@ class AgentsModeContractTest(unittest.TestCase):
                 "src.claude/commands/agents-init-project.md",
                 "src.gemini/skills/init-project/SKILL.md",
                 "src.qwen/skills/init-project/SKILL.md",
+                "scripts/sync-agents-mode-docs.py",
             ]
             for relative in files:
                 target = tmp_root / relative
@@ -66,7 +67,7 @@ class AgentsModeContractTest(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("canonical shape", result.stderr)
+            self.assertIn("src.codex", result.stderr)
 
 
 if __name__ == "__main__":

@@ -157,6 +157,7 @@ bash src.codex/skills/lead/scripts/validate-skill-pack.sh
 bash src.claude/agents/scripts/validate-skill-pack.sh
 bash src.gemini/scripts/validate-pack.sh
 bash src.qwen/scripts/validate-pack.sh
+python scripts/sync-agents-mode-docs.py --root . --check
 python scripts/validate-agents-mode-installers.py --root .
 ```
 
@@ -165,8 +166,11 @@ python scripts/validate-agents-mode-installers.py --root .
 .\src.claude\agents\scripts\validate-skill-pack.ps1
 .\src.gemini\scripts\validate-pack.ps1
 .\src.qwen\scripts\validate-pack.ps1
+python .\scripts\sync-agents-mode-docs.py --root . --check
 python .\scripts\validate-agents-mode-installers.py --root .
 ```
+
+The docs sync command checks generated `agents-mode` tables, raised-count lists, and canonical YAML snippets against the JSON contract; use `--write` to refresh those generated blocks after intentional schema or preset edits.
 
 The installer regression command creates disposable targets under `/.scratch/`, runs the Bash installers for all four provider lines, and verifies that stale `agents-mode` overlays are normalized to the current schema-backed contract.
 
