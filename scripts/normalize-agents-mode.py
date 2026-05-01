@@ -9,9 +9,11 @@ retired canonical keys, and restores the current inline comments/order.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 
 TOP_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9]*):(?:\s*(.*))?$")
@@ -27,7 +29,7 @@ RETIRED_PROFILE_LANE_NAMES = {
 }
 LEGACY_PROVIDER_ALIASES = {"claude-secret": "reserve"}
 PRODUCTION_PROFILE_PROVIDERS = {"codex", "claude"}
-ADVISORY_REVIEW_PROFILE_PROVIDERS = {"codex", "claude", "reserve"}
+SUPPLEMENTAL_PROFILE_PROVIDERS = {"reserve"}
 
 
 @dataclass
@@ -54,6 +56,84 @@ class BlockMeta:
     comment: str
     order: list[str] = field(default_factory=list)
     entries: dict[str, ProfileMeta | LaneMeta] = field(default_factory=dict)
+
+
+@dataclass
+class ContractPolicy:
+    production_profile_providers: set[str]
+    supplemental_profile_providers: set[str]
+    provider_scalar_defaults: dict[str, dict[str, ScalarMeta]] = field(
+        default_factory=dict
+    )
+
+
+def load_contract_policy(template_path: str) -> ContractPolicy:
+    """Load provider/lane policy from the schema next to the shared template."""
+    schema_data = load_adjacent_schema(template_path)
+    if schema_data is None:
+        return ContractPolicy(
+            production_profile_providers=set(PRODUCTION_PROFILE_PROVIDERS),
+            supplemental_profile_providers=set(SUPPLEMENTAL_PROFILE_PROVIDERS),
+            provider_scalar_defaults={
+                "codex": {
+                    "externalClaudeProfile": ScalarMeta(
+                        value="opus-max",
+                        comment="# allowed: sonnet-high | opus-max; default: opus-max",
+                    )
+                }
+            },
+        )
+
+    provider_scalars: dict[str, dict[str, ScalarMeta]] = {}
+    for scalar in schema_data.get("scalarKeys", []):
+        providers = scalar.get("providers")
+        if not providers:
+            continue
+        allowed = scalar.get("allowed", [])
+        if not isinstance(providers, list) or not isinstance(allowed, list):
+            continue
+        name = str(scalar["name"])
+        default = str(scalar["default"])
+        comment = f"# allowed: {' | '.join(str(value) for value in allowed)}; default: {default}"
+        for provider in providers:
+            provider_scalars.setdefault(str(provider), {})[name] = ScalarMeta(
+                value=default,
+                comment=comment,
+            )
+
+    return ContractPolicy(
+        production_profile_providers={
+            str(provider) for provider in schema_data["productionAutoProviders"]
+        },
+        supplemental_profile_providers={
+            str(provider)
+            for provider in schema_data.get("advisoryReviewSupplementalProviders", [])
+        },
+        provider_scalar_defaults=provider_scalars,
+    )
+
+
+def load_adjacent_schema(template_path: str) -> dict[str, Any] | None:
+    template_dir = os.path.dirname(os.path.abspath(template_path))
+    parent_dir = os.path.dirname(template_dir)
+    candidates = [
+        os.path.join(template_dir, "agents-mode.schema.json"),
+        os.path.join(parent_dir, "shared", "agents-mode.schema.json"),
+    ]
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = os.path.normcase(os.path.abspath(candidate))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if not os.path.exists(candidate):
+            continue
+        with open(candidate, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if not isinstance(data, dict):
+            raise ValueError(f"{candidate} must contain a JSON object.")
+        return data
+    return None
 
 
 def split_value_and_comment(rest: str | None) -> tuple[str, str]:
@@ -170,14 +250,13 @@ def is_advisory_or_review_lane(lane_name: str) -> bool:
 def sanitize_profile_providers(
     value: str,
     lane_name: str,
+    policy: ContractPolicy,
     allow_reserve: bool = True,
 ) -> str:
     """Keep profile providers on production-approved providers for the lane."""
-    allowed = (
-        ADVISORY_REVIEW_PROFILE_PROVIDERS
-        if is_advisory_or_review_lane(lane_name)
-        else PRODUCTION_PROFILE_PROVIDERS
-    )
+    allowed = set(policy.production_profile_providers)
+    if is_advisory_or_review_lane(lane_name):
+        allowed |= policy.supplemental_profile_providers
     if not allow_reserve:
         allowed = allowed - {"reserve"}
     providers: list[str] = []
@@ -204,7 +283,11 @@ def read_text_lines(path: str) -> list[str]:
         return handle.read().splitlines()
 
 
-def template_metadata(template_path: str, provider: str) -> tuple[list[str], dict[str, ScalarMeta], BlockMeta, BlockMeta]:
+def template_metadata(
+    template_path: str,
+    provider: str,
+    policy: ContractPolicy,
+) -> tuple[list[str], dict[str, ScalarMeta], BlockMeta, BlockMeta]:
     order, blocks = collect_top_level_blocks(read_text_lines(template_path))
     scalar_meta: dict[str, ScalarMeta] = {}
     profiles_meta: BlockMeta | None = None
@@ -221,12 +304,10 @@ def template_metadata(template_path: str, provider: str) -> tuple[list[str], dic
     if profiles_meta is None or counts_meta is None:
         raise ValueError("Template is missing required priority/count blocks.")
 
-    if provider == "codex" and "externalClaudeProfile" not in scalar_meta:
-        order.append("externalClaudeProfile")
-        scalar_meta["externalClaudeProfile"] = ScalarMeta(
-            value="opus-max",
-            comment="# allowed: sonnet-high | opus-max; default: opus-max",
-        )
+    for key, meta in policy.provider_scalar_defaults.get(provider, {}).items():
+        if key not in scalar_meta:
+            order.append(key)
+            scalar_meta[key] = meta
 
     return order, scalar_meta, profiles_meta, counts_meta
 
@@ -301,6 +382,7 @@ def render_scalar(key: str, meta: ScalarMeta, existing: dict[str, ScalarMeta]) -
 def render_profiles(
     meta: BlockMeta,
     existing: BlockMeta | None,
+    policy: ContractPolicy,
     allow_reserve: bool = True,
 ) -> list[str]:
     lines = [f"externalPriorityProfiles:{comment_suffix(meta.comment)}"]
@@ -324,6 +406,7 @@ def render_profiles(
             sanitized_value = sanitize_profile_providers(
                 lane_meta.value,
                 lane_name,
+                policy,
                 allow_reserve=allow_reserve,
             )
             if not sanitized_value:
@@ -342,6 +425,7 @@ def render_profiles(
             sanitized_value = sanitize_profile_providers(
                 extra_lane.value,
                 lane_name,
+                policy,
                 allow_reserve=allow_reserve,
             )
             if not sanitized_value:
@@ -367,6 +451,7 @@ def render_profiles(
             sanitized_value = sanitize_profile_providers(
                 lane.value,
                 lane_name,
+                policy,
                 allow_reserve=allow_reserve,
             )
             if not sanitized_value:
@@ -409,7 +494,12 @@ def render_counts(meta: BlockMeta, existing: BlockMeta | None) -> list[str]:
 
 
 def normalize_file(template: str, target: str, provider: str) -> str:
-    order, scalar_meta, profiles_meta, counts_meta = template_metadata(template, provider)
+    policy = load_contract_policy(template)
+    order, scalar_meta, profiles_meta, counts_meta = template_metadata(
+        template,
+        provider,
+        policy,
+    )
     known_keys = set(order) | {"externalPriorityProfiles", "externalOpinionCounts"}
     retired_keys = {
         "externalClaudeApiMode",
@@ -437,6 +527,7 @@ def normalize_file(template: str, target: str, provider: str) -> str:
                 render_profiles(
                     profiles_meta,
                     existing_profiles,
+                    policy,
                     allow_reserve=allow_reserve,
                 )
             )
