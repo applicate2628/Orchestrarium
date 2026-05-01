@@ -20,9 +20,9 @@ Relevant keys:
 
 - `consultantMode`
 - `parallelMode`
-- `externalClaudeApiMode`
 - `externalProvider`
 - `externalPriorityProfile`
+- `reserveResolver`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalModelMode`
@@ -31,13 +31,14 @@ Qwen-line provider rules:
 
 - `externalProvider: auto` resolves through the active named priority profile, not a Qwen-line default provider
 - `externalPriorityProfile` defaults to `balanced`
+- `reserveResolver` binds symbolic `reserve` to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`
 - the shipped `balanced` profile is production-only and keeps `auto` routing on `codex | claude`
 - `externalProvider: codex` means Codex CLI explicitly
 - `externalProvider: claude` means Claude CLI explicitly
 - `externalProvider: gemini` and `externalProvider: qwen` are explicit example-only overrides; both are `WEAK MODEL / NOT RECOMMENDED`
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native production path for the resolved provider
-- `externalClaudeApiMode` controls only the supplemental `claude-secret` advisory/review profile candidate; allowed values are `disabled | auto | force`, with `auto` as the default
-- `claude-secret` appears only after primary `claude`/`codex` when an advisory/review order reaches it; it is independent of primary `claude` and is not a retry, fallback, or worker transport
+- `reserve` is a symbolic supplemental read-only candidate inside eligible advisory/review profile orders
+- `reserve` appears only after primary `claude`/`codex` when an advisory/review order reaches it; it is bound through `reserveResolver`, independent of primary `claude`, and not a retry, fallback, or worker transport
 - `parallelMode` is the general helper fan-out rule across internal and external lanes
 - if a repository wants Qwen participation in an advisory lane, express that through a scalar explicit provider override rather than any `auto` profile entry
 - same-provider Qwen routing must be explicit; ordinary `auto` must still avoid self-bounce

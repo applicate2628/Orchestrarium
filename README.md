@@ -94,12 +94,12 @@ Important: operator preferences now live only in pack-local `agents-mode` files.
 - `parallelMode: manual` keeps parallel fan-out explicit-by-request, `auto` leaves safe parallelism enabled by routing judgment for any independent internal or external lanes, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `mcpMode: auto` lets the agent decide when MCP is appropriate; `force` means the config itself is an explicit instruction to use relevant available MCP tools instead of treating MCP usage as optional.
 - `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
-- Production `externalProvider` routing now uses `auto | codex | claude`. `externalProvider: auto` is lane-driven, not host-pack-driven, and the shipped production profiles stay on the Codex/Claude pair only.
+- Production `externalProvider` routing now uses `auto | codex | claude`. `externalProvider: auto` is lane-driven, not host-pack-driven, and the shipped production profiles stay on the Codex/Claude provider pair with `reserve` allowed only as a supplemental advisory/review candidate.
 - Gemini and Qwen remain explicit example-only integrations in this repository. They are `WEAK MODEL / NOT RECOMMENDED`, do not participate in the shipped production `auto` profiles, and should be treated as manual example or compatibility paths rather than production defaults.
-- `externalPriorityProfile` selects the active named provider-order profile, `externalPriorityProfiles` stores the switchable per-lane provider orders, and `externalOpinionCounts` raises specific lanes above the default single-opinion behavior when one external opinion is not enough. Those counts are lane-local distinct-opinion requirements, not a cap on how many parallel external helper instances may run overall; `parallelMode` remains the general fan-out rule for any helper lane, while bounded same-provider external helper fan-out lives under the dedicated brigade surfaces.
+- `externalPriorityProfile` selects the active named provider-order profile, `reserveResolver` binds the symbolic `reserve` slot to a concrete read-only resolver, `externalPriorityProfiles` stores the switchable per-lane provider orders, and `externalOpinionCounts` raises specific lanes above the default single-opinion behavior when one external opinion is not enough. Those counts are lane-local distinct-opinion requirements, not a cap on how many parallel external helper instances may run overall; `parallelMode` remains the general fan-out rule for any helper lane, while bounded same-provider external helper fan-out lives under the dedicated brigade surfaces.
 - `externalModelMode: runtime-default | pinned-top-pro` remains the shared production model policy for the Codex/Claude pair. `runtime-default` leaves the resolved provider on its runtime default model/profile; `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on limit-style failures.
 - Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun.
-- `externalClaudeApiMode: disabled | auto | force` controls the advisory/review-only `claude-secret` supplemental candidate. The named Claude API path is the repo-local secret-backed wrapper that runs plain `claude` with `ANTHROPIC_*` from `SECRET.md`; it is weaker than primary Claude, appears only after primary `claude`/`codex` in advisory and review profile orders, and is not a scalar provider or an implementation/editing fallback.
+- `reserve` is a symbolic advisory/review-only profile candidate. It is not a scalar provider, not a worker path, and not a silent fallback from primary `claude` or `codex`; `reserveResolver: claude-sonnet | claude-wrapper | wrapper:<command> | disabled` selects the concrete read-only resolver, where `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path.
 - External provider CLI launches use file-based prompts by default: write substantive task prompts to temporary prompt files and feed them through stdin or a provider-supported file-input mechanism instead of putting the full prompt in argv.
 - Codex may additionally use `externalClaudeProfile` to select or override the Claude CLI execution profile: `sonnet-high` or `opus-max`. New Codex installs seed `opus-max` by default unless a preset or explicit override chooses otherwise.
 - Codex install also seeds `.codex/agents/default.toml`, `worker.toml`, and `explorer.toml` so the built-in Codex subagents run as `gpt-5.4` with `xhigh` by default unless the user has already customized those files.
@@ -110,25 +110,26 @@ Important: operator preferences now live only in pack-local `agents-mode` files.
 - Gemini remains an explicit example integration. Use Gemini's built-in `/init` to generate or tailor `GEMINI.md`, keep official runtime config and MCP wiring in `.gemini/settings.json` or extension manifests, and treat the Orchestrarium overlay `.gemini/.agents-mode.yaml` as example-path routing state rather than part of the shipped production `auto` contract. If local Gemini overlay files are missing but `~/.gemini/.agents-mode.yaml` exists, ordinary reads should use that global overlay honestly until you choose to create a project-local override.
 - Qwen remains a native explicit example integration. Use Qwen's built-in `/init` to generate or tailor `QWEN.md`, keep official runtime config and MCP wiring in `.qwen/settings.json` or extension manifests, and treat Qwen routing as manual example or compatibility work rather than part of the shipped production `auto` contract. The current checkout exposes Qwen through root `scripts/install-qwen.*`, while checkouts without those entrypoints should fall back to the Qwen source tree directly.
 - Explicit user role requests still override the toggle state in either direction.
-- Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity, continue-by-default execution expectations for initialized projects, and the current init-time preset family: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, and `max-speed`. Init helpers can either write the chosen preset as-is or open an optional fine-tune pass before saving `.agents-mode.yaml`.
+- Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity, continue-by-default execution expectations for initialized projects, and the current init-time preset family: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `power-mode`, and `max-speed`. Init helpers can either write the chosen preset as-is or open an optional fine-tune pass before saving `.agents-mode.yaml`.
 
 Shipped production provider-order profile:
 
-This is the persisted production `externalPriorityProfile` shipped from the root surfaces, not the init-time preset shortcuts. Example integrations may define their own provider-local examples, but the root production profile stays on Codex plus Claude only.
+This is the persisted production `externalPriorityProfile` shipped from the root surfaces, not the init-time preset shortcuts. Example integrations may define their own provider-local examples, but the root production profile stays on Codex plus Claude provider families only. `reserve` may appear only as a supplemental read-only candidate after primary Claude and Codex on advisory/review lanes.
 
 | Profile | Lane | Priority |
 |---|---|---|
-| `balanced` | `advisory.repo-understanding` | `claude > codex` |
-|  | `advisory.design-adr` | `claude > codex` |
-|  | `review.pre-pr` | `claude > codex` |
-|  | `review.performance-architecture` | `claude > codex` |
+| `balanced` | `advisory.repo-understanding` | `claude > codex > reserve` |
+|  | `advisory.design-adr` | `claude > codex > reserve` |
+|  | `design.ui-ux-structure` | `codex > claude` |
+|  | `worker.reasoning-constraints` | `claude > codex` |
 |  | `worker.default-implementation` | `codex > claude` |
-|  | `worker.systems-performance-implementation` | `codex > claude` |
-|  | `worker.long-autonomous` | `claude > codex` |
-|  | `worker.ui-structural-modernization` | `codex > claude` |
-|  | `worker.ui-surgical-patch-cleanup` | `codex > claude` |
-|  | `worker.visual-icon-decorative` | `codex > claude` |
-|  | `review.visual` | `claude > codex` |
+|  | `worker.systems-performance-implementation` | `claude > codex` |
+|  | `worker.ui-implementation` | `claude > codex` |
+|  | `worker.visual-graphics-visualization` | `claude > codex` |
+|  | `review.pre-pr` | `claude > codex > reserve` |
+|  | `review.security` | `claude > codex > reserve` |
+|  | `review.performance-architecture` | `codex > claude > reserve` |
+|  | `review.ui-visual-correctness` | `codex > claude > reserve` |
 
 If a repo-local lane policy explicitly asks for consultant input at closeout, it should follow the configured `consultantMode`; `consultantMode: disabled` waives consultant closeout instead of blocking the batch. `parallelMode` is the general rule for whether any helper lanes are parallelized by judgment or only by explicit request, while `externalOpinionCounts` may still raise advisory or review lanes above `1` when the active policy wants multiple independent external opinions before advancing.
 
@@ -182,12 +183,17 @@ This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](
 
 - `AGENTS.md`: agent governance entrypoint assembled or read by Codex-compatible runtimes.
 - `agents-mode`: Orchestrarium operator configuration overlay for delegation, provider routing, MCP use, and parallelism.
+- `reserve`: symbolic supplemental read-only candidate for advisory/review lanes; it runs after primary `claude` and `codex` and is not a worker or editing path.
+- `reserveResolver`: scalar `agents-mode` key that binds `reserve` to `claude-sonnet`, `claude-wrapper`, a `wrapper:<command>` resolver, or `disabled`.
 - `CLI`: Command-Line Interface, a terminal command surface such as `codex`, `claude`, `gemini`, or `qwen`.
 - `Codex`: the OpenAI Codex runtime and production provider line in this repository.
 - `Claude Code`: Anthropic's Claude Code runtime and production provider line in this repository.
 - `externalProvider: auto`: Orchestrarium routing mode that uses only production-recommended providers, currently Codex and Claude.
+- `externalPriorityProfile`: the active named provider-order profile used when `externalProvider: auto`.
+- `externalPriorityProfiles`: the map of named routing profiles to lane-specific provider priority lists.
 - `Gemini`: Google Gemini CLI provider line, kept here as an explicit example integration.
 - `MCP`: Model Context Protocol; a protocol for exposing tools and resources to agent runtimes.
+- `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency.
 - `Qwen`: Qwen provider line, kept here as an explicit example integration.
 - `runtime`: installed provider-facing files and directories used by an agent tool outside the source tree.
 - `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers that must stay out of production defaults and `auto` routing.

@@ -44,10 +44,10 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 1. Read and normalize `.agents/.agents-mode.yaml` before trusting any flags.
 2. Honor the current external routing fields, including:
    - `consultantMode` (allowed: `external | internal | disabled`; default: `disabled`)
-   - `externalClaudeApiMode` (controls advisory/review-only `claude-secret`: `disabled | auto | force`; default: `auto`)
    - `parallelMode` (allowed: `manual | auto | force`; default: `auto`)
    - `externalProvider`
    - `externalPriorityProfile`
+   - `reserveResolver`
    - `externalPriorityProfiles`
    - `externalOpinionCounts`
    - `externalCodexWorkdirMode`
@@ -59,7 +59,8 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 5. Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. It does not cap how many same-provider brigade items may run in parallel across different disjoint lanes or slices.
 6. Allow repeated same-provider fan-out when each brigade item owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
 7. If a brigade item itself requires `2+` same-lane opinions, satisfy that distinct-provider requirement first or fail that item closed.
-8. Do not silently downgrade external items to internal execution inside the brigade.
+8. When a brigade advisory/review item reaches `reserve`, bind it through `reserveResolver`; worker-side brigade items must not use `reserve`.
+9. Do not silently downgrade external items to internal execution inside the brigade.
 
 ## Return exactly one artifact
 

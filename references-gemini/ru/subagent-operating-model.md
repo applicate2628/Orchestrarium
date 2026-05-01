@@ -17,7 +17,7 @@
 - Gemini на этой линии поддерживается как example-only integration: репозиторий классифицирует его как `WEAK MODEL / NOT RECOMMENDED`.
 - На Gemini-линии `externalProvider: auto` по-прежнему разрешается по lane type через active named priority profile, а не через один жёсткий Gemini-line default, но shipped production profile исключает Gemini и Qwen и остаётся на `codex | claude`.
 - Явный `externalProvider: gemini` — это только manual example или compatibility path, а не production recommendation.
-- На Gemini-line external routing `externalClaudeApiMode` управляет только supplemental `claude-secret` candidate для advisory/review (`disabled | auto | force`, default `auto`); worker lanes не должны его использовать.
+- На Gemini-line external routing `reserve` является symbolic supplemental candidate внутри eligible advisory/review profile orders и привязывается через `reserveResolver`; worker lanes не должны его использовать.
 
 ## Gemini-side repository concretization
 

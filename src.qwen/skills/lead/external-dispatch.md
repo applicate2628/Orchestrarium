@@ -12,7 +12,6 @@ Canonical Qwen-line schema:
 
 ```yaml
 consultantMode: external  # allowed: external | internal | disabled; default: disabled
-externalClaudeApiMode: auto  # controls advisory/review-only claude-secret candidate: disabled | auto | force; default: auto
 delegationMode: manual  # allowed: manual | auto | force; default: manual
 parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
@@ -20,6 +19,7 @@ preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
 externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are WEAK MODEL / NOT RECOMMENDED example-only routes
 externalPriorityProfile: balanced  # allowed: balanced | <repo-local production profile>; default: balanced
+reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {}  # profile -> lane -> ordered provider list
 externalOpinionCounts: {}  # lane -> integer
 externalCodexWorkdirMode: neutral  # allowed: neutral | project
@@ -32,12 +32,13 @@ Rules:
 - `externalProvider` stays scalar and keeps its meaning for explicit provider overrides.
 - `externalProvider: auto` resolves through the active named priority profile and then applies the self-provider filter.
 - `externalPriorityProfile` selects the active profile used for `auto`; missing means `balanced`.
+- `reserveResolver` binds the symbolic `reserve` candidate to one concrete read-only resolver: `disabled`, `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`. `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path, not an argv prompt channel.
 - `externalPriorityProfiles` stores ordered provider lists per lane for each named profile; missing `balanced` means the current shared production matrix.
 - `externalOpinionCounts` stores how many distinct external opinions to collect per lane; missing entries mean `1`.
 - `parallelMode: manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `externalCodexWorkdirMode` and `externalClaudeWorkdirMode` choose whether those provider-backed external runs start in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`.
 - `externalModelMode` is the shared cross-provider model-selection policy. `runtime-default` leaves the resolved provider on its runtime default model/profile. `pinned-top-pro` starts on the strongest documented provider-native production path for the resolved provider.
-- `externalClaudeApiMode` controls only the supplemental `claude-secret` candidate in advisory/review profile orders. It is independent of primary `claude` and is not a scalar provider, retry, or transport swap.
+- `reserve` is a symbolic supplemental read-only candidate that may appear only in advisory/review profile orders after primary `claude`/`codex`. It is independent of primary `claude` and is not a scalar provider key, retry, or transport swap. The concrete resolver comes from `reserveResolver`.
 - `externalClaudeProfile` is not part of canonical Qwen-line config.
 - Preserve unknown keys on write.
 - Any read of `.qwen/.agents-mode.yaml` that influences routing must normalize an existing file to the current canonical format before trusting the flags. Comment-free or older-layout files are valid input, not valid output.
@@ -54,13 +55,21 @@ Rules:
 
 - Default shipped profile name.
 - Mirrors the current shared lane matrix.
-- Keeps the ordinary first-opinion routing unchanged.
+- Shipped production `auto` provider families stay on `codex | claude`; advisory/review lanes may also reach the supplemental `reserve` candidate after primary providers.
 - Uses `externalOpinionCounts: 1` unless a repo-local policy explicitly asks for more.
-- Uses `codex | claude` only:
-  - advisory lanes: `claude > codex`
-  - ordinary worker lanes: `codex > claude`
-  - long-autonomous worker lane: `claude > codex`
-  - review lanes: `claude > codex`
+- Follows the release-backed `12 + 1` routing read:
+  - `advisory.repo-understanding`: `claude > codex > reserve`
+  - `advisory.design-adr`: `claude > codex > reserve`
+  - `design.ui-ux-structure`: `codex > claude`
+  - `worker.reasoning-constraints`: `claude > codex`
+  - `worker.default-implementation`: `codex > claude`
+  - `worker.systems-performance-implementation`: `claude > codex`
+  - `worker.ui-implementation`: `claude > codex`
+  - `worker.visual-graphics-visualization`: `claude > codex`
+  - `review.pre-pr`: `claude > codex > reserve`
+  - `review.security`: `claude > codex > reserve`
+  - `review.performance-architecture`: `codex > claude > reserve`
+  - `review.ui-visual-correctness`: `codex > claude > reserve`
 
 Repo-local custom production profiles may exist, but they must be declared locally and kept clearly separate from shipped production defaults. Gemini and Qwen must not be profile entries: if a repo wants to demonstrate either example provider, use a scalar explicit provider override such as `externalProvider: qwen` or `externalProvider: gemini` and label the run `WEAK MODEL / NOT RECOMMENDED`.
 
@@ -95,9 +104,10 @@ Repo-local custom production profiles may exist, but they must be declared local
 - Do not cap that fan-out at one instance per helper or provider: the same external helper and the same resolved provider may be launched multiple times concurrently when each run owns a different admitted artifact or disjoint slice.
 - If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
 - When multiple independent external lanes should launch together, prefer the pack-local `external-brigade` surface so the main Qwen session records one bounded brigade plan instead of scattering ad hoc parallel helper launches.
-- `externalClaudeApiMode: auto` allows `claude-secret` only when an advisory or review profile order reaches it after primary `claude`/`codex`. `externalClaudeApiMode: force` keeps `claude-secret` available for advisory/review lanes, but it still does not skip earlier primary profile candidates.
-- If the plain Claude CLI path is selected and fails, do not silently convert that same primary `claude` run to the wrapper. Advisory/review lanes may later collect `claude-secret` as a separate profile candidate when enabled; worker or mutating routes must report Claude unavailable or reroute honestly.
-- From PowerShell, use `.claude/agents/scripts/invoke-claude-api.ps1` only for a resolved `claude-secret` advisory/review candidate and pass forwarded Claude flags after `--%`. From Bash or Git Bash, use `.claude/agents/scripts/invoke-claude-api.sh`, and set `CLAUDE_BIN` explicitly when the active shell PATH differs from the PowerShell PATH.
+- `reserve` is considered only when an advisory or review profile order reaches it after primary `claude`/`codex`; it does not skip earlier primary profile candidates.
+- When advisory or review routing reaches `reserve`, bind it through `reserveResolver`: `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`. `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path.
+- If the plain Claude CLI path is selected and fails, do not silently convert that same primary `claude` run to the wrapper. Advisory/review lanes may later collect `reserve` as a separate profile candidate when enabled; worker or mutating routes must report Claude unavailable or reroute honestly.
+- From PowerShell, use `.claude/agents/scripts/invoke-claude-api.ps1` only for a resolved `reserve` advisory/review candidate and pass forwarded Claude flags after `--%`. From Bash or Git Bash, use `.claude/agents/scripts/invoke-claude-api.sh`, and set `CLAUDE_BIN` explicitly when the active shell PATH differs from the PowerShell PATH.
 - On Windows, keep the ordinary external launch path unchanged and try the native Windows shell first. If that native shell path fails because of shell bootstrap, execution-policy, or environment-policy problems, retry once through Git-for-Windows Bash / MSYS when available. Do not use the WSL `bash.exe` stub as a fallback, and do not reinterpret ordinary provider auth, quota, or model failures as shell-fallback triggers.
 - External CLI launches that carry a substantive task prompt must use file-based prompt delivery: write the prompt to a temporary prompt file and feed it through the provider's stdin or supported file-input mechanism. Keep command-line arguments limited to launcher flags, model/profile options, and file paths; inline prompt argv is allowed only for tiny smoke checks or a documented provider limitation, and record that deviation in the execution artifact.
 
@@ -132,3 +142,15 @@ Every external or consultant artifact should record:
 - `Deviation reason: <none | external unavailable: [reason]>`
 - `internal consultant` is valid only for the consultant role when `consultantMode: internal`
 - Provider-backed consultant execution in `external` mode plus `$external-worker` and `$external-reviewer` must show a direct external transport path. An internal agent/helper/subagent host means the route failed the contract and must be reported as disabled or rerouted.
+
+## Terms and Abbreviations
+
+- `agents-mode`: Orchestrarium operator configuration overlay for delegation, external provider routing, MCP use, and parallelism.
+- `reserve`: symbolic supplemental read-only candidate for advisory/review lanes only; it is separate from primary providers and not valid for worker or mutating routes.
+- `reserveResolver`: scalar `agents-mode` key that binds symbolic `reserve` to a concrete read-only resolver such as `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`.
+- `CLI`: Command-Line Interface; a provider or tool invoked from a shell.
+- `MCP`: Model Context Protocol; protocol for exposing tools and resources to agent runtimes.
+- `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
+- `Qwen`: Qwen provider line; here it is explicit example-only and `WEAK MODEL / NOT RECOMMENDED`.
+- `12 + 1`: twelve external routing lines plus one owner/control line from the release-backed RF12 interpretation.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.

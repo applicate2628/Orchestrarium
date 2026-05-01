@@ -58,8 +58,8 @@ Use `external-dispatch.md` when the main Qwen session prefers or explicitly sele
 - If the selected external CLI is unavailable, the adapter is disabled and the main Qwen session reroutes explicitly.
 - If the current runtime cannot launch the selected external provider directly, the route is unavailable; do not proxy it through a Qwen subagent host.
 - `externalProvider: auto` resolves through the active named priority profile, not a line-specific default. Shipped and repo-local production profiles stay on `codex | claude`. If a repository wants a Qwen demonstration lane, express that through a scalar explicit provider override, not a profile entry.
-- Honor `externalModelMode` first after provider resolution. If Codex is the resolved provider and the model policy is pinned, start on `gpt-5.4 --reasoning-effort xhigh`; only `worker.long-autonomous` or another explicitly fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path, and the route must not silently downgrade below that floor. Example-only Qwen routes remain explicit/manual and do not add separate provider-local fallback keys to the shared schema.
-- Honor `externalClaudeApiMode` only when an advisory or review profile order reaches the supplemental `claude-secret` candidate. It is separate from primary `claude`, appears after primary `claude`/`codex`, and must not be used for worker, implementation, code-generation, file-editing, or publication work.
+- Honor `externalModelMode` first after provider resolution. If Codex is the resolved provider and the model policy is pinned, start on `gpt-5.4 --reasoning-effort xhigh`; only an explicitly configured repo-local fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path, and the route must not silently downgrade below that floor. Example-only Qwen routes remain explicit/manual and do not add separate provider-local fallback keys to the shared schema.
+- Honor `reserve` only when an advisory or review profile order reaches that symbolic supplemental candidate. It is separate from primary providers, appears after primary `claude`/`codex`, and must not be used for worker, implementation, code-generation, file-editing, or publication work.
 - `parallelMode` is the general rule for whether independent helper lanes should be parallelized by judgment at all. External fan-out follows that rule instead of defining a separate global concurrency model.
 - If the active lane policy asks for more than one external opinion, the main session may launch multiple independent external adapters in parallel and aggregate the returned artifacts fail closed.
 
@@ -77,3 +77,12 @@ Use `external-dispatch.md` when the main Qwen session prefers or explicitly sele
 - A subagent does not launch another subagent.
 - If evidence is missing, route to the correct factual role instead of guessing.
 - If a review artifact is still missing, the review is not complete.
+
+## Terms and Abbreviations
+
+- `BLOCKED`: workflow state for a real missing dependency, prerequisite, or unavailable route.
+- `reserve`: symbolic supplemental read-only candidate for advisory/review lanes only; it is separate from primary providers and not valid for worker or mutating routes.
+- `CLI`: Command-Line Interface; a provider or tool invoked from a shell.
+- `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
+- `Qwen`: Qwen provider line; here it is explicit example-only and `WEAK MODEL / NOT RECOMMENDED`.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.

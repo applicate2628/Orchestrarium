@@ -76,7 +76,6 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 
    ```
    consultantMode: external
-   externalClaudeApiMode: auto
    delegationMode: manual
    parallelMode: auto
    mcpMode: auto
@@ -84,31 +83,34 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    preferExternalReviewer: true
    externalProvider: auto
    externalPriorityProfile: balanced
+   reserveResolver: claude-sonnet
    externalPriorityProfiles:
      balanced:
-       advisory.repo-understanding: [claude, codex]
-       advisory.design-adr: [claude, codex]
-       review.pre-pr: [claude, codex]
-       review.performance-architecture: [claude, codex]
+       advisory.repo-understanding: [claude, codex, reserve]
+       advisory.design-adr: [claude, codex, reserve]
+       design.ui-ux-structure: [codex, claude]
+       worker.reasoning-constraints: [claude, codex]
        worker.default-implementation: [codex, claude]
-       worker.systems-performance-implementation: [codex, claude]
-       worker.long-autonomous: [claude, codex]
-       worker.ui-structural-modernization: [codex, claude]
-       worker.ui-surgical-patch-cleanup: [codex, claude]
-       worker.visual-icon-decorative: [codex, claude]
-       review.visual: [claude, codex]
+       worker.systems-performance-implementation: [claude, codex]
+       worker.ui-implementation: [claude, codex]
+       worker.visual-graphics-visualization: [claude, codex]
+       review.pre-pr: [claude, codex, reserve]
+       review.security: [claude, codex, reserve]
+       review.performance-architecture: [codex, claude, reserve]
+       review.ui-visual-correctness: [codex, claude, reserve]
    externalOpinionCounts:
      advisory.repo-understanding: 1
      advisory.design-adr: 1
-     review.pre-pr: 1
-     review.performance-architecture: 1
+     design.ui-ux-structure: 1
+     worker.reasoning-constraints: 1
      worker.default-implementation: 1
      worker.systems-performance-implementation: 1
-     worker.long-autonomous: 1
-     worker.ui-structural-modernization: 1
-     worker.ui-surgical-patch-cleanup: 1
-     worker.visual-icon-decorative: 1
-     review.visual: 1
+     worker.ui-implementation: 1
+     worker.visual-graphics-visualization: 1
+     review.pre-pr: 1
+     review.security: 1
+     review.performance-architecture: 1
+     review.ui-visual-correctness: 1
    externalModelMode: runtime-default
    externalClaudeProfile: opus-max
    ```
@@ -121,37 +123,39 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - `preferExternalReviewer` — external-reviewer as default on `review` + `QA` stages
    - `externalProvider` — shipped production provider universe `auto`, `claude`, or `codex` for provider-backed consultant / adapter selection
    - `externalPriorityProfile` — active named provider-order profile used only when `externalProvider: auto`
-   - `externalPriorityProfiles` — per-profile lane matrix with ordered provider lists; the shipped production profile set stays on Codex plus Claude only
+   - `reserveResolver` — concrete read-only resolver for symbolic `reserve`: `disabled`, `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`
+   - `externalPriorityProfiles` — per-profile lane matrix with ordered provider lists; the shipped production profile set stays on Codex plus Claude provider families, with `reserve` only as the supplemental advisory/review candidate
    - `externalOpinionCounts` — per-lane number of distinct external opinions required under `externalProvider: auto`; not a global cap on helper multiplicity
    - `externalModelMode` — shared production model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion
-   - `externalClaudeApiMode` — controls the supplemental `claude-secret` candidate for advisory/review lanes; it does not turn a primary `claude` route into a wrapper-backed run and is not available to worker-side implementation/editing lanes
+   - `reserve` — symbolic supplemental candidate that may appear only in advisory/review profile orders; it is not a scalar provider key, not a primary `claude` retry, and not available to worker-side implementation/editing lanes
    - `externalClaudeProfile` — Codex-line only optional Claude CLI execution profile: `sonnet-high` or `opus-max`
    - Each toggle is independent
-   - Default full shape on first creation: `externalClaudeApiMode: auto`, `delegationMode: manual`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, shipped `externalPriorityProfiles` on the Codex/Claude pair, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; the shared model policy defaults to `externalModelMode: runtime-default`; Codex also writes `externalClaudeProfile: opus-max`
+   - Default full shape on first creation: `delegationMode: manual`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `reserveResolver: claude-sonnet`, shipped `externalPriorityProfiles` on the Codex/Claude pair plus advisory/review-only `reserve`, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; the shared model policy defaults to `externalModelMode: runtime-default`; Codex also writes `externalClaudeProfile: opus-max`
 
 3. **Dispatch protocol (platform-dependent)**
 
 | Profile | Lane | `externalProvider: auto` priority |
 |---------|---------|---------|
-| `balanced` | `advisory.repo-understanding` | `claude > codex` |
-|  | `advisory.design-adr` | `claude > codex` |
-|  | `review.pre-pr` | `claude > codex` |
-|  | `review.performance-architecture` | `claude > codex` |
+| `balanced` | `advisory.repo-understanding` | `claude > codex > reserve` |
+|  | `advisory.design-adr` | `claude > codex > reserve` |
+|  | `design.ui-ux-structure` | `codex > claude` |
+|  | `worker.reasoning-constraints` | `claude > codex` |
 |  | `worker.default-implementation` | `codex > claude` |
-|  | `worker.systems-performance-implementation` | `codex > claude` |
-|  | `worker.long-autonomous` | `claude > codex` |
-|  | `worker.ui-structural-modernization` | `codex > claude` |
-|  | `worker.ui-surgical-patch-cleanup` | `codex > claude` |
-|  | `worker.visual-icon-decorative` | `codex > claude` |
-|  | `review.visual` | `claude > codex` |
+|  | `worker.systems-performance-implementation` | `claude > codex` |
+|  | `worker.ui-implementation` | `claude > codex` |
+|  | `worker.visual-graphics-visualization` | `claude > codex` |
+|  | `review.pre-pr` | `claude > codex > reserve` |
+|  | `review.security` | `claude > codex > reserve` |
+|  | `review.performance-architecture` | `codex > claude > reserve` |
+|  | `review.ui-visual-correctness` | `codex > claude > reserve` |
 
-   `externalProvider: auto` is pack-neutral and resolves through the active named profile instead of a line-default provider mapping, but the shipped production profile remains limited to Codex plus Claude. Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun. Gemini and Qwen remain `WEAK MODEL / NOT RECOMMENDED` example-only routes outside this production profile table.
+   `externalProvider: auto` is pack-neutral and resolves through the active named profile instead of a line-default provider mapping, but the shipped production profile remains limited to Codex plus Claude provider families, with `reserve` only as the supplemental advisory/review candidate. The profile follows the release-backed `12 + 1` routing read in [`docs/routing/full-v2-hard-r2-routing-evidence-2026-05-01.md`](routing/full-v2-hard-r2-routing-evidence-2026-05-01.md); the `L00 owner/control` line is documented there but is not an external profile lane. Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun. Gemini and Qwen remain `WEAK MODEL / NOT RECOMMENDED` example-only routes outside this production profile table.
 
 4. **Common rules**
    - CLI availability check before dispatch (`which codex` / `where codex` on Claude Code, `claude` / `claude.exe` on Codex)
    - Under `externalModelMode: runtime-default`, keep the selected provider on its runtime default model/profile.
    - Under `externalModelMode: pinned-top-pro`, hard tasks start on the strongest documented production provider-native path: `--model gpt-5.4 --reasoning-effort xhigh` (Codex) or `opus-max` / `--model opus --effort max` (Claude CLI). Example-provider model behavior stays provider-local and is intentionally outside this production design spec.
-   - On advisory and review lanes, `externalClaudeApiMode: auto` enables the installed Claude wrapper under `.claude/agents/scripts/invoke-claude-api.sh` or `.ps1` as the supplemental `claude-secret` profile candidate after primary candidates such as `claude` and `codex`. That wrapper reads `SECRET.md`, exports the declared `ANTHROPIC_*` values, and launches plain `claude`. The wrapper is independent of primary `claude`; it is not a retry path for primary Claude and is unavailable for worker-side implementation, code-generation, file-editing, installer, publication, or write-producing repository-hygiene routes.
+   - On advisory and review lanes, `reserve` is the supplemental symbolic profile candidate after primary candidates such as `claude` and `codex`. `reserveResolver` binds it to an approved read-only transport such as the installed secret-backed Claude wrapper, a smaller production model, or another local read-only source, but the execution record must name the actual resolved path. `reserve` is independent of primary `claude`; it is not a retry path for primary Claude and is unavailable for worker-side implementation, code-generation, file-editing, installer, publication, or write-producing repository-hygiene routes.
    - `externalPriorityProfile` selects the named provider-order map only when `externalProvider: auto`; unknown profile names fail closed instead of silently falling back.
    - `externalOpinionCounts` controls how many distinct external opinions a lane must collect under `auto`. Missing counts mean `1`; shortfalls keep the lane `BLOCKED`.
    - Reusing the same provider across multiple different brigade items is allowed when the scopes are independent; that is separate from satisfying one lane's distinct-opinion requirement.
@@ -175,7 +179,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 | Situation | Rule |
 |---|---|
 | Claude CLI is selected and already authenticated | Use the plain Claude CLI path first. |
-| Claude CLI is unauthenticated, or the repository intentionally carries auth in `.claude/SECRET.md` | Do not convert a primary `claude` route into a wrapper-backed run. Advisory/review lanes may still reach the independent `claude-secret` candidate later in the profile order when enabled. |
+| Claude CLI is unauthenticated, or the repository intentionally carries auth in `.claude/SECRET.md` | Do not convert a primary `claude` route into a wrapper-backed run. Advisory/review lanes may still reach the independent `reserve` candidate later in the profile order when enabled. |
 | PowerShell Claude API transport | Use `.claude/agents/scripts/invoke-claude-api.ps1`. It must remain compatible with Windows PowerShell 5.1 and PowerShell 7+, it accepts both `-PrintSecretPath` and `--print-secret-path`, and forwarded Claude flags should be passed after `--%`. |
 | Bash / Git Bash Claude API transport | Use `.claude/agents/scripts/invoke-claude-api.sh`. It launches plain `claude`; if the active shell still cannot see the binary, set `CLAUDE_BIN` explicitly. |
 | External provider CLI prompt payload | Write the substantive task prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism. Keep argv for launcher flags, model/profile options, and file paths; inline prompt strings are only for tiny smoke checks or a documented provider limitation, and the deviation must be recorded. |
@@ -197,11 +201,12 @@ The orchestrator (lead or main conversation) **prefers** external roles by defau
 - `preferExternalReviewer: true` — `$external-reviewer` on eligible `review` + `QA` stages
 - `externalProvider: auto | claude | codex` — use the shipped production provider universe; `auto` resolves through the active named profile, while example-provider routing stays explicit-only and outside the production profile set
 - `externalPriorityProfile: balanced | <custom>` — select which ordered provider map `auto` uses
-- `externalPriorityProfiles` — maintain the per-profile lane matrix; the shipped production profiles stay on the Codex/Claude pair
+- `reserveResolver: disabled | claude-sonnet | claude-wrapper | wrapper:<command>` — choose the concrete read-only resolver for symbolic `reserve`; `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path
+- `externalPriorityProfiles` — maintain the per-profile lane matrix; the shipped production profiles stay on the Codex/Claude pair plus advisory/review-only `reserve`
 - `externalOpinionCounts` — raise specific lanes above `1` when the orchestrator should collect multiple independent external opinions
 - `parallelMode` is the general fan-out rule for any helper lane; `externalOpinionCounts` and brigade semantics remain the external-specific overlay on top
 - `externalModelMode: runtime-default | pinned-top-pro` — shared production model policy; `runtime-default` keeps provider runtime selection, while `pinned-top-pro` asks each production provider for its strongest documented native path with one named same-provider fallback on retryable provider exhaustion
-- `externalClaudeApiMode: disabled | auto | force` — control whether the advisory/review-only `claude-secret` supplemental candidate is forbidden or available; it is independent of primary `claude` and not available to worker or mutating routes
+- `reserve` in `externalPriorityProfiles` — advisory/review-only supplemental candidate bound by `reserveResolver`; it is independent of primary `claude`, not a scalar provider key, and not available to worker or mutating routes
 - `externalClaudeProfile: sonnet-high | opus-max` — Codex-line only; when Codex dispatches to Claude CLI, prefer the matching model/effort profile instead of the provider default or the broader shared model policy
 
 Domain specialist is selected instead only when:
@@ -260,3 +265,18 @@ Normal routing fallback to domain specialist. Not an error — standard routing 
 - Replacing the consultant's advisory-only contract
 - Adding new interaction types to the operating model
 - Auto-detection of when external worker is "better" — orchestrator uses explicit criteria
+
+## Terms and Abbreviations
+
+- `agents-mode`: Orchestrarium operator configuration overlay for delegation, external provider routing, MCP use, and parallelism.
+- `argv`: command-line argument vector passed to a process.
+- `reserve`: symbolic supplemental read-only candidate for advisory/review lanes only; it is separate from primary providers and not valid for worker or mutating routes.
+- `reserveResolver`: scalar `agents-mode` key that binds symbolic `reserve` to a concrete read-only resolver such as `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`.
+- `CLI`: Command-Line Interface; a provider or tool invoked from a shell.
+- `JSON`: JavaScript Object Notation; structured data format used by Claude team templates.
+- `L00`: owner/control routing line in the release-backed `12 + 1` read; it is documented evidence but not an external provider profile lane.
+- `MCP`: Model Context Protocol; protocol for exposing tools and resources to agent runtimes.
+- `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
+- `12 + 1`: twelve external routing lines plus one owner/control line from the release-backed RF12 interpretation.
+- `stdin`: standard input stream for a process.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.

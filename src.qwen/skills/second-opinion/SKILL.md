@@ -21,23 +21,24 @@ Manage these keys in `.qwen/.agents-mode.yaml`:
 - `preferExternalReviewer`
 - `externalProvider`
 - `externalPriorityProfile`
+- `reserveResolver`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalModelMode`
-- `externalClaudeApiMode`
 
 Qwen-line rules:
 
 - `externalProvider: auto` resolves through the active named priority profile, not a Qwen-line default provider
 - `externalPriorityProfile` defaults to `balanced`
+- `reserveResolver` binds symbolic `reserve` to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`
 - the shipped `balanced` profile is production-only and keeps `auto` routing on `codex | claude`
 - explicit providers are `codex`, `claude`, `gemini`, and `qwen`
 - `externalProvider: gemini` and `externalProvider: qwen` are explicit example-only overrides; both are `WEAK MODEL / NOT RECOMMENDED`
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native production path for the resolved provider
-- `externalClaudeApiMode` matters only when provider resolves to Claude
+- `reserve` matters only when an advisory/review profile order reaches that symbolic supplemental candidate and is bound through `reserveResolver`
 - if a repository wants Qwen participation for a specific example lane, express that through a scalar explicit provider override, not a profile entry
 - same-provider Qwen routing must be explicit; ordinary `auto` must still avoid self-bounce
-- preserve unknown keys and keep the three new profile/count keys in expanded multi-key form rather than collapsing them into a consultant-only shape
+- preserve unknown keys and keep `reserveResolver` plus the profile/count keys in expanded multi-key form rather than collapsing them into a consultant-only shape
 - `parallelMode` is the general helper fan-out rule across internal and external lanes
 - `externalOpinionCounts` is lane-specific; when a lane asks for more than one opinion, the lead may invoke the matching external skill repeatedly and aggregate fail closed on top of `parallelMode`
 

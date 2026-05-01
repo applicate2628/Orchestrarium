@@ -19,14 +19,14 @@ Use the shared Gemini dispatch contract in [../lead/external-dispatch.md](../lea
 
 - Read and normalize `.gemini/.agents-mode.yaml` to the current canonical format before trusting its flags.
 - Read and normalize `.gemini/.agents-mode.yaml` to the current canonical format before trusting its flags. If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
-- Honor `.gemini/.agents-mode.yaml`, including `parallelMode`, `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts`.
+- Honor `.gemini/.agents-mode.yaml`, including `parallelMode`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`.
 - `parallelMode` is the general helper fan-out rule across internal and external lanes; `externalOpinionCounts` governs distinct-provider opinions for one lane and does not cap how many same-provider worker instances may run in parallel for different disjoint lanes or slices.
 - `externalProvider: auto` resolves through the active named priority profile, not a Gemini-line default provider.
 - `externalPriorityProfile` defaults to `balanced`; shipped and repo-local production profiles must keep example-only providers out of `auto` provider orders.
 - `externalProvider: codex` resolves to Codex CLI explicitly.
 - `externalProvider: claude` resolves to Claude CLI explicitly.
 - Honor `externalModelMode` first on the production provider paths. `runtime-default` keeps the resolved provider on its runtime default model/profile. `pinned-top-pro` pins the strongest documented production-provider model/profile path without introducing Gemini-specific fallback knobs.
-- Do not honor `claude-secret` or the secret-backed Claude wrapper for worker-side lanes. `externalClaudeApiMode` only controls the supplemental `claude-secret` candidate in `advisory.*` and `review.*` profile orders, after primary `claude`/`codex`; it is not a worker transport, not a retry for primary Claude, and not an implementation/editing fallback.
+- Do not honor `reserve` for worker-side lanes. It is a supplemental read-only candidate only in `advisory.*` and `review.*` profile orders after primary `claude`/`codex`, and `reserveResolver` must not turn it into a worker transport, primary-Claude retry, or implementation/editing fallback.
 - This adapter is a direct external launch contract. Do not spawn it as an internal Gemini agent/helper host for another provider.
 - `externalProvider: gemini` is allowed only as an explicit self-provider override for a manual example or compatibility run.
 - `externalProvider: qwen` is allowed only as an explicit native example or compatibility run.

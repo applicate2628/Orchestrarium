@@ -350,12 +350,22 @@ fi
 
 if [[ "$MODE" == "source" && -f "$ROOT/docs/agents-mode-reference.md" ]]; then
   grep -Fq '## Canonical maintenance' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should define canonical maintenance"
+  grep -Fq '`power-mode` | hardest-task maximum result' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document power-mode preset"
+  grep -Fq '`power-mode` (hardest-task maximum result)' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "Gemini init-project should expose power-mode preset"
   grep -Fq 'Read-time normalization preserves the effective values of known keys' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document read-time normalization semantics"
   [[ -f "$ROOT/shared/agents-mode.defaults.yaml" ]] || fail "shared agents-mode defaults exemplar should exist"
-  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.performance-architecture review.visual; do
-    grep -Fq "    $lane: [claude, codex, claude-secret]" "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should keep claude-secret last on $lane"
+  ! grep -Fq 'externalClaudeApiMode' "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should not keep retired externalClaudeApiMode"
+  grep -Fq 'reserveResolver: claude-sonnet' "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should define reserveResolver default"
+  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.security review.performance-architecture review.ui-visual-correctness; do
+    expected="    $lane: [claude, codex, reserve]"
+    case "$lane" in
+      review.performance-architecture|review.ui-visual-correctness)
+        expected="    $lane: [codex, claude, reserve]"
+        ;;
+    esac
+    grep -Fq "$expected" "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should keep reserve last on $lane"
   done
-  ! grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*(claude-secret|gemini|qwen)' "$ROOT/shared/agents-mode.defaults.yaml" >/dev/null || fail "shared defaults should keep worker lanes off claude-secret/Gemini/Qwen"
+  ! grep -E '^[[:space:]]{4}(design|worker)\.[^:]+: \[[^]]*(reserve|gemini|qwen)' "$ROOT/shared/agents-mode.defaults.yaml" >/dev/null || fail "shared defaults should keep design/worker lanes off reserve/Gemini/Qwen"
   [[ ! -e "$ROOT/src.gemini/agents-mode.defaults.yaml" ]] || fail "src.gemini/agents-mode.defaults.yaml should not exist in the monorepo"
 fi
 

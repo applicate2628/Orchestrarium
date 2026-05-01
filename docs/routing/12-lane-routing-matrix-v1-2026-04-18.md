@@ -1,12 +1,16 @@
 Date: 2026-04-18
-Updated: 2026-04-20
+Updated: 2026-05-01
 Owner: `$lead`
-Status: `PASS`
+Status: `SUPERSEDED / HISTORICAL`
 
 ## Purpose
 
-This note freezes the canonical `12`-lane routing model as the planning baseline for
+This note freezes the historical `12`-lane routing model that was used as the planning baseline for
 `externalPriorityProfiles`.
+
+Current production routing is based on the `full-v2-hard-r2` release and is recorded in
+[`full-v2-hard-r2-routing-evidence-2026-05-01.md`](full-v2-hard-r2-routing-evidence-2026-05-01.md).
+Use that newer `40`-slot table and `12 + 1` line-priority read for shipped profile updates.
 
 This is a routing-layer decision only:
 
@@ -118,3 +122,14 @@ The next implementation step after this freeze is a documentation and config upd
 - updates `shared/agents-mode.defaults.yaml`
 - treats `worker.long-autonomous` as an extra/reference lane when updating profile docs
 - keeps `N08..N10` reported separately from the core `12` routing-lane results
+
+## Terms and Abbreviations
+
+- `ADR`: Architecture Decision Record; a durable architecture decision note.
+- `authz`: authorization; permission and access-control behavior.
+- `E1`: extra/reference lane identifier outside the core twelve routing lanes.
+- `N01..N10`: benchmark trigger identifiers used for non-seed score slices in this historical routing read.
+- `RF12`: role-fit scorecard over twelve routing lines plus owner/control context.
+- `S01..S33`: seed benchmark trigger identifiers used in the historical routing read.
+- `UI`: User Interface.
+- `UX`: User Experience.

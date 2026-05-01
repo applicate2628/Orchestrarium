@@ -44,10 +44,10 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 2. If local `.qwen/.agents-mode.yaml` is missing, read local legacy `.qwen/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.qwen/.agents-mode.yaml` and then global legacy `~/.qwen/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 3. Honor the current external routing fields, including:
    - `consultantMode`
-   - `externalClaudeApiMode`
    - `parallelMode`
    - `externalProvider`
    - `externalPriorityProfile`
+   - `reserveResolver`
    - `externalPriorityProfiles`
    - `externalOpinionCounts`
    - `externalCodexWorkdirMode`
@@ -61,7 +61,7 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 9. Honor `externalModelMode` before any provider-specific transport detail. Keep Qwen and Gemini as explicit `WEAK MODEL / NOT RECOMMENDED` example-only provider choices and keep shipped production `auto` profiles on `codex | claude`.
 10. Do not silently downgrade external items to internal execution inside the brigade.
 
-When a brigade review/advisory item resolves to `claude-secret`, `externalClaudeApiMode` controls whether that supplemental candidate is available (`disabled | auto | force`, default `auto`). Worker-side brigade items must not use `claude-secret`.
+When a brigade review/advisory item resolves to `reserve`, bind that symbolic supplemental candidate through `reserveResolver`. Worker-side brigade items must not use `reserve`.
 
 ## Return exactly one artifact
 

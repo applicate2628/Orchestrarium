@@ -20,9 +20,9 @@ Relevant keys:
 
 - `consultantMode`
 - `parallelMode`
-- `externalClaudeApiMode`
 - `externalProvider`
 - `externalPriorityProfile`
+- `reserveResolver`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalModelMode`
@@ -31,14 +31,15 @@ Gemini-line provider rules:
 
 - `externalProvider: auto` resolves through the active named priority profile, not a Gemini-line default provider
 - `externalPriorityProfile` defaults to `balanced`
+- `reserveResolver` binds symbolic `reserve` to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`
 - `balanced` mirrors the ordinary shared production matrix and keeps shipped `auto` routing on `codex | claude`
 - `externalProvider: codex` means Codex CLI explicitly
 - `externalProvider: claude` means Claude CLI explicitly
 - `externalProvider: gemini` is allowed only as an explicit self-provider override for a manual example or compatibility run
 - `externalProvider: qwen` is allowed only as an explicit manual example or compatibility override when Qwen is installed
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved production provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile on the production provider paths
-- `externalClaudeApiMode` controls only the supplemental `claude-secret` advisory/review profile candidate; allowed values are `disabled | auto | force`, with `auto` as the default
-- `claude-secret` appears only after primary `claude`/`codex` when an advisory/review order reaches it; it is independent of primary `claude` and is not a retry, fallback, or worker transport
+- `reserve` is a symbolic supplemental read-only candidate inside eligible advisory/review profile orders
+- `reserve` appears only after primary `claude`/`codex` when an advisory/review order reaches it; it is bound through `reserveResolver`, independent of primary `claude`, and not a retry, fallback, or worker transport
 - `parallelMode` is the general helper fan-out rule across internal and external lanes
 - Gemini is `WEAK MODEL / NOT RECOMMENDED` on this line; it remains installable for inspection and explicit example runs, but it is not part of shipped production `auto` routing
 - Same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce and example-only providers must stay out of shipped or repo-local production profiles

@@ -41,7 +41,6 @@ The local config file is `.claude/.agents-mode.yaml`. The canonical file may con
 
 ```yaml
 consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-externalClaudeApiMode: {value}  # controls advisory/review-only claude-secret candidate: disabled | auto | force; default: auto
 delegationMode: {value}  # allowed: manual | auto | force; default: manual
 parallelMode: {value}  # allowed: manual | auto | force; default: auto
 mcpMode: {value}  # allowed: auto | force; default: auto
@@ -49,12 +48,13 @@ preferExternalWorker: {value}  # allowed: false | true; default: false
 preferExternalReviewer: {value}  # allowed: false | true; default: false
 externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
 externalPriorityProfile: {value}  # allowed: balanced | <repo-local production profile>; default: balanced
+reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {...}  # structured profile map; default seed ships balanced only
 externalOpinionCounts: {...}  # structured lane-count map; default seed keeps documented lanes at 1
 externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
 ```
 
-`consultantMode` continues to govern consultant behavior. `externalClaudeApiMode` controls only the supplemental `claude-secret` advisory/review profile candidate: `disabled` removes it, `auto` allows it when an advisory order reaches `claude-secret` after primary `claude`/`codex`, and `force` keeps that candidate available for advisory/review even when plain Claude is unavailable. It is independent of primary `claude` and is not a retry, fallback, or transport swap for a failed Claude CLI run. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default. Shipped `auto` stays on `codex | claude`; explicit `codex`, `claude`, `gemini`, or `qwen` may still be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths. `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
+`consultantMode` continues to govern consultant behavior. `reserve` is a symbolic supplemental advisory/review profile candidate that may be reached after primary `claude`/`codex`; it is independent of primary `claude` and is not a retry, fallback, or transport swap for a failed Claude CLI run. `reserveResolver` binds that symbolic candidate to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`; `wrapper:<command>` must be a PATH-resolved command or repo-relative wrapper path. `delegationMode: manual` keeps explicit user-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist. `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified. `mcpMode: auto` lets the agent decide when available MCP tools are appropriate, while `force` makes relevant MCP usage a standing explicit instruction. The two preference flags are for the external dispatch contract, and `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default. Shipped `auto` stays on `codex | claude`; explicit `codex`, `claude`, `gemini`, or `qwen` may still be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths. `externalClaudeProfile` remains Codex-line only. These keys must be preserved by any command that updates this file.
 
 Read and normalize `.claude/.agents-mode.yaml` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.claude/.agents-mode.yaml` and then global legacy `~/.claude/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
@@ -127,8 +127,8 @@ claude --quiet --full-auto < "$PROMPT_FILE"
 ```
 
 - If the plain Claude CLI path fails, do not silently convert that same primary `claude` run to the wrapper.
-- If the advisory profile later resolves to `claude-secret`, `externalClaudeApiMode: auto` allows the approved wrapper after primary `claude`/`codex`; `force` keeps it available even when plain Claude is unavailable.
-- If `claude-secret` is unavailable or fails, return an unavailable memo and keep routing honest.
+- If the advisory profile later resolves to `reserve`, bind it through `reserveResolver` after primary `claude`/`codex`.
+- If `reserve` is unavailable or fails, return an unavailable memo and keep routing honest.
 - Do not silently downgrade from a selected Claude path to Codex or Gemini.
 
 If Gemini or Qwen is selected explicitly, keep it explicit and example-only.

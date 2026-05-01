@@ -26,7 +26,7 @@ Plan or launch a bounded parallel set of external helpers for independent admitt
    - Do not turn one vague request into an implicit brigade.
 
 4. **Route the brigade honestly.**
-   - Use `.claude/.agents-mode.yaml` for `parallelMode`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, and `externalClaudeApiMode`.
+   - Use `.claude/.agents-mode.yaml` for `parallelMode`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, and eligible advisory/review `reserve` profile entries.
    - Keep `parallelMode` as the general helper fan-out rule. Brigade launch is an explicit bounded overlay on top of that rule, not a second general concurrency model.
    - Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. Do not misuse it as a concurrency cap.
    - Allow repeated same-provider helper instances when different brigade items own different admitted artifacts or disjoint slices and the runtime supports concurrent non-interactive execution.

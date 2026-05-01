@@ -21,24 +21,25 @@ Manage these keys in `.gemini/.agents-mode.yaml`:
 - `preferExternalReviewer`
 - `externalProvider`
 - `externalPriorityProfile`
+- `reserveResolver`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalModelMode`
-- `externalClaudeApiMode`
 
 Gemini-line rules:
 
 - `externalProvider: auto` resolves through the active named priority profile, not a Gemini-line default provider
 - `externalPriorityProfile` defaults to `balanced`
+- `reserveResolver` binds symbolic `reserve` to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`
 - `balanced` is the ordinary shipped production profile and keeps `auto` routing on `codex | claude`
 - explicit providers are `codex`, `claude`, `gemini`, and `qwen`
 - `externalProvider: gemini` is allowed only as an explicit self-provider override for a manual example or compatibility run
 - `externalProvider: qwen` is allowed only as an explicit native example or compatibility run
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved production provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile on the production provider paths
-- `externalClaudeApiMode` matters only when provider resolves to Claude
+- `reserve` matters only when an advisory/review profile order reaches that symbolic supplemental candidate and is bound through `reserveResolver`
 - Gemini is `WEAK MODEL / NOT RECOMMENDED`; shipped and repo-local production `auto` profiles must keep Gemini and Qwen out of provider-order lists
 - same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce
-- preserve unknown keys and keep the three new profile/count keys in expanded multi-key form rather than collapsing them into a consultant-only shape
+- preserve unknown keys and keep `reserveResolver` plus the profile/count keys in expanded multi-key form rather than collapsing them into a consultant-only shape
 - `parallelMode` is the general helper fan-out rule across internal and external lanes
 - `externalOpinionCounts` is lane-specific; when a lane asks for more than one opinion, the lead may invoke the matching external skill repeatedly and aggregate fail closed on top of `parallelMode`
 

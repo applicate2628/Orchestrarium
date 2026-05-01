@@ -340,10 +340,15 @@ grep -Fq 'It does not cap how many same-provider brigade items may run in parall
 grep -Fq 'externalProvider: qwen' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "init-project should document explicit qwen provider override"
 grep -Fq 'externalProvider: gemini' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "init-project should document explicit gemini provider override"
 grep -Fq 'shipped production `auto` routing stays `codex | claude`' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "init-project should preserve the production auto-routing contract"
-grep -Fq 'Shipped production `auto` profiles stay on `codex | claude` only.' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should preserve the production auto-routing contract"
+grep -Fq 'Shipped production `auto` provider families stay on `codex | claude`' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should preserve the production auto-routing contract"
 
 if [[ "$MODE" == "source" && -f "$ROOT/docs/agents-mode-reference.md" ]]; then
   grep -Fq '## Canonical maintenance' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should define canonical maintenance"
+  grep -Fq '`power-mode` | hardest-task maximum result' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document power-mode preset"
+  grep -Fq '`power-mode` (hardest-task maximum result)' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "Qwen init-project should expose power-mode preset"
+  for lane in review.security review.ui-visual-correctness; do
+    grep -Fq "$lane: 2" "$PACK_ROOT/skills/init-project/SKILL.md" || fail "Qwen init-project correctness-first/power-mode presets raise $lane"
+  done
   grep -Fq 'Read-time normalization preserves the effective values of known keys' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document read-time normalization semantics"
   grep -Fq 'WEAK MODEL / NOT RECOMMENDED' "$ROOT/references-qwen/subagent-operating-model.md" || fail "references-qwen should mark Qwen as a not recommended example-only integration"
   grep -Fq '## Shared core now owns' "$ROOT/references-qwen/subagent-operating-model.md" || fail "references-qwen should include shared-core ownership parity with Gemini"
@@ -374,10 +379,18 @@ if [[ "$MODE" == "source" && -f "$ROOT/docs/agents-mode-reference.md" ]]; then
   grep -Fq 'Pressing Enter selects the default production install' "$ROOT/INSTALL.md" || fail "INSTALL.md should document the Codex/Claude default root install"
   grep -Fq '.agents-mode.yaml' "$ROOT/INSTALL.md" || fail "INSTALL.md default project result should include provider overlay files"
   [[ -f "$ROOT/shared/agents-mode.defaults.yaml" ]] || fail "shared agents-mode defaults exemplar should exist"
-  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.performance-architecture review.visual; do
-    grep -Fq "    $lane: [claude, codex, claude-secret]" "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should keep claude-secret last on $lane"
+  ! grep -Fq 'externalClaudeApiMode' "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should not keep retired externalClaudeApiMode"
+  grep -Fq 'reserveResolver: claude-sonnet' "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should define reserveResolver default"
+  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.security review.performance-architecture review.ui-visual-correctness; do
+    expected="    $lane: [claude, codex, reserve]"
+    case "$lane" in
+      review.performance-architecture|review.ui-visual-correctness)
+        expected="    $lane: [codex, claude, reserve]"
+        ;;
+    esac
+    grep -Fq "$expected" "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should keep reserve last on $lane"
   done
-  ! grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*(claude-secret|gemini|qwen)' "$ROOT/shared/agents-mode.defaults.yaml" >/dev/null || fail "shared defaults should keep worker lanes off claude-secret/Gemini/Qwen"
+  ! grep -E '^[[:space:]]{4}(design|worker)\.[^:]+: \[[^]]*(reserve|gemini|qwen)' "$ROOT/shared/agents-mode.defaults.yaml" >/dev/null || fail "shared defaults should keep design/worker lanes off reserve/Gemini/Qwen"
   [[ ! -e "$ROOT/src.qwen/agents-mode.defaults.yaml" ]] || fail "src.qwen/agents-mode.defaults.yaml should not exist in the monorepo"
 fi
 

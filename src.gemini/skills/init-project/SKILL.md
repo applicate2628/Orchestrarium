@@ -30,33 +30,36 @@ It must not replace Gemini's official runtime config in:
 
 Presets are init-time shortcuts only. They expand into canonical `agents-mode` keys. The preset name is NOT persisted in the file.
 
-| Key | `default` (safe-init) | `absolute-balance` (everyday center) | `external-aggressive` (aggressive external use) | `correctness-first` (no-time-limit correctness) | `max-speed` (speed-first) |
-|---|---|---|---|---|---|
-| `consultantMode` | `disabled` | `internal` | `external` | `external` | `disabled` |
-| `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `delegationMode` | `manual` | `auto` | `force` | `force` | `auto` |
-| `parallelMode` | `auto` | `auto` | `force` | `auto` | `force` |
-| `mcpMode` | `auto` | `auto` | `auto` | `force` | `auto` |
-| `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
-| `preferExternalReviewer` | `false` | `true` | `true` | `true` | `false` |
-| `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` |
-| `externalPriorityProfiles` | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is |
-| `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review lanes `2`, others `1` | all `1` |
-| `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
-| `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
-| `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `runtime-default` |
+| Key | `default` (safe-init) | `absolute-balance` (everyday center) | `external-aggressive` (aggressive external use) | `correctness-first` (no-time-limit correctness) | `power-mode` (hardest-task maximum result) | `max-speed` (speed-first) |
+|---|---|---|---|---|---|---|
+| `consultantMode` | `disabled` | `internal` | `external` | `external` | `external` | `disabled` |
+| `delegationMode` | `manual` | `auto` | `force` | `force` | `force` | `auto` |
+| `parallelMode` | `auto` | `auto` | `force` | `auto` | `force` | `force` |
+| `mcpMode` | `auto` | `auto` | `auto` | `force` | `force` | `auto` |
+| `preferExternalWorker` | `false` | `false` | `true` | `true` | `true` | `false` |
+| `preferExternalReviewer` | `false` | `true` | `true` | `true` | `true` | `false` |
+| `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` | `auto` |
+| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` |
+| `reserveResolver` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` |
+| `externalPriorityProfiles` | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is |
+| `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review lanes `2`, others `1` | advisory+review lanes `2`, others `1` | all `1` |
+| `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
 
-`correctness-first` lane-specific opinion counts:
+`correctness-first` and `power-mode` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
 - `advisory.design-adr: 2`
 - `review.pre-pr: 2`
+- `review.security: 2`
 - `review.performance-architecture: 2`
+- `review.ui-visual-correctness: 2`
 - all other lanes: `1`
 
 Routing conventions (not persisted as keys):
 - **same-host fast-path**: under `external-aggressive` and `max-speed`, when neutral isolation is not required, allow per-invocation explicit self-provider override. Keep the stored file canonical; this is a routing rule, not a persisted key.
 - **overflow means spill, not serialize**: under `external-aggressive`, internal slot saturation pushes independent eligible lanes into `$external-worker`, `$external-reviewer`, or `$external-brigade` by default.
+- **power-mode means hardest-task maximum useful result**: combine `correctness-first` validation density with `external-aggressive` fan-out, but keep neutral workdirs and production-only `auto` routing so the extra power does not become a hidden project-state or example-provider shortcut.
 
 ## Steps
 
@@ -81,7 +84,7 @@ Routing conventions (not persisted as keys):
    - If that document is not present in the installed runtime, rely on this skill's canonical schema and rules below instead of inventing extra Gemini-only keys.
 
 4. **Select a preset (optional).**
-    - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, or `max-speed`.
+    - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `power-mode`, or `max-speed`.
     - If the user picks a preset, apply its full key expansion from the table above as the starting values.
     - After applying a preset, ask whether to write that preset as-is or fine-tune individual keys first.
     - If the user says `use the preset`, `preset only`, `apply as-is`, or otherwise declines manual tweaking, skip the key-by-key overlay walkthrough and carry the preset-expanded values straight to confirmation.
@@ -92,7 +95,6 @@ Routing conventions (not persisted as keys):
    - Run this step only when the user started from `custom`, skipped preset selection, or explicitly asked to fine-tune after selecting a preset.
    - Walk through these keys one at a time:
      - `consultantMode`
-     - `externalClaudeApiMode`
      - `delegationMode`
      - `parallelMode`
      - `mcpMode`
@@ -100,6 +102,7 @@ Routing conventions (not persisted as keys):
      - `preferExternalReviewer`
      - `externalProvider`
      - `externalPriorityProfile`
+     - `reserveResolver`
      - `externalPriorityProfiles`
      - `externalOpinionCounts`
      - `externalCodexWorkdirMode`
@@ -107,7 +110,6 @@ Routing conventions (not persisted as keys):
      - `externalModelMode`
    - Use existing values when present, the preset-expanded value if one was selected, or otherwise default to:
      - `consultantMode: disabled`
-     - `externalClaudeApiMode: auto`
      - `delegationMode: manual`
      - `parallelMode: auto`
      - `mcpMode: auto`
@@ -115,7 +117,8 @@ Routing conventions (not persisted as keys):
      - `preferExternalReviewer: false`
      - `externalProvider: auto`  (shared-universe default; shipped production profiles stay on `codex | claude`; explicit `gemini` / `qwen` remain example-only)
      - `externalPriorityProfile: balanced`
-     - `externalPriorityProfiles.balanced`: current shared production matrix over `codex | claude`
+     - `reserveResolver: claude-sonnet`
+     - `externalPriorityProfiles.balanced`: current shared production matrix over `codex | claude` plus advisory/review-only `reserve`
      - `externalOpinionCounts`: `1` for ordinary lanes unless a repo-local policy explicitly asks for more
      - `externalCodexWorkdirMode: neutral`
      - `externalClaudeWorkdirMode: neutral`
@@ -136,7 +139,6 @@ Routing conventions (not persisted as keys):
 
    ```yaml
    consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-   externalClaudeApiMode: {value}  # controls advisory/review-only claude-secret candidate: disabled | auto | force; default: auto
    delegationMode: {value}  # allowed: manual | auto | force; default: manual
    parallelMode: {value}  # allowed: manual | auto | force; default: auto
    mcpMode: {value}  # allowed: auto | force; default: auto
@@ -144,31 +146,34 @@ Routing conventions (not persisted as keys):
    preferExternalReviewer: {value}  # allowed: false | true; default: false
    externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
    externalPriorityProfile: {value}  # allowed: balanced | <repo-local production profile>; default: balanced
+   reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
    externalPriorityProfiles:
      balanced:
-       advisory.repo-understanding: [claude, codex]
-       advisory.design-adr: [claude, codex]
-       review.pre-pr: [claude, codex]
-       review.performance-architecture: [claude, codex]
+       advisory.repo-understanding: [claude, codex, reserve]
+       advisory.design-adr: [claude, codex, reserve]
+       design.ui-ux-structure: [codex, claude]
+       worker.reasoning-constraints: [claude, codex]
        worker.default-implementation: [codex, claude]
-       worker.systems-performance-implementation: [codex, claude]
-       worker.long-autonomous: [claude, codex]
-       worker.ui-structural-modernization: [codex, claude]
-       worker.ui-surgical-patch-cleanup: [codex, claude]
-       worker.visual-icon-decorative: [codex, claude]
-       review.visual: [claude, codex]
+       worker.systems-performance-implementation: [claude, codex]
+       worker.ui-implementation: [claude, codex]
+       worker.visual-graphics-visualization: [claude, codex]
+       review.pre-pr: [claude, codex, reserve]
+       review.security: [claude, codex, reserve]
+       review.performance-architecture: [codex, claude, reserve]
+       review.ui-visual-correctness: [codex, claude, reserve]
    externalOpinionCounts:
      advisory.repo-understanding: 1
      advisory.design-adr: 1
-     review.pre-pr: 1
-     review.performance-architecture: 1
+     design.ui-ux-structure: 1
+     worker.reasoning-constraints: 1
      worker.default-implementation: 1
      worker.systems-performance-implementation: 1
-     worker.long-autonomous: 1
-     worker.ui-structural-modernization: 1
-     worker.ui-surgical-patch-cleanup: 1
-     worker.visual-icon-decorative: 1
-     review.visual: 1
+     worker.ui-implementation: 1
+     worker.visual-graphics-visualization: 1
+     review.pre-pr: 1
+     review.security: 1
+     review.performance-architecture: 1
+     review.ui-visual-correctness: 1
    externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
@@ -189,3 +194,13 @@ Routing conventions (not persisted as keys):
 - Any read that drives a decision should prefer local `.gemini/.agents-mode.yaml`, then local legacy `.gemini/.agents-mode`, then global `~/.gemini/.agents-mode.yaml`, then global legacy `~/.gemini/.agents-mode`; normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 - Gemini is `WEAK MODEL / NOT RECOMMENDED` on this line. If the user asks for `externalProvider: gemini`, accept it only as an explicit self-provider override for a manual example or compatibility run; ordinary `auto` routing must still avoid same-provider self-bounce.
 - If the user asks for `externalProvider: qwen`, treat it as the same kind of manual example or compatibility run and keep it out of shipped or repo-local production profiles.
+
+## Terms and Abbreviations
+
+- `agents-mode`: Orchestrarium operator configuration overlay for delegation, external provider routing, MCP use, and parallelism.
+- `reserve`: symbolic supplemental read-only candidate for advisory/review lanes only; it is separate from primary providers and not valid for worker or mutating routes.
+- `reserveResolver`: scalar `agents-mode` key that binds symbolic `reserve` to a concrete read-only resolver such as `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`.
+- `Gemini`: Google Gemini provider line; here it is explicit example-only and `WEAK MODEL / NOT RECOMMENDED`.
+- `MCP`: Model Context Protocol; protocol for exposing tools and resources to agent runtimes.
+- `Qwen`: Qwen provider line; here it is explicit example-only and `WEAK MODEL / NOT RECOMMENDED`.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.

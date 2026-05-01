@@ -123,7 +123,7 @@ Fact-first note:
 
 Consultant exception:
 - `$consultant` returns the same first four sections, but ends with `5. Advisory status: NON-BLOCKING` and `6. Continuation prompt: <ready-to-send second prompt that begins with a direct imperative to continue and names the next concrete action>`.
-- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.agents-mode.yaml` must preserve any existing `consultantMode`, `externalClaudeApiMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalModelMode`, and `externalClaudeProfile` values.
+- The shared dispatch contract lives in `external-dispatch.md`; writes to `.agents/.agents-mode.yaml` must preserve any existing `consultantMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalModelMode`, and `externalClaudeProfile` values, while dropping retired canonical keys during normalization.
 - If the selected external consultant path is unavailable or fails, the lead must report that honestly and reroute; do not auto-downgrade into an internal consultant. An internal consultant remains valid only when `consultantMode: internal` was selected explicitly before dispatch. `consultantMode: disabled` waives consultant closeout instead of leaving a hidden blocker, and any explicitly requested or repo-policy-required consultant sweep must follow the selected consultant mode honestly.
 
 ## Shared external dispatch contract
@@ -133,9 +133,9 @@ Use `external-dispatch.md` when the routing decision prefers or explicitly selec
 - The canonical config file is `.agents/.agents-mode.yaml`.
 - Read and normalize `.agents/.agents-mode.yaml` before trusting its flags. If the local canonical file is absent, continue resolving the effective Codex overlay in this order: local legacy `.agents/.agents-mode`, global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`. Comment-free, partial, or older-layout files are valid legacy input, not valid runtime output.
 - Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope, do not recreate any legacy file, and do not synthesize a local override on read alone.
-- The extended schema contains `consultantMode`, `externalClaudeApiMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalModelMode`, and an optional `externalClaudeProfile` used for Codex-line Claude CLI profile selection.
+- The extended schema contains `consultantMode`, `delegationMode`, `parallelMode`, `mcpMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalModelMode`, and an optional `externalClaudeProfile` used for Codex-line Claude CLI profile selection.
 - `consultantMode` governs `$consultant` behavior only. Allowed values: `external | internal | disabled`; default: `disabled`.
-- `externalClaudeApiMode` governs whether the supplemental `claude-secret` candidate is available in advisory/review profile orders. Allowed values: `disabled | auto | force`; default: `auto`.
+- `reserve` is a symbolic supplemental read-only candidate that may appear only in advisory/review profile orders after primary `claude`/`codex`.
 - `parallelMode` governs the general orchestrator fan-out rule across internal and external helper lanes. Allowed values: `manual | auto | force`; default: `auto`.
 - The preference flags govern whether eligible implement or review/QA slots route to the external adapters by default.
 - The assigned role in the external handoff is a provenance/routing label, not a restriction on universality.
@@ -144,9 +144,9 @@ Use `external-dispatch.md` when the routing decision prefers or explicitly selec
 - If the external CLI is unavailable, the role is disabled at the role level and the orchestrator may reroute to another eligible internal specialist.
 - `$external-worker` and `$external-reviewer` are direct external launch routes, not internal specialist subagents. Do not satisfy these roles by spawning an internal helper/agent host that then relays to another CLI.
 - Any spawned internal subagent remains internal even if its prompt says to act as Gemini, Qwen, Claude, or Codex. Provider-labeled internal delegation does not satisfy an external adapter route.
-- Wherever Codex is the resolved external provider, honor `externalModelMode` first. Under `runtime-default`, leave Codex on its runtime default model/profile. Under `pinned-top-pro`, start on `gpt-5.4 --reasoning-effort xhigh`; only `worker.long-autonomous` or another explicitly fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path. Do not silently downgrade below that floor.
-- Wherever an advisory or review profile order resolves to `claude-secret`, `externalClaudeApiMode` governs whether that repo-local secret-backed Claude wrapper candidate is available. It is independent of the primary `claude` candidate and is not a retry, fallback, or transport swap for a failed primary Claude run.
-- Treat fallback pools asymmetrically: `gpt-5.3-codex-spark` is a bounded mechanical overflow path only, while `claude-secret` is a weaker supplemental advisory/review candidate that may appear only after primary `claude`/`codex` in eligible profile orders.
+- Wherever Codex is the resolved external provider, honor `externalModelMode` first. Under `runtime-default`, leave Codex on its runtime default model/profile. Under `pinned-top-pro`, start on `gpt-5.4 --reasoning-effort xhigh`; only an explicitly configured repo-local fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path. Do not silently downgrade below that floor.
+- Wherever an advisory or review profile order resolves to `reserve`, bind it through `reserveResolver` and record the concrete execution path. It is independent of the primary `claude` candidate and is not a retry, fallback, or transport swap for a failed primary Claude run.
+- Treat fallback pools asymmetrically: `gpt-5.3-codex-spark` is a bounded mechanical overflow path only, while `reserve` is a symbolic supplemental advisory/review candidate that may appear only after primary `claude`/`codex` in eligible profile orders.
 - `externalProvider: auto` resolves through the active production priority profile, then applies explicit-only self-provider exclusion and CLI availability. Example-only providers such as Gemini and Qwen stay explicit-only and must not appear in shipped `auto` profiles.
 - `parallelMode` is the general rule for whether independent helper lanes should be parallelized by judgment at all. External fan-out follows that rule instead of defining a separate global concurrency model.
 - Independent external adapters may run in parallel when their scopes are disjoint, `parallelMode` permits ordinary parallel fan-out, and provider runtimes support concurrent non-interactive execution. If native internal slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
@@ -606,3 +606,11 @@ Ask these before advancing:
 6. Is an independent reviewer or human gate still required?
 7. Is the blast radius still inside the approved change surface?
 8. Is any admitted-scope obligation still open even though one sub-batch is finished?
+
+## Terms and Abbreviations
+
+- `BLOCKED`: workflow state for a real missing dependency, prerequisite, or unavailable route.
+- `CLI`: Command-Line Interface; a provider or tool invoked from a shell.
+- `REVISE`: workflow state meaning the artifact must return to the same role for bounded correction.
+- `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
+- `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.

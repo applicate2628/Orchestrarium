@@ -191,14 +191,23 @@ check_normalizer_strips_example_auto_providers() {
   target="$tmpdir/.agents-mode.yaml"
   cat > "$target" <<'EOF'
 externalProvider: auto
+externalClaudeApiMode: force
 externalPriorityProfile: custom-demo
+reserveResolver: wrapper:tools/reserve-review.ps1
 externalPriorityProfiles:
   custom-demo:
-    advisory.repo-understanding: [claude, codex, claude-secret, gemini, qwen]
-    review.visual: [claude, codex, claude-secret, gemini]
-    worker.default-implementation: [claude-secret, claude, gemini, qwen, codex]
-    worker.secret-only: [claude-secret, gemini, qwen]
-externalOpinionCounts: {}
+    advisory.repo-understanding: [claude, codex, reserve, gemini, qwen]
+    advisory.design-adr: [claude-secret, codex, claude]
+    advisory.legacy-secret-only: [claude-secret]
+    review.security: [reserve, claude, codex]
+    review.ui-visual-correctness: [claude, codex, reserve, gemini]
+    design.ui-ux-structure: [reserve, codex, gemini, claude, qwen]
+    worker.default-implementation: [reserve, claude, gemini, qwen, codex]
+    worker.ui-structural-modernization: [codex, claude]
+    review.visual: [claude, codex, reserve]
+    worker.secret-only: [reserve, gemini, qwen]
+externalOpinionCounts:
+  review.visual: 2
 EOF
 
   if "$python_cmd" "$REPO_ROOT/scripts/normalize-agents-mode.py" \
@@ -206,12 +215,63 @@ EOF
     --target "$target" \
     --provider shared >/dev/null 2>&1 &&
     grep -Fq "  custom-demo:" "$target" &&
-    grep -Fq "    advisory.repo-understanding: [claude, codex, claude-secret]" "$target" &&
-    grep -Fq "    review.visual: [claude, codex, claude-secret]" "$target" &&
+    grep -Fq "    advisory.repo-understanding: [claude, codex, reserve]" "$target" &&
+    grep -Fq "    advisory.design-adr: [codex, claude, reserve]" "$target" &&
+    grep -Fq "    advisory.legacy-secret-only: [reserve]" "$target" &&
+    grep -Fq "    review.security: [claude, codex, reserve]" "$target" &&
+    grep -Fq "    review.ui-visual-correctness: [claude, codex, reserve]" "$target" &&
+    grep -Fq "    design.ui-ux-structure: [codex, claude]" "$target" &&
     grep -Fq "    worker.default-implementation: [claude, codex]" "$target" &&
+    grep -Fq "reserveResolver: wrapper:tools/reserve-review.ps1" "$target" &&
+    ! grep -Fq "externalClaudeApiMode" "$target" &&
     ! grep -Fq "worker.secret-only" "$target" &&
+    ! grep -Fq "worker.ui-structural-modernization" "$target" &&
+    ! grep -Fq "review.visual" "$target" &&
     ! grep -E '^[[:space:]]{4}.*: \[[^]]*(gemini|qwen)' "$target" >/dev/null &&
-    ! grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*claude-secret' "$target" >/dev/null; then
+    ! grep -E '^[[:space:]]{4}(design|worker)\.[^:]+: \[[^]]*reserve' "$target" >/dev/null; then
+    :
+  else
+    fail "$label"
+    rm -rf "$tmpdir"
+    return
+  fi
+
+  target="$tmpdir/.agents-mode-disabled.yaml"
+  cat > "$target" <<'EOF'
+externalProvider: auto
+reserveResolver: disabled
+EOF
+
+  if "$python_cmd" "$REPO_ROOT/scripts/normalize-agents-mode.py" \
+    --template "$REPO_ROOT/shared/agents-mode.defaults.yaml" \
+    --target "$target" \
+    --provider shared >/dev/null 2>&1 &&
+    grep -Fq "reserveResolver: disabled" "$target" &&
+    grep -Fq "    advisory.repo-understanding: [claude, codex]" "$target" &&
+    grep -Fq "    review.ui-visual-correctness: [codex, claude]" "$target" &&
+    ! grep -E '^[[:space:]]{4}.*: \[[^]]*reserve' "$target" >/dev/null; then
+    :
+  else
+    fail "$label"
+    rm -rf "$tmpdir"
+    return
+  fi
+
+  target="$tmpdir/.agents-mode-legacy-disabled.yaml"
+  cat > "$target" <<'EOF'
+externalProvider: auto
+externalClaudeApiMode: disabled
+EOF
+
+  if "$python_cmd" "$REPO_ROOT/scripts/normalize-agents-mode.py" \
+    --template "$REPO_ROOT/shared/agents-mode.defaults.yaml" \
+    --target "$target" \
+    --provider shared >/dev/null 2>&1 &&
+    grep -Fq "reserveResolver: disabled" "$target" &&
+    grep -Fq "    advisory.repo-understanding: [claude, codex]" "$target" &&
+    grep -Fq "    review.ui-visual-correctness: [codex, claude]" "$target" &&
+    ! grep -E '^[[:space:]]{4}.*: \[[^]]*reserve' "$target" >/dev/null &&
+    ! grep -Fq "externalClaudeApiMode" "$target"; then
     pass "$label"
   else
     fail "$label"
@@ -219,7 +279,7 @@ EOF
   rm -rf "$tmpdir"
 }
 
-check_shared_defaults_claude_secret_policy() {
+check_shared_defaults_reserve_policy() {
   local label="$1"
   if [[ $DEV_REPO -ne 1 ]]; then
     warn "$label (dev repo defaults unavailable in installed layout)"
@@ -232,19 +292,34 @@ check_shared_defaults_claude_secret_policy() {
     return
   fi
 
-  local lane
-  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.performance-architecture review.visual; do
-    if ! grep -Fq "    $lane: [claude, codex, claude-secret]" "$defaults"; then
-      fail "$label ($lane missing claude-secret as last advisory/review candidate)"
+  if grep -Fq "externalClaudeApiMode" "$defaults"; then
+    fail "$label (retired externalClaudeApiMode should not be in shared defaults)"
+    return
+  fi
+  if ! grep -Fq "reserveResolver: claude-sonnet" "$defaults"; then
+    fail "$label (shared defaults should define reserveResolver default)"
+    return
+  fi
+
+  local lane expected
+  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.security review.performance-architecture review.ui-visual-correctness; do
+    expected="    $lane: [claude, codex, reserve]"
+    case "$lane" in
+      review.performance-architecture|review.ui-visual-correctness)
+        expected="    $lane: [codex, claude, reserve]"
+        ;;
+    esac
+    if ! grep -Fq "$expected" "$defaults"; then
+      fail "$label ($lane missing reserve as last advisory/review candidate)"
       return
     fi
   done
 
-  if grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*(claude-secret|gemini|qwen)' "$defaults" >/dev/null; then
-    fail "$label (worker lane contains forbidden provider)"
+  if grep -E '^[[:space:]]{4}(design|worker)\.[^:]+: \[[^]]*(reserve|gemini|qwen)' "$defaults" >/dev/null; then
+    fail "$label (design/worker lane contains forbidden provider)"
     return
   fi
-  if grep -E '^[[:space:]]{4}(advisory|review|worker)\.[^:]+: \[[^]]*(gemini|qwen)' "$defaults" >/dev/null; then
+  if grep -E '^[[:space:]]{4}(advisory|design|review|worker)\.[^:]+: \[[^]]*(gemini|qwen)' "$defaults" >/dev/null; then
     fail "$label (Gemini/Qwen appear in shipped production profile)"
     return
   fi
@@ -510,7 +585,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CLAUDE_REF_DIR/subagent-operating-model.md" 120 \
     "Claude addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "3901809876c178947ce1903527b5175447bf64a735d3fe3ea35526e73e7b001b" \
+    "1c065730f1a9f383bffba5d0884002f73ab6f36ffe6838ad97cfb89da5d4c46d" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "f3b58ded2c928e4ad138e3ff966c75480b2f869c56c02bba8aafb4cbfe622cf6" \
@@ -818,6 +893,14 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "INSTALL.md documents the Codex/Claude default root install"
   check_contains "$REPO_ROOT/INSTALL.md" ".agents-mode.yaml" \
     "INSTALL.md default project result includes provider overlay files"
+  check_contains "$REPO_ROOT/docs/agents-mode-reference.md" '`power-mode` | hardest-task maximum result' \
+    "agents-mode reference documents power-mode preset"
+  check_contains "$REPO_ROOT/src.claude/commands/agents-init-project.md" '`power-mode` (hardest-task maximum result)' \
+    "Claude init-project exposes power-mode preset"
+  for lane in review.security review.ui-visual-correctness; do
+    check_contains "$REPO_ROOT/src.claude/commands/agents-init-project.md" "$lane: 2" \
+      "Claude init-project correctness-first/power-mode presets raise $lane"
+  done
   check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "## Canonical maintenance" \
     "agents-mode reference defines canonical maintenance"
   check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "Read-time normalization preserves the effective values of known keys" \
@@ -827,10 +910,10 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "Substantive task prompts are file-based by default" \
     "agents-mode reference documents file-based external CLI prompts"
   check_normalizer_strips_example_auto_providers \
-    "agents-mode normalizer strips Gemini/Qwen and worker claude-secret from custom auto profiles"
+    "agents-mode normalizer strips Gemini/Qwen and keeps reserve last or absent in custom auto profiles"
   check_file "$REPO_ROOT/shared/agents-mode.defaults.yaml" "shared/agents-mode.defaults.yaml"
-  check_shared_defaults_claude_secret_policy \
-    "shared agents-mode defaults keep claude-secret advisory/review-only"
+  check_shared_defaults_reserve_policy \
+    "shared agents-mode defaults keep reserve advisory/review-only"
   check_not_exists "$REPO_ROOT/src.claude/agents-mode.defaults.yaml" \
     "src.claude/agents-mode.defaults.yaml removed from the monorepo"
 fi

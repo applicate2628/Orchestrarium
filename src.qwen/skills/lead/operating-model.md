@@ -41,7 +41,7 @@ Canonical provider semantics:
 | Key | Meaning |
 |---|---|
 | `consultantMode` | consultant behavior toggle for Qwen-line routing |
-| `externalClaudeApiMode` | controls the supplemental `claude-secret` candidate for `advisory.*` and `review.*` profile orders only; never a primary-Claude retry, worker transport, or editing path |
+| `reserve` | symbolic supplemental read-only candidate for `advisory.*` and `review.*` profile orders only; considered after primary `claude`/`codex`; never a primary-Claude retry, worker transport, or editing path |
 | `parallelMode` | general helper parallelism rule across internal and external lanes |
 | `externalProvider: auto` | resolve by the active named priority profile and then apply the self-provider filter; shipped production profiles stay on `codex | claude` only |
 | `externalProvider: codex` | explicit Codex CLI path |
