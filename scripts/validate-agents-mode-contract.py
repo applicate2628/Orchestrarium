@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -310,6 +311,167 @@ def validate_init_expansion(
         )
 
 
+def validate_init_canonical_shape(
+    root: Path,
+    schema_data: dict[str, Any],
+    provider: str,
+    path: Path,
+) -> None:
+    full_path = root / path
+    yaml_lines = extract_canonical_yaml_shape(full_path)
+    actual_keys = top_level_yaml_keys(yaml_lines)
+    expected_keys = expected_canonical_shape_keys(schema_data, provider)
+    if actual_keys != expected_keys:
+        raise ContractError(
+            f"{full_path} canonical shape keys drifted:\n"
+            f"  expected: {expected_keys}\n"
+            f"  actual:   {actual_keys}"
+        )
+
+    profiles_block = yaml_block_for_key(yaml_lines, "externalPriorityProfiles")
+    if len(profiles_block) > 1:
+        actual_profiles = parse_yaml_profile_block(profiles_block)
+        if actual_profiles != schema_data["priorityProfiles"]:
+            raise ContractError(
+                f"{full_path} canonical shape externalPriorityProfiles drifted"
+            )
+
+    counts_block = yaml_block_for_key(yaml_lines, "externalOpinionCounts")
+    if len(counts_block) > 1:
+        actual_counts = parse_yaml_count_block(counts_block)
+        expected_counts = {
+            lane: int(value)
+            for lane, value in schema_data["externalOpinionCounts"].items()
+        }
+        if actual_counts != expected_counts:
+            raise ContractError(
+                f"{full_path} canonical shape externalOpinionCounts drifted"
+            )
+
+
+def expected_canonical_shape_keys(
+    schema_data: dict[str, Any],
+    provider: str,
+) -> list[str]:
+    keys: list[str] = []
+    for scalar in schema_data["scalarKeys"]:
+        providers = scalar.get("providers")
+        if providers and provider not in providers:
+            continue
+        name = scalar["name"]
+        keys.append(name)
+        if name == "reserveResolver":
+            keys.extend(["externalPriorityProfiles", "externalOpinionCounts"])
+    return keys
+
+
+def extract_canonical_yaml_shape(path: Path) -> list[str]:
+    lines = path.read_text(encoding="utf-8").splitlines()
+    marker_index = None
+    for index, line in enumerate(lines):
+        if "Use this canonical" in line:
+            marker_index = index
+            break
+    if marker_index is None:
+        raise ContractError(f"{path} missing canonical shape marker")
+
+    start = None
+    for index in range(marker_index + 1, len(lines)):
+        if lines[index].strip() == "```yaml":
+            start = index + 1
+            break
+    if start is None:
+        raise ContractError(f"{path} missing canonical shape YAML block")
+
+    for index in range(start, len(lines)):
+        if lines[index].strip() == "```":
+            block = "\n".join(lines[start:index])
+            return textwrap.dedent(block).splitlines()
+    raise ContractError(f"{path} canonical shape YAML block is unterminated")
+
+
+def top_level_yaml_keys(lines: list[str]) -> list[str]:
+    keys: list[str] = []
+    for line in lines:
+        if line.startswith(" ") or not line.strip():
+            continue
+        match = re.match(r"^([A-Za-z][A-Za-z0-9]*):", line)
+        if match:
+            keys.append(match.group(1))
+    return keys
+
+
+def yaml_block_for_key(lines: list[str], key: str) -> list[str]:
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith(f"{key}:"):
+            start = index
+            break
+    if start is None:
+        raise ContractError(f"canonical shape missing {key}")
+
+    result = [lines[start]]
+    for line in lines[start + 1 :]:
+        if line and not line.startswith(" "):
+            break
+        result.append(line)
+    return result
+
+
+def parse_yaml_profile_block(lines: list[str]) -> dict[str, dict[str, list[str]]]:
+    profiles: dict[str, dict[str, list[str]]] = {}
+    current_profile: str | None = None
+    profile_re = re.compile(r"^ {2}([^:#][^:]*):")
+    lane_re = re.compile(r"^ {4}([^:#][^:]*):\s*\[([^]]*)\]")
+    for line in lines[1:]:
+        profile_match = profile_re.match(line)
+        if profile_match and not line.startswith("    "):
+            current_profile = profile_match.group(1).strip()
+            profiles[current_profile] = {}
+            continue
+        lane_match = lane_re.match(line)
+        if lane_match and current_profile:
+            providers = [
+                provider.strip()
+                for provider in lane_match.group(2).split(",")
+                if provider.strip()
+            ]
+            profiles[current_profile][lane_match.group(1).strip()] = providers
+    return profiles
+
+
+def parse_yaml_count_block(lines: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    count_re = re.compile(r"^ {2}([^:#][^:]*):\s*([0-9]+)")
+    for line in lines[1:]:
+        count_match = count_re.match(line)
+        if count_match:
+            counts[count_match.group(1).strip()] = int(count_match.group(2))
+    return counts
+
+
+def validate_raised_count_bullets(
+    root: Path,
+    presets_data: dict[str, Any],
+    path: Path,
+) -> None:
+    full_path = root / path
+    text = full_path.read_text(encoding="utf-8")
+    marker = "`correctness-first` and `power-mode` lane-specific opinion counts:"
+    if marker not in text:
+        raise ContractError(f"{full_path} missing raised opinion-count list")
+    for lane in presets_data["raisedOpinionCountLanes"]:
+        expected = f"- `{lane}: 2`"
+        if expected not in text:
+            raise ContractError(
+                f"{full_path} raised opinion-count list missing {expected!r}"
+            )
+    if "- all other lanes: `1`" not in text:
+        raise ContractError(
+            f"{full_path} raised opinion-count list missing all-other-lanes rule"
+        )
+
+
 def role_from_preset_name(preset: str, role: str) -> str:
     # The init tables use compact column labels that intentionally differ from
     # the operator-facing role wording for a few presets.
@@ -481,8 +643,11 @@ def main() -> int:
         validate_defaults(root, schema_data)
         validate_available_presets(root, presets_data)
         validate_reference_expansion(root, presets_data)
+        validate_raised_count_bullets(root, presets_data, PRESET_DOCS)
         for provider, path in INIT_SURFACES.items():
             validate_init_expansion(root, presets_data, provider, path)
+            validate_init_canonical_shape(root, schema_data, provider, path)
+            validate_raised_count_bullets(root, presets_data, path)
     except ContractError as exc:
         errors.append(str(exc))
 
