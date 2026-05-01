@@ -1,0 +1,19 @@
+id: V3L02
+surface_id: V3-W1
+pack_id: V3P01
+role_class: design
+artifact_type: ADR decision package
+modality_family: architecture decision
+rf12_line: L02
+role_trigger: ordinary-source-ranked-adr
+target_separator: tie-probe
+allowed_change_surface:
+  - candidate/adr-decision.json
+  - candidate/adr-decision.md
+must_not_touch:
+  - inputs/**
+  - oracle/**
+  - verifiers/**
+  - candidate/README.md
+score_profile: "source-ranked ADR, compatibility, rollback, non-claim discipline"
+overlay_flags: []

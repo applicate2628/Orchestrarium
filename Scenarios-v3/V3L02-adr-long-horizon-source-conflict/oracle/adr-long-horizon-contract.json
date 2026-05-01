@@ -1,0 +1,302 @@
+{
+  "schema_version": "scenarios-v3-oracle-2026-05-01",
+  "scenario_id": "V3L02",
+  "root_name": "V3L02-adr-long-horizon-source-conflict",
+  "rf12_line": "L02",
+  "role_trigger": "ordinary-source-ranked-adr",
+  "target_separator": "tie-probe",
+  "score": {
+    "max_points": 100,
+    "pass_threshold": 85,
+    "binary_pass_requires": [
+      "required_files",
+      "decision_choice",
+      "source_authority_order",
+      "accepted_claims",
+      "rejected_options",
+      "compatibility_plan",
+      "rollback_plan",
+      "non_claims",
+      "gate_decision",
+      "markdown_summary"
+    ]
+  },
+  "required_top_level_entries": [
+    "README.md",
+    "scenario.yaml",
+    "inputs",
+    "candidate",
+    "oracle",
+    "verifiers"
+  ],
+  "scenario_yaml_fields": [
+    "id",
+    "surface_id",
+    "pack_id",
+    "role_class",
+    "artifact_type",
+    "modality_family",
+    "rf12_line",
+    "role_trigger",
+    "target_separator",
+    "allowed_change_surface",
+    "must_not_touch",
+    "score_profile",
+    "overlay_flags"
+  ],
+  "required_metadata": {
+    "id": "V3L02",
+    "surface_id": "V3-W1",
+    "pack_id": "V3P01",
+    "role_class": "design",
+    "artifact_type": "ADR decision package",
+    "modality_family": "architecture decision",
+    "rf12_line": "L02",
+    "role_trigger": "ordinary-source-ranked-adr",
+    "target_separator": "tie-probe",
+    "allowed_change_surface": [
+      "candidate/adr-decision.json",
+      "candidate/adr-decision.md"
+    ],
+    "must_not_touch": [
+      "inputs/**",
+      "oracle/**",
+      "verifiers/**",
+      "candidate/README.md"
+    ],
+    "score_profile": "source-ranked ADR, compatibility, rollback, non-claim discipline",
+    "overlay_flags": []
+  },
+  "required_bundle_files": [
+    "inputs/README.md",
+    "inputs/task.md",
+    "inputs/current-code-contract.md",
+    "inputs/runtime-evidence.md",
+    "inputs/downstream-constraints.md",
+    "inputs/proposal-packet.md",
+    "inputs/stale-adr.md",
+    "candidate/README.md",
+    "candidate/adr-decision.json",
+    "candidate/adr-decision.md",
+    "oracle/README.md",
+    "oracle/adr-long-horizon-contract.json",
+    "oracle/scoring-anchors.md",
+    "verifiers/README.md",
+    "verifiers/check_adr_long_horizon.py"
+  ],
+  "required_artifacts": [
+    {
+      "path": "candidate/adr-decision.json",
+      "format": "json",
+      "owner": "candidate"
+    },
+    {
+      "path": "candidate/adr-decision.md",
+      "format": "markdown",
+      "owner": "candidate"
+    }
+  ],
+  "decision": {
+    "choice": "boundary-owned-compatibility-adapter",
+    "status": "ADOPT"
+  },
+  "source_authority_order": [
+    "SRC-CODE-API",
+    "SRC-RUNTIME-TRACE",
+    "SRC-DOWNSTREAM-TEST",
+    "SRC-PROPOSAL",
+    "SRC-STALE-ADR"
+  ],
+  "accepted_claims": [
+    {
+      "id": "AC-1",
+      "summary_terms": [
+        "PlanBridge owns translation",
+        "producer boundary"
+      ],
+      "required_sources": [
+        "SRC-CODE-API"
+      ]
+    },
+    {
+      "id": "AC-2",
+      "summary_terms": [
+        "legacy_plan_id",
+        "seat-sync"
+      ],
+      "required_sources": [
+        "SRC-CODE-API",
+        "SRC-RUNTIME-TRACE",
+        "SRC-DOWNSTREAM-TEST"
+      ]
+    },
+    {
+      "id": "AC-3",
+      "summary_terms": [
+        "idempotency_key",
+        "consumer shim"
+      ],
+      "required_sources": [
+        "SRC-CODE-API",
+        "SRC-RUNTIME-TRACE"
+      ]
+    },
+    {
+      "id": "AC-4",
+      "summary_terms": [
+        "v1",
+        "90 days"
+      ],
+      "required_sources": [
+        "SRC-DOWNSTREAM-TEST"
+      ]
+    }
+  ],
+  "rejected_options": [
+    {
+      "option": "A",
+      "reason_terms": [
+        "global entitlement bus",
+        "audit correlation"
+      ],
+      "required_sources": [
+        "SRC-DOWNSTREAM-TEST",
+        "SRC-PROPOSAL"
+      ]
+    },
+    {
+      "option": "C",
+      "reason_terms": [
+        "consumer-side shims",
+        "idempotency"
+      ],
+      "required_sources": [
+        "SRC-RUNTIME-TRACE",
+        "SRC-CODE-API"
+      ]
+    },
+    {
+      "option": "D",
+      "reason_terms": [
+        "direct schema switch",
+        "legacy_plan_id"
+      ],
+      "required_sources": [
+        "SRC-RUNTIME-TRACE",
+        "SRC-DOWNSTREAM-TEST"
+      ]
+    },
+    {
+      "option": "STALE-ADR-021",
+      "reason_terms": [
+        "stale",
+        "14 days"
+      ],
+      "required_sources": [
+        "SRC-STALE-ADR",
+        "SRC-RUNTIME-TRACE"
+      ]
+    }
+  ],
+  "compatibility_plan": [
+    {
+      "id": "CP-1",
+      "required_terms": [
+        "PlanEnvelopeV1",
+        "PlanEnvelopeV2",
+        "adapter"
+      ]
+    },
+    {
+      "id": "CP-2",
+      "required_terms": [
+        "legacy_plan_id",
+        "90 days"
+      ]
+    },
+    {
+      "id": "CP-3",
+      "required_terms": [
+        "idempotency_key",
+        "producer"
+      ]
+    },
+    {
+      "id": "CP-4",
+      "required_terms": [
+        "DST-1",
+        "DST-2",
+        "DST-3",
+        "DST-4"
+      ]
+    }
+  ],
+  "rollback_plan": [
+    {
+      "id": "RB-1",
+      "required_terms": [
+        "disable v2",
+        "preserve v1"
+      ]
+    },
+    {
+      "id": "RB-2",
+      "required_terms": [
+        "idempotency",
+        "audit correlation"
+      ]
+    }
+  ],
+  "non_claims": [
+    {
+      "id": "NC-1",
+      "required_terms": [
+        "seat-sync",
+        "completed",
+        "not claim"
+      ]
+    },
+    {
+      "id": "NC-2",
+      "required_terms": [
+        "global entitlement bus",
+        "approved",
+        "not claim"
+      ]
+    },
+    {
+      "id": "NC-3",
+      "required_terms": [
+        "14 days",
+        "current",
+        "not claim"
+      ]
+    }
+  ],
+  "gate_decision": "PASS",
+  "markdown_required_sections": [
+    "# V3L02 ADR Decision",
+    "## Decision",
+    "## Source Authority",
+    "## Accepted Claims",
+    "## Rejected Options",
+    "## Compatibility Plan",
+    "## Rollback Plan",
+    "## Non-Claim Ledger",
+    "## Gate Decision"
+  ],
+  "forbidden_claims": [
+    "global entitlement bus is approved",
+    "drop legacy_plan_id after 14 days",
+    "consumer shims are safe",
+    "seat-sync migration is complete",
+    "replace PlanBridge ownership",
+    "direct schema switch is safe"
+  ],
+  "not_run_classification": [
+    "quota",
+    "timeout_without_summary",
+    "route_failure",
+    "wrapper_failure"
+  ]
+}

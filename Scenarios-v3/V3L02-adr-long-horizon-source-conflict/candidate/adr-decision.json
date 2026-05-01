@@ -1,0 +1,15 @@
+{
+  "scenario_id": "V3L02",
+  "decision": {
+    "choice": "",
+    "status": ""
+  },
+  "source_authority_order": [],
+  "accepted_claims": [],
+  "rejected_options": [],
+  "compatibility_plan": [],
+  "rollback_plan": [],
+  "non_claims": [],
+  "gate_decision": "",
+  "notes": ""
+}

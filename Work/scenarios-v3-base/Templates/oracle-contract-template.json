@@ -1,0 +1,32 @@
+{
+  "schema_version": "scenarios-v3-oracle-template-2026-05-01",
+  "scenario_id": "V3Lxx-short-name",
+  "rf12_line": "Lxx",
+  "role_trigger": "ordinary|staged|compact|visual|scientific",
+  "target_separator": "X1>X3|X3>X1|tie-probe",
+  "score": {
+    "max_points": 100,
+    "pass_threshold": 85,
+    "binary_pass_requires": []
+  },
+  "required_artifacts": [
+    {
+      "path": "candidate/output.json",
+      "format": "json",
+      "owner": "candidate"
+    }
+  ],
+  "source_bindings": [],
+  "decision_tuples": [],
+  "forbidden_claims": [],
+  "budget_gates": {
+    "worker_output_bytes_max": null,
+    "runtime_seconds_max": null
+  },
+  "not_run_classification": [
+    "quota",
+    "timeout_without_summary",
+    "route_failure",
+    "wrapper_failure"
+  ]
+}

@@ -1,0 +1,172 @@
+{
+  "version": "scenarios-v3-base-2026-05-01",
+  "status": "v3-w1-run-binary-tie",
+  "source_basis": "embedded pre-v3 RF12 line map plus Work/scenarios-v3-base/Planning/s2-to-v3-migration-map-2026-05-01.md",
+  "active_discovery_policy": {
+    "scenarios_v3_top_level": "admitted v3 scenario roots only",
+    "base_admitted_roots": 0,
+    "current_admitted_roots": 1,
+    "registry_counts_as_root": false,
+    "copy_forward_policy": "do not copy Scenarios-v2 roots forward unless a root is redesigned and admitted as v3"
+  },
+  "row_scope": {
+    "primary_rows": ["X1", "X3"],
+    "final_comparator_rows": ["X4"],
+    "calibration_rows": ["X2"],
+    "deprecated_rows": ["X5", "X6"]
+  },
+  "id_namespace": {
+    "preferred_root_prefix": "V3L",
+    "example": "V3L02-adr-long-horizon-source-conflict",
+    "rule": "include the RF12 line id and the separator axis in the root name"
+  },
+  "admitted_roots": [
+    {
+      "id": "V3L02",
+      "root": "V3L02-adr-long-horizon-source-conflict",
+      "line": "L02",
+      "status": "RUN / BINARY TIE",
+      "target_separator": "ordinary source-ranked ADR",
+      "model_runs": {
+        "X1": "PASS",
+        "X3": "PASS",
+        "X2": "scoreable FAIL calibration",
+        "X4": "NOT-RUN / disabled",
+        "X5": "DEPRECATED",
+        "X6": "DEPRECATED"
+      },
+      "bundle_shape": "PASS",
+      "reference_probe": "PASS",
+      "admission_evidence": "Work/scenarios-v3-base/Evidence/v3l02-admission-2026-05-01.json"
+    }
+  ],
+  "line_targets": [
+    {
+      "line": "L00",
+      "name": "owner/control",
+      "s2_score_slots": ["N17", "N67", "N40", "N56"],
+      "s2_read": "split",
+      "v3_disposition": "anchor",
+      "priority": "P1",
+      "separator_axis": ["staged reentry favors X1", "compact owner packet favors X3"]
+    },
+    {
+      "line": "L01",
+      "name": "advisory.repo-understanding",
+      "s2_score_slots": ["S03", "S04", "S06"],
+      "s2_read": "near-tie",
+      "v3_disposition": "low-priority retest only if new source-binding pattern appears",
+      "priority": "P2",
+      "separator_axis": ["semantic source ranking ties", "compact source handoff may favor X3"]
+    },
+    {
+      "line": "L02",
+      "name": "advisory.design-adr",
+      "s2_score_slots": ["S05", "S07", "S09"],
+      "s2_read": "near-tie",
+      "v3_disposition": "run completed; binary tie remains",
+      "priority": "P0",
+      "next_candidate": "V3L02-adr-long-horizon-source-conflict",
+      "separator_axis": ["ordinary source-ranked ADR remains unresolved", "staged ADR/review gate already routes to X1 through L11"]
+    },
+    {
+      "line": "L03",
+      "name": "design.ui-ux-structure",
+      "s2_score_slots": ["S08", "N01", "N02"],
+      "s2_read": "split by execution shape",
+      "v3_disposition": "anchor after N126; do not mine more ordinary variants first",
+      "priority": "P1",
+      "separator_axis": ["staged UX reentry favors X1", "mixed visual/trace state has X3 scored edge", "text-only trace/state ties"]
+    },
+    {
+      "line": "L04",
+      "name": "worker.reasoning-constraints",
+      "s2_score_slots": ["N22", "N32", "N58"],
+      "s2_read": "split",
+      "v3_disposition": "candidate after L02 if scientific/runtime routing needs stronger proof",
+      "priority": "P1",
+      "separator_axis": ["science correctness near-tie", "runtime and compactness favor X3 when scored"]
+    },
+    {
+      "line": "L05",
+      "name": "worker.default-implementation",
+      "s2_score_slots": ["N35", "N36", "N57"],
+      "s2_read": "split",
+      "v3_disposition": "anchor",
+      "priority": "P1",
+      "separator_axis": ["staged API/interface migration favors X1", "compact single-shot budget favors X3"]
+    },
+    {
+      "line": "L06",
+      "name": "systems/performance-worker",
+      "s2_score_slots": ["N19", "N39", "N85"],
+      "s2_read": "split",
+      "v3_disposition": "anchor",
+      "priority": "P1",
+      "separator_axis": ["staged systems recovery favors X1", "compact performance hot path favors X3"]
+    },
+    {
+      "line": "L07",
+      "name": "worker.ui-implementation",
+      "s2_score_slots": ["N25", "N47", "N60"],
+      "s2_read": "X3",
+      "v3_disposition": "anchor; revisit only for staged UI implementation",
+      "priority": "P2",
+      "separator_axis": ["compact UI state/render favors X3"]
+    },
+    {
+      "line": "L08",
+      "name": "worker.visual/graphics",
+      "s2_score_slots": ["S22", "N110", "N48"],
+      "s2_read": "X3",
+      "v3_disposition": "anchor; keep pixel-localization pattern",
+      "priority": "P1",
+      "separator_axis": ["original-pixel localization favors X3", "compact visual patch favors X3"]
+    },
+    {
+      "line": "L09",
+      "name": "review.pre-pr",
+      "s2_score_slots": ["S25", "N03", "N04"],
+      "s2_read": "near-tie",
+      "v3_disposition": "anchor as tuple-exact review tie; budgeted review uses X3",
+      "priority": "P2",
+      "separator_axis": ["tuple-exact review ties", "compact low-noise review favors X3 when budgeted"]
+    },
+    {
+      "line": "L10",
+      "name": "review.security",
+      "s2_score_slots": ["S27", "N05", "N06"],
+      "s2_read": "near-tie",
+      "v3_disposition": "anchor; compact security-budget evidence stays routing overlay",
+      "priority": "P2",
+      "separator_axis": ["tuple-exact security ties", "compact security budget favors X3"]
+    },
+    {
+      "line": "L11",
+      "name": "review.performance-architecture",
+      "s2_score_slots": ["S28", "N07", "N37"],
+      "s2_read": "X1",
+      "v3_disposition": "anchor",
+      "priority": "P1",
+      "separator_axis": ["staged source-bound review favors X1"]
+    },
+    {
+      "line": "L12",
+      "name": "review.ui-visual-correctness",
+      "s2_score_slots": ["N80", "N98", "N105"],
+      "s2_read": "X1",
+      "v3_disposition": "anchor",
+      "priority": "P1",
+      "separator_axis": ["calibrated screenshot grounding and visual diff review favor X1"]
+    }
+  ],
+  "first_wave": {
+    "name": "V3-W1",
+    "target_line": "L02",
+    "goal": "separate ordinary/source-ranked ADR work without relying on staged-review triggers or output-budget-only routing",
+    "proposed_root": "V3L02-adr-long-horizon-source-conflict",
+    "admitted_root": "V3L02-adr-long-horizon-source-conflict",
+    "status": "RUN / BINARY TIE",
+    "run_status": "X1 PASS; X3 PASS; X2 scoreable FAIL calibration; X4 NOT-RUN disabled"
+  }
+}

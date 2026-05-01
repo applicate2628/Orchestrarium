@@ -1,0 +1,121 @@
+{
+  "date": "2026-05-01",
+  "owner": "$knowledge-archivist",
+  "status": "RUN_BINARY_TIE",
+  "scenario": {
+    "id": "V3L02",
+    "root": "Scenarios-v3/V3L02-adr-long-horizon-source-conflict",
+    "rf12_line": "L02 advisory.design-adr",
+    "wave": "V3-W1",
+    "target_separator": "ordinary source-ranked ADR",
+    "role": "$architect"
+  },
+  "model_runs": {
+    "X1": "PASS",
+    "X3": "PASS",
+    "X4": "NOT-RUN / disabled",
+    "X2": "scoreable FAIL calibration",
+    "X5": "DEPRECATED",
+    "X6": "DEPRECATED"
+  },
+  "run_results": [
+    {
+      "row": "X1",
+      "model": "gpt-5.5",
+      "batch": "v3l02-x1-x3-2026-05-01",
+      "run_root": ".scratch/v2-cohort-runs/2026-05-01_03-52-31-X1-v3l02-x1-x3-2026-05-01/V3L02",
+      "wrapper_exit_code": 0,
+      "runtime_failure_reason": null,
+      "scoreability": "scoreable",
+      "verification": "PASS",
+      "changed_paths": [
+        "candidate/adr-decision.json",
+        "candidate/adr-decision.md"
+      ],
+      "auxiliary_changed_paths": [],
+      "candidate_bytes": {
+        "adr-decision.json": 8194,
+        "adr-decision.md": 6544
+      }
+    },
+    {
+      "row": "X3",
+      "model": "opus 4.7max",
+      "batch": "v3l02-x1-x3-2026-05-01",
+      "run_root": ".scratch/v2-cohort-runs/2026-05-01_03-52-31-X3-v3l02-x1-x3-2026-05-01/V3L02",
+      "wrapper_exit_code": 0,
+      "runtime_failure_reason": null,
+      "scoreability": "scoreable",
+      "verification": "PASS",
+      "changed_paths": [
+        "candidate/adr-decision.json",
+        "candidate/adr-decision.md"
+      ],
+      "auxiliary_changed_paths": [],
+      "candidate_bytes": {
+        "adr-decision.json": 5311,
+        "adr-decision.md": 5395
+      }
+    },
+    {
+      "row": "X2",
+      "model": "gpt-5.3-codex-spark",
+      "batch": "v3l02-x2-calibration-2026-05-01",
+      "run_root": ".scratch/v2-cohort-runs/2026-05-01_04-04-01-X2-v3l02-x2-calibration-2026-05-01/V3L02",
+      "wrapper_exit_code": 0,
+      "runtime_failure_reason": null,
+      "scoreability": "scoreable calibration",
+      "verification": "FAIL",
+      "changed_paths": [],
+      "auxiliary_changed_paths": [],
+      "failure_summary": "left starter candidate unchanged; verifier reported missing decision, source authority order, accepted claims, rejected options, compatibility plan, rollback plan, non-claim ledger, gate decision, and required Markdown sections"
+    }
+  ],
+  "primary_verdict": {
+    "rows": ["X1", "X3"],
+    "result": "binary tie remains",
+    "reason": "both primary rows passed the exact completed-candidate verifier"
+  },
+  "checks": [
+    {
+      "name": "oracle and registry JSON parse",
+      "command": "python -c \"import json; json.load(open('Scenarios-v3/_registry/scenarios-v3-base.json', encoding='utf-8')); json.load(open('Scenarios-v3/V3L02-adr-long-horizon-source-conflict/oracle/adr-long-horizon-contract.json', encoding='utf-8'))\"",
+      "result": "PASS"
+    },
+    {
+      "name": "bundle shape",
+      "command": "python Scenarios-v3/V3L02-adr-long-horizon-source-conflict/verifiers/check_adr_long_horizon.py --bundle-shape-only",
+      "result": "PASS"
+    },
+    {
+      "name": "reference probe",
+      "command": "python Scenarios-v3/V3L02-adr-long-horizon-source-conflict/verifiers/check_adr_long_horizon.py --candidate-root .scratch/verifier-probes/2026-05-01-v3l02-reference/candidate",
+      "result": "PASS"
+    },
+    {
+      "name": "git diff whitespace",
+      "command": "git diff --check",
+      "result": "PASS"
+    },
+    {
+      "name": "mcp orphan cleanup",
+      "command": "mcp-free",
+      "result": "PASS",
+      "note": "STATS kill: none"
+    }
+  ],
+  "runner_context": {
+    "model_launches_performed": true,
+    "run_summaries": [
+      ".scratch/v2-cohort-runs/2026-05-01_03-52-31-X1-v3l02-x1-x3-2026-05-01/V3L02/summary.json",
+      ".scratch/v2-cohort-runs/2026-05-01_03-52-31-X3-v3l02-x1-x3-2026-05-01/V3L02/summary.json",
+      ".scratch/v2-cohort-runs/2026-05-01_04-04-01-X2-v3l02-x2-calibration-2026-05-01/V3L02/summary.json"
+    ],
+    "note": "Run summaries are local ignored runtime evidence; committed evidence stores distilled results only."
+  },
+  "notes": [
+    "Starter candidate remains intentionally incomplete; X2 is a model failure because wrapperExitCode was 0, runtimeFailureReason was null, and the model left the starter candidate unchanged.",
+    "Reference candidate lives under ignored .scratch for verifier admission only.",
+    "V3L02 does not separate X1 and X3; stronger L02 design is still needed."
+  ]
+}
