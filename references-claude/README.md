@@ -1,8 +1,10 @@
 # Claude References
 
-This directory is the canonical provider-local reference tree for the standalone Claude branch.
+This directory is the provider-local Claude reference tree for the Orchestrarium monorepo.
 
-It follows the common provider-local reference layout used across the four branches:
+`shared/references/` holds the canonical shared design cores. `references-claude/` keeps the Claude-specific addenda plus compatibility pointers that still need stable legacy paths.
+
+This tree follows the common provider-local reference layout used across the four branches:
 
 - `README.md`
 - `evidence-based-answer-pipeline.md`
@@ -12,6 +14,12 @@ It follows the common provider-local reference layout used across the four branc
 - `repository-task-memory.md`
 - `subagent-operating-model.md`
 - `workflow-strategy-comparison.md`
-- `ru/` translations for the diagram, periodic controls, publication safety, task memory, subagent operating model, and workflow strategy comparison; `evidence-based-answer-pipeline.md` is tracked here in English only for now
+- `ru/` translations for the diagram, periodic controls, publication safety, task memory, subagent operating model, and workflow strategy comparison
 
-These references are source-branch documentation only. They are not installed into target repositories.
+Use together with:
+
+- [../docs/README.md](../docs/README.md) for the common branch-level docs index
+- [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) for shared operator semantics when the Claude line matters
+- [../src.claude/README.md](../src.claude/README.md) for the Claude source tree
+
+Provider-backed external CLI prompt delivery inherits the shared file-based prompt rule; use the Claude dispatch docs for the exact Claude-line runtime contract.

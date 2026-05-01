@@ -1,39 +1,19 @@
 #!/usr/bin/env bash
-# Install Claudestrator skill-pack.
+# Install Claude Code pack.
 # Usage:
-#   bash install-claude.sh                  install into current repo (.claude/)
-#   bash install-claude.sh --global         install into ~/.claude/
-#   bash install-claude.sh --target DIR     install into DIR/.claude/ (or DIR if DIR ends with .claude)
+#   bash scripts/install-claude.sh                  install into current repo (.claude/)
+#   bash scripts/install-claude.sh --global         install into ~/.claude/
+#   bash scripts/install-claude.sh --target DIR     install into DIR/.claude/ (or DIR if DIR ends with .claude)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SOURCE="$SCRIPT_DIR/src.claude"
-DEFAULT_AGENTS_MODE_SOURCE="$SCRIPT_DIR/agents-mode.defaults.yaml"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SOURCE="$REPO_DIR/src.claude"
+DEFAULT_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 
 # Directories to install (order doesn't matter)
-DIRS=(agents skills)
+DIRS=(agents commands)
 OPTIONAL_DIRS=(memory)
-LEGACY_COMMANDS=(
-  agents-bugfix
-  agents-check-policies
-  agents-check-safety
-  agents-design
-  agents-help
-  agents-implement
-  agents-init-project
-  agents-perf
-  agents-policies
-  agents-qa-session
-  agents-refactor
-  agents-research
-  agents-resume
-  agents-review
-  agents-second-opinion
-  agents-security
-  agents-status
-  agents-test
-  agents-validate
-)
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
@@ -42,13 +22,13 @@ TARGET=""
 
 usage() {
   echo "Usage:"
-  echo "  bash install-claude.sh                          Install into current repo (.claude/)"
-  echo "  bash install-claude.sh --global                 Install into ~/.claude/"
-  echo "  bash install-claude.sh --target DIR             Install into DIR/.claude/"
-  echo "  bash install-claude.sh --force                  Skip deletion prompts"
-  echo "  bash install-claude.sh --dry-run                Print planned actions without changing files"
-  echo "  bash install-claude.sh --allow-unsafe-target    Override allowlist for custom target path"
-  echo "  bash install-claude.sh --help                   Show help"
+  echo "  bash scripts/install-claude.sh                          Install into current repo (.claude/)"
+  echo "  bash scripts/install-claude.sh --global                 Install into ~/.claude/"
+  echo "  bash scripts/install-claude.sh --target DIR             Install into DIR/.claude/"
+  echo "  bash scripts/install-claude.sh --force                  Skip deletion prompts"
+  echo "  bash scripts/install-claude.sh --dry-run                Print planned actions without changing files"
+  echo "  bash scripts/install-claude.sh --allow-unsafe-target    Override allowlist for custom target path"
+  echo "  bash scripts/install-claude.sh --help                   Show help"
   exit 1
 }
 
@@ -287,51 +267,10 @@ confirm_removal() {
 
 # Per-item install preserves user-added files — no destructive directory wipe needed.
 
-ensure_default_file() {
-  local src="$1" dst="$2" label="$3"
-
-  if [[ -f "$dst" ]]; then
-    echo "  Preserving existing $label..."
-    return
-  fi
-
-  echo "  Installing default $label..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    [dry-run] would create $dst"
-  else
-    cp "$src" "$dst"
-  fi
-}
-
-migrate_legacy_agents_mode_file() {
-  local legacy="$1" dst="$2" label="$3"
-
-  remove_dangling_symlink "$legacy" "legacy $label"
-  remove_dangling_symlink "$dst" "$label"
-
-  if [[ -f "$dst" ]]; then
-    if [[ -f "$legacy" ]]; then
-      echo "  Canonical $label already exists; leaving legacy file untouched: $legacy"
-    fi
-    return
-  fi
-
-  if [[ ! -f "$legacy" ]]; then
-    return
-  fi
-
-  echo "  Migrating legacy $label to $dst..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    [dry-run] would move $legacy -> $dst"
-  else
-    mv "$legacy" "$dst"
-  fi
-}
-
 prompt_install_mode() {
   if [ ! -t 0 ]; then
     echo "FAIL: No install target specified and not running interactively." >&2
-    echo "Use: bash install-claude.sh --global  or  bash install-claude.sh --target <path>" >&2
+    echo "Use: bash scripts/install-claude.sh --global  or  bash scripts/install-claude.sh --target <path>" >&2
     exit 1
   fi
 
@@ -448,10 +387,15 @@ else
   usage
 fi
 
+if [ "$MODE" = "global" ]; then
+  PROJECT_ROOT=""
+else
+  PROJECT_ROOT="$(dirname "$TARGET")"
+fi
 AGENTS_MODE_TARGET="$TARGET/.agents-mode.yaml"
-LEGACY_AGENTS_MODE_TARGET="$TARGET/.agents-mode.yaml"
+LEGACY_AGENTS_MODE_TARGET="$TARGET/.agents-mode"
 
-echo "=== Claudestrator Installer ==="
+echo "=== Claude Code Installer ==="
 echo "Source: $SOURCE"
 echo "Target: $TARGET"
 echo "agents-mode: $AGENTS_MODE_TARGET"
@@ -464,7 +408,7 @@ echo
 # Verify source
 if [[ ! -d "$SOURCE/agents" ]]; then
   echo "FAIL: Source directory $SOURCE/agents not found."
-  echo "Run this script from the Claudestrator repo root."
+  echo "Run this script from the Orchestrarium repo root."
   exit 1
 fi
 if [[ ! -f "$DEFAULT_AGENTS_MODE_SOURCE" ]]; then
@@ -481,53 +425,229 @@ if [[ ! -d "$TARGET" ]]; then
 fi
 
 # Per-item install: only replace pack items, preserve user-added files
-install_item() {
+items_equal() {
   local src="$1" dst="$2"
+  if [[ -d "$src" && -d "$dst" ]]; then
+    diff -qr "$src" "$dst" >/dev/null
+  elif [[ -f "$src" && -f "$dst" ]]; then
+    cmp -s "$src" "$dst"
+  else
+    return 1
+  fi
+}
+
+install_item() {
+  local src="$1" dst="$2" label="${3:-$(basename "$2")}"
   if [[ -e "$dst" ]]; then
     if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would replace $(basename "$dst")"
+      echo "    [dry-run] would replace $label"
+    elif items_equal "$src" "$dst"; then
+      echo "    OK  $label unchanged"
     else
       rm -rf "$dst"
       cp -r "$src" "$dst"
     fi
   else
     if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would install $(basename "$dst")"
+      echo "    [dry-run] would install $label"
     else
       cp -r "$src" "$dst"
     fi
   fi
 }
 
-cleanup_legacy_pack_commands() {
-  local commands_dir="$TARGET/commands"
+ensure_local_only_gitignore_entries() {
+  local project_root="$1"
+  local gitignore="$project_root/.gitignore"
+  local entries=("/.reports/" "/work-items/")
+  local missing=()
 
-  if [[ ! -d "$commands_dir" ]]; then
+  for entry in "${entries[@]}"; do
+    local alternate="${entry#/}"
+    if [[ -f "$gitignore" ]] && { grep -Fxq "$entry" "$gitignore" || grep -Fxq "$alternate" "$gitignore"; }; then
+      continue
+    fi
+    missing+=("$entry")
+  done
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    echo "  .gitignore: local-only entries already present"
     return
   fi
 
-  echo "  Cleaning up migrated pack-managed legacy commands..."
-  local name legacy_file
-  for name in "${LEGACY_COMMANDS[@]}"; do
-    legacy_file="$commands_dir/$name.md"
-    if [[ -f "$legacy_file" ]]; then
-      if [ "$DRY_RUN" -eq 1 ]; then
-        echo "    [dry-run] would remove legacy pack command commands/$name.md"
+  echo "  Ensuring .gitignore ignores local-only task-memory paths..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    for entry in "${missing[@]}"; do
+      if [[ -f "$gitignore" ]]; then
+        echo "    [dry-run] would append '$entry' to $gitignore"
       else
-        rm -f "$legacy_file"
-        echo "    removed commands/$name.md"
+        echo "    [dry-run] would create $gitignore with '$entry'"
       fi
-    fi
-  done
+    done
+    return
+  fi
 
-  if [[ -d "$commands_dir" && -z "$(find "$commands_dir" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+  if [[ ! -f "$gitignore" ]]; then
+    printf '%s\n' "${missing[@]}" > "$gitignore"
+  else
+    for entry in "${missing[@]}"; do
+      printf '\n%s\n' "$entry" >> "$gitignore"
+    done
+  fi
+}
+
+remove_dangling_symlink() {
+  local path="$1"
+  local label="$2"
+
+  if [[ -L "$path" && ! -e "$path" ]]; then
+    echo "  Removing dangling symlink for $label..."
     if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would remove empty commands/ directory"
+      echo "    [dry-run] would remove dangling symlink $path"
     else
-      rmdir "$commands_dir"
-      echo "    removed empty commands/ directory"
+      rm -f "$path"
     fi
   fi
+}
+
+resolve_python_command() {
+  if command -v python >/dev/null 2>&1; then
+    printf '%s' "python"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "python3"
+    return 0
+  fi
+  return 1
+}
+
+ensure_default_file() {
+  local src="$1" dst="$2" label="$3"
+
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    echo "  Preserving existing $label..."
+    return
+  fi
+
+  echo "  Installing default $label..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp "$src" "$dst"
+  fi
+}
+
+sync_agents_mode_file() {
+  local template="$1" dst="$2" label="$3"
+  local normalizer="$REPO_DIR/scripts/normalize-agents-mode.py"
+  local python_cmd=""
+
+  remove_dangling_symlink "$dst" "$label"
+  python_cmd="$(resolve_python_command || true)"
+
+  if [[ -n "$python_cmd" && -f "$normalizer" ]]; then
+    if [[ -f "$dst" ]]; then
+      echo "  Normalizing existing $label to current canonical format..."
+    else
+      echo "  Installing canonical $label..."
+    fi
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "    [dry-run] would normalize $dst"
+    else
+      "$python_cmd" "$normalizer" --template "$template" --target "$dst" --provider shared
+    fi
+    return
+  fi
+
+  if [[ -f "$dst" ]]; then
+    echo "FAIL: python or python3 is required to normalize existing $label at $dst" >&2
+    exit 1
+  fi
+
+  echo "  Installing canonical $label..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp "$template" "$dst"
+  fi
+}
+
+migrate_legacy_agents_mode_file() {
+  local legacy="$1" dst="$2" label="$3"
+
+  remove_dangling_symlink "$legacy" "legacy $label"
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    if [[ -f "$legacy" ]]; then
+      echo "  Canonical $label already exists; leaving legacy file untouched: $legacy"
+    fi
+    return
+  fi
+
+  if [[ ! -f "$legacy" ]]; then
+    return
+  fi
+
+  echo "  Migrating legacy $label to $dst..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would move $legacy -> $dst"
+  else
+    mv "$legacy" "$dst"
+  fi
+}
+
+collect_preserved_claude_imports() {
+  local file="$1"
+  awk '
+    BEGIN { started=0 }
+    /^@AGENTS\.md$|^# Claude Code Pack$|^# Claudestrator$/ { started=1 }
+    started==1 {
+      if ($0 ~ /^@/) {
+        if ($0 != "@AGENTS.md" && !seen[$0]++) print $0
+        next
+      }
+      if ($0 ~ /^[[:space:]]*$/) next
+      exit
+    }
+  ' "$file"
+}
+
+write_merged_claude_md() {
+  local existing="$1"
+  local src="$2"
+  local output="$3"
+  local pack_start="$4"
+  local imports_tmp tail_tmp
+
+  imports_tmp="$(mktemp)"
+  tail_tmp="$(mktemp)"
+  collect_preserved_claude_imports "$existing" > "$imports_tmp"
+
+  : > "$output"
+  if [ "$pack_start" -gt 1 ]; then
+    head -n $((pack_start - 1)) "$existing" >> "$output"
+  fi
+
+  if head -n 1 "$src" | grep -qx "@AGENTS.md"; then
+    printf '%s\n' "@AGENTS.md" >> "$output"
+    if [ -s "$imports_tmp" ]; then
+      cat "$imports_tmp" >> "$output"
+    fi
+    awk 'NR==1 { next } { if (!started && $0 ~ /^[[:space:]]*$/) next; started=1; print }' "$src" > "$tail_tmp"
+    if [ -s "$tail_tmp" ]; then
+      printf '\n' >> "$output"
+      cat "$tail_tmp" >> "$output"
+    fi
+  else
+    cat "$src" >> "$output"
+  fi
+
+  rm -f "$imports_tmp" "$tail_tmp"
 }
 
 # Count existing items and confirm reinstall
@@ -575,21 +695,16 @@ for dir in "${DIRS[@]}"; do
   for sub in "$src"/*/; do
     [[ -d "$sub" ]] || continue
     sub_name="$(basename "$sub")"
-    if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would replace $dir/$sub_name/"
-    else
-      rm -rf "$dst/$sub_name"
-      cp -r "$sub" "$dst/$sub_name"
-    fi
+    install_item "$sub" "$dst/$sub_name" "$dir/$sub_name/"
   done
 
-  # Copy individual files (e.g., agents/*.md)
+  # Copy individual files (e.g., agents/*.md, commands/*.md)
   pack_items=()
   for item in "$src"/*; do
     [[ -f "$item" ]] || continue
     item_name="$(basename "$item")"
     pack_items+=("$item_name")
-    install_item "$item" "$dst/$item_name"
+    install_item "$item" "$dst/$item_name" "$dir/$item_name"
   done
 
   # Report preserved user files
@@ -606,8 +721,6 @@ for dir in "${DIRS[@]}"; do
     fi
   done
 done
-
-cleanup_legacy_pack_commands
 
 # Optional dirs: copy if not present, don't overwrite
 for dir in "${OPTIONAL_DIRS[@]}"; do
@@ -629,36 +742,33 @@ done
 src_md="$SOURCE/CLAUDE.md"
 dst_md="$TARGET/CLAUDE.md"
 
+remove_dangling_symlink "$dst_md" "CLAUDE.md"
+
 if [[ -f "$dst_md" ]]; then
-  if grep -q "^@AGENTS.md" "$dst_md" 2>/dev/null || grep -q "^# Claudestrator" "$dst_md" 2>/dev/null; then
-    # Existing Claudestrator install — find where user content ends and pack content begins.
+  if grep -q "^@AGENTS.md" "$dst_md" 2>/dev/null || grep -q "^# Claudestrator" "$dst_md" 2>/dev/null || grep -q "^# Claude Code Pack" "$dst_md" 2>/dev/null; then
+    # Existing Claude Code or legacy Claudestrator install — find where user content ends and pack content begins.
     # User content (## Project policies, custom rules) lives AFTER the pack section.
-    # Pack section starts at @AGENTS.md or # Claudestrator (whichever comes first).
-    pack_start=$(grep -n "^@AGENTS.md\|^# Claudestrator" "$dst_md" | head -1 | cut -d: -f1)
+    # Pack section starts at @AGENTS.md, # Claude Code Pack, or legacy # Claudestrator (whichever comes first).
+    pack_start=$(grep -n "^@AGENTS.md\|^# Claude Code Pack\|^# Claudestrator" "$dst_md" | head -1 | cut -d: -f1)
     total_lines=$(wc -l < "$dst_md")
     # Everything before pack_start is user content (if any)
     head_lines=$((pack_start - 1))
-    echo "  CLAUDE.md: replacing Claudestrator section..."
+    echo "  CLAUDE.md: replacing Claude Code pack section..."
     if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would replace Claudestrator section in CLAUDE.md"
+      echo "    [dry-run] would replace Claude Code pack section in CLAUDE.md"
     else
-      if [ "$head_lines" -gt 0 ]; then
-        head -n "$head_lines" "$dst_md" > "$dst_md.tmp"
-        cat "$src_md" >> "$dst_md.tmp"
-        mv "$dst_md.tmp" "$dst_md"
-      else
-        cp "$src_md" "$dst_md"
-      fi
+      write_merged_claude_md "$dst_md" "$src_md" "$dst_md.tmp" "$pack_start"
+      mv "$dst_md.tmp" "$dst_md"
     fi
   elif grep -q "## Delegation rule" "$dst_md" 2>/dev/null; then
-    echo "  CLAUDE.md: full replace (has delegation rule but no Claudestrator header)..."
+    echo "  CLAUDE.md: full replace (has delegation rule but no recognized pack header)..."
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "    [dry-run] would replace CLAUDE.md"
     else
       cp "$src_md" "$dst_md"
     fi
   else
-    echo "  CLAUDE.md: prepending Claudestrator content..."
+    echo "  CLAUDE.md: prepending Claude Code pack content..."
     if [ "$DRY_RUN" -eq 1 ]; then
       echo "    [dry-run] would prepend CLAUDE.md"
     else
@@ -677,8 +787,10 @@ else
 fi
 
 # AGENTS.md: copy or replace shared governance
-src_agents="$SOURCE/AGENTS.shared.md"
+src_agents="$REPO_DIR/shared/AGENTS.shared.md"
 dst_agents="$TARGET/AGENTS.md"
+
+remove_dangling_symlink "$dst_agents" "AGENTS.md"
 
 if [[ -f "$src_agents" ]]; then
   if [[ -f "$dst_agents" ]]; then
@@ -709,8 +821,12 @@ if [[ -f "$src_agents" ]]; then
   fi
 fi
 
+if [ "$MODE" != "global" ]; then
+  ensure_local_only_gitignore_entries "$PROJECT_ROOT"
+fi
+
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
-ensure_default_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
@@ -799,7 +915,7 @@ if [[ $errors -gt 0 ]]; then
   echo "RESULT: FAIL ($errors errors)"
   exit 1
 else
-  echo "RESULT: OK — Claudestrator installed to $TARGET"
+  echo "RESULT: OK — Claude Code pack installed to $TARGET"
   echo ""
   echo "Next: restart Claude, then run /agents-init-project to review/update project policies and the installed default .claude/.agents-mode.yaml."
 fi

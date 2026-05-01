@@ -1,7 +1,7 @@
 # Operating Model Diagram
 
 This file provides a visual companion to [subagent-operating-model.md](subagent-operating-model.md).
-Strategy comparison companion: [workflow-strategy-comparison.md](workflow-strategy-comparison.md).
+Strategy comparison companion: [shared/references/workflow-strategy-comparison.md](../shared/references/workflow-strategy-comparison.md).
 
 ## 1. End-to-end operating flow
 
@@ -41,7 +41,7 @@ flowchart TB
 
 ## 3. Direct peer edges (optimizations)
 
-These edges complement hub-and-spoke. Lead remains orchestrating owner; direct edges require lead approval of the edge, scope, and artifact boundary.
+These edges complement hub-and-spoke. Lead remains orchestrating owner; direct edges require lead authorization.
 
 ```mermaid
 flowchart LR
@@ -102,7 +102,7 @@ flowchart TB
 | Situation | Strategy | Key roles |
 | --- | --- | --- |
 | What should enter delivery next? | Roadmap / Intake loop | `$product-manager`, `$product-analyst` |
-| Approved item needs execution | Delivery loop | `$lead` -> research -> design -> plan -> implement -> QA/review -> lead |
+| Approved item needs execution | Delivery loop | `$lead` -> research -> design -> plan -> implement -> QA/review |
 | Next decision blocked by missing facts | Fact-first routing | `$analyst`, `$product-analyst`, specialist evidence lane |
 | Domain risk can independently fail result | Risk-owner routing | Relevant constraint role + corresponding reviewer |
 | Admitted item changed mid-delivery | Re-intake loop | `$lead` -> `$product-manager` -> `$lead` |
@@ -129,7 +129,7 @@ flowchart TB
 Notes:
 
 - `knowledge-archivist` is cross-cutting hygiene, usually invoked outside the main feature phase.
-- `consultant` is advisory-only and never a required delivery gate.
+- `consultant` is advisory-only and never becomes a reviewer or approver; ordinary consultant use is optional, and a closeout consultant sweep should run only when explicitly requested or required by repo-local policy while `consultantMode` is enabled.
 
 ## 8. Claims chain
 
