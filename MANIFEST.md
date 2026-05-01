@@ -11,6 +11,7 @@ This file is the compact inventory of what the `benchmarks` branch currently pre
 | Area | Status | Meaning |
 |---|---|---|
 | `Archive/` | canonical | frozen admitted benchmark snapshots |
+| `Scenarios-v3/` | active discovery | admitted Scenarios-v3 roots and registry metadata |
 | `Work/` | mutable | workspace for the next upgraded benchmark pack |
 
 ## Current preserved package
@@ -27,6 +28,8 @@ This file is the compact inventory of what the `benchmarks` branch currently pre
 | `8` | `Work/next-upgraded-pack/Evidence/` | mutable work | future run evidence for the upgraded pack |
 | `9` | `Work/next-upgraded-pack/Checkpoints/` | mutable work | future interpretation and status layer |
 | `10` | `Work/next-upgraded-pack/Results-drafts/` | mutable work | draft result tables before future admission |
+| `11` | `Scenarios-v3/V3L02-adr-long-horizon-source-conflict/` | active discovery | first admitted v3 root; `binary tie remains` for `X1` vs `X3` |
+| `12` | `Work/scenarios-v3-base/` | mutable work | Scenarios-v3 planning, templates, evidence, and draft results |
 
 ## What counts as canonical now
 
@@ -35,6 +38,8 @@ This file is the compact inventory of what the `benchmarks` branch currently pre
 | frozen baseline package | `Archive/2026-04-16-first-baseline/` |
 | current full results | `Archive/2026-04-16-first-baseline/Results/full-results-2026-04-16.md` |
 | current short basis results | `Archive/2026-04-16-first-baseline/Results/short-results-x1-x5-2026-04-16.md` |
+| active v3 discovery | `Scenarios-v3/` |
+| active v3 result draft | `Work/scenarios-v3-base/Results-drafts/v3l02-results-2026-05-01.md` |
 | active mutable next-pack workspace | `Work/next-upgraded-pack/` |
 
 ## Model-version note
@@ -58,5 +63,11 @@ This file is the compact inventory of what the `benchmarks` branch currently pre
 | Rule | Meaning |
 |---|---|
 | use `Archive/` for admitted history | this is the frozen source of truth for the current baseline |
+| use `Scenarios-v3/` for admitted v3 roots | this is the active discovery root, not an archive |
 | use `Work/` for next-pack design and execution | future benchmark work must not mutate the archive |
 | keep salvage out of versioned package | cleanup leftovers may be kept locally, but they must not ship as committed archive content |
+
+## Terms and Abbreviations
+
+- `RF12`: role-fit scorecard over twelve routing lines plus one owner/control line.
+- `V3L02`: first admitted Scenarios-v3 root for `L02 advisory.design-adr`.

@@ -6,8 +6,9 @@ Status: `PASS`
 
 This branch is a dedicated benchmark archive and benchmark-planning workspace.
 
-Its job is to keep two top-level zones separate:
+Its job is to keep active discovery, archive, and work zones separate:
 
+- admitted Scenarios-v3 roots under `Scenarios-v3/`
 - immutable archived snapshots under `Archive/`
 - mutable future-work workspaces under `Work/`
 
@@ -17,6 +18,8 @@ Its job is to keep two top-level zones separate:
 |---|---|
 | `README.md` | human-facing entry point |
 | `AGENTS.md` | structure, document classes, and operating rules for this branch |
+| `Scenarios-v3/` | active discovery root for admitted Scenarios-v3 roots and registry metadata |
+| `Scenarios-v3/_registry/` | machine-readable v3 line, trigger, and admission metadata; not a score root |
 | `Archive/` | immutable archived benchmark snapshots |
 | `Archive/<snapshot>/Results/` | frozen result tables for one admitted snapshot |
 | `Archive/<snapshot>/Method/` | benchmark design, notation, governance, and policy docs for that snapshot |
@@ -47,6 +50,7 @@ Its job is to keep two top-level zones separate:
 
 | Rule | Meaning |
 |---|---|
+| keep scenario discovery clean | `Scenarios-v3/` may contain only admitted v3 roots plus `_registry/`; drafts and diagnostics stay in `Work/` until admitted |
 | separate archive from work | archive snapshots under `Archive/` must not be used as the mutable work area |
 | separate result from plan | if a document proposes future tests, it belongs in `Work/`, not in archived `Results/` |
 | separate checkpoint from result | if a document explains or synthesizes state, it belongs in archived `Checkpoints/`, not in `Results/` |
@@ -88,3 +92,8 @@ When publishing or restating benchmark results in this branch, prefer the compac
 ## Next-phase expectation
 
 The next benchmark phase should be designed inside `Work/<pack>/Planning/` first, then executed in that mutable workspace, and only after admitted evidence exists should it be archived as a new dated package under `Archive/`.
+
+## Terms and Abbreviations
+
+- `RF12`: role-fit scorecard over twelve routing lines plus one owner/control line.
+- `Scenarios-v3`: active benchmark discovery generation after the archived baseline.
