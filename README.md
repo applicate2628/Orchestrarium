@@ -118,32 +118,20 @@ Shipped production provider-order profiles:
 
 These are the persisted production `externalPriorityProfile` choices shipped from the root surfaces, not the init-time preset shortcuts. Example integrations may define their own provider-local examples, but root production profiles stay on Codex plus Claude provider families only. `reserve` may appear only as a supplemental read-only candidate after primary Claude and Codex on advisory/review lanes.
 
-| Profile | Lane | Priority |
+| Lane | Balanced priority | Quality-first priority |
 |---|---|---|
-| `balanced` | `advisory.repo-understanding` | `claude > codex > reserve` |
-|  | `advisory.design-adr` | `claude > codex > reserve` |
-|  | `design.ui-ux-structure` | `codex > claude` |
-|  | `worker.reasoning-constraints` | `claude > codex` |
-|  | `worker.default-implementation` | `codex > claude` |
-|  | `worker.systems-performance-implementation` | `claude > codex` |
-|  | `worker.ui-implementation` | `claude > codex` |
-|  | `worker.visual-graphics-visualization` | `claude > codex` |
-|  | `review.pre-pr` | `claude > codex > reserve` |
-|  | `review.security` | `claude > codex > reserve` |
-|  | `review.performance-architecture` | `codex > claude > reserve` |
-|  | `review.ui-visual-correctness` | `codex > claude > reserve` |
-| `quality-first` | `advisory.repo-understanding` | `codex > claude > reserve` |
-|  | `advisory.design-adr` | `codex > claude > reserve` |
-|  | `design.ui-ux-structure` | `codex > claude` |
-|  | `worker.reasoning-constraints` | `claude > codex` |
-|  | `worker.default-implementation` | `codex > claude` |
-|  | `worker.systems-performance-implementation` | `codex > claude` |
-|  | `worker.ui-implementation` | `claude > codex` |
-|  | `worker.visual-graphics-visualization` | `claude > codex` |
-|  | `review.pre-pr` | `codex > claude > reserve` |
-|  | `review.security` | `codex > claude > reserve` |
-|  | `review.performance-architecture` | `codex > claude > reserve` |
-|  | `review.ui-visual-correctness` | `codex > claude > reserve` |
+| `advisory.repo-understanding` | `claude > codex > reserve` | `codex > claude > reserve` |
+| `advisory.design-adr` | `claude > codex > reserve` | `codex > claude > reserve` |
+| `design.ui-ux-structure` | `codex > claude` | `codex > claude` |
+| `worker.reasoning-constraints` | `claude > codex` | `claude > codex` |
+| `worker.default-implementation` | `codex > claude` | `codex > claude` |
+| `worker.systems-performance-implementation` | `claude > codex` | `codex > claude` |
+| `worker.ui-implementation` | `claude > codex` | `claude > codex` |
+| `worker.visual-graphics-visualization` | `claude > codex` | `claude > codex` |
+| `review.pre-pr` | `claude > codex > reserve` | `codex > claude > reserve` |
+| `review.security` | `claude > codex > reserve` | `codex > claude > reserve` |
+| `review.performance-architecture` | `codex > claude > reserve` | `codex > claude > reserve` |
+| `review.ui-visual-correctness` | `codex > claude > reserve` | `codex > claude > reserve` |
 
 If a repo-local lane policy explicitly asks for consultant input at closeout, it should follow the configured `consultantMode`; `consultantMode: disabled` waives consultant closeout instead of blocking the batch. `parallelMode` is the general rule for whether any helper lanes are parallelized by judgment or only by explicit request, while `externalOpinionCounts` may still raise advisory or review lanes above `1` when the active policy wants multiple independent external opinions before advancing.
 
