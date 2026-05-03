@@ -16,7 +16,7 @@ if [[ -d "src.codex/skills" && -f "shared/AGENTS.shared.md" && -f "src.codex/AGE
   # Dev repo: assemble AGENTS.md from split source files for validation
   SKILLS_DIR="$(cd "src.codex/skills" && pwd -P)"
   SCRIPTS_DIR="$(cd "src.codex/skills/lead/scripts" && pwd -P)"
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)"
+  REPO_ROOT="$(pwd -P)"
   DEV_REPO=1
   AGENTS_FILE="$(mktemp)"
   {
