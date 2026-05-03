@@ -11,6 +11,13 @@ GATE_VALUES = {"PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "
 EXECUTION_ROLES = {"main", "lead", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade"}
 EVIDENCE_KINDS = {"command", "artifact", "visual", "review", "manual-check", "log"}
 RETURN_GATE_RE = re.compile(r"^RETURN\([a-z][a-z-]*\)$")
+MIN_LENGTHS = {
+    "runId": 8,
+    "workItem": 1,
+    "role": 1,
+    "startedAt": 10,
+    "updatedAt": 10,
+}
 ALLOWED_FIELDS = {
     "schemaVersion",
     "runId",
@@ -30,6 +37,7 @@ ALLOWED_FIELDS = {
     "updatedAt",
     "notes",
 }
+EVIDENCE_ALLOWED_FIELDS = {"kind", "ref", "result"}
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -93,6 +101,8 @@ def validate_evidence(evidence: object, run_id: object, errors: list[str], requi
         if not isinstance(entry, dict):
             fail(errors, f"{run_id}: evidence[{index}] must be an object")
             continue
+        for key in sorted(set(entry) - EVIDENCE_ALLOWED_FIELDS):
+            fail(errors, f"{run_id}: evidence[{index}] has unexpected field: {key}")
         if entry.get("kind") not in EVIDENCE_KINDS:
             fail(errors, f"{run_id}: evidence[{index}] has invalid kind {entry.get('kind')!r}")
         if not isinstance(entry.get("ref"), str) or not entry.get("ref", "").strip():
@@ -120,9 +130,12 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
 
     if event.get("schemaVersion") != 1:
         fail(errors, f"{run_id}: schemaVersion must be 1")
-    for key in ["workItem", "role", "startedAt", "updatedAt"]:
-        if not isinstance(event.get(key), str) or not event.get(key, "").strip():
+    for key, min_length in MIN_LENGTHS.items():
+        value = event.get(key)
+        if not isinstance(value, str) or not value.strip():
             fail(errors, f"{run_id}: {key} must be a non-empty string")
+        elif len(value) < min_length:
+            fail(errors, f"{run_id}: {key} must be at least {min_length} characters")
     for key in ["assignedRole", "provider", "model", "promptFile", "notes"]:
         if key in event and not isinstance(event.get(key), str):
             fail(errors, f"{run_id}: {key} must be a string")

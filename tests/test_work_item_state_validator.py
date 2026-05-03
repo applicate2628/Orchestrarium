@@ -6,6 +6,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VALIDATOR = ROOT / "scripts" / "validate-work-item-state.py"
+CONTRACT_CHECK = ROOT / "scripts" / "check-agent-run-ledger-contract.py"
 
 
 def write(path: Path, text: str) -> None:
@@ -16,6 +17,17 @@ def write(path: Path, text: str) -> None:
 def run_validator(work_item: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, str(VALIDATOR), "--work-item", str(work_item)],
+        cwd=ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+
+
+def run_contract_check() -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(CONTRACT_CHECK), "--root", str(ROOT)],
         cwd=ROOT,
         text=True,
         stdout=subprocess.PIPE,
@@ -95,6 +107,13 @@ def test_pass_ledger_with_artifact_and_evidence(tmp_path: Path) -> None:
     assert "RESULT: PASS" in result.stdout
 
 
+def test_schema_contract_check_exercises_validator_negative_cases() -> None:
+    result = run_contract_check()
+
+    assert result.returncode == 0, result.stdout
+    assert "RESULT: PASS" in result.stdout
+
+
 def test_pass_without_evidence_fails(tmp_path: Path) -> None:
     item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
     write(item / "status.md", valid_status())
@@ -130,6 +149,36 @@ def test_pass_evidence_entry_requires_kind_and_ref(tmp_path: Path) -> None:
     assert result.returncode == 1
     assert "invalid kind" in result.stdout
     assert "requires ref" in result.stdout
+
+
+def test_evidence_entry_rejects_unexpected_fields(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", valid_status())
+    write(item / "reviews" / "qa.md", "# QA\n\nGate: PASS\n")
+    evidence = [{"kind": "command", "ref": "pytest -q", "extra": "unexpected"}]
+    write(item / "agent-runs.jsonl", json.dumps(ledger_event(evidence=evidence)) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 1
+    assert "unexpected field" in result.stdout
+
+
+def test_required_string_min_lengths_match_schema(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", valid_status())
+    write(item / "reviews" / "qa.md", "# QA\n\nGate: PASS\n")
+    write(
+        item / "agent-runs.jsonl",
+        json.dumps(ledger_event(runId="x", startedAt="1", updatedAt="2")) + "\n",
+    )
+
+    result = run_validator(item)
+
+    assert result.returncode == 1
+    assert "runId must be at least 8 characters" in result.stdout
+    assert "startedAt must be at least 10 characters" in result.stdout
+    assert "updatedAt must be at least 10 characters" in result.stdout
 
 
 def test_return_gate_accepts_concrete_role(tmp_path: Path) -> None:

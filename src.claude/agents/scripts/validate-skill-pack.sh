@@ -91,6 +91,32 @@ check_file() {
   fi
 }
 
+check_agent_run_ledger_contract() {
+  local label="$1"
+  if [[ $DEV_REPO -ne 1 ]]; then
+    warn "$label (dev repo validator unavailable in installed layout)"
+    return
+  fi
+
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_cmd="python"
+  else
+    warn "$label (python unavailable)"
+    return
+  fi
+
+  local output
+  if output="$("$python_cmd" "$REPO_ROOT/scripts/check-agent-run-ledger-contract.py" --root "$REPO_ROOT" 2>&1)"; then
+    pass "$label"
+  else
+    printf '%s\n' "$output"
+    fail "$label"
+  fi
+}
+
 check_not_exists() {
   local path="$1"
   local label="$2"
@@ -438,6 +464,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "$SHARED_REF_DIR/workflow-strategy-comparison.md" \
     "$SHARED_REF_DIR/repository-publication-safety.md" \
     "$REPO_ROOT/shared/schemas/agent-runs.schema.json" \
+    "$REPO_ROOT/scripts/check-agent-run-ledger-contract.py" \
     "$REPO_ROOT/scripts/validate-work-item-state.py" \
     "$REPO_ROOT/scripts/validate-work-item-state.sh" \
     "$REPO_ROOT/scripts/validate-work-item-state.ps1" \
@@ -986,6 +1013,8 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "agent run ledger schema defines executionRole"
   check_contains "$REPO_ROOT/shared/schemas/agent-runs.schema.json" '"evidence"' \
     "agent run ledger schema defines evidence"
+  check_agent_run_ledger_contract \
+    "agent run ledger schema and validator reject schema-invalid events"
 fi
 echo ""
 
