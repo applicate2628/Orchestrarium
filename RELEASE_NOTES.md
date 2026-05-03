@@ -16,6 +16,7 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 
 - Added the first machine-readable work-item execution tracking contract. Active work items can now keep `agent-runs.jsonl` beside `status.md`, and `scripts/validate-work-item-state.* --work-item <path>` checks duplicate run IDs, stale running agents, missing evidence, missing artifacts for `PASS`, and inconsistent `BLOCKED` / `REVISE` gates before closeout. This matters because the existing rule "verify subagents before trusting them" now has an operator-checkable workflow instead of relying only on narrative session summaries.
 - Hardened that validator before publication so `PASS` artifacts must resolve inside the work-item directory, evidence entries must carry only schema-approved fields with a valid kind plus reference, and required timestamp/run identifiers must satisfy the shared schema length contract. Codex and Claude source validators now run a real schema-plus-validator smoke check instead of only grepping for ledger strings. This matters because machine-readable closeout evidence should not be satisfied by a path that escapes local task memory, by an empty or shape-invalid evidence object, or by source validators that cannot catch schema/implementation drift.
+- Added a ledger append/init helper for local task-memory operators. `scripts/agent-run-ledger.* --work-item <path> init` prepares legacy work items by adding missing status sections and `agent-runs.jsonl`, while `append` writes one event and immediately reuses the shared validator, rolling the file back if the event would make closeout invalid. This matters because real agent tracking now has a practical command path instead of asking operators to hand-edit JSONL during an active delivery flow.
 
 ## 2026-05-01
 
@@ -182,6 +183,7 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 ## Terms and Abbreviations
 
 - `AGENTS.md`: the Codex-readable governance and instruction file installed into a repository or provider home.
+- `agent-run-ledger.*`: helper script family that initializes legacy work-item ledger files and appends validated `agent-runs.jsonl` events.
 - `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `API`: Application Programming Interface, a programmatic contract exposed by a tool, runtime, or service.
 - `AXIOM`: a top-priority rule label; in this change it refers to a global-only "never guess" rule that was folded into the existing shared discipline instead of copied as a competing section.

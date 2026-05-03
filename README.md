@@ -174,7 +174,7 @@ The docs sync command checks generated `agents-mode` tables, raised-count lists,
 
 The installer regression command creates disposable targets under `/.scratch/`, runs the Bash installers for all four provider lines, and verifies that stale `agents-mode` overlays are normalized to the current schema-backed contract.
 
-Work-item execution tracking uses `agent-runs.jsonl` beside `status.md` for machine-readable agent state. Use `scripts/validate-work-item-state.* --work-item <path>` before closeout to catch stale agents, duplicate run IDs, missing evidence, inconsistent gates, or accepted artifacts that were never verified.
+Work-item execution tracking uses `agent-runs.jsonl` beside `status.md` for machine-readable agent state. Use `scripts/agent-run-ledger.* --work-item <path> init` for one-time migration of missing status sections and ledger files, `scripts/agent-run-ledger.* --work-item <path> append ...` to append one validated event with rollback on failure, and `scripts/validate-work-item-state.* --work-item <path>` before closeout to catch stale agents, duplicate run IDs, missing evidence, inconsistent gates, or accepted artifacts that were never verified.
 
 For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title. Keep release notes in reverse-chronological `## YYYY-MM-DD` sections instead of one long-lived `## Unreleased` bucket, and run the repo-local gate before publication:
 
@@ -193,6 +193,7 @@ This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](
 ## Terms and Abbreviations
 
 - `AGENTS.md`: agent governance entrypoint assembled or read by Codex-compatible runtimes.
+- `agent-run-ledger.*`: helper script family that initializes legacy work-item ledger files and appends validated `agent-runs.jsonl` events.
 - `agents-mode`: Orchestrarium operator configuration overlay for delegation, provider routing, MCP use, and parallelism.
 - `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `reserve`: symbolic supplemental read-only candidate for advisory/review lanes; it runs after primary `claude` and `codex` and is not a worker or editing path.

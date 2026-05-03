@@ -465,6 +465,9 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "$SHARED_REF_DIR/repository-publication-safety.md" \
     "$REPO_ROOT/shared/schemas/agent-runs.schema.json" \
     "$REPO_ROOT/scripts/check-agent-run-ledger-contract.py" \
+    "$REPO_ROOT/scripts/agent-run-ledger.py" \
+    "$REPO_ROOT/scripts/agent-run-ledger.sh" \
+    "$REPO_ROOT/scripts/agent-run-ledger.ps1" \
     "$REPO_ROOT/scripts/validate-work-item-state.py" \
     "$REPO_ROOT/scripts/validate-work-item-state.sh" \
     "$REPO_ROOT/scripts/validate-work-item-state.ps1" \
@@ -635,7 +638,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CLAUDE_REF_DIR/subagent-operating-model.md" 120 \
     "Claude addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "e64c63a31faefc4980d4e3a77685fd80295098af3da6a9cb9fa7e46de5cc79a9" \
+    "3acb297b7a152b27bff6a72821120fe771343290df7d10d750658f94de2451af" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "f3b58ded2c928e4ad138e3ff966c75480b2f869c56c02bba8aafb4cbfe622cf6" \
@@ -752,6 +755,8 @@ check_contains "$PACK/agents/contracts/subagent-contracts.md" 'A `PASS` in `stat
   "subagent-contracts reject PASS without ledger evidence"
 check_contains "$PACK/agents/contracts/subagent-contracts.md" "shared/schemas/agent-runs.schema.json" \
   "subagent-contracts point to the shared ledger schema"
+check_contains "$PACK/agents/contracts/subagent-contracts.md" "scripts/agent-run-ledger.*" \
+  "subagent-contracts point to the work-item ledger helper"
 check_contains "$PACK/agents/contracts/subagent-contracts.md" "scripts/validate-work-item-state.* --work-item" \
   "subagent-contracts point to the work-item state validator"
 check_contains "$PACK/commands/agents-init-project.md" "normalize it to the current canonical format before presenting or trusting the current values." \
@@ -993,10 +998,24 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "src.claude/agents-mode.defaults.yaml removed from the monorepo"
   check_contains "$REPO_ROOT/README.md" "scripts/validate-work-item-state.* --work-item" \
     "README documents the work-item state validator"
+  check_contains "$REPO_ROOT/README.md" "scripts/agent-run-ledger.* --work-item" \
+    "README documents the work-item ledger helper"
   check_contains "$REPO_ROOT/INSTALL.md" "agent-runs.jsonl" \
     "INSTALL documents local work-item execution tracking"
+  check_contains "$REPO_ROOT/INSTALL.md" "scripts/agent-run-ledger.* --work-item" \
+    "INSTALL documents the work-item ledger helper"
   check_contains "$REPO_ROOT/RELEASE_NOTES.md" "machine-readable work-item execution tracking contract" \
     "release notes document the work-item execution tracking contract"
+  check_contains "$REPO_ROOT/RELEASE_NOTES.md" "ledger append/init helper" \
+    "release notes document the ledger append/init helper"
+  check_contains "$REPO_ROOT/scripts/agent-run-ledger.py" "validate_work_item" \
+    "agent-run-ledger helper reuses the work-item state validator"
+  check_contains "$REPO_ROOT/scripts/agent-run-ledger.py" "restore_ledger" \
+    "agent-run-ledger helper rolls back invalid appends"
+  check_contains "$REPO_ROOT/scripts/agent-run-ledger.sh" "agent-run-ledger.py" \
+    "agent-run-ledger Bash wrapper targets the Python helper"
+  check_contains "$REPO_ROOT/scripts/agent-run-ledger.ps1" "agent-run-ledger.py" \
+    "agent-run-ledger PowerShell wrapper targets the Python helper"
   check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "PASS gate requires evidence" \
     "work-item state validator enforces evidence for PASS"
   check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "escapes the work item" \

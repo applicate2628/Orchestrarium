@@ -59,7 +59,7 @@ Canonical operator-overlay output now uses `.agents-mode.yaml` on every provider
 The same rule now applies to reinstall: if an existing `.agents-mode.yaml` is older than the current shipped schema or defaults, the installer must normalize it to the current canonical form instead of preserving stale pack-owned structure verbatim.
 Maintainers changing scalar keys, provider sets, priority profiles, opinion counts, or preset expansions must keep `shared/agents-mode.defaults.yaml`, `shared/agents-mode.schema.json`, `shared/agents-mode.presets.json`, and the provider init surfaces aligned; `python scripts/validate-agents-mode-contract.py --root .` checks that contract directly, the pack validators invoke it in source-mode validation, and runtime normalization reads the schema for provider/lane policy while preserving the YAML exemplar as emitted install shape. Run `python scripts/sync-agents-mode-docs.py --root . --write` to refresh generated reference/init tables and snippets after intentional schema or preset edits. For installer-path regression coverage, run `python scripts/validate-agents-mode-installers.py --root .`; it creates disposable targets under `/.scratch/`, runs the Bash installers, and verifies the emitted provider overlays.
 
-Project repositories that use Orchestrarium task-memory closeout should keep `agent-runs.jsonl` beside each active `status.md`. The file is local task memory, not publication content; run `scripts/validate-work-item-state.* --work-item <path>` before closeout to reconcile subagent execution, artifacts, gates, and evidence. Existing local work items created before this ledger existed may need a one-time status/ledger migration before the validator can pass.
+Project repositories that use Orchestrarium task-memory closeout should keep `agent-runs.jsonl` beside each active `status.md`. The file is local task memory, not publication content; run `scripts/agent-run-ledger.* --work-item <path> init` for one-time status/ledger migration, `scripts/agent-run-ledger.* --work-item <path> append ...` to append one validated event with rollback on failure, and `scripts/validate-work-item-state.* --work-item <path>` before closeout to reconcile subagent execution, artifacts, gates, and evidence.
 
 ## Codex install details
 
@@ -235,6 +235,7 @@ It intentionally keeps the full Gemini payload in `src.gemini/` while materializ
 ## Terms and Abbreviations
 
 - `AGENTS.md`: agent governance file installed for Codex and materialized as a shared-governance module for example providers.
+- `agent-run-ledger.*`: helper script family that initializes legacy work-item ledger files and appends validated `agent-runs.jsonl` events.
 - `agents-mode`: Orchestrarium YAML overlay that records delegation, provider, consultant, parallelism, MCP, and workdir preferences.
 - `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `Claude Code`: Anthropic's Claude runtime and production provider line.

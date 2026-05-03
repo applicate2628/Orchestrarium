@@ -690,7 +690,7 @@ At minimum, it is useful to keep these artifacts near the repository:
 - `notes.md` or `notes/` holds technical findings and discoveries; accepted long-lived decisions still belong in the design or ADR artifact.
 - `closure.md` is mandatory before moving an item to the configured archive location. It holds the final closeout record: outcome, residual risk, and archive location.
 - `status.md` has a defined format with YAML frontmatter (template, orchestrator, started, updated) and sections: Current state, Active agents, Completed agents, REVISE loop (optional), Next action. The full format is defined in `subagent-contracts.md`.
-- `agent-runs.jsonl` is the machine-readable execution ledger for the work item. It records each launched or accepted agent run, assigned role, execution path, status, gate, artifact, and evidence. The lead must use it to reconcile active, completed, blocked, and revise states before closeout.
+- `agent-runs.jsonl` is the machine-readable execution ledger for the work item. It records each launched or accepted agent run, assigned role, execution path, status, gate, artifact, and evidence. The lead must use it to reconcile active, completed, blocked, and revise states before closeout. When `scripts/agent-run-ledger.*` or an installed equivalent is available, use it to initialize legacy work items and append validated events instead of hand-editing JSONL.
 - `status.md` and `agent-runs.jsonl` must agree at stage boundaries: no closed task with running ledger entries, no accepted `PASS` without evidence, no missing artifact for a completed gate, and no dependent downstream `PASS` left untouched after a material upstream revision.
 
 ### 11.3 What should be automated
@@ -858,6 +858,7 @@ Short team formula:
 
 - `accepted artifact`: an output that has passed its required gate and may be used by downstream roles.
 - `ADR`: Architecture Decision Record; a durable document that records an architecture decision, context, and consequences.
+- `agent-run-ledger.*`: helper script family that initializes legacy work-item ledger files and appends validated `agent-runs.jsonl` events.
 - `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `artifact`: a concrete work product such as a brief, memo, design, plan, patch, review, or closure note.
 - `BLOCKED`: workflow state for a real external blocker, unavailable prerequisite, or missing required decision.
