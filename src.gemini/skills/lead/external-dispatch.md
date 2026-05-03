@@ -18,7 +18,7 @@ mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
 externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
-externalPriorityProfile: balanced  # allowed: balanced | <repo-local production profile>; default: balanced
+externalPriorityProfile: balanced  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {}  # profile -> lane -> ordered provider list used when externalProvider=auto
 externalOpinionCounts: {}  # lane -> integer
@@ -33,7 +33,7 @@ Rules:
 - `externalProvider: auto` resolves through the active named production priority profile and then applies the self-provider filter.
 - `externalPriorityProfile` selects the active profile used for `auto`; missing means `balanced`.
 - `reserveResolver` binds the symbolic `reserve` candidate to one concrete read-only resolver: `disabled`, `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`. `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path, not an argv prompt channel.
-- `externalPriorityProfiles` stores the ordered provider lists per lane for each named profile; missing `balanced` means the current shared production matrix.
+- `externalPriorityProfiles` stores the ordered provider lists per lane for each named profile; missing shipped profiles mean the current shared production matrix must be refreshed.
 - `externalOpinionCounts` stores how many distinct external opinions to collect per lane; missing entries mean `1`.
 - `parallelMode: manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `externalCodexWorkdirMode` and `externalClaudeWorkdirMode` choose whether each production-provider external run starts in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`.
@@ -50,7 +50,7 @@ Rules:
 - `externalProvider: gemini` is an explicit self-provider override only and remains a manual example or compatibility path.
 - `externalProvider: qwen` remains a manual `WEAK MODEL / NOT RECOMMENDED` example or compatibility path only.
 - When the resolved provider is Codex, honor `externalCodexWorkdirMode`; when it is Claude, honor `externalClaudeWorkdirMode`.
-- `externalModelMode: pinned-top-pro` maps the strongest documented production-provider path as follows: Codex uses `gpt-5.4 --reasoning-effort xhigh`; only an explicitly configured repo-local fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path; Claude uses `opus-max` on the primary `claude` candidate instead of downgrading to `sonnet-high`. `reserve` is separate: it is exposed only as a symbolic advisory/review profile candidate after primary `claude`/`codex`, never as a retry or transport swap for the primary `claude` candidate. Explicit Gemini or Qwen runs remain manual `WEAK MODEL / NOT RECOMMENDED` example or compatibility paths rather than a pinned production model policy.
+- `externalModelMode: pinned-top-pro` maps the strongest documented production-provider path as follows: Codex uses `gpt-5.5 --reasoning-effort xhigh`; only an explicitly configured repo-local fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path; Claude uses `opus-max` on the primary `claude` candidate instead of downgrading to `sonnet-high`. `reserve` is separate: it is exposed only as a symbolic advisory/review profile candidate after primary `claude`/`codex`, never as a retry or transport swap for the primary `claude` candidate. Explicit Gemini or Qwen runs remain manual `WEAK MODEL / NOT RECOMMENDED` example or compatibility paths rather than a pinned production model policy.
 - Do not silently downgrade below `gpt-5.3-codex-spark` on the Codex line.
 - Treat named fallback paths as alternate limit or budget pools only when runtime observation shows they exhaust independently. That is repo-local operator policy, not an official provider guarantee.
 - Treat `gpt-5.3-codex-spark` as a bounded mechanical overflow path only. It is acceptable for tightly scoped, low-reasoning, autonomous work, not as the ordinary cheaper mode for broad reasoning or cleanup.
@@ -65,6 +65,13 @@ Rules:
 - Mirrors the current shared production lane matrix.
 - Keeps ordinary production provider families on `codex | claude`; advisory/review lanes may also reach the supplemental `reserve` candidate after primary providers.
 - Uses `externalOpinionCounts: 1` unless a repo-local policy explicitly asks for more.
+- Example-only providers stay out of shipped `auto` orders.
+
+### `quality-first`
+
+- Shipped alternate production profile for maximum result quality.
+- Biases near-tie advisory, source-bound, and review lanes toward Codex while preserving Claude-first lanes where the benchmark evidence gives Claude a clearer compact or visual-worker edge.
+- Keeps ordinary production provider families on `codex | claude`; advisory/review lanes may also reach the supplemental `reserve` candidate after primary providers.
 - Example-only providers stay out of shipped `auto` orders.
 
 ## Routing algorithm

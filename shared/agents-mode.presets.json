@@ -103,7 +103,7 @@
     },
     "power-mode": {
       "role": "hardest-task maximum result",
-      "whenToUse": "Combine top model policy, forced delegation, forced MCP, parallel fan-out, external adapters, and multi-opinion review for maximum useful output on complex work",
+      "whenToUse": "Start from quality-first provider priority, then add top model policy, forced delegation, forced MCP, parallel fan-out, external adapters, and multi-opinion review for maximum useful output on complex work",
       "expansion": {
         "consultantMode": "external",
         "delegationMode": "force",
@@ -112,7 +112,7 @@
         "preferExternalWorker": "true",
         "preferExternalReviewer": "true",
         "externalProvider": "auto",
-        "externalPriorityProfile": "balanced",
+        "externalPriorityProfile": "quality-first",
         "reserveResolver": "claude-sonnet",
         "externalPriorityProfiles": "shipped-as-is",
         "externalOpinionCounts": "advisory-review-2",

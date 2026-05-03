@@ -42,7 +42,7 @@
     {
       "name": "externalPriorityProfile",
       "default": "balanced",
-      "allowed": ["balanced", "<repo-local production profile>"]
+      "allowed": ["balanced", "quality-first", "<repo-local production profile>"]
     },
     {
       "name": "reserveResolver",
@@ -83,6 +83,20 @@
       "worker.visual-graphics-visualization": ["claude", "codex"],
       "review.pre-pr": ["claude", "codex", "reserve"],
       "review.security": ["claude", "codex", "reserve"],
+      "review.performance-architecture": ["codex", "claude", "reserve"],
+      "review.ui-visual-correctness": ["codex", "claude", "reserve"]
+    },
+    "quality-first": {
+      "advisory.repo-understanding": ["codex", "claude", "reserve"],
+      "advisory.design-adr": ["codex", "claude", "reserve"],
+      "design.ui-ux-structure": ["codex", "claude"],
+      "worker.reasoning-constraints": ["claude", "codex"],
+      "worker.default-implementation": ["codex", "claude"],
+      "worker.systems-performance-implementation": ["codex", "claude"],
+      "worker.ui-implementation": ["claude", "codex"],
+      "worker.visual-graphics-visualization": ["claude", "codex"],
+      "review.pre-pr": ["codex", "claude", "reserve"],
+      "review.security": ["codex", "claude", "reserve"],
       "review.performance-architecture": ["codex", "claude", "reserve"],
       "review.ui-visual-correctness": ["codex", "claude", "reserve"]
     }

@@ -39,7 +39,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `preferExternalWorker` | `false` | `false` | `true` | `true` | `true` | `false` |
 | `preferExternalReviewer` | `false` | `true` | `true` | `true` | `true` | `false` |
 | `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` |
+| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `quality-first` | `balanced` |
 | `reserveResolver` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` |
 | `externalPriorityProfiles` | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is |
 | `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review lanes `2`, others `1` | advisory+review lanes `2`, others `1` | all `1` |
@@ -59,7 +59,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 Routing conventions (not persisted as keys):
 - **same-host fast-path**: under `external-aggressive` and `max-speed`, when neutral isolation is not required, allow per-invocation explicit self-provider override. Keep the stored file canonical; this is a routing rule, not a persisted key.
 - **overflow means spill, not serialize**: under `external-aggressive`, internal slot saturation pushes independent eligible lanes into `$external-worker`, `$external-reviewer`, or `$external-brigade` by default.
-- **power-mode means hardest-task maximum useful result**: combine `correctness-first` validation density with `external-aggressive` fan-out, but keep neutral workdirs and production-only `auto` routing so the extra power does not become a hidden project-state or example-provider shortcut.
+- **power-mode means hardest-task maximum useful result**: start from the `quality-first` provider-priority profile, then combine `correctness-first` validation density with `external-aggressive` fan-out, while keeping neutral workdirs and production-only `auto` routing so the extra power does not become a hidden project-state or example-provider shortcut.
 
 ## Steps
 
@@ -118,7 +118,7 @@ Routing conventions (not persisted as keys):
      - `externalProvider: auto`  (shared-universe default; shipped production profiles stay on `codex | claude`; explicit `gemini` / `qwen` remain example-only)
      - `externalPriorityProfile: balanced`
      - `reserveResolver: claude-sonnet`
-     - `externalPriorityProfiles.balanced`: current shared production matrix over `codex | claude` plus advisory/review-only `reserve`
+     - `externalPriorityProfiles.balanced` and `externalPriorityProfiles.quality-first`: current shipped production matrices over `codex | claude` plus advisory/review-only `reserve`
      - `externalOpinionCounts`: `1` for ordinary lanes unless a repo-local policy explicitly asks for more
      - `externalCodexWorkdirMode: neutral`
      - `externalClaudeWorkdirMode: neutral`
@@ -145,7 +145,7 @@ Routing conventions (not persisted as keys):
    preferExternalWorker: {value}  # allowed: false | true; default: false
    preferExternalReviewer: {value}  # allowed: false | true; default: false
    externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
-   externalPriorityProfile: {value}  # allowed: balanced | <repo-local production profile>; default: balanced
+   externalPriorityProfile: {value}  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
    reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
    externalPriorityProfiles:
      balanced:
@@ -159,6 +159,19 @@ Routing conventions (not persisted as keys):
        worker.visual-graphics-visualization: [claude, codex]
        review.pre-pr: [claude, codex, reserve]
        review.security: [claude, codex, reserve]
+       review.performance-architecture: [codex, claude, reserve]
+       review.ui-visual-correctness: [codex, claude, reserve]
+     quality-first:
+       advisory.repo-understanding: [codex, claude, reserve]
+       advisory.design-adr: [codex, claude, reserve]
+       design.ui-ux-structure: [codex, claude]
+       worker.reasoning-constraints: [claude, codex]
+       worker.default-implementation: [codex, claude]
+       worker.systems-performance-implementation: [codex, claude]
+       worker.ui-implementation: [claude, codex]
+       worker.visual-graphics-visualization: [claude, codex]
+       review.pre-pr: [codex, claude, reserve]
+       review.security: [codex, claude, reserve]
        review.performance-architecture: [codex, claude, reserve]
        review.ui-visual-correctness: [codex, claude, reserve]
    externalOpinionCounts:

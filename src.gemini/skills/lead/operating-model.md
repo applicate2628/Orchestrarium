@@ -68,7 +68,7 @@ Canonical provider semantics:
 | `consultantMode` | consultant behavior toggle for Gemini-line routing; `disabled` skips consultant work by default, `internal` keeps consultant internal-only, and `external` allows consultant requests to use external routing |
 | `reserve` | symbolic supplemental read-only candidate for `advisory.*` and `review.*` profile orders only; considered after primary `claude`/`codex`; never a primary-Claude retry, worker transport, or editing path |
 | `parallelMode` | general helper parallelism rule across internal and external lanes; `manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified |
-| `externalProvider: auto` | Resolve by the active named production priority profile and then apply the self-provider filter; shipped `balanced` keeps `auto` on `codex | claude` only |
+| `externalProvider: auto` | Resolve by the active named production priority profile and then apply the self-provider filter; shipped production profiles `balanced` and `quality-first` keep `auto` on `codex | claude` only |
 | `externalProvider: codex` | explicit Codex CLI path |
 | `externalProvider: claude` | explicit Claude CLI path |
 | `externalProvider: gemini` | explicit self-provider override only; manual example or compatibility path, not a production recommendation |

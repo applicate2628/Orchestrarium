@@ -21,7 +21,7 @@ mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
 externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended for shipped auto
-externalPriorityProfile: balanced  # allowed: balanced | <repo-local production profile>; default: balanced
+externalPriorityProfile: balanced  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {}  # allowed: structured profile map
 externalOpinionCounts: {}  # allowed: structured lane-count map
@@ -39,7 +39,7 @@ externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opu
 - `preferExternalReviewer` routes eligible reviewer/QA roles through `$external-reviewer` by default.
 - `externalProvider` uses the shared provider universe `auto | codex | claude | gemini | qwen`.
 - `externalProvider: auto` resolves by lane type through the active production priority profile and opinion-count policy below instead of by host-pack identity. Ordinary `auto` must not silently self-bounce into the Codex line and must not select example-only providers.
-- `externalPriorityProfile` chooses which named production routing profile to apply when `externalProvider: auto` is in effect. `balanced` is the quiet default. Repo-local custom profiles must keep example-only providers out of production `auto`.
+- `externalPriorityProfile` chooses which named production routing profile to apply when `externalProvider: auto` is in effect. `balanced` is the quiet default, and `quality-first` is the shipped alternate for maximum result quality. Repo-local custom profiles must keep example-only providers out of production `auto`.
 - `reserveResolver` binds the symbolic `reserve` candidate to one concrete read-only resolver: `disabled`, `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`. `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path, not an argv prompt channel.
 - `externalPriorityProfiles` stores the ordered provider lists for each named profile. The shipped profiles live in the structured block below.
 - `externalOpinionCounts` stores how many distinct external opinions each lane should collect. Missing lane entries default to `1`.
@@ -54,7 +54,7 @@ externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opu
 - If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode`. Normalize whichever file supplied the effective config in place before trusting the flags.
 - When writing `.agents/.agents-mode.yaml`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
 - Writes go to `.agents/.agents-mode.yaml`; preserve unknown keys and the other known keys when updating.
-- If the file is created from scratch, write the full default shape: the requested `consultantMode`, `delegationMode: manual`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `reserveResolver: claude-sonnet`, `externalPriorityProfiles` with the shipped `balanced` block, `externalOpinionCounts` with documented lanes defaulting to `1`, `externalCodexWorkdirMode: neutral`, `externalClaudeWorkdirMode: neutral`, `externalModelMode: runtime-default`, and `externalClaudeProfile: opus-max` unless the user explicitly requested a different Claude profile.
+- If the file is created from scratch, write the full default shape: the requested `consultantMode`, `delegationMode: manual`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `reserveResolver: claude-sonnet`, `externalPriorityProfiles` with the shipped `balanced` and `quality-first` blocks, `externalOpinionCounts` with documented lanes defaulting to `1`, `externalCodexWorkdirMode: neutral`, `externalClaudeWorkdirMode: neutral`, `externalModelMode: runtime-default`, and `externalClaudeProfile: opus-max` unless the user explicitly requested a different Claude profile.
 - Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 
 ## Routing model
@@ -64,7 +64,7 @@ externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opu
 - When the resolved provider is Codex, honor `externalCodexWorkdirMode`; when it is Claude, honor `externalClaudeWorkdirMode`.
 - Explicit user override or documented repo-local heuristics may still choose an explicit example-only provider route such as Qwen, or the weaker/not-recommended Gemini path, for demonstration or compatibility work. Shipped production `auto` does not do that.
 - Explicit `externalProvider: codex` is a self-provider override only. Ordinary `auto` must not silently self-bounce into Codex from the Codex line.
-- `externalModelMode: pinned-top-pro` maps the strongest documented production-provider path as follows: Codex uses `gpt-5.4 --reasoning-effort xhigh`; only an explicitly configured repo-local fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path; Claude uses `opus-max` on the primary `claude` candidate instead of downgrading to `sonnet-high`. `reserve` is a separate symbolic advisory/review candidate after primary `claude`/`codex`, never a retry or transport swap for the primary `claude` candidate. Example-only Gemini and Qwen routes stay explicit/manual and do not add separate production fallback keys to this schema.
+- `externalModelMode: pinned-top-pro` maps the strongest documented production-provider path as follows: Codex uses `gpt-5.5 --reasoning-effort xhigh`; only an explicitly configured repo-local fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path; Claude uses `opus-max` on the primary `claude` candidate instead of downgrading to `sonnet-high`. `reserve` is a separate symbolic advisory/review candidate after primary `claude`/`codex`, never a retry or transport swap for the primary `claude` candidate. Example-only Gemini and Qwen routes stay explicit/manual and do not add separate production fallback keys to this schema.
 - Do not silently downgrade below `gpt-5.3-codex-spark` on the Codex line.
 - Treat `gpt-5.3-codex-spark` as a bounded mechanical overflow path only. It is acceptable for tightly scoped, low-reasoning, autonomous work, not as the ordinary cheaper mode for broad reasoning or cleanup.
 - Treat `reserve` differently from primary production providers: it is a supplemental advisory/review candidate only. It never grants permission to run implementation, worker-side execution, or editing work through the resolved transport.
@@ -106,6 +106,18 @@ externalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opu
 |  | `worker.visual-graphics-visualization` | `claude > codex` |
 |  | `review.pre-pr` | `claude > codex > reserve` |
 |  | `review.security` | `claude > codex > reserve` |
+|  | `review.performance-architecture` | `codex > claude > reserve` |
+|  | `review.ui-visual-correctness` | `codex > claude > reserve` |
+| `quality-first` | `advisory.repo-understanding` | `codex > claude > reserve` |
+|  | `advisory.design-adr` | `codex > claude > reserve` |
+|  | `design.ui-ux-structure` | `codex > claude` |
+|  | `worker.reasoning-constraints` | `claude > codex` |
+|  | `worker.default-implementation` | `codex > claude` |
+|  | `worker.systems-performance-implementation` | `codex > claude` |
+|  | `worker.ui-implementation` | `claude > codex` |
+|  | `worker.visual-graphics-visualization` | `claude > codex` |
+|  | `review.pre-pr` | `codex > claude > reserve` |
+|  | `review.security` | `codex > claude > reserve` |
 |  | `review.performance-architecture` | `codex > claude > reserve` |
 |  | `review.ui-visual-correctness` | `codex > claude > reserve` |
 

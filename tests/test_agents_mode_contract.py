@@ -1,3 +1,4 @@
+import json
 import subprocess
 import sys
 import tempfile
@@ -7,6 +8,16 @@ from shutil import copy2
 
 
 class AgentsModeContractTest(unittest.TestCase):
+    def test_power_mode_uses_quality_first_priority_profile(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        presets = json.loads(
+            (root / "shared" / "agents-mode.presets.json").read_text(encoding="utf-8")
+        )
+
+        profile = presets["presets"]["power-mode"]["expansion"]["externalPriorityProfile"]
+
+        self.assertEqual(profile, "quality-first")
+
     def test_shared_contract_validator_passes(self) -> None:
         root = Path(__file__).resolve().parents[1]
         result = subprocess.run(

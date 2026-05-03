@@ -119,7 +119,7 @@ If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfil
 Honor `externalModelMode` before provider-specific transport selection:
 
 - `runtime-default` → keep the selected provider on its native runtime default model/profile.
-- `pinned-top-pro` on the Codex line → use `gpt-5.4 --reasoning-effort xhigh` for consultant work. Do not downgrade consultant memos to `gpt-5.3-codex-spark`.
+- `pinned-top-pro` on the Codex line → use `gpt-5.5 --reasoning-effort xhigh` for consultant work. Do not downgrade consultant memos to `gpt-5.3-codex-spark`.
 - Gemini and Qwen routes stay manual demonstration or compatibility paths only. Both are `WEAK MODEL / NOT RECOMMENDED` example-only routes, and this pack does not add shared production fallback keys for them.
 
 Examples:

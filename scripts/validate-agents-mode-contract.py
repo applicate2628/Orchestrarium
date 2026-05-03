@@ -644,6 +644,14 @@ def validate_schema(schema_data: dict[str, Any], presets_data: dict[str, Any]) -
         }:
             raise ContractError(f"preset {preset} has invalid opinion-count mode")
 
+    power_profile = presets_data["presets"]["power-mode"]["expansion"][
+        "externalPriorityProfile"
+    ]
+    if power_profile != "quality-first":
+        raise ContractError(
+            "preset power-mode must use externalPriorityProfile quality-first"
+        )
+
     for lane in presets_data["raisedOpinionCountLanes"]:
         if lane not in lanes:
             raise ContractError(f"raised opinion-count lane is unknown: {lane}")

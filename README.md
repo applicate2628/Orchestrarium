@@ -102,7 +102,7 @@ Important: operator preferences now live only in pack-local `agents-mode` files.
 - `reserve` is a symbolic advisory/review-only profile candidate. It is not a scalar provider, not a worker path, and not a silent fallback from primary `claude` or `codex`; `reserveResolver: claude-sonnet | claude-wrapper | wrapper:<command> | disabled` selects the concrete read-only resolver, where `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path.
 - External provider CLI launches use file-based prompts by default: write substantive task prompts to temporary prompt files and feed them through stdin or a provider-supported file-input mechanism instead of putting the full prompt in argv.
 - Codex may additionally use `externalClaudeProfile` to select or override the Claude CLI execution profile: `sonnet-high` or `opus-max`. New Codex installs seed `opus-max` by default unless a preset or explicit override chooses otherwise.
-- Codex install also seeds `.codex/agents/default.toml`, `worker.toml`, and `explorer.toml` so the built-in Codex subagents run as `gpt-5.4` with `xhigh` by default unless the user has already customized those files.
+- Codex install also seeds `.codex/agents/default.toml`, `worker.toml`, and `explorer.toml` so the built-in Codex subagents run as `gpt-5.5` with `xhigh` by default. Reinstall refreshes stale Orchestrarium-owned templates but preserves files whose prompt or structure was actually customized by the user.
 - Provider-specific workdir keys stay separate and default to `neutral`: `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`.
 - For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode.yaml`. If local Codex overlay files are missing but `~/.codex/.agents-mode.yaml` exists, ordinary reads should use that global overlay honestly until you choose to create a project-local override.
 - When the current working directory is this installer monorepo itself, a missing local `.agents/.agents-mode.yaml` should fall back to the global Codex install by default. Create a repo-local install only when you explicitly want project-local runtime state; the installer source tree and the installed runtime are different surfaces.
@@ -113,9 +113,9 @@ Important: operator preferences now live only in pack-local `agents-mode` files.
 - Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity, continue-by-default execution expectations for initialized projects, and the current init-time preset family: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `power-mode`, and `max-speed`. Init helpers can either write the chosen preset as-is or open an optional fine-tune pass before saving `.agents-mode.yaml`.
 - Machine-readable `agents-mode` contract sources live in [`shared/agents-mode.schema.json`](shared/agents-mode.schema.json) and [`shared/agents-mode.presets.json`](shared/agents-mode.presets.json). [`scripts/validate-agents-mode-contract.py`](scripts/validate-agents-mode-contract.py) checks those sources against the shared YAML exemplar, the operator reference, and provider init surfaces.
 
-Shipped production provider-order profile:
+Shipped production provider-order profiles:
 
-This is the persisted production `externalPriorityProfile` shipped from the root surfaces, not the init-time preset shortcuts. Example integrations may define their own provider-local examples, but the root production profile stays on Codex plus Claude provider families only. `reserve` may appear only as a supplemental read-only candidate after primary Claude and Codex on advisory/review lanes.
+These are the persisted production `externalPriorityProfile` choices shipped from the root surfaces, not the init-time preset shortcuts. Example integrations may define their own provider-local examples, but root production profiles stay on Codex plus Claude provider families only. `reserve` may appear only as a supplemental read-only candidate after primary Claude and Codex on advisory/review lanes.
 
 | Profile | Lane | Priority |
 |---|---|---|
@@ -129,6 +129,18 @@ This is the persisted production `externalPriorityProfile` shipped from the root
 |  | `worker.visual-graphics-visualization` | `claude > codex` |
 |  | `review.pre-pr` | `claude > codex > reserve` |
 |  | `review.security` | `claude > codex > reserve` |
+|  | `review.performance-architecture` | `codex > claude > reserve` |
+|  | `review.ui-visual-correctness` | `codex > claude > reserve` |
+| `quality-first` | `advisory.repo-understanding` | `codex > claude > reserve` |
+|  | `advisory.design-adr` | `codex > claude > reserve` |
+|  | `design.ui-ux-structure` | `codex > claude` |
+|  | `worker.reasoning-constraints` | `claude > codex` |
+|  | `worker.default-implementation` | `codex > claude` |
+|  | `worker.systems-performance-implementation` | `codex > claude` |
+|  | `worker.ui-implementation` | `claude > codex` |
+|  | `worker.visual-graphics-visualization` | `claude > codex` |
+|  | `review.pre-pr` | `codex > claude > reserve` |
+|  | `review.security` | `codex > claude > reserve` |
 |  | `review.performance-architecture` | `codex > claude > reserve` |
 |  | `review.ui-visual-correctness` | `codex > claude > reserve` |
 
@@ -172,7 +184,7 @@ python .\scripts\validate-agents-mode-installers.py --root .
 
 The docs sync command checks generated `agents-mode` tables, raised-count lists, and canonical YAML snippets against the JSON contract; use `--write` to refresh those generated blocks after intentional schema or preset edits.
 
-The installer regression command creates disposable targets under `/.scratch/`, runs the Bash installers for all four provider lines, and verifies that stale `agents-mode` overlays are normalized to the current schema-backed contract.
+The installer regression command creates disposable targets under `/.scratch/`, runs the Bash installers for all four provider lines, and verifies that stale `agents-mode` overlays are normalized to the current schema-backed contract. It also verifies that Codex built-in agent override reinstall refreshes stale Orchestrarium-owned templates while preserving a customized override file.
 
 Work-item execution tracking uses `agent-runs.jsonl` beside `status.md` for machine-readable agent state. Use `scripts/agent-run-ledger.* --work-item <path> init` for one-time migration of missing status sections and ledger files, `scripts/agent-run-ledger.* --work-item <path> append ...` to append one validated event with rollback on failure, `scripts/validate-work-item-state.* --work-item <path>` before single-item closeout, and `scripts/check-work-items-state.* --root . --stale-hours 24` before broad closeout or interruption recovery. The helpers catch stale agents, duplicate run IDs, missing evidence, inconsistent gates, or accepted artifacts that were never verified.
 
@@ -213,7 +225,8 @@ This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](
 - `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
 - `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
 - `MCP`: Model Context Protocol; a protocol for exposing tools and resources to agent runtimes.
-- `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency.
+- `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency; starts from the `quality-first` provider-order profile.
+- `quality-first`: production provider-order profile that biases near-tie advisory, source-bound, and review lanes toward Codex while preserving Claude-first lanes where the benchmark evidence gives Claude a clearer compact or visual-worker edge.
 - `Qwen`: Qwen provider line, kept here as an explicit example integration.
 - `runtime`: installed provider-facing files and directories used by an agent tool outside the source tree.
 - `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.

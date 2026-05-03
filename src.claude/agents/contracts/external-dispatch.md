@@ -18,7 +18,7 @@ mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
 externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended for shipped auto
-externalPriorityProfile: balanced  # allowed: balanced | <repo-local production profile>; default: balanced
+externalPriorityProfile: balanced  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {}  # allowed: structured profile map
 externalOpinionCounts: {}  # allowed: structured lane-count map
@@ -116,7 +116,8 @@ Rules:
 
 - `externalPriorityProfile` selects the named provider-order map used only when `externalProvider: auto`.
 - `balanced` is the shipped default profile and must always exist.
-- The shipped `balanced` profile follows the release-backed `12 + 1` routing read in `docs/routing/full-v2-hard-r2-routing-evidence-2026-05-01.md`; the `L00 owner/control` line is not an external profile lane because owner roles have no generic external adapter.
+- `quality-first` is the shipped alternate production profile for maximum result quality; it biases near-tie advisory, source-bound, and review lanes toward Codex while preserving Claude-first lanes where the benchmark evidence gives Claude a clearer compact or visual-worker edge.
+- The shipped `balanced` and `quality-first` profiles follow the release-backed `12 + 1` routing read in `docs/routing/full-v2-hard-r2-routing-evidence-2026-05-01.md`; the `L00 owner/control` line is not an external profile lane because owner roles have no generic external adapter.
 - Repo-local heuristics may refine lane classification, but they must not invent a different provider universe.
 - Ordinary `auto` must not resolve to the same provider as the current host line.
 

@@ -5,7 +5,7 @@ mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: false  # allowed: false | true; default: false
 preferExternalReviewer: false  # allowed: false | true; default: false
 externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
-externalPriorityProfile: balanced  # allowed: balanced | <repo-local production profile>; default: balanced
+externalPriorityProfile: balanced  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles:  # allowed: profile -> lane -> ordered provider priority used when externalProvider=auto
   balanced:  # default shared routing profile
@@ -20,6 +20,20 @@ externalPriorityProfiles:  # allowed: profile -> lane -> ordered provider priori
     worker.visual-graphics-visualization: [claude, codex]  # visual worker rank: claude raster/localization, codex staged visual delivery
     review.pre-pr: [claude, codex, reserve]  # pre-PR review rank: claude compact review, codex staged source-bound gates
     review.security: [claude, codex, reserve]  # security review rank: claude compact budget, codex ordinary/staged fallback
+    review.performance-architecture: [codex, claude, reserve]  # performance/architecture review rank: codex staged source-bound review
+    review.ui-visual-correctness: [codex, claude, reserve]  # visual review rank: codex screenshot-diff first, reserve last
+  quality-first:  # quality-first production profile
+    # RF12 L00 owner/control is intentionally absent: owner roles have no generic external adapter.
+    advisory.repo-understanding: [codex, claude, reserve]  # advisory rank: codex staged/source-bound first, claude compact fallback
+    advisory.design-adr: [codex, claude, reserve]  # design/ADR rank: codex staged closure first, claude compact fallback
+    design.ui-ux-structure: [codex, claude]  # UX structure rank: codex for staged closure, claude compact fallback
+    worker.reasoning-constraints: [claude, codex]  # science/constraints rank: claude compact edge, codex staged fallback
+    worker.default-implementation: [codex, claude]  # implementation rank: codex staged/API-accountability, claude compact fallback
+    worker.systems-performance-implementation: [codex, claude]  # systems/perf rank: codex staged recovery, claude compact fallback
+    worker.ui-implementation: [claude, codex]  # UI implementation rank: claude compact state/render, codex staged fallback
+    worker.visual-graphics-visualization: [claude, codex]  # visual worker rank: claude raster/localization, codex staged fallback
+    review.pre-pr: [codex, claude, reserve]  # pre-PR review rank: codex staged source-bound gates, claude compact fallback
+    review.security: [codex, claude, reserve]  # security review rank: codex traceability first, claude compact fallback
     review.performance-architecture: [codex, claude, reserve]  # performance/architecture review rank: codex staged source-bound review
     review.ui-visual-correctness: [codex, claude, reserve]  # visual review rank: codex screenshot-diff first, reserve last
 externalOpinionCounts:  # allowed: lane -> minimum distinct external opinions required before closure

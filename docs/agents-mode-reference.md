@@ -53,7 +53,7 @@ At init time, the helper may either write the selected preset immediately or ent
 | `absolute-balance` | true everyday center | Daily operation with moderate delegation, internal consultant availability, and external review preference |
 | `external-aggressive` | aggressive external use | Maximize external execution on preferred lanes while keeping the stored file canonical |
 | `correctness-first` | no-time-limit correctness | Favor deeper validation, forced delegation, forced MCP use, and multi-opinion advisory or review lanes |
-| `power-mode` | hardest-task maximum result | Combine top model policy, forced delegation, forced MCP, parallel fan-out, external adapters, and multi-opinion review for maximum useful output on complex work |
+| `power-mode` | hardest-task maximum result | Start from quality-first provider priority, then add top model policy, forced delegation, forced MCP, parallel fan-out, external adapters, and multi-opinion review for maximum useful output on complex work |
 | `max-speed` | lowest-friction throughput | Minimize latency and ceremony; prefer project workdirs and no extra opinion overhead |
 
 `absolute-balance` is intentionally named differently from `externalPriorityProfile: balanced` so the init-time preset and the persisted provider-order profile do not get conflated.
@@ -69,7 +69,7 @@ At init time, the helper may either write the selected preset immediately or ent
 | `preferExternalWorker` | `false` | `false` | `true` | `true` | `true` | `false` |
 | `preferExternalReviewer` | `false` | `true` | `true` | `true` | `true` | `false` |
 | `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` |
+| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `quality-first` | `balanced` |
 | `reserveResolver` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` |
 | `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review `2`, others `1` | advisory+review `2`, others `1` | all `1` |
 | workdir modes | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `project` |
@@ -89,7 +89,7 @@ At init time, the helper may either write the selected preset immediately or ent
 
 - **same-host fast-path**: under `external-aggressive` and `max-speed`, when neutral isolation is not required, allow per-invocation explicit self-provider override. The stored file stays canonical; this is a routing rule, not a persisted key.
 - **overflow means spill, not serialize**: under `external-aggressive`, internal slot saturation pushes independent eligible lanes into `$external-worker`, `$external-reviewer`, or `$external-brigade` by default. Current rules already allow this; the preset makes it the expected interpretation.
-- **power-mode means hardest-task maximum useful result**: combine `correctness-first` validation density with `external-aggressive` fan-out, but keep neutral workdirs and production-only `auto` routing so the extra power does not become a hidden project-state or example-provider shortcut.
+- **power-mode means hardest-task maximum useful result**: start from the `quality-first` provider-priority profile, then combine `correctness-first` validation density with `external-aggressive` fan-out, while keeping neutral workdirs and production-only `auto` routing so the extra power does not become a hidden project-state or example-provider shortcut.
 
 ## Shared keys
 
@@ -176,6 +176,7 @@ Notes:
 | Value | Meaning | Expected behavior |
 |---|---|---|
 | `balanced` | Default shared routing profile | Keeps the quiet shared lane priorities that ship by default. |
+| `quality-first` | Quality-first shared routing profile | Biases near-tie advisory, source-bound implementation, and review lanes toward Codex while preserving Claude-first lanes where benchmark evidence gives Claude a clearer compact or visual-worker edge. |
 | `<custom name>` | Repo-local named production profile | Must exist under `externalPriorityProfiles`; otherwise fail closed instead of silently falling back to another profile. Custom profiles must keep example-only providers out of `auto`. |
 
 Notes:
@@ -230,9 +231,22 @@ Recommended shipped profiles:
 |  | `review.security` | `claude > codex > reserve` |
 |  | `review.performance-architecture` | `codex > claude > reserve` |
 |  | `review.ui-visual-correctness` | `codex > claude > reserve` |
+| `quality-first` | `advisory.repo-understanding` | `codex > claude > reserve` |
+|  | `advisory.design-adr` | `codex > claude > reserve` |
+|  | `design.ui-ux-structure` | `codex > claude` |
+|  | `worker.reasoning-constraints` | `claude > codex` |
+|  | `worker.default-implementation` | `codex > claude` |
+|  | `worker.systems-performance-implementation` | `codex > claude` |
+|  | `worker.ui-implementation` | `claude > codex` |
+|  | `worker.visual-graphics-visualization` | `claude > codex` |
+|  | `review.pre-pr` | `codex > claude > reserve` |
+|  | `review.security` | `codex > claude > reserve` |
+|  | `review.performance-architecture` | `codex > claude > reserve` |
+|  | `review.ui-visual-correctness` | `codex > claude > reserve` |
 
 Notes:
 - `balanced` is the implicit default profile and should always be available.
+- `quality-first` is a shipped alternate production profile, not an init-time preset. It favors maximum result quality by shifting source-bound and review-heavy near-ties toward Codex while preserving Claude-first lanes with clearer Claude evidence.
 - Repo-local heuristics may refine lane classification, but production `auto` profiles must keep worker lanes to `codex | claude`; advisory/review lanes may use `reserve` only as the supplemental last candidate.
 - The profile follows the `full-v2-hard-r2` `12 + 1` routing read in [`docs/routing/full-v2-hard-r2-routing-evidence-2026-05-01.md`](routing/full-v2-hard-r2-routing-evidence-2026-05-01.md). `L00 owner/control` is documented there but is not an external profile lane because owner roles have no generic external adapter.
 - Use `design.ui-ux-structure` for pre-implementation UI/UX structure, `worker.ui-implementation` for UI code work, and `review.ui-visual-correctness` for screenshot, visual, accessibility, and UX regression review.
@@ -287,7 +301,7 @@ Notes:
 - This is the shared cross-provider model-selection policy. It applies only after provider resolution.
 - `runtime-default` is the first-write default where this key exists.
 - `pinned-top-pro` means:
-- Codex: `gpt-5.4 --reasoning-effort xhigh`; only explicitly configured repo-local fully autonomous low-reasoning worker lanes may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path
+- Codex: `gpt-5.5 --reasoning-effort xhigh`; only explicitly configured repo-local fully autonomous low-reasoning worker lanes may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path
 - Claude: `opus-max` for the primary `claude` candidate. `reserve` is not a fallback from that candidate; it is a separate symbolic advisory/review candidate that the profile order may reach after primary `claude` and `codex`.
 - Supplemental candidates apply only where their lane policy allows them. `reserve` is advisory/review-only and does not affect primary Claude model/profile selection.
 - Codex-line `externalClaudeProfile`, when explicitly set, remains a narrower override for Claude model/profile selection than the shared `externalModelMode`.
@@ -328,7 +342,7 @@ Guardrails:
 
 | Situation | Rule |
 |---|---|
-| `externalModelMode: pinned-top-pro` and Codex is the chosen provider | Try `gpt-5.4 --reasoning-effort xhigh` first. Only on an explicitly configured repo-local fully autonomous low-reasoning worker lane may Codex retry once with `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path. Other lanes must disclose Codex unavailability instead of downgrading. |
+| `externalModelMode: pinned-top-pro` and Codex is the chosen provider | Try `gpt-5.5 --reasoning-effort xhigh` first. Only on an explicitly configured repo-local fully autonomous low-reasoning worker lane may Codex retry once with `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path. Other lanes must disclose Codex unavailability instead of downgrading. |
 | Explicit Gemini example route | Gemini is outside production `auto` routing and is classified as `WEAK MODEL / NOT RECOMMENDED`; any direct Gemini command is a manual example or compatibility run, not a pinned production model policy. |
 | `externalModelMode: pinned-top-pro` and Claude is the chosen provider | Try primary `claude` on `opus-max`. Do not retry primary Claude through the secret-backed wrapper. Advisory/review lanes may later collect the separate `reserve` candidate if their profile order and opinion count reach it. |
 | Claude CLI is the chosen provider and is already authenticated | Use the plain Claude CLI path first. |
@@ -368,12 +382,12 @@ Structured defaults written alongside the scalar keys:
 |---|---|
 | `externalPriorityProfile` | `balanced` |
 | `reserveResolver` | `claude-sonnet` |
-| `externalPriorityProfiles` | ship `balanced` only |
+| `externalPriorityProfiles` | ship `balanced` and `quality-first` |
 | `externalOpinionCounts` | all documented lanes default to `1` unless repo-local policy explicitly raises a lane |
 
 Default-comment guidance:
 - In the canonical exemplar, every shipped scalar default should include both the `allowed` set and the explicit `default: ...` value in the inline comment so the first-write value is visible directly in the file.
-- `balanced` should stay marked as the default shared routing profile inside the `externalPriorityProfiles` block.
+- `balanced` should stay marked as the default shared routing profile inside the `externalPriorityProfiles` block; `quality-first` stays a shipped alternate production profile, not an init-time preset.
 
 ## Task continuity
 
@@ -442,7 +456,8 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 - `L00`: owner/control routing line in the release-backed `12 + 1` read; it is documented evidence but not an external provider profile lane.
 - `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
 - `MCP`: Model Context Protocol; protocol for exposing tools and resources to agent runtimes.
-- `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency; expands to forced delegation, forced parallelism, forced MCP use, top production-provider policy, and multi-opinion advisory/review lanes.
+- `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency; expands through `quality-first` provider priority plus forced delegation, forced parallelism, forced MCP use, top production-provider policy, and multi-opinion advisory/review lanes.
+- `quality-first`: production provider-order profile that favors Codex on source-bound and review-heavy near-ties while keeping Claude first on lanes where the evidence gives Claude a clearer compact or visual-worker edge.
 - `Qwen`: Qwen provider line; in this repository it is explicit example-only and `WEAK MODEL / NOT RECOMMENDED`.
 - `12 + 1`: twelve external routing lines plus one owner/control line from the release-backed RF12 interpretation.
 - `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.

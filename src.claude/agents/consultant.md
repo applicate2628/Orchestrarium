@@ -47,9 +47,9 @@ mcpMode: {value}  # allowed: auto | force; default: auto
 preferExternalWorker: {value}  # allowed: false | true; default: false
 preferExternalReviewer: {value}  # allowed: false | true; default: false
 externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
-externalPriorityProfile: {value}  # allowed: balanced | <repo-local production profile>; default: balanced
+externalPriorityProfile: {value}  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
-externalPriorityProfiles: {...}  # structured profile map; default seed ships balanced only
+externalPriorityProfiles: {...}  # structured profile map; default seed ships balanced and quality-first
 externalOpinionCounts: {...}  # structured lane-count map; default seed keeps documented lanes at 1
 externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
 ```
@@ -115,7 +115,7 @@ If Codex is selected:
 codex --quiet --full-auto < "$PROMPT_FILE"
 ```
 
-- For hard tasks, use `--model gpt-5.4 --reasoning-effort xhigh`.
+- For hard tasks, use `--model gpt-5.5 --reasoning-effort xhigh`.
 - `PROMPT_FILE` is a temporary file containing the full prompt payload. Prefer passing large context as file references inside that prompt rather than embedding raw artifacts.
 - Wait 5–15 minutes before treating a single advisory run as stalled. Do not launch a duplicate advisory call for the same memo while the first may still be running; independent external lanes may still run in parallel when their scopes are disjoint and the routing contract allows it.
 - If Codex is not installed, fails, times out, or hits quota/auth limits, do not silently degrade the consultant requirement. Return an unavailable memo and keep routing honest.

@@ -18,7 +18,7 @@ mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
 preferExternalReviewer: true  # allowed: false | true; default: false
 externalProvider: auto  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are WEAK MODEL / NOT RECOMMENDED example-only routes
-externalPriorityProfile: balanced  # allowed: balanced | <repo-local production profile>; default: balanced
+externalPriorityProfile: balanced  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
 reserveResolver: claude-sonnet  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
 externalPriorityProfiles: {}  # profile -> lane -> ordered provider list
 externalOpinionCounts: {}  # lane -> integer
@@ -33,7 +33,7 @@ Rules:
 - `externalProvider: auto` resolves through the active named priority profile and then applies the self-provider filter.
 - `externalPriorityProfile` selects the active profile used for `auto`; missing means `balanced`.
 - `reserveResolver` binds the symbolic `reserve` candidate to one concrete read-only resolver: `disabled`, `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`. `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path, not an argv prompt channel.
-- `externalPriorityProfiles` stores ordered provider lists per lane for each named profile; missing `balanced` means the current shared production matrix.
+- `externalPriorityProfiles` stores ordered provider lists per lane for each named profile; missing shipped profiles mean the current shared production matrix must be refreshed.
 - `externalOpinionCounts` stores how many distinct external opinions to collect per lane; missing entries mean `1`.
 - `parallelMode: manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `externalCodexWorkdirMode` and `externalClaudeWorkdirMode` choose whether those provider-backed external runs start in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`.
@@ -70,6 +70,13 @@ Rules:
   - `review.security`: `claude > codex > reserve`
   - `review.performance-architecture`: `codex > claude > reserve`
   - `review.ui-visual-correctness`: `codex > claude > reserve`
+
+### `quality-first`
+
+- Shipped alternate production profile for maximum result quality.
+- Biases near-tie advisory, source-bound, and review lanes toward Codex while preserving Claude-first lanes where the benchmark evidence gives Claude a clearer compact or visual-worker edge.
+- Shipped production `auto` provider families stay on `codex | claude`; advisory/review lanes may also reach the supplemental `reserve` candidate after primary providers.
+- Gemini and Qwen must not be profile entries.
 
 Repo-local custom production profiles may exist, but they must be declared locally and kept clearly separate from shipped production defaults. Gemini and Qwen must not be profile entries: if a repo wants to demonstrate either example provider, use a scalar explicit provider override such as `externalProvider: qwen` or `externalProvider: gemini` and label the run `WEAK MODEL / NOT RECOMMENDED`.
 

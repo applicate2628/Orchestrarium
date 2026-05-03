@@ -119,26 +119,38 @@ tries to route them through an external worker or reviewer.
 | `L11 review.performance-architecture` | `review.performance-architecture` | `X1 3/3`, `X3 2/3`, `X4 2/3` | staged source-bound performance/architecture review uses `X1`; single-shot review is near-tie unless budget is explicit |
 | `L12 review.ui-visual-correctness` | `review.ui-visual-correctness` | `X1 3/3`, `X3 0/3`, `X4 1/3` | calibrated screenshot grounding, screenshot-diff review, and staged screenshot-diff review use `X1`; exact original-pixel extraction remains an `X3` worker/diagnostic subcase |
 
-## Shipped Balanced Profile
+## Shipped Production Profiles
 
-The shipped profile keeps Gemini and Qwen out of production `auto` routing. Advisory and review
+The shipped profiles keep Gemini and Qwen out of production `auto` routing. Advisory and review
 lanes may use `reserve` only as the supplemental last candidate. Worker and design lanes must
 not use `reserve`.
 
-| Lane | Balanced provider order |
-|---|---|
-| `advisory.repo-understanding` | `claude > codex > reserve` |
-| `advisory.design-adr` | `claude > codex > reserve` |
-| `design.ui-ux-structure` | `codex > claude` |
-| `worker.reasoning-constraints` | `claude > codex` |
-| `worker.default-implementation` | `codex > claude` |
-| `worker.systems-performance-implementation` | `claude > codex` |
-| `worker.ui-implementation` | `claude > codex` |
-| `worker.visual-graphics-visualization` | `claude > codex` |
-| `review.pre-pr` | `claude > codex > reserve` |
-| `review.security` | `claude > codex > reserve` |
-| `review.performance-architecture` | `codex > claude > reserve` |
-| `review.ui-visual-correctness` | `codex > claude > reserve` |
+| Profile | Lane | Provider order |
+|---|---|---|
+| `balanced` | `advisory.repo-understanding` | `claude > codex > reserve` |
+|  | `advisory.design-adr` | `claude > codex > reserve` |
+|  | `design.ui-ux-structure` | `codex > claude` |
+|  | `worker.reasoning-constraints` | `claude > codex` |
+|  | `worker.default-implementation` | `codex > claude` |
+|  | `worker.systems-performance-implementation` | `claude > codex` |
+|  | `worker.ui-implementation` | `claude > codex` |
+|  | `worker.visual-graphics-visualization` | `claude > codex` |
+|  | `review.pre-pr` | `claude > codex > reserve` |
+|  | `review.security` | `claude > codex > reserve` |
+|  | `review.performance-architecture` | `codex > claude > reserve` |
+|  | `review.ui-visual-correctness` | `codex > claude > reserve` |
+| `quality-first` | `advisory.repo-understanding` | `codex > claude > reserve` |
+|  | `advisory.design-adr` | `codex > claude > reserve` |
+|  | `design.ui-ux-structure` | `codex > claude` |
+|  | `worker.reasoning-constraints` | `claude > codex` |
+|  | `worker.default-implementation` | `codex > claude` |
+|  | `worker.systems-performance-implementation` | `codex > claude` |
+|  | `worker.ui-implementation` | `claude > codex` |
+|  | `worker.visual-graphics-visualization` | `claude > codex` |
+|  | `review.pre-pr` | `codex > claude > reserve` |
+|  | `review.security` | `codex > claude > reserve` |
+|  | `review.performance-architecture` | `codex > claude > reserve` |
+|  | `review.ui-visual-correctness` | `codex > claude > reserve` |
 
 ## Source Surfaces
 
@@ -157,6 +169,7 @@ not use `reserve`.
 - `authz`: authorization; permission and access-control behavior.
 - `reserve`: symbolic supplemental read-only candidate for advisory/review lanes only; it is ranked after primary `claude` and `codex`.
 - `CLI`: Command-Line Interface; a provider or tool launched from a shell.
+- `externalPriorityProfile`: active named provider-order profile selected from `externalPriorityProfiles` when `externalProvider: auto` is used.
 - `externalPriorityProfiles`: Orchestrarium `agents-mode` map from a named profile and lane to an ordered production provider list.
 - `L00..L12`: RF12 line identifiers for the owner/control line plus twelve routing lines.
 - `MoM`: Method of Moments; a numerical method used in computational electromagnetics.
