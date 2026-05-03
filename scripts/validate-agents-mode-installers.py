@@ -237,6 +237,11 @@ def validate_overlay(
     if counts != expected_counts:
         raise InstallerRegressionError(f"{case.name} opinion counts drifted")
 
+    if scalars.get("externalCodexProfile") != "default":
+        raise InstallerRegressionError(
+            f"{case.name} missing shared externalCodexProfile default"
+        )
+
     custom = profiles.get("custom")
     if custom is None:
         raise InstallerRegressionError(f"{case.name} did not preserve custom profile")

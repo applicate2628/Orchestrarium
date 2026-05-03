@@ -65,6 +65,11 @@
       "allowed": ["runtime-default", "pinned-top-pro"]
     },
     {
+      "name": "externalCodexProfile",
+      "default": "default",
+      "allowed": ["default", "gpt-5.5-fast"]
+    },
+    {
       "name": "externalClaudeProfile",
       "default": "opus-max",
       "allowed": ["sonnet-high", "opus-max"],

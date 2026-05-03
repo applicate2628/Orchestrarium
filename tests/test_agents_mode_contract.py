@@ -18,6 +18,27 @@ class AgentsModeContractTest(unittest.TestCase):
 
         self.assertEqual(profile, "quality-first")
 
+    def test_codex_fast_profile_is_explicit_opt_in(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        schema = json.loads(
+            (root / "shared" / "agents-mode.schema.json").read_text(encoding="utf-8")
+        )
+        presets = json.loads(
+            (root / "shared" / "agents-mode.presets.json").read_text(encoding="utf-8")
+        )
+
+        scalars = {scalar["name"]: scalar for scalar in schema["scalarKeys"]}
+        codex_profile = scalars["externalCodexProfile"]
+
+        self.assertEqual(codex_profile["default"], "default")
+        self.assertEqual(codex_profile["allowed"], ["default", "gpt-5.5-fast"])
+        self.assertNotIn("providers", codex_profile)
+
+        for preset in presets["presetOrder"]:
+            with self.subTest(preset=preset):
+                expansion = presets["presets"][preset]["expansion"]
+                self.assertEqual(expansion["externalCodexProfile"], "default")
+
     def test_shared_contract_validator_passes(self) -> None:
         root = Path(__file__).resolve().parents[1]
         result = subprocess.run(
@@ -60,7 +81,7 @@ class AgentsModeContractTest(unittest.TestCase):
             text = codex_init.read_text(encoding="utf-8")
             text = text.replace(
                 "   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max; default: opus-max",
-                "   externalCodexProfile: {value}  # invalid drift from Codex-only scalar",
+                "   externalFastProfile: {value}  # invalid drift from Codex-only scalar",
                 1,
             )
             codex_init.write_text(text, encoding="utf-8")

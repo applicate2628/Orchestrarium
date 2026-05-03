@@ -135,6 +135,13 @@ def reference_expansion_table(presets_data: dict[str, Any]) -> str:
         ]
     )
     rows.append(
+        [code("externalCodexProfile")]
+        + [
+            code(str(presets[preset]["expansion"]["externalCodexProfile"]))
+            for preset in order
+        ]
+    )
+    rows.append(
         ["`externalClaudeProfile` (Codex-line only)"]
         + [
             code(str(presets[preset]["expansion"]["externalClaudeProfile"]))
@@ -165,6 +172,7 @@ def init_expansion_table(presets_data: dict[str, Any], provider: str) -> str:
         "externalCodexWorkdirMode",
         "externalClaudeWorkdirMode",
         "externalModelMode",
+        "externalCodexProfile",
     ]
     if provider == "codex":
         keys.append("externalClaudeProfile")

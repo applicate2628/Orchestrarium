@@ -258,6 +258,12 @@ def validate_reference_expansion(root: Path, presets_data: dict[str, Any]) -> No
     )
     check_table_row(
         rows,
+        code("externalCodexProfile"),
+        row_values(presets, preset_order, "externalCodexProfile"),
+        path,
+    )
+    check_table_row(
+        rows,
         "`externalClaudeProfile` (Codex-line only)",
         row_values(presets, preset_order, "externalClaudeProfile"),
         path,
@@ -295,6 +301,7 @@ def validate_init_expansion(
         "externalCodexWorkdirMode",
         "externalClaudeWorkdirMode",
         "externalModelMode",
+        "externalCodexProfile",
     ]:
         check_table_row(rows, code(key), row_values(presets, preset_order, key), full_path)
 

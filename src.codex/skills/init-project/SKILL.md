@@ -36,6 +36,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
+| `externalCodexProfile` | `default` | `default` | `default` | `default` | `default` | `default` |
 | `externalClaudeProfile` | `opus-max` | `sonnet-high` | `sonnet-high` | `opus-max` | `opus-max` | `sonnet-high` |
 
 `correctness-first` and `power-mode` lane-specific opinion counts:
@@ -103,6 +104,7 @@ Routing conventions (not persisted as keys):
      - `externalCodexWorkdirMode`
      - `externalClaudeWorkdirMode`
      - `externalModelMode`
+     - `externalCodexProfile`
      - `externalClaudeProfile`
    - Use the existing value when present, the preset-expanded value if one was selected, or otherwise default to:
      - `consultantMode: disabled`
@@ -119,6 +121,7 @@ Routing conventions (not persisted as keys):
      - `externalCodexWorkdirMode: neutral`
      - `externalClaudeWorkdirMode: neutral`
      - `externalModelMode: runtime-default`
+     - `externalCodexProfile: default`
      - `externalClaudeProfile: opus-max`
    - Accept shorthand answers such as `force`, `external reviewer only`, `opus`, or `defaults for the rest`.
 
@@ -152,6 +155,7 @@ Routing conventions (not persisted as keys):
    externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
+   externalCodexProfile: {value}  # allowed: default | gpt-5.5-fast; default: default
    externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max; default: opus-max
    ```
 

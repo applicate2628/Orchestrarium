@@ -6,8 +6,8 @@ Canonical value-by-value operator reference for pack-local `agents-mode` files. 
 
 | Provider | Canonical file | Provider-specific note |
 |---|---|---|
-| Codex | `.agents/.agents-mode.yaml` | Shares the production provider universe `auto | codex | claude`, plus the advisory/review-only supplemental `reserve` profile candidate. `auto` resolves by lane type through the active named production profile below; explicit `codex` is a self-provider override only, never the ordinary `auto` result. Decision-driving reads resolve Codex overlay state in this order: local `.agents/.agents-mode.yaml`, local legacy `.agents/.agents-mode`, global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`; whichever file supplies the effective config must be normalized forward into the canonical `.yaml` path in the same scope. `reserveResolver` binds the symbolic reserve candidate to a concrete read-only resolver. Codex-line config may store the shared `externalModelMode` and optional `externalClaudeProfile` when Codex dispatches to primary Claude. |
-| Claude Code | `.claude/.agents-mode.yaml` | Shares the production provider universe `auto | codex | claude`, plus the advisory/review-only supplemental `reserve` profile candidate. `auto` resolves by lane type through the active named production profile below; explicit `claude` is a self-provider override only, never the ordinary `auto` result. Decision-driving reads resolve Claude overlay state in this order: local `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, global `~/.claude/.agents-mode.yaml`, then global legacy `~/.claude/.agents-mode`; whichever file supplies the effective config must be normalized forward into the canonical `.yaml` path in the same scope. `reserveResolver` binds the symbolic reserve candidate to a concrete read-only resolver and is not a separate scalar provider. Claude-line config may store the shared `externalModelMode`. |
+| Codex | `.agents/.agents-mode.yaml` | Shares the production provider universe `auto | codex | claude`, plus the advisory/review-only supplemental `reserve` profile candidate. `auto` resolves by lane type through the active named production profile below; explicit `codex` is a self-provider override only, never the ordinary `auto` result. Decision-driving reads resolve Codex overlay state in this order: local `.agents/.agents-mode.yaml`, local legacy `.agents/.agents-mode`, global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`; whichever file supplies the effective config must be normalized forward into the canonical `.yaml` path in the same scope. `reserveResolver` binds the symbolic reserve candidate to a concrete read-only resolver. Codex-line config may store the shared `externalModelMode` and `externalCodexProfile`, plus optional `externalClaudeProfile` when Codex dispatches to primary Claude. |
+| Claude Code | `.claude/.agents-mode.yaml` | Shares the production provider universe `auto | codex | claude`, plus the advisory/review-only supplemental `reserve` profile candidate. `auto` resolves by lane type through the active named production profile below; explicit `claude` is a self-provider override only, never the ordinary `auto` result. Decision-driving reads resolve Claude overlay state in this order: local `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, global `~/.claude/.agents-mode.yaml`, then global legacy `~/.claude/.agents-mode`; whichever file supplies the effective config must be normalized forward into the canonical `.yaml` path in the same scope. `reserveResolver` binds the symbolic reserve candidate to a concrete read-only resolver and is not a separate scalar provider. Claude-line config may store the shared `externalModelMode` and `externalCodexProfile`. |
 | Gemini CLI | `.gemini/.agents-mode.yaml` | Example-only integration. Gemini is classified by this repository as `WEAK MODEL / NOT RECOMMENDED` and must not appear in shipped `auto` routing profiles. Explicit `externalProvider: gemini` is a manual demonstration path only, not a production recommendation. Decision-driving reads resolve Gemini overlay state in this order: local `.gemini/.agents-mode.yaml`, local legacy `.gemini/.agents-mode`, global `~/.gemini/.agents-mode.yaml`, then global legacy `~/.gemini/.agents-mode`; whichever file supplies the effective config must be normalized forward into the canonical `.yaml` path in the same scope. Official Gemini runtime config still lives in `.gemini/settings.json`; Orchestrarium install seeds the overlay, and Gemini `/init` still owns `GEMINI.md`. |
 | Qwen Code | `.qwen/.agents-mode.yaml` | Example-only integration. Qwen is classified by this repository as `WEAK MODEL / NOT RECOMMENDED`, is maintained only as a native example peer to Gemini, and must not appear in shipped `auto` routing profiles. Explicit `externalProvider: qwen` is a manual demonstration path only, not a production recommendation. Official Qwen runtime config uses Qwen-native surfaces such as `QWEN.md`, `.qwen/settings.json`, `.qwen/skills`, `.qwen/agents`, `.qwen/commands`, and `qwen-extension.json`; Orchestrarium Qwen installation must follow those surfaces rather than copying Gemini-specific mechanics. |
 
@@ -74,6 +74,7 @@ At init time, the helper may either write the selected preset immediately or ent
 | `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review `2`, others `1` | advisory+review `2`, others `1` | all `1` |
 | workdir modes | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
+| `externalCodexProfile` | `default` | `default` | `default` | `default` | `default` | `default` |
 | `externalClaudeProfile` (Codex-line only) | `opus-max` | `sonnet-high` | `sonnet-high` | `opus-max` | `opus-max` | `sonnet-high` |
 
 `correctness-first` and `power-mode` lane-specific opinion counts:
@@ -156,7 +157,7 @@ Notes:
 |---|---|---|
 | `auto` | Resolve the external provider by lane type through the active named production priority profile | `auto` is pack-neutral. It uses the active production profile below, explicit user override, and any documented repo-local routing heuristic. Ordinary `auto` must not silently resolve to the same provider as the current host line, and it must not select example-only providers. |
 | `claude` | Route provider-backed external work to primary Claude CLI | Valid wherever Claude CLI is installed. When this value is selected or `auto` resolves to Claude, honor `externalModelMode`; Codex may additionally honor `externalClaudeProfile` as a narrower override. The `reserve` candidate does not change this primary provider run. |
-| `codex` | Route provider-backed external work to Codex CLI | Valid wherever Codex CLI is installed. If selected from the Codex line, treat it as an explicit self-provider override only. |
+| `codex` | Route provider-backed external work to Codex CLI | Valid wherever Codex CLI is installed. If selected from the Codex line, treat it as an explicit self-provider override only. When this value is selected or `auto` resolves to Codex, honor `externalCodexProfile`; `default` inherits `externalModelMode`. |
 | `gemini` | Manual example-only Gemini CLI route | `WEAK MODEL / NOT RECOMMENDED`. Valid only as an explicit demonstration or compatibility path where Gemini CLI is installed. It is not eligible for shipped `auto` routing and must not be presented as a production recommendation. |
 | `qwen` | Manual example-only Qwen Code route | `WEAK MODEL / NOT RECOMMENDED`. Valid only as an explicit native Qwen integration demonstration where Qwen Code is installed. It is not eligible for shipped `auto` routing and must not be presented as a production recommendation. |
 
@@ -310,6 +311,19 @@ Notes:
 - Treat `gpt-5.3-codex-spark` as a bounded mechanical overflow path only. Reserve it for strictly scoped, low-reasoning, autonomous work instead of using it as the ordinary cheaper mode for broad reasoning or cleanup.
 - Treat `reserve` differently from provider fallback pools: it is a separate advisory/review candidate, not a primary-Claude retry path and not a worker, implementation, editing, or publication path.
 
+### `externalCodexProfile`
+
+| Value | Meaning | Effective Codex behavior |
+|---|---|---|
+| `default` | Inherit the shared model policy | When the resolved provider is Codex, apply `externalModelMode` unchanged. This is the shipped preset value, including for `externalProvider: auto`, so auto routing does not secretly enable fast mode. |
+| `gpt-5.5-fast` | Explicit Codex fast-profile request | When the resolved provider is Codex, request the runtime's matching `gpt-5.5` fast profile or flag if the installed Codex runtime supports it. If the runtime cannot prove that profile is available, record the route as unavailable or deviated instead of silently fabricating an equivalent. |
+
+Notes:
+- This is a shared `agents-mode` key because any host line may route an external lane to Codex.
+- The key applies only after provider resolution. It has no effect when the resolved provider is Claude, Gemini, Qwen, or `reserve`.
+- `default` is intentionally different from `gpt-5.5-fast`: it preserves the current `externalModelMode` behavior and keeps shipped profiles stable.
+- Treat `gpt-5.5-fast` as a repo-local profile label that still requires installed-runtime verification before claiming an actual provider-native fast path was used.
+
 ## External role eligibility
 
 Resolve external routing in this order: `role eligibility -> provider selection -> CLI availability`.
@@ -342,6 +356,8 @@ Guardrails:
 
 | Situation | Rule |
 |---|---|
+| `externalCodexProfile: default` and Codex is the chosen provider | Inherit `externalModelMode`; under `runtime-default`, do not pin a model, and under `pinned-top-pro`, use the documented top Codex path. |
+| `externalCodexProfile: gpt-5.5-fast` and Codex is the chosen provider | Request the installed runtime's `gpt-5.5` fast profile if supported. If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
 | `externalModelMode: pinned-top-pro` and Codex is the chosen provider | Try `gpt-5.5 --reasoning-effort xhigh` first. Only on an explicitly configured repo-local fully autonomous low-reasoning worker lane may Codex retry once with `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path. Other lanes must disclose Codex unavailability instead of downgrading. |
 | Explicit Gemini example route | Gemini is outside production `auto` routing and is classified as `WEAK MODEL / NOT RECOMMENDED`; any direct Gemini command is a manual example or compatibility run, not a pinned production model policy. |
 | `externalModelMode: pinned-top-pro` and Claude is the chosen provider | Try primary `claude` on `opus-max`. Do not retry primary Claude through the secret-backed wrapper. Advisory/review lanes may later collect the separate `reserve` candidate if their profile order and opinion count reach it. |
@@ -369,12 +385,12 @@ Notes:
 
 ## First-write defaults
 
-| Provider | `consultantMode` | `delegationMode` | `parallelMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `reserveResolver` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalModelMode` | `externalClaudeProfile` |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Codex | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `opus-max` unless explicitly overridden |
-| Claude Code | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | not part of canonical Claude-line config |
-| Gemini CLI | example-only | example-only | example-only | example-only | example-only | example-only | explicit `gemini` only | `claude-sonnet` in shared overlay | example-only | example-only | example-only | not part of canonical Gemini-line config |
-| Qwen Code | example-only | example-only | example-only | example-only | example-only | example-only | explicit `qwen` only | `claude-sonnet` in shared overlay | example-only | example-only | example-only | not part of canonical Qwen-line config |
+| Provider | `consultantMode` | `delegationMode` | `parallelMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `reserveResolver` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalModelMode` | `externalCodexProfile` | `externalClaudeProfile` |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Codex | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | `opus-max` unless explicitly overridden |
+| Claude Code | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | not part of canonical Claude-line config |
+| Gemini CLI | example-only | example-only | example-only | example-only | example-only | example-only | explicit `gemini` only | `claude-sonnet` in shared overlay | example-only | example-only | example-only | `default` | not part of canonical Gemini-line config |
+| Qwen Code | example-only | example-only | example-only | example-only | example-only | example-only | explicit `qwen` only | `claude-sonnet` in shared overlay | example-only | example-only | example-only | `default` | not part of canonical Qwen-line config |
 
 Structured defaults written alongside the scalar keys:
 
@@ -427,6 +443,7 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 | External CLI prompt delivery | Substantive task prompts are file-based by default: create a temporary prompt file and feed it through stdin or a provider-supported file-input mechanism instead of putting the full prompt in argv. |
 | External workdir mode | `externalCodexWorkdirMode` and `externalClaudeWorkdirMode` choose whether each production external provider runs in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`. |
 | Shared external model policy | `externalModelMode: runtime-default` keeps provider runtime model selection; `pinned-top-pro` pins the strongest documented model/profile for the resolved provider and allows one named same-provider fallback on retryable provider exhaustion. |
+| Codex external profile | `externalCodexProfile: default` inherits the shared model policy when Codex is the resolved provider; `gpt-5.5-fast` is an explicit fast-profile request that must be verified against the installed Codex runtime. |
 | Gemini example status | Gemini is `WEAK MODEL / NOT RECOMMENDED`; use explicit `externalProvider: gemini` only for manual example or compatibility demonstrations, never for shipped `auto` routing. |
 | Qwen example status | Qwen is a native example integration peer classified as `WEAK MODEL / NOT RECOMMENDED`; use explicit `externalProvider: qwen` only for manual example or compatibility demonstrations, never for shipped `auto` routing. |
 | Reserve candidate | `reserve` is the advisory/review-only supplemental candidate after primary `claude` and `codex`. It is symbolic, bound by `reserveResolver`, independent of primary providers, and must not be used for worker or mutating work. |
@@ -445,6 +462,7 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 - `agents-mode`: Orchestrarium operator configuration overlay for delegation, external provider routing, MCP use, and parallelism.
 - `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `argv`: command-line argument vector passed to a process.
+- `externalCodexProfile`: shared `agents-mode` key that controls optional Codex-specific profile selection after external provider resolution chooses Codex.
 - `reserve`: symbolic supplemental read-only candidate for advisory/review lanes only; it is separate from primary providers and not valid for worker or mutating routes.
 - `reserveResolver`: scalar `agents-mode` key that binds symbolic `reserve` to a concrete read-only resolver such as `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`.
 - `CLI`: Command-Line Interface; a provider or tool invoked from a shell.

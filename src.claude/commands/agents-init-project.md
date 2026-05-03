@@ -31,6 +31,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
+| `externalCodexProfile` | `default` | `default` | `default` | `default` | `default` | `default` |
 
 `correctness-first` and `power-mode` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
@@ -93,6 +94,7 @@ Routing conventions (not persisted as keys):
       - `externalCodexWorkdirMode`
       - `externalClaudeWorkdirMode`
       - `externalModelMode`
+      - `externalCodexProfile`
     - Use the existing value when present, the preset-expanded value if one was selected, or otherwise default to:
       - `consultantMode: disabled`
       - `delegationMode: manual`
@@ -108,6 +110,7 @@ Routing conventions (not persisted as keys):
       - `externalCodexWorkdirMode: neutral`
       - `externalClaudeWorkdirMode: neutral`
       - `externalModelMode: runtime-default`
+      - `externalCodexProfile: default`
     - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on `codex | claude`; explicit `codex`, `claude`, `gemini`, or `qwen` may still be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths.
     - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
@@ -142,6 +145,7 @@ Routing conventions (not persisted as keys):
    externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
+   externalCodexProfile: {value}  # allowed: default | gpt-5.5-fast; default: default
    ```
 
 8. **Write to CLAUDE.md.** Add or replace the `## Project policies` section in `.claude/CLAUDE.md`. Place it between `## Engineering hygiene` and `## Publication safety`. Use this format:

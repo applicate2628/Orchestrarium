@@ -46,6 +46,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
+| `externalCodexProfile` | `default` | `default` | `default` | `default` | `default` | `default` |
 
 `correctness-first` and `power-mode` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
@@ -106,6 +107,7 @@ Routing conventions (not persisted as keys):
      - `externalCodexWorkdirMode`
      - `externalClaudeWorkdirMode`
      - `externalModelMode`
+     - `externalCodexProfile`
    - Use existing values when present, the preset-expanded value if one was selected, or otherwise default to:
      - `consultantMode: disabled`
      - `delegationMode: manual`
@@ -121,6 +123,7 @@ Routing conventions (not persisted as keys):
      - `externalCodexWorkdirMode: neutral`
      - `externalClaudeWorkdirMode: neutral`
      - `externalModelMode: runtime-default`
+     - `externalCodexProfile: default`
    - Accept shorthand such as `force`, `external reviewer only`, `balanced profile`, `explicit qwen`, or `pinned top pro`.
    - Do not invent shipped profile names beyond `balanced` and `quality-first`. If the user wants another profile, treat it as repo-local custom data and keep `gemini` / `qwen` out of any profile the user expects to behave as production `auto`.
 
@@ -190,6 +193,7 @@ Routing conventions (not persisted as keys):
    externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
+   externalCodexProfile: {value}  # allowed: default | gpt-5.5-fast; default: default
    ```
 
 8. **Confirm completion.**
