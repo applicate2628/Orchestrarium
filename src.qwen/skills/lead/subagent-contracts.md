@@ -46,6 +46,16 @@ Gate to next stage:
 5. Gate: PASS | REVISE | BLOCKED:<class> | RETURN(role)
 ```
 
+## agent-runs.jsonl format
+
+When task memory is configured, every delegated role, external adapter, consultant sweep, and main-session gate action that produces or accepts an artifact must append one JSON object to `agent-runs.jsonl` in the same work-item directory.
+
+The ledger is machine-readable execution state; `status.md` remains the human-readable recovery summary. A `PASS` in `status.md` is not accepted unless the corresponding ledger event has `gate: "PASS"`, `status: "completed"`, an artifact path, and at least one evidence entry.
+
+Minimum required fields are defined by `shared/schemas/agent-runs.schema.json`: `schemaVersion`, `runId`, `workItem`, `role`, `executionRole`, `status`, `gate`, `scope`, `startedAt`, and `updatedAt`.
+
+Before closeout, run `scripts/validate-work-item-state.* --work-item <path>` or the installed equivalent when the repository exposes one. Closeout is blocked while the ledger contains running agents, duplicate run IDs, missing artifacts for `PASS`, `PASS` without evidence, or inconsistent `BLOCKED` / `REVISE` status.
+
 ## External dispatch contract
 
 Use `external-dispatch.md` when the main Qwen session prefers or explicitly selects an external adapter.
@@ -80,9 +90,15 @@ Use `external-dispatch.md` when the main Qwen session prefers or explicitly sele
 
 ## Terms and Abbreviations
 
+- `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `BLOCKED`: workflow state for a real missing dependency, prerequisite, or unavailable route.
 - `reserve`: symbolic supplemental read-only candidate for advisory/review lanes only; it is separate from primary providers and not valid for worker or mutating routes.
 - `CLI`: Command-Line Interface; a provider or tool invoked from a shell.
+- `evidence`: concrete verification data such as a command, artifact path, review result, log summary, or observed output supporting a gate.
+- `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
+- `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
+- `PASS`: workflow state meaning the scoped artifact passed the relevant gate.
 - `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
 - `Qwen`: Qwen provider line; here it is explicit example-only and `WEAK MODEL / NOT RECOMMENDED`.
+- `status.md`: human-readable recovery summary for the active work item.
 - `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.

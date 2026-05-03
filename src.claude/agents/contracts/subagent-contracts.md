@@ -114,6 +114,16 @@ updated: <YYYY-MM-DD HH:MM>
 
 The REVISE loop section is optional — include it only when a stage has returned REVISE and the loop is active. Remove it when the loop resolves (PASS or escalation).
 
+### agent-runs.jsonl format
+
+When task memory is configured, every delegated role, external adapter, consultant sweep, and main-session gate action that produces or accepts an artifact must append one JSON object to `agent-runs.jsonl` in the same work-item directory.
+
+The ledger is machine-readable execution state; `status.md` remains the human-readable recovery summary. A `PASS` in `status.md` is not accepted unless the corresponding ledger event has `gate: "PASS"`, `status: "completed"`, an artifact path, and at least one evidence entry.
+
+Minimum required fields are defined by `shared/schemas/agent-runs.schema.json`: `schemaVersion`, `runId`, `workItem`, `role`, `executionRole`, `status`, `gate`, `scope`, `startedAt`, and `updatedAt`.
+
+Before closeout, run `scripts/validate-work-item-state.* --work-item <path>` or the installed equivalent when the repository exposes one. Closeout is blocked while the ledger contains running agents, duplicate run IDs, missing artifacts for `PASS`, `PASS` without evidence, or inconsistent `BLOCKED` / `REVISE` status.
+
 No-artifact interruption rule:
 - A handoff interrupt or worker stall without an artifact does not count as a substantive REVISE artifact.
 - Set `Primary task status: side-interrupted` and `Interruption marker: INTERRUPTED(no-artifact)` in `status.md` for orchestrator bookkeeping.
@@ -195,3 +205,18 @@ Ask these before advancing:
 6. Is an independent reviewer or human gate still required?
 7. Is the blast radius still inside the approved change surface?
 8. Is any admitted-scope obligation still open even though one sub-batch is finished?
+
+## Terms and Abbreviations
+
+- `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
+- `artifact`: concrete work product such as a memo, plan, patch, review, or closure note.
+- `BLOCKED`: workflow state for a real missing dependency, prerequisite, or unavailable route.
+- `CLI`: Command-Line Interface; a provider or tool invoked from a shell.
+- `evidence`: concrete verification data such as a command, artifact path, review result, log summary, or observed output supporting a gate.
+- `gate`: acceptance checkpoint that verifies whether an artifact may move forward.
+- `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
+- `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
+- `PASS`: workflow state meaning the scoped artifact passed the relevant gate.
+- `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
+- `REVISE`: workflow state meaning the artifact must return to the same role for bounded correction.
+- `status.md`: human-readable recovery summary for the active work item.

@@ -683,6 +683,8 @@ lead -> product-manager -> lead
 - `notes.md` или `notes/` хранит technical findings и discoveries; принятые долгоживущие решения по-прежнему должны жить в design или ADR artifact.
 - `closure.md` обязателен перед перемещением item в конфигурируемую archive location. Содержит финальную запись о закрытии: outcome, residual risk и archive location.
 - `status.md` имеет определённый формат с YAML frontmatter (template, orchestrator, started, updated) и разделами: Current state, Active agents, Completed agents, REVISE loop (опционально), Next action. Полный формат определён в `subagent-contracts.md`.
+- `agent-runs.jsonl` — машиночитаемый журнал исполнения work-item. Он фиксирует каждый запуск или приём результата агента: роль, execution path, статус, gate, artifact и evidence. Lead обязан использовать его для сверки active, completed, blocked и revise состояний перед closeout.
+- `status.md` и `agent-runs.jsonl` должны совпадать на границах стадий: нельзя закрывать задачу при running ledger entries, принимать `PASS` без evidence, принимать completed gate без artifact или оставлять downstream `PASS` без re-review после существенной правки upstream artifact.
 
 ### 11.3 Что стоит автоматизировать
 
@@ -844,18 +846,22 @@ accessibility-reviewer
 
 > **Одна роль. Один артефакт. Один gate. Один явный владелец на каждый критичный риск.**
 
-### Термины и сокращения
+## Термины и сокращения
 
 - `accepted artifact`: артефакт, который прошёл обязательный gate и может использоваться downstream-ролями.
 - `ADR`: Architecture Decision Record; долговечный документ, фиксирующий архитектурное решение, контекст и последствия.
+- `agent-runs.jsonl`: JSONL-журнал исполнения рядом с `status.md`; машиночитаемое состояние work-item.
 - `artifact`: конкретный рабочий результат: brief, memo, design, plan, patch, review или closure note.
 - `BLOCKED`: состояние workflow для реального внешнего blocker'а, недоступного prerequisite или отсутствующего required decision.
 - `CAD`: Computer-Aided Design; software и file formats для technical drawings, geometry или engineered layouts.
 - `CI`: Continuous Integration; автоматизированные repository checks, например builds, linters и tests.
 - `data point`: одно конкретное наблюдаемое значение, log line, field, return code, screenshot fact или command result, используемые как evidence.
+- `evidence`: конкретные проверочные данные, подтверждающие gate: command result, artifact path, review result, log summary или observed output.
 - `gate`: acceptance checkpoint, который проверяет, можно ли двигать artifact дальше.
 - `hash`: deterministic digest bytes или content файла; полезен для identity checks, но не заменяет visual inspection.
+- `JSONL`: JSON Lines; формат "один JSON object на строку", используемый здесь для append-only execution events.
 - `lead`: orchestration role, которая маршрутизирует работу, отслеживает artifacts и принимает или отклоняет gates.
+- `ledger`: append-only record запусков agents, gates, artifacts и evidence для work item.
 - `Markdown`: lightweight markup format, используемый для repository documentation.
 - `metadata`: descriptive file или runtime information, например dimensions, timestamps, MIME type или generator fields.
 - `MIME`: Multipurpose Internet Mail Extensions; стандартная family content-type labels для описания file или payload formats.
@@ -866,6 +872,7 @@ accessibility-reviewer
 - `SLA`: Service-Level Agreement; внешнее reliability или performance commitment.
 - `SLO`: Service-Level Objective; внутренний reliability или performance target.
 - `subagent`: делегированный agent instance с узкой role, limited context, одним expected artifact и explicit gate.
+- `status.md`: human-readable recovery summary активного work item.
 - `TeX`: typesetting system и math-notation language, которую используют многие Markdown math renderers.
 - `UI`: User Interface; user-facing interaction surface.
 - `UX`: User Experience; usability, flow, comprehension и interaction quality.

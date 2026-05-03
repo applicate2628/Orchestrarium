@@ -690,6 +690,8 @@ At minimum, it is useful to keep these artifacts near the repository:
 - `notes.md` or `notes/` holds technical findings and discoveries; accepted long-lived decisions still belong in the design or ADR artifact.
 - `closure.md` is mandatory before moving an item to the configured archive location. It holds the final closeout record: outcome, residual risk, and archive location.
 - `status.md` has a defined format with YAML frontmatter (template, orchestrator, started, updated) and sections: Current state, Active agents, Completed agents, REVISE loop (optional), Next action. The full format is defined in `subagent-contracts.md`.
+- `agent-runs.jsonl` is the machine-readable execution ledger for the work item. It records each launched or accepted agent run, assigned role, execution path, status, gate, artifact, and evidence. The lead must use it to reconcile active, completed, blocked, and revise states before closeout.
+- `status.md` and `agent-runs.jsonl` must agree at stage boundaries: no closed task with running ledger entries, no accepted `PASS` without evidence, no missing artifact for a completed gate, and no dependent downstream `PASS` left untouched after a material upstream revision.
 
 ### 11.3 What should be automated
 
@@ -852,18 +854,22 @@ Short team formula:
 
 > **One role. One artifact. One gate. One explicit owner for every critical risk.**
 
-### Terms and Abbreviations
+## Terms and Abbreviations
 
 - `accepted artifact`: an output that has passed its required gate and may be used by downstream roles.
 - `ADR`: Architecture Decision Record; a durable document that records an architecture decision, context, and consequences.
+- `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `artifact`: a concrete work product such as a brief, memo, design, plan, patch, review, or closure note.
 - `BLOCKED`: workflow state for a real external blocker, unavailable prerequisite, or missing required decision.
 - `CAD`: Computer-Aided Design; software and file formats used for technical drawings, geometry, or engineered layouts.
 - `CI`: Continuous Integration; automated repository checks such as builds, linters, and tests.
 - `data point`: one concrete observed value, log line, field, return code, screenshot fact, or command result used as evidence.
+- `evidence`: concrete verification data that supports a gate, such as a command result, artifact path, review result, log summary, or observed output.
 - `gate`: an acceptance checkpoint that verifies whether an artifact may move forward.
 - `hash`: a deterministic digest of file bytes or content; useful for identity checks but not a substitute for visual inspection.
+- `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
 - `lead`: the orchestration role that routes work, tracks artifacts, and accepts or rejects gates.
+- `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
 - `Markdown`: a lightweight markup format used for repository documentation.
 - `metadata`: descriptive file or runtime information such as dimensions, timestamps, MIME type, or generator fields.
 - `MIME`: Multipurpose Internet Mail Extensions; a standard content-type label family used to describe file or payload formats.
@@ -874,6 +880,7 @@ Short team formula:
 - `SLA`: Service-Level Agreement; an external reliability or performance commitment.
 - `SLO`: Service-Level Objective; an internal reliability or performance target.
 - `subagent`: a delegated agent instance with a narrow role, limited context, one expected artifact, and an explicit gate.
+- `status.md`: human-readable recovery summary for the active work item.
 - `TeX`: a typesetting system and math-notation language used by many Markdown math renderers.
 - `UI`: User Interface; the user-facing interaction surface.
 - `UX`: User Experience; usability, flow, comprehension, and interaction quality.
