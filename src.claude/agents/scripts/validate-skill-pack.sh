@@ -425,6 +425,10 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "$SHARED_REF_DIR/subagent-operating-model.md" \
     "$SHARED_REF_DIR/workflow-strategy-comparison.md" \
     "$SHARED_REF_DIR/repository-publication-safety.md" \
+    "$REPO_ROOT/shared/schemas/agent-runs.schema.json" \
+    "$REPO_ROOT/scripts/validate-work-item-state.py" \
+    "$REPO_ROOT/scripts/validate-work-item-state.sh" \
+    "$REPO_ROOT/scripts/validate-work-item-state.ps1" \
     "$SHARED_REF_DIR/ru/subagent-operating-model.md" \
     "$SHARED_REF_DIR/ru/workflow-strategy-comparison.md" \
     "$SHARED_REF_DIR/ru/repository-publication-safety.md"; do
@@ -507,6 +511,12 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "shared subagent-operating-model keeps the role-map section in the shared core"
   check_contains "$SHARED_REF_DIR/subagent-operating-model.md" "## 8. Gates: what each stage must prove" \
     "shared subagent-operating-model keeps the gate model in the shared core"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'agent-runs.jsonl` is the machine-readable execution ledger' \
+    "shared subagent-operating-model documents the agent execution ledger"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'no accepted `PASS` without evidence' \
+    "shared subagent-operating-model rejects PASS without evidence"
   check_h2_section_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
     "## 3.10 Periodic controls" \
     'Use the corresponding pack-local `periodic-control-matrix.md` named in the local addendum as the canonical cadence, owner, evidence, and fail-action matrix.' \
@@ -531,7 +541,8 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "## 11. Governance notes" \
     "## 12. Team composition" \
     "## 13. Short memo for the lead" \
-    "## 14. Final wording to give the lead"
+    "## 14. Final wording to give the lead" \
+    "## Terms and Abbreviations"
 
   check_h2_section_contains "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "## Claude-specific runtime notes" \
@@ -585,7 +596,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CLAUDE_REF_DIR/subagent-operating-model.md" 120 \
     "Claude addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "1c065730f1a9f383bffba5d0884002f73ab6f36ffe6838ad97cfb89da5d4c46d" \
+    "e64c63a31faefc4980d4e3a77685fd80295098af3da6a9cb9fa7e46de5cc79a9" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "f3b58ded2c928e4ad138e3ff966c75480b2f869c56c02bba8aafb4cbfe622cf6" \
@@ -696,6 +707,14 @@ check_absent "$PACK/agents/contracts/external-dispatch.md" "fallback approved by
   "external-dispatch does not record consultant fallback approvals"
 check_contains "$PACK/agents/contracts/subagent-contracts.md" "Read and normalize \`.claude/.agents-mode.yaml\` first." \
   "subagent-contracts require read-time agents-mode normalization"
+check_contains "$PACK/agents/contracts/subagent-contracts.md" "agent-runs.jsonl format" \
+  "subagent-contracts define the agent run ledger format"
+check_contains "$PACK/agents/contracts/subagent-contracts.md" 'A `PASS` in `status.md` is not accepted' \
+  "subagent-contracts reject PASS without ledger evidence"
+check_contains "$PACK/agents/contracts/subagent-contracts.md" "shared/schemas/agent-runs.schema.json" \
+  "subagent-contracts point to the shared ledger schema"
+check_contains "$PACK/agents/contracts/subagent-contracts.md" "scripts/validate-work-item-state.* --work-item" \
+  "subagent-contracts point to the work-item state validator"
 check_contains "$PACK/commands/agents-init-project.md" "normalize it to the current canonical format before presenting or trusting the current values." \
   "agents-init-project normalizes existing agents-mode before reading values"
 check_contains "$PACK/commands/agents-init-project.md" "Any read of \`.claude/.agents-mode.yaml\` that drives a decision should normalize the file to the current canonical format before trusting the flags." \
@@ -922,6 +941,10 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "agents-mode reference documents profile provider sanitization"
   check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "Substantive task prompts are file-based by default" \
     "agents-mode reference documents file-based external CLI prompts"
+  check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "agent-runs.jsonl" \
+    "agents-mode reference documents ledger fan-out tracking"
+  check_contains "$REPO_ROOT/docs/external-worker-design.md" "Work-item ledger rule" \
+    "external-worker design maps execution records to the ledger"
   check_normalizer_strips_example_auto_providers \
     "agents-mode normalizer strips Gemini/Qwen and keeps reserve last or absent in custom auto profiles"
   check_file "$REPO_ROOT/shared/agents-mode.defaults.yaml" "shared/agents-mode.defaults.yaml"
@@ -929,6 +952,26 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "shared agents-mode defaults keep reserve advisory/review-only"
   check_not_exists "$REPO_ROOT/src.claude/agents-mode.defaults.yaml" \
     "src.claude/agents-mode.defaults.yaml removed from the monorepo"
+  check_contains "$REPO_ROOT/README.md" "scripts/validate-work-item-state.* --work-item" \
+    "README documents the work-item state validator"
+  check_contains "$REPO_ROOT/INSTALL.md" "agent-runs.jsonl" \
+    "INSTALL documents local work-item execution tracking"
+  check_contains "$REPO_ROOT/RELEASE_NOTES.md" "machine-readable work-item execution tracking contract" \
+    "release notes document the work-item execution tracking contract"
+  check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "PASS gate requires evidence" \
+    "work-item state validator enforces evidence for PASS"
+  check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "agent-runs.jsonl" \
+    "work-item state validator loads the agent run ledger"
+  check_contains "$REPO_ROOT/scripts/validate-work-item-state.sh" "validate-work-item-state.py" \
+    "work-item state Bash wrapper targets the Python validator"
+  check_contains "$REPO_ROOT/scripts/validate-work-item-state.ps1" "validate-work-item-state.py" \
+    "work-item state PowerShell wrapper targets the Python validator"
+  check_contains "$REPO_ROOT/shared/schemas/agent-runs.schema.json" "agent-runs.schema.json" \
+    "agent run ledger schema has a stable id"
+  check_contains "$REPO_ROOT/shared/schemas/agent-runs.schema.json" '"executionRole"' \
+    "agent run ledger schema defines executionRole"
+  check_contains "$REPO_ROOT/shared/schemas/agent-runs.schema.json" '"evidence"' \
+    "agent run ledger schema defines evidence"
 fi
 echo ""
 

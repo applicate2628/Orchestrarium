@@ -181,6 +181,7 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 ## Terms and Abbreviations
 
 - `AGENTS.md`: the Codex-readable governance and instruction file installed into a repository or provider home.
+- `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `API`: Application Programming Interface, a programmatic contract exposed by a tool, runtime, or service.
 - `AXIOM`: a top-priority rule label; in this change it refers to a global-only "never guess" rule that was folded into the existing shared discipline instead of copied as a competing section.
 - `Bash`: a Unix-style command shell used by the `.sh` installers.
@@ -193,6 +194,7 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 - `hash`: a deterministic digest of file bytes or content; useful for identity checks but not a substitute for visual inspection.
 - `HTTP`: Hypertext Transfer Protocol, the web protocol whose status codes include quota and rate-limit signals such as `429`.
 - `INSTALL.md`: this repository's installation guide.
+- `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
 - `junction`: a Windows directory link that redirects one path to another path on disk.
 - `Markdown`: a lightweight markup format used for repository documentation.
 - `MCP`: Model Context Protocol, a protocol used to expose tools and resources to agent runtimes.
@@ -207,6 +209,7 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 - `root router`: the top-level `install.sh` or `install.ps1` entrypoint that dispatches to pack-specific installers.
 - `SECRET.md`: a local-only file used for secret-backed Claude transport configuration; it must not be published.
 - `SKILL.md`: the entrypoint file for a Codex skill definition.
+- `status.md`: human-readable recovery summary for the active work item.
 - `OneDrive-backed directory`: a directory stored under Microsoft OneDrive synchronization, where sync and hydration behavior can affect file access timing.
 - `TeX`: a typesetting system and math-notation language used by many Markdown math renderers.
 - `UI`: User Interface, the visible or interactive surface presented to a user.

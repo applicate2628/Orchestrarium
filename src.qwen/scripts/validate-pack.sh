@@ -154,6 +154,10 @@ done
 if [[ "$MODE" == "source" ]]; then
   [[ -f "$SHARED_SOURCE_FILE" ]] || fail "missing $SHARED_SOURCE_FILE"
   [[ -f "$SHARED_REF_FILE" ]] || fail "missing $SHARED_REF_FILE"
+  [[ -f "$ROOT/shared/schemas/agent-runs.schema.json" ]] || fail "missing shared agent run ledger schema"
+  [[ -f "$ROOT/scripts/validate-work-item-state.py" ]] || fail "missing work-item state validator"
+  [[ -f "$ROOT/scripts/validate-work-item-state.sh" ]] || fail "missing work-item state Bash wrapper"
+  [[ -f "$ROOT/scripts/validate-work-item-state.ps1" ]] || fail "missing work-item state PowerShell wrapper"
   [[ ! -e "$PACK_ROOT/AGENTS.shared.md" ]] || fail "$PACK_ROOT/AGENTS.shared.md should not duplicate shared/AGENTS.shared.md"
   [[ ! -e "$RUNTIME_AGENTS_FILE" ]] || fail "$RUNTIME_AGENTS_FILE should not exist in the source tree"
   [[ -f "$EXTENSION_README_FILE" ]] || fail "missing $EXTENSION_README_FILE"
@@ -292,6 +296,20 @@ if [[ "$MODE" == "source" ]]; then
   grep -Fq 'Formula scope and assumptions amendment' "$SHARED_REF_FILE" || fail "shared subagent-operating-model should document formula scope discipline"
   grep -Fq 'tool availability' "$SHARED_REF_FILE" || fail "shared subagent-operating-model should preserve canonical-source ambiguity inspection"
   grep -Fq 'smallest safe reversible subset' "$SHARED_REF_FILE" || fail "shared subagent-operating-model should preserve user-intent fallback discipline"
+  grep -Fq 'agent-runs.jsonl` is the machine-readable execution ledger' "$SHARED_REF_FILE" || fail "shared subagent-operating-model should document the agent execution ledger"
+  grep -Fq 'no accepted `PASS` without evidence' "$SHARED_REF_FILE" || fail "shared subagent-operating-model should reject PASS without evidence"
+  grep -Fq 'agent-runs.jsonl` — машиночитаемый журнал исполнения work-item' "$ROOT/shared/references/ru/subagent-operating-model.md" || fail "shared RU subagent-operating-model should document the agent execution ledger"
+  grep -Fq 'PASS` без evidence' "$ROOT/shared/references/ru/subagent-operating-model.md" || fail "shared RU subagent-operating-model should reject PASS without evidence"
+  grep -Fq 'agent-runs.jsonl' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document ledger fan-out tracking"
+  grep -Fq 'Work-item ledger rule' "$ROOT/docs/external-worker-design.md" || fail "external-worker design should map execution records to the ledger"
+  grep -Fq 'scripts/validate-work-item-state.* --work-item' "$ROOT/README.md" || fail "README should document the work-item state validator"
+  grep -Fq 'agent-runs.jsonl' "$ROOT/INSTALL.md" || fail "INSTALL should document local work-item execution tracking"
+  grep -Fq 'machine-readable work-item execution tracking contract' "$ROOT/RELEASE_NOTES.md" || fail "release notes should document work-item execution tracking"
+  grep -Fq 'agent-runs.schema.json' "$ROOT/shared/schemas/agent-runs.schema.json" || fail "agent run ledger schema should have a stable id"
+  grep -Fq '"executionRole"' "$ROOT/shared/schemas/agent-runs.schema.json" || fail "agent run ledger schema should define executionRole"
+  grep -Fq '"evidence"' "$ROOT/shared/schemas/agent-runs.schema.json" || fail "agent run ledger schema should define evidence"
+  grep -Fq 'PASS gate requires evidence' "$ROOT/scripts/validate-work-item-state.py" || fail "work-item state validator should enforce evidence for PASS"
+  grep -Fq 'agent-runs.jsonl' "$ROOT/scripts/validate-work-item-state.py" || fail "work-item state validator should load the agent run ledger"
 else
   grep -Fq 'Adapter host runtime' "$RUNTIME_AGENTS_FILE" && fail "shared governance should not allow adapter-host metadata for external execution"
   grep -Fq 'must use direct external launch' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require direct external launch"
@@ -316,6 +334,10 @@ fi
 grep -Fq 'Adapter host runtime:' "$PACK_ROOT/skills/lead/external-dispatch.md" && fail "external-dispatch should not record adapter host runtime"
 grep -Fq 'must use direct external launch' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should require direct external launch"
 grep -Fq 'substantive task prompt must use file-based prompt delivery' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should require file-based external CLI prompts"
+grep -Fq 'agent-runs.jsonl format' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent-contracts should define the agent run ledger format"
+grep -Fq 'A `PASS` in `status.md` is not accepted' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent-contracts should reject PASS without ledger evidence"
+grep -Fq 'shared/schemas/agent-runs.schema.json' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent-contracts should point to the shared ledger schema"
+grep -Fq 'scripts/validate-work-item-state.* --work-item' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent-contracts should point to the work-item state validator"
 
 grep -Fq 'Read and normalize `.qwen/.agents-mode.yaml` to the current canonical format before trusting its flags.' "$PACK_ROOT/skills/external-worker/SKILL.md" || fail "external-worker should normalize agents-mode before routing"
 grep -Fq 'Read and normalize `.qwen/.agents-mode.yaml` to the current canonical format before trusting its flags.' "$PACK_ROOT/skills/external-reviewer/SKILL.md" || fail "external-reviewer should normalize agents-mode before routing"
@@ -431,6 +453,9 @@ json_targets=(
   "$PACK_ROOT/agents/team-templates/security-sensitive.json"
   "$EXTENSION_MANIFEST_FILE"
 )
+if [[ "$MODE" == "source" ]]; then
+  json_targets+=("$ROOT/shared/schemas/agent-runs.schema.json")
+fi
 
 "$PYTHON_BIN" - "$EXTENSION_MANIFEST_FILE" "${json_targets[@]}" <<'PY'
 import json
