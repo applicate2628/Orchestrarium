@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orchestrarium.local/schemas/agent-runs.schema.json",
+  "title": "Orchestrarium agent run ledger event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "runId",
+    "workItem",
+    "role",
+    "executionRole",
+    "status",
+    "gate",
+    "scope",
+    "startedAt",
+    "updatedAt"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runId": { "type": "string", "minLength": 8 },
+    "workItem": { "type": "string", "minLength": 1 },
+    "role": { "type": "string", "minLength": 1 },
+    "executionRole": {
+      "enum": ["main", "lead", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade"]
+    },
+    "assignedRole": { "type": "string" },
+    "provider": { "type": "string" },
+    "model": { "type": "string" },
+    "status": { "enum": ["planned", "running", "completed", "revise", "blocked", "cancelled"] },
+    "gate": {
+      "enum": ["PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "RETURN(role)", "advisory", "none"]
+    },
+    "scope": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "promptFile": { "type": "string" },
+    "artifact": { "type": "string" },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "ref"],
+        "properties": {
+          "kind": { "enum": ["command", "artifact", "visual", "review", "manual-check", "log"] },
+          "ref": { "type": "string", "minLength": 1 },
+          "result": { "type": "string" }
+        }
+      }
+    },
+    "startedAt": { "type": "string", "minLength": 10 },
+    "updatedAt": { "type": "string", "minLength": 10 },
+    "notes": { "type": "string" }
+  }
+}
