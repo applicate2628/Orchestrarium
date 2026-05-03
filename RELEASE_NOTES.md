@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-05-03
+
+### Changed
+
+- Added the first machine-readable work-item execution tracking contract. Active work items can now keep `agent-runs.jsonl` beside `status.md`, and `scripts/validate-work-item-state.* --work-item <path>` checks duplicate run IDs, stale running agents, missing evidence, missing artifacts for `PASS`, and inconsistent `BLOCKED` / `REVISE` gates before closeout. This matters because the existing rule "verify subagents before trusting them" now has an operator-checkable workflow instead of relying only on narrative session summaries.
+
 ## 2026-05-01
 
 ### Changed

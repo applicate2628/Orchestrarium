@@ -173,6 +173,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
      - **Deviation reason:** `<none | external unavailable: [reason]>`
    - Provider-backed consultant execution in `external` mode and both external adapter roles must use direct external launch from the orchestrating runtime or an approved transport wrapper script. If the host runtime cannot launch the selected provider directly, the route is `role disabled`.
    - Reporting rule: if the operator or caller left provider selection at runtime default behavior, artifacts must record `Requested provider: internal` and put the real provider choice in `Resolved provider`; do not emit `auto` in the execution record.
+   - Work-item ledger rule: when task memory is enabled, the execution record maps directly to `agent-runs.jsonl`: `Execution role` becomes `executionRole`; `Assigned / replaced internal role` becomes `assignedRole`; `Resolved provider` becomes `provider`; `Model / profile used` becomes `model`; and publication-safe execution-path detail belongs in `notes` until the schema grows a dedicated path field. Adapter closeout is incomplete until the ledger has the event, artifact, gate, and evidence.
 
 ### Practical launch rules
 
@@ -269,14 +270,19 @@ Normal routing fallback to domain specialist. Not an error — standard routing 
 ## Terms and Abbreviations
 
 - `agents-mode`: Orchestrarium operator configuration overlay for delegation, external provider routing, MCP use, and parallelism.
+- `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `argv`: command-line argument vector passed to a process.
 - `reserve`: symbolic supplemental read-only candidate for advisory/review lanes only; it is separate from primary providers and not valid for worker or mutating routes.
 - `reserveResolver`: scalar `agents-mode` key that binds symbolic `reserve` to a concrete read-only resolver such as `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`.
 - `CLI`: Command-Line Interface; a provider or tool invoked from a shell.
+- `evidence`: concrete verification data such as a command result, artifact path, review result, log summary, or observed output supporting a gate.
 - `JSON`: JavaScript Object Notation; structured data format used by Claude team templates.
+- `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
 - `L00`: owner/control routing line in the release-backed `12 + 1` read; it is documented evidence but not an external provider profile lane.
+- `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
 - `MCP`: Model Context Protocol; protocol for exposing tools and resources to agent runtimes.
 - `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
 - `12 + 1`: twelve external routing lines plus one owner/control line from the release-backed RF12 interpretation.
 - `stdin`: standard input stream for a process.
+- `status.md`: human-readable recovery summary for the active work item.
 - `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.

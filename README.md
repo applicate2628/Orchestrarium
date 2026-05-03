@@ -174,6 +174,8 @@ The docs sync command checks generated `agents-mode` tables, raised-count lists,
 
 The installer regression command creates disposable targets under `/.scratch/`, runs the Bash installers for all four provider lines, and verifies that stale `agents-mode` overlays are normalized to the current schema-backed contract.
 
+Work-item execution tracking uses `agent-runs.jsonl` beside `status.md` for machine-readable agent state. Use `scripts/validate-work-item-state.* --work-item <path>` before closeout to catch stale agents, duplicate run IDs, missing evidence, inconsistent gates, or accepted artifacts that were never verified.
+
 For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title. Keep release notes in reverse-chronological `## YYYY-MM-DD` sections instead of one long-lived `## Unreleased` bucket, and run the repo-local gate before publication:
 
 ```bash
@@ -192,6 +194,7 @@ This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](
 
 - `AGENTS.md`: agent governance entrypoint assembled or read by Codex-compatible runtimes.
 - `agents-mode`: Orchestrarium operator configuration overlay for delegation, provider routing, MCP use, and parallelism.
+- `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `reserve`: symbolic supplemental read-only candidate for advisory/review lanes; it runs after primary `claude` and `codex` and is not a worker or editing path.
 - `reserveResolver`: scalar `agents-mode` key that binds `reserve` to `claude-sonnet`, `claude-wrapper`, a `wrapper:<command>` resolver, or `disabled`.
 - `CLI`: Command-Line Interface, a terminal command surface such as `codex`, `claude`, `gemini`, or `qwen`.
@@ -200,11 +203,15 @@ This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](
 - `externalProvider: auto`: Orchestrarium routing mode that uses only production-recommended providers, currently Codex and Claude.
 - `externalPriorityProfile`: the active named provider-order profile used when `externalProvider: auto`.
 - `externalPriorityProfiles`: the map of named routing profiles to lane-specific provider priority lists.
+- `evidence`: concrete verification data such as a command result, artifact path, review result, log summary, or observed output supporting a gate.
 - `Gemini`: Google Gemini CLI provider line, kept here as an explicit example integration.
 - `JSON`: JavaScript Object Notation; structured data format used here for machine-readable contract files.
+- `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
+- `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
 - `MCP`: Model Context Protocol; a protocol for exposing tools and resources to agent runtimes.
 - `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency.
 - `Qwen`: Qwen provider line, kept here as an explicit example integration.
 - `runtime`: installed provider-facing files and directories used by an agent tool outside the source tree.
 - `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.
+- `status.md`: human-readable recovery summary for the active work item.
 - `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers that must stay out of production defaults and `auto` routing.

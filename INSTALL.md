@@ -59,6 +59,8 @@ Canonical operator-overlay output now uses `.agents-mode.yaml` on every provider
 The same rule now applies to reinstall: if an existing `.agents-mode.yaml` is older than the current shipped schema or defaults, the installer must normalize it to the current canonical form instead of preserving stale pack-owned structure verbatim.
 Maintainers changing scalar keys, provider sets, priority profiles, opinion counts, or preset expansions must keep `shared/agents-mode.defaults.yaml`, `shared/agents-mode.schema.json`, `shared/agents-mode.presets.json`, and the provider init surfaces aligned; `python scripts/validate-agents-mode-contract.py --root .` checks that contract directly, the pack validators invoke it in source-mode validation, and runtime normalization reads the schema for provider/lane policy while preserving the YAML exemplar as emitted install shape. Run `python scripts/sync-agents-mode-docs.py --root . --write` to refresh generated reference/init tables and snippets after intentional schema or preset edits. For installer-path regression coverage, run `python scripts/validate-agents-mode-installers.py --root .`; it creates disposable targets under `/.scratch/`, runs the Bash installers, and verifies the emitted provider overlays.
 
+Project repositories that use `work-items/` may keep `agent-runs.jsonl` beside each active `status.md`. The file is local task memory, not publication content; run `scripts/validate-work-item-state.* --work-item <path>` before closeout to reconcile subagent execution, artifacts, gates, and evidence.
+
 ## Codex install details
 
 Use `scripts/install-codex.sh` or `scripts/install-codex.ps1` when you want the Codex pack directly.
@@ -234,16 +236,21 @@ It intentionally keeps the full Gemini payload in `src.gemini/` while materializ
 
 - `AGENTS.md`: agent governance file installed for Codex and materialized as a shared-governance module for example providers.
 - `agents-mode`: Orchestrarium YAML overlay that records delegation, provider, consultant, parallelism, MCP, and workdir preferences.
+- `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `Claude Code`: Anthropic's Claude runtime and production provider line.
 - `Codex`: OpenAI Codex runtime and production provider line.
 - `externalProvider: auto`: production routing mode that stays on `codex | claude` in shipped defaults.
+- `evidence`: concrete verification data such as a command result, artifact path, review result, log summary, or observed output supporting a gate.
 - `Gemini`: Google Gemini CLI provider line, installable here only as an explicit example or compatibility path.
 - `global install`: install into a user-level provider runtime root such as `~/.codex/` or `~/.claude/`.
 - `JSON`: JavaScript Object Notation; structured data format used here for machine-readable contract files.
+- `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
+- `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
 - `MCP`: Model Context Protocol; provider/runtime mechanism for tool and resource servers.
 - `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency.
 - `Qwen`: Qwen provider line, installable here only as an explicit example or compatibility path.
 - `runtime`: installed provider-facing files and directories read by the provider tool.
 - `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.
 - `stdin`: standard input stream used by CLIs and wrappers.
+- `status.md`: human-readable recovery summary for the active work item.
 - `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only provider integrations that are excluded from default installs and production `auto` routing.

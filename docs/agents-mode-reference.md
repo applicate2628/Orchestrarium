@@ -127,6 +127,7 @@ Notes:
 - `parallelMode` is the general orchestrator fan-out rule for any helper or subagent lane, not only for external adapters.
 - `parallelMode: manual` does not waive an explicit user-requested or repo-policy-required parallel bundle; it only disables ordinary judgment-based parallel fan-out as the default.
 - External-specific controls remain overlays on top of `parallelMode`: `externalOpinionCounts` governs same-lane external distinct-opinion requirements, and `external-brigade` governs one bounded parallel external helper set.
+- When work-item tracking is enabled, every parallel helper lane, external-opinion lane, and brigade item must write or be represented by one `agent-runs.jsonl` event so closeout can distinguish completed work from still-running, missing-evidence, or no-artifact lanes.
 
 ### `mcpMode`
 
@@ -256,6 +257,7 @@ Notes:
 - When a lane asks for `2+` opinions, treat that as a distinct-opinion requirement whenever the provider order and availability make that possible. Reusing one provider repeatedly does not satisfy the opinion count for that same lane unless a repo-local rule says otherwise.
 - `parallelMode` is still the general rule for whether helper lanes should be parallelized by judgment at all; `externalOpinionCounts` only changes how many external opinions one lane must collect once that lane is active.
 - When bounded parallel same-provider reuse is needed, route that helper set through `/agents-external-brigade` instead of treating opinion counts as a concurrency control.
+- With task memory enabled, same-lane opinions and brigade items remain incomplete until their ledger events include role, execution role, artifact, gate, and evidence.
 
 ### `external<Provider>WorkdirMode`
 
@@ -427,18 +429,23 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 ## Terms and Abbreviations
 
 - `agents-mode`: Orchestrarium operator configuration overlay for delegation, external provider routing, MCP use, and parallelism.
+- `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
 - `argv`: command-line argument vector passed to a process.
 - `reserve`: symbolic supplemental read-only candidate for advisory/review lanes only; it is separate from primary providers and not valid for worker or mutating routes.
 - `reserveResolver`: scalar `agents-mode` key that binds symbolic `reserve` to a concrete read-only resolver such as `claude-sonnet`, `claude-wrapper`, or `wrapper:<command>`.
 - `CLI`: Command-Line Interface; a provider or tool invoked from a shell.
 - `Codex`: the OpenAI Codex runtime and production provider line.
 - `Gemini`: Google Gemini provider line; in this repository it is explicit example-only and `WEAK MODEL / NOT RECOMMENDED`.
+- `evidence`: concrete verification data such as a command result, artifact path, review result, log summary, or observed output supporting a gate.
 - `JSON`: JavaScript Object Notation; structured data format used here for machine-readable contract files.
+- `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
 - `L00`: owner/control routing line in the release-backed `12 + 1` read; it is documented evidence but not an external provider profile lane.
+- `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
 - `MCP`: Model Context Protocol; protocol for exposing tools and resources to agent runtimes.
 - `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency; expands to forced delegation, forced parallelism, forced MCP use, top production-provider policy, and multi-opinion advisory/review lanes.
 - `Qwen`: Qwen provider line; in this repository it is explicit example-only and `WEAK MODEL / NOT RECOMMENDED`.
 - `12 + 1`: twelve external routing lines plus one owner/control line from the release-backed RF12 interpretation.
 - `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.
 - `stdin`: standard input stream for a process.
+- `status.md`: human-readable recovery summary for the active work item.
 - `WEAK MODEL / NOT RECOMMENDED`: repository classification for example-only providers excluded from production `auto` routing.
