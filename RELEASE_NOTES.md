@@ -15,6 +15,7 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 ### Changed
 
 - Added the first machine-readable work-item execution tracking contract. Active work items can now keep `agent-runs.jsonl` beside `status.md`, and `scripts/validate-work-item-state.* --work-item <path>` checks duplicate run IDs, stale running agents, missing evidence, missing artifacts for `PASS`, and inconsistent `BLOCKED` / `REVISE` gates before closeout. This matters because the existing rule "verify subagents before trusting them" now has an operator-checkable workflow instead of relying only on narrative session summaries.
+- Hardened that validator before publication so `PASS` artifacts must resolve inside the work-item directory and evidence entries must carry a valid kind plus reference. This matters because machine-readable closeout evidence should not be satisfied by a path that escapes local task memory or by an empty evidence object.
 
 ## 2026-05-01
 

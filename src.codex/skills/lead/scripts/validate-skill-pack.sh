@@ -12,10 +12,14 @@ SCRIPT_DIR_LOGICAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 DEV_REPO=0
 CODEX_RUNTIME_ROOT=""
-if [[ -d "src.codex/skills" && -f "shared/AGENTS.shared.md" && -f "src.codex/AGENTS.codex.md" ]]; then
+SOURCE_SCRIPTS_DIR=""
+if [[ -d "src.codex/skills/lead/scripts" ]]; then
+  SOURCE_SCRIPTS_DIR="$(cd "src.codex/skills/lead/scripts" && pwd -P)"
+fi
+if [[ -n "$SOURCE_SCRIPTS_DIR" && "$SCRIPT_DIR" == "$SOURCE_SCRIPTS_DIR" && -f "shared/AGENTS.shared.md" && -f "src.codex/AGENTS.codex.md" ]]; then
   # Dev repo: assemble AGENTS.md from split source files for validation
   SKILLS_DIR="$(cd "src.codex/skills" && pwd -P)"
-  SCRIPTS_DIR="$(cd "src.codex/skills/lead/scripts" && pwd -P)"
+  SCRIPTS_DIR="$SOURCE_SCRIPTS_DIR"
   REPO_ROOT="$(pwd -P)"
   DEV_REPO=1
   AGENTS_FILE="$(mktemp)"
@@ -1224,6 +1228,8 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "release notes document the work-item execution tracking contract"
   check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "PASS gate requires evidence" \
     "work-item state validator enforces evidence for PASS"
+  check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "escapes the work item" \
+    "work-item state validator confines PASS artifacts to the work item"
   check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "agent-runs.jsonl" \
     "work-item state validator loads the agent run ledger"
   check_contains "$REPO_ROOT/scripts/validate-work-item-state.sh" "validate-work-item-state.py" \

@@ -294,6 +294,7 @@ if [[ "$MODE" == "source" ]]; then
   grep -Fq '"executionRole"' "$ROOT/shared/schemas/agent-runs.schema.json" || fail "agent run ledger schema should define executionRole"
   grep -Fq '"evidence"' "$ROOT/shared/schemas/agent-runs.schema.json" || fail "agent run ledger schema should define evidence"
   grep -Fq 'PASS gate requires evidence' "$ROOT/scripts/validate-work-item-state.py" || fail "work-item state validator should enforce evidence for PASS"
+  grep -Fq 'escapes the work item' "$ROOT/scripts/validate-work-item-state.py" || fail "work-item state validator should confine PASS artifacts to the work item"
   grep -Fq 'agent-runs.jsonl' "$ROOT/scripts/validate-work-item-state.py" || fail "work-item state validator should load the agent run ledger"
 else
   grep -Fq 'Adapter host runtime' "$RUNTIME_AGENTS_FILE" && fail "shared governance should not allow adapter-host metadata for external execution"

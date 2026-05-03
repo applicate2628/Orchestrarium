@@ -29,7 +29,10 @@
     "model": { "type": "string" },
     "status": { "enum": ["planned", "running", "completed", "revise", "blocked", "cancelled"] },
     "gate": {
-      "enum": ["PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "RETURN(role)", "advisory", "none"]
+      "oneOf": [
+        { "enum": ["PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "advisory", "none"] },
+        { "type": "string", "pattern": "^RETURN\\([a-z][a-z-]*\\)$" }
+      ]
     },
     "scope": {
       "type": "array",

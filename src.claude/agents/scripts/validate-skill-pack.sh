@@ -5,8 +5,14 @@
 set -euo pipefail
 
 # Auto-detect pack root: src.claude/ (dev repo) or .claude/ (installed)
+SCRIPT_DIR_LOGICAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 DEV_REPO=0
-if [[ -d "src.claude/agents" ]]; then
+SOURCE_SCRIPTS_DIR=""
+if [[ -d "src.claude/agents/scripts" ]]; then
+  SOURCE_SCRIPTS_DIR="$(cd "src.claude/agents/scripts" && pwd -P)"
+fi
+if [[ -n "$SOURCE_SCRIPTS_DIR" && "$SCRIPT_DIR" == "$SOURCE_SCRIPTS_DIR" && -d "src.claude/agents" ]]; then
   PACK="src.claude"
   AGENTS_FILE="shared/AGENTS.shared.md"
   REPO_ROOT="$(pwd -P)"
@@ -18,6 +24,12 @@ elif [[ -d ".claude/agents" ]]; then
   else
     AGENTS_FILE="$PACK/AGENTS.shared.md"
   fi
+elif [[ -d "$SCRIPT_DIR_LOGICAL/.." && -f "$SCRIPT_DIR_LOGICAL/../lead.md" && -f "$SCRIPT_DIR_LOGICAL/../../AGENTS.md" ]]; then
+  PACK="$(cd "$SCRIPT_DIR_LOGICAL/../.." && pwd)"
+  AGENTS_FILE="$PACK/AGENTS.md"
+elif [[ -d "$SCRIPT_DIR/.." && -f "$SCRIPT_DIR/../lead.md" && -f "$SCRIPT_DIR/../../AGENTS.md" ]]; then
+  PACK="$(cd "$SCRIPT_DIR/../.." && pwd -P)"
+  AGENTS_FILE="$PACK/AGENTS.md"
 else
   echo "FAIL: neither src.claude/ nor .claude/ found. Run from repo root."
   exit 1
@@ -960,6 +972,8 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "release notes document the work-item execution tracking contract"
   check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "PASS gate requires evidence" \
     "work-item state validator enforces evidence for PASS"
+  check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "escapes the work item" \
+    "work-item state validator confines PASS artifacts to the work item"
   check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "agent-runs.jsonl" \
     "work-item state validator loads the agent run ledger"
   check_contains "$REPO_ROOT/scripts/validate-work-item-state.sh" "validate-work-item-state.py" \

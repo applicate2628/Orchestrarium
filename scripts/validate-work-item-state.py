@@ -1,13 +1,35 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
 
 STATUS_VALUES = {"planned", "running", "completed", "revise", "blocked", "cancelled"}
-GATE_VALUES = {"PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "RETURN(role)", "advisory", "none"}
+GATE_VALUES = {"PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "advisory", "none"}
 EXECUTION_ROLES = {"main", "lead", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade"}
+EVIDENCE_KINDS = {"command", "artifact", "visual", "review", "manual-check", "log"}
+RETURN_GATE_RE = re.compile(r"^RETURN\([a-z][a-z-]*\)$")
+ALLOWED_FIELDS = {
+    "schemaVersion",
+    "runId",
+    "workItem",
+    "role",
+    "executionRole",
+    "assignedRole",
+    "provider",
+    "model",
+    "status",
+    "gate",
+    "scope",
+    "promptFile",
+    "artifact",
+    "evidence",
+    "startedAt",
+    "updatedAt",
+    "notes",
+}
 
 
 def fail(errors: list[str], message: str) -> None:
@@ -36,42 +58,107 @@ def load_jsonl(path: Path, errors: list[str]) -> list[dict]:
     return events
 
 
+def resolve_work_item_path(item: Path, value: object, label: str, run_id: object, errors: list[str]) -> Path | None:
+    if not isinstance(value, str):
+        fail(errors, f"{run_id}: {label} must be a string")
+        return None
+    if not value.strip():
+        fail(errors, f"{run_id}: {label} must be a non-empty relative path")
+        return None
+
+    candidate = Path(value)
+    if candidate.is_absolute():
+        fail(errors, f"{run_id}: {label} must be relative to the work item: {value}")
+        return None
+
+    item_root = item.resolve()
+    resolved = (item_root / candidate).resolve()
+    if resolved != item_root and item_root not in resolved.parents:
+        fail(errors, f"{run_id}: {label} escapes the work item: {value}")
+        return None
+
+    return resolved
+
+
+def validate_evidence(evidence: object, run_id: object, errors: list[str], require_non_empty: bool) -> None:
+    if not isinstance(evidence, list):
+        fail(errors, f"{run_id}: evidence must be a list")
+        return
+    if not evidence:
+        if require_non_empty:
+            fail(errors, f"{run_id}: PASS gate requires evidence")
+        return
+
+    for index, entry in enumerate(evidence, start=1):
+        if not isinstance(entry, dict):
+            fail(errors, f"{run_id}: evidence[{index}] must be an object")
+            continue
+        if entry.get("kind") not in EVIDENCE_KINDS:
+            fail(errors, f"{run_id}: evidence[{index}] has invalid kind {entry.get('kind')!r}")
+        if not isinstance(entry.get("ref"), str) or not entry.get("ref", "").strip():
+            fail(errors, f"{run_id}: evidence[{index}] requires ref")
+        if "result" in entry and not isinstance(entry.get("result"), str):
+            fail(errors, f"{run_id}: evidence[{index}].result must be a string")
+
+
 def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -> None:
     required = ["schemaVersion", "runId", "workItem", "role", "executionRole", "status", "gate", "scope", "startedAt", "updatedAt"]
     for key in required:
         if key not in event:
             fail(errors, f"event missing required field: {key}")
 
+    for key in sorted(set(event) - ALLOWED_FIELDS):
+        fail(errors, f"unexpected field: {key}")
+
     run_id = event.get("runId")
     if isinstance(run_id, str):
         if run_id in seen:
             fail(errors, f"duplicate runId: {run_id}")
         seen.add(run_id)
+    else:
+        fail(errors, f"{run_id}: runId must be a string")
 
     if event.get("schemaVersion") != 1:
         fail(errors, f"{run_id}: schemaVersion must be 1")
+    for key in ["workItem", "role", "startedAt", "updatedAt"]:
+        if not isinstance(event.get(key), str) or not event.get(key, "").strip():
+            fail(errors, f"{run_id}: {key} must be a non-empty string")
+    for key in ["assignedRole", "provider", "model", "promptFile", "notes"]:
+        if key in event and not isinstance(event.get(key), str):
+            fail(errors, f"{run_id}: {key} must be a string")
     if event.get("status") not in STATUS_VALUES:
         fail(errors, f"{run_id}: invalid status {event.get('status')!r}")
-    if event.get("gate") not in GATE_VALUES:
+    gate = event.get("gate")
+    if not isinstance(gate, str) or (gate not in GATE_VALUES and not RETURN_GATE_RE.fullmatch(gate)):
         fail(errors, f"{run_id}: invalid gate {event.get('gate')!r}")
     if event.get("executionRole") not in EXECUTION_ROLES:
         fail(errors, f"{run_id}: invalid executionRole {event.get('executionRole')!r}")
     if not isinstance(event.get("scope"), list) or not event.get("scope"):
         fail(errors, f"{run_id}: scope must be a non-empty list")
+    elif any(not isinstance(scope, str) or not scope.strip() for scope in event["scope"]):
+        fail(errors, f"{run_id}: scope items must be non-empty strings")
 
-    gate = event.get("gate")
     status = event.get("status")
     artifact = event.get("artifact")
     evidence = event.get("evidence")
+
+    artifact_path = None
+    if artifact:
+        artifact_path = resolve_work_item_path(item, artifact, "artifact", run_id, errors)
+    elif "artifact" in event and not isinstance(artifact, str):
+        fail(errors, f"{run_id}: artifact must be a string")
+
+    if evidence is not None:
+        validate_evidence(evidence, run_id, errors, gate == "PASS")
 
     if gate == "PASS":
         if status != "completed":
             fail(errors, f"{run_id}: PASS gate requires completed status")
         if not artifact:
             fail(errors, f"{run_id}: PASS gate requires artifact")
-        elif not (item / artifact).exists():
+        if artifact_path is not None and not artifact_path.exists():
             fail(errors, f"{run_id}: artifact does not exist: {artifact}")
-        if not isinstance(evidence, list) or not evidence:
+        if evidence is None:
             fail(errors, f"{run_id}: PASS gate requires evidence")
 
     if gate == "REVISE" and status not in {"revise", "completed"}:

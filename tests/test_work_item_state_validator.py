@@ -107,6 +107,66 @@ def test_pass_without_evidence_fails(tmp_path: Path) -> None:
     assert "PASS gate requires evidence" in result.stdout
 
 
+def test_pass_artifact_must_stay_inside_work_item(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", valid_status())
+    write(tmp_path / "outside.md", "# Outside\n")
+    write(item / "agent-runs.jsonl", json.dumps(ledger_event(artifact="../../../outside.md")) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 1
+    assert "artifact escapes the work item" in result.stdout
+
+
+def test_pass_evidence_entry_requires_kind_and_ref(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", valid_status())
+    write(item / "reviews" / "qa.md", "# QA\n\nGate: PASS\n")
+    write(item / "agent-runs.jsonl", json.dumps(ledger_event(evidence=[{"kind": "unknown"}])) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 1
+    assert "invalid kind" in result.stdout
+    assert "requires ref" in result.stdout
+
+
+def test_return_gate_accepts_concrete_role(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", valid_status())
+    write(item / "agent-runs.jsonl", json.dumps(ledger_event(gate="RETURN(security-engineer)", artifact="", evidence=[])) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 0, result.stdout
+    assert "RESULT: PASS" in result.stdout
+
+
+def test_unexpected_field_fails(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", valid_status())
+    write(item / "reviews" / "qa.md", "# QA\n\nGate: PASS\n")
+    write(item / "agent-runs.jsonl", json.dumps(ledger_event(unexpected="value")) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 1
+    assert "unexpected field" in result.stdout
+
+
+def test_artifact_type_error_is_reported_without_crashing(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", valid_status())
+    write(item / "agent-runs.jsonl", json.dumps(ledger_event(artifact=123)) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 1
+    assert "artifact must be a string" in result.stdout
+    assert "TypeError" not in result.stdout
+
+
 def test_closed_status_with_running_agent_fails(tmp_path: Path) -> None:
     item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
     closed = valid_status().replace("Primary task status**: active", "Primary task status**: closed")
