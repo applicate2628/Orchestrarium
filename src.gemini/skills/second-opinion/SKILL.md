@@ -25,6 +25,7 @@ Manage these keys in `.gemini/.agents-mode.yaml`:
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalModelMode`
+- `externalCodexProfile`
 
 Gemini-line rules:
 
@@ -36,6 +37,7 @@ Gemini-line rules:
 - `externalProvider: gemini` is allowed only as an explicit self-provider override for a manual example or compatibility run
 - `externalProvider: qwen` is allowed only as an explicit native example or compatibility run
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved production provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile on the production provider paths
+- `externalCodexProfile: default` inherits `externalModelMode` when Codex is selected or auto-resolved; `gpt-5.5-fast` is explicit opt-in and must be verified against the installed Codex runtime
 - `reserve` matters only when an advisory/review profile order reaches that symbolic supplemental candidate and is bound through `reserveResolver`
 - Gemini is `WEAK MODEL / NOT RECOMMENDED`; shipped and repo-local production `auto` profiles must keep Gemini and Qwen out of provider-order lists
 - same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce

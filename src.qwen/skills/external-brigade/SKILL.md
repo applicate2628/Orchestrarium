@@ -53,12 +53,13 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
    - `externalCodexWorkdirMode`
    - `externalClaudeWorkdirMode`
    - `externalModelMode`
+   - `externalCodexProfile`
 4. Reject unsupported owner routes before provider resolution.
 5. Keep `parallelMode` as the general helper fan-out rule. Brigade launch is an explicit bounded overlay on top of that rule, not a second general concurrency model.
 6. Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. It does not cap how many same-provider brigade items may run in parallel across different disjoint lanes or slices.
 7. Allow repeated same-provider fan-out when each brigade item owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
 8. If a brigade item itself requires `2+` same-lane opinions, satisfy that distinct-provider requirement first or fail that item closed.
-9. Honor `externalModelMode` before any provider-specific transport detail. Keep Qwen and Gemini as explicit `WEAK MODEL / NOT RECOMMENDED` example-only provider choices and keep shipped production `auto` profiles on `codex | claude`.
+9. Honor `externalCodexProfile` when Codex is resolved; `default` inherits `externalModelMode`, while `gpt-5.5-fast` requires installed-runtime verification. Honor `externalModelMode` before other provider-specific transport details. Keep Qwen and Gemini as explicit `WEAK MODEL / NOT RECOMMENDED` example-only provider choices and keep shipped production `auto` profiles on `codex | claude`.
 10. Do not silently downgrade external items to internal execution inside the brigade.
 
 When a brigade review/advisory item resolves to `reserve`, bind that symbolic supplemental candidate through `reserveResolver`. Worker-side brigade items must not use `reserve`.

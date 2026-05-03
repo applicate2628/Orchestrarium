@@ -26,6 +26,7 @@ Use the shared Gemini dispatch contract in [../lead/external-dispatch.md](../lea
 - `externalProvider: codex` resolves to Codex CLI explicitly.
 - `externalProvider: claude` resolves to Claude CLI explicitly.
 - Honor `externalModelMode` first on the production provider paths. `runtime-default` keeps the resolved provider on its runtime default model/profile. `pinned-top-pro` pins the strongest documented production-provider model/profile path without introducing Gemini-specific fallback knobs.
+- When Codex is the resolved provider, honor `externalCodexProfile`: `default` inherits `externalModelMode`, while `gpt-5.5-fast` explicitly requests the installed Codex runtime's fast profile and must record unavailable or deviated if that profile cannot be verified.
 - If a review/QA profile order reaches `reserve`, bind that symbolic supplemental candidate through `reserveResolver` after primary `claude`/`codex`. Treat it as a separate reviewer candidate, not a retry for primary Claude and not permission for the reviewer adapter to edit files or take implementation ownership.
 - This adapter is a direct external launch contract. Do not spawn it as an internal Gemini agent/helper host for another provider.
 - `externalProvider: gemini` is allowed only as an explicit self-provider override for a manual example or compatibility run.

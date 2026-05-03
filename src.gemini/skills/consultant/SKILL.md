@@ -26,6 +26,7 @@ Relevant keys:
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalModelMode`
+- `externalCodexProfile`
 
 Gemini-line provider rules:
 
@@ -38,6 +39,7 @@ Gemini-line provider rules:
 - `externalProvider: gemini` is allowed only as an explicit self-provider override for a manual example or compatibility run
 - `externalProvider: qwen` is allowed only as an explicit manual example or compatibility override when Qwen is installed
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved production provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile on the production provider paths
+- `externalCodexProfile: default` inherits `externalModelMode` when Codex is selected or auto-resolved; `gpt-5.5-fast` is explicit opt-in and must be verified against the installed Codex runtime
 - `reserve` is a symbolic supplemental read-only candidate inside eligible advisory/review profile orders
 - `reserve` appears only after primary `claude`/`codex` when an advisory/review order reaches it; it is bound through `reserveResolver`, independent of primary `claude`, and not a retry, fallback, or worker transport
 - `parallelMode` is the general helper fan-out rule across internal and external lanes

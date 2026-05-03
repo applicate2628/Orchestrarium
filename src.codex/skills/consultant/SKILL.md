@@ -43,12 +43,13 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 - `externalCodexWorkdirMode`
 - `externalClaudeWorkdirMode`
 - `externalModelMode`
+- `externalCodexProfile`
 - `externalClaudeProfile`
 
 Read and normalize the effective Codex overlay before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode`. Normalize whichever file supplied the effective config in place and do not recreate any legacy file.
 
-When changing `consultantMode`, preserve the other keys, including the profile, reserve resolver, opinion-count, workdir, model-policy, Claude-profile, and general `parallelMode` fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `delegationMode` to `manual`, `parallelMode` to `auto`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, `reserveResolver` to `claude-sonnet`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, and `externalClaudeProfile` to `opus-max` unless the user explicitly requested a different Claude profile override.
+When changing `consultantMode`, preserve the other keys, including the profile, reserve resolver, opinion-count, workdir, model-policy, Codex-profile, Claude-profile, and general `parallelMode` fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `delegationMode` to `manual`, `parallelMode` to `auto`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, `reserveResolver` to `claude-sonnet`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, `externalCodexProfile` to `default`, and `externalClaudeProfile` to `opus-max` unless the user explicitly requested a different Claude profile override.
 Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 
 ## When to invoke
@@ -116,10 +117,12 @@ If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfil
 - `opus-max` → `--model opus --effort max`
 - key missing → use the current default Claude CLI invocation for this pack unless `externalModelMode: pinned-top-pro` requests the stronger Claude path
 
-Honor `externalModelMode` before provider-specific transport selection:
+Honor `externalCodexProfile` and `externalModelMode` before provider-specific transport selection:
 
 - `runtime-default` → keep the selected provider on its native runtime default model/profile.
 - `pinned-top-pro` on the Codex line → use `gpt-5.5 --reasoning-effort xhigh` for consultant work. Do not downgrade consultant memos to `gpt-5.3-codex-spark`.
+- `externalCodexProfile: default` → inherit the selected `externalModelMode` when Codex is selected or `auto` resolves to Codex.
+- `externalCodexProfile: gpt-5.5-fast` → explicitly request the installed Codex runtime's fast profile when Codex is selected or `auto` resolves to Codex; record unavailable or deviated if that profile cannot be verified.
 - Gemini and Qwen routes stay manual demonstration or compatibility paths only. Both are `WEAK MODEL / NOT RECOMMENDED` example-only routes, and this pack does not add shared production fallback keys for them.
 
 Examples:

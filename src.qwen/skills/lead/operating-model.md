@@ -52,6 +52,7 @@ Canonical provider semantics:
 | `externalPriorityProfiles` | stores the `profile -> lane -> ordered provider list` map |
 | `externalOpinionCounts` | stores how many distinct external opinions to collect per lane |
 | `externalModelMode` | shared cross-provider model policy; `runtime-default` keeps provider runtime selection, `pinned-top-pro` pins the strongest documented production-provider path |
+| `externalCodexProfile` | Codex-specific profile override after provider resolution; `default` inherits `externalModelMode`, `gpt-5.5-fast` is explicit opt-in |
 
 Rules:
 

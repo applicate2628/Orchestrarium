@@ -53,6 +53,7 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
    - `externalCodexWorkdirMode`
    - `externalClaudeWorkdirMode`
    - `externalModelMode`
+   - `externalCodexProfile`
    - `externalClaudeProfile`
 3. Reject unsupported owner routes before provider resolution.
 4. Keep `parallelMode` as the general helper fan-out rule. Brigade launch is an explicit bounded overlay on top of that rule, not a second general concurrency model.

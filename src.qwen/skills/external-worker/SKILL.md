@@ -27,6 +27,7 @@ Use the shared Qwen dispatch contract in [../lead/external-dispatch.md](../lead/
 - `externalProvider: claude` resolves to Claude CLI explicitly.
 - `externalProvider: gemini` and `externalProvider: qwen` are explicit example-only overrides; both are `WEAK MODEL / NOT RECOMMENDED`.
 - Honor `externalModelMode` first when an external provider is selected: `runtime-default` keeps the resolved provider on its runtime default model/profile, while `pinned-top-pro` uses the strongest documented provider-native production path for that provider.
+- When Codex is the resolved provider, honor `externalCodexProfile`: `default` inherits `externalModelMode`, while `gpt-5.5-fast` explicitly requests the installed Codex runtime's fast profile and must record unavailable or deviated if that profile cannot be verified.
 - Do not honor `reserve` for worker-side lanes. It is a supplemental read-only candidate only in `advisory.*` and `review.*` profile orders after primary `claude`/`codex`, and `reserveResolver` must not turn it into a worker transport, primary-Claude retry, or implementation/editing fallback.
 - This adapter is a direct external launch contract. Do not spawn it as an internal Qwen agent/helper host for another provider.
 - If a repository wants Qwen for a specific example worker lane, express that through a scalar explicit provider override; do not place Qwen inside any `auto` profile.

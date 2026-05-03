@@ -22,6 +22,7 @@ Summarize:
 - that this repository classifies Qwen as `WEAK MODEL / NOT RECOMMENDED`
 - that explicit `externalProvider: gemini` or `externalProvider: qwen` remains a manual `WEAK MODEL / NOT RECOMMENDED` example or compatibility path only
 - how `externalModelMode` distinguishes runtime-default provider selection from pinned production-provider execution
+- how `externalCodexProfile: default | gpt-5.5-fast` controls Codex-specific profile choice after provider resolution
 - how `reserve` works as an advisory/review-only symbolic candidate
 - the role of `Qwen Code /init`, `.qwen/settings.json`, `.qwen/.agents-mode.yaml`, and `qwen-extension.json`
 - the local command namespace

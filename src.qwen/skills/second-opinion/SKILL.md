@@ -25,6 +25,7 @@ Manage these keys in `.qwen/.agents-mode.yaml`:
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalModelMode`
+- `externalCodexProfile`
 
 Qwen-line rules:
 
@@ -35,6 +36,7 @@ Qwen-line rules:
 - explicit providers are `codex`, `claude`, `gemini`, and `qwen`
 - `externalProvider: gemini` and `externalProvider: qwen` are explicit example-only overrides; both are `WEAK MODEL / NOT RECOMMENDED`
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native production path for the resolved provider
+- `externalCodexProfile: default` inherits `externalModelMode` when Codex is selected or auto-resolved; `gpt-5.5-fast` is explicit opt-in and must be verified against the installed Codex runtime
 - `reserve` matters only when an advisory/review profile order reaches that symbolic supplemental candidate and is bound through `reserveResolver`
 - if a repository wants Qwen participation for a specific example lane, express that through a scalar explicit provider override, not a profile entry
 - same-provider Qwen routing must be explicit; ordinary `auto` must still avoid self-bounce

@@ -26,6 +26,7 @@ Relevant keys:
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalModelMode`
+- `externalCodexProfile`
 
 Qwen-line provider rules:
 
@@ -37,6 +38,7 @@ Qwen-line provider rules:
 - `externalProvider: claude` means Claude CLI explicitly
 - `externalProvider: gemini` and `externalProvider: qwen` are explicit example-only overrides; both are `WEAK MODEL / NOT RECOMMENDED`
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native production path for the resolved provider
+- `externalCodexProfile: default` inherits `externalModelMode` when Codex is selected or auto-resolved; `gpt-5.5-fast` is explicit opt-in and must be verified against the installed Codex runtime
 - `reserve` is a symbolic supplemental read-only candidate inside eligible advisory/review profile orders
 - `reserve` appears only after primary `claude`/`codex` when an advisory/review order reaches it; it is bound through `reserveResolver`, independent of primary `claude`, and not a retry, fallback, or worker transport
 - `parallelMode` is the general helper fan-out rule across internal and external lanes

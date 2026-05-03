@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-05-04
+
+### Changed
+
+- Added the shared `externalCodexProfile: default | gpt-5.5-fast` operator key to the `agents-mode` contract while keeping every shipped preset on `default`. This lets operators opt into a Codex fast profile explicitly after provider resolution, while preserving existing production `externalProvider: auto` behavior: when `auto` resolves to Codex, `default` inherits `externalModelMode` instead of silently changing the model/profile choice. The shared YAML exemplar is now grouped with section comments so the flat installer-compatible shape is easier to read without introducing a nested-schema migration.
+
 ## 2026-05-03
 
 ### Changed

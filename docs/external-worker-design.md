@@ -109,9 +109,10 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
      worker.visual-graphics-visualization: 1
      review.pre-pr: 1
      review.security: 1
-     review.performance-architecture: 1
-     review.ui-visual-correctness: 1
+   review.performance-architecture: 1
+   review.ui-visual-correctness: 1
    externalModelMode: runtime-default
+   externalCodexProfile: default
    externalClaudeProfile: opus-max
    ```
 
@@ -127,10 +128,11 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - `externalPriorityProfiles` — per-profile lane matrix with ordered provider lists; the shipped production profile set stays on Codex plus Claude provider families, with `reserve` only as the supplemental advisory/review candidate
    - `externalOpinionCounts` — per-lane number of distinct external opinions required under `externalProvider: auto`; not a global cap on helper multiplicity
    - `externalModelMode` — shared production model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion
+   - `externalCodexProfile` — shared Codex-specific profile override: `default` inherits `externalModelMode`; `gpt-5.5-fast` explicitly requests a Codex fast profile after provider resolution and must be verified against the installed runtime
    - `reserve` — symbolic supplemental candidate that may appear only in advisory/review profile orders; it is not a scalar provider key, not a primary `claude` retry, and not available to worker-side implementation/editing lanes
    - `externalClaudeProfile` — Codex-line only optional Claude CLI execution profile: `sonnet-high` or `opus-max`
    - Each toggle is independent
-   - Default full shape on first creation: `delegationMode: manual`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `reserveResolver: claude-sonnet`, shipped `externalPriorityProfiles` on the Codex/Claude pair plus advisory/review-only `reserve`, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; the shared model policy defaults to `externalModelMode: runtime-default`; Codex also writes `externalClaudeProfile: opus-max`
+   - Default full shape on first creation: `delegationMode: manual`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `reserveResolver: claude-sonnet`, shipped `externalPriorityProfiles` on the Codex/Claude pair plus advisory/review-only `reserve`, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; the shared model policy defaults to `externalModelMode: runtime-default`; the Codex profile override defaults to `externalCodexProfile: default`; Codex also writes `externalClaudeProfile: opus-max`
 
 3. **Dispatch protocol (platform-dependent)**
 
@@ -155,6 +157,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - CLI availability check before dispatch (`which codex` / `where codex` on Claude Code, `claude` / `claude.exe` on Codex)
    - Under `externalModelMode: runtime-default`, keep the selected provider on its runtime default model/profile.
    - Under `externalModelMode: pinned-top-pro`, hard tasks start on the strongest documented production provider-native path: `--model gpt-5.5 --reasoning-effort xhigh` (Codex) or `opus-max` / `--model opus --effort max` (Claude CLI). Example-provider model behavior stays provider-local and is intentionally outside this production design spec.
+   - Under `externalCodexProfile: default`, Codex inherits `externalModelMode`; under `externalCodexProfile: gpt-5.5-fast`, Codex explicitly requests the installed runtime's fast profile and must record unavailable or deviated if that profile cannot be verified.
    - On advisory and review lanes, `reserve` is the supplemental symbolic profile candidate after primary candidates such as `claude` and `codex`. `reserveResolver` binds it to an approved read-only transport such as the installed secret-backed Claude wrapper, a smaller production model, or another local read-only source, but the execution record must name the actual resolved path. `reserve` is independent of primary `claude`; it is not a retry path for primary Claude and is unavailable for worker-side implementation, code-generation, file-editing, installer, publication, or write-producing repository-hygiene routes.
    - `externalPriorityProfile` selects the named provider-order map only when `externalProvider: auto`; unknown profile names fail closed instead of silently falling back.
    - `externalOpinionCounts` controls how many distinct external opinions a lane must collect under `auto`. Missing counts mean `1`; shortfalls keep the lane `BLOCKED`.
@@ -207,6 +210,7 @@ The orchestrator (lead or main conversation) **prefers** external roles by defau
 - `externalOpinionCounts` — raise specific lanes above `1` when the orchestrator should collect multiple independent external opinions
 - `parallelMode` is the general fan-out rule for any helper lane; `externalOpinionCounts` and brigade semantics remain the external-specific overlay on top
 - `externalModelMode: runtime-default | pinned-top-pro` — shared production model policy; `runtime-default` keeps provider runtime selection, while `pinned-top-pro` asks each production provider for its strongest documented native path with one named same-provider fallback on retryable provider exhaustion
+- `externalCodexProfile: default | gpt-5.5-fast` — shared Codex-specific profile override; `default` inherits `externalModelMode`, while `gpt-5.5-fast` is explicit opt-in after provider resolution
 - `reserve` in `externalPriorityProfiles` — advisory/review-only supplemental candidate bound by `reserveResolver`; it is independent of primary `claude`, not a scalar provider key, and not available to worker or mutating routes
 - `externalClaudeProfile: sonnet-high | opus-max` — Codex-line only; when Codex dispatches to Claude CLI, prefer the matching model/effort profile instead of the provider default or the broader shared model policy
 
