@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -161,6 +162,61 @@ def run_installer(root: Path, case: InstallerCase, target_rel: Path) -> None:
         )
 
 
+def powershell_executable() -> str | None:
+    for name in ["powershell", "powershell.exe", "pwsh"]:
+        resolved = shutil.which(name)
+        if resolved:
+            return resolved
+    return None
+
+
+def run_powershell_codex_global_installer(root: Path, userprofile: Path) -> None:
+    powershell = powershell_executable()
+    if powershell is None:
+        print(
+            "SKIP: PowerShell executable not available; "
+            "Codex PowerShell global installer regression not run",
+            file=sys.stderr,
+        )
+        return
+
+    env = os.environ.copy()
+    env["USERPROFILE"] = str(userprofile)
+    env.setdefault("HOME", str(userprofile))
+    if "PSModulePath" not in env:
+        system_root = env.get("SystemRoot", r"C:\Windows")
+        program_files = env.get("ProgramFiles", r"C:\Program Files")
+        env["PSModulePath"] = ";".join(
+            [
+                str(userprofile / "Documents" / "WindowsPowerShell" / "Modules"),
+                rf"{program_files}\WindowsPowerShell\Modules",
+                rf"{system_root}\System32\WindowsPowerShell\v1.0\Modules",
+            ]
+        )
+    command = [
+        powershell,
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(root / "scripts" / "install-codex.ps1"),
+        "-Global",
+        "-Force",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=root,
+        text=True,
+        capture_output=True,
+        env=env,
+    )
+    if result.returncode != 0:
+        raise InstallerRegressionError(
+            "codex PowerShell global installer failed:\n"
+            f"{result.stdout}\n{result.stderr}"
+        )
+
+
 def seed_stale_overlay(project_root: Path, case: InstallerCase) -> Path:
     overlay = project_root / case.overlay
     overlay.parent.mkdir(parents=True, exist_ok=True)
@@ -306,6 +362,20 @@ def run_regression(root: Path) -> None:
             validate_overlay(case, overlay, schema_data)
             if case.codex_line:
                 validate_codex_agent_overrides(project_root, root)
+
+        codex_global_home = scratch / "codex-powershell-global-home"
+        codex_global_home.mkdir(parents=True, exist_ok=True)
+        codex_global_case = InstallerCase(
+            name="codex-powershell-global",
+            script="scripts/install-codex.ps1",
+            overlay=".codex/.agents-mode.yaml",
+            codex_line=True,
+        )
+        overlay = seed_stale_overlay(codex_global_home, codex_global_case)
+        seed_codex_agent_overrides(codex_global_home, root)
+        run_powershell_codex_global_installer(root, codex_global_home)
+        validate_overlay(codex_global_case, overlay, schema_data)
+        validate_codex_agent_overrides(codex_global_home, root)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

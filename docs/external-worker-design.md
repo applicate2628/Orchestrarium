@@ -109,8 +109,8 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
      worker.visual-graphics-visualization: 1
      review.pre-pr: 1
      review.security: 1
-   review.performance-architecture: 1
-   review.ui-visual-correctness: 1
+     review.performance-architecture: 1
+     review.ui-visual-correctness: 1
    externalModelMode: runtime-default
    externalCodexProfile: default
    externalClaudeProfile: opus-max
@@ -156,7 +156,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 4. **Common rules**
    - CLI availability check before dispatch (`which codex` / `where codex` on Claude Code, `claude` / `claude.exe` on Codex)
    - Under `externalModelMode: runtime-default`, keep the selected provider on its runtime default model/profile.
-   - Under `externalModelMode: pinned-top-pro`, hard tasks start on the strongest documented production provider-native path: `--model gpt-5.5 --reasoning-effort xhigh` (Codex) or `opus-max` / `--model opus --effort max` (Claude CLI). Example-provider model behavior stays provider-local and is intentionally outside this production design spec.
+   - Under `externalModelMode: pinned-top-pro`, hard tasks start on the strongest documented production provider-native path: Codex model `gpt-5.5` with `model_reasoning_effort = "xhigh"` supplied through a supported config/profile path, or `opus-max` / `--model opus --effort max` on Claude CLI. Example-provider model behavior stays provider-local and is intentionally outside this production design spec.
    - Under `externalCodexProfile: default`, Codex inherits `externalModelMode`; under `externalCodexProfile: gpt-5.5-fast`, Codex explicitly requests the installed runtime's fast profile and must record unavailable or deviated if that profile cannot be verified.
    - On advisory and review lanes, `reserve` is the supplemental symbolic profile candidate after primary candidates such as `claude` and `codex`. `reserveResolver` binds it to an approved read-only transport such as the installed secret-backed Claude wrapper, a smaller production model, or another local read-only source, but the execution record must name the actual resolved path. `reserve` is independent of primary `claude`; it is not a retry path for primary Claude and is unavailable for worker-side implementation, code-generation, file-editing, installer, publication, or write-producing repository-hygiene routes.
    - `externalPriorityProfile` selects the named provider-order map only when `externalProvider: auto`; unknown profile names fail closed instead of silently falling back.
@@ -204,7 +204,7 @@ The orchestrator (lead or main conversation) **prefers** external roles by defau
 - `preferExternalWorker: true` — `$external-worker` on eligible worker-side lanes
 - `preferExternalReviewer: true` — `$external-reviewer` on eligible `review` + `QA` stages
 - `externalProvider: auto | claude | codex` — use the shipped production provider universe; `auto` resolves through the active named profile, while example-provider routing stays explicit-only and outside the production profile set
-- `externalPriorityProfile: balanced | <custom>` — select which ordered provider map `auto` uses
+- `externalPriorityProfile: balanced | quality-first | <custom>` — select which ordered provider map `auto` uses
 - `reserveResolver: disabled | claude-sonnet | claude-wrapper | wrapper:<command>` — choose the concrete read-only resolver for symbolic `reserve`; `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path
 - `externalPriorityProfiles` — maintain the per-profile lane matrix; the shipped production profiles stay on the Codex/Claude pair plus advisory/review-only `reserve`
 - `externalOpinionCounts` — raise specific lanes above `1` when the orchestrator should collect multiple independent external opinions

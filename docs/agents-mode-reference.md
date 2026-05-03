@@ -302,7 +302,7 @@ Notes:
 - This is the shared cross-provider model-selection policy. It applies only after provider resolution.
 - `runtime-default` is the first-write default where this key exists.
 - `pinned-top-pro` means:
-- Codex: `gpt-5.5 --reasoning-effort xhigh`; only explicitly configured repo-local fully autonomous low-reasoning worker lanes may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path
+- Codex: model `gpt-5.5` with `model_reasoning_effort = "xhigh"` supplied through a supported Codex config/profile path; for direct `codex exec` launches, use `--model gpt-5.5 -c model_reasoning_effort="xhigh"` or a profile that sets the same key. Only explicitly configured repo-local fully autonomous low-reasoning worker lanes may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path.
 - Claude: `opus-max` for the primary `claude` candidate. `reserve` is not a fallback from that candidate; it is a separate symbolic advisory/review candidate that the profile order may reach after primary `claude` and `codex`.
 - Supplemental candidates apply only where their lane policy allows them. `reserve` is advisory/review-only and does not affect primary Claude model/profile selection.
 - Codex-line `externalClaudeProfile`, when explicitly set, remains a narrower override for Claude model/profile selection than the shared `externalModelMode`.
@@ -358,7 +358,7 @@ Guardrails:
 |---|---|
 | `externalCodexProfile: default` and Codex is the chosen provider | Inherit `externalModelMode`; under `runtime-default`, do not pin a model, and under `pinned-top-pro`, use the documented top Codex path. |
 | `externalCodexProfile: gpt-5.5-fast` and Codex is the chosen provider | Request the installed runtime's `gpt-5.5` fast profile if supported. If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
-| `externalModelMode: pinned-top-pro` and Codex is the chosen provider | Try `gpt-5.5 --reasoning-effort xhigh` first. Only on an explicitly configured repo-local fully autonomous low-reasoning worker lane may Codex retry once with `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path. Other lanes must disclose Codex unavailability instead of downgrading. |
+| `externalModelMode: pinned-top-pro` and Codex is the chosen provider | Try model `gpt-5.5` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path first. Only on an explicitly configured repo-local fully autonomous low-reasoning worker lane may Codex retry once with `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path. Other lanes must disclose Codex unavailability instead of downgrading. |
 | Explicit Gemini example route | Gemini is outside production `auto` routing and is classified as `WEAK MODEL / NOT RECOMMENDED`; any direct Gemini command is a manual example or compatibility run, not a pinned production model policy. |
 | `externalModelMode: pinned-top-pro` and Claude is the chosen provider | Try primary `claude` on `opus-max`. Do not retry primary Claude through the secret-backed wrapper. Advisory/review lanes may later collect the separate `reserve` candidate if their profile order and opinion count reach it. |
 | Claude CLI is the chosen provider and is already authenticated | Use the plain Claude CLI path first. |
@@ -389,10 +389,12 @@ Notes:
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | Codex | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | `opus-max` unless explicitly overridden |
 | Claude Code | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | not part of canonical Claude-line config |
-| Gemini CLI | example-only | example-only | example-only | example-only | example-only | example-only | explicit `gemini` only | `claude-sonnet` in shared overlay | example-only | example-only | example-only | `default` | not part of canonical Gemini-line config |
-| Qwen Code | example-only | example-only | example-only | example-only | example-only | example-only | explicit `qwen` only | `claude-sonnet` in shared overlay | example-only | example-only | example-only | `default` | not part of canonical Qwen-line config |
+| Gemini CLI | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | not part of canonical Gemini-line config |
+| Qwen Code | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | not part of canonical Qwen-line config |
 
 Structured defaults written alongside the scalar keys:
+
+Gemini and Qwen keep the same shared first-write scalar defaults as the production packs so `auto` remains production-profile driven. Their own provider families stay explicit example-only overrides (`externalProvider: gemini` or `externalProvider: qwen`) and are never the shipped first-write default.
 
 | Key | Default |
 |---|---|

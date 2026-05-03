@@ -116,7 +116,7 @@ If Codex is selected:
 codex --quiet --full-auto < "$PROMPT_FILE"
 ```
 
-- For hard tasks, use `--model gpt-5.5 --reasoning-effort xhigh`.
+- For hard tasks, use Codex model `gpt-5.5` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path.
 - `PROMPT_FILE` is a temporary file containing the full prompt payload. Prefer passing large context as file references inside that prompt rather than embedding raw artifacts.
 - Wait 5–15 minutes before treating a single advisory run as stalled. Do not launch a duplicate advisory call for the same memo while the first may still be running; independent external lanes may still run in parallel when their scopes are disjoint and the routing contract allows it.
 - If Codex is not installed, fails, times out, or hits quota/auth limits, do not silently degrade the consultant requirement. Return an unavailable memo and keep routing honest.

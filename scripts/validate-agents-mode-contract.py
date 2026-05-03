@@ -602,6 +602,68 @@ def validate_defaults(root: Path, schema_data: dict[str, Any]) -> None:
         )
 
 
+def validate_manual_reference_surfaces(root: Path) -> None:
+    reference = (root / "docs" / "agents-mode-reference.md").read_text(
+        encoding="utf-8"
+    )
+    external_worker = (root / "docs" / "external-worker-design.md").read_text(
+        encoding="utf-8"
+    )
+    candidates = [
+        root / "docs" / "agents-mode-reference.md",
+        root / "docs" / "external-worker-design.md",
+        root / "RELEASE_NOTES.md",
+        root / "src.codex" / "skills" / "consultant" / "SKILL.md",
+        root / "src.codex" / "skills" / "lead" / "external-dispatch.md",
+        root / "src.codex" / "skills" / "lead" / "subagent-contracts.md",
+        root / "src.claude" / "agents" / "consultant.md",
+        root / "src.gemini" / "skills" / "lead" / "external-dispatch.md",
+        root / "src.gemini" / "skills" / "lead" / "subagent-contracts.md",
+        root / "src.qwen" / "skills" / "lead" / "subagent-contracts.md",
+    ]
+
+    if "| Gemini CLI | `disabled` | `manual` | `auto`" not in reference:
+        raise ContractError(
+            "agents-mode reference must keep Gemini first-write defaults on shared auto defaults"
+        )
+    if "| Qwen Code | `disabled` | `manual` | `auto`" not in reference:
+        raise ContractError(
+            "agents-mode reference must keep Qwen first-write defaults on shared auto defaults"
+        )
+    if "explicit `gemini` only" in reference or "explicit `qwen` only" in reference:
+        raise ContractError(
+            "agents-mode reference must not present example providers as first-write defaults"
+        )
+
+    if "externalPriorityProfile: balanced | quality-first | <custom>" not in external_worker:
+        raise ContractError(
+            "external-worker design must document quality-first as a shipped priority profile"
+        )
+    external_worker_lines = set(external_worker.splitlines())
+    for lane in [
+        "review.performance-architecture",
+        "review.ui-visual-correctness",
+    ]:
+        if f"     {lane}: 1" not in external_worker_lines:
+            raise ContractError(
+                f"external-worker design YAML example misindents {lane}"
+            )
+        if f"   {lane}: 1" in external_worker_lines or f"      {lane}: 1" in external_worker_lines:
+            raise ContractError(
+                f"external-worker design YAML example has top-level {lane}"
+            )
+
+    for path in candidates:
+        text = path.read_text(encoding="utf-8")
+        if "--reasoning-effort" in text or re.search(
+            r"(?:--model\s+)?gpt-5\.[0-9]+\s+--reasoning-effort\s+xhigh",
+            text,
+        ):
+            raise ContractError(
+                f"{path.relative_to(root)} documents unsupported Codex reasoning CLI flag"
+            )
+
+
 def validate_schema(schema_data: dict[str, Any], presets_data: dict[str, Any]) -> None:
     production = set(schema_data["productionAutoProviders"])
     examples = set(schema_data["exampleOnlyProviders"])
@@ -681,6 +743,7 @@ def main() -> int:
         validate_schema(schema_data, presets_data)
         validate_generated_docs_sync(root)
         validate_defaults(root, schema_data)
+        validate_manual_reference_surfaces(root)
         validate_available_presets(root, presets_data)
         validate_reference_expansion(root, presets_data)
         validate_raised_count_bullets(root, presets_data, PRESET_DOCS)
