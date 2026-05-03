@@ -683,7 +683,7 @@ lead -> product-manager -> lead
 - `notes.md` или `notes/` хранит technical findings и discoveries; принятые долгоживущие решения по-прежнему должны жить в design или ADR artifact.
 - `closure.md` обязателен перед перемещением item в конфигурируемую archive location. Содержит финальную запись о закрытии: outcome, residual risk и archive location.
 - `status.md` имеет определённый формат с YAML frontmatter (template, orchestrator, started, updated) и разделами: Current state, Active agents, Completed agents, REVISE loop (опционально), Next action. Полный формат определён в `subagent-contracts.md`.
-- `agent-runs.jsonl` — машиночитаемый журнал исполнения work-item. Он фиксирует каждый запуск или приём результата агента: роль, execution path, статус, gate, artifact и evidence. Lead обязан использовать его для сверки active, completed, blocked и revise состояний перед closeout. Если доступны `scripts/agent-run-ledger.*` или installed equivalent, используйте их для инициализации legacy work items и добавления validated events вместо ручного редактирования JSONL.
+- `agent-runs.jsonl` — машиночитаемый журнал исполнения work-item. Он фиксирует каждый запуск или приём результата агента: роль, execution path, статус, gate, artifact и evidence. Lead обязан использовать его для сверки active, completed, blocked и revise состояний перед closeout. Если доступны `scripts/agent-run-ledger.*` или installed equivalent, используйте их для инициализации legacy work items и добавления validated events вместо ручного редактирования JSONL. Используйте `scripts/check-work-items-state.* --root <repo>` или installed equivalent для периодической проверки всех active work items перед broad closeout, interruption recovery или publication review.
 - `status.md` и `agent-runs.jsonl` должны совпадать на границах стадий: нельзя закрывать задачу при running ledger entries, принимать `PASS` без evidence, принимать completed gate без artifact или оставлять downstream `PASS` без re-review после существенной правки upstream artifact.
 
 ### 11.3 Что стоит автоматизировать
@@ -852,6 +852,7 @@ accessibility-reviewer
 - `ADR`: Architecture Decision Record; долговечный документ, фиксирующий архитектурное решение, контекст и последствия.
 - `agent-run-ledger.*`: family helper scripts, которая инициализирует legacy ledger files для work-item и добавляет validated events в `agent-runs.jsonl`.
 - `agent-runs.jsonl`: JSONL-журнал исполнения рядом с `status.md`; машиночитаемое состояние work-item.
+- `check-work-items-state.*`: family helper scripts, которая проверяет все active work items под корнем repository.
 - `artifact`: конкретный рабочий результат: brief, memo, design, plan, patch, review или closure note.
 - `BLOCKED`: состояние workflow для реального внешнего blocker'а, недоступного prerequisite или отсутствующего required decision.
 - `CAD`: Computer-Aided Design; software и file formats для technical drawings, geometry или engineered layouts.

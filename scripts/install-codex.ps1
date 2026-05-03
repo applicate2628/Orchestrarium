@@ -761,7 +761,40 @@ if (Test-Path -LiteralPath $SkillsTarget) {
     }
 }
 
-# Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
+# Runtime ledger helpers are sourced once from repo-root scripts/ and installed
+# beside the lead scripts so installed packs have a local helper surface too.
+$RuntimeLedgerScripts = @(
+    "agent-run-ledger.py",
+    "agent-run-ledger.ps1",
+    "agent-run-ledger.sh",
+    "check-work-items-state.py",
+    "check-work-items-state.ps1",
+    "check-work-items-state.sh",
+    "validate-work-item-state.py",
+    "validate-work-item-state.ps1",
+    "validate-work-item-state.sh"
+)
+Write-Host "  Installing work-item ledger helper scripts..."
+if (-not (Test-Path -LiteralPath $LeadScriptsTarget)) {
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Path $LeadScriptsTarget -Force | Out-Null
+    } else {
+        Write-Host "    [dry-run] would create $LeadScriptsTarget"
+    }
+}
+foreach ($scriptName in $RuntimeLedgerScripts) {
+    $scriptSource = Join-Path (Join-Path $RepoDir "scripts") $scriptName
+    $scriptTarget = Join-Path $LeadScriptsTarget $scriptName
+    if (-not (Test-Path -LiteralPath $scriptSource)) {
+        Write-Host "FAIL: Missing runtime helper source $scriptSource" -ForegroundColor Red
+        exit 1
+    }
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $scriptSource -Destination $scriptTarget -Force
+    } else {
+        Write-Host "    [dry-run] would copy $scriptSource -> $scriptTarget"
+    }
+}
 
 Write-Host "  Installing built-in agent overrides (preserving existing custom files)..."
 if (-not (Test-Path -LiteralPath $AgentOverridesTarget)) {
@@ -898,6 +931,9 @@ Test-InstalledFile (Join-Path $SkillsTarget "lead/subagent-contracts.md") "skill
 Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.sh") "skills/lead/scripts/check-publication-safety.sh"
 Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.ps1") "skills/lead/scripts/check-publication-safety.ps1"
 Test-InstalledFile (Join-Path $LeadScriptsTarget "validate-skill-pack.sh") "skills/lead/scripts/validate-skill-pack.sh"
+foreach ($scriptName in $RuntimeLedgerScripts) {
+    Test-InstalledFile (Join-Path $LeadScriptsTarget $scriptName) "skills/lead/scripts/$scriptName"
+}
 Test-InstalledFile $AgentsModeTarget ".agents-mode.yaml"
 Test-InstalledFile (Join-Path $AgentOverridesTarget "default.toml") "agents/default.toml"
 Test-InstalledFile (Join-Path $AgentOverridesTarget "worker.toml") "agents/worker.toml"

@@ -119,14 +119,37 @@ def check_validator(root: Path) -> None:
             root,
             base,
             "short-required-strings",
-        ledger_event(runId="x", startedAt="1", updatedAt="2"),
-        False,
-        (
-            "runId must be at least 8 characters",
-            "startedAt must be at least 10 characters",
-            "updatedAt must be at least 10 characters",
-        ),
-    )
+            ledger_event(runId="x", startedAt="1", updatedAt="2"),
+            False,
+            (
+                "runId must be at least 8 characters",
+                "startedAt must be at least 10 characters",
+                "updatedAt must be at least 10 characters",
+            ),
+        )
+
+
+def check_periodic_checker(root: Path) -> None:
+    checker = root / "scripts" / "check-work-items-state.py"
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        item = base / "work-items" / "active" / "valid"
+        (item / "reviews").mkdir(parents=True)
+        (item / "status.md").write_text(STATUS_TEXT, encoding="utf-8")
+        (item / "reviews" / "qa.md").write_text("# QA\n\nGate: PASS\n", encoding="utf-8")
+        (item / "agent-runs.jsonl").write_text(json.dumps(ledger_event(workItem="valid")) + "\n", encoding="utf-8")
+
+        proc = subprocess.run(
+            [sys.executable, str(checker), "--root", str(base), "--stale-hours", "24", "--now", "2026-05-03T15:00:00Z"],
+            cwd=root,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        if proc.returncode != 0:
+            raise AssertionError(f"periodic checker should pass:\n{proc.stdout}")
+        require("RESULT: PASS" in proc.stdout, f"periodic checker output missed pass result:\n{proc.stdout}")
 
 
 def main(argv: list[str]) -> int:
@@ -137,6 +160,7 @@ def main(argv: list[str]) -> int:
     root = Path(args.root).resolve()
     check_schema(root)
     check_validator(root)
+    check_periodic_checker(root)
     print("RESULT: PASS")
     return 0
 

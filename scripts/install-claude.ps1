@@ -776,6 +776,40 @@ foreach ($dir in $Dirs) {
     }
 }
 
+$RuntimeLedgerScripts = @(
+    "agent-run-ledger.py",
+    "agent-run-ledger.ps1",
+    "agent-run-ledger.sh",
+    "check-work-items-state.py",
+    "check-work-items-state.ps1",
+    "check-work-items-state.sh",
+    "validate-work-item-state.py",
+    "validate-work-item-state.ps1",
+    "validate-work-item-state.sh"
+)
+$ClaudeScriptsTarget = Join-Path $TargetRoot "agents\scripts"
+Write-Host "  Installing work-item ledger helper scripts..."
+if (-not (Test-Path -LiteralPath $ClaudeScriptsTarget)) {
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Path $ClaudeScriptsTarget -Force | Out-Null
+    } else {
+        Write-Host "    [dry-run] would create $ClaudeScriptsTarget"
+    }
+}
+foreach ($scriptName in $RuntimeLedgerScripts) {
+    $scriptSource = Join-Path (Join-Path $RepoDir "scripts") $scriptName
+    $scriptTarget = Join-Path $ClaudeScriptsTarget $scriptName
+    if (-not (Test-Path -LiteralPath $scriptSource)) {
+        Write-Host "FAIL: Missing runtime helper source $scriptSource" -ForegroundColor Red
+        exit 1
+    }
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $scriptSource -Destination $scriptTarget -Force
+    } else {
+        Write-Host "    [dry-run] would copy $scriptSource -> $scriptTarget"
+    }
+}
+
 # Optional dirs: copy if not present, don't overwrite
 foreach ($dir in $OptionalDirs) {
     $src = Join-Path $Source $dir
@@ -938,6 +972,9 @@ foreach ($dir in $Dirs) {
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/operating-model.md") "agents/contracts/operating-model.md"
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/subagent-contracts.md") "agents/contracts/subagent-contracts.md"
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/policies-catalog.md") "agents/contracts/policies-catalog.md"
+foreach ($scriptName in $RuntimeLedgerScripts) {
+    Test-InstalledFile (Join-Path $TargetRoot "agents/scripts/$scriptName") "agents/scripts/$scriptName"
+}
 Test-InstalledFile $AgentsModeTarget ".agents-mode.yaml"
 
 # Check CLAUDE.md (Claude-specific sections)

@@ -781,7 +781,41 @@ if [[ -d "$SKILLS_TARGET" ]]; then
   done
 fi
 
-# Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
+# Runtime ledger helpers are sourced once from repo-root scripts/ and installed
+# beside the lead scripts so installed packs have a local helper surface too.
+runtime_ledger_scripts=(
+  agent-run-ledger.py
+  agent-run-ledger.ps1
+  agent-run-ledger.sh
+  check-work-items-state.py
+  check-work-items-state.ps1
+  check-work-items-state.sh
+  validate-work-item-state.py
+  validate-work-item-state.ps1
+  validate-work-item-state.sh
+)
+echo "  Installing work-item ledger helper scripts..."
+lead_scripts_target="$SKILLS_TARGET/lead/scripts"
+if [[ ! -d "$lead_scripts_target" ]]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $lead_scripts_target"
+  else
+    mkdir -p "$lead_scripts_target"
+  fi
+fi
+for script_name in "${runtime_ledger_scripts[@]}"; do
+  script_source="$REPO_DIR/scripts/$script_name"
+  script_target="$lead_scripts_target/$script_name"
+  if [[ ! -f "$script_source" ]]; then
+    echo "FAIL: Missing runtime helper source $script_source" >&2
+    exit 1
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would copy $script_source -> $script_target"
+  else
+    cp "$script_source" "$script_target"
+  fi
+done
 
 echo "  Installing built-in agent overrides (preserving existing custom files)..."
 if [[ ! -d "$AGENT_OVERRIDES_TARGET" ]]; then
@@ -907,6 +941,9 @@ check_file "$SKILLS_TARGET/lead/subagent-contracts.md" "skills/lead/subagent-con
 check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.sh" "skills/lead/scripts/check-publication-safety.sh"
 check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.ps1" "skills/lead/scripts/check-publication-safety.ps1"
 check_file "$SKILLS_TARGET/lead/scripts/validate-skill-pack.sh" "skills/lead/scripts/validate-skill-pack.sh"
+for script_name in "${runtime_ledger_scripts[@]}"; do
+  check_file "$SKILLS_TARGET/lead/scripts/$script_name" "skills/lead/scripts/$script_name"
+done
 check_file "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 check_file "$AGENT_OVERRIDES_TARGET/default.toml" "agents/default.toml"
 check_file "$AGENT_OVERRIDES_TARGET/worker.toml" "agents/worker.toml"

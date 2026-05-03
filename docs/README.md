@@ -21,11 +21,14 @@ Current docs in this branch:
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
 - [provider-runtime-layouts.md](provider-runtime-layouts.md) for cross-provider runtime path mapping
+- [work-item-execution-tracking.md](work-item-execution-tracking.md) for the execution ledger helper and periodic active work-item checker
 - [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md)
 
 ## Terms and Abbreviations
 
 - `agents-mode`: Orchestrarium operator overlay for delegation, provider routing, MCP use, and parallelism.
+- `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
+- `check-work-items-state.*`: helper script family that checks every active work item under a repository root.
 - `Codex`: OpenAI Codex runtime and provider line.
 - `Claude`: Anthropic Claude runtime and provider line.
 - `Gemini`: Google Gemini CLI provider line, documented here as an example integration.

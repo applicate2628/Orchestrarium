@@ -722,6 +722,40 @@ for dir in "${DIRS[@]}"; do
   done
 done
 
+runtime_ledger_scripts=(
+  agent-run-ledger.py
+  agent-run-ledger.ps1
+  agent-run-ledger.sh
+  check-work-items-state.py
+  check-work-items-state.ps1
+  check-work-items-state.sh
+  validate-work-item-state.py
+  validate-work-item-state.ps1
+  validate-work-item-state.sh
+)
+echo "  Installing work-item ledger helper scripts..."
+claude_scripts_target="$TARGET/agents/scripts"
+if [[ ! -d "$claude_scripts_target" ]]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $claude_scripts_target"
+  else
+    mkdir -p "$claude_scripts_target"
+  fi
+fi
+for script_name in "${runtime_ledger_scripts[@]}"; do
+  script_source="$REPO_DIR/scripts/$script_name"
+  script_target="$claude_scripts_target/$script_name"
+  if [[ ! -f "$script_source" ]]; then
+    echo "FAIL: Missing runtime helper source $script_source" >&2
+    exit 1
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would copy $script_source -> $script_target"
+  else
+    cp "$script_source" "$script_target"
+  fi
+done
+
 # Optional dirs: copy if not present, don't overwrite
 for dir in "${OPTIONAL_DIRS[@]}"; do
   src="$SOURCE/$dir"
@@ -867,6 +901,9 @@ done
 check_file "$TARGET/agents/contracts/operating-model.md" "agents/contracts/operating-model.md"
 check_file "$TARGET/agents/contracts/subagent-contracts.md" "agents/contracts/subagent-contracts.md"
 check_file "$TARGET/agents/contracts/policies-catalog.md" "agents/contracts/policies-catalog.md"
+for script_name in "${runtime_ledger_scripts[@]}"; do
+  check_file "$TARGET/agents/scripts/$script_name" "agents/scripts/$script_name"
+done
 check_file "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 
 # Check CLAUDE.md (Claude-specific sections)

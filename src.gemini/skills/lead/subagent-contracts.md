@@ -56,7 +56,7 @@ Minimum required fields are defined by `shared/schemas/agent-runs.schema.json`: 
 
 When `scripts/agent-run-ledger.*` or an installed equivalent is available, prefer its `append` command so the event is validated and rolled back on failure. Use its `init` command for one-time migration of legacy work items with missing status sections or ledger files. Manual JSONL append is acceptable only when no helper is available.
 
-Before closeout, run `scripts/validate-work-item-state.* --work-item <path>` or the installed equivalent when the repository exposes one. Closeout is blocked while the ledger contains running agents, duplicate run IDs, missing artifacts for `PASS`, `PASS` without evidence, or inconsistent `BLOCKED` / `REVISE` status.
+Before closeout, run `scripts/validate-work-item-state.* --work-item <path>` or the installed equivalent when the repository exposes one. Before broad closeout, interruption recovery, or publication review, run `scripts/check-work-items-state.* --root <repo>` or the installed equivalent to scan all active work items. Closeout is blocked while the ledger contains running agents, duplicate run IDs, missing artifacts for `PASS`, `PASS` without evidence, stale running agents, or inconsistent `BLOCKED` / `REVISE` status.
 
 ## External dispatch contract
 
@@ -98,6 +98,7 @@ Use `external-dispatch.md` when the main Gemini session prefers or explicitly se
 
 - `agent-run-ledger.*`: helper script family that initializes legacy work-item ledger files and appends validated `agent-runs.jsonl` events.
 - `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
+- `check-work-items-state.*`: helper script family that checks every active work item under a repository root.
 - `BLOCKED`: workflow state for a real missing dependency, prerequisite, or unavailable route.
 - `reserve`: symbolic supplemental read-only candidate for advisory/review lanes only; it is separate from primary providers and not valid for worker or mutating routes.
 - `CLI`: Command-Line Interface; a provider or tool invoked from a shell.

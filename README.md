@@ -174,7 +174,9 @@ The docs sync command checks generated `agents-mode` tables, raised-count lists,
 
 The installer regression command creates disposable targets under `/.scratch/`, runs the Bash installers for all four provider lines, and verifies that stale `agents-mode` overlays are normalized to the current schema-backed contract.
 
-Work-item execution tracking uses `agent-runs.jsonl` beside `status.md` for machine-readable agent state. Use `scripts/agent-run-ledger.* --work-item <path> init` for one-time migration of missing status sections and ledger files, `scripts/agent-run-ledger.* --work-item <path> append ...` to append one validated event with rollback on failure, and `scripts/validate-work-item-state.* --work-item <path>` before closeout to catch stale agents, duplicate run IDs, missing evidence, inconsistent gates, or accepted artifacts that were never verified.
+Work-item execution tracking uses `agent-runs.jsonl` beside `status.md` for machine-readable agent state. Use `scripts/agent-run-ledger.* --work-item <path> init` for one-time migration of missing status sections and ledger files, `scripts/agent-run-ledger.* --work-item <path> append ...` to append one validated event with rollback on failure, `scripts/validate-work-item-state.* --work-item <path>` before single-item closeout, and `scripts/check-work-items-state.* --root . --stale-hours 24` before broad closeout or interruption recovery. The helpers catch stale agents, duplicate run IDs, missing evidence, inconsistent gates, or accepted artifacts that were never verified.
+
+The runtime helper surface is installed with production Codex and Claude packs as well: Codex gets the scripts under `~/.codex/skills/lead/scripts/` or `<repo>/.agents/skills/lead/scripts/`, while Claude Code gets them under `~/.claude/agents/scripts/` or `<repo>/.claude/agents/scripts/`. See [docs/work-item-execution-tracking.md](docs/work-item-execution-tracking.md) for the operator runbook.
 
 For release-relevant tracked changes, update `RELEASE_NOTES.md` in the same change before publication and explain the practical effect of the change, not just its title. Keep release notes in reverse-chronological `## YYYY-MM-DD` sections instead of one long-lived `## Unreleased` bucket, and run the repo-local gate before publication:
 
@@ -196,6 +198,7 @@ This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](
 - `agent-run-ledger.*`: helper script family that initializes legacy work-item ledger files and appends validated `agent-runs.jsonl` events.
 - `agents-mode`: Orchestrarium operator configuration overlay for delegation, provider routing, MCP use, and parallelism.
 - `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
+- `check-work-items-state.*`: helper script family that checks every active work item under a repository root.
 - `reserve`: symbolic supplemental read-only candidate for advisory/review lanes; it runs after primary `claude` and `codex` and is not a worker or editing path.
 - `reserveResolver`: scalar `agents-mode` key that binds `reserve` to `claude-sonnet`, `claude-wrapper`, a `wrapper:<command>` resolver, or `disabled`.
 - `CLI`: Command-Line Interface, a terminal command surface such as `codex`, `claude`, `gemini`, or `qwen`.
