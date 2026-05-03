@@ -570,6 +570,114 @@ ensure_default_file() {
   fi
 }
 
+normalize_codex_agent_override_content() {
+  sed -E 's/\r$//; s/^model[[:space:]]*=[[:space:]]*"[^"]*"$/model = "<model>"/'
+}
+
+normalized_codex_agent_override_file() {
+  local path="$1"
+  normalize_codex_agent_override_content < "$path"
+}
+
+legacy_codex_agent_override_template() {
+  local name="$1"
+  case "$name" in
+    default.toml)
+      cat <<'EOF'
+name = "default"
+description = "General-purpose fallback agent."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+General-purpose fallback agent.
+Inherit the parent session's task context and focus on the assigned subtask.
+Stay within the requested scope and return a concise, usable result.
+"""
+EOF
+      ;;
+    worker.toml)
+      cat <<'EOF'
+name = "worker"
+description = "Execution-focused agent for implementation and fixes."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+Execution-focused agent for implementation and fixes.
+Carry out the assigned implementation task directly, stay within scope, and avoid redesign unless the parent explicitly asks for it.
+Return concrete progress and outcomes for the requested slice.
+"""
+EOF
+      ;;
+    explorer.toml)
+      cat <<'EOF'
+name = "explorer"
+description = "Read-heavy codebase exploration agent."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+Read-heavy codebase exploration agent.
+Stay in exploration mode, gather evidence efficiently, and return factual findings with clear pointers.
+Do not drift into implementation unless the parent explicitly asks for it.
+"""
+EOF
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_pack_owned_codex_agent_override() {
+  local src="$1" dst="$2" name="$3"
+  local target_norm source_norm legacy_norm
+
+  target_norm="$(normalized_codex_agent_override_file "$dst")"
+  source_norm="$(normalized_codex_agent_override_file "$src")"
+  if [[ "$target_norm" == "$source_norm" ]]; then
+    return 0
+  fi
+
+  legacy_norm="$(legacy_codex_agent_override_template "$name" || true)"
+  if [[ -n "$legacy_norm" && "$target_norm" == "$legacy_norm" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_codex_agent_override_file() {
+  local src="$1" dst="$2" label="$3"
+  local name
+  name="$(basename "$src")"
+
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    if is_pack_owned_codex_agent_override "$src" "$dst" "$name"; then
+      if cmp -s "$src" "$dst"; then
+        echo "  OK  $label unchanged"
+      else
+        echo "  Refreshing stale pack-owned $label..."
+        if [ "$DRY_RUN" -eq 1 ]; then
+          echo "    [dry-run] would replace $dst"
+        else
+          cp "$src" "$dst"
+        fi
+      fi
+    else
+      echo "  Preserving existing custom $label..."
+    fi
+    return
+  fi
+
+  echo "  Installing default $label..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp "$src" "$dst"
+  fi
+}
+
 write_codex_default_agents_mode_file() {
   local template="$1" dst="$2"
   cat "$template" > "$dst"
@@ -827,7 +935,7 @@ if [[ ! -d "$AGENT_OVERRIDES_TARGET" ]]; then
 fi
 for agent_file in "$AGENTS_SOURCE"/*.toml; do
   [[ -f "$agent_file" ]] || continue
-  ensure_default_file "$agent_file" "$AGENT_OVERRIDES_TARGET/$(basename "$agent_file")" "built-in agent override $(basename "$agent_file")"
+  ensure_codex_agent_override_file "$agent_file" "$AGENT_OVERRIDES_TARGET/$(basename "$agent_file")" "built-in agent override $(basename "$agent_file")"
 done
 
 # AGENTS.md: assemble from shared + codex-specific, then merge or create

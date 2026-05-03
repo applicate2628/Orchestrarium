@@ -27,6 +27,29 @@ externalPriorityProfiles:
     worker.default-implementation: [gemini, reserve, claude]
 """
 
+LEGACY_CODEX_DEFAULT_AGENT = """\
+name = "default"
+description = "General-purpose fallback agent."
+model = "gpt-legacy-default"
+model_reasoning_effort = "xhigh"
+developer_instructions = \"\"\"
+General-purpose fallback agent.
+Inherit the parent session's task context and focus on the assigned subtask.
+Stay within the requested scope and return a concise, usable result.
+\"\"\"
+"""
+
+CUSTOM_CODEX_WORKER_AGENT = """\
+name = "worker"
+description = "Execution-focused agent for implementation and fixes."
+model = "user-custom-model"
+model_reasoning_effort = "xhigh"
+developer_instructions = \"\"\"
+User-customized worker override that intentionally stays on an explicit model.
+Do not replace this file during reinstall.
+\"\"\"
+"""
+
 
 @dataclass(frozen=True)
 class InstallerCase:
@@ -145,6 +168,45 @@ def seed_stale_overlay(project_root: Path, case: InstallerCase) -> Path:
     return overlay
 
 
+def seed_codex_agent_overrides(project_root: Path, root: Path) -> None:
+    agents_dir = project_root / ".codex" / "agents"
+    agents_dir.mkdir(parents=True, exist_ok=True)
+    (agents_dir / "default.toml").write_text(
+        LEGACY_CODEX_DEFAULT_AGENT,
+        encoding="utf-8",
+    )
+    current_explorer = (root / "src.codex" / "agents" / "explorer.toml").read_text(
+        encoding="utf-8"
+    )
+    (agents_dir / "explorer.toml").write_text(
+        current_explorer.replace('model = "gpt-5.5"', 'model = "gpt-old-default"'),
+        encoding="utf-8",
+    )
+    (agents_dir / "worker.toml").write_text(
+        CUSTOM_CODEX_WORKER_AGENT,
+        encoding="utf-8",
+    )
+
+
+def validate_codex_agent_overrides(project_root: Path, root: Path) -> None:
+    agents_dir = project_root / ".codex" / "agents"
+    source_dir = root / "src.codex" / "agents"
+
+    for name in ["default.toml", "explorer.toml"]:
+        expected = (source_dir / name).read_text(encoding="utf-8")
+        actual = (agents_dir / name).read_text(encoding="utf-8")
+        if actual != expected:
+            raise InstallerRegressionError(
+                f"codex did not refresh stale built-in agent override {name}"
+            )
+
+    worker = (agents_dir / "worker.toml").read_text(encoding="utf-8")
+    if worker != CUSTOM_CODEX_WORKER_AGENT:
+        raise InstallerRegressionError(
+            "codex replaced a customized built-in worker override"
+        )
+
+
 def validate_overlay(
     case: InstallerCase,
     overlay: Path,
@@ -226,6 +288,8 @@ def run_regression(root: Path) -> None:
             project_root = scratch / f"{case.name}-project"
             project_root.mkdir(parents=True, exist_ok=True)
             overlay = seed_stale_overlay(project_root, case)
+            if case.codex_line:
+                seed_codex_agent_overrides(project_root, root)
             run_installer(
                 root,
                 case,
@@ -235,6 +299,8 @@ def run_regression(root: Path) -> None:
                 / f"{case.name}-project",
             )
             validate_overlay(case, overlay, schema_data)
+            if case.codex_line:
+                validate_codex_agent_overrides(project_root, root)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

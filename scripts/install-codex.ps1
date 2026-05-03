@@ -428,6 +428,127 @@ function Ensure-DefaultFile {
     }
 }
 
+function Get-NormalizedCodexAgentOverrideContent {
+    param([string]$Content)
+
+    $normalized = $Content -replace "`r`n", "`n"
+    $normalized = $normalized -replace "`r", "`n"
+    $normalized = [regex]::Replace(
+        $normalized,
+        '(?m)^model\s*=\s*"[^"]*"\s*$',
+        'model = "<model>"'
+    )
+    return $normalized.TrimEnd("`n")
+}
+
+function Get-LegacyCodexAgentOverrideTemplate {
+    param([string]$Name)
+
+    switch ($Name) {
+        "default.toml" {
+            return @'
+name = "default"
+description = "General-purpose fallback agent."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+General-purpose fallback agent.
+Inherit the parent session's task context and focus on the assigned subtask.
+Stay within the requested scope and return a concise, usable result.
+"""
+'@
+        }
+        "worker.toml" {
+            return @'
+name = "worker"
+description = "Execution-focused agent for implementation and fixes."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+Execution-focused agent for implementation and fixes.
+Carry out the assigned implementation task directly, stay within scope, and avoid redesign unless the parent explicitly asks for it.
+Return concrete progress and outcomes for the requested slice.
+"""
+'@
+        }
+        "explorer.toml" {
+            return @'
+name = "explorer"
+description = "Read-heavy codebase exploration agent."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+Read-heavy codebase exploration agent.
+Stay in exploration mode, gather evidence efficiently, and return factual findings with clear pointers.
+Do not drift into implementation unless the parent explicitly asks for it.
+"""
+'@
+        }
+        default {
+            return $null
+        }
+    }
+}
+
+function Test-PackOwnedCodexAgentOverride {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile
+    )
+
+    $name = Split-Path $SourceFile -Leaf
+    $targetNorm = Get-NormalizedCodexAgentOverrideContent -Content (Get-Content -LiteralPath $TargetFile -Raw)
+    $sourceNorm = Get-NormalizedCodexAgentOverrideContent -Content (Get-Content -LiteralPath $SourceFile -Raw)
+    if ($targetNorm -eq $sourceNorm) {
+        return $true
+    }
+
+    $legacyTemplate = Get-LegacyCodexAgentOverrideTemplate -Name $name
+    if ($null -ne $legacyTemplate) {
+        $legacyNorm = Get-NormalizedCodexAgentOverrideContent -Content $legacyTemplate
+        if ($targetNorm -eq $legacyNorm) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Ensure-CodexAgentOverrideFile {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile,
+        [string]$Label
+    )
+
+    Remove-DanglingLink -Path $TargetFile -Label $Label
+
+    if (Test-Path -LiteralPath $TargetFile) {
+        if (Test-PackOwnedCodexAgentOverride -SourceFile $SourceFile -TargetFile $TargetFile) {
+            if ((Get-FileHash -LiteralPath $SourceFile).Hash -eq (Get-FileHash -LiteralPath $TargetFile).Hash) {
+                Write-Host "  OK  $Label unchanged"
+            } else {
+                Write-Host "  Refreshing stale pack-owned $Label..."
+                if (-not $DryRun) {
+                    Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
+                } else {
+                    Write-Host "    [dry-run] would replace $TargetFile"
+                }
+            }
+        } else {
+            Write-Host "  Preserving existing custom $Label..."
+        }
+        return
+    }
+
+    Write-Host "  Installing default $Label..."
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
+    } else {
+        Write-Host "    [dry-run] would create $TargetFile"
+    }
+}
+
 function Migrate-LegacyAgentsModeFile {
     param(
         [string]$LegacyFile,
@@ -806,7 +927,7 @@ if (-not (Test-Path -LiteralPath $AgentOverridesTarget)) {
 }
 foreach ($agentFile in Get-ChildItem -LiteralPath $AgentsSource -File) {
     $targetFile = Join-Path $AgentOverridesTarget $agentFile.Name
-    Ensure-DefaultFile -SourceFile $agentFile.FullName -TargetFile $targetFile -Label ("built-in agent override {0}" -f $agentFile.Name)
+    Ensure-CodexAgentOverrideFile -SourceFile $agentFile.FullName -TargetFile $targetFile -Label ("built-in agent override {0}" -f $agentFile.Name)
 }
 
 # AGENTS.md: assemble from shared + codex-specific, then merge or create
