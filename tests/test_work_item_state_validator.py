@@ -105,3 +105,39 @@ def test_pass_without_evidence_fails(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert "PASS gate requires evidence" in result.stdout
+
+
+def test_closed_status_with_running_agent_fails(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    closed = valid_status().replace("Primary task status**: active", "Primary task status**: closed")
+    write(item / "status.md", closed)
+    write(item / "agent-runs.jsonl", json.dumps(ledger_event(status="running", gate="none", artifact="", evidence=[])) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 1
+    assert "cannot be closed while ledger has running agents" in result.stdout
+
+
+def test_duplicate_run_id_fails(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", valid_status())
+    event = ledger_event()
+    write(item / "reviews" / "qa.md", "# QA\n\nGate: PASS\n")
+    write(item / "agent-runs.jsonl", json.dumps(event) + "\n" + json.dumps(event) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 1
+    assert "duplicate runId" in result.stdout
+
+
+def test_blocked_gate_requires_blocked_status(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", valid_status())
+    write(item / "agent-runs.jsonl", json.dumps(ledger_event(status="completed", gate="BLOCKED:dependency", artifact="", evidence=[])) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 1
+    assert "BLOCKED gate requires blocked status" in result.stdout
