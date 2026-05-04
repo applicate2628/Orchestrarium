@@ -25,6 +25,8 @@ Provider-specific reference trees such as `references-codex/` and `references-cl
 
 Shared-core documents may still keep provider-local addenda when the shared blueprint needs runtime-specific concretization. `subagent-operating-model` now follows that pattern: the canonical shared core lives here, while each provider-local tree keeps only its runtime and repository-specific addendum.
 
+Russian translations live under `shared/references/ru/` for shared documents that are mirrored for Russian-language operators.
+
 Intentional pack-local exceptions:
 - `periodic-control-matrix` stays pack-local because it still embeds provider/runtime vocabulary, task-memory layout, and runtime-doc links rather than a generic shared skeleton.
 

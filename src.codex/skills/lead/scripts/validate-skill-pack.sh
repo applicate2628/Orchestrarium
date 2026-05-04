@@ -724,11 +724,24 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "$SHARED_REF_DIR/subagent-operating-model.md" \
     "$SHARED_REF_DIR/workflow-strategy-comparison.md" \
     "$SHARED_REF_DIR/repository-publication-safety.md" \
+    "$SHARED_REF_DIR/ru/evidence-based-answer-pipeline.md" \
     "$SHARED_REF_DIR/ru/subagent-operating-model.md" \
     "$SHARED_REF_DIR/ru/workflow-strategy-comparison.md" \
     "$SHARED_REF_DIR/ru/repository-publication-safety.md"
   do
     if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
+  done
+
+  for ref_dir in "$SHARED_REF_DIR" "$CODEX_REF_DIR" "$CLAUDE_REF_DIR" "$GEMINI_REF_DIR" "$QWEN_REF_DIR"; do
+    while IFS= read -r source_file; do
+      name="$(basename "$source_file")"
+      [[ "$name" == "README.md" ]] && continue
+      if [[ -f "$ref_dir/ru/$name" ]]; then
+        pass "$ref_dir/ru/$name mirrors $name"
+      else
+        fail "$ref_dir/ru/$name missing for $name"
+      fi
+    done < <(find "$ref_dir" -maxdepth 1 -type f -name '*.md' | sort)
   done
 
   echo ""
@@ -738,14 +751,20 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_pointer "$CODEX_REF_DIR/subagent-operating-model.md" "../shared/references/subagent-operating-model.md"
   check_pointer "$CODEX_REF_DIR/workflow-strategy-comparison.md" "../shared/references/workflow-strategy-comparison.md"
   check_pointer "$CODEX_REF_DIR/repository-publication-safety.md" "../shared/references/repository-publication-safety.md"
+  check_pointer "$CODEX_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
   check_pointer "$CODEX_REF_DIR/ru/subagent-operating-model.md" "../../shared/references/ru/subagent-operating-model.md"
   check_pointer "$CODEX_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
   check_pointer "$CODEX_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
+  check_pointer "$CLAUDE_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
+  check_pointer "$CLAUDE_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
   check_pointer "$GEMINI_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
   check_pointer "$GEMINI_REF_DIR/workflow-strategy-comparison.md" "../shared/references/workflow-strategy-comparison.md"
   check_pointer "$GEMINI_REF_DIR/repository-publication-safety.md" "../shared/references/repository-publication-safety.md"
+  check_pointer "$GEMINI_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
   check_pointer "$GEMINI_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
   check_pointer "$GEMINI_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
+  check_pointer "$QWEN_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
+  check_pointer "$QWEN_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
 
   echo ""
   echo "=== Shared core / addendum semantics ==="
