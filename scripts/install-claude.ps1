@@ -14,7 +14,8 @@ param(
     [string]$Target,
     [switch]$Force,
     [switch]$DryRun,
-    [switch]$AllowUnsafeTarget
+    [switch]$AllowUnsafeTarget,
+    [switch]$NoHypothesisHook
 )
 
 $ErrorActionPreference = "Stop"
@@ -937,6 +938,20 @@ Sync-AgentsModeFile -TemplateFile $DefaultAgentsModeSource -TargetFile $AgentsMo
 if ($Mode -eq "global") {
     $SharedGlobalAgentsMode = Join-Path $HOME ".agents-mode.yaml"
     Sync-AgentsModeFile -TemplateFile $DefaultAgentsModeSource -TargetFile $SharedGlobalAgentsMode -Label "shared global ~/.agents-mode.yaml"
+}
+
+# Install the hypothesis-disclosure PreToolUse hook by merging it into the
+# user's settings.json idempotently. Preserves all other user keys and other
+# hooks. Opt out with -NoHypothesisHook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
+if (-not $NoHypothesisHook -and -not $DryRun) {
+    $PythonCmd = Get-PythonCommand
+    $HookInstaller = Join-Path $RepoDir "scripts\install-hypothesis-hook.py"
+    if ($PythonCmd -and (Test-Path $HookInstaller)) {
+        $SettingsTarget = Join-Path $TargetRoot "settings.json"
+        $ScriptTarget = Join-Path $TargetRoot "agents\scripts\check-hypothesis-disclosure.sh"
+        Write-Host "  Installing hypothesis-disclosure PreToolUse hook..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --script-path $ScriptTarget
+    }
 }
 
 if ($DryRun) {

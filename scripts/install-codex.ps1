@@ -14,7 +14,8 @@ param(
     [string]$Target,
     [switch]$Force,
     [switch]$DryRun,
-    [switch]$AllowUnsafeTarget
+    [switch]$AllowUnsafeTarget,
+    [switch]$NoHypothesisHook
 )
 
 $ErrorActionPreference = "Stop"
@@ -1009,6 +1010,22 @@ Sync-AgentsModeFile -TemplateFile $SharedAgentsModeSource -TargetFile $AgentsMod
 if ($Mode -eq "global") {
     $SharedGlobalAgentsMode = Join-Path $HOME ".agents-mode.yaml"
     Sync-AgentsModeFile -TemplateFile $SharedAgentsModeSource -TargetFile $SharedGlobalAgentsMode -Label "shared global ~/.agents-mode.yaml" -Provider shared
+}
+
+# Install the hypothesis-disclosure PreToolUse hook into ~/.codex/hooks.json
+# (global) or <project>/.codex/hooks.json (target). Idempotent JSON merge.
+# Opt out with -NoHypothesisHook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
+if (-not $NoHypothesisHook -and -not $DryRun) {
+    $PythonCmd = Get-PythonCommand
+    $HookInstaller = Join-Path $RepoDir "scripts\install-hypothesis-hook.py"
+    if ($PythonCmd -and (Test-Path $HookInstaller)) {
+        # TargetRoot is ~/.codex (global) or <project>/.codex (target); hooks.json lives there.
+        # AgentsRoot is ~/.codex (global) or <project>/.agents (target); skills live there.
+        $HooksTarget = Join-Path $TargetRoot "hooks.json"
+        $ScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-hypothesis-disclosure.sh"
+        Write-Host "  Installing hypothesis-disclosure PreToolUse hook..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --script-path $ScriptTarget
+    }
 }
 
 if ($DryRun) {

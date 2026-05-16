@@ -17,6 +17,7 @@ OPTIONAL_DIRS=(memory)
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
+NO_HYPOTHESIS_HOOK=0
 MODE=""
 TARGET=""
 
@@ -345,6 +346,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-unsafe-target)
       ALLOW_UNSAFE_TARGET=1
+      shift
+      ;;
+    --no-hypothesis-hook)
+      NO_HYPOTHESIS_HOOK=1
       shift
       ;;
     -h|--help)
@@ -870,6 +875,23 @@ sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agen
 if [ "$MODE" = "global" ]; then
   SHARED_GLOBAL_AGENTS_MODE="$HOME/.agents-mode.yaml"
   sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$SHARED_GLOBAL_AGENTS_MODE" "shared global ~/.agents-mode.yaml"
+fi
+
+# Install the hypothesis-disclosure PreToolUse hook by merging it into the
+# user's settings.json idempotently. Preserves all other user keys and other
+# hooks. Opt out with --no-hypothesis-hook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
+if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
+  python_cmd="$(resolve_python_command || true)"
+  hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
+  if [ -n "$python_cmd" ] && [ -f "$hook_installer" ]; then
+    settings_target="$TARGET/settings.json"
+    script_target="$TARGET/agents/scripts/check-hypothesis-disclosure.sh"
+    echo "  Installing hypothesis-disclosure PreToolUse hook..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --script-path "$script_target"
+  fi
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then

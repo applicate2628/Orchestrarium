@@ -35,11 +35,13 @@ Treat `AGENTS.md` as the universal minimum contract for Codex work in a reposito
 >
 > These phrases are not banned in open exploration or hypothesis formation. They are banned **only** as the justification for a commit. When one appears in that position, name it, treat the underlying claim as a HYPOTHESIS, and apply steps 1-5.
 
-### Optional structural enforcement
+### Structural enforcement (auto-installed)
 
-Codex CLI exposes a `PreToolUse` hook surface (stable feature `hooks`, default-on) that can intercept `Bash` tool calls and block them by returning a structured deny decision. The Codex pack ships an opt-in hook script at `~/.codex/skills/lead/scripts/check-hypothesis-disclosure.sh` (and `.ps1`) that machine-checks the HEAD commit message before a `git push`: behavior-changing commit types (`feat`/`fix`/`refactor`) must carry `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers in the commit body; whitelisted types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
+Codex CLI exposes a `PreToolUse` hook surface (stable feature `hooks`, default-on) that can intercept `Bash` tool calls and block them by returning a structured deny decision. The Codex pack ships a hook script at `~/.codex/skills/lead/scripts/check-hypothesis-disclosure.sh` (and `.ps1`) that machine-checks the HEAD commit message before a `git push`: behavior-changing commit types (`feat`/`fix`/`refactor`) must carry `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers in the commit body; whitelisted types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
 
-Recommended `~/.codex/hooks.json` snippet (opt-in — the installer does not modify this file):
+**The installer auto-installs the hook by default** into `~/.codex/hooks.json` (`--global`) or `<project>/.codex/hooks.json` (`--target`). The JSON-merge is idempotent and preserves all other user keys and other hooks. Opt out with `--no-hypothesis-hook` flag or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment. To remove an already-installed entry: `python scripts/install-hypothesis-hook.py --target ~/.codex/hooks.json --platform codex --script-path <ignored-for-remove> --remove`.
+
+The auto-installed entry has this shape:
 
 ```json
 {

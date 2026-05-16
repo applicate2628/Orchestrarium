@@ -35,11 +35,13 @@ Platform-specific rules for Claude Code. Shared governance (hygiene, publication
 >
 > These phrases are not banned in open exploration or hypothesis formation. They are banned **only** as the justification for a commit. When one appears in that position, name it, treat the underlying claim as a HYPOTHESIS, and apply steps 1-5.
 
-### Optional structural enforcement
+### Structural enforcement (auto-installed)
 
-The pack ships an opt-in hook script that turns the Bootstrap into machine-checked structural enforcement on `git push`. The script lives at `.claude/agents/scripts/check-hypothesis-disclosure.sh` (Bash / Git Bash) and `.claude/agents/scripts/check-hypothesis-disclosure.ps1` (PowerShell). When wired as a Claude Code `PreToolUse` hook, it inspects the HEAD commit message and blocks the push if the commit type is behavior-changing (`feat`/`fix`/`refactor`) but the body lacks either a `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` marker. Whitelisted commit types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
+The pack ships a hook script that turns the Bootstrap into machine-checked structural enforcement on `git push`. The script lives at `.claude/agents/scripts/check-hypothesis-disclosure.sh` (Bash / Git Bash) and `.claude/agents/scripts/check-hypothesis-disclosure.ps1` (PowerShell). When wired as a Claude Code `PreToolUse` hook, it inspects the HEAD commit message and blocks the push if the commit type is behavior-changing (`feat`/`fix`/`refactor`) but the body lacks either a `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` marker. Whitelisted commit types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
 
-The pack does **not** modify `settings.json` automatically — structural enforcement is opt-in. Operators who want it add this snippet to their `~/.claude/settings.json` (recommended; matches the globally-installed script location):
+**The installer auto-installs the hook by default.** Both `scripts/install-claude.sh --global` and `scripts/install-claude.sh --target <project>` merge the hook entry into `settings.json` (idempotent JSON-merge that preserves all your other keys and other PreToolUse hooks). Opt out at install time with `--no-hypothesis-hook` or by setting `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment. To remove an already-installed entry: `python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --script-path <ignored-for-remove> --remove`.
+
+The auto-installed entry uses this shape (Bash form, works on macOS, Linux, and Windows under Git Bash):
 
 ```json
 {

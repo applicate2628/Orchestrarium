@@ -20,6 +20,7 @@ OPTIONAL_DIRS=()
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
+NO_HYPOTHESIS_HOOK=0
 MODE=""
 TARGET=""
 
@@ -363,6 +364,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-unsafe-target)
       ALLOW_UNSAFE_TARGET=1
+      shift
+      ;;
+    --no-hypothesis-hook)
+      NO_HYPOTHESIS_HOOK=1
       shift
       ;;
     -h|--help)
@@ -1014,6 +1019,29 @@ sync_agents_mode_file "$SHARED_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agent
 if [ "$MODE" = "global" ]; then
   SHARED_GLOBAL_AGENTS_MODE="$HOME/.agents-mode.yaml"
   sync_agents_mode_file "$SHARED_AGENTS_MODE_SOURCE" "$SHARED_GLOBAL_AGENTS_MODE" "shared global ~/.agents-mode.yaml" "shared"
+fi
+
+# Install the hypothesis-disclosure PreToolUse hook into ~/.codex/hooks.json
+# (global) or <project>/.codex/hooks.json (target). Idempotent JSON merge that
+# preserves all other user keys and other hooks. Opt out with --no-hypothesis-hook
+# or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1. Codex's matcher field has no `if`-style
+# argument filter, so the hook script self-filters by parsing tool_input.command.
+if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
+  python_cmd="$(resolve_python_command || true)"
+  hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
+  if [ -n "$python_cmd" ] && [ -f "$hook_installer" ]; then
+    # TARGET is ~/.codex (global) or <project>/.codex (target). Codex hooks.json
+    # lives in the .codex/ directory in both modes.
+    # AGENTS_ROOT is ~/.codex (global) or <project>/.agents (target) — skills
+    # live under AGENTS_ROOT.
+    hooks_target="$TARGET/hooks.json"
+    script_target="$AGENTS_ROOT/skills/lead/scripts/check-hypothesis-disclosure.sh"
+    echo "  Installing hypothesis-disclosure PreToolUse hook..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --script-path "$script_target"
+  fi
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then

@@ -217,15 +217,31 @@ Customize each platform in the place that platform actually reads:
 - Configure consultant and external-dispatch preferences in `.agents/.agents-mode.yaml` for Codex or `.claude/.agents-mode.yaml` for Claude Code.
 - Shared design references in `shared/references/` are repository-maintainer documentation only; they are not copied into target projects and should not be treated as installed runtime docs.
 
-### Opt-in: structural enforcement for Hypothesis disclosure
+### Structural enforcement for Hypothesis disclosure (auto-installed)
 
-Both Claude Code and Codex CLI expose `PreToolUse` hook surfaces; both packs ship the same opt-in hook script that machine-checks the HEAD commit message before `git push`. Behavior-changing commit types (`feat`/`fix`/`refactor`) must carry `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers in the body; whitelisted types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked. Installers do **not** modify the user's hook configuration automatically.
+Both Claude Code and Codex CLI expose `PreToolUse` hook surfaces; both packs ship the same hook script that machine-checks the HEAD commit message before `git push`. Behavior-changing commit types (`feat`/`fix`/`refactor`) must carry `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers in the body; whitelisted types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
 
-Claude Code — script lives at `~/.claude/agents/scripts/check-hypothesis-disclosure.{sh,ps1}`. Add the recommended snippet from `~/.claude/CLAUDE.md` ("Optional structural enforcement") to your `~/.claude/settings.json` (use `$HOME/...` or `${CLAUDE_PROJECT_DIR}/...` paths — relative paths fail because the hook runs with session cwd, not the settings.json directory).
+**The installer auto-installs the hook by default** in both `--global` and `--target <project>` modes via an idempotent JSON-merge that preserves all your other settings and hooks:
 
-Codex CLI — script lives at `~/.codex/skills/lead/scripts/check-hypothesis-disclosure.{sh,ps1}`. Add the recommended snippet from `~/.codex/AGENTS.md` ("Optional structural enforcement") to your `~/.codex/hooks.json` (or as `[hooks]` tables in `~/.codex/config.toml`). Note that Codex matchers are tool-name regex only with no `if`-style argument filter; the script self-filters by inspecting the bash command from the stdin envelope.
+- Claude Code installer merges the hook entry into `~/.claude/settings.json` (`--global`) or `<project>/.claude/settings.json` (`--target`).
+- Codex CLI installer merges the hook entry into `~/.codex/hooks.json` (`--global`) or `<project>/.codex/hooks.json` (`--target`).
 
-The Bootstrap text rule remains binding on both platforms regardless of whether the hook is installed.
+Opt out at install time with:
+
+- `bash scripts/install-claude.sh --global --no-hypothesis-hook` (or `-NoHypothesisHook` on PowerShell)
+- `bash scripts/install-codex.sh --global --no-hypothesis-hook` (or `-NoHypothesisHook` on PowerShell)
+- Set `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment before running any installer
+
+To remove an already-installed hook entry without uninstalling the pack:
+
+```bash
+python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --script-path "" --remove
+python scripts/install-hypothesis-hook.py --target ~/.codex/hooks.json --platform codex --script-path "" --remove
+```
+
+Our entry is identified by the `check-hypothesis-disclosure` substring in the `command` field, so re-running the installer is idempotent (the entry is updated in place rather than appended), and manual edits you make to settings.json structure are preserved as long as our entry's command field still contains that substring.
+
+Gemini and Qwen example packs do not auto-install the hook (Codex/Claude hook surfaces are platform-specific). The Bootstrap text rule in the merged `AGENTS.md` remains binding on all platforms regardless of whether the hook is installed.
 
 When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
 
