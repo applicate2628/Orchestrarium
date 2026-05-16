@@ -1384,10 +1384,14 @@ echo ""
 echo "=== AGENTS.md required sections ==="
 
 agents_line_count="$(count_codex_pack_lines "$AGENTS_FILE")"
-if [[ "$agents_line_count" -le 300 ]]; then
-  pass "Codex AGENTS.md pack section line budget <= 300 ($agents_line_count)"
+# Budget bumped 300 -> 340 (2026-05-16) to accommodate the Hypothesis disclosure
+# Bootstrap block prepended to the Codex pack section. Bootstrap adds ~32 lines;
+# the new headroom (~25 lines on current consumption) is intentional so the next
+# governance addition is a visible decision rather than a silent budget growth.
+if [[ "$agents_line_count" -le 340 ]]; then
+  pass "Codex AGENTS.md pack section line budget <= 340 ($agents_line_count)"
 else
-  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 300)"
+  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 340)"
 fi
 
 for section in "delegation" "Role index" "Engineering hygiene"; do

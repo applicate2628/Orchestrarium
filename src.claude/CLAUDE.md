@@ -4,6 +4,35 @@
 
 Platform-specific rules for Claude Code. Shared governance (hygiene, publication safety, role index, core delegation) is imported from `AGENTS.md` above via `@import`.
 
+## Bootstrap — before every fix or implementation commit
+
+> **STOP. Before committing any change that fixes a bug, alters behavior, modifies a contract, or implements a feature, run this 5-step checklist. This Bootstrap is the operational form of the shared `Hypothesis disclosure discipline` rule in `AGENTS.md`. It binds the main conversation and any role that authors commits.**
+>
+> 1. **Diagnostic data.** Name the concrete observed data points that drive this fix: `file:line` citation, command output captured this session, log line, user statement quoted verbatim, reproduction transcript. If you cannot name any — go investigate first; do not commit yet.
+>
+> 2. **Hypothesis inventory.** List every interpretive leap the fix depends on. Examples:
+>    - "Word X in the user's message means Y."
+>    - "Mechanism A is what is hiding behind label B in the user's vocabulary."
+>    - "Flag `--foo` produces behavior C."
+>    - "This fix touches three files because the contract spans them."
+>    Each item is a HYPOTHESIS until verified. The chain typically has more than one node — list each one separately rather than collapsing them.
+>
+> 3. **For each hypothesis, decide one of two paths:**
+>    - **Verify now** — run the empirical test (`Bash` / `PowerShell` shell-out, smoke run, file read), check the authoritative doc (`WebFetch` to versioned source), or ask the user directly via `AskUserQuestion`. Do not commit until verified.
+>    - **Label `ASSUMPTION (UNVERIFIED)`** in the commit message body alongside the verification step that would resolve it. Only allowed when the cost of asking/verifying is genuinely higher than the cost of being wrong, AND the assumption is disclosed in the commit message — never silent. An unlabelled unverified claim driving a commit is a violation.
+>
+> 4. **Scope proportionality.** Is the change scope what the verified hypothesis actually requires? Minimal is the default — if the verified bug is a one-character typo, the fix is one character. Wider scope (refactor, multi-file edit, contract change, abstraction extraction) is allowed when the verified hypothesis itself names the wider scope (for example "wire-shape mismatch between producer and consumer requires updating both sides"); state that explicitly in the commit message. "While I'm here let me also..." additions and opportunistic cleanups without their own verified hypothesis are forbidden.
+>
+> 5. **Recovery readiness.** If a hypothesis later turns out wrong, what is the rollback path? For local-only commits, prefer `git reset --hard HEAD~N` over `git revert` because the hypothesis-bearing commit then disappears from history rather than being preserved as a partial truth. Do not `git push` hypothesis-bearing commits before user review; user review is the final hypothesis verification step.
+>
+> **Violation triggers** — if you find yourself writing or thinking any of these as load-bearing reasoning for a fix, that IS the trigger to invoke this Bootstrap:
+>
+> - `most likely means`, `presumably`, `I believe it refers to`, `this should map to`, `based on training data`, `extrapolating from`, `in general X means Y`
+> - `while I'm here let me also`, `since we're touching this anyway`
+> - `I'll just commit this and we can fix it if wrong`
+>
+> These phrases are not banned in open exploration or hypothesis formation. They are banned **only** as the justification for a commit. When one appears in that position, name it, treat the underlying claim as a HYPOTHESIS, and apply steps 1-5.
+
 ## Delegation rule
 
 If `## Project policies` is missing, or if neither `.claude/.agents-mode.yaml` nor the matching global fallback `~/.claude/.agents-mode.yaml` exists for the current project, suggest running `/agents-init-project` before starting implementation work. If the project-local overlay is missing but the global one exists, ordinary reads should use the global file honestly until the user wants a project-local override.
