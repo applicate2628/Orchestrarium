@@ -115,19 +115,25 @@ def build_codex_entry(script_path: str, host_os: str) -> dict[str, Any]:
     default shell. shlex.quote() defends against metacharacter injection in
     the script path.
 
-    POSIX host: `command: "bash <quoted_sh>"`.
-    Windows host: `command: "powershell -NoProfile -ExecutionPolicy Bypass
-    -File <quoted_ps1>"` — assumes the host's Codex default shell can locate
-    `powershell` on PATH (Git Bash on most Windows setups can).
+    Both POSIX and Windows emit `bash <quoted_sh_path>` (script_path should be
+    POSIX-style; on Windows Git Bash this means `/c/Users/.../check.sh`). This
+    keeps shlex.quote correct (POSIX shell quoting matches the bash interpreter)
+    and the same code path works on both. The `host_os` parameter is currently
+    accepted for symmetry with build_claude_entry() but does not change the
+    Codex emission shape; if a future Codex release documents native PowerShell
+    invocation, the Windows branch can diverge then.
 
     Codex matchers do not support the `if` permission-rule filter; the script
     self-filters by parsing tool_input.command for "git push".
+
+    Note: Codex marks newly-written hook entries as "untrusted"; the user must
+    run `codex` interactively at least once and trust the hook via the TUI
+    before it fires. This installer writes the entry; trust is the user's
+    responsibility (Codex does not currently expose a programmatic trust API).
     """
+    del host_os  # currently unused for Codex; both POSIX and Windows take bash form
     quoted = shlex.quote(script_path)
-    if host_os == "windows":
-        command_str = f"powershell -NoProfile -ExecutionPolicy Bypass -File {quoted}"
-    else:
-        command_str = f"bash {quoted}"
+    command_str = f"bash {quoted}"
     return {
         "matcher": "Bash",
         "hooks": [
@@ -343,27 +349,19 @@ def main() -> int:
         )
         return 0
 
-    # Unsupported lane: Codex on Windows. Codex hook docs
-    # (https://developers.openai.com/codex/hooks) do not document Windows
-    # default shell selection, do not support the `args` exec form, and do
-    # not support a `shell` field. Emitting a powershell command string is
-    # ambiguous (POSIX shlex quoting != PowerShell quoting; path namespace
-    # may be POSIX-style from Git Bash and not invocable by powershell -File).
-    # We fail-closed with a WARN until Codex documents the Windows hook
-    # execution path. Removal still works (no platform restriction on
-    # cleaning up a previously-installed entry).
-    if args.platform == "codex" and args.host_os == "windows" and not args.remove:
-        sys.stderr.write(
-            "SKIP: Codex CLI on Windows is an unsupported lane for the "
-            "hypothesis-disclosure hook auto-install — Codex's Windows hook "
-            "execution path is not documented (no `args` exec form, no "
-            "`shell` field, shell semantics unverified). The hook script is "
-            "still installed at ~/.codex/skills/lead/scripts/, so you can "
-            "manually configure ~/.codex/hooks.json once your Codex runtime's "
-            "Windows shell behavior is verified for your install.\n"
-        )
-        return 0
-
+    # Codex hooks require an interactive trust step via the `codex` TUI before
+    # they actually fire — Codex marks newly-installed hooks as "untrusted"
+    # and `codex exec` silently skips them until the user runs `codex`
+    # interactively and trusts the hook. This installer writes the entry; the
+    # trust step remains the user's responsibility (it can't be performed
+    # programmatically without an explicit trust API, which Codex does not
+    # currently expose).
+    #
+    # On Windows, the Codex shell-form command we emit assumes Codex's hook
+    # interpreter can locate `bash` (typically via Git Bash on standard Windows
+    # Codex setups). If a user's Codex runtime uses a different shell, the
+    # hook entry will be visible in the trust UI but will fail to invoke; the
+    # user can edit ~/.codex/hooks.json after install to match their shell.
     target = Path(args.target).expanduser()
     data = load_existing(target)
 

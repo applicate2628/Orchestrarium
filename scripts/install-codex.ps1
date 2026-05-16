@@ -1016,22 +1016,29 @@ if ($Mode -eq "global") {
 # (global) or <project>/.codex/hooks.json (target). Idempotent JSON merge.
 # Opt out with -NoHypothesisHook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
 if (-not $NoHypothesisHook -and -not $DryRun) {
-    # Codex's Windows hook execution path is not documented (no `args` exec
-    # form, no `shell` field, shell semantics unverified). The PowerShell
-    # installer runs on Windows by definition, so the Codex hook auto-install
-    # is skipped here. The hook script is still installed to
-    # $AgentsRoot/skills/lead/scripts/ so the user can manually configure
-    # the hooks.json once their Codex Windows shell behavior is verified.
-    # Path-aware message: --global writes to ~/.codex/...; --target writes
-    # to <project>/.codex/... and <project>/.agents/skills/...
-    $ScriptHome = Join-Path $AgentsRoot "skills\lead\scripts"
-    $HooksFile = Join-Path $TargetRoot "hooks.json"
-    if ($Mode -eq "global") {
-        Write-Host "  SKIP: Codex Windows hook auto-install -- Codex's Windows hook execution path is undocumented."
-        Write-Host "        The hook script is installed at $ScriptHome; configure $HooksFile manually if needed."
+    $HookInstaller = Join-Path $RepoDir "scripts\install-hypothesis-hook.py"
+    if (-not (Test-Path $HookInstaller)) {
+        Write-Warning "hypothesis-hook installer not found at $HookInstaller; skipping hook install"
     } else {
-        Write-Host "  SKIP: Codex Windows hook auto-install -- Codex's Windows hook execution path is undocumented."
-        Write-Host "        The hook script is installed at $ScriptHome; configure $HooksFile (project-local) manually if needed."
+        $PythonCmd = Get-PythonCommand
+        if (-not $PythonCmd) {
+            Write-Error "python or python3 is required to auto-install the hypothesis-disclosure hook. Rerun with -NoHypothesisHook to skip, or install Python and re-run."
+            exit 1
+        }
+        # PowerShell installer runs on Windows by definition. Codex hook entry
+        # uses `bash <script.sh>` shell form (assumes Git Bash is on PATH for
+        # the Codex hook interpreter — typical on Windows Codex setups). User
+        # must run `codex` interactively after install and trust the hook via
+        # TUI before it fires — Codex marks newly-installed hooks as untrusted
+        # by design, and the installer cannot trust them programmatically.
+        $HooksTarget = Join-Path $TargetRoot "hooks.json"
+        $ScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-hypothesis-disclosure.sh"
+        Write-Host "  Installing hypothesis-disclosure PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-path $ScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
     }
 }
 

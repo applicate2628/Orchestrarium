@@ -239,9 +239,11 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
 python scripts/install-hypothesis-hook.py --target ~/.codex/hooks.json --platform codex --script-path "" --remove
 ```
 
-Our entry is identified by the `check-hypothesis-disclosure` substring in the `command` field, so re-running the installer is idempotent (the entry is updated in place rather than appended), and manual edits you make to settings.json structure are preserved as long as our entry's command field still contains that substring.
+Our entry is identified by the `check-hypothesis-disclosure` substring in the `command` field (or in `args[k]` for Claude's exec form), so re-running the installer is idempotent (the entry is updated in place rather than appended), and manual edits you make to settings.json/hooks.json structure are preserved as long as our entry's command/args field still contains that substring.
 
-Gemini and Qwen example packs do not auto-install the hook (Codex/Claude hook surfaces are platform-specific). The Bootstrap text rule in the merged `AGENTS.md` remains binding on all platforms regardless of whether the hook is installed.
+**Codex-specific note: manual trust step required after install.** Codex marks every newly-installed or modified hook as "untrusted" by design; the entry is written to `hooks.json` but does not fire until you run `codex` interactively and trust it via the TUI. This is Codex's security model, not a limitation of the installer — Codex does not currently expose a programmatic trust API. After install: run `codex` once, open the hook browser (typically via the keystroke shown next to "Trust to view hooks; to trust"), and trust the entry. Claude Code does not require this step — Claude hooks fire immediately after install.
+
+Gemini and Qwen example packs do not auto-install the hook (their runtimes do not expose comparable `PreToolUse` hook surfaces). The Bootstrap text rule in the merged `AGENTS.md` remains binding on all platforms regardless of whether the hook is installed or trusted.
 
 When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
 
