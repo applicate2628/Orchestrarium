@@ -1027,33 +1027,38 @@ fi
 # or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1. Codex's matcher field has no `if`-style
 # argument filter, so the hook script self-filters by parsing tool_input.command.
 if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
-  hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
-  if [ ! -f "$hook_installer" ]; then
-    echo "WARN: hypothesis-hook installer not found at $hook_installer; skipping hook install" >&2
-  else
-    python_cmd="$(resolve_python_command || true)"
-    if [ -z "$python_cmd" ]; then
-      echo "FAIL: python or python3 is required to auto-install the hypothesis-disclosure hook" >&2
-      echo "      Rerun with --no-hypothesis-hook to skip, or install Python and re-run." >&2
-      exit 1
-    fi
-    # TARGET is ~/.codex (global) or <project>/.codex (target). Codex hooks.json
-    # lives in the .codex/ directory in both modes.
-    # AGENTS_ROOT is ~/.codex (global) or <project>/.agents (target) — skills
-    # live under AGENTS_ROOT.
-    # OS-aware host detection: on Windows (under Git Bash / MSYS / Cygwin)
-    # we skip the Codex hook install entirely — Codex's Windows hook
-    # execution path is not documented (no `args` exec form, no `shell`
-    # field, shell semantics unverified). The hook script is still
-    # installed to ~/.codex/skills/lead/scripts/ so the user can manually
-    # configure ~/.codex/hooks.json once their Codex Windows shell
-    # behavior is verified. On POSIX, install normally.
-    case "$(uname -s 2>/dev/null)" in
-      MINGW*|MSYS*|CYGWIN*)
+  # OS-aware host detection — check this FIRST, before any Python or installer
+  # script availability requirements. On Windows (Git Bash / MSYS / Cygwin) we
+  # skip the Codex hook install entirely; Codex's Windows hook execution path
+  # is not documented (no `args` exec form, no `shell` field, shell semantics
+  # unverified). Doing the detection up front means Windows users without
+  # Python don't get a misleading "python required" failure for a lane we
+  # weren't going to install anyway.
+  case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*)
+      if [ "$MODE" = "global" ]; then
         echo "  SKIP: Codex Windows hook auto-install — Codex's Windows hook execution path is undocumented." >&2
-        echo "        The hook script is installed; configure ~/.codex/hooks.json manually if needed." >&2
-        ;;
-      *)
+        echo "        The hook script is installed at $AGENTS_ROOT/skills/lead/scripts/; configure $TARGET/hooks.json manually if needed." >&2
+      else
+        echo "  SKIP: Codex Windows hook auto-install — Codex's Windows hook execution path is undocumented." >&2
+        echo "        The hook script is installed at $AGENTS_ROOT/skills/lead/scripts/; configure $TARGET/hooks.json (project-local) manually if needed." >&2
+      fi
+      ;;
+    *)
+      hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
+      if [ ! -f "$hook_installer" ]; then
+        echo "WARN: hypothesis-hook installer not found at $hook_installer; skipping hook install" >&2
+      else
+        python_cmd="$(resolve_python_command || true)"
+        if [ -z "$python_cmd" ]; then
+          echo "FAIL: python or python3 is required to auto-install the hypothesis-disclosure hook" >&2
+          echo "      Rerun with --no-hypothesis-hook to skip, or install Python and re-run." >&2
+          exit 1
+        fi
+        # TARGET is ~/.codex (global) or <project>/.codex (target). Codex hooks.json
+        # lives in the .codex/ directory in both modes.
+        # AGENTS_ROOT is ~/.codex (global) or <project>/.agents (target) — skills
+        # live under AGENTS_ROOT.
         hooks_target="$TARGET/hooks.json"
         script_target="$AGENTS_ROOT/skills/lead/scripts/check-hypothesis-disclosure.sh"
         echo "  Installing hypothesis-disclosure PreToolUse hook (host-os=posix)..."
@@ -1062,9 +1067,9 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
           --platform codex \
           --host-os posix \
           --script-path "$script_target"
-        ;;
-    esac
-  fi
+      fi
+      ;;
+  esac
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then

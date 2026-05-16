@@ -1020,10 +1020,19 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
     # form, no `shell` field, shell semantics unverified). The PowerShell
     # installer runs on Windows by definition, so the Codex hook auto-install
     # is skipped here. The hook script is still installed to
-    # ~/.codex/skills/lead/scripts/ so the user can manually configure
-    # ~/.codex/hooks.json once their Codex Windows shell behavior is verified.
-    Write-Host "  SKIP: Codex Windows hook auto-install -- Codex's Windows hook execution path is undocumented."
-    Write-Host "        The hook script is installed; configure ~/.codex/hooks.json manually if needed."
+    # $AgentsRoot/skills/lead/scripts/ so the user can manually configure
+    # the hooks.json once their Codex Windows shell behavior is verified.
+    # Path-aware message: --global writes to ~/.codex/...; --target writes
+    # to <project>/.codex/... and <project>/.agents/skills/...
+    $ScriptHome = Join-Path $AgentsRoot "skills\lead\scripts"
+    $HooksFile = Join-Path $TargetRoot "hooks.json"
+    if ($Mode -eq "global") {
+        Write-Host "  SKIP: Codex Windows hook auto-install -- Codex's Windows hook execution path is undocumented."
+        Write-Host "        The hook script is installed at $ScriptHome; configure $HooksFile manually if needed."
+    } else {
+        Write-Host "  SKIP: Codex Windows hook auto-install -- Codex's Windows hook execution path is undocumented."
+        Write-Host "        The hook script is installed at $ScriptHome; configure $HooksFile (project-local) manually if needed."
+    }
 }
 
 if ($DryRun) {

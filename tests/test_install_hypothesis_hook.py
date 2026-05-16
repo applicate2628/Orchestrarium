@@ -300,6 +300,39 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("json", result.stderr.lower())
 
+    def test_codex_windows_skip_does_not_load_target_file(self) -> None:
+        # Regression for arch-review-4 finding: on Codex+Windows the helper
+        # must exit BEFORE doing any file I/O so a missing/unreadable target
+        # path or invalid JSON in target does not cause a false failure.
+        # Use a deliberately bogus target path that would fail if the helper
+        # tried to read or write it.
+        bogus = self.tmpdir / "nonexistent-subdir-that-should-not-be-created" / "hooks.json"
+        ps1_path = "C:\\Users\\test\\.codex\\skills\\lead\\scripts\\check-hypothesis-disclosure.ps1"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(HOOK_INSTALLER),
+                "--target",
+                str(bogus),
+                "--platform",
+                "codex",
+                "--host-os",
+                "windows",
+                "--script-path",
+                ps1_path,
+            ],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "ORCHESTRARIUM_NO_HYPOTHESIS_HOOK": ""},
+        )
+        # Must exit 0 with SKIP and must NOT create the directory or the file
+        # (proves the skip happens before any FS write).
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SKIP", result.stderr)
+        self.assertFalse(bogus.parent.exists(), "skip must not create directories")
+        self.assertFalse(bogus.exists(), "skip must not create the target file")
+        self.assertIn("json", result.stderr.lower())
+
 
 if __name__ == "__main__":
     unittest.main()
