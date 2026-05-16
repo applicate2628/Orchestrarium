@@ -33,6 +33,12 @@ Treat `AGENTS.md` as the universal minimum contract for Codex work in a reposito
 >
 > These phrases are not banned in open exploration or hypothesis formation. They are banned **only** as the justification for a commit. When one appears in that position, name it, treat the underlying claim as a HYPOTHESIS, and apply steps 1-5.
 
+### Optional structural enforcement (Claude Code clients)
+
+The Claude pack of this repository ships an opt-in hook script at `.claude/agents/scripts/check-hypothesis-disclosure.sh` (and `.ps1`) that machine-checks the HEAD commit message before a `git push` and blocks the push if a behavior-changing commit lacks `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers. Whitelisted commit types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked. The hook is documented in `src.claude/CLAUDE.md` and wired through `.claude/settings.json`.
+
+Codex CLI does not currently expose an analogous `PreToolUse` hook surface for shell commands, so the equivalent structural enforcement on the Codex side is **not yet available**. The text rule in the Bootstrap above remains binding regardless of platform; a Codex equivalent of the hook can be added when the Codex CLI runtime exposes a hookable shell layer. Until then, the Codex-side defense is the Bootstrap text plus the shared `Hypothesis disclosure discipline` rule in the merged `AGENTS.md`.
+
 ## Default delegation entry point
 
 If approved delivery work needs delegation and no narrower delegated role is already named, use `$lead` from `$CODEX_HOME/skills/lead` as the default coordinator. If the task is about roadmap ownership, prioritization, milestone shaping, or admission into discovery or delivery, use `$product-manager` instead.

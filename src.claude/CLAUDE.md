@@ -33,6 +33,35 @@ Platform-specific rules for Claude Code. Shared governance (hygiene, publication
 >
 > These phrases are not banned in open exploration or hypothesis formation. They are banned **only** as the justification for a commit. When one appears in that position, name it, treat the underlying claim as a HYPOTHESIS, and apply steps 1-5.
 
+### Optional structural enforcement
+
+The pack ships an opt-in hook script that turns the Bootstrap into machine-checked structural enforcement on `git push`. The script lives at `.claude/agents/scripts/check-hypothesis-disclosure.sh` (Bash / Git Bash) and `.claude/agents/scripts/check-hypothesis-disclosure.ps1` (PowerShell). When wired as a Claude Code `PreToolUse` hook, it inspects the HEAD commit message and blocks the push if the commit type is behavior-changing (`feat`/`fix`/`refactor`) but the body lacks either a `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` marker. Whitelisted commit types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
+
+The pack does **not** modify `settings.json` automatically — structural enforcement is opt-in. Operators who want it add this snippet to their `.claude/settings.json` (or `~/.claude/settings.json` for global):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(git push *)",
+            "command": "bash .claude/agents/scripts/check-hypothesis-disclosure.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Windows-side equivalent uses `powershell -NoProfile -ExecutionPolicy Bypass -File .claude\\agents\\scripts\\check-hypothesis-disclosure.ps1` instead. The hook's `if: "Bash(git push *)"` permission-rule filter ensures the hook only fires on actual push attempts, not on every Bash invocation.
+
+The Bootstrap text rule above remains binding regardless of whether the hook is installed; the hook is the structural backstop for sessions where the text rule alone is insufficient.
+
 ## Delegation rule
 
 If `## Project policies` is missing, or if neither `.claude/.agents-mode.yaml` nor the matching global fallback `~/.claude/.agents-mode.yaml` exists for the current project, suggest running `/agents-init-project` before starting implementation work. If the project-local overlay is missing but the global one exists, ordinary reads should use the global file honestly until the user wants a project-local override.

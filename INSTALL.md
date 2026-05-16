@@ -215,6 +215,10 @@ Customize each platform in the place that platform actually reads:
 - Configure consultant and external-dispatch preferences in `.agents/.agents-mode.yaml` for Codex or `.claude/.agents-mode.yaml` for Claude Code.
 - Shared design references in `shared/references/` are repository-maintainer documentation only; they are not copied into target projects and should not be treated as installed runtime docs.
 
+### Opt-in: structural enforcement for Hypothesis disclosure (Claude Code)
+
+The Claude pack installs an opt-in hook script at `.claude/agents/scripts/check-hypothesis-disclosure.sh` (and `.ps1`) that machine-checks the HEAD commit message before `git push` and blocks the push if a behavior-changing commit (`feat`/`fix`/`refactor`) lacks `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers in the commit body. The installer does **not** modify `.claude/settings.json` automatically. To enable the hook, add the recommended snippet documented in `.claude/CLAUDE.md` (under "Optional structural enforcement") to your `.claude/settings.json` or `~/.claude/settings.json`. Codex CLI does not currently expose an analogous shell hook surface; the text rule remains binding on both platforms regardless of whether the hook is installed.
+
 When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
 
 ## Gemini example source tree in the monorepo
