@@ -1384,15 +1384,15 @@ echo ""
 echo "=== AGENTS.md required sections ==="
 
 agents_line_count="$(count_codex_pack_lines "$AGENTS_FILE")"
-# Budget bumped 300 -> 340 (2026-05-16) to accommodate the Hypothesis disclosure
-# Bootstrap block prepended to the Codex pack section. Bootstrap adds ~32 lines;
-# the new headroom (~29 lines on current consumption of 311) is intentional so
-# the next governance addition is a visible decision rather than a silent budget
-# growth.
-if [[ "$agents_line_count" -le 340 ]]; then
-  pass "Codex AGENTS.md pack section line budget <= 340 ($agents_line_count)"
+# Budget bumped 340 -> 360 (2026-05-16) to accommodate the "Fix means correct
+# logic, not workaround" (no-kostyl) clause added as step 4.5 to the Bootstrap
+# block. Previous bump 300 -> 340 added the Bootstrap itself; this bump (~2
+# lines actual, +20 ceiling) preserves headroom for the next governance
+# addition. Visible decision rather than silent budget growth.
+if [[ "$agents_line_count" -le 360 ]]; then
+  pass "Codex AGENTS.md pack section line budget <= 360 ($agents_line_count)"
 else
-  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 340)"
+  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 360)"
 fi
 
 for section in "delegation" "Role index" "Engineering hygiene"; do
