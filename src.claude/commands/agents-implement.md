@@ -2,6 +2,19 @@
 
 Execute an approved plan from `work-items/active/` phase by phase.
 
+## When to auto-invoke
+
+Apply this command's flow automatically when:
+
+- an accepted plan exists in `work-items/active/<slug>/plan.md` and the user asks to proceed, continue, or execute
+- user explicitly says "implement plan X", "execute the plan for Y", "run phase N"
+- user says "continue", "next phase", "go ahead" while a work-item is mid-implementation
+- user references a specific phase by slug or number
+
+The user does not need to type `/agents-implement` for this flow to fire. Apply it transparently and announce the routing decision in your first response.
+
+**Do NOT auto-invoke** for "build feature X" without an accepted plan — that is the `/agents-design` flow's territory first. If the user's request is for a new feature with no prior research/design/plan, route through `agents-design.md` instead.
+
 ## Steps
 
 1. **Find the plan.** Check `$ARGUMENTS`:

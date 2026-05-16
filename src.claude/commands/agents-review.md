@@ -2,6 +2,19 @@
 
 Run a full read-only repository impact review starting from current changes or a specified review target. Changed files are only the entry point; the review must cover the wider affected surface, including unchanged dependents, contracts, tests, config, and nearby logic.
 
+## When to auto-invoke
+
+Apply this command's flow automatically when:
+
+- user asks for review of completed work: "review what I built", "audit module X", "check the diff"
+- user wants pre-merge gate: "is this ready to commit?", "can I push?"
+- user asks for post-implementation validation: "verify the X feature works correctly"
+- user requests architecture audit: "review the architecture of Y"
+
+The user does not need to type `/agents-review` for this flow to fire. Apply it transparently and announce the routing decision.
+
+This is read-only review — do not re-implement. If review uncovers required changes, surface them and let the user decide whether to route to `/agents-bugfix` or `/agents-refactor`.
+
 ## Steps
 
 1. **Determine scope.** Check `$ARGUMENTS`:
