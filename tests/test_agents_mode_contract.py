@@ -18,7 +18,7 @@ class AgentsModeContractTest(unittest.TestCase):
 
         self.assertEqual(profile, "quality-first")
 
-    def test_codex_fast_profile_is_explicit_opt_in(self) -> None:
+    def test_codex_profile_per_preset_layout(self) -> None:
         root = Path(__file__).resolve().parents[1]
         schema = json.loads(
             (root / "shared" / "agents-mode.schema.json").read_text(encoding="utf-8")
@@ -30,14 +30,33 @@ class AgentsModeContractTest(unittest.TestCase):
         scalars = {scalar["name"]: scalar for scalar in schema["scalarKeys"]}
         codex_profile = scalars["externalCodexProfile"]
 
-        self.assertEqual(codex_profile["default"], "default")
-        self.assertEqual(codex_profile["allowed"], ["default", "gpt-5.5-fast"])
+        # Shipped default is the best-effort profile (symmetric to externalClaudeProfile: opus-max).
+        self.assertEqual(codex_profile["default"], "gpt-5.5-xhigh")
+        self.assertEqual(
+            codex_profile["allowed"],
+            ["default", "gpt-5.5-fast", "gpt-5.5-xhigh"],
+        )
         self.assertNotIn("providers", codex_profile)
 
+        # Per-preset assignments must correspond to each preset's intent:
+        #   best-effort presets → gpt-5.5-xhigh
+        #   speed preset → gpt-5.5-fast
+        #   balanced everyday presets → default (inherit externalModelMode)
+        expected_per_preset = {
+            "default": "gpt-5.5-xhigh",
+            "absolute-balance": "default",
+            "external-aggressive": "default",
+            "correctness-first": "gpt-5.5-xhigh",
+            "power-mode": "gpt-5.5-xhigh",
+            "max-speed": "gpt-5.5-fast",
+        }
         for preset in presets["presetOrder"]:
             with self.subTest(preset=preset):
                 expansion = presets["presets"][preset]["expansion"]
-                self.assertEqual(expansion["externalCodexProfile"], "default")
+                self.assertEqual(
+                    expansion["externalCodexProfile"],
+                    expected_per_preset[preset],
+                )
 
     def test_shared_contract_validator_passes(self) -> None:
         root = Path(__file__).resolve().parents[1]

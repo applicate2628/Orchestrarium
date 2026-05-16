@@ -293,9 +293,9 @@ def validate_overlay(
     if counts != expected_counts:
         raise InstallerRegressionError(f"{case.name} opinion counts drifted")
 
-    if scalars.get("externalCodexProfile") != "default":
+    if scalars.get("externalCodexProfile") != "gpt-5.5-xhigh":
         raise InstallerRegressionError(
-            f"{case.name} missing shared externalCodexProfile default"
+            f"{case.name} missing shared externalCodexProfile default (gpt-5.5-xhigh)"
         )
 
     custom = profiles.get("custom")

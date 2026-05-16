@@ -35,7 +35,7 @@
         "externalCodexWorkdirMode": "neutral",
         "externalClaudeWorkdirMode": "neutral",
         "externalModelMode": "runtime-default",
-        "externalCodexProfile": "default",
+        "externalCodexProfile": "gpt-5.5-xhigh",
         "externalClaudeProfile": "opus-max"
       }
     },
@@ -101,7 +101,7 @@
         "externalCodexWorkdirMode": "neutral",
         "externalClaudeWorkdirMode": "neutral",
         "externalModelMode": "pinned-top-pro",
-        "externalCodexProfile": "default",
+        "externalCodexProfile": "gpt-5.5-xhigh",
         "externalClaudeProfile": "opus-max"
       }
     },
@@ -123,7 +123,7 @@
         "externalCodexWorkdirMode": "neutral",
         "externalClaudeWorkdirMode": "neutral",
         "externalModelMode": "pinned-top-pro",
-        "externalCodexProfile": "default",
+        "externalCodexProfile": "gpt-5.5-xhigh",
         "externalClaudeProfile": "opus-max"
       }
     },
@@ -145,7 +145,7 @@
         "externalCodexWorkdirMode": "project",
         "externalClaudeWorkdirMode": "project",
         "externalModelMode": "runtime-default",
-        "externalCodexProfile": "default",
+        "externalCodexProfile": "gpt-5.5-fast",
         "externalClaudeProfile": "sonnet-high"
       }
     }

@@ -74,7 +74,7 @@ At init time, the helper may either write the selected preset immediately or ent
 | `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review `2`, others `1` | advisory+review `2`, others `1` | all `1` |
 | workdir modes | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
-| `externalCodexProfile` | `default` | `default` | `default` | `default` | `default` | `default` |
+| `externalCodexProfile` | `gpt-5.5-xhigh` | `default` | `default` | `gpt-5.5-xhigh` | `gpt-5.5-xhigh` | `gpt-5.5-fast` |
 | `externalClaudeProfile` (Codex-line only) | `opus-max` | `sonnet-high` | `sonnet-high` | `opus-max` | `opus-max` | `sonnet-high` |
 
 `correctness-first` and `power-mode` lane-specific opinion counts:

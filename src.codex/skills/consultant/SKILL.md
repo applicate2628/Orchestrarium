@@ -136,9 +136,10 @@ If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfil
 Honor `externalCodexProfile` and `externalModelMode` before provider-specific transport selection:
 
 - `runtime-default` → keep the selected provider on its native runtime default model/profile.
-- `pinned-top-pro` on the Codex line → use model `gpt-5.5` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path for consultant work. Do not downgrade consultant memos to `gpt-5.3-codex-spark`.
+- **Consultant Codex calls always use best effort**, regardless of `externalModelMode` or `externalCodexProfile`: model `gpt-5.5` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path. Symmetric to the consultant Claude path which always uses `--model opus --effort max`. The shipped default `externalCodexProfile: gpt-5.5-xhigh` matches this rule; `pinned-top-pro` mode and `externalCodexProfile: gpt-5.5-xhigh` both resolve to the same xhigh path. Do not downgrade consultant memos to `gpt-5.3-codex-spark` or to runtime-default, and do not silently switch to `gpt-5.5-fast` between attempts on the same consultant lane.
 - `externalCodexProfile: default` → inherit the selected `externalModelMode` when Codex is selected or `auto` resolves to Codex.
 - `externalCodexProfile: gpt-5.5-fast` → explicitly request the installed Codex runtime's fast profile when Codex is selected or `auto` resolves to Codex; record unavailable or deviated if that profile cannot be verified.
+- `externalCodexProfile: gpt-5.5-xhigh` → shipped as the default and used unconditionally by the consultant lane; explicitly request model `gpt-5.5` with `model_reasoning_effort = "xhigh"` via `-c model_reasoning_effort=xhigh` regardless of `externalModelMode`, symmetric to `externalClaudeProfile: opus-max`.
 - Gemini and Qwen routes stay manual demonstration or compatibility paths only. Both are `WEAK MODEL / NOT RECOMMENDED` example-only routes, and this pack does not add shared production fallback keys for them.
 
 Examples:
