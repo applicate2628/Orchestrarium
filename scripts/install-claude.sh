@@ -12,7 +12,7 @@ SOURCE="$REPO_DIR/src.claude"
 DEFAULT_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 
 # Directories to install (order doesn't matter)
-DIRS=(agents commands)
+DIRS=(agents commands skills)
 OPTIONAL_DIRS=(memory)
 FORCE=0
 DRY_RUN=0

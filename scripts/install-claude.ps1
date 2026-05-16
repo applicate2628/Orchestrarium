@@ -23,7 +23,7 @@ $RepoDir = Split-Path -Parent $ScriptDir
 $Source = Join-Path $RepoDir "src.claude"
 $DefaultAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
 
-$Dirs = @("agents", "commands")
+$Dirs = @("agents", "commands", "skills")
 $OptionalDirs = @("memory")
 $script:PromptMode = $null
 

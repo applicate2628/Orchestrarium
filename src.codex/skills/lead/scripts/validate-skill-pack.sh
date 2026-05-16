@@ -951,7 +951,14 @@ echo ""
 echo "=== Role index consistency ==="
 
 mapfile -t indexed_roles < <(
-  grep -oE '\$[a-z][a-z-]{2,}' "$AGENTS_FILE" \
+  awk '/^## Role index/{flag=1; next} /^## /{flag=0} flag' "$AGENTS_FILE" \
+    | grep -oE '\$[a-z][a-z-]{2,}' \
+    | sed 's/^\$//' \
+    | sort -u
+)
+mapfile -t indexed_common_skills < <(
+  awk '/^## Common skills/{flag=1; next} /^## /{flag=0} flag' "$AGENTS_FILE" \
+    | grep -oE '\$[a-z][a-z-]{2,}' \
     | sed 's/^\$//' \
     | sort -u
 )
@@ -978,9 +985,14 @@ echo ""
 echo "=== Skill metadata budget ==="
 
 CODEX_SKILL_DESCRIPTION_MAX_CHARS=180
-CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=3000
+# Budget covers roles + utility skills + common skills. Roles alone were sized at 3000 historically;
+# raised to 3500 (2026-05-16) to accommodate the common-skills category without forcing
+# role-description churn. Current consumption ~3352 chars; headroom ~148 chars is tight — adding
+# a 5th common skill at ≥150 chars will overflow and require either another budget bump or
+# trimming the existing descriptions, not silent budget growth.
+CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=3500
 UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes)
-PACK_BUDGET_SKILLS=("${indexed_roles[@]}" "${UTILITY_SKILLS[@]}")
+PACK_BUDGET_SKILLS=("${indexed_roles[@]}" "${UTILITY_SKILLS[@]}" "${indexed_common_skills[@]}")
 mapfile -t PACK_BUDGET_SKILLS < <(printf '%s\n' "${PACK_BUDGET_SKILLS[@]}" | sort -u)
 check_skill_frontmatter_yaml "${PACK_BUDGET_SKILLS[@]}"
 check_skill_description_budget "$CODEX_SKILL_DESCRIPTION_MAX_CHARS" "$CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS" "${PACK_BUDGET_SKILLS[@]}"
@@ -995,12 +1007,20 @@ for dir in "$SKILLS_DIR"/*/; do
     if [[ "$util" == "$role" ]]; then is_utility=1; break; fi
   done
   if [[ $is_utility -eq 1 ]]; then continue; fi
+  is_common_skill=0
+  for cs in "${indexed_common_skills[@]}"; do
+    if [[ "$cs" == "$role" ]]; then is_common_skill=1; break; fi
+  done
+  if [[ $is_common_skill -eq 1 ]]; then
+    pass "Directory $dir is registered as a common skill"
+    continue
+  fi
   found=0
   for indexed in "${indexed_roles[@]}"; do
     if [[ "$indexed" == "$role" ]]; then found=1; break; fi
   done
   if [[ $found -eq 0 ]]; then
-    warn "Directory $dir exists but \$$role is not in AGENTS.md role index"
+    warn "Directory $dir exists but \$$role is not in AGENTS.md role index or common-skill index"
   fi
 done
 

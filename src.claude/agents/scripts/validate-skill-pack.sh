@@ -652,8 +652,10 @@ fi
 # 2. Role index vs actual agent files
 echo "[Role index consistency]"
 if [[ -f "$AGENTS_FILE" ]]; then
-  # Extract role names from AGENTS.md (shared governance, lines with $role-name pattern)
-  roles=$(grep -oE '\$[a-z][a-z-]{2,}' "$AGENTS_FILE" | sed 's/^\$//' | sort -u)
+  # Extract role names only from the "## Role index" section (stop at next "## " heading)
+  roles=$(awk '/^## Role index/{flag=1; next} /^## /{flag=0} flag' "$AGENTS_FILE" | grep -oE '\$[a-z][a-z-]{2,}' | sed 's/^\$//' | sort -u)
+  # Extract common-skill names only from the "## Common skills" section
+  common_skills=$(awk '/^## Common skills/{flag=1; next} /^## /{flag=0} flag' "$AGENTS_FILE" | grep -oE '\$[a-z][a-z-]{2,}' | sed 's/^\$//' | sort -u)
   for role in $roles; do
     if [[ -f "$PACK/agents/${role}.md" ]]; then
       pass "$role has agent file"
@@ -667,6 +669,8 @@ if [[ -f "$AGENTS_FILE" ]]; then
     name=$(basename "$f" .md)
     if [[ "$name" == "external-worker" || "$name" == "external-reviewer" ]]; then
       pass "$name is an expected external adapter file"
+    elif echo "$common_skills" | grep -qx "$name"; then
+      pass "$name is a delegate-style common-skill wrapper"
     elif ! echo "$roles" | grep -qx "$name"; then
       warn "$name has agent file but not in AGENTS.md role index"
     fi
