@@ -39,7 +39,11 @@ Treat `AGENTS.md` as the universal minimum contract for Codex work in a reposito
 
 Codex CLI exposes a `PreToolUse` hook surface (stable feature `hooks`, default-on) that can intercept `Bash` tool calls and block them by returning a structured deny decision. The Codex pack ships a hook script at `~/.codex/skills/lead/scripts/check-hypothesis-disclosure.sh` (and `.ps1`) that machine-checks the HEAD commit message before a `git push`: behavior-changing commit types (`feat`/`fix`/`refactor`) must carry `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers in the commit body; whitelisted types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
 
-**The installer auto-installs the hook by default** into `~/.codex/hooks.json` (`--global`) or `<project>/.codex/hooks.json` (`--target`). The JSON-merge is idempotent and preserves all other user keys and other hooks. Opt out with `--no-hypothesis-hook` flag or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment. To remove an already-installed entry: `python scripts/install-hypothesis-hook.py --target ~/.codex/hooks.json --platform codex --script-path <ignored-for-remove> --remove`.
+**The installer auto-installs the hook by default on POSIX hosts** into `~/.codex/hooks.json` (`--global`) or `<project>/.codex/hooks.json` (`--target`). The JSON-merge is idempotent and preserves all other user keys and other hooks. Opt out with `--no-hypothesis-hook` flag or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment.
+
+**Windows host limitation.** Codex CLI's hook execution path on Windows is not documented in the official [Codex hooks reference](https://developers.openai.com/codex/hooks): the schema supports neither the `args` exec form nor a `shell` field for selecting bash vs PowerShell, and the default Windows shell semantics are unspecified. As a result the installer **skips the Codex hook auto-install on Windows** (the hook script is still placed under `~/.codex/skills/lead/scripts/`, but `~/.codex/hooks.json` is not modified). Operators on Windows who know their Codex runtime's shell behavior can manually add a hook entry to `~/.codex/hooks.json`. The Claude pack's auto-install is unaffected and uses native PowerShell exec form on Windows.
+
+To remove an already-installed entry: `python scripts/install-hypothesis-hook.py --target ~/.codex/hooks.json --platform codex --host-os posix --script-path <ignored-for-remove> --remove`.
 
 The auto-installed entry has this shape:
 

@@ -1016,27 +1016,14 @@ if ($Mode -eq "global") {
 # (global) or <project>/.codex/hooks.json (target). Idempotent JSON merge.
 # Opt out with -NoHypothesisHook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
 if (-not $NoHypothesisHook -and -not $DryRun) {
-    $HookInstaller = Join-Path $RepoDir "scripts\install-hypothesis-hook.py"
-    if (-not (Test-Path $HookInstaller)) {
-        Write-Warning "hypothesis-hook installer not found at $HookInstaller; skipping hook install"
-    } else {
-        $PythonCmd = Get-PythonCommand
-        if (-not $PythonCmd) {
-            Write-Error "python or python3 is required to auto-install the hypothesis-disclosure hook. Rerun with -NoHypothesisHook to skip, or install Python and re-run."
-            exit 1
-        }
-        # TargetRoot is ~/.codex (global) or <project>/.codex (target); hooks.json lives there.
-        # AgentsRoot is ~/.codex (global) or <project>/.agents (target); skills live there.
-        # PowerShell installer always emits Windows-host form referencing .ps1.
-        $HooksTarget = Join-Path $TargetRoot "hooks.json"
-        $ScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-hypothesis-disclosure.ps1"
-        Write-Host "  Installing hypothesis-disclosure PreToolUse hook (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-path $ScriptTarget
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
-            exit $LASTEXITCODE
-        }
-    }
+    # Codex's Windows hook execution path is not documented (no `args` exec
+    # form, no `shell` field, shell semantics unverified). The PowerShell
+    # installer runs on Windows by definition, so the Codex hook auto-install
+    # is skipped here. The hook script is still installed to
+    # ~/.codex/skills/lead/scripts/ so the user can manually configure
+    # ~/.codex/hooks.json once their Codex Windows shell behavior is verified.
+    Write-Host "  SKIP: Codex Windows hook auto-install -- Codex's Windows hook execution path is undocumented."
+    Write-Host "        The hook script is installed; configure ~/.codex/hooks.json manually if needed."
 }
 
 if ($DryRun) {

@@ -343,6 +343,27 @@ def main() -> int:
         )
         return 0
 
+    # Unsupported lane: Codex on Windows. Codex hook docs
+    # (https://developers.openai.com/codex/hooks) do not document Windows
+    # default shell selection, do not support the `args` exec form, and do
+    # not support a `shell` field. Emitting a powershell command string is
+    # ambiguous (POSIX shlex quoting != PowerShell quoting; path namespace
+    # may be POSIX-style from Git Bash and not invocable by powershell -File).
+    # We fail-closed with a WARN until Codex documents the Windows hook
+    # execution path. Removal still works (no platform restriction on
+    # cleaning up a previously-installed entry).
+    if args.platform == "codex" and args.host_os == "windows" and not args.remove:
+        sys.stderr.write(
+            "SKIP: Codex CLI on Windows is an unsupported lane for the "
+            "hypothesis-disclosure hook auto-install — Codex's Windows hook "
+            "execution path is not documented (no `args` exec form, no "
+            "`shell` field, shell semantics unverified). The hook script is "
+            "still installed at ~/.codex/skills/lead/scripts/, so you can "
+            "manually configure ~/.codex/hooks.json once your Codex runtime's "
+            "Windows shell behavior is verified for your install.\n"
+        )
+        return 0
+
     target = Path(args.target).expanduser()
     data = load_existing(target)
 

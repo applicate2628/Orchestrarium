@@ -103,18 +103,36 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertIn("bash", hook["command"])
         self.assertIn(SCRIPT_PATH, hook["command"])
 
-    def test_install_codex_windows_powershell_shell_form(self) -> None:
+    def test_codex_windows_is_skipped_with_warn(self) -> None:
+        # Codex+Windows is an unsupported lane (Codex's Windows hook
+        # execution path is not documented). The helper must exit 0 with
+        # a WARN on stderr and NOT write to the target file.
         ps1_path = "C:\\Users\\test\\.codex\\skills\\lead\\scripts\\check-hypothesis-disclosure.ps1"
         result = run_installer(self.target, platform="codex", host_os="windows", script_path=ps1_path)
         self.assertEqual(result.returncode, 0, result.stderr)
-        data = load_json(self.target)
-        hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
-        self.assertNotIn("args", hook)
-        self.assertIn("powershell", hook["command"])
-        self.assertIn("-NoProfile", hook["command"])
-        self.assertIn("-ExecutionPolicy", hook["command"])
-        self.assertIn("Bypass", hook["command"])
-        self.assertIn("-File", hook["command"])
+        self.assertIn("SKIP", result.stderr)
+        self.assertIn("Codex", result.stderr)
+        self.assertIn("Windows", result.stderr)
+        self.assertFalse(self.target.exists(), "Codex+Windows must NOT write to hooks.json")
+
+    def test_codex_windows_remove_still_works(self) -> None:
+        # Even though install is skipped on Codex+Windows, removal of a
+        # previously-installed entry must still work — a user might have
+        # installed when their Codex Windows lane was supported, then
+        # upgraded to a version that skips Windows; --remove should still
+        # clean up the legacy entry.
+        existing_cmd = f"bash {SCRIPT_PATH}"
+        self.target.write_text(json.dumps({
+            "hooks": {
+                "PreToolUse": [
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": existing_cmd}]},
+                ]
+            }
+        }, indent=2), encoding="utf-8")
+        result = run_installer(self.target, "--remove", platform="codex", host_os="windows")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # File should be deleted (removal emptied it).
+        self.assertFalse(self.target.exists())
 
     def test_idempotent_reinstall(self) -> None:
         run_installer(self.target)
