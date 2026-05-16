@@ -28,11 +28,11 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not $CodexFlags -or $CodexFlags.Count -eq 0) {
-  # Default flags match shipped `externalCodexProfile: gpt-5.5-xhigh` best-effort default
-  # (symmetric to Claude's `externalClaudeProfile: opus-max`). Override the whole array
-  # to use a different profile (e.g. `gpt-5.5-fast` for the fast Codex model tier — note:
-  # reasoning effort stays xhigh on that tier, the "fast" dimension is model variant only).
-  $CodexFlags = @('--quiet', '--full-auto', '-c', 'model_reasoning_effort=xhigh')
+  # Codex CLI 0.130.0+ uses `codex exec` (non-interactive subcommand); the old
+  # top-level --quiet / --full-auto flags were removed. Defaults below pin only
+  # `model_reasoning_effort=xhigh`; callers should override after the `--` block
+  # if they need a deterministic per-profile invocation including fast_mode.
+  $CodexFlags = @('-c', 'model_reasoning_effort=xhigh')
 }
 
 $codexBin = if ($env:CODEX_BIN) { $env:CODEX_BIN } else { 'codex' }
@@ -69,6 +69,10 @@ if ($PromptFile) {
 
 $pinfo = New-Object System.Diagnostics.ProcessStartInfo
 $pinfo.FileName = $codexPath
+# Codex CLI 0.130.0+ requires `exec` subcommand for non-interactive invocation;
+# --skip-git-repo-check lets prompts be served from any directory.
+$pinfo.ArgumentList.Add('exec')
+$pinfo.ArgumentList.Add('--skip-git-repo-check')
 foreach ($flag in $CodexFlags) { $pinfo.ArgumentList.Add($flag) }
 $pinfo.RedirectStandardInput = $true
 $pinfo.RedirectStandardOutput = $true

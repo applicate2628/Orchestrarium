@@ -39,13 +39,20 @@ EOF
 
 TOPIC=""
 PROMPT_FILE=""
-# Default flags match the shipped `externalCodexProfile: gpt-5.5-xhigh` best-effort default
-# (symmetric to Claude's `externalClaudeProfile: opus-max`). Callers that want a different
-# profile (e.g. `gpt-5.5-fast` for the fast Codex model tier — note: reasoning effort still
-# stays xhigh on that tier, the "fast" dimension is the model variant, not the effort
-# level — or `default` for runtime-default inheritance) must override the whole flag list
-# via the `--` block.
-CODEX_FLAGS=("--quiet" "--full-auto" "-c" "model_reasoning_effort=xhigh")
+# Codex CLI 0.130.0+ uses `codex exec` (non-interactive subcommand) instead of the
+# old top-level `--quiet --full-auto` flags. The wrapper invokes `codex exec` and
+# supplies `--skip-git-repo-check` so prompts can be served from any directory.
+#
+# Default flags pin only `model_reasoning_effort=xhigh` and intentionally do NOT
+# touch Codex's stable `fast_mode` feature. To make a deterministic invocation,
+# callers should pass the full per-profile flag set after `--`:
+#   `gpt-5.5-xhigh` (best-effort / consultant lane):
+#     -- -c model_reasoning_effort=xhigh --disable fast_mode
+#   `gpt-5.5-fast` (fast variant):
+#     -- -c model_reasoning_effort=xhigh --enable fast_mode
+#   `default` (inherit externalModelMode):
+#     --                                          (no profile-specific extras)
+CODEX_FLAGS=("-c" "model_reasoning_effort=xhigh")
 SAW_DELIMITER=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -113,7 +120,7 @@ else
 fi
 
 set +e
-"$CODEX_CMD" "${CODEX_FLAGS[@]}" < "$PROMPT_PATH" 1> "$OUT_PATH" 2> "$ERR_PATH"
+"$CODEX_CMD" exec --skip-git-repo-check "${CODEX_FLAGS[@]}" < "$PROMPT_PATH" 1> "$OUT_PATH" 2> "$ERR_PATH"
 EXIT_CODE=$?
 set -e
 
