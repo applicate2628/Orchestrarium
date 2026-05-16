@@ -72,7 +72,7 @@ Routing conventions (not persisted as keys):
 2. **Read current overlay state.**
    - Read `.qwen/.agents-mode.yaml` first.
    - If it is missing, read legacy `.qwen/.agents-mode` as compatibility input only.
-   - If both local files are missing, fall back to global `~/.qwen/.agents-mode.yaml` and then global legacy `~/.qwen/.agents-mode` as compatibility input.
+   - If both local files are missing, fall back through pack-local global `~/.qwen/.agents-mode.yaml`, pack-local global legacy `~/.qwen/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale.
    - If either file exists, normalize it to the current canonical format before presenting or trusting any values.
    - Any read of `.qwen/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
    - If neither local nor global overlay exists, start from the canonical defaults below.

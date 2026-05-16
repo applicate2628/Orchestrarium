@@ -694,6 +694,14 @@ install_pack_content_file "$extension_qwen_tmp" "$EXTENSION_QWEN_TARGET" "extens
 install_pack_file "$SHARED_AGENTS_SOURCE" "$EXTENSION_AGENTS_TARGET" "extension AGENTS.md"
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+
+# Shared cross-pack global .agents-mode.yaml at $HOME/.agents-mode.yaml — lowest-precedence
+# fallback layer below pack-local globals. Idempotent across all 4 pack installers.
+if [[ "$MODE" == "global" ]]; then
+  SHARED_GLOBAL_AGENTS_MODE="$HOME/.agents-mode.yaml"
+  sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$SHARED_GLOBAL_AGENTS_MODE" "shared global ~/.agents-mode.yaml"
+fi
+
 remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"
 remove_legacy_pack_file "$LEGACY_AGENTS_README_TARGET" "agents/README.md"
 remove_legacy_pack_file "$LEGACY_EXTENSION_SHARED_TARGET" "extension AGENTS.shared.md"

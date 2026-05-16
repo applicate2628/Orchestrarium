@@ -72,7 +72,7 @@ Routing conventions (not persisted as keys):
 2. **Read current overlay state.**
    - Read `.gemini/.agents-mode.yaml` first.
    - If it is missing, read legacy `.gemini/.agents-mode` as compatibility input only.
-   - If both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode` as compatibility input.
+   - If both local files are missing, fall back through pack-local global `~/.gemini/.agents-mode.yaml`, pack-local global legacy `~/.gemini/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale.
    - If either file exists, normalize it to the current canonical format before presenting or trusting any values.
    - If any file exists, normalize the effective file to the current canonical format before presenting or trusting any values.
    - Any read of `.gemini/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.

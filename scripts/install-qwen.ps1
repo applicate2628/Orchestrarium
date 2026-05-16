@@ -754,6 +754,14 @@ Install-PackContent -Content ((Get-Content -LiteralPath (Join-Path $Source "QWEN
 Install-PackContent -Content (Get-Content -LiteralPath $SharedAgentsSource -Raw) -TargetFile $ExtensionAgentsTarget -Label "extension AGENTS.md"
 Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
 Sync-AgentsModeFile -TemplateFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
+
+# Shared cross-pack global .agents-mode.yaml at $HOME/.agents-mode.yaml — lowest-precedence
+# fallback layer below pack-local globals. Idempotent across all 4 pack installers.
+if ($Mode -eq "global") {
+    $SharedGlobalAgentsMode = Join-Path $HOME ".agents-mode.yaml"
+    Sync-AgentsModeFile -TemplateFile $DefaultAgentsModeSource -TargetFile $SharedGlobalAgentsMode -Label "shared global ~/.agents-mode.yaml"
+}
+
 Remove-LegacyPackFile -TargetFile $LegacySharedTarget -Label "AGENTS.shared.md"
 Remove-LegacyPackFile -TargetFile $LegacyAgentsReadmeTarget -Label "agents/README.md"
 Remove-LegacyPackFile -TargetFile $LegacyExtensionSharedTarget -Label "extension AGENTS.shared.md"

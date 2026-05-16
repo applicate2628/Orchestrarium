@@ -51,7 +51,7 @@ Gemini-line rules:
 - `internal` -> `consultantMode: internal`
 - `disable` -> `consultantMode: disabled`
 - `status` -> read and normalize `.gemini/.agents-mode.yaml`, then print the current resolved values
-- If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode` before reporting status
+- If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.gemini/.agents-mode.yaml`, pack-local global legacy `~/.gemini/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults (each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale) and reporting status
 
 Preserve unknown keys on write and normalize comment-free, partial, or older-layout files to the current canonical format on read. Keep one key per line with inline allowed-value comments. Legacy `.gemini/.agents-mode` is compatibility input only and must not be recreated.
 
