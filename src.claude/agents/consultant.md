@@ -5,6 +5,22 @@ description: Provide an independent advisory memo for the lead without becoming 
 
 # Consultant
 
+## Bootstrap — first action
+
+> **DO NOT draft an advisory response yet.** When this skill is invoked, execute in this order before producing any opinion text:
+>
+> 1. Read `.claude/.agents-mode.yaml` (or its global fallback) and determine `consultantMode` and the resolved external provider per the active `externalPriorityProfile`.
+> 2. **Branch on `consultantMode`:**
+>    - `disabled` or no overlay: return the standard "second opinion skipped — consultant disabled" memo immediately and stop. Do not improvise an internal advisory. Steps 3-6 do not apply.
+>    - `internal`: proceed to formulate an internal advisory memo directly (skip steps 3-5). Steps 3-5 and the end-of-response violation clause do **not** apply in this mode; the memo is authored from your own reasoning by design. Continue to step 6 with "internal advisory" as the source.
+>    - `external`: continue to steps 3-6 below; the violation clause at the end of this block applies.
+> 3. (external mode) Identify the selected external provider for the current lane (e.g. Codex for an advisory.design-adr lane under `quality-first`). **Verification is a real tool call, not a text claim.** Run `command -v <provider>` (POSIX/Git Bash) or `Get-Command <provider>` (PowerShell) via the Bash/PowerShell tool and capture the output. Treat any reasoning that does not include such a tool call as unverified — the provider's unavailability is then a claim with no evidence, not a fact. **The absence of a repo-specific wrapper script (`.claude/agents/scripts/invoke-<provider>*.sh`) is never sufficient to conclude the provider is unavailable**: wrappers are convenience surfaces, not authentication gates; the canonical availability check is whether the binary resolves on PATH. If the binary is genuinely not callable, return an unavailable memo and surface the gap; do not silently switch providers and do not author the opinion yourself.
+> 4. (external mode) Write the full advisory prompt body to `.scratch/<provider>-prompts/<topic>.md`. Argv to the provider stays for launcher flags only. This rule is binding for every consultant invocation — see the shared `External CLI prompt delivery` governance.
+> 5. (external mode) Shell out to the selected provider via the prompt-orchestration wrapper (`.claude/agents/scripts/invoke-codex-prompt.sh` for Codex, `.claude/agents/scripts/invoke-claude-prompt.sh` for routine Claude, `.claude/agents/scripts/invoke-claude-api.sh` only when `reserveResolver` resolved to `claude-wrapper`). The wrapper enforces file-based prompt delivery and writes prompt/stdout/stderr to `.scratch/<provider>-prompts/`. Wait the appropriate time for the selected model/profile (5–15 minutes for ordinary advisory; up to 45–60 minutes for Claude opus/max deep review). Do not abandon the run on the first short timeout; check stdout/stderr files and process status first.
+> 6. Only after the provider returns (in external mode) or after you have completed your internal reasoning (in internal mode) may you formulate the consultant memo. In external mode the memo summarizes the external response and applies your own framing; it does not substitute your own opinion for the external one. In internal mode the memo is authored from your own reasoning and is explicitly labeled as `internal advisory` at the top.
+>
+> **Violation clause (external mode only):** if `consultantMode == external` and you reach the end of your response while step 5 was never actually executed via a tool call (Bash/PowerShell shell-out), you have violated the role. Abort the response, return an unavailable memo with the explicit reason "external provider call was not actually executed", and surface the gap to the user. This clause does NOT fire for `internal` mode — internal advisory by design has no external shell-out — nor for `disabled` mode where the response stopped at step 2.
+
 ## Core stance
 
 - Act as an independent advisor, not as a pipeline owner.
@@ -112,14 +128,30 @@ Check the selected provider first:
 
 If Codex is selected:
 
+Required pattern — use the prompt-orchestration wrapper `invoke-codex-prompt.sh` (Bash / Git Bash) or `invoke-codex-prompt.ps1` (PowerShell). The wrapper enforces the file-based prompt delivery discipline so you do not have to construct the file/redirect chain by hand: it probes codex availability, persists the prompt body to `.scratch/codex-prompts/<topic>-<timestamp>.md`, runs `codex --quiet --full-auto < <prompt>`, captures stdout/stderr to sibling files, and prints the three resulting paths. Never embed the substantive prompt in argv. The wrapper layer covers the file-based-prompt rule in one invocation; you only need to provide the prompt body.
+
 ```bash
-codex --quiet --full-auto < "$PROMPT_FILE"
+# Bash / Git Bash:
+echo "<full prompt body>" |
+  bash .claude/agents/scripts/invoke-codex-prompt.sh advisory-design-adr
+# Or with prompt already in a file:
+bash .claude/agents/scripts/invoke-codex-prompt.sh advisory-design-adr --prompt-file path/to/prompt.md
+# Override codex flags after `--`:
+bash .claude/agents/scripts/invoke-codex-prompt.sh worker-task -- --quiet --full-auto --model gpt-5.5
 ```
 
+```powershell
+# PowerShell:
+Get-Content -Raw .\prompt.md |
+  powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-codex-prompt.ps1 advisory-design-adr
+```
+
+The wrapper has no SECRET.md, no env injection, and no auth-mode switching — codex authenticates through its own ambient path (`~/.codex/auth.json` from `codex login`, or the `OPENAI_API_KEY` env). The wrapper exists purely to encapsulate the file-based prompt orchestration rule so each consultant invocation does not have to re-implement it by hand (which is the recurring lazy-discipline failure mode this design defends against).
+
 - For hard tasks, use Codex model `gpt-5.5` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path.
-- `PROMPT_FILE` is a temporary file containing the full prompt payload. Prefer passing large context as file references inside that prompt rather than embedding raw artifacts.
+- `PROMPT_FILE` is a temporary file containing the full prompt payload. Prefer passing large context as file references inside that prompt rather than embedding raw artifacts. Keep stdout and stderr captured to explicit files for later inspection per the shared `External CLI prompt delivery` governance.
 - Wait 5–15 minutes before treating a single advisory run as stalled. Do not launch a duplicate advisory call for the same memo while the first may still be running; independent external lanes may still run in parallel when their scopes are disjoint and the routing contract allows it.
-- If Codex is not installed, fails, times out, or hits quota/auth limits, do not silently degrade the consultant requirement. Return an unavailable memo and keep routing honest.
+- If Codex is not installed, fails, times out, or hits quota/auth limits, do not silently degrade the consultant requirement. Return an unavailable memo and keep routing honest. **In particular:** if you found yourself drafting an advisory response without having actually shelled out to the codex binary (via Bash or PowerShell with the prompt redirected from a file), that is a discipline violation regardless of how confident your internal answer feels — return an unavailable memo and surface the gap to the user rather than substituting your own opinion for the requested external one.
 
 If the advisory profile resolves to primary Claude, run the plain Claude CLI path:
 

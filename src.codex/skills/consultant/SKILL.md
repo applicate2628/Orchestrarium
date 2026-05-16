@@ -5,6 +5,22 @@ description: "Advise on tradeoffs, ambiguity, cross-cutting concerns; never appr
 
 # Consultant
 
+## Bootstrap — first action
+
+> **DO NOT draft an advisory response yet.** When this skill is invoked, execute in this order before producing any opinion text:
+>
+> 1. Read `.agents/.agents-mode.yaml` (or its global fallback) and determine `consultantMode` and the resolved external provider per the active `externalPriorityProfile`.
+> 2. **Branch on `consultantMode`:**
+>    - `disabled` or no overlay: return the standard "second opinion skipped — consultant disabled" memo immediately and stop. Do not improvise an internal advisory. Steps 3-6 do not apply.
+>    - `internal`: proceed to formulate an internal advisory memo directly (skip steps 3-5). Steps 3-5 and the end-of-response violation clause do **not** apply in this mode; the memo is authored from your own reasoning by design. Continue to step 6 with "internal advisory" as the source.
+>    - `external`: continue to steps 3-6 below; the violation clause at the end of this block applies.
+> 3. (external mode) Identify the selected external provider for the current lane. **Verification is a real shell call, not a text claim.** Run `command -v <provider>` (POSIX) or `Get-Command <provider>` (PowerShell) in the current session and record the output. Treat any reasoning that does not include such a shell call as unverified — the provider's unavailability is then a claim with no evidence, not a fact. **The absence of a repo-specific wrapper script is never sufficient to conclude the provider is unavailable**: wrappers are convenience surfaces, not authentication gates; the canonical availability check is whether the binary resolves on PATH. See the shared `Active-availability probe discipline` for the binding form of this rule. If the binary is genuinely not callable, return an unavailable memo and surface the gap; do not silently switch providers and do not author the opinion yourself.
+> 4. (external mode) Write the full advisory prompt body to `.scratch/<provider>-prompts/<topic>.md`. Argv to the provider stays for launcher flags only. This rule is binding for every consultant invocation — see the shared `External CLI prompt delivery` governance.
+> 5. (external mode) Shell out to the selected provider with the prompt redirected from the file and stdout/stderr captured to sibling files. Wait the appropriate time for the selected model/profile (5–15 minutes for ordinary advisory; up to 45–60 minutes for Claude opus/max deep review). Do not abandon the run on the first short timeout; check stdout/stderr files and process status first.
+> 6. Only after the provider returns (in external mode) or after you have completed your internal reasoning (in internal mode) may you formulate the consultant memo. In external mode the memo summarizes the external response and applies your own framing; it does not substitute your own opinion for the external one. In internal mode the memo is authored from your own reasoning and is explicitly labeled as `internal advisory` at the top.
+>
+> **Violation clause (external mode only):** if `consultantMode == external` and you reach the end of your response while step 5 was never actually executed via a tool call (shell-out), you have violated the role. Abort the response, return an unavailable memo with the explicit reason "external provider call was not actually executed", and surface the gap to the user. This clause does NOT fire for `internal` mode — internal advisory by design has no external shell-out — nor for `disabled` mode where the response stopped at step 2.
+
 ## Core stance
 
 - Act as an independent advisor, not as a pipeline owner.
