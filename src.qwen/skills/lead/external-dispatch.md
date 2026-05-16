@@ -39,7 +39,7 @@ Rules:
 - `parallelMode: manual` keeps ordinary parallel fan-out explicit-only, `auto` parallelizes safe independent lanes by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `externalCodexWorkdirMode` and `externalClaudeWorkdirMode` choose whether those provider-backed external runs start in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`.
 - `externalModelMode` is the shared cross-provider model-selection policy. `runtime-default` leaves the resolved provider on its runtime default model/profile. `pinned-top-pro` starts on the strongest documented provider-native production path for the resolved provider.
-- `externalCodexProfile` is the Codex-specific external profile override after provider resolution. `default` inherits `externalModelMode`, including when `externalProvider: auto` resolves to Codex. `gpt-5.5-fast` explicitly requests a Codex fast profile and must be verified against the installed runtime before it is reported as used.
+- `externalCodexProfile` is the Codex-specific external profile override after provider resolution. `default` inherits `externalModelMode`, including when `externalProvider: auto` resolves to Codex. `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade) and must be verified against the installed runtime before it is reported as used.
 - `reserve` is a symbolic supplemental read-only candidate that may appear only in advisory/review profile orders after primary `claude`/`codex`. It is independent of primary `claude` and is not a scalar provider key, retry, or transport swap. The concrete resolver comes from `reserveResolver`.
 - `externalClaudeProfile` is not part of canonical Qwen-line config.
 - Preserve unknown keys on write.
@@ -49,7 +49,7 @@ Rules:
 - Shipped production `auto` profiles stay on `codex | claude` only. Qwen and Gemini remain explicit example-only providers classified as `WEAK MODEL / NOT RECOMMENDED` and must not appear in a shipped production `auto` profile.
 - `externalProvider: gemini` and `externalProvider: qwen` are explicit example-only overrides. Both are `WEAK MODEL / NOT RECOMMENDED`; ordinary `auto` must not silently self-bounce.
 - When the resolved provider is Codex, honor `externalCodexWorkdirMode`; when it is Claude, honor `externalClaudeWorkdirMode`.
-- When the resolved provider is Codex, `externalCodexProfile: default` inherits `externalModelMode`; `externalCodexProfile: gpt-5.5-fast` requests the installed Codex runtime's fast profile and must record unavailable or deviated if that profile cannot be verified.
+- When the resolved provider is Codex, `externalCodexProfile: default` inherits `externalModelMode`; `externalCodexProfile: gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade) and must record unavailable or deviated if that model tier cannot be verified against the installed runtime.
 - Provider-backed consultant execution in `external` mode plus `$external-worker` and `$external-reviewer` must use direct external launch from the orchestrating runtime or an approved transport wrapper script. Do not proxy them through an internal agent/helper/subagent host.
 
 ## Named profiles

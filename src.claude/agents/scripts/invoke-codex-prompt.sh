@@ -41,8 +41,10 @@ TOPIC=""
 PROMPT_FILE=""
 # Default flags match the shipped `externalCodexProfile: gpt-5.5-xhigh` best-effort default
 # (symmetric to Claude's `externalClaudeProfile: opus-max`). Callers that want a different
-# profile (e.g. `gpt-5.5-fast` for speed, or `default` for runtime-default inheritance)
-# must override the whole flag list via the `--` block.
+# profile (e.g. `gpt-5.5-fast` for the fast Codex model tier — note: reasoning effort still
+# stays xhigh on that tier, the "fast" dimension is the model variant, not the effort
+# level — or `default` for runtime-default inheritance) must override the whole flag list
+# via the `--` block.
 CODEX_FLAGS=("--quiet" "--full-auto" "-c" "model_reasoning_effort=xhigh")
 SAW_DELIMITER=0
 while [[ $# -gt 0 ]]; do

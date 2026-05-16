@@ -61,4 +61,4 @@ externalOpinionCounts:  # allowed: lane -> minimum distinct external opinions re
 externalCodexWorkdirMode: neutral  # allowed: neutral | project; default: neutral
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project; default: neutral
 externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-externalCodexProfile: gpt-5.5-xhigh  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh; default: gpt-5.5-xhigh; matches Claude opus-max as the shipped best-effort default; `default` inherits externalModelMode; `gpt-5.5-fast` is the explicit speed override
+externalCodexProfile: gpt-5.5-xhigh  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh; default: gpt-5.5-xhigh; matches Claude opus-max as the shipped best-effort default; `default` inherits externalModelMode; `gpt-5.5-fast` selects the fast Codex model tier while keeping reasoning_effort = xhigh (it is NOT an effort downgrade)

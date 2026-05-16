@@ -30,7 +30,8 @@ $ErrorActionPreference = 'Stop'
 if (-not $CodexFlags -or $CodexFlags.Count -eq 0) {
   # Default flags match shipped `externalCodexProfile: gpt-5.5-xhigh` best-effort default
   # (symmetric to Claude's `externalClaudeProfile: opus-max`). Override the whole array
-  # to use a different profile (e.g. `gpt-5.5-fast` for speed).
+  # to use a different profile (e.g. `gpt-5.5-fast` for the fast Codex model tier — note:
+  # reasoning effort stays xhigh on that tier, the "fast" dimension is model variant only).
   $CodexFlags = @('--quiet', '--full-auto', '-c', 'model_reasoning_effort=xhigh')
 }
 

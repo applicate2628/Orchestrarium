@@ -52,7 +52,7 @@ Canonical provider semantics:
 | `externalPriorityProfiles` | stores the `profile -> lane -> ordered provider list` map |
 | `externalOpinionCounts` | stores how many distinct external opinions to collect per lane |
 | `externalModelMode` | shared cross-provider model policy; `runtime-default` keeps provider runtime selection, `pinned-top-pro` pins the strongest documented production-provider path |
-| `externalCodexProfile` | Codex-specific profile override after provider resolution; `default` inherits `externalModelMode`, `gpt-5.5-fast` is explicit opt-in |
+| `externalCodexProfile` | Codex-specific profile override after provider resolution; `default` inherits `externalModelMode`; `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, not an effort downgrade); `gpt-5.5-xhigh` (shipped as default in Codex/Claude packs) pins `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode` |
 
 Rules:
 
