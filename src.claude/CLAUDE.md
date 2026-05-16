@@ -70,7 +70,9 @@ The Bootstrap text rule above remains binding regardless of whether the hook is 
 
 ## Delegation rule
 
-If `## Project policies` is missing, or if neither `.claude/.agents-mode.yaml` nor the matching global fallback `~/.claude/.agents-mode.yaml` exists for the current project, suggest running `/agents-init-project` before starting implementation work. If the project-local overlay is missing but the global one exists, ordinary reads should use the global file honestly until the user wants a project-local override.
+If `## Project policies` is missing, or if no `.agents-mode.yaml` file exists at any layer for the current project, suggest running `/agents-init-project` before starting implementation work.
+
+**Read-order precedence** (highest to lowest, per-key resolution): project-local `.claude/.agents-mode.yaml` > pack-local global `~/.claude/.agents-mode.yaml` > shared cross-pack global `~/.agents-mode.yaml` > built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. The shared cross-pack global (`~/.agents-mode.yaml`, alongside `~/.claude.json`) is created during default global install and serves as the single source of truth shared between Claude Code and Codex CLI; pack-local globals stay as Claude-specific overrides where needed.
 
 When subagent delegation is appropriate, classify the task and pick the matching team template from `.claude/agents/team-templates/`.
 

@@ -124,7 +124,9 @@ For all other work, use the narrowest matching installed specialist. The shared 
 
 ## Project bootstrap
 
-If the project root `AGENTS.md` lacks `## Project policies`, or if neither `.agents/.agents-mode.yaml` nor the matching global fallback `~/.codex/.agents-mode.yaml` exists, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred. If the project-local overlay is missing but the global overlay exists, read the global file honestly until the user wants a project-local override.
+If the project root `AGENTS.md` lacks `## Project policies`, or if no `.agents-mode.yaml` exists at any layer for the current project, suggest `$init-project` before substantial implementation work so the project policy surface and operator mode file are explicit instead of inferred.
+
+**Read-order precedence** (highest to lowest, per-key resolution): project-local `.agents/.agents-mode.yaml` > pack-local global `~/.codex/.agents-mode.yaml` > shared cross-pack global `~/.agents-mode.yaml` > built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. The shared cross-pack global (`~/.agents-mode.yaml`, alongside `~/.claude.json`) is created during default global install and serves as the single source of truth shared between Claude Code and Codex CLI; pack-local globals stay as Codex-specific overrides where needed.
 
 ## Publication safety scan
 

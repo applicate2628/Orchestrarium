@@ -1002,6 +1002,15 @@ if ($Mode -ne "global") {
 Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
 Sync-AgentsModeFile -TemplateFile $SharedAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml" -Provider codex
 
+# Shared cross-pack global .agents-mode.yaml lives at $HOME/.agents-mode.yaml
+# (alongside ~/.claude.json). Lowest-precedence fallback layer below pack-local
+# globals and project-local overlays. Sync is normalize-not-overwrite, so calling
+# from both pack installers is idempotent. Only created/normalized during global installs.
+if ($Mode -eq "global") {
+    $SharedGlobalAgentsMode = Join-Path $HOME ".agents-mode.yaml"
+    Sync-AgentsModeFile -TemplateFile $SharedAgentsModeSource -TargetFile $SharedGlobalAgentsMode -Label "shared global ~/.agents-mode.yaml" -Provider shared
+}
+
 if ($DryRun) {
     Write-Host ""
     Write-Host "RESULT: DRY-RUN complete (no files modified)."

@@ -1007,6 +1007,15 @@ fi
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 sync_agents_mode_file "$SHARED_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml" "codex"
 
+# Shared cross-pack global .agents-mode.yaml lives at $HOME/.agents-mode.yaml
+# (alongside ~/.claude.json). Lowest-precedence fallback layer below pack-local
+# globals and project-local overlays. Sync is normalize-not-overwrite, so calling
+# from both pack installers is idempotent. Only created/normalized during global installs.
+if [ "$MODE" = "global" ]; then
+  SHARED_GLOBAL_AGENTS_MODE="$HOME/.agents-mode.yaml"
+  sync_agents_mode_file "$SHARED_AGENTS_MODE_SOURCE" "$SHARED_GLOBAL_AGENTS_MODE" "shared global ~/.agents-mode.yaml" "shared"
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
   echo "RESULT: DRY-RUN complete (no files modified)."
