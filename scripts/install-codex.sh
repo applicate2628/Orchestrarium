@@ -1041,12 +1041,26 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
     # lives in the .codex/ directory in both modes.
     # AGENTS_ROOT is ~/.codex (global) or <project>/.agents (target) — skills
     # live under AGENTS_ROOT.
+    # OS-aware host detection: on Windows under Git Bash / MSYS / Cygwin we
+    # emit a powershell command form; on POSIX we emit the bash form. Codex
+    # hooks always use shell form (Codex doesn't support `args` exec form),
+    # so the Python helper applies shlex.quote to the script path.
+    case "$(uname -s 2>/dev/null)" in
+      MINGW*|MSYS*|CYGWIN*)
+        hook_host_os="windows"
+        script_target="$AGENTS_ROOT/skills/lead/scripts/check-hypothesis-disclosure.ps1"
+        ;;
+      *)
+        hook_host_os="posix"
+        script_target="$AGENTS_ROOT/skills/lead/scripts/check-hypothesis-disclosure.sh"
+        ;;
+    esac
     hooks_target="$TARGET/hooks.json"
-    script_target="$AGENTS_ROOT/skills/lead/scripts/check-hypothesis-disclosure.sh"
-    echo "  Installing hypothesis-disclosure PreToolUse hook..."
+    echo "  Installing hypothesis-disclosure PreToolUse hook (host-os=$hook_host_os)..."
     "$python_cmd" "$hook_installer" \
       --target "$hooks_target" \
       --platform codex \
+      --host-os "$hook_host_os" \
       --script-path "$script_target"
   fi
 fi

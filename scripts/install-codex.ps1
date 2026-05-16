@@ -1027,10 +1027,11 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         }
         # TargetRoot is ~/.codex (global) or <project>/.codex (target); hooks.json lives there.
         # AgentsRoot is ~/.codex (global) or <project>/.agents (target); skills live there.
+        # PowerShell installer always emits Windows-host form referencing .ps1.
         $HooksTarget = Join-Path $TargetRoot "hooks.json"
-        $ScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-hypothesis-disclosure.sh"
-        Write-Host "  Installing hypothesis-disclosure PreToolUse hook..."
-        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --script-path $ScriptTarget
+        $ScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-hypothesis-disclosure.ps1"
+        Write-Host "  Installing hypothesis-disclosure PreToolUse hook (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-path $ScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE

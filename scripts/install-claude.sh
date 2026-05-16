@@ -895,11 +895,25 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       exit 1
     fi
     settings_target="$TARGET/settings.json"
-    script_target="$TARGET/agents/scripts/check-hypothesis-disclosure.sh"
-    echo "  Installing hypothesis-disclosure PreToolUse hook..."
+    # OS-aware host detection: on Windows under Git Bash / MSYS / Cygwin we
+    # emit the native PowerShell exec form referencing .ps1; on POSIX we emit
+    # the bash exec form referencing .sh. The Python helper builds the right
+    # entry shape from --host-os.
+    case "$(uname -s 2>/dev/null)" in
+      MINGW*|MSYS*|CYGWIN*)
+        hook_host_os="windows"
+        script_target="$TARGET/agents/scripts/check-hypothesis-disclosure.ps1"
+        ;;
+      *)
+        hook_host_os="posix"
+        script_target="$TARGET/agents/scripts/check-hypothesis-disclosure.sh"
+        ;;
+    esac
+    echo "  Installing hypothesis-disclosure PreToolUse hook (host-os=$hook_host_os)..."
     "$python_cmd" "$hook_installer" \
       --target "$settings_target" \
       --platform claude \
+      --host-os "$hook_host_os" \
       --script-path "$script_target"
   fi
 fi

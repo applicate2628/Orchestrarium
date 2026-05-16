@@ -955,9 +955,11 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
             exit 1
         }
         $SettingsTarget = Join-Path $TargetRoot "settings.json"
-        $ScriptTarget = Join-Path $TargetRoot "agents\scripts\check-hypothesis-disclosure.sh"
-        Write-Host "  Installing hypothesis-disclosure PreToolUse hook..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --script-path $ScriptTarget
+        # PowerShell installer always emits Windows-native exec form referencing
+        # the .ps1 hook script. Bash form is reserved for the .sh installer.
+        $ScriptTarget = Join-Path $TargetRoot "agents\scripts\check-hypothesis-disclosure.ps1"
+        Write-Host "  Installing hypothesis-disclosure PreToolUse hook (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-path $ScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE

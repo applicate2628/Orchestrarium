@@ -28,16 +28,25 @@ HOOK_INSTALLER = REPO_ROOT / "scripts" / "install-hypothesis-hook.py"
 SCRIPT_PATH = "/tmp/check-hypothesis-disclosure.sh"
 
 
-def run_installer(target: Path, *extra: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
+def run_installer(
+    target: Path,
+    *extra: str,
+    platform: str = "claude",
+    host_os: str = "posix",
+    script_path: str = SCRIPT_PATH,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     cmd = [
         sys.executable,
         str(HOOK_INSTALLER),
         "--target",
         str(target),
         "--platform",
-        "claude",
+        platform,
+        "--host-os",
+        host_os,
         "--script-path",
-        SCRIPT_PATH,
+        script_path,
         *extra,
     ]
     full_env = os.environ.copy()
@@ -60,15 +69,52 @@ class TestInstallHypothesisHook(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def test_install_into_empty(self) -> None:
+    def test_install_into_empty_posix_claude_exec_form(self) -> None:
         result = run_installer(self.target)
         self.assertEqual(result.returncode, 0, result.stderr)
         data = load_json(self.target)
         pretool = data["hooks"]["PreToolUse"]
         self.assertEqual(len(pretool), 1)
-        cmd = pretool[0]["hooks"][0]["command"]
-        self.assertIn("check-hypothesis-disclosure", cmd)
-        self.assertIn("bash", cmd)
+        hook = pretool[0]["hooks"][0]
+        # Claude POSIX = exec form (args array, no shell interpretation)
+        self.assertEqual(hook["command"], "bash")
+        self.assertEqual(hook["args"], [SCRIPT_PATH])
+        self.assertEqual(hook["if"], "Bash(git push *)")
+
+    def test_install_claude_windows_powershell_exec_form(self) -> None:
+        ps1_path = "C:\\Users\\test\\.claude\\agents\\scripts\\check-hypothesis-disclosure.ps1"
+        result = run_installer(self.target, host_os="windows", script_path=ps1_path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = load_json(self.target)
+        hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
+        # Windows-native PowerShell exec form
+        self.assertEqual(hook["command"], "powershell")
+        self.assertEqual(hook["args"][:4], ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
+        self.assertEqual(hook["args"][4], ps1_path)
+        self.assertNotIn("bash", hook["command"])
+
+    def test_install_codex_posix_shell_form(self) -> None:
+        result = run_installer(self.target, platform="codex")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = load_json(self.target)
+        hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
+        # Codex always shell form (no `args` field supported)
+        self.assertNotIn("args", hook)
+        self.assertIn("bash", hook["command"])
+        self.assertIn(SCRIPT_PATH, hook["command"])
+
+    def test_install_codex_windows_powershell_shell_form(self) -> None:
+        ps1_path = "C:\\Users\\test\\.codex\\skills\\lead\\scripts\\check-hypothesis-disclosure.ps1"
+        result = run_installer(self.target, platform="codex", host_os="windows", script_path=ps1_path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = load_json(self.target)
+        hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
+        self.assertNotIn("args", hook)
+        self.assertIn("powershell", hook["command"])
+        self.assertIn("-NoProfile", hook["command"])
+        self.assertIn("-ExecutionPolicy", hook["command"])
+        self.assertIn("Bypass", hook["command"])
+        self.assertIn("-File", hook["command"])
 
     def test_idempotent_reinstall(self) -> None:
         run_installer(self.target)
@@ -100,17 +146,23 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(data["permissions"], {"allow": ["Bash"]})
         self.assertEqual(len(data["hooks"]["PreToolUse"]), 2)
         self.assertEqual(data["hooks"]["PreToolUse"][0]["hooks"][0]["command"], "echo user-other-hook")
-        self.assertIn("check-hypothesis-disclosure", data["hooks"]["PreToolUse"][1]["hooks"][0]["command"])
+        our_hook = data["hooks"]["PreToolUse"][1]["hooks"][0]
+        # Exec form: marker lives in args[0], not in command.
+        self.assertEqual(our_hook["command"], "bash")
+        self.assertIn("check-hypothesis-disclosure", our_hook["args"][0])
         self.assertEqual(data["hooks"]["Stop"], [{"hooks": [{"type": "command", "command": "echo stop"}]}])
 
     def test_duplicates_collapsed_on_install(self) -> None:
-        # Simulate an earlier buggy install that left two of our entries.
-        cmd = f"bash {SCRIPT_PATH}"
+        # Simulate two old-style shell-form entries (older buggy install).
+        # The marker substring `check-hypothesis-disclosure` is what identifies
+        # our entries regardless of form (shell or exec), so duplicates are
+        # collapsed even if one is shell form and one is exec form.
+        old_cmd = f"bash {SCRIPT_PATH}"
         self.target.write_text(json.dumps({
             "hooks": {
                 "PreToolUse": [
-                    {"matcher": "Bash", "hooks": [{"type": "command", "command": cmd}]},
-                    {"matcher": "Bash", "hooks": [{"type": "command", "command": cmd + " # duplicate"}]},
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": old_cmd}]},
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": old_cmd + " # duplicate"}]},
                 ]
             }
         }, indent=2), encoding="utf-8")
@@ -118,14 +170,20 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         data = load_json(self.target)
         self.assertEqual(len(data["hooks"]["PreToolUse"]), 1)
+        # After collapse, the remaining entry uses the new exec form.
+        hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
+        self.assertEqual(hook["command"], "bash")
+        self.assertEqual(hook["args"], [SCRIPT_PATH])
 
     def test_duplicates_all_removed_on_uninstall(self) -> None:
-        cmd = f"bash {SCRIPT_PATH}"
+        # Old-style shell-form entries are still recognized by marker substring
+        # and removed cleanly even when the current install would use exec form.
+        old_cmd = f"bash {SCRIPT_PATH}"
         self.target.write_text(json.dumps({
             "hooks": {
                 "PreToolUse": [
-                    {"matcher": "Bash", "hooks": [{"type": "command", "command": cmd}]},
-                    {"matcher": "Bash", "hooks": [{"type": "command", "command": cmd + " # dup"}]},
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": old_cmd}]},
+                    {"matcher": "Bash", "hooks": [{"type": "command", "command": old_cmd + " # dup"}]},
                 ]
             }
         }, indent=2), encoding="utf-8")
@@ -149,24 +207,35 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertFalse(self.target.exists(), "remove should succeed despite opt-out env var")
 
-    def test_command_injection_via_unquoted_path_is_blocked(self) -> None:
+    def test_command_injection_via_unquoted_path_is_blocked_claude(self) -> None:
         # The architecture/security reviews demonstrated this with
-        # '/tmp/safe path; echo PWNED'. After fix: shlex-quoted into JSON.
+        # '/tmp/safe path; echo PWNED'. After fix: Claude uses EXEC form
+        # (args array, no shell), so the malicious string is passed as a
+        # single literal argument with zero shell interpretation possible.
         malicious = "/tmp/safe path; echo PWNED"
-        cmd = [
-            sys.executable, str(HOOK_INSTALLER),
-            "--target", str(self.target),
-            "--platform", "claude",
-            "--script-path", malicious,
-        ]
-        env = os.environ.copy()
-        env.pop("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", None)
-        subprocess.run(cmd, check=True, env=env, capture_output=True, text=True)
+        result = run_installer(self.target, script_path=malicious)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = load_json(self.target)
+        hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
+        # Exec form: command="bash", args contains the raw malicious path as
+        # a single argv element. No shell metacharacter interpretation.
+        self.assertEqual(hook["command"], "bash")
+        self.assertEqual(hook["args"], [malicious])
+        # The dangerous metacharacters must NOT appear in a shell-interpreted
+        # `command` string anywhere.
+        self.assertNotIn("; echo PWNED", hook["command"])
+
+    def test_command_injection_via_unquoted_path_is_blocked_codex(self) -> None:
+        # Codex shell form: shlex.quote() defends since Codex doesn't support
+        # exec form. Verify the persisted shell-form command contains the
+        # malicious chars only inside POSIX single-quotes.
+        malicious = "/tmp/safe path; echo PWNED"
+        result = run_installer(self.target, platform="codex", script_path=malicious)
+        self.assertEqual(result.returncode, 0, result.stderr)
         data = load_json(self.target)
         recorded = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        # The command-injection chars must be inside single-quotes (shlex.quote).
-        # Bash treats `'...; echo PWNED'` as a single literal argument to `bash`,
-        # not as a shell metacharacter chain.
+        # shlex.quote wraps it in single-quotes so bash treats it as a single
+        # literal argument, not a shell metacharacter chain.
         self.assertIn("'", recorded, f"expected shlex quoting, got: {recorded}")
         self.assertNotRegex(
             recorded, r"^bash /tmp/safe path; echo PWNED$",

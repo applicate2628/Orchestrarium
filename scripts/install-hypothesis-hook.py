@@ -61,37 +61,110 @@ from typing import Any
 SCRIPT_MARKER = "check-hypothesis-disclosure"
 
 
-def build_claude_entry(script_path: str) -> dict[str, Any]:
-    quoted = shlex.quote(script_path)
+def build_claude_entry(script_path: str, host_os: str) -> dict[str, Any]:
+    """Build a Claude PreToolUse hook entry in exec form (args array, no shell).
+
+    Exec form is the documented portable cross-platform pattern per
+    https://code.claude.com/docs/hooks-reference#exec-form-and-shell-form
+    — each `args` element is passed as a literal argument, with no shell
+    interpretation, so paths with spaces or shell metacharacters are safe
+    without any quoting concern.
+
+    POSIX host: `command: "bash", args: [<sh_path>]`.
+    Windows host: `command: "powershell", args: [-NoProfile, -ExecutionPolicy,
+    Bypass, -File, <ps1_path>]` — native PowerShell invocation without any
+    Git Bash dependency.
+    """
+    if host_os == "windows":
+        return {
+            "matcher": "Bash",
+            "hooks": [
+                {
+                    "type": "command",
+                    "if": "Bash(git push *)",
+                    "command": "powershell",
+                    "args": [
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        script_path,
+                    ],
+                }
+            ],
+        }
     return {
         "matcher": "Bash",
         "hooks": [
             {
                 "type": "command",
                 "if": "Bash(git push *)",
-                "command": f"bash {quoted}",
+                "command": "bash",
+                "args": [script_path],
             }
         ],
     }
 
 
-def build_codex_entry(script_path: str) -> dict[str, Any]:
-    # Codex matchers do not support the `if` permission-rule filter; the script
-    # self-filters by parsing tool_input.command for "git push".
+def build_codex_entry(script_path: str, host_os: str) -> dict[str, Any]:
+    """Build a Codex PreToolUse hook entry in shell form.
+
+    Codex hooks (per https://developers.openai.com/codex/hooks) do NOT support
+    an `args` array or a `shell` field — only `type`, `command`, `statusMessage`,
+    `timeout`, and `async`. Commands are always interpreted by the host's
+    default shell. shlex.quote() defends against metacharacter injection in
+    the script path.
+
+    POSIX host: `command: "bash <quoted_sh>"`.
+    Windows host: `command: "powershell -NoProfile -ExecutionPolicy Bypass
+    -File <quoted_ps1>"` — assumes the host's Codex default shell can locate
+    `powershell` on PATH (Git Bash on most Windows setups can).
+
+    Codex matchers do not support the `if` permission-rule filter; the script
+    self-filters by parsing tool_input.command for "git push".
+    """
     quoted = shlex.quote(script_path)
+    if host_os == "windows":
+        command_str = f"powershell -NoProfile -ExecutionPolicy Bypass -File {quoted}"
+    else:
+        command_str = f"bash {quoted}"
     return {
         "matcher": "Bash",
         "hooks": [
             {
                 "type": "command",
-                "command": f"bash {quoted}",
+                "command": command_str,
             }
         ],
     }
 
 
+def _hook_contains_marker(hook: dict[str, Any]) -> bool:
+    """True if a single hook dict references our script via marker substring.
+
+    Marker can appear in either:
+      - The `command` shell-string (legacy shell form / Codex always-shell form).
+      - Any element of the `args` array (exec form, where the script path is
+        a literal argv element separate from the executable name).
+    """
+    command = hook.get("command", "")
+    if isinstance(command, str) and SCRIPT_MARKER in command:
+        return True
+    args_field = hook.get("args")
+    if isinstance(args_field, list):
+        for arg in args_field:
+            if isinstance(arg, str) and SCRIPT_MARKER in arg:
+                return True
+    return False
+
+
 def find_our_entry_indices(pretool_list: list[Any]) -> list[int]:
-    """Return ALL indices whose hook command contains the marker.
+    """Return ALL indices whose hook references our script (by marker).
+
+    Recognizes both legacy shell form (marker in `command`) and current exec
+    form (marker in `args[k]`). This lets a re-install collapse an older
+    shell-form entry into the new exec-form entry without leaving stale
+    duplicates, and lets `--remove` clean up either form.
 
     Earlier versions of this script returned only the first match; that left
     duplicates firing if multiple of our entries were inserted by a buggy or
@@ -105,15 +178,11 @@ def find_our_entry_indices(pretool_list: list[Any]) -> list[int]:
         hooks_field = entry.get("hooks")
         if not isinstance(hooks_field, list):
             # Defensive: a non-list `hooks` is malformed for this entry; skip
-            # it rather than crashing. The validation in install()/remove()
-            # will reject the file shape if the top-level structure is wrong;
-            # per-entry hooks_field that is not a list is just ignored here.
+            # it rather than crashing. Per-entry malformations are not the
+            # script's job to repair.
             continue
         for hook in hooks_field:
-            if not isinstance(hook, dict):
-                continue
-            command = hook.get("command", "")
-            if isinstance(command, str) and SCRIPT_MARKER in command:
+            if isinstance(hook, dict) and _hook_contains_marker(hook):
                 indices.append(idx)
                 break
     return indices
@@ -245,7 +314,13 @@ def main() -> int:
     parser.add_argument(
         "--script-path",
         required=True,
-        help="Absolute or expandable path to check-hypothesis-disclosure.sh",
+        help="Absolute or expandable path to the hook script (.sh on POSIX, .ps1 on Windows)",
+    )
+    parser.add_argument(
+        "--host-os",
+        choices=("posix", "windows"),
+        default="posix",
+        help="Host OS class (controls exec-form vs shell-form / bash vs powershell)",
     )
     parser.add_argument(
         "--remove",
@@ -276,9 +351,9 @@ def main() -> int:
         action = "removed"
     else:
         if args.platform == "claude":
-            entry = build_claude_entry(args.script_path)
+            entry = build_claude_entry(args.script_path, args.host_os)
         else:
-            entry = build_codex_entry(args.script_path)
+            entry = build_codex_entry(args.script_path, args.host_os)
         changed = install(data, entry)
         action = "installed/updated"
 
