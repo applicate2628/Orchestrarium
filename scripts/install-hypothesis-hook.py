@@ -13,21 +13,34 @@ Supported targets:
   --platform codex   →  Codex hooks.json (e.g. ~/.codex/hooks.json)
 
 Cross-platform behavior:
-  The shipped command uses `bash $HOME/.<provider>/...check-hypothesis-disclosure.sh`
-  which works on macOS, Linux, and Windows (via Git Bash). Operators who want
-  the native PowerShell variant on Windows can replace the `command` field
-  manually; this script's idempotent update keys on the `check-hypothesis-disclosure`
-  substring, so a hand-edited PowerShell entry will still be recognized as
-  "ours" and re-updated to the bash form on next install. To preserve a manual
-  PowerShell override, set ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1 in the environment
-  to skip the install entirely.
+  The shipped command uses `bash <quoted script_path>` which works on macOS,
+  Linux, and Windows (via Git Bash). Path is shlex-quoted to defend against
+  paths with spaces, semicolons, or other shell metacharacters. Operators who
+  want a native PowerShell variant on Windows can replace the `command` field
+  manually; this script's idempotent update keys on the `check-hypothesis-
+  disclosure` substring, so a hand-edited PowerShell entry is still recognized
+  as "ours" and re-updated to the bash form on next install. To preserve a
+  manual PowerShell override, set ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1 in the
+  environment to skip the install entirely.
 
 Removal:
-  --remove  Removes our hook entry. Cleans up empty hooks containers.
+  --remove  Removes ALL of our hook entries (handles duplicates from earlier
+            buggy versions). Cleans up empty hooks containers. The opt-out env
+            var does NOT block --remove, so a standing opt-out can still
+            uninstall a previously-installed hook.
+
+Safety hardening:
+  - Refuses to write through a symlinked settings.json target (security: avoid
+    same-user clobber of /etc/passwd-style symlink attacks).
+  - Atomic write via temp file + os.replace to prevent torn writes.
+  - Validates that hooks/PreToolUse are correct JSON types before iterating
+    (a malformed-but-valid JSON like {"hooks": {"PreToolUse": [{"hooks": 5}]}}
+    is rejected with a clear error instead of crashing with TypeError).
 
 Exit codes:
   0 on success (install, update, remove, or no-op).
-  1 on JSON parse error or filesystem error.
+  1 on JSON parse error, type-validation error, filesystem error, symlink
+    target.
   2 on argument error.
 """
 
@@ -36,24 +49,27 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
 # Substring that identifies our hook entry inside an existing settings.json.
-# Any PreToolUse entry whose command contains this substring is treated as
-# "ours" for idempotent update/replace.
+# Any PreToolUse entry whose hooks list contains a command with this substring
+# is treated as "ours" for idempotent update/replace.
 SCRIPT_MARKER = "check-hypothesis-disclosure"
 
 
 def build_claude_entry(script_path: str) -> dict[str, Any]:
+    quoted = shlex.quote(script_path)
     return {
         "matcher": "Bash",
         "hooks": [
             {
                 "type": "command",
                 "if": "Bash(git push *)",
-                "command": f"bash {script_path}",
+                "command": f"bash {quoted}",
             }
         ],
     }
@@ -62,28 +78,45 @@ def build_claude_entry(script_path: str) -> dict[str, Any]:
 def build_codex_entry(script_path: str) -> dict[str, Any]:
     # Codex matchers do not support the `if` permission-rule filter; the script
     # self-filters by parsing tool_input.command for "git push".
+    quoted = shlex.quote(script_path)
     return {
         "matcher": "Bash",
         "hooks": [
             {
                 "type": "command",
-                "command": f"bash {script_path}",
+                "command": f"bash {quoted}",
             }
         ],
     }
 
 
-def find_our_entry(pretool_list: list[Any]) -> int | None:
+def find_our_entry_indices(pretool_list: list[Any]) -> list[int]:
+    """Return ALL indices whose hook command contains the marker.
+
+    Earlier versions of this script returned only the first match; that left
+    duplicates firing if multiple of our entries were inserted by a buggy or
+    racy install. Now: install collapses duplicates to a single entry; remove
+    deletes every one of our entries.
+    """
+    indices: list[int] = []
     for idx, entry in enumerate(pretool_list):
         if not isinstance(entry, dict):
             continue
-        for hook in entry.get("hooks") or []:
+        hooks_field = entry.get("hooks")
+        if not isinstance(hooks_field, list):
+            # Defensive: a non-list `hooks` is malformed for this entry; skip
+            # it rather than crashing. The validation in install()/remove()
+            # will reject the file shape if the top-level structure is wrong;
+            # per-entry hooks_field that is not a list is just ignored here.
+            continue
+        for hook in hooks_field:
             if not isinstance(hook, dict):
                 continue
             command = hook.get("command", "")
             if isinstance(command, str) and SCRIPT_MARKER in command:
-                return idx
-    return None
+                indices.append(idx)
+                break
+    return indices
 
 
 def load_existing(target: Path) -> dict[str, Any]:
@@ -103,14 +136,44 @@ def load_existing(target: Path) -> dict[str, Any]:
     return data
 
 
-def write_pretty(target: Path, data: dict[str, Any]) -> None:
+def write_atomic(target: Path, data: dict[str, Any]) -> None:
+    """Write target atomically via temp file in same dir + os.replace.
+
+    Refuses to write through a symlink (lstat-based check). The temp file is
+    created in the same directory as target so os.replace is atomic on the
+    same filesystem.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_symlink():
+        sys.stderr.write(
+            f"FAIL: {target} is a symbolic link; refusing to write through it. "
+            "Resolve the symlink or move it aside before re-running.\n"
+        )
+        sys.exit(1)
     text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-    target.write_text(text, encoding="utf-8")
+    # tempfile in the same directory so os.replace is atomic on the same FS.
+    fd, tmp_path_str = tempfile.mkstemp(
+        prefix=".install-hypothesis-hook.", suffix=".tmp", dir=str(target.parent)
+    )
+    tmp_path = Path(tmp_path_str)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except (AttributeError, OSError):
+                # fsync may not be available on every filesystem (Windows
+                # remote shares, some FUSE mounts); best-effort only.
+                pass
+        os.replace(tmp_path, target)
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def install(data: dict[str, Any], new_entry: dict[str, Any]) -> bool:
-    """Insert or update our hook entry. Returns True if data changed."""
+    """Insert our hook entry, removing any duplicates. Returns True if changed."""
     hooks = data.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         sys.stderr.write("FAIL: 'hooks' key is not a JSON object\n")
@@ -120,28 +183,44 @@ def install(data: dict[str, Any], new_entry: dict[str, Any]) -> bool:
         sys.stderr.write("FAIL: 'hooks.PreToolUse' is not a JSON array\n")
         sys.exit(1)
 
-    existing_idx = find_our_entry(pretool)
-    if existing_idx is not None:
-        if pretool[existing_idx] == new_entry:
-            return False  # idempotent no-op
-        pretool[existing_idx] = new_entry
+    existing = find_our_entry_indices(pretool)
+    changed = False
+
+    # If there are multiple of our entries (duplicates from earlier buggy
+    # state), collapse them to a single entry containing the new content.
+    if len(existing) > 1:
+        # Delete duplicates from the end so earlier indices stay valid.
+        for idx in reversed(existing[1:]):
+            del pretool[idx]
+        existing = [existing[0]]
+        changed = True
+
+    if existing:
+        idx = existing[0]
+        if pretool[idx] != new_entry:
+            pretool[idx] = new_entry
+            changed = True
     else:
         pretool.append(new_entry)
-    return True
+        changed = True
+
+    return changed
 
 
 def remove(data: dict[str, Any]) -> bool:
-    """Remove our hook entry. Returns True if data changed."""
+    """Remove ALL of our hook entries. Returns True if changed."""
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
         return False
     pretool = hooks.get("PreToolUse")
     if not isinstance(pretool, list):
         return False
-    existing_idx = find_our_entry(pretool)
-    if existing_idx is None:
+    indices = find_our_entry_indices(pretool)
+    if not indices:
         return False
-    del pretool[existing_idx]
+    # Delete from the end so earlier indices stay valid.
+    for idx in reversed(indices):
+        del pretool[idx]
     # Clean up empty containers so the file does not gain ghost structure.
     if not pretool:
         del hooks["PreToolUse"]
@@ -180,9 +259,11 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"):
+    # The opt-out env var blocks install but NOT remove — a standing opt-out
+    # should still allow uninstall of a previously-installed hook entry.
+    if os.environ.get("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK") and not args.remove:
         sys.stderr.write(
-            "SKIP: ORCHESTRARIUM_NO_HYPOTHESIS_HOOK set; not modifying "
+            "SKIP: ORCHESTRARIUM_NO_HYPOTHESIS_HOOK set; not installing into "
             f"{args.target}\n"
         )
         return 0
@@ -209,14 +290,19 @@ def main() -> int:
         sys.stdout.write(f"  [dry-run] would write {target}\n")
         return 0
 
-    # Special case: file removal when remove cleared everything
+    # Special case: file removal when remove cleared everything.
     if args.remove and not data:
         if target.exists():
+            if target.is_symlink():
+                sys.stderr.write(
+                    f"FAIL: {target} is a symbolic link; refusing to delete\n"
+                )
+                return 1
             target.unlink()
             sys.stdout.write(f"  Hypothesis hook {action}; deleted now-empty {target}\n")
         return 0
 
-    write_pretty(target, data)
+    write_atomic(target, data)
     sys.stdout.write(f"  Hypothesis hook {action} in {target}\n")
     return 0
 

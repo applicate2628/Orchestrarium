@@ -1016,15 +1016,25 @@ if ($Mode -eq "global") {
 # (global) or <project>/.codex/hooks.json (target). Idempotent JSON merge.
 # Opt out with -NoHypothesisHook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
 if (-not $NoHypothesisHook -and -not $DryRun) {
-    $PythonCmd = Get-PythonCommand
     $HookInstaller = Join-Path $RepoDir "scripts\install-hypothesis-hook.py"
-    if ($PythonCmd -and (Test-Path $HookInstaller)) {
+    if (-not (Test-Path $HookInstaller)) {
+        Write-Warning "hypothesis-hook installer not found at $HookInstaller; skipping hook install"
+    } else {
+        $PythonCmd = Get-PythonCommand
+        if (-not $PythonCmd) {
+            Write-Error "python or python3 is required to auto-install the hypothesis-disclosure hook. Rerun with -NoHypothesisHook to skip, or install Python and re-run."
+            exit 1
+        }
         # TargetRoot is ~/.codex (global) or <project>/.codex (target); hooks.json lives there.
         # AgentsRoot is ~/.codex (global) or <project>/.agents (target); skills live there.
         $HooksTarget = Join-Path $TargetRoot "hooks.json"
         $ScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-hypothesis-disclosure.sh"
         Write-Host "  Installing hypothesis-disclosure PreToolUse hook..."
         & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --script-path $ScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
     }
 }
 

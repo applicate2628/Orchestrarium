@@ -1027,9 +1027,16 @@ fi
 # or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1. Codex's matcher field has no `if`-style
 # argument filter, so the hook script self-filters by parsing tool_input.command.
 if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
-  python_cmd="$(resolve_python_command || true)"
   hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
-  if [ -n "$python_cmd" ] && [ -f "$hook_installer" ]; then
+  if [ ! -f "$hook_installer" ]; then
+    echo "WARN: hypothesis-hook installer not found at $hook_installer; skipping hook install" >&2
+  else
+    python_cmd="$(resolve_python_command || true)"
+    if [ -z "$python_cmd" ]; then
+      echo "FAIL: python or python3 is required to auto-install the hypothesis-disclosure hook" >&2
+      echo "      Rerun with --no-hypothesis-hook to skip, or install Python and re-run." >&2
+      exit 1
+    fi
     # TARGET is ~/.codex (global) or <project>/.codex (target). Codex hooks.json
     # lives in the .codex/ directory in both modes.
     # AGENTS_ROOT is ~/.codex (global) or <project>/.agents (target) — skills

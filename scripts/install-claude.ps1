@@ -943,14 +943,25 @@ if ($Mode -eq "global") {
 # Install the hypothesis-disclosure PreToolUse hook by merging it into the
 # user's settings.json idempotently. Preserves all other user keys and other
 # hooks. Opt out with -NoHypothesisHook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
+# Fails closed (non-zero exit) if Python is required but unavailable.
 if (-not $NoHypothesisHook -and -not $DryRun) {
-    $PythonCmd = Get-PythonCommand
     $HookInstaller = Join-Path $RepoDir "scripts\install-hypothesis-hook.py"
-    if ($PythonCmd -and (Test-Path $HookInstaller)) {
+    if (-not (Test-Path $HookInstaller)) {
+        Write-Warning "hypothesis-hook installer not found at $HookInstaller; skipping hook install"
+    } else {
+        $PythonCmd = Get-PythonCommand
+        if (-not $PythonCmd) {
+            Write-Error "python or python3 is required to auto-install the hypothesis-disclosure hook. Rerun with -NoHypothesisHook to skip, or install Python and re-run."
+            exit 1
+        }
         $SettingsTarget = Join-Path $TargetRoot "settings.json"
         $ScriptTarget = Join-Path $TargetRoot "agents\scripts\check-hypothesis-disclosure.sh"
         Write-Host "  Installing hypothesis-disclosure PreToolUse hook..."
         & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --script-path $ScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
     }
 }
 

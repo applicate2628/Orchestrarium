@@ -880,10 +880,20 @@ fi
 # Install the hypothesis-disclosure PreToolUse hook by merging it into the
 # user's settings.json idempotently. Preserves all other user keys and other
 # hooks. Opt out with --no-hypothesis-hook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
+# Fails closed (non-zero exit) if Python is required but unavailable, matching
+# the agents-mode sync contract — silent skip would leave the user thinking
+# the hook is active when it is not.
 if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
-  python_cmd="$(resolve_python_command || true)"
   hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
-  if [ -n "$python_cmd" ] && [ -f "$hook_installer" ]; then
+  if [ ! -f "$hook_installer" ]; then
+    echo "WARN: hypothesis-hook installer not found at $hook_installer; skipping hook install" >&2
+  else
+    python_cmd="$(resolve_python_command || true)"
+    if [ -z "$python_cmd" ]; then
+      echo "FAIL: python or python3 is required to auto-install the hypothesis-disclosure hook" >&2
+      echo "      Rerun with --no-hypothesis-hook to skip, or install Python and re-run." >&2
+      exit 1
+    fi
     settings_target="$TARGET/settings.json"
     script_target="$TARGET/agents/scripts/check-hypothesis-disclosure.sh"
     echo "  Installing hypothesis-disclosure PreToolUse hook..."
