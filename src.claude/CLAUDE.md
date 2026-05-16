@@ -37,7 +37,7 @@ Platform-specific rules for Claude Code. Shared governance (hygiene, publication
 
 The pack ships an opt-in hook script that turns the Bootstrap into machine-checked structural enforcement on `git push`. The script lives at `.claude/agents/scripts/check-hypothesis-disclosure.sh` (Bash / Git Bash) and `.claude/agents/scripts/check-hypothesis-disclosure.ps1` (PowerShell). When wired as a Claude Code `PreToolUse` hook, it inspects the HEAD commit message and blocks the push if the commit type is behavior-changing (`feat`/`fix`/`refactor`) but the body lacks either a `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` marker. Whitelisted commit types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
 
-The pack does **not** modify `settings.json` automatically — structural enforcement is opt-in. Operators who want it add this snippet to their `.claude/settings.json` (or `~/.claude/settings.json` for global):
+The pack does **not** modify `settings.json` automatically — structural enforcement is opt-in. Operators who want it add this snippet to their `~/.claude/settings.json` (recommended; matches the globally-installed script location):
 
 ```json
 {
@@ -49,7 +49,7 @@ The pack does **not** modify `settings.json` automatically — structural enforc
           {
             "type": "command",
             "if": "Bash(git push *)",
-            "command": "bash .claude/agents/scripts/check-hypothesis-disclosure.sh"
+            "command": "bash $HOME/.claude/agents/scripts/check-hypothesis-disclosure.sh"
           }
         ]
       }
@@ -58,7 +58,13 @@ The pack does **not** modify `settings.json` automatically — structural enforc
 }
 ```
 
-Windows-side equivalent uses `powershell -NoProfile -ExecutionPolicy Bypass -File .claude\\agents\\scripts\\check-hypothesis-disclosure.ps1` instead. The hook's `if: "Bash(git push *)"` permission-rule filter ensures the hook only fires on actual push attempts, not on every Bash invocation.
+Path resolution notes:
+
+- The `command` field uses `$HOME/...` (or `~/...`) tilde expansion, which Claude Code passes through to the shell. Relative paths like `.claude/agents/scripts/...` are unreliable because the hook runs with the session's current working directory, not the directory of `settings.json` — see the [Hooks path placeholders](https://code.claude.com/docs/en/hooks.md#path-placeholders) docs.
+- For project-local hooks (script lives at `<repo>/.claude/agents/scripts/...`), use `${CLAUDE_PROJECT_DIR}/.claude/agents/scripts/check-hypothesis-disclosure.sh` instead.
+- Windows-side equivalent uses the PowerShell variant: `powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\agents\scripts\check-hypothesis-disclosure.ps1"` for global, or `powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}\.claude\agents\scripts\check-hypothesis-disclosure.ps1"` for project-local.
+
+The hook's `if: "Bash(git push *)"` permission-rule filter ensures the hook only fires on actual push attempts, not on every Bash invocation.
 
 The Bootstrap text rule above remains binding regardless of whether the hook is installed; the hook is the structural backstop for sessions where the text rule alone is insufficient.
 

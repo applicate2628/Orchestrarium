@@ -215,9 +215,15 @@ Customize each platform in the place that platform actually reads:
 - Configure consultant and external-dispatch preferences in `.agents/.agents-mode.yaml` for Codex or `.claude/.agents-mode.yaml` for Claude Code.
 - Shared design references in `shared/references/` are repository-maintainer documentation only; they are not copied into target projects and should not be treated as installed runtime docs.
 
-### Opt-in: structural enforcement for Hypothesis disclosure (Claude Code)
+### Opt-in: structural enforcement for Hypothesis disclosure
 
-The Claude pack installs an opt-in hook script at `.claude/agents/scripts/check-hypothesis-disclosure.sh` (and `.ps1`) that machine-checks the HEAD commit message before `git push` and blocks the push if a behavior-changing commit (`feat`/`fix`/`refactor`) lacks `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers in the commit body. The installer does **not** modify `.claude/settings.json` automatically. To enable the hook, add the recommended snippet documented in `.claude/CLAUDE.md` (under "Optional structural enforcement") to your `.claude/settings.json` or `~/.claude/settings.json`. Codex CLI does not currently expose an analogous shell hook surface; the text rule remains binding on both platforms regardless of whether the hook is installed.
+Both Claude Code and Codex CLI expose `PreToolUse` hook surfaces; both packs ship the same opt-in hook script that machine-checks the HEAD commit message before `git push`. Behavior-changing commit types (`feat`/`fix`/`refactor`) must carry `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers in the body; whitelisted types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked. Installers do **not** modify the user's hook configuration automatically.
+
+Claude Code — script lives at `~/.claude/agents/scripts/check-hypothesis-disclosure.{sh,ps1}`. Add the recommended snippet from `~/.claude/CLAUDE.md` ("Optional structural enforcement") to your `~/.claude/settings.json` (use `$HOME/...` or `${CLAUDE_PROJECT_DIR}/...` paths — relative paths fail because the hook runs with session cwd, not the settings.json directory).
+
+Codex CLI — script lives at `~/.codex/skills/lead/scripts/check-hypothesis-disclosure.{sh,ps1}`. Add the recommended snippet from `~/.codex/AGENTS.md` ("Optional structural enforcement") to your `~/.codex/hooks.json` (or as `[hooks]` tables in `~/.codex/config.toml`). Note that Codex matchers are tool-name regex only with no `if`-style argument filter; the script self-filters by inspecting the bash command from the stdin envelope.
+
+The Bootstrap text rule remains binding on both platforms regardless of whether the hook is installed.
 
 When both packs are installed, keep shared project policies aligned across both files. The repository's dev overlays, `AGENTS.md` and `CLAUDE.md`, are for maintaining this monorepo and are not copied into target projects by the install scripts.
 

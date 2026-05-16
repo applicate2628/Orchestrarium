@@ -33,11 +33,31 @@ Treat `AGENTS.md` as the universal minimum contract for Codex work in a reposito
 >
 > These phrases are not banned in open exploration or hypothesis formation. They are banned **only** as the justification for a commit. When one appears in that position, name it, treat the underlying claim as a HYPOTHESIS, and apply steps 1-5.
 
-### Optional structural enforcement (Claude Code clients)
+### Optional structural enforcement
 
-The Claude pack of this repository ships an opt-in hook script at `.claude/agents/scripts/check-hypothesis-disclosure.sh` (and `.ps1`) that machine-checks the HEAD commit message before a `git push` and blocks the push if a behavior-changing commit lacks `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers. Whitelisted commit types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked. The hook is documented in `src.claude/CLAUDE.md` and wired through `.claude/settings.json`.
+Codex CLI exposes a `PreToolUse` hook surface (stable feature `hooks`, default-on) that can intercept `Bash` tool calls and block them by returning a structured deny decision. The Codex pack ships an opt-in hook script at `~/.codex/skills/lead/scripts/check-hypothesis-disclosure.sh` (and `.ps1`) that machine-checks the HEAD commit message before a `git push`: behavior-changing commit types (`feat`/`fix`/`refactor`) must carry `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers in the commit body; whitelisted types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
 
-Codex CLI does not currently expose an analogous `PreToolUse` hook surface for shell commands, so the equivalent structural enforcement on the Codex side is **not yet available**. The text rule in the Bootstrap above remains binding regardless of platform; a Codex equivalent of the hook can be added when the Codex CLI runtime exposes a hookable shell layer. Until then, the Codex-side defense is the Bootstrap text plus the shared `Hypothesis disclosure discipline` rule in the merged `AGENTS.md`.
+Recommended `~/.codex/hooks.json` snippet (opt-in — the installer does not modify this file):
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash $HOME/.codex/skills/lead/scripts/check-hypothesis-disclosure.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Codex's `matcher` field is regex on the tool name only (no `if`-style argument filter like Claude Code has); the script self-filters by parsing `tool_input.command` from the stdin JSON envelope and exits 0 immediately on any command that is not `git push`. Both `~/.codex/hooks.json` and inline `[hooks]` tables in `~/.codex/config.toml` are supported; project-local `<repo>/.codex/hooks.json` is also supported but requires the project to be trusted. The Bootstrap text rule above remains binding regardless of whether the hook is installed.
 
 ## Default delegation entry point
 
