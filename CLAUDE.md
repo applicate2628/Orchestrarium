@@ -71,11 +71,12 @@ references-claude/       ← Claude-specific addenda + compatibility pointers fo
 src.gemini/              ← Gemini provider-pack source tree
 src.claude/              ← Claude Code pack source (install copies to target .claude/)
   CLAUDE.md              ← product governance (installed to users)
-  agents/                ← 33 role definitions
+  agents/                ← role definitions + delegate-style common-skill wrappers
     contracts/           ← operating model + subagent contracts + policy catalog
     team-templates/      ← 8 routing templates (JSON)
     scripts/             ← validation + safety scripts
-  commands/              ← 19 skills (slash commands)
+  commands/              ← slash commands (agents-*)
+  skills/                ← common skills (workflow-focused, Skill-tool invokable)
 .claude/                 ← local working install (in .gitignore, NOT committed)
 CLAUDE.md                ← THIS FILE (repo-local dev rules, NOT installed)
 RELEASE_NOTES.md         ← canonical tracked release log for release-relevant changes

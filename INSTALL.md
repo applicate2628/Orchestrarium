@@ -182,14 +182,17 @@ project/
     agents/
   .agents/
     .agents-mode.yaml
-    skills/
+    skills/                ← role skills + common skills (e.g. windows-gui-manual-testing/, mathtype-book-page/)
   .claude/
     .agents-mode.yaml
     AGENTS.md
     CLAUDE.md
+    agents/                ← role subagent definitions + delegate-style common-skill wrappers
+    commands/
+    skills/                ← common skills reachable via the Skill tool from main conv and subagents
 ```
 
-Explicit Gemini or Qwen example installs add their provider-native files and extension directories on top of that production baseline.
+Explicit Gemini or Qwen example installs add their provider-native files and extension directories on top of that production baseline. Their common-skill payload is materialized under `.gemini/extensions/orchestrarium-gemini/skills/` and the equivalent Qwen extension path.
 
 Reference directories are development-only and are not installed:
 

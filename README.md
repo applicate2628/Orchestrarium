@@ -137,6 +137,22 @@ If a repo-local lane policy explicitly asks for consultant input at closeout, it
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 
+## Common skills
+
+In addition to roles, the pack ships **common skills** — workflow-focused capabilities that any role or the main conversation can invoke when the skill's description matches the current task. They package reusable methodology, gates, and evidence requirements without owning delivery.
+
+Two archetypes:
+- **Knowledge-style** — loaded into the caller's current context to inform how the caller performs the work.
+- **Delegate-style** — additionally spawnable as a fresh-context subagent that executes the workflow and returns one self-contained artifact.
+
+The governance index and runtime layout are defined in [`shared/AGENTS.shared.md`](shared/AGENTS.shared.md) under `## Common skills`. Each provider source tree carries its native form under `src.<provider>/skills/<name>/`, and Claude delegate-style skills additionally register a thin Agent-tool wrapper at `src.claude/agents/<name>.md`.
+
+Currently shipped:
+- `$windows-gui-manual-testing` — delegate-style; Qt and native Windows desktop GUI manual visual verification with screen capture and theme/state evidence.
+- `$analyzing-video-bugs` — knowledge-style; frame extraction, scene-change detection, and dense sampling for any UI/animation/layout bug video.
+- `$bug-hunting` — knowledge-style; systematic runtime-bug investigation via diagnostic logging.
+- `$mathtype-book-page` — knowledge-style; bring translated technical-book DOCX pages to accepted MathType format.
+
 ## References and maintenance
 
 - `shared/references/` contains the shared cross-provider design core that current and future provider packs can reuse.
