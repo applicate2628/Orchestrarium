@@ -263,6 +263,7 @@ Do not advance work on optimism or partial acceptance.
 - `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - Be conservative with write-heavy work. Parallel edits are acceptable only when write scopes and contracts are already fixed.
 - Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.
+- **Subagent thread-limit discipline**: in-session subagent fan-out is bounded by the runtime; assume a practical limit of four concurrent in-session agents unless the runtime explicitly reports a higher available limit. Before spawning a new in-session agent, check whether existing agents are still needed and close completed or parked ones once their result is accepted. If more than four independent lanes are useful, run only the top-priority four in-session and route extra lanes through external CLI tools, provider CLIs, scripts, or sequential execution; a spawn that fails with a thread-limit error is not a retry trigger but a re-plan signal. Report reduced fan-out in the session log when the original workflow expected more parallel agents.
 - If merge or coordination cost is likely to exceed the benefit, do not parallelize.
 
 ## Governance rule

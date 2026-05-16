@@ -39,6 +39,7 @@ description: "Design from accepted research: architecture, APIs, data, security,
 - Name the modules or contracts that should remain untouched if the design is followed correctly.
 - Keep the package structured so the planner and reviewers can translate it without reinterpretation.
 - Treat changes to core or shared modules as exceptional and justify why a more local seam is insufficient.
+- For non-foundation features in the design, require a single feature gate at the owning module's boundary (settings model or capability registry), not scattered consumer-side conditionals. Disabled state must be fully inert across every reachable surface — UI, command palette, hotkeys, deep links, IPC, background watchers, persistence writes — and the design must define what happens to persisted state when the feature is removed, renamed, split, or default-flipped.
 - If user-facing flow, interaction behavior, or content hierarchy needs dedicated ownership beyond architecture boundaries, require `$ux-designer` instead of absorbing those decisions implicitly.
 
 ## Adjacent findings protocol

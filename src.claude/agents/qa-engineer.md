@@ -35,6 +35,7 @@ description: Verify an approved phase against its acceptance criteria and test s
 - Add or update tests when the phase lacks the planned coverage.
 - Treat regressions in nominally unrelated but plan-adjacent surfaces as first-class findings, not incidental noise.
 - Return `BLOCKED` when required performance evidence is missing for a performance-sensitive phase.
+- For systematic runtime-bug investigation during QA, invoke `$bug-hunting` to load diagnostic-logging discipline. Route video evidence through `$windows-gui-manual-testing` (parent workflow) and `$analyzing-video-bugs` (frame extraction) rather than reading raw video files.
 
 ## Bug registry
 

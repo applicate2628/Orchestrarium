@@ -34,6 +34,7 @@ description: Implement approved build and toolchain phases without drifting into
 - Make compiler, SDK, package-manager, cache, and environment assumptions easy to review.
 - Separate build and packaging concerns from deployment and runtime platform concerns.
 - If the approved plan conflicts with the actual toolchain or build graph, stop and return the exact conflict instead of improvising.
+- When porting build, packaging, or tooling logic across languages or platforms (regex defaults, CSV/format parser strictness, shell quoting, encoding, default case sensitivity), apply the cross-platform/cross-language port discipline from shared governance: compare semantics of both source and destination primitives, reproduce source semantic explicitly at destination, and treat surface-syntax-only ports as defective until verified by a target-environment smoke test.
 
 ## Adjacent findings protocol
 

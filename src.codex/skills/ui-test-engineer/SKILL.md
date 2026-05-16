@@ -32,6 +32,7 @@ description: "Verify Qt UI: interactions, focus, high-DPI, themes, screenshots."
 - Prefer reproducible UI evidence over subjective polish comments.
 - Check the narrow Qt surface under review rather than the whole application.
 - Escalate broad usability or accessibility concerns to `$ux-reviewer` or `$accessibility-reviewer` instead of expanding scope.
+- Route visual evidence collection through `$windows-gui-manual-testing` for the broader workflow (theme/state context, screen capture when no recording exists, structural-vs-cosmetic classification) and through `$analyzing-video-bugs` for systematic frame extraction whenever video is involved.
 
 ## Non-goals
 
