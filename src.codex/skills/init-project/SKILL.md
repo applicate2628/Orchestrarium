@@ -59,7 +59,7 @@ Routing conventions (not persisted as keys):
    - Read the project's root `AGENTS.md` and check whether a `## Project policies` section already exists.
    - Read `.agents/.agents-mode.yaml` first.
    - If it is missing, read legacy `.agents/.agents-mode` as compatibility input only.
-   - If both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode` as compatibility input.
+   - If both local files are missing, fall back through pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale.
    - If either file exists, normalize it to the current canonical format before presenting or trusting the current values.
    - If any file exists, normalize the effective file to the current canonical format before presenting or trusting the current values.
    - Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file. If the effective config came from the global scope, use it as the starting point for the project-local review instead of pretending there was no prior state.
