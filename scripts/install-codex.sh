@@ -1037,9 +1037,12 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       echo "      Rerun with --no-hypothesis-hook to skip, or install Python and re-run." >&2
       exit 1
     fi
-    # OS-aware host-os flag. The Codex hook entry uses `bash <script>` shell
-    # form on both POSIX and Windows; on Windows under Git Bash the script
-    # path resolves POSIX-style and bash handles it natively.
+    # OS-aware host-os flag. On Windows the Codex hook entry uses
+    # `powershell.exe ... -File <.ps1>` to avoid the PATH gotcha where
+    # `bash` may resolve to the WSL launcher (System32\bash.exe) instead of
+    # Git Bash — WSL bash cannot resolve `C:\Users\...` paths and the entry
+    # silently fails. PowerShell.exe always resolves to one known system
+    # path with no PATH ambiguity. On POSIX, plain `bash <script.sh>` works.
     case "$(uname -s 2>/dev/null)" in
       MINGW*|MSYS*|CYGWIN*) hook_host_os="windows" ;;
       *) hook_host_os="posix" ;;
@@ -1049,8 +1052,12 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
     # AGENTS_ROOT is ~/.codex (global) or <project>/.agents (target) — skills
     # live under AGENTS_ROOT.
     hooks_target="$TARGET/hooks.json"
-    script_target="$AGENTS_ROOT/skills/lead/scripts/check-hypothesis-disclosure.sh"
-    echo "  Installing hypothesis-disclosure PreToolUse hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    if [ "$hook_host_os" = "windows" ]; then
+      script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.ps1"
+    else
+      script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.sh"
+    fi
+    echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
     "$python_cmd" "$hook_installer" \
       --target "$hooks_target" \
       --platform codex \

@@ -217,9 +217,9 @@ Customize each platform in the place that platform actually reads:
 - Configure consultant and external-dispatch preferences in `.agents/.agents-mode.yaml` for Codex or `.claude/.agents-mode.yaml` for Claude Code.
 - Shared design references in `shared/references/` are repository-maintainer documentation only; they are not copied into target projects and should not be treated as installed runtime docs.
 
-### Structural enforcement for Hypothesis disclosure (auto-installed)
+### Structural enforcement for Pre-fix bugfix discipline (auto-installed)
 
-Both Claude Code and Codex CLI expose `PreToolUse` hook surfaces; both packs ship the same hook script that machine-checks the HEAD commit message before `git push`. Behavior-changing commit types (`feat`/`fix`/`refactor`) must carry `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers in the body; whitelisted types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
+Both Claude Code and Codex CLI expose `PreToolUse` hook surfaces; both packs ship the same hook (Python brain `check-bugfix-discipline.py` plus thin `.sh`/`.ps1` wrappers). The hook catches the **most common pre-fix discipline violation**: the model is about to make a code-mutating tool call (`Edit`/`Write`/`NotebookEdit`/`apply_patch`) in response to a user message that contains a bug-report or change-request signal (e.g. `fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, `поменяй`, traceback, `Error:`), but did NOT first invoke `/agents-bugfix` or otherwise capture diagnostic data. The hook reads the session transcript from the PreToolUse envelope's `transcript_path`, detects bug-context + discipline-signal presence, and emits a structured `deny` payload when bug-context is detected without discipline.
 
 **The installer auto-installs the hook by default** in both `--global` and `--target <project>` modes via an idempotent JSON-merge that preserves all your other settings and hooks:
 
@@ -232,6 +232,8 @@ Opt out at install time with:
 - `bash scripts/install-codex.sh --global --no-hypothesis-hook` (or `-NoHypothesisHook` on PowerShell)
 - Set `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment before running any installer
 
+(The flag and env-var names retain the legacy "hypothesis-hook" prefix for back-compat with operators who already scripted them; the hook itself is now the bugfix-discipline guard.)
+
 To remove an already-installed hook entry without uninstalling the pack:
 
 ```bash
@@ -239,9 +241,13 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
 python scripts/install-hypothesis-hook.py --target ~/.codex/hooks.json --platform codex --script-path "" --remove
 ```
 
-Our entry is identified by the `check-hypothesis-disclosure` substring in the `command` field (or in `args[k]` for Claude's exec form). Re-running the installer is idempotent: it finds the entry by that marker and updates it in place rather than appending duplicates. **Scope of preservation:** the merge preserves every part of the file *outside* our entry — your other `PreToolUse` hooks, other hook lanes (e.g. `Stop`), and top-level user keys (env, attribution, permissions, enabledPlugins, model, theme) all survive byte-for-byte. **Scope of overwrite:** the merge does NOT preserve hand-edits *inside* our entry's `command`/`args` field — on every reinstall the matched entry is normalized back to the canonical bash form (Codex) or PowerShell/bash exec form (Claude). The marker enables clean re-identification across pack upgrades; it is not a license to keep a different command shape across reinstalls. To preserve a manual override of our entry, pass `--no-hypothesis-hook` (PowerShell: `-NoHypothesisHook`) on every future install or set `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment so the installer skips the hook step entirely; the opt-out does not block `--remove`.
+Our entry is identified by the `check-bugfix-discipline` substring in the `command` field (or in `args[k]` for Claude's exec form). Re-running the installer is idempotent: it finds the entry by that marker and updates it in place rather than appending duplicates. **Scope of preservation:** the merge preserves every part of the file *outside* our entry — your other `PreToolUse` hooks, other hook lanes (e.g. `Stop`), and top-level user keys (env, attribution, permissions, enabledPlugins, model, theme) all survive byte-for-byte. **Scope of overwrite:** the merge does NOT preserve hand-edits *inside* our entry's `command`/`args` field — on every reinstall the matched entry is normalized back to the canonical form. To preserve a manual override of our entry, pass `--no-hypothesis-hook` (PowerShell: `-NoHypothesisHook`) on every future install or set `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment so the installer skips the hook step entirely; the opt-out does not block `--remove`.
+
+**Per-turn override (no install change).** When you want to make a code edit in a non-bug context but the user message happens to contain a bug-trigger word (e.g. "fix this typo" — really a docs edit), put `[skip-bugfix-discipline]` in your assistant message acknowledging the override. The guard pulls back for the next turn only.
 
 **Codex-specific note: manual trust step required after install.** Codex marks every newly-installed or modified hook as "untrusted" by design; the entry is written to `hooks.json` but does not fire until you run `codex` interactively and trust it via the TUI. This is Codex's security model, not a limitation of the installer — Codex does not currently expose a programmatic trust API. After install: run `codex` once, open the hook browser (typically via the keystroke shown next to "Trust to view hooks; to trust"), and trust the entry. Claude Code does not require this step — Claude hooks fire immediately after install.
+
+**Codex+Windows note: PowerShell shell form.** The Codex hook entry on Windows uses `powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<abs-path>\check-bugfix-discipline.ps1'`. Explicit `powershell.exe` avoids a Windows PATH gotcha: on machines with WSL installed alongside Git Bash, `bash` may resolve to `C:\Windows\System32\bash.exe` (the WSL launcher) instead of Git Bash; WSL bash cannot resolve `C:\Users\...` paths and the entry silently failed on every Bash tool call. PowerShell.exe is unambiguous.
 
 Gemini and Qwen example packs do not auto-install the hook (their runtimes do not expose comparable `PreToolUse` hook surfaces). The Bootstrap text rule in the merged `AGENTS.md` remains binding on all platforms regardless of whether the hook is installed or trusted.
 

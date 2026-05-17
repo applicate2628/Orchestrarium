@@ -51,23 +51,36 @@ Platform-specific rules for Claude Code. Shared governance (hygiene, publication
 
 ### Structural enforcement (auto-installed)
 
-The pack ships a hook script that turns the Bootstrap into machine-checked structural enforcement on `git push`. The script lives at `.claude/agents/scripts/check-hypothesis-disclosure.sh` (Bash / Git Bash) and `.claude/agents/scripts/check-hypothesis-disclosure.ps1` (PowerShell). When wired as a Claude Code `PreToolUse` hook, it inspects the HEAD commit message and blocks the push if the commit type is behavior-changing (`feat`/`fix`/`refactor`) but the body lacks either a `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` marker. Whitelisted commit types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
+The pack ships a hook script that catches the **most common pre-fix discipline violation**: the model is about to make a code-mutating tool call (`Edit`/`Write`/`NotebookEdit`) in response to a user message that contains a bug-report or change-request signal (e.g. `fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, `поменяй`, traceback, `Error:`, etc.), but the model did NOT first invoke `/agents-bugfix` or otherwise capture diagnostic data. This is the recurring failure mode where the model jumps to the first hypothesis and starts editing without verification.
 
-**The installer auto-installs the hook by default.** Both `scripts/install-claude.sh --global` and `scripts/install-claude.sh --target <project>` merge the hook entry into `settings.json` (idempotent JSON-merge that preserves all your other keys and other PreToolUse hooks). Opt out at install time with `--no-hypothesis-hook` or by setting `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment. To remove an already-installed entry: `python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --script-path <ignored-for-remove> --remove`.
+The hook entry point is `.claude/agents/scripts/check-bugfix-discipline.sh` (Bash) and `.claude/agents/scripts/check-bugfix-discipline.ps1` (PowerShell) — thin wrappers around the python brain `.claude/agents/scripts/check-bugfix-discipline.py`. When wired as a `PreToolUse` hook with matcher `Edit|Write|NotebookEdit|apply_patch`, it reads the PreToolUse JSON envelope's `transcript_path`, parses the recent JSONL transcript, and:
 
-The auto-installed entry uses this shape (Bash form, works on macOS, Linux, and Windows under Git Bash):
+- If the last user message contains no bug-trigger phrase → exit 0 (allow; not a bug context).
+- If the last user message contains the override marker `[skip-bugfix-discipline]` → exit 0 (allow; user explicitly opted out).
+- If the current turn (everything after the last user message) shows discipline signals (`/agents-bugfix` invocation, `agents-bugfix` skill load, text containing `diagnostic`/`hypothesis`/`reproducing`/`VERIFIED:`) → exit 0 (allow; model is following the flow).
+- Otherwise → emit a structured `permissionDecision: "deny"` JSON payload telling the model exactly how to comply (invoke skill, capture diagnostic data, or use override marker).
+
+**The installer auto-installs the hook by default.** Both `scripts/install-claude.sh --global` and `scripts/install-claude.sh --target <project>` merge the hook entry into `settings.json` (idempotent JSON-merge that preserves all your other keys and other PreToolUse hooks). Opt out at install time with `--no-hypothesis-hook` (legacy flag name kept for back-compat) or by setting `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment. To remove an already-installed entry: `python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --script-path <ignored-for-remove> --remove`.
+
+The auto-installed entry uses this shape (Windows exec form using PowerShell; POSIX uses `bash` instead):
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Edit|Write|NotebookEdit|apply_patch",
         "hooks": [
           {
             "type": "command",
-            "if": "Bash(git push *)",
-            "command": "bash $HOME/.claude/agents/scripts/check-hypothesis-disclosure.sh"
+            "command": "powershell",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-bugfix-discipline.ps1"
+            ]
           }
         ]
       }
@@ -78,11 +91,13 @@ The auto-installed entry uses this shape (Bash form, works on macOS, Linux, and 
 
 Path resolution notes:
 
-- The `command` field uses `$HOME/...` (or `~/...`) tilde expansion, which Claude Code passes through to the shell. Relative paths like `.claude/agents/scripts/...` are unreliable because the hook runs with the session's current working directory, not the directory of `settings.json` — see the [Hooks path placeholders](https://code.claude.com/docs/en/hooks.md#path-placeholders) docs.
-- For project-local hooks (script lives at `<repo>/.claude/agents/scripts/...`), use `${CLAUDE_PROJECT_DIR}/.claude/agents/scripts/check-hypothesis-disclosure.sh` instead.
-- Windows-side equivalent uses the PowerShell variant: `powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\.claude\agents\scripts\check-hypothesis-disclosure.ps1"` for global, or `powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PROJECT_DIR}\.claude\agents\scripts\check-hypothesis-disclosure.ps1"` for project-local.
+- The script-path in `args` is an absolute path; relative paths like `.claude/agents/scripts/...` are unreliable because the hook runs with the session's current working directory, not the directory of `settings.json` — see the [Hooks path placeholders](https://code.claude.com/docs/en/hooks.md#path-placeholders) docs.
+- For project-local hooks (script lives at `<repo>/.claude/agents/scripts/...`), use `${CLAUDE_PROJECT_DIR}\.claude\agents\scripts\check-bugfix-discipline.ps1` instead.
+- POSIX exec form uses `command: "bash", args: ["<abs-path>/check-bugfix-discipline.sh"]`.
 
-The hook's `if: "Bash(git push *)"` permission-rule filter ensures the hook only fires on actual push attempts, not on every Bash invocation.
+The matcher `Edit|Write|NotebookEdit|apply_patch` (regex on tool name) covers Claude's code-mutating tools plus Codex's `apply_patch`. The hook fires on every code edit; the script self-filters on bug-context detected from the transcript, so non-bug edits pass through with one cheap transcript-read.
+
+**Bypass is by design.** The override marker `[skip-bugfix-discipline]` in your message disables the guard for the next turn. The hook catches "model jumped to edit without thinking", not "model wrote false discipline markers" — for the latter, real review is the only defence. The text rule in the Bootstrap above remains binding regardless of whether the hook is installed.
 
 The Bootstrap text rule above remains binding regardless of whether the hook is installed; the hook is the structural backstop for sessions where the text rule alone is insufficient.
 

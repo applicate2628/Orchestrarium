@@ -25,7 +25,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK_INSTALLER = REPO_ROOT / "scripts" / "install-hypothesis-hook.py"
-SCRIPT_PATH = "/tmp/check-hypothesis-disclosure.sh"
+SCRIPT_PATH = "/tmp/check-bugfix-discipline.sh"
 
 
 def run_installer(
@@ -79,10 +79,14 @@ class TestInstallHypothesisHook(unittest.TestCase):
         # Claude POSIX = exec form (args array, no shell interpretation)
         self.assertEqual(hook["command"], "bash")
         self.assertEqual(hook["args"], [SCRIPT_PATH])
-        self.assertEqual(hook["if"], "Bash(git push *)")
+        # Matcher fires on code-mutating tool calls (script self-filters on
+        # bug-context from session transcript). No `if` filter anymore — the
+        # decision lives inside the script, not in the hook permission rule.
+        self.assertEqual(data["hooks"]["PreToolUse"][0]["matcher"], "Edit|Write|NotebookEdit|apply_patch")
+        self.assertNotIn("if", hook)
 
     def test_install_claude_windows_powershell_exec_form(self) -> None:
-        ps1_path = "C:\\Users\\test\\.claude\\agents\\scripts\\check-hypothesis-disclosure.ps1"
+        ps1_path = "C:\\Users\\test\\.claude\\agents\\scripts\\check-bugfix-discipline.ps1"
         result = run_installer(self.target, host_os="windows", script_path=ps1_path)
         self.assertEqual(result.returncode, 0, result.stderr)
         data = load_json(self.target)
@@ -92,6 +96,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(hook["args"][:4], ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
         self.assertEqual(hook["args"][4], ps1_path)
         self.assertNotIn("bash", hook["command"])
+        self.assertNotIn("if", hook)
 
     def test_install_codex_posix_shell_form(self) -> None:
         result = run_installer(self.target, platform="codex")
@@ -103,25 +108,30 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertIn("bash", hook["command"])
         self.assertIn(SCRIPT_PATH, hook["command"])
 
-    def test_codex_windows_writes_entry_with_bash_form(self) -> None:
-        # Codex+Windows now writes the hook entry in bash shell form (assumes
-        # Git Bash is on PATH for the Codex hook interpreter, typical on
-        # Windows Codex setups). The trust step remains the user's manual
-        # responsibility via the codex TUI; the installer cannot trust hooks
-        # programmatically. Verify the entry is written and uses the same
-        # bash form as POSIX (no powershell command string for Codex).
-        sh_path = SCRIPT_PATH  # .sh path even on Windows host
-        result = run_installer(self.target, platform="codex", host_os="windows", script_path=sh_path)
+    def test_codex_windows_writes_entry_with_powershell_form(self) -> None:
+        # Codex+Windows writes the hook entry in powershell.exe shell form.
+        # Explicit powershell.exe avoids the Windows PATH gotcha where `bash`
+        # may resolve to the WSL launcher (C:\Windows\System32\bash.exe)
+        # instead of Git Bash; WSL bash cannot resolve C:\Users\... paths
+        # and the entry silently failed on every Bash tool call in earlier
+        # designs. PowerShell.exe always resolves to one known system path.
+        # Trust step remains the user's manual responsibility via the
+        # codex TUI; the installer cannot trust hooks programmatically.
+        ps1_path = "C:\\Users\\test\\.codex\\skills\\lead\\scripts\\check-bugfix-discipline.ps1"
+        result = run_installer(self.target, platform="codex", host_os="windows", script_path=ps1_path)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.target.exists(), "Codex+Windows must write hooks.json entry")
         data = load_json(self.target)
         hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
         # Codex shell form (no args, just command string)
         self.assertNotIn("args", hook)
-        self.assertIn("bash", hook["command"])
-        # No powershell form for Codex (that was an earlier hypothesis-driven attempt)
-        self.assertNotIn("powershell", hook["command"])
-        self.assertIn(SCRIPT_PATH, hook["command"])
+        # Powershell.exe form, not bash
+        self.assertIn("powershell.exe", hook["command"])
+        self.assertIn("-NoProfile", hook["command"])
+        self.assertIn("-ExecutionPolicy Bypass", hook["command"])
+        self.assertIn("-File", hook["command"])
+        self.assertIn("check-bugfix-discipline", hook["command"])
+        self.assertNotIn(" bash ", " " + hook["command"] + " ")
 
     def test_codex_windows_remove_works(self) -> None:
         # Removal must work the same way on Codex+Windows as on POSIX.
@@ -170,7 +180,7 @@ class TestInstallHypothesisHook(unittest.TestCase):
         our_hook = data["hooks"]["PreToolUse"][1]["hooks"][0]
         # Exec form: marker lives in args[0], not in command.
         self.assertEqual(our_hook["command"], "bash")
-        self.assertIn("check-hypothesis-disclosure", our_hook["args"][0])
+        self.assertIn("check-bugfix-discipline", our_hook["args"][0])
         self.assertEqual(data["hooks"]["Stop"], [{"hooks": [{"type": "command", "command": "echo stop"}]}])
 
     def test_duplicates_collapsed_on_install(self) -> None:

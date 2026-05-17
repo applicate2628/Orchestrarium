@@ -55,13 +55,12 @@
 
 Для coding agents single-pass equivalent такой: прочитать код, проверить claim, сказать, что confirmed, и отметить, что не проверялось. Multi-pass pipeline нужен для production systems, где цена неправильного ответа оправдывает несколько verification passes.
 
-Для code-bearing работы дисциплина срабатывает в трёх structural enforcement points:
+Для code-bearing работы дисциплина срабатывает в двух enforcement points:
 
-1. **Pre-fix** — до первого code-mutating tool call в bug-report контексте должны завершиться шаги 1-3 Bootstrap (capture observable data → form hypothesis → verify each link); это `Pre-fix diagnostic gate` rule выше, и Bootstrap-блоки в каждом паке операционализируют его как "pre-fix trigger moment".
-2. **Pre-commit** — до авторинга коммита, который fixes/alters behavior, должны завершиться все 5 шагов Bootstrap (четыре диагностических шага плюс Recovery readiness), и commit message должен раскрыть verified hypothesis chain.
-3. **Pre-push** — auto-installed `check-hypothesis-disclosure` PreToolUse hook gates `git push`: behavior-changing commit types (`feat`/`fix`/`refactor`) должны нести `VERIFIED:` или `ASSUMPTION (UNVERIFIED)` маркер в теле, иначе push отклоняется со structured reason.
+1. **Pre-fix (text rule + auto-installed structural hook)** — до первого code-mutating tool call (`Edit`/`Write`/`NotebookEdit`/`apply_patch`) в bug-report контексте должны завершиться шаги 1-3 Bootstrap (capture observable data → form hypothesis → verify each link). Text rule — это `Pre-fix diagnostic gate` rule выше. Structural backstop — auto-installed `check-bugfix-discipline` PreToolUse hook: читает session transcript из PreToolUse envelope, детектирует содержит ли last user message bug-trigger phrase (`fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, `поменяй`, traceback, `Error:` и т.п.), и отклоняет edit если в текущем turn'е нет discipline signals (нет `/agents-bugfix` invocation, нет captured diagnostic data, нет stated hypothesis). Пользователь может override на один turn маркером `[skip-bugfix-discipline]` если trigger — false positive (например "fix this typo" — на самом деле docs edit).
+2. **Pre-commit (text rule only)** — до авторинга коммита, который fixes/alters behavior, должны завершиться все 5 шагов Bootstrap (четыре диагностических шага плюс Recovery readiness), и commit message должен раскрыть verified hypothesis chain. Machine check здесь нет; модель должна следовать text rule самостоятельно.
 
-Три точки вместе делают одну и ту же evidence-citation discipline auditable на каждом уровне необратимости действия — зря потраченные edit cycles ловятся на pre-fix, зря потраченные коммиты на pre-commit, зря потраченные shared-state writes на pre-push.
+Structural hook намеренно срабатывает на pre-fix moment, не на git push: hypothesis-discipline это про *мышление перед edit'ом*, что выше любого publication mechanism. Привязка structural check к `git push` (ранний дизайн который мы удалили) была бы theatre — к моменту push'а unverified-hypothesis edit уже произошёл и harm уже нанесён. Catching на edit time — это то, что реально предотвращает wasted work.
 
 ## Термины и сокращения
 

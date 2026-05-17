@@ -902,14 +902,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
     case "$(uname -s 2>/dev/null)" in
       MINGW*|MSYS*|CYGWIN*)
         hook_host_os="windows"
-        script_target="$TARGET/agents/scripts/check-hypothesis-disclosure.ps1"
+        script_target="$TARGET/agents/scripts/check-bugfix-discipline.ps1"
         ;;
       *)
         hook_host_os="posix"
-        script_target="$TARGET/agents/scripts/check-hypothesis-disclosure.sh"
+        script_target="$TARGET/agents/scripts/check-bugfix-discipline.sh"
         ;;
     esac
-    echo "  Installing hypothesis-disclosure PreToolUse hook (host-os=$hook_host_os)..."
+    echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os)..."
     "$python_cmd" "$hook_installer" \
       --target "$settings_target" \
       --platform claude \

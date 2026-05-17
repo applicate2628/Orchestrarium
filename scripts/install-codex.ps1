@@ -1026,14 +1026,17 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
             exit 1
         }
         # PowerShell installer runs on Windows by definition. Codex hook entry
-        # uses `bash <script.sh>` shell form (assumes Git Bash is on PATH for
-        # the Codex hook interpreter — typical on Windows Codex setups). User
-        # must run `codex` interactively after install and trust the hook via
-        # TUI before it fires — Codex marks newly-installed hooks as untrusted
-        # by design, and the installer cannot trust them programmatically.
+        # uses native `powershell.exe ... -File <.ps1>` invocation — explicit
+        # powershell.exe avoids the Windows PATH gotcha where `bash` may
+        # resolve to the WSL launcher (System32\bash.exe) instead of Git
+        # Bash; WSL bash cannot resolve `C:\Users\...` paths and the entry
+        # silently failed on every Bash tool call. User must run `codex`
+        # interactively after install and trust the hook via TUI before it
+        # fires — Codex marks newly-installed hooks as untrusted by design,
+        # and the installer cannot trust them programmatically.
         $HooksTarget = Join-Path $TargetRoot "hooks.json"
-        $ScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-hypothesis-disclosure.sh"
-        Write-Host "  Installing hypothesis-disclosure PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
+        $ScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-bugfix-discipline.ps1"
+        Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
         & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-path $ScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"

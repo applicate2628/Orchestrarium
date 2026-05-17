@@ -51,28 +51,35 @@ Treat `AGENTS.md` as the universal minimum contract for Codex work in a reposito
 
 ### Structural enforcement (auto-installed)
 
-Codex CLI exposes a `PreToolUse` hook surface (stable feature `hooks`, default-on) that can intercept `Bash` tool calls and block them by returning a structured deny decision. The Codex pack ships a hook script at `~/.codex/skills/lead/scripts/check-hypothesis-disclosure.sh` (and `.ps1`) that machine-checks the HEAD commit message before a `git push`: behavior-changing commit types (`feat`/`fix`/`refactor`) must carry `VERIFIED:` or `ASSUMPTION (UNVERIFIED)` markers in the commit body; whitelisted types (`docs`/`chore`/`style`/`merge`/`ci`/`build`/`perf`/`test`/`revert`) pass through unchecked.
+Codex CLI exposes a `PreToolUse` hook surface (stable feature `hooks`, default-on) that can intercept tool calls and block them with a structured deny decision. The Codex pack ships a hook that catches the **most common pre-fix discipline violation**: the model is about to make a code-mutating tool call (`apply_patch`) in response to a user message that contains a bug-report or change-request signal (e.g. `fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, `поменяй`, traceback, `Error:`), but did NOT first invoke `/agents-bugfix` or otherwise capture diagnostic data. This is the recurring failure mode where the model jumps to the first hypothesis and starts editing without verification.
 
-**The installer auto-installs the hook entry by default on all platforms** into `~/.codex/hooks.json` (`--global`) or `<project>/.codex/hooks.json` (`--target`). The JSON-merge is idempotent and preserves all other user keys and other hooks. Opt out with `--no-hypothesis-hook` flag or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment.
+Hook entry points: `~/.codex/skills/lead/scripts/check-bugfix-discipline.sh` (POSIX) and `~/.codex/skills/lead/scripts/check-bugfix-discipline.ps1` (Windows) — thin wrappers around the python brain `~/.codex/skills/lead/scripts/check-bugfix-discipline.py`. When fired, the script reads the PreToolUse JSON envelope's `transcript_path`, parses the recent JSONL transcript, and:
 
-**Manual trust step required (Codex security model).** Unlike Claude Code, Codex marks every newly-installed or modified hook as **untrusted** by design — the hook entry is written to `hooks.json` but it does **not fire** until the user reviews and trusts it via the interactive `codex` TUI. After install (or any pack upgrade that updates the hook), run `codex` once interactively, open the hook browser (per the on-screen prompt — typically the keystroke shown next to "Trust to view hooks; to trust; to toggle"), and trust the entry. Until this step is done, the hook stays visible-but-inactive and `codex exec` will skip it silently. The installer cannot perform this step programmatically because Codex does not currently expose a trust API — only managed-hook bundles (typically MDM-deployed via `requirements.toml` with `managed_dir` / `windows_managed_dir`) bypass the trust prompt, and those are out of scope for a pack-level installer.
+- If the last user message contains no bug-trigger phrase → exit 0 (allow; not a bug context).
+- If the last user message contains the override marker `[skip-bugfix-discipline]` → exit 0 (allow; user explicitly opted out).
+- If the current turn shows discipline signals (`/agents-bugfix` invocation, `agents-bugfix` skill load, text containing `diagnostic`/`hypothesis`/`reproducing`/`VERIFIED:`) → exit 0 (allow).
+- Otherwise → emit a structured `permissionDecision: "deny"` payload telling the model how to comply.
 
-**Windows hook command shape.** On Windows, the hook entry uses `bash <script.sh>` shell form (no `args` field — Codex hooks don't support `args`). This assumes the Codex hook interpreter on Windows can locate `bash` on PATH, which is the typical setup when Git Bash is installed alongside Codex. If your Codex runtime uses a different shell, you have two options. **(1) Recommended:** keep the canonical entry and re-point `bash` on PATH at your preferred shell. **(2) Manual override:** edit `~/.codex/hooks.json` to match your shell, then either pass `--no-hypothesis-hook` (PowerShell: `-NoHypothesisHook`) on every future install/upgrade, or set `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in your environment so the installer skips this step entirely. Without an opt-out, the installer's idempotent merge keys on the `check-hypothesis-disclosure` substring marker only to *identify* the pack's entry — it then **normalizes the entry back to the canonical `bash <script.sh>` form** on next install, so a hand-edited command shape will not survive a reinstall. The marker enables clean identification across upgrades and prevents duplicate entries; it does not preserve user edits.
+**The installer auto-installs the hook entry by default on all platforms** into `~/.codex/hooks.json` (`--global`) or `<project>/.codex/hooks.json` (`--target`). The JSON-merge is idempotent and preserves all other user keys. Opt out with `--no-hypothesis-hook` (legacy flag kept for back-compat) or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment.
+
+**Manual trust step required (Codex security model).** Unlike Claude Code, Codex marks every newly-installed or modified hook as **untrusted** by design — the hook entry is written to `hooks.json` but does **not fire** until the user reviews and trusts it via the interactive `codex` TUI. After install (or any pack upgrade that changes the hook script or hooks.json command), run `codex` once interactively, open the hook browser (per the on-screen prompt — typically the keystroke shown next to "Trust to view hooks; to trust; to toggle"), and trust the entry. Until this step is done the hook stays visible-but-inactive and `codex exec` skips it silently.
+
+**Windows hook command shape.** On Windows, the hook entry uses `powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<abs-path>\check-bugfix-discipline.ps1'` — explicit `powershell.exe` avoids the Windows PATH gotcha where `bash` may resolve to the WSL launcher (`C:\Windows\System32\bash.exe`) instead of Git Bash. WSL bash cannot resolve `C:\Users\...` paths, so a `bash 'C:\...'` form silently failed on default Windows installs that have WSL installed alongside Git Bash. POSIX hosts use `bash <abs-path>/check-bugfix-discipline.sh`.
 
 To remove an already-installed entry: `python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform codex --host-os posix --script-path <ignored-for-remove> --remove`.
 
-The auto-installed entry has this shape:
+The auto-installed entry on Windows has this shape:
 
 ```json
 {
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Edit|Write|NotebookEdit|apply_patch",
         "hooks": [
           {
             "type": "command",
-            "command": "bash $HOME/.codex/skills/lead/scripts/check-hypothesis-disclosure.sh"
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\\Users\\<you>\\.codex\\skills\\lead\\scripts\\check-bugfix-discipline.ps1'"
           }
         ]
       }
@@ -81,7 +88,9 @@ The auto-installed entry has this shape:
 }
 ```
 
-Codex's `matcher` field is regex on the tool name only (no `if`-style argument filter like Claude Code has); the script self-filters by parsing `tool_input.command` from the stdin JSON envelope and exits 0 immediately on any command that is not `git push`. Both `~/.codex/hooks.json` and inline `[hooks]` tables in `~/.codex/config.toml` are supported; project-local `<repo>/.codex/hooks.json` is also supported but requires the project to be trusted. The Bootstrap text rule above remains binding regardless of whether the hook is installed.
+Codex's `matcher` field is regex on tool name only (no `if`-style argument filter like Claude Code has); the script self-filters on transcript-derived bug-context rather than on tool-input. Both `~/.codex/hooks.json` and inline `[hooks]` tables in `~/.codex/config.toml` are supported; project-local `<repo>/.codex/hooks.json` is also supported but requires the project to be trusted.
+
+**Bypass is by design.** The override marker `[skip-bugfix-discipline]` in your message disables the guard for the next turn. The hook catches "model jumped to edit without thinking", not "model wrote false discipline markers" — the latter is review territory. The Bootstrap text rule above remains binding regardless of whether the hook is installed or trusted.
 
 ## Default delegation entry point
 

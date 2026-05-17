@@ -58,7 +58,14 @@ from typing import Any
 # Substring that identifies our hook entry inside an existing settings.json.
 # Any PreToolUse entry whose hooks list contains a command with this substring
 # is treated as "ours" for idempotent update/replace.
-SCRIPT_MARKER = "check-hypothesis-disclosure"
+SCRIPT_MARKER = "check-bugfix-discipline"
+
+# Matcher regex covers Claude's code-mutating tools + Codex's apply_patch.
+# Per Claude Code hooks-reference, `matcher` is a regex on tool name; per
+# Codex hooks docs, same. The single regex covers both platforms cleanly.
+# This hook fires on every code edit; the script self-filters on bug-context
+# detected from the session transcript.
+TOOL_MATCHER_REGEX = "Edit|Write|NotebookEdit|apply_patch"
 
 
 def build_claude_entry(script_path: str, host_os: str) -> dict[str, Any]:
@@ -74,14 +81,18 @@ def build_claude_entry(script_path: str, host_os: str) -> dict[str, Any]:
     Windows host: `command: "powershell", args: [-NoProfile, -ExecutionPolicy,
     Bypass, -File, <ps1_path>]` — native PowerShell invocation without any
     Git Bash dependency.
+
+    The matcher regex (Edit|Write|NotebookEdit|apply_patch) fires on every
+    code-mutating tool call; the script's first action is to inspect the
+    PreToolUse envelope's `transcript_path` for bug-context signals and
+    decide whether to allow or deny.
     """
     if host_os == "windows":
         return {
-            "matcher": "Bash",
+            "matcher": TOOL_MATCHER_REGEX,
             "hooks": [
                 {
                     "type": "command",
-                    "if": "Bash(git push *)",
                     "command": "powershell",
                     "args": [
                         "-NoProfile",
@@ -94,11 +105,10 @@ def build_claude_entry(script_path: str, host_os: str) -> dict[str, Any]:
             ],
         }
     return {
-        "matcher": "Bash",
+        "matcher": TOOL_MATCHER_REGEX,
         "hooks": [
             {
                 "type": "command",
-                "if": "Bash(git push *)",
                 "command": "bash",
                 "args": [script_path],
             }
@@ -115,27 +125,38 @@ def build_codex_entry(script_path: str, host_os: str) -> dict[str, Any]:
     default shell. shlex.quote() defends against metacharacter injection in
     the script path.
 
-    Both POSIX and Windows emit `bash <quoted_sh_path>` (script_path should be
-    POSIX-style; on Windows Git Bash this means `/c/Users/.../check.sh`). This
-    keeps shlex.quote correct (POSIX shell quoting matches the bash interpreter)
-    and the same code path works on both. The `host_os` parameter is currently
-    accepted for symmetry with build_claude_entry() but does not change the
-    Codex emission shape; if a future Codex release documents native PowerShell
-    invocation, the Windows branch can diverge then.
+    POSIX host: `bash <quoted_sh_path>`.
+    Windows host: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
+    <quoted_ps1_path>` — explicit `powershell.exe` avoids the Windows PATH
+    gotcha where `bash` may resolve to the WSL launcher (`C:\\Windows\\System32
+    \\bash.exe`) instead of Git Bash. WSL bash cannot resolve `C:\\Users\\...`
+    paths, so the previous bash-first form silently broke on default Windows
+    installs that have WSL installed alongside Git Bash. PowerShell.exe always
+    resolves to a single known system path with no PATH ambiguity.
 
-    Codex matchers do not support the `if` permission-rule filter; the script
-    self-filters by parsing tool_input.command for "git push".
+    Codex matchers do not support the Claude-style `if` permission-rule
+    filter; the script self-filters on bug-context detected from the
+    PreToolUse envelope's transcript_path.
 
-    Note: Codex marks newly-written hook entries as "untrusted"; the user must
-    run `codex` interactively at least once and trust the hook via the TUI
-    before it fires. This installer writes the entry; trust is the user's
-    responsibility (Codex does not currently expose a programmatic trust API).
+    Note: Codex marks newly-written hook entries as "untrusted"; the user
+    must run `codex` interactively at least once and trust the hook via the
+    TUI before it fires. This installer writes the entry; trust is the
+    user's responsibility (Codex does not currently expose a programmatic
+    trust API).
     """
-    del host_os  # currently unused for Codex; both POSIX and Windows take bash form
-    quoted = shlex.quote(script_path)
-    command_str = f"bash {quoted}"
+    if host_os == "windows":
+        # Native PowerShell on Windows — single-quote the script path so any
+        # space in $HOME or path component is interpreted as part of the
+        # filename, not as a flag boundary. PowerShell parses single-quoted
+        # strings literally with no further escaping.
+        command_str = (
+            f"powershell.exe -NoProfile -ExecutionPolicy Bypass -File '{script_path}'"
+        )
+    else:
+        quoted = shlex.quote(script_path)
+        command_str = f"bash {quoted}"
     return {
-        "matcher": "Bash",
+        "matcher": TOOL_MATCHER_REGEX,
         "hooks": [
             {
                 "type": "command",
