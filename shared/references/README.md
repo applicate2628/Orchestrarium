@@ -19,6 +19,8 @@ Exact operational instructions belong in the root repository docs and the corres
 
 Cross-provider dispatch invariants may be named here at design level. For example, provider-backed external CLI launches treat substantive prompt payloads as file-based inputs; exact provider commands and shell syntax stay in runtime pack docs.
 
+Repo-wide source-tree organization rules may also name pack-source-tree paths when the path identity itself is the governed exception (e.g. a grandfathered co-located directory preserved for a documented design constraint such as user-copy/install-script convenience). Exact runtime commands, install runbooks, and CLI invocation syntax still stay in root and pack docs per the rules above; only the path-as-named-exception is in scope here.
+
 For exact provider runtime layout differences such as `global` vs `local` install roots, instruction entrypoints, and native command or extension directories, keep that reference outside `shared/references/`; the current canonical runtime-layout note lives in [`docs/provider-runtime-layouts.md`](../../docs/provider-runtime-layouts.md).
 
 Provider-specific reference trees such as `references-codex/` and `references-claude/` should keep only provider-specific material plus thin compatibility pointers when an older path must remain stable for existing links, reports, or notes.
