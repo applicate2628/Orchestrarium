@@ -67,7 +67,7 @@
     {
       "name": "externalCodexProfile",
       "default": "gpt-5.5-xhigh",
-      "allowed": ["default", "gpt-5.5-fast", "gpt-5.5-xhigh"]
+      "allowed": ["default", "gpt-5.5-fast", "gpt-5.5-xhigh", "gpt-5.3-codex-spark"]
     },
     {
       "name": "externalClaudeProfile",

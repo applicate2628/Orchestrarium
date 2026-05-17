@@ -155,7 +155,7 @@ Routing conventions (not persisted as keys):
    externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-   externalCodexProfile: {value}  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh; default: gpt-5.5-xhigh
+   externalCodexProfile: {value}  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh | gpt-5.3-codex-spark; default: gpt-5.5-xhigh
    externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max; default: opus-max
    ```
 
