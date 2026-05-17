@@ -52,13 +52,32 @@ emit_deny() {
 
 # Read JSON envelope from stdin. If python3 is unavailable, fall back to a
 # minimal grep extraction (less robust but the hook still works on the common
-# case).
-input_json="$(cat)"
+# case). Both extraction paths MUST fail open: an unparseable or empty stdin
+# envelope (which some runtimes — notably Codex CLI in certain hook contexts —
+# pass for non-git-push tool calls) must NOT crash the script with exit 1,
+# because that crash surfaces as "PreToolUse hook failed" on every Bash call
+# and blocks the user's whole session. Two layers of defence:
+#   (1) python -c wrapped in try/except so JSONDecodeError on empty/malformed
+#       stdin sets `d = {}` instead of raising — python always exits 0.
+#   (2) shell-level `|| command_str=""` belt-and-suspenders so even if python
+#       itself errors (PATH issue, OOM, missing) the variable falls back to
+#       empty and the git-push regex check below misses, exit 0 path taken.
+# When command_str ends up empty, the script falls through to the pass-through
+# branch (exit 0). The hook only blocks behaviour-changing commits with no
+# disclosure markers; any bad input gracefully degrades to no-op.
+input_json="$(cat || true)"
 command_str=""
 if command -v python3 >/dev/null 2>&1; then
-  command_str="$(printf '%s' "$input_json" | python3 -c 'import json,sys;d=json.load(sys.stdin);print(d.get("tool_input",{}).get("command",""))')"
+  command_str="$(printf '%s' "$input_json" | python3 -c '
+import json, sys
+try:
+    d = json.loads(sys.stdin.read())
+except Exception:
+    d = {}
+print(d.get("tool_input", {}).get("command", ""))
+' 2>/dev/null)" || command_str=""
 else
-  command_str="$(printf '%s' "$input_json" | grep -oE '"command":[[:space:]]*"[^"]*"' | head -1 | sed -E 's/.*"command":[[:space:]]*"([^"]*)".*/\1/')"
+  command_str="$(printf '%s' "$input_json" | grep -oE '"command":[[:space:]]*"[^"]*"' 2>/dev/null | head -1 | sed -E 's/.*"command":[[:space:]]*"([^"]*)".*/\1/')" || command_str=""
 fi
 
 # Only act on `git push ...`. Other Bash commands pass through unchanged.
