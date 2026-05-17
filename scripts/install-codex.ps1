@@ -1012,7 +1012,7 @@ if ($Mode -eq "global") {
     Sync-AgentsModeFile -TemplateFile $SharedAgentsModeSource -TargetFile $SharedGlobalAgentsMode -Label "shared global ~/.agents-mode.yaml" -Provider shared
 }
 
-# Install the hypothesis-disclosure PreToolUse hook into ~/.codex/hooks.json
+# Install structural hooks into ~/.codex/hooks.json
 # (global) or <project>/.codex/hooks.json (target). Idempotent JSON merge.
 # Opt out with -NoHypothesisHook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
 if (-not $NoHypothesisHook -and -not $DryRun) {
@@ -1022,7 +1022,7 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
     } else {
         $PythonCmd = Get-PythonCommand
         if (-not $PythonCmd) {
-            Write-Error "python or python3 is required to auto-install the hypothesis-disclosure hook. Rerun with -NoHypothesisHook to skip, or install Python and re-run."
+            Write-Error "python or python3 is required to auto-install the structural hooks. Rerun with -NoHypothesisHook to skip, or install Python and re-run."
             exit 1
         }
         # PowerShell installer runs on Windows by definition. Codex hook entry
@@ -1035,9 +1035,16 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         # fires — Codex marks newly-installed hooks as untrusted by design,
         # and the installer cannot trust them programmatically.
         $HooksTarget = Join-Path $TargetRoot "hooks.json"
-        $ScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-bugfix-discipline.ps1"
+        $BugfixScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-bugfix-discipline.ps1"
+        $StopScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-passive-polling-stop.ps1"
         Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
-        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-path $ScriptTarget
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-path $BugfixScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing passive-polling Stop hook (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --hook-event Stop --script-marker check-passive-polling-stop --script-path $StopScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE

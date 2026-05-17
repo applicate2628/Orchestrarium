@@ -940,7 +940,7 @@ if ($Mode -eq "global") {
     Sync-AgentsModeFile -TemplateFile $DefaultAgentsModeSource -TargetFile $SharedGlobalAgentsMode -Label "shared global ~/.agents-mode.yaml"
 }
 
-# Install the hypothesis-disclosure PreToolUse hook by merging it into the
+# Install structural hooks by merging them into the
 # user's settings.json idempotently. Preserves all other user keys and other
 # hooks. Opt out with -NoHypothesisHook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
 # Fails closed (non-zero exit) if Python is required but unavailable.
@@ -951,15 +951,22 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
     } else {
         $PythonCmd = Get-PythonCommand
         if (-not $PythonCmd) {
-            Write-Error "python or python3 is required to auto-install the hypothesis-disclosure hook. Rerun with -NoHypothesisHook to skip, or install Python and re-run."
+            Write-Error "python or python3 is required to auto-install the structural hooks. Rerun with -NoHypothesisHook to skip, or install Python and re-run."
             exit 1
         }
         $SettingsTarget = Join-Path $TargetRoot "settings.json"
         # PowerShell installer always emits Windows-native exec form referencing
         # the .ps1 hook script. Bash form is reserved for the .sh installer.
-        $ScriptTarget = Join-Path $TargetRoot "agents\scripts\check-bugfix-discipline.ps1"
+        $BugfixScriptTarget = Join-Path $TargetRoot "agents\scripts\check-bugfix-discipline.ps1"
+        $StopScriptTarget = Join-Path $TargetRoot "agents\scripts\check-passive-polling-stop.ps1"
         Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-path $ScriptTarget
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-path $BugfixScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing passive-polling Stop hook (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event Stop --script-marker check-passive-polling-stop --script-path $StopScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE

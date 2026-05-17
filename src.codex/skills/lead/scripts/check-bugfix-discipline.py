@@ -40,7 +40,14 @@ from __future__ import annotations
 import json
 import re
 import sys
-from pathlib import Path
+
+from hook_common import (
+    extract_text,
+    parse_envelope,
+    read_stdin_utf8,
+    read_transcript_tail,
+    slice_current_turn,
+)
 
 # Bug-trigger and change-request phrases — English + Russian + universal markers.
 #
@@ -119,46 +126,24 @@ TRANSCRIPT_TAIL_LINES = 100
 
 def main() -> int:
     try:
-        envelope = json.load(sys.stdin)
+        envelope = parse_envelope(read_stdin_utf8())
     except Exception:
-        return 0  # malformed envelope → fail open
+        return 0  # malformed envelope -> fail open
 
     transcript_path = envelope.get("transcript_path") or ""
     if not transcript_path:
         return 0
-    tp = Path(transcript_path)
-    if not tp.is_file():
-        return 0
 
-    try:
-        raw = tp.read_text(encoding="utf-8", errors="replace")
-    except Exception:
-        return 0
-
-    lines = raw.splitlines()[-TRANSCRIPT_TAIL_LINES:]
+    entries = read_transcript_tail(transcript_path, TRANSCRIPT_TAIL_LINES)
 
     # Walk transcript in reverse to find the last user message; everything
     # after it is the "current turn" we examine for discipline signals.
-    last_user_entry = None
-    after_user_entries: list[dict] = []
-    for line in reversed(lines):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            entry = json.loads(line)
-        except Exception:
-            continue
-        if _is_user_message(entry):
-            last_user_entry = entry
-            break
-        after_user_entries.append(entry)
-    after_user_entries.reverse()
+    last_user_entry, after_user_entries = slice_current_turn(entries)
 
     if last_user_entry is None:
         return 0  # no user message in scope; allow
 
-    user_text = _extract_text(last_user_entry)
+    user_text = extract_text(last_user_entry)
 
     if OVERRIDE_MARKER_REGEX.search(user_text):
         return 0  # explicit override; allow
@@ -167,7 +152,7 @@ def main() -> int:
         return 0  # not bug context; allow
 
     # Bug-context confirmed. Check current turn for discipline signals.
-    haystack_parts = [_extract_text(e) for e in after_user_entries]
+    haystack_parts = [extract_text(e) for e in after_user_entries]
     haystack = "\n".join(p for p in haystack_parts if p)
     if BUGFIX_SIGNAL_REGEX.search(haystack):
         return 0  # discipline engaged; allow
@@ -204,69 +189,6 @@ def main() -> int:
     }
     print(json.dumps(payload))
     return 0
-
-
-def _is_user_message(entry: dict) -> bool:
-    """Detect a user message across Claude Code + Codex transcript shapes."""
-    # Claude Code transcript: {"type":"user","message":{"role":"user",...}}
-    if entry.get("type") == "user":
-        return True
-    # Bare role field
-    if entry.get("role") == "user":
-        return True
-    # Nested message
-    msg = entry.get("message")
-    if isinstance(msg, dict) and msg.get("role") == "user":
-        return True
-    return False
-
-
-def _extract_text(entry: object) -> str:
-    """Pull human-readable text out of a transcript entry across shapes."""
-    if not isinstance(entry, dict):
-        return ""
-
-    # Direct content field (string or list-of-blocks)
-    content = entry.get("content")
-    if content is None:
-        msg = entry.get("message")
-        if isinstance(msg, dict):
-            content = msg.get("content")
-
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: list[str] = []
-        for item in content:
-            if not isinstance(item, dict):
-                parts.append(str(item))
-                continue
-            # Text block
-            if "text" in item:
-                parts.append(str(item["text"]))
-            # Tool use: name + input
-            if "name" in item:
-                parts.append(str(item["name"]))
-            if "input" in item:
-                try:
-                    parts.append(json.dumps(item["input"]))
-                except Exception:
-                    parts.append(str(item["input"]))
-            # Tool result: content
-            if "content" in item and not isinstance(item.get("content"), str):
-                parts.append(_extract_text({"content": item["content"]}))
-            elif isinstance(item.get("content"), str):
-                parts.append(item["content"])
-        return "\n".join(parts)
-
-    # Codex transcript: top-level command / output strings
-    for key in ("command", "output", "stdout", "stderr", "text"):
-        v = entry.get(key)
-        if isinstance(v, str):
-            return v
-
-    return ""
-
 
 if __name__ == "__main__":
     sys.exit(main())

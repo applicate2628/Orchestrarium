@@ -51,24 +51,38 @@ Treat `AGENTS.md` as the universal minimum contract for Codex work in a reposito
 
 ### Structural enforcement (auto-installed)
 
-Codex CLI exposes a `PreToolUse` hook surface (stable feature `hooks`, default-on) that can intercept tool calls and block them with a structured deny decision. The Codex pack ships a hook that catches the **most common pre-fix discipline violation**: the model is about to make a code-mutating tool call (`apply_patch`) in response to a user message that contains a bug-report or change-request signal (e.g. `fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, `поменяй`, traceback, `Error:`), but did NOT first invoke `/agents-bugfix` or otherwise capture diagnostic data. This is the recurring failure mode where the model jumps to the first hypothesis and starts editing without verification.
+Codex CLI exposes hook events that can intercept tool calls and turn completion. The Codex pack ships two structural hooks. They are backstops for two different failure moments; they do not replace the text rules above.
 
-Hook entry points: `~/.codex/skills/lead/scripts/check-bugfix-discipline.sh` (POSIX) and `~/.codex/skills/lead/scripts/check-bugfix-discipline.ps1` (Windows) — thin wrappers around the python brain `~/.codex/skills/lead/scripts/check-bugfix-discipline.py`. When fired, the script reads the PreToolUse JSON envelope's `transcript_path`, parses the recent JSONL transcript, and:
+**PreToolUse bugfix-discipline hook.** `check-bugfix-discipline.py` catches the most common pre-fix discipline violation: the model is about to make a code-mutating tool call (`apply_patch`) in response to a user message that contains a bug-report or change-request signal (e.g. `fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, `поменяй`, traceback, `Error:`), but it did NOT first invoke `/agents-bugfix` or otherwise capture diagnostic data. The hook reads the PreToolUse envelope's `transcript_path`, parses the recent transcript tail, and:
 
 - If the last user message contains no bug-trigger phrase → exit 0 (allow; not a bug context).
 - If the last user message contains the override marker `[skip-bugfix-discipline]` → exit 0 (allow; user explicitly opted out).
 - If the current turn shows discipline signals (`/agents-bugfix` invocation, `agents-bugfix` skill load, text containing `diagnostic`/`hypothesis`/`reproducing`/`VERIFIED:`) → exit 0 (allow).
 - Otherwise → emit a structured `permissionDecision: "deny"` payload telling the model how to comply.
 
-**The installer auto-installs the hook entry by default on all platforms** into `~/.codex/hooks.json` (`--global`) or `<project>/.codex/hooks.json` (`--target`). The JSON-merge is idempotent and preserves all other user keys. Opt out with `--no-hypothesis-hook` (legacy flag kept for back-compat) or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment.
+**Stop passive-polling hook.** `check-passive-polling-stop.py` catches a different failure: the model is about to end its turn by saying it is waiting for an async external source (bot/review/CI/job/notification/reply) without a relevant current-turn state check. The hook reads `last_assistant_message` directly from the Stop envelope, exits immediately when `stop_hook_active=true`, and parses the transcript only after a passive-polling phrase is detected. It allows user handoffs such as `waiting for your response` / `жду твоего подтверждения`, allows the per-stop override marker `[acknowledge-passive-stop]`, and otherwise requires a relevant probe in the current turn: time/status commands (`date`, `Get-Date`, `gh pr view`, `gh run list`, `gh api`, `curl`), process/task output, or reads of output/log/task files. If no relevant probe is present, it emits top-level `{"decision":"block","reason":"..."}` telling the model to check state now, use the override for a real handoff, or invoke a concrete tool like `Bash: gh pr view`.
 
-**Manual trust step required (Codex security model).** Unlike Claude Code, Codex marks every newly-installed or modified hook as **untrusted** by design — the hook entry is written to `hooks.json` but does **not fire** until the user reviews and trusts it via the interactive `codex` TUI. After install (or any pack upgrade that changes the hook script or hooks.json command), run `codex` once interactively, open the hook browser (per the on-screen prompt — typically the keystroke shown next to "Trust to view hooks; to trust; to toggle"), and trust the entry. Until this step is done the hook stays visible-but-inactive and `codex exec` skips it silently.
+Hook entry points:
 
-**Windows hook command shape.** On Windows, the hook entry uses `powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<abs-path>\check-bugfix-discipline.ps1'` — explicit `powershell.exe` avoids the Windows PATH gotcha where `bash` may resolve to the WSL launcher (`C:\Windows\System32\bash.exe`) instead of Git Bash. WSL bash cannot resolve `C:\Users\...` paths, so a `bash 'C:\...'` form silently failed on default Windows installs that have WSL installed alongside Git Bash. POSIX hosts use `bash <abs-path>/check-bugfix-discipline.sh`.
+- `~/.codex/skills/lead/scripts/check-bugfix-discipline.sh` / `.ps1`
+- `~/.codex/skills/lead/scripts/check-passive-polling-stop.sh` / `.ps1`
 
-To remove an already-installed entry: `python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform codex --host-os posix --script-path <ignored-for-remove> --remove`.
+Both wrappers are thin fail-open wrappers around the sibling Python brain. Shared JSON envelope and transcript helpers live in `~/.codex/skills/lead/scripts/hook_common.py`.
 
-The auto-installed entry on Windows has this shape:
+**The installer auto-installs both hook entries by default on all platforms** into `~/.codex/hooks.json` (`--global`) or `<project>/.codex/hooks.json` (`--target`). The JSON merge is idempotent and preserves all other user keys and hooks. Opt out with `--no-hypothesis-hook` (legacy flag kept for back-compat) or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment.
+
+**Manual trust step required (Codex security model).** Unlike Claude Code, Codex marks every newly-installed or modified hook as **untrusted** by design — both entries are written to `hooks.json` but do **not fire** until the user reviews and trusts them via the interactive `codex` TUI. After install (or any pack upgrade that changes either hook script or hooks.json command), run `codex` once interactively, open the hook browser (per the on-screen prompt — typically the keystroke shown next to "Trust to view hooks; to trust; to toggle"), and trust both entries. Until this step is done the hooks stay visible-but-inactive and `codex exec` skips them silently.
+
+**Windows hook command shape.** On Windows, entries use `powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<abs-path>\<script>.ps1'` — explicit `powershell.exe` avoids the Windows PATH gotcha where `bash` may resolve to the WSL launcher (`C:\Windows\System32\bash.exe`) instead of Git Bash. WSL bash cannot resolve `C:\Users\...` paths, so a `bash 'C:\...'` form silently failed on default Windows installs that have WSL installed alongside Git Bash. POSIX hosts use `bash <abs-path>/<script>.sh`.
+
+To remove already-installed entries independently:
+
+```bash
+python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform codex --host-os posix --script-path <ignored> --remove
+python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform codex --host-os posix --hook-event Stop --script-marker check-passive-polling-stop --script-path <ignored> --remove
+```
+
+The auto-installed entries on Windows have this shape:
 
 ```json
 {
@@ -83,14 +97,24 @@ The auto-installed entry on Windows has this shape:
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\\Users\\<you>\\.codex\\skills\\lead\\scripts\\check-passive-polling-stop.ps1'"
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
-Codex's `matcher` field is regex on tool name only (no `if`-style argument filter like Claude Code has); the script self-filters on transcript-derived bug-context rather than on tool-input. Both `~/.codex/hooks.json` and inline `[hooks]` tables in `~/.codex/config.toml` are supported; project-local `<repo>/.codex/hooks.json` is also supported but requires the project to be trusted.
+Codex's `matcher` field is regex on tool name only (no `if`-style argument filter like Claude Code has); the PreToolUse script self-filters on transcript-derived bug-context rather than on tool-input. Stop ignores matcher, so the installer omits it for the Stop entry. Both `~/.codex/hooks.json` and inline `[hooks]` tables in `~/.codex/config.toml` are supported; project-local `<repo>/.codex/hooks.json` is also supported but requires the project to be trusted.
 
-**Bypass is by design.** The override marker `[skip-bugfix-discipline]` in your message disables the guard for the next turn. The hook catches "model jumped to edit without thinking", not "model wrote false discipline markers" — the latter is review territory. The Bootstrap text rule above remains binding regardless of whether the hook is installed or trusted.
+**Bypass is by design.** `[skip-bugfix-discipline]` bypasses the PreToolUse guard for the next turn. `[acknowledge-passive-stop]` bypasses one Stop guard decision when the assistant is intentionally handing off to the user. False discipline markers remain review territory; the Bootstrap text rule remains binding regardless of whether hooks are installed or trusted.
 
 ## Default delegation entry point
 

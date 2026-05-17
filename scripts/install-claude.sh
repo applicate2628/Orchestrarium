@@ -877,7 +877,7 @@ if [ "$MODE" = "global" ]; then
   sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$SHARED_GLOBAL_AGENTS_MODE" "shared global ~/.agents-mode.yaml"
 fi
 
-# Install the hypothesis-disclosure PreToolUse hook by merging it into the
+# Install structural hooks by merging them into the
 # user's settings.json idempotently. Preserves all other user keys and other
 # hooks. Opt out with --no-hypothesis-hook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
 # Fails closed (non-zero exit) if Python is required but unavailable, matching
@@ -890,7 +890,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
   else
     python_cmd="$(resolve_python_command || true)"
     if [ -z "$python_cmd" ]; then
-      echo "FAIL: python or python3 is required to auto-install the hypothesis-disclosure hook" >&2
+      echo "FAIL: python or python3 is required to auto-install the structural hooks" >&2
       echo "      Rerun with --no-hypothesis-hook to skip, or install Python and re-run." >&2
       exit 1
     fi
@@ -902,11 +902,13 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
     case "$(uname -s 2>/dev/null)" in
       MINGW*|MSYS*|CYGWIN*)
         hook_host_os="windows"
-        script_target="$TARGET/agents/scripts/check-bugfix-discipline.ps1"
+        bugfix_script_target="$TARGET/agents/scripts/check-bugfix-discipline.ps1"
+        stop_script_target="$TARGET/agents/scripts/check-passive-polling-stop.ps1"
         ;;
       *)
         hook_host_os="posix"
-        script_target="$TARGET/agents/scripts/check-bugfix-discipline.sh"
+        bugfix_script_target="$TARGET/agents/scripts/check-bugfix-discipline.sh"
+        stop_script_target="$TARGET/agents/scripts/check-passive-polling-stop.sh"
         ;;
     esac
     echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os)..."
@@ -914,7 +916,15 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --target "$settings_target" \
       --platform claude \
       --host-os "$hook_host_os" \
-      --script-path "$script_target"
+      --script-path "$bugfix_script_target"
+    echo "  Installing passive-polling Stop hook (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --hook-event Stop \
+      --script-marker check-passive-polling-stop \
+      --script-path "$stop_script_target"
   fi
 fi
 

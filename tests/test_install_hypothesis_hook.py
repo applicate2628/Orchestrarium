@@ -26,6 +26,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK_INSTALLER = REPO_ROOT / "scripts" / "install-hypothesis-hook.py"
 SCRIPT_PATH = "/tmp/check-bugfix-discipline.sh"
+STOP_SCRIPT_PATH = "/tmp/check-passive-polling-stop.sh"
 
 
 def run_installer(
@@ -183,9 +184,118 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertIn("check-bugfix-discipline", our_hook["args"][0])
         self.assertEqual(data["hooks"]["Stop"], [{"hooks": [{"type": "command", "command": "echo stop"}]}])
 
+    def test_install_stop_hook_entry_shape(self) -> None:
+        result = run_installer(
+            self.target,
+            "--hook-event",
+            "Stop",
+            "--script-marker",
+            "check-passive-polling-stop",
+            script_path=STOP_SCRIPT_PATH,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = load_json(self.target)
+        stop_entries = data["hooks"]["Stop"]
+        self.assertEqual(len(stop_entries), 1)
+        self.assertNotIn("matcher", stop_entries[0])
+        hook = stop_entries[0]["hooks"][0]
+        self.assertEqual(hook["command"], "bash")
+        self.assertEqual(hook["args"], [STOP_SCRIPT_PATH])
+        self.assertIn("check-passive-polling-stop", hook["args"][0])
+
+    def test_both_hooks_installed_without_overwrite(self) -> None:
+        first = run_installer(self.target)
+        second = run_installer(
+            self.target,
+            "--hook-event",
+            "Stop",
+            "--script-marker",
+            "check-passive-polling-stop",
+            script_path=STOP_SCRIPT_PATH,
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        data = load_json(self.target)
+        self.assertEqual(len(data["hooks"]["PreToolUse"]), 1)
+        self.assertEqual(len(data["hooks"]["Stop"]), 1)
+        pre_hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
+        stop_hook = data["hooks"]["Stop"][0]["hooks"][0]
+        self.assertIn("check-bugfix-discipline", pre_hook["args"][0])
+        self.assertIn("check-passive-polling-stop", stop_hook["args"][0])
+
+    def test_remove_stop_hook_preserves_pretool_hook(self) -> None:
+        run_installer(self.target)
+        run_installer(
+            self.target,
+            "--hook-event",
+            "Stop",
+            "--script-marker",
+            "check-passive-polling-stop",
+            script_path=STOP_SCRIPT_PATH,
+        )
+        result = run_installer(
+            self.target,
+            "--remove",
+            "--hook-event",
+            "Stop",
+            "--script-marker",
+            "check-passive-polling-stop",
+            script_path=STOP_SCRIPT_PATH,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = load_json(self.target)
+        self.assertIn("PreToolUse", data["hooks"])
+        self.assertNotIn("Stop", data["hooks"])
+        self.assertIn(
+            "check-bugfix-discipline",
+            data["hooks"]["PreToolUse"][0]["hooks"][0]["args"][0],
+        )
+
+    def test_remove_pretool_hook_preserves_stop_hook(self) -> None:
+        run_installer(self.target)
+        run_installer(
+            self.target,
+            "--hook-event",
+            "Stop",
+            "--script-marker",
+            "check-passive-polling-stop",
+            script_path=STOP_SCRIPT_PATH,
+        )
+        result = run_installer(self.target, "--remove")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = load_json(self.target)
+        self.assertIn("Stop", data["hooks"])
+        self.assertNotIn("PreToolUse", data["hooks"])
+        self.assertIn(
+            "check-passive-polling-stop",
+            data["hooks"]["Stop"][0]["hooks"][0]["args"][0],
+        )
+
+    def test_stop_hook_idempotent_reinstall(self) -> None:
+        run_installer(
+            self.target,
+            "--hook-event",
+            "Stop",
+            "--script-marker",
+            "check-passive-polling-stop",
+            script_path=STOP_SCRIPT_PATH,
+        )
+        before = self.target.read_bytes()
+        result = run_installer(
+            self.target,
+            "--hook-event",
+            "Stop",
+            "--script-marker",
+            "check-passive-polling-stop",
+            script_path=STOP_SCRIPT_PATH,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no-op", result.stdout)
+        self.assertEqual(before, self.target.read_bytes())
+
     def test_duplicates_collapsed_on_install(self) -> None:
         # Simulate two old-style shell-form entries (older buggy install).
-        # The marker substring `check-hypothesis-disclosure` is what identifies
+        # The marker substring `check-bugfix-discipline` is what identifies
         # our entries regardless of form (shell or exec), so duplicates are
         # collapsed even if one is shell form and one is exec form.
         old_cmd = f"bash {SCRIPT_PATH}"

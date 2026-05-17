@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Install or update the hypothesis-disclosure PreToolUse hook idempotently.
+"""Install or update Orchestrarium structural hooks idempotently.
 
-This script merges the Orchestrarium hypothesis-disclosure hook config into a
+This script merges an Orchestrarium structural hook config into a
 target settings/hooks JSON file while preserving all other user-owned keys and
-other PreToolUse hooks. Running it multiple times produces the same result
-(our entry is identified by the `check-hypothesis-disclosure` script signature
-in the command field, so re-runs update in place rather than appending
+other hooks. Running it multiple times produces the same result
+(our entry is identified by the configured script marker in the command or
+args fields, so re-runs update in place rather than appending
 duplicates).
 
 Supported targets:
@@ -13,15 +13,8 @@ Supported targets:
   --platform codex   →  Codex hooks.json (e.g. ~/.codex/hooks.json)
 
 Cross-platform behavior:
-  The shipped command uses `bash <quoted script_path>` which works on macOS,
-  Linux, and Windows (via Git Bash). Path is shlex-quoted to defend against
-  paths with spaces, semicolons, or other shell metacharacters. Operators who
-  want a native PowerShell variant on Windows can replace the `command` field
-  manually; this script's idempotent update keys on the `check-hypothesis-
-  disclosure` substring, so a hand-edited PowerShell entry is still recognized
-  as "ours" and re-updated to the bash form on next install. To preserve a
-  manual PowerShell override, set ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1 in the
-  environment to skip the install entirely.
+  Claude uses exec form; Codex uses shell form. POSIX hosts use bash wrappers.
+  Windows hosts use PowerShell wrappers.
 
 Removal:
   --remove  Removes ALL of our hook entries (handles duplicates from earlier
@@ -33,8 +26,8 @@ Safety hardening:
   - Refuses to write through a symlinked settings.json target (security: avoid
     same-user clobber of /etc/passwd-style symlink attacks).
   - Atomic write via temp file + os.replace to prevent torn writes.
-  - Validates that hooks/PreToolUse are correct JSON types before iterating
-    (a malformed-but-valid JSON like {"hooks": {"PreToolUse": [{"hooks": 5}]}}
+  - Validates that hooks/<event> are correct JSON types before iterating
+    (a malformed-but-valid JSON like {"hooks": {"Stop": [{"hooks": 5}]}}
     is rejected with a clear error instead of crashing with TypeError).
 
 Exit codes:
@@ -55,10 +48,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-# Substring that identifies our hook entry inside an existing settings.json.
-# Any PreToolUse entry whose hooks list contains a command with this substring
-# is treated as "ours" for idempotent update/replace.
-SCRIPT_MARKER = "check-bugfix-discipline"
+DEFAULT_SCRIPT_MARKER = "check-bugfix-discipline"
 
 # Matcher regex covers Claude's code-mutating tools + Codex's apply_patch.
 # Per Claude Code hooks-reference, `matcher` is a regex on tool name; per
@@ -68,8 +58,17 @@ SCRIPT_MARKER = "check-bugfix-discipline"
 TOOL_MATCHER_REGEX = "Edit|Write|NotebookEdit|apply_patch"
 
 
-def build_claude_entry(script_path: str, host_os: str) -> dict[str, Any]:
-    """Build a Claude PreToolUse hook entry in exec form (args array, no shell).
+def _with_event_matcher(entry: dict[str, Any], hook_event: str) -> dict[str, Any]:
+    """Attach matcher only for hook events that consume one."""
+    if hook_event == "PreToolUse":
+        return {"matcher": TOOL_MATCHER_REGEX, **entry}
+    return entry
+
+
+def build_claude_entry(
+    script_path: str, host_os: str, hook_event: str = "PreToolUse"
+) -> dict[str, Any]:
+    """Build a Claude hook entry in exec form (args array, no shell).
 
     Exec form is the documented portable cross-platform pattern per
     https://code.claude.com/docs/hooks-reference#exec-form-and-shell-form
@@ -88,8 +87,8 @@ def build_claude_entry(script_path: str, host_os: str) -> dict[str, Any]:
     decide whether to allow or deny.
     """
     if host_os == "windows":
-        return {
-            "matcher": TOOL_MATCHER_REGEX,
+        return _with_event_matcher(
+            {
             "hooks": [
                 {
                     "type": "command",
@@ -103,9 +102,11 @@ def build_claude_entry(script_path: str, host_os: str) -> dict[str, Any]:
                     ],
                 }
             ],
-        }
-    return {
-        "matcher": TOOL_MATCHER_REGEX,
+            },
+            hook_event,
+        )
+    return _with_event_matcher(
+        {
         "hooks": [
             {
                 "type": "command",
@@ -113,11 +114,15 @@ def build_claude_entry(script_path: str, host_os: str) -> dict[str, Any]:
                 "args": [script_path],
             }
         ],
-    }
+        },
+        hook_event,
+    )
 
 
-def build_codex_entry(script_path: str, host_os: str) -> dict[str, Any]:
-    """Build a Codex PreToolUse hook entry in shell form.
+def build_codex_entry(
+    script_path: str, host_os: str, hook_event: str = "PreToolUse"
+) -> dict[str, Any]:
+    """Build a Codex hook entry in shell form.
 
     Codex hooks (per https://developers.openai.com/codex/hooks) do NOT support
     an `args` array or a `shell` field — only `type`, `command`, `statusMessage`,
@@ -155,18 +160,20 @@ def build_codex_entry(script_path: str, host_os: str) -> dict[str, Any]:
     else:
         quoted = shlex.quote(script_path)
         command_str = f"bash {quoted}"
-    return {
-        "matcher": TOOL_MATCHER_REGEX,
+    return _with_event_matcher(
+        {
         "hooks": [
             {
                 "type": "command",
                 "command": command_str,
             }
         ],
-    }
+        },
+        hook_event,
+    )
 
 
-def _hook_contains_marker(hook: dict[str, Any]) -> bool:
+def _hook_contains_marker(hook: dict[str, Any], script_marker: str) -> bool:
     """True if a single hook dict references our script via marker substring.
 
     Marker can appear in either:
@@ -175,17 +182,17 @@ def _hook_contains_marker(hook: dict[str, Any]) -> bool:
         a literal argv element separate from the executable name).
     """
     command = hook.get("command", "")
-    if isinstance(command, str) and SCRIPT_MARKER in command:
+    if isinstance(command, str) and script_marker in command:
         return True
     args_field = hook.get("args")
     if isinstance(args_field, list):
         for arg in args_field:
-            if isinstance(arg, str) and SCRIPT_MARKER in arg:
+            if isinstance(arg, str) and script_marker in arg:
                 return True
     return False
 
 
-def find_our_entry_indices(pretool_list: list[Any]) -> list[int]:
+def find_our_entry_indices(hook_event_list: list[Any], script_marker: str) -> list[int]:
     """Return ALL indices whose hook references our script (by marker).
 
     Recognizes both legacy shell form (marker in `command`) and current exec
@@ -199,7 +206,7 @@ def find_our_entry_indices(pretool_list: list[Any]) -> list[int]:
     deletes every one of our entries.
     """
     indices: list[int] = []
-    for idx, entry in enumerate(pretool_list):
+    for idx, entry in enumerate(hook_event_list):
         if not isinstance(entry, dict):
             continue
         hooks_field = entry.get("hooks")
@@ -209,7 +216,7 @@ def find_our_entry_indices(pretool_list: list[Any]) -> list[int]:
             # script's job to repair.
             continue
         for hook in hooks_field:
-            if isinstance(hook, dict) and _hook_contains_marker(hook):
+            if isinstance(hook, dict) and _hook_contains_marker(hook, script_marker):
                 indices.append(idx)
                 break
     return indices
@@ -268,18 +275,23 @@ def write_atomic(target: Path, data: dict[str, Any]) -> None:
         raise
 
 
-def install(data: dict[str, Any], new_entry: dict[str, Any]) -> bool:
+def install(
+    data: dict[str, Any],
+    new_entry: dict[str, Any],
+    hook_event: str,
+    script_marker: str,
+) -> bool:
     """Insert our hook entry, removing any duplicates. Returns True if changed."""
     hooks = data.setdefault("hooks", {})
     if not isinstance(hooks, dict):
         sys.stderr.write("FAIL: 'hooks' key is not a JSON object\n")
         sys.exit(1)
-    pretool = hooks.setdefault("PreToolUse", [])
-    if not isinstance(pretool, list):
-        sys.stderr.write("FAIL: 'hooks.PreToolUse' is not a JSON array\n")
+    hook_entries = hooks.setdefault(hook_event, [])
+    if not isinstance(hook_entries, list):
+        sys.stderr.write(f"FAIL: 'hooks.{hook_event}' is not a JSON array\n")
         sys.exit(1)
 
-    existing = find_our_entry_indices(pretool)
+    existing = find_our_entry_indices(hook_entries, script_marker)
     changed = False
 
     # If there are multiple of our entries (duplicates from earlier buggy
@@ -287,39 +299,39 @@ def install(data: dict[str, Any], new_entry: dict[str, Any]) -> bool:
     if len(existing) > 1:
         # Delete duplicates from the end so earlier indices stay valid.
         for idx in reversed(existing[1:]):
-            del pretool[idx]
+            del hook_entries[idx]
         existing = [existing[0]]
         changed = True
 
     if existing:
         idx = existing[0]
-        if pretool[idx] != new_entry:
-            pretool[idx] = new_entry
+        if hook_entries[idx] != new_entry:
+            hook_entries[idx] = new_entry
             changed = True
     else:
-        pretool.append(new_entry)
+        hook_entries.append(new_entry)
         changed = True
 
     return changed
 
 
-def remove(data: dict[str, Any]) -> bool:
+def remove(data: dict[str, Any], hook_event: str, script_marker: str) -> bool:
     """Remove ALL of our hook entries. Returns True if changed."""
     hooks = data.get("hooks")
     if not isinstance(hooks, dict):
         return False
-    pretool = hooks.get("PreToolUse")
-    if not isinstance(pretool, list):
+    hook_entries = hooks.get(hook_event)
+    if not isinstance(hook_entries, list):
         return False
-    indices = find_our_entry_indices(pretool)
+    indices = find_our_entry_indices(hook_entries, script_marker)
     if not indices:
         return False
     # Delete from the end so earlier indices stay valid.
     for idx in reversed(indices):
-        del pretool[idx]
+        del hook_entries[idx]
     # Clean up empty containers so the file does not gain ghost structure.
-    if not pretool:
-        del hooks["PreToolUse"]
+    if not hook_entries:
+        del hooks[hook_event]
     if not hooks:
         del data["hooks"]
     return True
@@ -348,6 +360,17 @@ def main() -> int:
         choices=("posix", "windows"),
         default="posix",
         help="Host OS class (controls exec-form vs shell-form / bash vs powershell)",
+    )
+    parser.add_argument(
+        "--hook-event",
+        choices=("PreToolUse", "Stop"),
+        default="PreToolUse",
+        help="Hook event to install under (default: PreToolUse)",
+    )
+    parser.add_argument(
+        "--script-marker",
+        default=DEFAULT_SCRIPT_MARKER,
+        help="Substring identifying this specific hook entry for idempotency",
     )
     parser.add_argument(
         "--remove",
@@ -387,18 +410,22 @@ def main() -> int:
     data = load_existing(target)
 
     if args.remove:
-        changed = remove(data)
+        changed = remove(data, args.hook_event, args.script_marker)
         action = "removed"
     else:
         if args.platform == "claude":
-            entry = build_claude_entry(args.script_path, args.host_os)
+            entry = build_claude_entry(
+                args.script_path, args.host_os, args.hook_event
+            )
         else:
-            entry = build_codex_entry(args.script_path, args.host_os)
-        changed = install(data, entry)
+            entry = build_codex_entry(args.script_path, args.host_os, args.hook_event)
+        changed = install(data, entry, args.hook_event, args.script_marker)
         action = "installed/updated"
 
     if not changed:
-        sys.stdout.write(f"  Hypothesis hook already present in {target} (no-op)\n")
+        sys.stdout.write(
+            f"  {args.script_marker} hook already present in {target} (no-op)\n"
+        )
         return 0
 
     if args.dry_run:
@@ -414,11 +441,13 @@ def main() -> int:
                 )
                 return 1
             target.unlink()
-            sys.stdout.write(f"  Hypothesis hook {action}; deleted now-empty {target}\n")
+            sys.stdout.write(
+                f"  {args.script_marker} hook {action}; deleted now-empty {target}\n"
+            )
         return 0
 
     write_atomic(target, data)
-    sys.stdout.write(f"  Hypothesis hook {action} in {target}\n")
+    sys.stdout.write(f"  {args.script_marker} hook {action} in {target}\n")
     return 0
 
 

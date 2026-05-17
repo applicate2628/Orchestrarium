@@ -1394,19 +1394,19 @@ echo ""
 echo "=== AGENTS.md required sections ==="
 
 agents_line_count="$(count_codex_pack_lines "$AGENTS_FILE")"
-# Budget bumped 360 -> 380 (2026-05-17) to accommodate the Bootstrap "two
-# trigger moments" restructuring: the preamble grew to name both pre-fix
-# (steps 1-3 before first Edit/Write in bug-report context) and pre-commit
-# (all 5 steps) moments, and the violation-triggers list grew a new
-# Pre-fix triggers sub-block alongside the existing Pre-commit triggers.
-# Net cost ~6 lines (366 measured); +14 ceiling preserves headroom for
-# the next governance addition. Previous bumps: 340 -> 360 (2026-05-16,
-# no-kostyl step 4.5); 300 -> 340 (Bootstrap itself). Visible decision
-# rather than silent budget growth.
-if [[ "$agents_line_count" -le 380 ]]; then
-  pass "Codex AGENTS.md pack section line budget <= 380 ($agents_line_count)"
+# Budget bumped 380 -> 420 (2026-05-17) to accommodate the passive-polling
+# Stop hook structural-enforcement section beside the existing PreToolUse
+# bugfix-discipline hook: the docs now name both hook events, both entry
+# points, both override markers, independent removal commands, and the Stop
+# JSON shape. 399 measured after the change; +21 ceiling preserves headroom
+# for one small governance addition. Previous bumps: 360 -> 380 (2026-05-17,
+# Bootstrap two trigger moments); 340 -> 360 (2026-05-16, no-kostyl step
+# 4.5); 300 -> 340 (Bootstrap itself). Visible decision rather than silent
+# budget growth.
+if [[ "$agents_line_count" -le 420 ]]; then
+  pass "Codex AGENTS.md pack section line budget <= 420 ($agents_line_count)"
 else
-  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 380)"
+  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 420)"
 fi
 
 for section in "delegation" "Role index" "Engineering hygiene"; do

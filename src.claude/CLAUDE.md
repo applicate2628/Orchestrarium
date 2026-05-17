@@ -51,18 +51,32 @@ Platform-specific rules for Claude Code. Shared governance (hygiene, publication
 
 ### Structural enforcement (auto-installed)
 
-The pack ships a hook script that catches the **most common pre-fix discipline violation**: the model is about to make a code-mutating tool call (`Edit`/`Write`/`NotebookEdit`) in response to a user message that contains a bug-report or change-request signal (e.g. `fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, `поменяй`, traceback, `Error:`, etc.), but the model did NOT first invoke `/agents-bugfix` or otherwise capture diagnostic data. This is the recurring failure mode where the model jumps to the first hypothesis and starts editing without verification.
+The pack ships two structural hooks. They are backstops for two different failure moments; they do not replace the text rules above.
 
-The hook entry point is `.claude/agents/scripts/check-bugfix-discipline.sh` (Bash) and `.claude/agents/scripts/check-bugfix-discipline.ps1` (PowerShell) — thin wrappers around the python brain `.claude/agents/scripts/check-bugfix-discipline.py`. When wired as a `PreToolUse` hook with matcher `Edit|Write|NotebookEdit|apply_patch`, it reads the PreToolUse JSON envelope's `transcript_path`, parses the recent JSONL transcript, and:
+**PreToolUse bugfix-discipline hook.** `check-bugfix-discipline.py` catches the most common pre-fix discipline violation: the model is about to make a code-mutating tool call (`Edit`/`Write`/`NotebookEdit`/`apply_patch`) in response to a user message that contains a bug-report or change-request signal (e.g. `fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, `поменяй`, traceback, `Error:`), but it did NOT first invoke `/agents-bugfix` or otherwise capture diagnostic data. The hook reads the PreToolUse envelope's `transcript_path`, parses the recent transcript tail, and:
 
 - If the last user message contains no bug-trigger phrase → exit 0 (allow; not a bug context).
 - If the last user message contains the override marker `[skip-bugfix-discipline]` → exit 0 (allow; user explicitly opted out).
 - If the current turn (everything after the last user message) shows discipline signals (`/agents-bugfix` invocation, `agents-bugfix` skill load, text containing `diagnostic`/`hypothesis`/`reproducing`/`VERIFIED:`) → exit 0 (allow; model is following the flow).
 - Otherwise → emit a structured `permissionDecision: "deny"` JSON payload telling the model exactly how to comply (invoke skill, capture diagnostic data, or use override marker).
 
-**The installer auto-installs the hook by default.** Both `scripts/install-claude.sh --global` and `scripts/install-claude.sh --target <project>` merge the hook entry into `settings.json` (idempotent JSON-merge that preserves all your other keys and other PreToolUse hooks). Opt out at install time with `--no-hypothesis-hook` (legacy flag name kept for back-compat) or by setting `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment. To remove an already-installed entry: `python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --script-path <ignored-for-remove> --remove`.
+**Stop passive-polling hook.** `check-passive-polling-stop.py` catches a different failure: the model is about to end its turn by saying it is waiting for an async external source (bot/review/CI/job/notification/reply) without a relevant current-turn state check. The hook reads `last_assistant_message` directly from the Stop envelope, exits immediately when `stop_hook_active=true`, and parses the transcript only after a passive-polling phrase is detected. It allows user handoffs such as `waiting for your response` / `жду твоего подтверждения`, allows the per-stop override marker `[acknowledge-passive-stop]`, and otherwise requires a relevant probe in the current turn: time/status commands (`date`, `Get-Date`, `gh pr view`, `gh run list`, `gh api`, `curl`), process/task output, or reads of output/log/task files. If no relevant probe is present, it emits top-level `{"decision":"block","reason":"..."}` telling the model to check state now, use the override for a real handoff, or invoke a concrete tool like `Bash: gh pr view`.
 
-The auto-installed entry uses this shape (Windows exec form using PowerShell; POSIX uses `bash` instead):
+Hook entry points:
+
+- `.claude/agents/scripts/check-bugfix-discipline.sh` / `.ps1`
+- `.claude/agents/scripts/check-passive-polling-stop.sh` / `.ps1`
+
+Both wrappers are thin fail-open wrappers around the sibling Python brain. Shared JSON envelope and transcript helpers live in `.claude/agents/scripts/hook_common.py`.
+
+**The installer auto-installs both hook entries by default.** Both `scripts/install-claude.sh --global` and `scripts/install-claude.sh --target <project>` merge the `PreToolUse` and `Stop` entries into `settings.json` with an idempotent JSON merge that preserves other keys and hooks. Opt out at install time with `--no-hypothesis-hook` (legacy flag name kept for back-compat) or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1`. Remove entries independently:
+
+```bash
+python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --script-path <ignored> --remove
+python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --hook-event Stop --script-marker check-passive-polling-stop --script-path <ignored> --remove
+```
+
+The auto-installed entries use this shape (Windows exec form using PowerShell; POSIX uses `bash` instead):
 
 ```json
 {
@@ -84,6 +98,23 @@ The auto-installed entry uses this shape (Windows exec form using PowerShell; PO
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-passive-polling-stop.ps1"
+            ]
+          }
+        ]
+      }
     ]
   }
 }
@@ -93,13 +124,11 @@ Path resolution notes:
 
 - The script-path in `args` is an absolute path; relative paths like `.claude/agents/scripts/...` are unreliable because the hook runs with the session's current working directory, not the directory of `settings.json` — see the [Hooks path placeholders](https://code.claude.com/docs/en/hooks.md#path-placeholders) docs.
 - For project-local hooks (script lives at `<repo>/.claude/agents/scripts/...`), use `${CLAUDE_PROJECT_DIR}\.claude\agents\scripts\check-bugfix-discipline.ps1` instead.
-- POSIX exec form uses `command: "bash", args: ["<abs-path>/check-bugfix-discipline.sh"]`.
+- POSIX exec form uses `command: "bash", args: ["<abs-path>/check-bugfix-discipline.sh"]` and the equivalent `check-passive-polling-stop.sh` path for Stop.
 
-The matcher `Edit|Write|NotebookEdit|apply_patch` (regex on tool name) covers Claude's code-mutating tools plus Codex's `apply_patch`. The hook fires on every code edit; the script self-filters on bug-context detected from the transcript, so non-bug edits pass through with one cheap transcript-read.
+The matcher `Edit|Write|NotebookEdit|apply_patch` (regex on tool name) covers Claude's code-mutating tools plus Codex's `apply_patch`. Stop ignores matcher; the installer omits it for the Stop entry.
 
-**Bypass is by design.** The override marker `[skip-bugfix-discipline]` in your message disables the guard for the next turn. The hook catches "model jumped to edit without thinking", not "model wrote false discipline markers" — for the latter, real review is the only defence. The text rule in the Bootstrap above remains binding regardless of whether the hook is installed.
-
-The Bootstrap text rule above remains binding regardless of whether the hook is installed; the hook is the structural backstop for sessions where the text rule alone is insufficient.
+**Bypass is by design.** `[skip-bugfix-discipline]` bypasses the PreToolUse guard for the next turn. `[acknowledge-passive-stop]` bypasses one Stop guard decision when the assistant is intentionally handing off to the user. False discipline markers remain review territory; the Bootstrap text rule remains binding regardless of whether hooks are installed.
 
 ## Delegation rule
 
