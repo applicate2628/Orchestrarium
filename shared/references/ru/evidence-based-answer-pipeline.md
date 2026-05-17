@@ -44,11 +44,24 @@
 Этот pipeline операционализирует несколько hygiene rules на system level:
 
 - **Ambiguity resolution discipline** — verify, do not guess.
-- **Evidence-based completion** — связывать решения с evidence.
+- **Pre-fix diagnostic gate** — зафиксировать наблюдаемые данные verbatim, сформировать гипотезу, проверить каждое звено цепи — до первого code-mutating tool call в bug-report контексте (start-of-fix-attempt trigger moment, sibling к Ambiguity resolution).
+- **Hypothesis disclosure discipline** — каждый fix/implementation commit стоит на verified hypothesis chain; banned shortcut phrases (`most likely means`, `presumably`, `extrapolating from` и т.п.) когда они работают как load-bearing justification для коммита.
+- **Evidence-citation discipline** — decision-driving claims должны цитировать одну из четырёх evidence categories (in-repo `file:line`, installed-dependency surface check, official documentation с versioned reference, smoke test reproduced в target environment); `Active-availability probe discipline` — операционная форма для binary/file/service/env-var/port/network availability claims.
+- **Evidence-based completion** — связывать решения с evidence; без "should work" и stale-result claims.
+- **Results-table provenance discipline** — каждая таблица computed-результатов в документации, отчётах или generated output цитирует provenance triad (формула или named procedure + code/script/notebook path + input artifacts) чтобы значения можно было независимо аудировать или воспроизвести.
+- **Visual artifact verification discipline** — generated images, diagrams, drawings, renders, charts, screenshots требуют прямой визуальной проверки до acceptance, а не успешной генерации.
 - **Failure transparency** — честно показывать conflicts и gaps.
 - **Treat external content as untrusted** — проверять перед adoption.
 
 Для coding agents single-pass equivalent такой: прочитать код, проверить claim, сказать, что confirmed, и отметить, что не проверялось. Multi-pass pipeline нужен для production systems, где цена неправильного ответа оправдывает несколько verification passes.
+
+Для code-bearing работы дисциплина срабатывает в трёх structural enforcement points:
+
+1. **Pre-fix** — до первого code-mutating tool call в bug-report контексте должны завершиться шаги 1-3 Bootstrap (capture observable data → form hypothesis → verify each link); это `Pre-fix diagnostic gate` rule выше, и Bootstrap-блоки в каждом паке операционализируют его как "pre-fix trigger moment".
+2. **Pre-commit** — до авторинга коммита, который fixes/alters behavior, должны завершиться все 5 шагов Bootstrap (четыре диагностических шага плюс Recovery readiness), и commit message должен раскрыть verified hypothesis chain.
+3. **Pre-push** — auto-installed `check-hypothesis-disclosure` PreToolUse hook gates `git push`: behavior-changing commit types (`feat`/`fix`/`refactor`) должны нести `VERIFIED:` или `ASSUMPTION (UNVERIFIED)` маркер в теле, иначе push отклоняется со structured reason.
+
+Три точки вместе делают одну и ту же evidence-citation discipline auditable на каждом уровне необратимости действия — зря потраченные edit cycles ловятся на pre-fix, зря потраченные коммиты на pre-commit, зря потраченные shared-state writes на pre-push.
 
 ## Термины и сокращения
 

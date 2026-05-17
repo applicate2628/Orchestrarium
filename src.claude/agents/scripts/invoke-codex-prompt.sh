@@ -12,7 +12,8 @@
 #   echo "<prompt body>" | bash .claude/agents/scripts/invoke-codex-prompt.sh <topic-slug> [-- codex-flags...]
 #   bash .claude/agents/scripts/invoke-codex-prompt.sh <topic-slug> --prompt-file <path> [-- codex-flags...]
 #
-# Default codex flags (applied when no `--` block is given): --quiet --full-auto
+# Default codex flags (applied when no `--` block is given): -c model_reasoning_effort=xhigh
+# (codex CLI 0.130.0+ runs via the `exec` subcommand, not the deprecated top-level --quiet/--full-auto)
 #
 # Environment overrides:
 #   CODEX_BIN          Codex executable or absolute path (default: codex on PATH)

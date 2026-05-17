@@ -246,6 +246,33 @@ Procedure:
 
 Caveat: chapter-title chapter prefixes (`Глава 9. Метод обобщенной матрицы рассеяния`) and similar conventional patterns also need sentence-case body even if the number prefix carries chapter signal.
 
+### Listing Provenance Pointer (Class N)
+
+Program listings printed inside a translated technical-book chunk are OCR-cleaned samples from the source book; the verified, compilation-tested source typically lives separately in the project's verified-source root (commonly under a path such as `code/chapter_NN_*/restored/`, but the project's own convention controls). A chunk that prints or narratively references a program without a provenance pointer is a defect — a future reader cannot reproduce the run or distinguish the printed code from a cross-validated translation. The global rule is `Results-table provenance discipline` in `shared/AGENTS.shared.md`; this section is the skill's operational form of that rule for the "program listing" surface.
+
+The chapter-to-verified-code map is project-specific (e.g. one RF-engineering book mapped Chapter 02 / 05 / 08 / 10 / 11 to specific Fortran and Pascal restorations under `code/chapter_NN_*/restored/`, with cross-language cross-validation for the chapter with both Pascal and Fortran sources). When the project maintains a written defect-class catalogue (commonly `docs/translation-defect-checklist.md`), the chapter-to-path map and per-chapter compile/run invocations live there; the skill enforces the procedure regardless of where the map lives.
+
+How to find a listing in a chunk:
+
+1. Grep `word/document.xml` for monospace run properties: `w:rFonts w:ascii="(Courier|Consolas|Lucida Console|Source Code)"`, `w:rStyle w:val="(VerbatimChar|SourceCode.*)"`, `pStyle w:val="(SourceCode.*|Verbatim.*)"`.
+2. Grep for narrative references to programs: the named program identifier (e.g. `TLM_INHO`), language name (`Fortran`, `Pascal`, `Turbo Pascal`), or convention markers (`Листинг N`, `Program N`, `Listing N`).
+3. Cross-reference the chunk's printed-listing or narrative mention against the project's `code/.../README.md` or equivalent index of verified source files.
+
+Procedure for adding the provenance pointer:
+
+1. Locate the reference paragraph (listing block OR narrative mention of the program).
+2. Read the corresponding compiled-and-run output file with the Read tool to extract one representative numeric line for the empirical fingerprint (a future re-run that produces a different number flags a regression even without diffing the full output).
+3. Construct a 3-line provenance block as new Caption-styled `<w:p>` paragraphs immediately after the reference:
+   - `Verified source: <repo-relative-path-to-source-file> (<compile invocation>)`
+   - `Input artifact: <repo-relative-path-to-input-file>` (omit when the program has no external input)
+   - `Output: <repo-relative-path-to-output-file> (<one-line numeric summary>)`
+4. When the source has cross-validated translations across multiple languages (e.g. an original Turbo Pascal and a Fortran restoration), include both source paths, both compile invocations, the cross-validation row count, the max absolute difference between the two outputs, and the per-language output filenames.
+5. Insert by adding the new `<w:p>` paragraphs after the reference paragraph using the chunk's existing Caption style if defined, otherwise a plain body paragraph.
+6. Preserve OLE/media byte-identity: the provenance block is text-only and never touches `<o:OLEObject>` or `<w:drawing>` elements; SHA-256 of `word/media/*` and `word/embeddings/*` must match PRE backup.
+7. If the chunk references the listing narratively but the printed listing block is in a different chunk (e.g. a narrative-only mention of a program whose source pages fall in another chunk), still anchor the provenance block at the narrative reference site so the citation chain is intact.
+
+Skip rule: a chunk that contains only a numerical data table (e.g. parameter values styled with VerbatimChar) is NOT a listing — skip with rationale recorded in the project's audit JSON or equivalent. A trivial illustrative fragment with no verified-code counterpart is also skipped.
+
 ### Contents And Page Numbers
 
 - Format contents as a real structured Word layout: aligned titles, aligned page numbers, consistent indentation, and source/global page numbering.
@@ -653,6 +680,7 @@ Before claiming PASS:
 22. Confirm no body-flow `Страница NN` or `Страницы NN-MM` paragraphs remain (Class G page label residue).
 23. Confirm the project's release manifest `status` reflects the actual gate state for the chunk (full source-PDF visual review with render evidence is a different state than no-Word cleanup pass; do not coalesce them).
 24. Confirm per-chunk skill review record names the exact OLE/media byte-identity check, the styles.xml merge audit, and the heading-case audit.
+25. If the chunk contains a code listing (monospace runs `w:rFonts w:ascii="Courier"`/`Consolas`, `pStyle` resolving to a SourceCode/Verbatim family, or a printed listing caption such as `Листинг N` / `Program N` / `Listing N`), confirm a provenance pointer to the project's verified-source root is present in a caption or sidenote immediately adjacent to the listing block (Class N — operational form of the global `Results-table provenance discipline`).
 
 ## Defect Class Index
 
@@ -673,6 +701,7 @@ The minimum defect-class catalogue this skill enforces. Where the project mainta
 | K | Source-correct equation reference numbering in prose | no-Word XML, requires source-PDF cross-check |
 | L | Typography normalization against exemplar (`word/styles.xml`) | no-Word XML, full exemplar styles merge |
 | M | Heading case normalization (Russian sentence case, no ALL CAPS) | no-Word XML, multi-run text edit |
+| N | Code listing provenance pointer to project's verified-source root (operational form of global `Results-table provenance discipline` for program listings) | no-Word XML, adjacent caption / sidenote |
 
 ## Terms and Abbreviations
 

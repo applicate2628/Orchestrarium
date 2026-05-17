@@ -984,13 +984,23 @@ done
 echo ""
 echo "=== Skill metadata budget ==="
 
-CODEX_SKILL_DESCRIPTION_MAX_CHARS=180
-# Budget covers roles + utility skills + common skills. Roles alone were sized at 3000 historically;
-# raised to 3500 (2026-05-16) to accommodate the common-skills category without forcing
-# role-description churn. Current consumption ~3352 chars; headroom ~148 chars is tight — adding
-# a 5th common skill at ≥150 chars will overflow and require either another budget bump or
-# trimming the existing descriptions, not silent budget growth.
-CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=3500
+# Per-skill description cap. Bumped 180 -> 440 (2026-05-17) for the mathtype-
+# book-page common skill specifically: the user adopted the long-form 10-trigger
+# description from active downstream use (Itoh2) for better Skill-tool relevance
+# matching; the new description is 416 chars where the prior 180-char cap was a
+# pre-common-skills UX guideline. Future common skills should still aim for
+# <= 180 chars where the trigger surface is narrow; this cap is the wide-trigger
+# allowance, not a license for verbose role-style descriptions.
+CODEX_SKILL_DESCRIPTION_MAX_CHARS=440
+# Total cap covers roles + utility skills + common skills. Roles alone were
+# sized at 3000 historically; raised to 3500 (2026-05-16) to accommodate the
+# common-skills category without forcing role-description churn. Raised again
+# 3500 -> 3700 (2026-05-17) to fit the mathtype-book-page long-form description
+# (the wide-trigger allowance noted above costs ~240 chars vs the prior 180-cap
+# baseline). Current consumption after that change is ~3595 chars; headroom
+# ~105 chars is enough for one future common skill at modest length without
+# another bump.
+CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=3700
 UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes)
 PACK_BUDGET_SKILLS=("${indexed_roles[@]}" "${UTILITY_SKILLS[@]}" "${indexed_common_skills[@]}")
 mapfile -t PACK_BUDGET_SKILLS < <(printf '%s\n' "${PACK_BUDGET_SKILLS[@]}" | sort -u)
@@ -1384,15 +1394,19 @@ echo ""
 echo "=== AGENTS.md required sections ==="
 
 agents_line_count="$(count_codex_pack_lines "$AGENTS_FILE")"
-# Budget bumped 340 -> 360 (2026-05-16) to accommodate the "Fix means correct
-# logic, not workaround" (no-kostyl) clause added as step 4.5 to the Bootstrap
-# block. Previous bump 300 -> 340 added the Bootstrap itself; this bump (~2
-# lines actual, +20 ceiling) preserves headroom for the next governance
-# addition. Visible decision rather than silent budget growth.
-if [[ "$agents_line_count" -le 360 ]]; then
-  pass "Codex AGENTS.md pack section line budget <= 360 ($agents_line_count)"
+# Budget bumped 360 -> 380 (2026-05-17) to accommodate the Bootstrap "two
+# trigger moments" restructuring: the preamble grew to name both pre-fix
+# (steps 1-3 before first Edit/Write in bug-report context) and pre-commit
+# (all 5 steps) moments, and the violation-triggers list grew a new
+# Pre-fix triggers sub-block alongside the existing Pre-commit triggers.
+# Net cost ~6 lines (366 measured); +14 ceiling preserves headroom for
+# the next governance addition. Previous bumps: 340 -> 360 (2026-05-16,
+# no-kostyl step 4.5); 300 -> 340 (Bootstrap itself). Visible decision
+# rather than silent budget growth.
+if [[ "$agents_line_count" -le 380 ]]; then
+  pass "Codex AGENTS.md pack section line budget <= 380 ($agents_line_count)"
 else
-  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 360)"
+  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 380)"
 fi
 
 for section in "delegation" "Role index" "Engineering hygiene"; do
