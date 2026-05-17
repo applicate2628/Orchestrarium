@@ -1,6 +1,6 @@
 ---
 name: mathtype-book-page
-description: Bring translated technical-book DOCX pages to accepted MathType format with source-PDF authority. Use for formula tables, inline math, figure/captions, or typography repair.
+description: Use when formatting, correcting, or reviewing translated technical-book DOCX pages that require editable MathType formulas, source-PDF mathematical typography/index proofread, book-like typography, display formula tables, equation-number cells, inline math fidelity, MathType size/alignment checks, figure/caption table grouping, contents formatting, and visual validation against source PDF pages in any repository.
 ---
 
 # MathType Book Page
@@ -205,6 +205,46 @@ Create a brief style snapshot before editing. Record the observed target values 
 - Keep section titles, figure captions, source notes, and contents entries as Word text with styles, not images.
 - Normalize accidental extra spaces, duplicated tabs, empty paragraphs, and manual line breaks that create uneven rivers or broken justification.
 - Preserve source meaning and technical terminology; fix grammar and punctuation while checking against the original page.
+
+### Typography Normalization Against Exemplar (LOAD-BEARING)
+
+Stale OMML→DOCX pipeline produces non-book defaults. Every chunk's `word/styles.xml` must be reconciled against the accepted exemplar's `word/styles.xml`, not left at the pipeline output. Confirmed defect pattern observed in a recent Russian-language technical-book DOCX translation before normalization:
+
+- Body Normal style: `Arial 10.5pt` (sz=21 half-points) instead of exemplar's `Times New Roman 11pt` default
+- Title 18pt, Heading1 15.5pt, Heading2 13pt, Subtitle 14pt — all oversized relative to exemplar's Title 16pt / Heading1 14pt / Heading2 12pt / Subtitle 12pt
+- Caption, TOC, FootnoteText, etc. all carried pipeline defaults rather than book typography
+
+Procedure for typography normalization:
+
+1. Extract exemplar `word/styles.xml`. Record full block of Normal style plus each Heading1..5, Title, Subtitle, Caption, TOC1..9, FootnoteText, Hyperlink, etc.
+2. For every other chunk in release:
+   - Read its `word/styles.xml`
+   - Identify chunk-specific style IDs (pandoc styles like `FirstParagraph`, `Compact`, `Bibliography`, `BlockText`, `SourceCode` and its token children `KeywordTok` / `DataTypeTok` / etc., `CaptionChar`, `Figure`, `CaptionedFigure`, `VerbatimChar`, `Table`, `Author`, `Date`, `AbstractTitle`, `Abstract`, `TableCaption`, `ImageCaption`, `SectionNumber`, `FootnoteReference`, `FootnoteBlockText`, `DefinitionTerm`, `Definition`) — these are referenced by `<w:pStyle>` / `<w:rStyle>` in the chunk's `word/document.xml` and must stay
+   - Replace styles.xml with exemplar styles.xml plus appended chunk-specific style blocks (merge, not wholesale replace)
+3. Verify OLE/media byte-identity per chunk before/after via SHA-256
+4. Render at least one representative chunk and confirm headings/body match exemplar visually
+5. Record the typography-normalization step in the chunk's canonical skill review
+
+If exemplar's styles.xml is missing or ambiguous, use the source PDF page as authority (book-style serif font, 11pt body, sentence-case headings, sized headings hierarchy).
+
+### Heading Case Normalization (Russian sentence case)
+
+Russian production books use sentence case for headings: only first letter of first word capitalized, the rest lowercase, except proper nouns and acronyms. Stale pipelines often emit ALL CAPS headings (e.g. `9. МЕТОД ОБОБЩЕННОЙ МАТРИЦЫ РАССЕЯНИЯ`) — this is a defect, not a style choice.
+
+Procedure:
+
+1. Find every paragraph with `<w:pStyle w:val="Heading1|Heading2|Heading3|Heading4|Heading5|Title|Subtitle"/>`
+2. Concatenate all `<w:t>` text in the paragraph
+3. If concatenated text contains 8+ consecutive uppercase Cyrillic chars (signal: not just an acronym), apply Russian sentence case transform:
+   - Preserve number prefix (`9. `, `12.1 `, `Глава 3. `) — leave as-is
+   - First content character: keep uppercase
+   - Rest: lowercase
+   - Latin acronyms 2-4 chars (extend per book domain — RF/microwave example list: TLM, TE, TM, FEM, FDTD, MoM, CAD, MMIC, OMML, MathML, TEM, EM, SDM, MoL): keep uppercase if surrounded by spaces or punctuation
+4. Apply transformation by editing the affected `<w:t>` elements; multi-run headings (text split across `<w:r>` elements) require careful merge / redistribute
+5. Preserve text run styling (`<w:b/>`, `<w:i/>`, color) — only change text content, not run properties
+6. Verify all OLE/media byte-identical after edit
+
+Caveat: chapter-title chapter prefixes (`Глава 9. Метод обобщенной матрицы рассеяния`) and similar conventional patterns also need sentence-case body even if the number prefix carries chapter signal.
 
 ### Contents And Page Numbers
 
@@ -567,6 +607,14 @@ Treat each recurrence as `REVISE`.
 | Formula font/style mismatch | Variables, functions, vectors, or operators have wrong italic/bold/upright style | Correct MathType styles or styled Word runs against the source PDF |
 | Index copied by pattern instead of PDF | Formula has plausible but wrong subscript/superscript, prime, or Greek/Latin index | Recheck every base and script against the rendered source PDF, character by character |
 | Similar glyph substitution | `ν/v`, `μ/u`, `φ/ψ`, `k/K`, `0/O`, or another near-lookalike is swapped | Use source crop/zoom and record ambiguity instead of guessing |
+| Body font / size drift vs exemplar | Body uses Arial 10.5pt while exemplar uses TNR 11pt; headings 1-2pt oversized | Merge full exemplar `word/styles.xml` into the chunk's styles.xml, preserving chunk-specific pandoc styles (FirstParagraph, Compact, Bibliography, SourceCode/* tokens, CaptionChar, Figure, VerbatimChar, Table, Author, Date, etc.) |
+| Body page label banners | Body flow contains `Страницы NN-MM` Title and `Страница NN` Heading paragraphs that source PDF does not show | Remove the paragraphs from `word/document.xml`, preserve bookmark Starts/Ends, drop service `страница-*` bookmark ids and reattach semantic bookmark Ends to surviving paragraphs |
+| ALL CAPS section headings | Heading text in `word/document.xml` is uppercase Cyrillic, e.g. `9. МЕТОД ОБОБЩЕННОЙ МАТРИЦЫ РАССЕЯНИЯ` | Apply Russian sentence case while preserving number prefix and 2-4 char Latin acronyms; multi-run text-runs must be merged + redistributed carefully without losing `<w:rPr>` (bold/italic) |
+| Multi-number formula cell concatenation | Right cell contains `(N)(N+1)(N+2)` joined by `<w:br/>` instead of separate paragraphs | Split each numbered label into its own `<w:p>` inside the same right `<w:tc>`, preserving paragraph properties and right-justification |
+| Multi-row OLE display left untouched after multi-number split | Right cell now has N labels but left cell still has ONE merged OLE rendering all N equations as one image | Defer to writer-bound Phase 4 OLE rebuild; do not promote as visually correct |
+| Stale manifest status | Project's release manifest reports `status: PASS` (or equivalent) but the chunk has unresolved skill defects | Reconcile manifest after every cleanup pass; project-defined status values must map honestly to the gate state the chunk actually passed (full skill review with render evidence is a different state than no-Word cleanup pass; do not coalesce them) |
+| Skipping no-Word cleanup sweep before promote | Chunk lands in release as writer-only state, no body page label / inline punctuation / heading case / typography fixes applied | Always run the no-Word cleanup sweep against the project's defect-class catalogue (where one exists; otherwise enumerate Classes A/B/C/G/H/I/L/M below as the minimum) before promote; chunks with skipped sweep stay flagged for follow-up |
+| Render gate skipped after no-Word edits | Phase 2/3 audits show "structurally clean" but no render evidence that page-flow, table-merge, figure-grouping behave correctly | Render at least one representative chunk through Word ExportAsFixedFormat and compare against source PDF before claiming render-validated PASS |
 | Accents or primes drift | Prime, hat, bar, transpose, conjugate, or overline attaches to the wrong base or index | Rebuild the MathType script/accent template and re-render |
 | Hat rendered as loose mark | A unit vector or hatted variable shows a small detached hat instead of a single accented MathType symbol | Use a MathType accent-template slot or explicit MathML `mover accent="true"` with the base inside the slot |
 | Template symbol assembled from loose glyphs | Hat, tilde, overline, arrow, radical, brace, bracket, determinant bar, norm, or matrix delimiter looks short, detached, miscentered, or attached to only one row/cell | Rebuild with the corresponding MathType template and place the whole intended expression inside the template slot |
@@ -600,6 +648,31 @@ Before claiming PASS:
 17. Run the repo-relevant script syntax check or tests for changed scripts.
 18. Run whitespace/diff hygiene checks such as `git diff --check`.
 19. Confirm no Word/MathType automation process remains unless the user intentionally has Word open.
+20. Confirm `word/styles.xml` Normal style font/size matches the accepted exemplar (Class L typography normalization) and no chunk-specific pandoc styles were lost in the merge.
+21. Confirm no heading paragraph (Heading1-5, Title, Subtitle) contains 8+ consecutive uppercase Cyrillic characters that should be in sentence case (Class M).
+22. Confirm no body-flow `Страница NN` or `Страницы NN-MM` paragraphs remain (Class G page label residue).
+23. Confirm the project's release manifest `status` reflects the actual gate state for the chunk (full source-PDF visual review with render evidence is a different state than no-Word cleanup pass; do not coalesce them).
+24. Confirm per-chunk skill review record names the exact OLE/media byte-identity check, the styles.xml merge audit, and the heading-case audit.
+
+## Defect Class Index
+
+The minimum defect-class catalogue this skill enforces. Where the project maintains its own catalogue (for example `docs/translation-defect-checklist.md` in the project), that document is authoritative for pattern evidence and confirmed examples; the table below is the in-skill summary the worker keeps front-of-mind during a pass.
+
+| Class | Surface | Repair lane |
+|---|---|---|
+| A | Inline punctuation around MathType OLE | no-Word XML, surgical text-run edits |
+| B | Bilingual name corruption (Latin + Cyrillic hybrid) | no-Word XML, full Latin or full Cyrillic |
+| C | Word-order calque / OCR garbage in prose | no-Word XML |
+| D | Greek letter substitutions in prose (`p` vs `ρ`, `v` vs `ν`, `u` vs `μ`) | no-Word XML for prose; writer-bound for OLE internals |
+| E | Inner-product brackets `⟨ ⟩` vs `( )` | no-Word XML for prose; writer-bound for OLE |
+| F | Unit-vector hat / dyadic bar / accent loss | writer-bound OLE rebuild |
+| G | Page count drift and body-flow page labels (`Страница NN`) | no-Word XML for labels; writer/layout for page drift |
+| H | Multi-number formula cell merging in number cells | no-Word XML for split; writer-bound for merged-OLE display image |
+| I | Figure / caption ungrouping (top-level drawing + separate caption paragraph) | no-Word XML, wrap in borderless 1-col 2-row table |
+| J | English `<mtext>` inside MathType OLE (`otherwise`, `at nodes`, `on S_0`) | writer-bound OLE rebuild |
+| K | Source-correct equation reference numbering in prose | no-Word XML, requires source-PDF cross-check |
+| L | Typography normalization against exemplar (`word/styles.xml`) | no-Word XML, full exemplar styles merge |
+| M | Heading case normalization (Russian sentence case, no ALL CAPS) | no-Word XML, multi-run text edit |
 
 ## Terms and Abbreviations
 
