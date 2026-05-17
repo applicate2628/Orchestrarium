@@ -4,9 +4,15 @@
 
 Platform-specific rules for Claude Code. Shared governance (hygiene, publication safety, role index, core delegation) is imported from `AGENTS.md` above via `@import`.
 
-## Bootstrap — before every fix or implementation commit
+## Bootstrap — before every fix or implementation (two trigger moments)
 
-> **STOP. Before committing any change that fixes a bug, alters behavior, modifies a contract, or implements a feature, run this 5-step checklist. This Bootstrap is the operational form of the shared `Hypothesis disclosure discipline` rule in `AGENTS.md`. It binds the main conversation and any role that authors commits.**
+> **STOP. Two trigger moments fire this Bootstrap, and you must run the checklist at each.**
+>
+> **(a) Pre-fix trigger** — before the first code-mutating tool call (`Edit`, `Write`, `NotebookEdit`, or equivalent) in response to a bug report, runtime failure, error trace, regression, "does not work" claim, "не работает" claim, "broken" claim, or any user message naming a defect in behavior, **steps 1-3 must complete before the first edit lands**. The trigger fires regardless of whether the session invoked `/agents-bugfix` or any other flow — the discipline binds the session independent of the routing wrapper. Step 5 (Recovery readiness) does not apply at this moment; step 4 (Scope proportionality) and 4.5 (No-kostyl check) apply when you draft the planned edit.
+>
+> **(b) Pre-commit trigger** — before committing any change that fixes a bug, alters behavior, modifies a contract, or implements a feature, run **all 5 steps**. Step 5 is pre-commit-specific.
+>
+> This Bootstrap is the operational form of the shared `Hypothesis disclosure discipline` and `Pre-fix diagnostic gate` rules in `AGENTS.md`. It binds the main conversation and any role that authors code mutations or commits.
 >
 > 1. **Diagnostic data.** Name the concrete observed data points that drive this fix: `file:line` citation, command output captured this session, log line, user statement quoted verbatim, reproduction transcript. If you cannot name any — go investigate first; do not commit yet.
 >
@@ -27,13 +33,21 @@ Platform-specific rules for Claude Code. Shared governance (hygiene, publication
 >
 > 5. **Recovery readiness.** If a hypothesis later turns out wrong, what is the rollback path? For local-only commits, prefer `git reset --hard HEAD~N` over `git revert` because the hypothesis-bearing commit then disappears from history rather than being preserved as a partial truth. Do not `git push` hypothesis-bearing commits before user review; user review is the final hypothesis verification step.
 >
-> **Violation triggers** — if you find yourself writing or thinking any of these as load-bearing reasoning for a fix, that IS the trigger to invoke this Bootstrap:
+> **Violation triggers** — if you find yourself writing or thinking any of these as load-bearing reasoning for a fix *or* a fix-attempt code edit, that IS the trigger to invoke this Bootstrap:
+>
+> **Pre-fix triggers** (fire before the first `Edit` / `Write` / `NotebookEdit` tool call):
+>
+> - "I see the bug, let me edit X" without a captured `file:line` symptom citation or verbatim error output
+> - "the fix is to add Y" or "let me just patch Z" without a verified hypothesis about what is broken and where
+> - starting an `Edit` / `Write` tool call in a bug-report context with no diagnostic data captured in this session's conversation (user's wording verbatim, error output verbatim, return code, log line, reproduction step, or `file:line` symptom anchor)
+>
+> **Pre-commit triggers** (fire before authoring the commit):
 >
 > - `most likely means`, `presumably`, `I believe it refers to`, `this should map to`, `based on training data`, `extrapolating from`, `in general X means Y`
 > - `while I'm here let me also`, `since we're touching this anyway`
 > - `I'll just commit this and we can fix it if wrong`
 >
-> These phrases are not banned in open exploration or hypothesis formation. They are banned **only** as the justification for a commit. When one appears in that position, name it, treat the underlying claim as a HYPOTHESIS, and apply steps 1-5.
+> These phrases and patterns are not banned in open exploration or hypothesis formation. They are banned **only** as the justification for a code edit (pre-fix triggers) or a commit (pre-commit triggers). When one appears in that position, name it, treat the underlying claim as a HYPOTHESIS, and apply the relevant steps (1-3 at pre-fix; 1-5 at pre-commit).
 
 ### Structural enforcement (auto-installed)
 
