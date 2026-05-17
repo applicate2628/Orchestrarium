@@ -63,31 +63,68 @@ if ($PromptFile) {
     exit 1
   }
   $stdin = [Console]::In.ReadToEnd()
-  Set-Content -LiteralPath $promptPath -Value $stdin -Encoding UTF8 -NoNewline
+  # Explicit UTF-8 no-BOM write so the prompt file bytes are deterministic on
+  # both PS 5.1 (where `Set-Content -Encoding UTF8` adds a BOM) and PS 7+ — a
+  # leading BOM at claude stdin would otherwise be interpreted as prompt content.
+  [System.IO.File]::WriteAllText($promptPath, $stdin, [System.Text.UTF8Encoding]::new($false))
 }
 
-$pinfo = New-Object System.Diagnostics.ProcessStartInfo
-$pinfo.FileName = $claudePath
-foreach ($flag in $ClaudeFlags) { $pinfo.ArgumentList.Add($flag) }
-$pinfo.RedirectStandardInput = $true
-$pinfo.RedirectStandardOutput = $true
-$pinfo.RedirectStandardError = $true
-$pinfo.UseShellExecute = $false
+# UTF-8 encoding for the native-command pipeline. PS 5.1 defaults `$OutputEncoding`
+# to ASCII, which silently mangles non-ASCII bytes piped into a native process.
+# Setting all three layers (`$OutputEncoding`, console In, console Out) ensures
+# the prompt body reaches claude stdin and captured stdout/stderr stay UTF-8 clean.
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$prevOutputEncoding = $OutputEncoding
+$prevConsoleIn = [Console]::InputEncoding
+$prevConsoleOut = [Console]::OutputEncoding
+$prevErrorAction = $ErrorActionPreference
+$OutputEncoding = $utf8NoBom
+[Console]::InputEncoding = $utf8NoBom
+[Console]::OutputEncoding = $utf8NoBom
+# Relax error preference for the native call only. With `Stop` (set at the
+# wrapper top for the wrapper's own PowerShell code), any byte the child
+# process writes to stderr becomes a fatal NativeCommandError that kills the
+# script before `$LASTEXITCODE` can be captured. The wrapper-side Stop
+# strictness is restored in the finally block.
+$ErrorActionPreference = 'Continue'
 
-$process = [System.Diagnostics.Process]::Start($pinfo)
-$promptBody = Get-Content -Raw -LiteralPath $promptPath
-$process.StandardInput.Write($promptBody)
-$process.StandardInput.Close()
+try {
+  # Invoke claude via PowerShell native call operator. `&` handles shim resolution
+  # (`.exe`, `.cmd`, `.ps1`) on both PS 5.1 + PS 7+ — unlike `[Process]::Start` with
+  # `UseShellExecute=$false`, which only launches native `.exe` binaries and breaks
+  # on npm-installed `claude.ps1` shims. Stdin is fed from the prompt file via the
+  # pipeline; stdout/stderr captured via PowerShell's native `1>` / `2>` redirection;
+  # exit code via `$LASTEXITCODE`.
+  Get-Content -Raw -LiteralPath $promptPath |
+    & $claudePath @ClaudeFlags `
+      1> $outPath 2> $errPath
+  $exitCode = $LASTEXITCODE
+} finally {
+  $ErrorActionPreference = $prevErrorAction
+  $OutputEncoding = $prevOutputEncoding
+  [Console]::InputEncoding = $prevConsoleIn
+  [Console]::OutputEncoding = $prevConsoleOut
+}
 
-$stdoutText = $process.StandardOutput.ReadToEnd()
-$stderrText = $process.StandardError.ReadToEnd()
-$process.WaitForExit()
+if ($null -eq $exitCode) { $exitCode = 1 }
 
-Set-Content -LiteralPath $outPath -Value $stdoutText -Encoding UTF8 -NoNewline
-Set-Content -LiteralPath $errPath -Value $stderrText -Encoding UTF8 -NoNewline
+# Normalize captured stdout/stderr to UTF-8 no-BOM. PS 5.1's `1>` / `2>`
+# redirection writes UTF-16 LE with BOM via `Out-File`'s default Unicode
+# encoding; PS 7+ writes UTF-8 — re-encode so callers get consistent bytes
+# regardless of which host launched the wrapper. `Get-Content -Raw` auto-detects
+# the BOM, and `[System.IO.File]::WriteAllText` writes UTF-8 no-BOM explicitly.
+# On PS 7+ where the file is already UTF-8, this round-trip is a no-op.
+foreach ($capturedPath in @($outPath, $errPath)) {
+  if ((Test-Path -LiteralPath $capturedPath -PathType Leaf) -and (Get-Item -LiteralPath $capturedPath).Length -gt 0) {
+    $captured = Get-Content -Raw -LiteralPath $capturedPath
+    if ($null -ne $captured) {
+      [System.IO.File]::WriteAllText($capturedPath, $captured, [System.Text.UTF8Encoding]::new($false))
+    }
+  }
+}
 
 Write-Output $promptPath
 Write-Output $outPath
 Write-Output $errPath
 
-exit $process.ExitCode
+exit $exitCode
