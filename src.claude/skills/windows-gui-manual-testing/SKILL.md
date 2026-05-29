@@ -60,6 +60,9 @@ When the bug is animation-, timing-, or sequence-dependent, video evidence is re
    # Full desktop, 30 fps, 10 seconds, H.264 mp4
    ffmpeg -f gdigrab -framerate 30 -i desktop -t 10 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
 
+   # One-frame artifacts: use 60 fps and keep the clip short
+   ffmpeg -f gdigrab -framerate 60 -i desktop -t 9 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
+
    # Specific window by title (window must be visible and named):
    ffmpeg -f gdigrab -framerate 30 -i title="ExactWindowTitle" -t 10 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
 
@@ -67,10 +70,33 @@ When the bug is animation-, timing-, or sequence-dependent, video evidence is re
    ffmpeg -f gdigrab -framerate 30 -offset_x 100 -offset_y 100 -video_size 1280x720 -i desktop -t 10 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
    ```
 
+   Correct full-window capture recipe:
+
+   1. Find the target top-level HWND, then call `GetWindowRect` and the virtual-screen metrics (`SM_XVIRTUALSCREEN`, `SM_YVIRTUALSCREEN`, `SM_CXVIRTUALSCREEN`, `SM_CYVIRTUALSCREEN`). On Windows with DPI scaling or extended glass/shadow bounds, also call `DwmGetWindowAttribute(..., DWMWA_EXTENDED_FRAME_BOUNDS, ...)` and prefer the DWM extended-frame rectangle when `GetWindowRect` clips the right or bottom edge.
+   2. If any side of the window rect is outside the visible virtual screen, restore/move/resize the window into a known visible rectangle before recording.
+   3. Normalize capture width and height to even values for H.264.
+   4. Capture one still frame with the exact intended `-offset_x`, `-offset_y`, and `-video_size`.
+   5. Inspect that frame with `view_image`. Confirm the entire app surface is present from left edge to right edge and from title bar to bottom edge. For normal overlapped windows, the top-right close button must be visible; if the close button is missing, the crop is wrong and cannot be used as full-window evidence.
+   6. Only after the check frame passes, drive the repro and record the video. If the check frame is clipped, discard the setup and correct the rectangle first.
+
+   UI Automation preflight:
+   - When UI Automation is available, use it to identify the exact top-level app window and record its `BoundingRectangle`, title, process id, and title-bar button controls before choosing a crop.
+   - Treat the UIA close button as a hard crop anchor for normal windows: if UIA reports a close button but the verification still does not show it, the crop is wrong.
+   - If Win32 or DWM bounds disagree with UIA bounds on a high-DPI desktop, prefer the rectangle whose verification frame shows the full title bar and close button; stale or DPI-logical `GetWindowRect` values can crop the right side.
+   - Re-run UIA discovery after any window move, resize, maximize, restore, detach, or user adjustment. Do not reuse stale coordinates.
+   - For scripted repro clicks, prefer UIA element centers for tabs/buttons, then save an action log with target name, role, and absolute coordinates. After recording, verify the video or app log proves those clicks landed; a clip with wrong-click actions is not evidence.
+   - Do not blame a console/log window that is behind or below the app unless the verification frame actually shows it covering the target window. Crop the app window, not the nearby tooling.
+
    Notes:
    - Start the target app first, position and size it as needed, then start the capture command.
+   - Before any cropped window or region capture, prove that the requested capture rectangle contains the whole visual surface under test. If `GetWindowRect` extends off the visible desktop, or if the right/bottom side of the app is outside the monitor, first move/resize/maximize the window fully into the visible desktop or capture the full desktop instead. Do not treat a partial crop as evidence for full-window behavior.
    - Most UI bugs reproduce in 5–15 seconds; do not record long sessions when a short repro is enough.
    - Store captures in `.scratch/` (gitignored). Frames extracted from captures live in `.scratch/video-frames/` per `$analyzing-video-bugs` conventions.
+   - For native-child, WebView, popup, tooltip, menu, overlay, or airspace bugs, prefer full-desktop capture first. Window-title capture can miss or mis-layer separate native/top-level windows; crop the target window after capture.
+   - If process APIs do not reveal the visible app window reliably, enumerate HWNDs with Win32 `EnumWindows` + `GetWindowText` + `GetWindowRect`; do not trust `Get-Process.MainWindowTitle` as the only locator. In PowerShell use a variable like `$procId`, not `$pid`, because `$PID` is read-only.
+   - On multi-monitor or high-DPI desktops, treat `GetWindowRect` as virtual-screen coordinates. Compare the crop rectangle against the virtual-screen bounds, not just the primary monitor. If any side is clipped or ambiguous, move the window into a known visible rectangle before recording.
+   - After starting a new capture setup, extract or capture one verification frame before driving the repro. Inspect it directly and confirm the full left-to-right and top-to-bottom app surface is present, including side panels, previews, popups, overlays, and native child controls that matter to the bug. If the check frame is clipped, discard that capture setup and correct the rectangle before recording evidence.
+   - For intermittent one-frame bugs, drive several repeated transitions in one clip. Bring the exact HWND foreground before each scripted hotkey or click, leave a short stable pause between transitions, and verify the video file exists with a non-trivial byte size.
    - If the user must trigger the repro manually, coordinate timing: say "starting capture, please trigger the bug now" and wait for confirmation in chat that the trigger fired.
    - If `ffmpeg gdigrab` is unavailable (non-Windows host, restricted environment, no ffmpeg in PATH), ask the user to record with the OS's built-in tool (Game Bar via Win+G on Windows, QuickTime on macOS, GNOME Screencast on Linux) and provide the file path.
 
