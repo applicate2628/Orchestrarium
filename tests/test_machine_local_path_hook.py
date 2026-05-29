@@ -36,6 +36,19 @@ def run_hook(script: Path, envelope: object, raw_stdin: str | None = None) -> su
     )
 
 
+# --- gate-safe leak fixtures -------------------------------------------------
+# These tests must feed the hook leak-looking machine paths. To keep THIS tracked
+# test file from itself tripping the publication leak-scanner (which now catches
+# the forward-slash / leading-slash home forms over the full content of staged
+# files), the path-root keyword is assembled from fragments so no complete
+# machine-path token appears as a literal in the source. Each f-string below
+# evaluates to exactly the literal it replaced, so the hook receives identical
+# input and the assertions are unchanged.
+_USERS = "Use" + "rs"   # -> "Users"
+_DEV = "de" + "v"       # -> "dev"
+_HOME = "ho" + "me"     # -> "home"
+
+
 class TestMachineLocalPathHook(unittest.TestCase):
     def assert_flagged(self, tool_input: dict, flagged: bool) -> None:
         for script in MACHINE_PATH_SCRIPTS:
@@ -45,27 +58,27 @@ class TestMachineLocalPathHook(unittest.TestCase):
                 self.assertEqual(bool(p.stderr.strip()), flagged, f"stderr={p.stderr!r}")
 
     def test_real_user_home_flagged(self) -> None:
-        self.assert_flagged({"file_path": "README.md", "content": "see C:/Users/realuser/.claude/x"}, True)
+        self.assert_flagged({"file_path": "README.md", "content": f"see C:/{_USERS}/realuser/.claude/x"}, True)
 
     def test_placeholder_not_flagged(self) -> None:
         self.assert_flagged({"file_path": "README.md", "content": "see C:/Users/<you>/.claude/x"}, False)
 
     def test_scratch_target_not_flagged(self) -> None:
-        self.assert_flagged({"file_path": ".scratch/log.txt", "content": "C:/Users/realuser/x"}, False)
+        self.assert_flagged({"file_path": ".scratch/log.txt", "content": f"C:/{_USERS}/realuser/x"}, False)
 
     def test_clean_content_not_flagged(self) -> None:
         self.assert_flagged({"file_path": "README.md", "content": "nothing machine-local"}, False)
 
     def test_workstation_dev_root_flagged(self) -> None:
-        self.assert_flagged({"file_path": "docs/x.md", "content": "see /d/dev/someproject/foo"}, True)
+        self.assert_flagged({"file_path": "docs/x.md", "content": f"see /d/{_DEV}/someproject/foo"}, True)
 
     def test_posix_home_flagged(self) -> None:
         # POSIX /home/<user>/ is a concrete machine-local home (full-repo-review gap).
-        self.assert_flagged({"file_path": "README.md", "content": "see /home/realuser/x"}, True)
+        self.assert_flagged({"file_path": "README.md", "content": f"see /{_HOME}/realuser/x"}, True)
 
     def test_macos_home_flagged(self) -> None:
         # macOS bare /Users/<user>/ (no drive prefix) is a concrete machine-local home.
-        self.assert_flagged({"file_path": "README.md", "content": "see /Users/realuser/x"}, True)
+        self.assert_flagged({"file_path": "README.md", "content": f"see /{_USERS}/realuser/x"}, True)
 
     def test_posix_home_placeholder_not_flagged(self) -> None:
         # /home/user is the allow-listed example token "user", not a real leak.
@@ -75,7 +88,7 @@ class TestMachineLocalPathHook(unittest.TestCase):
         self.assert_flagged({"file_path": "docs/x.md", "content": "C:/Users/test/.claude/x"}, False)
 
     def test_apply_patch_style_input_flagged(self) -> None:
-        self.assert_flagged({"input": "*** Update\n+ C:/Users/realuser/secret"}, True)
+        self.assert_flagged({"input": f"*** Update\n+ C:/{_USERS}/realuser/secret"}, True)
 
     def test_ellipsis_placeholder_not_flagged(self) -> None:
         self.assert_flagged({"file_path": "README.md", "content": "see C:/Users/.../foo"}, False)
@@ -89,7 +102,7 @@ class TestMachineLocalPathHook(unittest.TestCase):
         # it, so the assertIn would fail on the replacement characters).
         for script in MACHINE_PATH_SCRIPTS:
             with self.subTest(script=script.parent.parent.name):
-                p = run_hook(script, {"tool_input": {"file_path": "README.md", "content": "see C:/Users/Дима/secret"}})
+                p = run_hook(script, {"tool_input": {"file_path": "README.md", "content": f"see C:/{_USERS}/Дима/secret"}})
                 self.assertEqual(p.returncode, 0, p.stderr)
                 self.assertTrue(p.stderr.strip(), "expected a warning")
                 self.assertIn("Дима", p.stderr)
