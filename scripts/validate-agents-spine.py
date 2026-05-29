@@ -57,9 +57,9 @@ MERGED_INTO_SPINE = {"Results-table provenance discipline"}
 # all genuine ELABORATION (rationale, examples, recovery procedures, the
 # glossary, common-skill layout, delegation prose) to on-demand
 # shared/references/spine/*.md extracts, taking AGENTS.shared.md from
-# 61,905 -> ~39,840 chars while keeping all 63 manifest protection tokens in the
+# 61,905 -> ~39,815 chars while keeping all 63 manifest protection tokens in the
 # spine (the 6 review-restored teeth were added after the review loop). The
-# floor near 39,840 is also set by the pack validators
+# floor near 39,815 is also set by the pack validators
 # (validate-skill-pack.sh), which require specific formula/terminology/
 # verification phrases to be present in the installed AGENTS.md itself, not only
 # in a reference. What remains is irreducible enforcement teeth (banned-phrase
