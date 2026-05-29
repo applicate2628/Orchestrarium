@@ -86,6 +86,7 @@ DEV = "de" + "v"
 WORK = "wo" + "rk"
 PROJ = "proj" + "ects"
 HOME = "ho" + "me"
+ELL = chr(0x2026)          # "…" U+2026, kept out of source as pure-ASCII chr()
 
 
 def block_rows() -> dict[str, str]:
@@ -114,6 +115,10 @@ def block_rows() -> dict[str, str]:
         # MF3: a secret on a line that ALSO contains an allowed path token must STILL block.
         "b21_secret_plus_allowed": _join("pass", "word", ": hunter2  ", WIN, BS, USERS, BS, "<you>"),
         "b22_aws_plus_token": _join("AKIA", "A" * 16, " near ", WIN, BS, USERS, BS, "you"),
+        # NEW (Change B): UNC host/share user homes -> concrete machine-local leak.
+        "b23_unc_host": _join(BS, BS, "host", BS, USERS, BS, REAL),
+        "b24_unc_share": _join(BS, BS, "srv", BS, "share", BS, USERS, BS, REAL),
+        "b25_unc_deep_share": _join(BS, BS, "srv", BS, "share", BS, "sub", BS, USERS, BS, REAL),
     }
 
 
@@ -138,6 +143,24 @@ def pass_rows() -> dict[str, str]:
         "p17_windows_dir": _join(WIN, BS, "Windows", BS, "System32", BS, "drivers"),
         "p18_program_files": _join(WIN, BS, "Program Files", BS, "App"),
         "p19_prose": "This prose mentions Users and home directories generically.",
+        # NEW (Change B): UNC placeholder + allowed token must PASS.
+        "p20_unc_angle_you": _join(BS, BS, "host", BS, USERS, BS, "<you>"),
+        "p21_unc_token_you": _join(BS, BS, "host", BS, USERS, BS, "you"),
+        "p22_unc_ellipsis_doc": _join(BS, BS, "host", BS, USERS, BS, "..."),
+        # NEW (Change A): U+2026 ellipsis placeholder in every form must PASS.
+        "p23_u2026_backslash": _join(WIN, BS, USERS, BS, ELL),
+        "p24_u2026_forward": _join(WIN, FS, USERS, FS, ELL),
+        "p25_u2026_macos": _join(FS, USERS, FS, ELL),
+        "p26_u2026_bare": _join("see ", ELL, " here"),
+        "p27_mixed_dot_ellipsis": _join(WIN, FS, USERS, FS, ".", ELL, "."),
+        "p28_u2026_unc": _join(BS, BS, "host", BS, USERS, BS, ELL),
+        # SELF-FLOOD GUARDS (C5): an ESCAPED Windows-path JSON literal and a
+        # UNC-with-"..." doc literal must BOTH stay exit-0 (the left-anchor +
+        # host-label guard rejects the drive-prefixed \\Users\\, the ellipsis
+        # filter clears the "..." segment). These are the exact shapes that the
+        # commit ADDING these rows would otherwise self-trip the scanner with.
+        "p29_json_escaped_literal": _join('"', WIN, BS, BS, USERS, BS, BS, "test", '"'),
+        "p30_unc_doc_ellipsis_literal": _join(BS, BS, "host", BS, USERS, BS, "..."),
     }
 
 

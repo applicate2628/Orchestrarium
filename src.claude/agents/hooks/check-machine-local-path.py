@@ -67,6 +67,10 @@ _PLACEHOLDER = r"(?:<[^>\\/\s]+>|%[^%\\/\s]+%|\$\{[^}\s]+\}|\$[A-Za-z_][A-Za-z0-
 # Example/placeholder usernames that are not real machine leaks (case-insensitive).
 ALLOWED_USER_TOKENS = {"you", "user", "username", "name", "test", "example", "me", "x"}
 
+# Dot run (".", "..", "...") OR the Unicode horizontal ellipsis U+2026 ("\u2026"),
+# or any mix, used as an ellipsis placeholder segment in docs (e.g. C:\Users\<U+2026>).
+_ELLIPSIS_CHARS = {".", "\u2026"}
+
 # Each pattern captures (root, first-segment). We then drop matches whose
 # first segment is a placeholder or an allowed example token.
 _PATTERNS = [
@@ -84,6 +88,18 @@ _PATTERNS = [
     re.compile(r"(?i)\b[a-z]:[\\/]+(?:dev|work|projects)[\\/]+([^\\/\s\"'`,;:)\]}>]+)"),
     # MSYS workstation dev root: /d/dev/X
     re.compile(r"(?i)(?:^|[\s\"'`(=])/[a-z]/(?:dev|work|projects)/([^/\s\"'`,;:)\]}>]+)"),
+    # UNC user home: \host\Users\X  or  \server\share\...\Users\X.
+    # Left-anchored on start/space/quote/'('/'='/',' so a bare doubled-backslash
+    # \Users\ inside an ESCAPED Windows-path source literal (e.g. JSON
+    # "C:\Users\test") cannot self-match — a genuine UNC needs a host label
+    # BEFORE \Users\, which a drive-prefixed \Users\ does not have. The negative
+    # lookahead excludes the \?\ and \.\ namespaces, whose embedded drive form
+    # (C:\Users\X) is already caught by the drive-letter pattern above.
+    re.compile(
+        r"(?i)(?:^|[\s\"'`(=,])\\\\(?![?.][\\/])"
+        r"[^\\/\s]+(?:[\\/]+[^\\/\s]+)*?[\\/]+users[\\/]+"
+        r"([^\\/\s\"'`,;:)\]}>]+)"
+    ),
 ]
 
 
@@ -91,8 +107,8 @@ def _is_placeholder_or_allowed(segment: str) -> bool:
     seg = segment.strip().strip("\\/").lower()
     if not seg:
         return True
-    if set(seg) <= {"."}:
-        return True  # ellipsis/dot placeholder such as "..." used in docs
+    if seg and set(seg) <= _ELLIPSIS_CHARS:
+        return True  # ellipsis/dot placeholder such as "...", "\u2026", "." used in docs
     if re.fullmatch(_PLACEHOLDER, segment.strip()):
         return True
     if seg in ALLOWED_USER_TOKENS:

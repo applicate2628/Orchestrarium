@@ -47,6 +47,8 @@ def run_hook(script: Path, envelope: object, raw_stdin: str | None = None) -> su
 _USERS = "Use" + "rs"   # -> "Users"
 _DEV = "de" + "v"       # -> "dev"
 _HOME = "ho" + "me"     # -> "home"
+_BS = chr(92)           # -> "\\" : a single literal backslash, kept out of source
+_ELL = chr(0x2026)      # -> "…" : U+2026, kept out of source as pure-ASCII chr()
 
 
 class TestMachineLocalPathHook(unittest.TestCase):
@@ -92,6 +94,46 @@ class TestMachineLocalPathHook(unittest.TestCase):
 
     def test_ellipsis_placeholder_not_flagged(self) -> None:
         self.assert_flagged({"file_path": "README.md", "content": "see C:/Users/.../foo"}, False)
+
+    # --- UNC host/share home (Change B) -------------------------------------
+    def test_unc_real_home_flagged(self) -> None:
+        # \\host\Users\<real> is a concrete UNC machine-local home -> FLAGGED.
+        content = f"see {_BS}{_BS}host{_BS}{_USERS}{_BS}realuser{_BS}secret"
+        self.assert_flagged({"file_path": "README.md", "content": content}, True)
+
+    def test_unc_share_real_home_flagged(self) -> None:
+        content = f"path {_BS}{_BS}srv{_BS}share{_BS}{_USERS}{_BS}realuser"
+        self.assert_flagged({"file_path": "docs/x.md", "content": content}, True)
+
+    def test_unc_placeholder_not_flagged(self) -> None:
+        # \\host\Users\<you> placeholder segment -> NOT flagged.
+        content = f"see {_BS}{_BS}host{_BS}{_USERS}{_BS}<you>"
+        self.assert_flagged({"file_path": "README.md", "content": content}, False)
+
+    def test_unc_token_not_flagged(self) -> None:
+        # \\host\Users\you allow-listed example token -> NOT flagged.
+        content = f"see {_BS}{_BS}host{_BS}{_USERS}{_BS}you"
+        self.assert_flagged({"file_path": "README.md", "content": content}, False)
+
+    # --- U+2026 ellipsis placeholder (Change A) ------------------------------
+    def test_u2026_backslash_not_flagged(self) -> None:
+        self.assert_flagged({"file_path": "README.md", "content": f"see C:{_BS}{_USERS}{_BS}{_ELL}"}, False)
+
+    def test_u2026_forward_slash_not_flagged(self) -> None:
+        self.assert_flagged({"file_path": "README.md", "content": f"see C:/{_USERS}/{_ELL}"}, False)
+
+    def test_u2026_bare_not_flagged(self) -> None:
+        self.assert_flagged({"file_path": "README.md", "content": f"prefix {_ELL} suffix"}, False)
+
+    def test_mixed_dot_ellipsis_not_flagged(self) -> None:
+        # A segment that is a mix of dots and U+2026 (e.g. ".….") is still a
+        # placeholder, not a real account name -> NOT flagged.
+        self.assert_flagged({"file_path": "README.md", "content": f"see C:/{_USERS}/.{_ELL}./foo"}, False)
+
+    def test_u2026_unc_placeholder_not_flagged(self) -> None:
+        # \\host\Users\… (UNC home with ellipsis segment) -> NOT flagged.
+        content = f"see {_BS}{_BS}host{_BS}{_USERS}{_BS}{_ELL}"
+        self.assert_flagged({"file_path": "README.md", "content": content}, False)
 
     def test_uppercase_x_placeholder_not_flagged(self) -> None:
         self.assert_flagged({"file_path": "README.md", "content": "see C:/Users/X/foo"}, False)
