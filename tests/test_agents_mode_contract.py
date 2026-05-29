@@ -32,9 +32,12 @@ class AgentsModeContractTest(unittest.TestCase):
 
         # Shipped default is the best-effort profile (symmetric to externalClaudeProfile: opus-max).
         self.assertEqual(codex_profile["default"], "gpt-5.5-xhigh")
+        # 4th allowed value gpt-5.3-codex-spark added in schema commit 6555faa
+        # (fast external-mechanical tier); keep this list in sync with
+        # shared/agents-mode.schema.json externalCodexProfile.allowed.
         self.assertEqual(
             codex_profile["allowed"],
-            ["default", "gpt-5.5-fast", "gpt-5.5-xhigh"],
+            ["default", "gpt-5.5-fast", "gpt-5.5-xhigh", "gpt-5.3-codex-spark"],
         )
         self.assertNotIn("providers", codex_profile)
 

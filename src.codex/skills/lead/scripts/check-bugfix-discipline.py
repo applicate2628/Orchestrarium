@@ -13,23 +13,30 @@ Decision algorithm (fail-open everywhere on internal error):
 
   1. Read PreToolUse JSON envelope from stdin. Extract transcript_path.
   2. If no transcript_path or file missing → exit 0 (cannot determine, allow).
-  3. Parse the recent transcript JSONL. Find the last user message and all
-     assistant/tool messages after it (the "current turn").
-  4. Examine the last user message text:
-     - If it contains an explicit override marker → exit 0 (allow).
-     - If it does NOT contain any bug-trigger phrase → exit 0 (not a bug
-       report; allow).
-  5. Bug-trigger phrase present. Examine the current turn (everything after
-     the last user message) for bugfix-discipline signals:
-     - Skill invocation with skill=agents-bugfix
-     - Read of agents-bugfix command/skill file
-     - Text markers indicating diagnostic capture occurred (file:line
-       citation, "reproducing", "diagnostic", "hypothesis", "VERIFIED")
-     - Bash/PowerShell tool calls that look like diagnostic probes
-       (grep on logs, file reads of mentioned paths)
-  6. If any signal present → exit 0 (model is following the flow, allow).
-  7. Otherwise → emit a structured deny payload telling the model exactly
-     what to do (invoke skill, capture diagnostics, or write override marker).
+  3. Parse the recent transcript JSONL. Find the last GENUINE user-typed
+     message — skipping tool_result entries and harness injections
+     (system-reminder / task-notification), which are recorded under role=user
+     in Claude Code — and treat everything after it as the "current turn".
+     Handles both Claude (`message.content`) and Codex (`payload`/`input_text`)
+     transcript shapes.
+  4. Examine the genuine user message plus the assistant's PROSE this turn:
+     - If the override marker appears in the user message OR in assistant prose
+       → exit 0 (allow). It is NOT honored from tool output or tool-call input,
+       because file content the model edits/reads can contain the literal
+       marker (it is present in several tracked repo files).
+     - If the user message contains no bug-trigger phrase → exit 0 (allow).
+  5. Bug-trigger present. The turn counts as engaging discipline iff either:
+     - a broad discipline signal (a stated "hypothesis", "diagnostic",
+       "VERIFIED:", "reproducing", a file:line citation, ...) appears in the
+       assistant's PROSE; or
+     - an /agents-bugfix invocation appears in the model's tool CALLS (Claude
+       tool_use / Codex function_call name+arguments), matched narrowly.
+     Tool OUTPUT and broad words inside arbitrary tool-call INPUT never count
+     (they are file content / command output, not the model engaging).
+  6. If discipline engaged → exit 0 (allow).
+  7. Otherwise → emit a structured deny payload telling the model exactly what
+     to do (invoke /agents-bugfix, capture diagnostics and state the hypothesis
+     in the conversation, or write the override marker in its reply).
 
 The hook is bypassable in principle — the model can fake any signal — but
 it catches the common omission of "saw bug report, went straight to Edit"
@@ -42,11 +49,12 @@ import re
 import sys
 
 from hook_common import (
-    extract_text,
+    extract_assistant_prose,
+    extract_model_tool_calls,
+    last_genuine_user_message,
     parse_envelope,
     read_stdin_utf8,
     read_transcript_tail,
-    slice_current_turn,
 )
 
 # Bug-trigger and change-request phrases — English + Russian + universal markers.
@@ -119,6 +127,13 @@ BUGFIX_SIGNAL_REGEX = re.compile(
     r"Bootstrap"
 )
 
+# Narrow: an actual /agents-bugfix INVOCATION counts as discipline even with no
+# prose. Kept separate from BUGFIX_SIGNAL_REGEX and matched ONLY against the
+# model's tool calls, so the broad prose words above (diagnostic/hypothesis/...)
+# cannot be satisfied merely by appearing inside arbitrary tool-call input
+# (e.g. a file the model is editing that happens to contain them).
+BUGFIX_INVOCATION_REGEX = re.compile(r"agents-bugfix", re.IGNORECASE)
+
 # How many lines of transcript JSONL to read. The current turn is usually
 # within the last ~50 entries; reading more wastes I/O.
 TRANSCRIPT_TAIL_LINES = 100
@@ -136,26 +151,47 @@ def main() -> int:
 
     entries = read_transcript_tail(transcript_path, TRANSCRIPT_TAIL_LINES)
 
-    # Walk transcript in reverse to find the last user message; everything
-    # after it is the "current turn" we examine for discipline signals.
-    last_user_entry, after_user_entries = slice_current_turn(entries)
+    # Find the last GENUINE user-typed message (skipping tool_result and
+    # harness-injected entries like system-reminder / task-notification);
+    # everything after it is the true current turn we examine for discipline
+    # signals. Matching triggers against the genuine message — not the most
+    # recent tool_result, which is what the naive "last user-role entry" used
+    # to return — is what stops the long-session false positives (and also
+    # fixes the false negative where a real bug report sits behind many
+    # tool_result entries).
+    last_user_entry, user_text, after_user_entries = last_genuine_user_message(entries)
 
     if last_user_entry is None:
-        return 0  # no user message in scope; allow
+        return 0  # no genuine user message in scope; allow
 
-    user_text = extract_text(last_user_entry)
-
-    if OVERRIDE_MARKER_REGEX.search(user_text):
+    # The override marker AND the broad discipline signals (a stated hypothesis,
+    # "diagnostic", "VERIFIED:", ...) come ONLY from the model's own PROSE reply
+    # — never from tool output, never from tool-call input. File content the
+    # model edits or reads can contain the literal `[skip-bugfix-discipline]`
+    # marker or those signal words (the marker is present in several tracked
+    # repo files), so matching them against tool I/O was a real bypass in both
+    # directions. extract_assistant_prose returns assistant text blocks only.
+    prose_haystack = "\n".join(
+        t for t in (extract_assistant_prose(e) for e in after_user_entries) if t
+    )
+    if OVERRIDE_MARKER_REGEX.search(user_text) or OVERRIDE_MARKER_REGEX.search(prose_haystack):
         return 0  # explicit override; allow
 
     if not BUG_TRIGGER_REGEX.search(user_text):
         return 0  # not bug context; allow
 
-    # Bug-context confirmed. Check current turn for discipline signals.
-    haystack_parts = [extract_text(e) for e in after_user_entries]
-    haystack = "\n".join(p for p in haystack_parts if p)
-    if BUGFIX_SIGNAL_REGEX.search(haystack):
-        return 0  # discipline engaged; allow
+    if BUGFIX_SIGNAL_REGEX.search(prose_haystack):
+        return 0  # discipline stated in the model's prose; allow
+
+    # An actual /agents-bugfix INVOCATION also counts as discipline — matched by
+    # the narrow BUGFIX_INVOCATION_REGEX against the model's tool CALLS only
+    # (Claude tool_use name/input, Codex function_call name/arguments), so a
+    # broad word inside arbitrary tool-call input does not satisfy this gate.
+    tool_call_haystack = "\n".join(
+        t for t in (extract_model_tool_calls(e) for e in after_user_entries) if t
+    )
+    if BUGFIX_INVOCATION_REGEX.search(tool_call_haystack):
+        return 0  # discipline engaged via an /agents-bugfix invocation; allow
 
     # Deny.
     tool_name = envelope.get("tool_name", "<unknown>")

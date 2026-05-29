@@ -27,6 +27,7 @@ Classify the chunk before choosing a repair path.
 |---|---|---|
 | Missing final candidate | No final MathType DOCX/PDF exists | Build only after source-map and payload preflight pass; result is candidate until reviewed |
 | Mechanical candidate | OLE counts and PDF exist but layout/source review is incomplete | Run structural/visual/source-PDF review and repair lanes; do not call it PASS |
+| Full-text coverage defect | Candidate contains formulas/figures/tables but skips source prose, problem text, footnotes, captions, or page-continuation text | Coverage lane first; do not start the next chunk or claim PASS |
 | Source-map defect | Missing/wrong formulas, wrong order, text in MathML, wrong split/merge before OLE | No-Word source-map repair, prepare-only, payload audits, checklist update |
 | Local formula/template defect | A small set of formulas has bad integrals, braces, hats, delimiters, style, indices, or gaps | One-object sample or targeted OLE replacement for only those formulas |
 | Inline-math defect | Plain caret text, wrong scripts, punctuation drift, missing inline MathType or styled Word math | Split prose from math, repair inline OLE/styled runs, render affected lines |
@@ -38,6 +39,19 @@ Classify the chunk before choosing a repair path.
 If more than one state applies, pick the highest upstream blocker first: source-map, then formula/template, then inline, then table/layout/figure, then final review.
 
 ## Repair Lanes
+
+### Coverage Lane
+
+Use when the candidate may be formula-complete but not text-complete.
+
+1. Render or locate the current source pages and candidate pages.
+2. Build a page-by-page source ledger: headings, prose anchors, problem ranges, footnotes, captions, table titles/bodies, figure numbers, and formula numbers.
+3. Extract text from the rendered candidate PDF and compare candidate/source character counts as a falsification check. For normal prose-heavy chunks, a rendered-candidate/source ratio below `0.85` is `REVISE` unless the artifact records a source-specific exception and visual reconciliation. A high ratio is only a sanity signal, not acceptance.
+4. Identify exact missing source spans by page and local anchor, especially text before the first formula, between adjacent formulas, after the last formula, after figures/tables, at page breaks, and in problem lists.
+5. Patch the source-map/writer content so the missing prose is represented as Word text while formulas remain editable MathType OLE.
+6. Rebuild or patch the candidate, render it, and repeat the coverage and visual checks.
+
+Exit: `CANDIDATE for coverage repair` after the repaired candidate renders, or `PASS for coverage ledger only` when no candidate was changed and final review is still pending.
 
 ### Source-Map Lane
 
@@ -144,6 +158,7 @@ Every worker must leave a compact artifact with these fields:
 | Lane | The single repair lane used |
 | Changed | Exact formulas, inline objects, pages, paragraphs, tables, or figures touched |
 | Untouched | Important accepted formulas/pages deliberately left unchanged |
+| Coverage | Page-by-page source coverage result, including any text-count sanity ratio and missing/proven source spans |
 | Rendered | Candidate PDF/pages rendered after the latest edit |
 | Source comparison | Source PDF pages/regions compared |
 | Remaining blockers | Empty only for final review handoff; otherwise list concrete REVISE items |

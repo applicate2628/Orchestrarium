@@ -904,11 +904,15 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
         hook_host_os="windows"
         bugfix_script_target="$TARGET/agents/scripts/check-bugfix-discipline.ps1"
         stop_script_target="$TARGET/agents/scripts/check-passive-polling-stop.ps1"
+        machine_path_script_target="$TARGET/agents/hooks/check-machine-local-path.ps1"
+        notrash_script_target="$TARGET/agents/hooks/check-no-trash-in-repo.ps1"
         ;;
       *)
         hook_host_os="posix"
         bugfix_script_target="$TARGET/agents/scripts/check-bugfix-discipline.sh"
         stop_script_target="$TARGET/agents/scripts/check-passive-polling-stop.sh"
+        machine_path_script_target="$TARGET/agents/hooks/check-machine-local-path.sh"
+        notrash_script_target="$TARGET/agents/hooks/check-no-trash-in-repo.sh"
         ;;
     esac
     echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os)..."
@@ -925,6 +929,21 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --hook-event Stop \
       --script-marker check-passive-polling-stop \
       --script-path "$stop_script_target"
+    echo "  Installing machine-local-path PreToolUse hook [AUDIT] (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --script-marker check-machine-local-path \
+      --script-path "$machine_path_script_target"
+    echo "  Installing no-trash-in-repo PreToolUse hook [AUDIT] (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --script-marker check-no-trash-in-repo \
+      --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash" \
+      --script-path "$notrash_script_target"
   fi
 fi
 

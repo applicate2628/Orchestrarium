@@ -732,6 +732,14 @@ if [[ $DEV_REPO -eq 1 ]]; then
     if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
   done
 
+  # ru/ localization policy (INTENTIONAL SCOPE — not glob folklore): every
+  # TOP-LEVEL standalone methodology reference under each ref dir must have a
+  # Russian mirror in ru/. The 'find -maxdepth 1' below is a deliberate policy
+  # boundary: typed subdirectories such as shared/references/spine/ hold
+  # English-only extracts (verbatim slices of the always-loaded AGENTS.md spine,
+  # which was itself English-only before the Task-6 cut) and are EXEMPT from the
+  # ru/ mirror requirement by design. Do NOT make this recursive without an
+  # explicit decision to localize the spine extracts.
   for ref_dir in "$SHARED_REF_DIR" "$CODEX_REF_DIR" "$CLAUDE_REF_DIR" "$GEMINI_REF_DIR" "$QWEN_REF_DIR"; do
     while IFS= read -r source_file; do
       name="$(basename "$source_file")"
@@ -741,7 +749,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
       else
         fail "$ref_dir/ru/$name missing for $name"
       fi
-    done < <(find "$ref_dir" -maxdepth 1 -type f -name '*.md' | sort)
+    done < <(find "$ref_dir" -maxdepth 1 -type f -name '*.md' | sort)  # maxdepth 1: top-level only; subdirs (spine/) intentionally exempt per note above
   done
 
   echo ""
@@ -991,7 +999,13 @@ echo "=== Skill metadata budget ==="
 # pre-common-skills UX guideline. Future common skills should still aim for
 # <= 180 chars where the trigger surface is narrow; this cap is the wide-trigger
 # allowance, not a license for verbose role-style descriptions.
-CODEX_SKILL_DESCRIPTION_MAX_CHARS=440
+# Bumped 440 -> 460 (2026-05-29) for the mathtype-book-page "Full-Text Coverage
+# Gate" backport from active Codex downstream use: the description gained the
+# "full source-text coverage" trigger and is now 443 chars. Headroom ~17 chars is
+# the ceiling for this one wide-trigger common skill, NOT an invitation to grow
+# other descriptions; narrow-trigger skills still aim for <= 180. The total cap
+# (3700) was not bumped — current consumption ~3622 leaves enough headroom.
+CODEX_SKILL_DESCRIPTION_MAX_CHARS=460
 # Total cap covers roles + utility skills + common skills. Roles alone were
 # sized at 3000 historically; raised to 3500 (2026-05-16) to accommodate the
 # common-skills category without forcing role-description churn. Raised again
@@ -1396,13 +1410,18 @@ echo "=== AGENTS.md required sections ==="
 agents_line_count="$(count_codex_pack_lines "$AGENTS_FILE")"
 # Budget bumped 380 -> 420 (2026-05-17) to accommodate the passive-polling
 # Stop hook structural-enforcement section beside the existing PreToolUse
-# bugfix-discipline hook: the docs now name both hook events, both entry
-# points, both override markers, independent removal commands, and the Stop
-# JSON shape. 399 measured after the change; +21 ceiling preserves headroom
-# for one small governance addition. Previous bumps: 360 -> 380 (2026-05-17,
-# Bootstrap two trigger moments); 340 -> 360 (2026-05-16, no-kostyl step
-# 4.5); 300 -> 340 (Bootstrap itself). Visible decision rather than silent
-# budget growth.
+# bugfix-discipline hook: as of that bump the docs named both hook events,
+# both entry points, both override markers, independent removal commands,
+# and the Stop JSON shape (399 measured then; +21 ceiling reserved headroom
+# for one small governance addition). 2026-05-29 landed TWO warn-only audit
+# hooks (machine-local-path, then the redesigned no-trash-in-repo) -- now four
+# hook entries, two on the PreToolUse event, adding no new override markers --
+# contributing their bullets, removal commands, entry-point list items, and
+# "four hook entries" wording. The assembled pack section stays well under the
+# 420 ceiling (measured in the low 340s in source-repo assembly; the runtime
+# check below prints the exact count). Previous bumps: 360 -> 380 (2026-05-17, Bootstrap two trigger
+# moments); 340 -> 360 (2026-05-16, no-kostyl step 4.5); 300 -> 340
+# (Bootstrap itself). Visible decision rather than silent budget growth.
 if [[ "$agents_line_count" -le 420 ]]; then
   pass "Codex AGENTS.md pack section line budget <= 420 ($agents_line_count)"
 else

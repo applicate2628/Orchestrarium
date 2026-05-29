@@ -99,6 +99,39 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertNotIn("bash", hook["command"])
         self.assertNotIn("if", hook)
 
+    def test_install_with_custom_tool_matcher(self) -> None:
+        # --tool-matcher overrides the default regex for a hook that must fire
+        # on a different tool set (e.g. a Bash/shell-command guard such as the
+        # no-trash-in-repo hook). The default path (no --tool-matcher) stays
+        # "Edit|Write|NotebookEdit|apply_patch" — covered by the empty-install
+        # test above — so existing hooks are unaffected by this new option.
+        result = run_installer(
+            self.target,
+            "--script-marker",
+            "check-no-trash-in-repo",
+            "--tool-matcher",
+            "Bash",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = load_json(self.target)
+        self.assertEqual(data["hooks"]["PreToolUse"][0]["matcher"], "Bash")
+
+    def test_custom_matcher_coexists_with_default_matcher_hook(self) -> None:
+        # A custom-matcher hook and a default-matcher hook register as two
+        # separate PreToolUse entries (idempotency keys on script-marker, not
+        # matcher); the default entry keeps the shared regex unchanged.
+        run_installer(self.target, "--script-marker", "check-bugfix-discipline")
+        run_installer(
+            self.target,
+            "--script-marker",
+            "check-no-trash-in-repo",
+            "--tool-matcher",
+            "Bash",
+        )
+        data = load_json(self.target)
+        matchers = sorted(e["matcher"] for e in data["hooks"]["PreToolUse"])
+        self.assertEqual(matchers, ["Bash", "Edit|Write|NotebookEdit|apply_patch"])
+
     def test_install_codex_posix_shell_form(self) -> None:
         result = run_installer(self.target, platform="codex")
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -51,7 +51,7 @@ Platform-specific rules for Claude Code. Shared governance (hygiene, publication
 
 ### Structural enforcement (auto-installed)
 
-The pack ships two structural hooks. They are backstops for two different failure moments; they do not replace the text rules above.
+The pack ships four structural hooks: two blocking-enforcement (bugfix-discipline, passive-polling) and two warn-only audits (machine-local-path, no-trash-in-repo). They are backstops; they do not replace the text rules above.
 
 **PreToolUse bugfix-discipline hook.** `check-bugfix-discipline.py` catches the most common pre-fix discipline violation: the model is about to make a code-mutating tool call (`Edit`/`Write`/`NotebookEdit`/`apply_patch`) in response to a user message that contains a bug-report or change-request signal (e.g. `fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, `поменяй`, traceback, `Error:`), but it did NOT first invoke `/agents-bugfix` or otherwise capture diagnostic data. The hook reads the PreToolUse envelope's `transcript_path`, parses the recent transcript tail, and:
 
@@ -62,21 +62,27 @@ The pack ships two structural hooks. They are backstops for two different failur
 
 **Stop passive-polling hook.** `check-passive-polling-stop.py` catches a different failure: the model is about to end its turn by saying it is waiting for an async external source (bot/review/CI/job/notification/reply) without a relevant current-turn state check. The hook reads `last_assistant_message` directly from the Stop envelope, exits immediately when `stop_hook_active=true`, and parses the transcript only after a passive-polling phrase is detected. It allows user handoffs such as `waiting for your response` / `жду твоего подтверждения`, allows the per-stop override marker `[acknowledge-passive-stop]`, and otherwise requires a relevant probe in the current turn: time/status commands (`date`, `Get-Date`, `gh pr view`, `gh run list`, `gh api`, `curl`), process/task output, or reads of output/log/task files. If no relevant probe is present, it emits top-level `{"decision":"block","reason":"..."}` telling the model to check state now, use the override for a real handoff, or invoke a concrete tool like `Bash: gh pr view`.
 
+**Two PreToolUse audit hooks (warn-only).** `check-machine-local-path.py` warns when a machine-local absolute path (a concrete user home or workstation dev root; placeholders like `<you>`, `%USERPROFILE%`, `${CLAUDE_PROJECT_DIR}` are allowed) is written into a non-`.scratch/` file. `check-no-trash-in-repo.py` warns when an operation CREATES a new directory inside the repo whose newly-created name is high-signal author-process vocabulary (`kosyaks`, `journal`, `diary`, `mistakes`, `mistake-log`, `personal`, `private`, `mine`) — it requires actual new-directory creation (writing under an existing dir never warns), exempts `.scratch/`, ignores ambiguous names like `dev`/`notes`/`docs`, and uses path-scoped `git ls-files` as a suppressor for established tracked dirs (this redesign replaced a first version that flagged dirs by name alone and false-fired on ordinary project structure). Both match the edit's own `tool_input` (not session context), write a UTF-8 stderr warning, and ALWAYS allow — AUDIT mode; promotion to a blocking `deny` is a separate reviewed step once the false-positive rate is measured. Both fail open.
+
 Hook entry points:
 
 - `.claude/agents/scripts/check-bugfix-discipline.sh` / `.ps1`
 - `.claude/agents/scripts/check-passive-polling-stop.sh` / `.ps1`
+- `.claude/agents/hooks/check-machine-local-path.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
+- `.claude/agents/hooks/check-no-trash-in-repo.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
 
-Both wrappers are thin fail-open wrappers around the sibling Python brain. Shared JSON envelope and transcript helpers live in `.claude/agents/scripts/hook_common.py`.
+Per the source-hygiene rule, the two audit hooks live in the typed `agents/hooks/` dir; the two grandfathered blocking hooks stay in `agents/scripts/`. All four wrappers are thin fail-open wrappers around their sibling Python brain. Shared JSON envelope and transcript helpers live in `.claude/agents/scripts/hook_common.py`.
 
-**The installer auto-installs both hook entries by default.** Both `scripts/install-claude.sh --global` and `scripts/install-claude.sh --target <project>` merge the `PreToolUse` and `Stop` entries into `settings.json` with an idempotent JSON merge that preserves other keys and hooks. Opt out at install time with `--no-hypothesis-hook` (legacy flag name kept for back-compat) or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1`. Remove entries independently:
+**The installer auto-installs all four hook entries by default.** Both `scripts/install-claude.sh --global` and `scripts/install-claude.sh --target <project>` merge the `PreToolUse` (bugfix-discipline + machine-local-path + no-trash-in-repo, the last with a `Bash`-inclusive matcher so it sees `mkdir`) and `Stop` entries into `settings.json` with an idempotent JSON merge that preserves other keys and hooks. Opt out at install time with `--no-hypothesis-hook` (legacy flag name kept for back-compat) or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1`. Remove entries independently:
 
 ```bash
 python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --script-path <ignored> --remove
 python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --hook-event Stop --script-marker check-passive-polling-stop --script-path <ignored> --remove
+python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --script-marker check-machine-local-path --script-path <ignored> --remove
+python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --script-marker check-no-trash-in-repo --script-path <ignored> --remove
 ```
 
-The auto-installed entries use this shape (Windows exec form using PowerShell; POSIX uses `bash` instead):
+The auto-installed entries use this shape (Windows exec form using PowerShell; POSIX uses `bash` instead). The example shows the `check-bugfix-discipline` PreToolUse entry and the `check-passive-polling-stop` Stop entry; the other two auto-installed entries, `check-machine-local-path` and `check-no-trash-in-repo`, share the PreToolUse shape with their own markers and `-File` paths (`check-no-trash-in-repo` also adds `Bash` to its matcher so it sees `mkdir`):
 
 ```json
 {

@@ -640,8 +640,13 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Claude addendum does not reintroduce the shared team-composition section"
   check_max_lines "$CLAUDE_REF_DIR/subagent-operating-model.md" 120 \
     "Claude addendum stays bounded instead of regrowing into a full blueprint copy"
+  # Fingerprint regenerated 2026-05-29: the prior hash (1a8291b9...) was stale.
+  # Commit 6555faa updated the shared doc (gpt-5.3-codex-spark enum) but missed
+  # this companion-update on the Claude validator; the Codex validator already
+  # carried the current f666dc58... hash, so the doc is the intended canonical
+  # and only this expected value was out of date. Re-aligned to the committed doc.
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "1a8291b94323bb586db4f7de30715d1be91d847512f2325633cd10eb8ce7286d" \
+    "f666dc58dc71e86733ea8f190e5d69c36f6f99e3db5319c19f9b760d72bf1a41" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "f3b58ded2c928e4ad138e3ff966c75480b2f869c56c02bba8aafb4cbfe622cf6" \

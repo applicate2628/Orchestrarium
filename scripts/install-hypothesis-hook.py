@@ -58,15 +58,25 @@ DEFAULT_SCRIPT_MARKER = "check-bugfix-discipline"
 TOOL_MATCHER_REGEX = "Edit|Write|NotebookEdit|apply_patch"
 
 
-def _with_event_matcher(entry: dict[str, Any], hook_event: str) -> dict[str, Any]:
-    """Attach matcher only for hook events that consume one."""
+def _with_event_matcher(
+    entry: dict[str, Any], hook_event: str, tool_matcher: str | None = None
+) -> dict[str, Any]:
+    """Attach matcher only for hook events that consume one.
+
+    tool_matcher overrides the default TOOL_MATCHER_REGEX for a hook that must
+    fire on a different tool set (e.g. "Bash" for a shell-command guard). When
+    None, the shared default applies, so every existing hook entry is unchanged.
+    """
     if hook_event == "PreToolUse":
-        return {"matcher": TOOL_MATCHER_REGEX, **entry}
+        return {"matcher": tool_matcher or TOOL_MATCHER_REGEX, **entry}
     return entry
 
 
 def build_claude_entry(
-    script_path: str, host_os: str, hook_event: str = "PreToolUse"
+    script_path: str,
+    host_os: str,
+    hook_event: str = "PreToolUse",
+    tool_matcher: str | None = None,
 ) -> dict[str, Any]:
     """Build a Claude hook entry in exec form (args array, no shell).
 
@@ -104,6 +114,7 @@ def build_claude_entry(
             ],
             },
             hook_event,
+            tool_matcher,
         )
     return _with_event_matcher(
         {
@@ -116,11 +127,15 @@ def build_claude_entry(
         ],
         },
         hook_event,
+        tool_matcher,
     )
 
 
 def build_codex_entry(
-    script_path: str, host_os: str, hook_event: str = "PreToolUse"
+    script_path: str,
+    host_os: str,
+    hook_event: str = "PreToolUse",
+    tool_matcher: str | None = None,
 ) -> dict[str, Any]:
     """Build a Codex hook entry in shell form.
 
@@ -170,6 +185,7 @@ def build_codex_entry(
         ],
         },
         hook_event,
+        tool_matcher,
     )
 
 
@@ -373,6 +389,16 @@ def main() -> int:
         help="Substring identifying this specific hook entry for idempotency",
     )
     parser.add_argument(
+        "--tool-matcher",
+        default=None,
+        help=(
+            "Override the PreToolUse matcher regex (default: "
+            "Edit|Write|NotebookEdit|apply_patch). Use for a hook that must fire "
+            "on a different tool set, e.g. 'Bash' for a shell-command guard. "
+            "Ignored for the Stop event, which takes no matcher."
+        ),
+    )
+    parser.add_argument(
         "--remove",
         action="store_true",
         help="Remove our hook entry instead of installing it",
@@ -401,11 +427,13 @@ def main() -> int:
     # programmatically without an explicit trust API, which Codex does not
     # currently expose).
     #
-    # On Windows, the Codex shell-form command we emit assumes Codex's hook
-    # interpreter can locate `bash` (typically via Git Bash on standard Windows
-    # Codex setups). If a user's Codex runtime uses a different shell, the
-    # hook entry will be visible in the trust UI but will fail to invoke; the
-    # user can edit ~/.codex/hooks.json after install to match their shell.
+    # On Windows, the Codex shell-form command we emit invokes the hook via
+    # `powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<ps1>'` (see
+    # build_codex_entry) — explicit powershell.exe avoids the PATH gotcha where
+    # `bash` resolves to the WSL launcher, which cannot read `C:\Users\...`
+    # paths. If a user's Codex runtime uses a different interpreter the hook
+    # entry is visible in the trust UI but may fail to invoke; the user can edit
+    # ~/.codex/hooks.json after install to match their shell.
     target = Path(args.target).expanduser()
     data = load_existing(target)
 
@@ -415,10 +443,12 @@ def main() -> int:
     else:
         if args.platform == "claude":
             entry = build_claude_entry(
-                args.script_path, args.host_os, args.hook_event
+                args.script_path, args.host_os, args.hook_event, args.tool_matcher
             )
         else:
-            entry = build_codex_entry(args.script_path, args.host_os, args.hook_event)
+            entry = build_codex_entry(
+                args.script_path, args.host_os, args.hook_event, args.tool_matcher
+            )
         changed = install(data, entry, args.hook_event, args.script_marker)
         action = "installed/updated"
 

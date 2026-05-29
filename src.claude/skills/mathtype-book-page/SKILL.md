@@ -1,6 +1,6 @@
 ---
 name: mathtype-book-page
-description: Use when formatting, correcting, or reviewing translated technical-book DOCX pages that require editable MathType formulas, source-PDF mathematical typography/index proofread, book-like typography, display formula tables, equation-number cells, inline math fidelity, MathType size/alignment checks, figure/caption table grouping, contents formatting, and visual validation against source PDF pages in any repository.
+description: Use when formatting, correcting, or reviewing translated technical-book DOCX pages that require full source-text coverage, editable MathType formulas, source-PDF mathematical typography/index proofread, book-like typography, display formula tables, equation-number cells, inline math fidelity, MathType size/alignment checks, figure/caption table grouping, contents formatting, and visual validation against source PDF pages in any repository.
 ---
 
 # MathType Book Page
@@ -13,11 +13,13 @@ Use the currently accepted page in the active repo as an exemplar, but express e
 
 Applying this skill means closing the visual/template defects in the document, not merely reviewing them. A raw OMML/MathML-to-MathType conversion, an OLE count report, or a worker report that says formulas were converted is not skill application. If the rendered document still shows old defects such as small/clipped integrals, loose or wrong braces, short determinant bars, detached hats, artificial alignment cells, wide gaps before `=`, or text/formula numbers inside MathType, mark the chunk `REVISE` and route it to template/source repair before final review.
 
+Applying this skill also means preserving the full translated source coverage. A formula-complete or figure-complete chunk that omits ordinary prose, section introductions, derivations, problem statements, footnotes, captions, table titles, or continuation text is `REVISE` even when every visible formula is editable MathType OLE.
+
 ## Source PDF Authority
 
 Treat the original source PDF as the mathematical and layout authority for every final DOCX/PDF candidate. An accepted exemplar controls reusable formatting patterns, but it never overrides the current source PDF's formula content, indices, accents, inline math, equation references, captions, page numbering, or source-specific layout.
 
-No chunk may receive final `PASS` until the current rendered candidate has been compared against the corresponding source PDF pages after the latest edit. This comparison must cover every changed display formula, every meaningful inline MathType object or styled Word math run, nearby punctuation, equation-number references in prose, figure captions, and any formula/table/layout region touched by the repair.
+No chunk may receive final `PASS` until the current rendered candidate has been compared against the corresponding source PDF pages after the latest edit. This comparison must cover the whole source-page content: prose paragraphs, headings, section transitions, derivation text, problem statements, footnotes/endnotes, captions, table titles, table bodies, display formulas, meaningful inline MathType objects or styled Word math runs, nearby punctuation, equation-number references in prose, figures, and any formula/table/layout region touched by the repair.
 
 When text extraction from the PDF is noisy, render or crop the source page and compare visually. If the source PDF is ambiguous, record the ambiguity in the repo QA artifact and keep the chunk at `REVISE` or `CANDIDATE`; do not infer the formula from neighboring patterns or from the generated DOCX.
 
@@ -30,16 +32,33 @@ Never collapse stage-specific success into final acceptance.
 | Source-map or no-Word repair | `PASS` only for the scoped source-map subset, with final chunk still `REVISE` | Claiming final MathType/layout/source-PDF acceptance |
 | XML-only layout/table/figure repair | `CANDIDATE` only, until the exact scratch DOCX is rendered and compared with the source PDF | Treating clean DOCX XML, grouped figures, or fixed table counts as visual acceptance |
 | Writer/OLE insertion | `PASS` only for mechanical conversion counts, exported DOCX/PDF, and zero placeholders | Treating OLE count, validation JSON, or exported PDF existence as skill PASS |
-| Skill review | `PASS` only after rendered visual review, source-PDF formula proofread, inline proofread, layout review, and figure/caption review | Accepting spot checks, stale reports, or worker summaries |
+| Skill review | `PASS` only after full source-text coverage review, rendered visual review, source-PDF formula proofread, inline proofread, layout review, and figure/caption review | Accepting spot checks, formula-only checks, stale reports, or worker summaries |
+
+## Full-Text Coverage Gate
+
+Before final `PASS`, prove that the candidate represents the whole source chunk, not just formulas and figures.
+
+Required coverage checks:
+
+1. Build or update a source-page ledger for the chunk. For each source page, record the section/problem range, important prose anchors, figures/tables, footnotes, captions, and numbered formulas that must appear in the candidate.
+2. Extract text from the rendered candidate PDF and compare it with the source OCR/text as a rough falsification check. For normal prose-heavy technical-book chunks, an output/source character ratio below `0.85` is a hard `REVISE` unless the QA artifact explains a source-specific reason such as OCR garbage, mostly-image pages, very dense formulas, or intentional scope exclusion approved by the user. A high ratio is not a PASS by itself.
+3. Visually inspect the rendered candidate pages against the rendered source pages after the latest edit. Confirm that prose blocks have not been skipped between formulas, across page breaks, after figures/tables, or at chapter/section boundaries.
+4. Check continuation areas explicitly: text before the first formula, text after the last formula, text between consecutive display formulas, problem lists, footnotes, and captions that wrap across lines.
+5. Record the coverage result in the QA artifact. If the chunk is formula-only by admitted scope, state that scope explicitly; otherwise formula-only output is defective.
+
+Do not advance to the next chunk when the current chunk is missing ordinary text. Freeze the pipeline, mark the affected chunk `REVISE`, and repair the coverage defect before producing more chunks unless the user explicitly parks the repair.
+
+For sequential chunk production, treat the previous chunk's full-coverage closure as a prerequisite for the next chunk. Do not start the next chunk from formula/OLE success alone: the current chunk's QA or status artifact must contain fresh evidence for rendered-PDF/source text coverage, source-map/source coverage or an equivalent source-page ledger, visual source comparison, and any source-specific exception. If a low-ratio repair required adding ordinary prose, update the reusable source-map or builder pattern before continuing so the omission does not propagate.
 
 Before any worker starts a chunk, require a quick anti-false-pass scan:
 
 1. Locate the source PDF, final DOCX/PDF candidate, validation JSON, formula checklists, and existing review/spec artifacts.
 2. Check whether the final candidate is missing, stale, mechanically converted only, or already marked `REVISE`.
-3. Inspect the DOCX structure for formula tables, table cell counts, OLE/object counts, drawing/image paragraphs, caption paragraphs, obvious font/justification drift, and remaining OMML/placeholders.
-4. Inspect the rendered PDF visually enough to catch oversized body text, loose figures/captions, table merges, clipped formulas, and obvious inline-math corruption.
-5. Compare current findings with prior QA artifacts, but do not let an older report close the gate. Old `PASS` or `REVISE` rows are evidence to recheck against the current rendered DOCX/PDF.
-6. If any required skill surface is unchecked, mark the chunk `REVISE` and write a repair/spec artifact instead of advancing the queue.
+3. Compare source OCR/text length and candidate rendered-PDF text length as a rough coverage sanity check; investigate low ratios before touching MathType.
+4. Inspect the DOCX structure for formula tables, table cell counts, OLE/object counts, drawing/image paragraphs, caption paragraphs, obvious font/justification drift, and remaining OMML/placeholders.
+5. Inspect the rendered PDF visually enough to catch missing prose blocks, oversized body text, loose figures/captions, table merges, clipped formulas, and obvious inline-math corruption.
+6. Compare current findings with prior QA artifacts, but do not let an older report close the gate. Old `PASS` or `REVISE` rows are evidence to recheck against the current rendered DOCX/PDF.
+7. If any required skill surface is unchecked, mark the chunk `REVISE` and write a repair/spec artifact instead of advancing the queue.
 
 Workers must state the scope of their verdict. Use phrases such as `PASS for no-Word source-map repair only` or `PASS for mechanical writer conversion only`. Do not write bare `PASS` unless the full skill review gate has passed.
 
@@ -51,6 +70,8 @@ Hard blockers:
 
 - no current source-PDF render or accepted exemplar was consulted;
 - no current candidate DOCX/PDF was rendered after the latest edit;
+- any source page, prose block, problem item, footnote, caption, table row, or section/chapter boundary is not mapped into the translated candidate;
+- rendered-candidate text coverage is far below source coverage without a recorded source-specific explanation and visual reconciliation;
 - any display formula, meaningful inline formula, or formula reference is unchecked against the source PDF;
 - any known defect pattern from an earlier page/chunk recurs: clipped integrals, wrong braces/cases, short bars, detached hats, artificial alignment cells, wide gaps before `=`, wrong bold/italic/upright math style, wrong indices, text inside MathType, formula numbers inside MathType, loose figure/caption blocks, merged formula tables, or plain-text formula markers;
 - the candidate changes unrelated formulas/pages without an explicit accepted reason;
@@ -287,6 +308,7 @@ Skip rule: a chunk that contains only a numerical data table (e.g. parameter val
 - Grouping a figure and caption is not sufficient if the embedded image itself is cropped or incomplete. Compare the rendered figure against the source PDF image area; if the source top, bottom, side labels, arrows, or subfigures are missing, repair the image extraction/source crop before acceptance.
 - Keep captions centered, close to the figure, styled consistently, and on the same page as the image.
 - Keep image row and caption row together; prevent a page break between them where the document model supports that.
+- A grouped figure/caption table can still fail after render if the image row is too tall for the remaining column, the table begins too low on the page, or the section uses multi-column text. Use source-faithful flow controls such as `keepNext`, `cantSplit`, or a column/page break before the group, constrain the table to the effective column width, and scale the image proportionally so image plus editable caption render together. Do not ungroup the caption or crop away source figure content to force the page break.
 - For multi-part figures, keep all subfigures and the shared caption in one grouped structure, preserving source order and relative spacing.
 - Place captions above or below the figure according to the source PDF or accepted exemplar; do not normalize all captions mechanically.
 - Let long captions wrap as Word text inside the caption row rather than using images or text boxes.
@@ -332,6 +354,7 @@ Skip rule: a chunk that contains only a numerical data table (e.g. parameter val
 - Preserve aspect ratio when scaling an OLE object.
 - Record any scaling rule in the repo pipeline if it is automated.
 - If a display formula is too wide, first try a source-faithful line break or MathType layout change; use scaling only after preserving readability.
+- If the source render proves the display topology is already correct and the only rendered defect is that the Word/VML preview is wider than the effective formula cell, constrain the table/preview geometry before rebuilding MathType. Scale the whole preview shape proportionally, keep the equation number as ordinary Word text in the number cell, preserve OLE/media bytes, and render the exact scratch DOCX to prove the number no longer overlaps or clips. Do not use preview scaling for formulas whose source uses a multiline layout or whose formula content/style has not been source-checked.
 - If a formula looks too small after automatic import, rebuild or copy a better MathType template instead of accepting a shrunken object.
 - Validate baseline and size in both Word and exported PDF when possible; trust the exported PDF when they differ.
 - Verify sizes visually in the exported preview PDF; OLE metadata alone is not enough.
@@ -616,6 +639,7 @@ Treat each recurrence as `REVISE`.
 | Inserted display tables merge with neighbors | Two formulas or formula plus figure become one multi-cell table | Insert a tiny normal separator paragraph before/after inserted tables and verify XML cell counts after Word save |
 | Equation number wraps inside number cell | Closing parenthesis drops to a separate line, for example `(52a` then `)` | Widen the number cell, use fixed table layout, and split multi-number displays with explicit line breaks or paragraphs |
 | Source prose between formulas is lost | An unnumbered identity and the following numbered equation are merged, or the linking sentence disappears | Keep the unnumbered formula, linking prose, and numbered formula as separate Word-flow structures |
+| Advancing queue after writer-only success | Next chunk starts after clean MathType/OLE counts while current chunk has no current coverage rows or source-page ledger | Record rendered-PDF/source coverage, source-map/source coverage or source-page ledger, visual comparison, and any exception before moving to the next chunk |
 | Text labels inside MathType | Region names or prose conditions appear inside OLE | Move labels to Word text; keep MathType math-only |
 | Oversized body text | Page looks like a poster or all-bold block | Restore book typography and source-like hierarchy |
 | Mechanically converted overlay typography | Target PDF has many more pages, large sans/body text, unindented paragraphs, or captions styled as body | Normalize against the accepted exemplar/source before visual review |
@@ -623,6 +647,8 @@ Treat each recurrence as `REVISE`.
 | Figure/caption separated | Figure moves to one page and caption to another | Put image and caption in one borderless table with keep-with-next behavior |
 | Figure image cropped after grouping | Caption is stable but the figure itself lost top/bottom/side content compared with source PDF | Replace or re-extract the figure image from the source crop before accepting the grouped figure |
 | Figure caption clipped after grouping | The image is clean but the rendered caption stops mid-caption or loses source-equivalent legend/material text | Allow the caption row/cell to grow, remove fixed-height clipping, widen or split the caption text, and render the affected page before acceptance |
+| Grouped figure table splits because image is too tall or starts too low | Image and caption are in one table but still render on different columns/pages, or a blank/caption-only page appears | Keep the group intact, constrain table width to the effective column, scale the image proportionally, and insert only source-faithful column/page flow controls before the group; re-render the exact candidate |
+| Formula preview overlaps equation number | MathType OLE/media are present and source topology is correct, but the VML preview extends into the ordinary Word-text number cell | After source line-break/content proof, proportionally constrain the preview/table geometry without rebuilding unrelated OLE objects; render-check that the number cell is separated and the formula is not clipped |
 | Bad technical term translation | Domain term becomes nonsense | Verify against source context and use a consistent glossary |
 | TOC/page-number drift | Contents use local chunk pages instead of book page numbers | Preserve source/global page numbers unless user asks otherwise |
 | Inline math loses style | Greek/indexed/vector symbols look like plain text | Convert to inline MathType or explicitly style Word text |
@@ -681,6 +707,7 @@ Before claiming PASS:
 23. Confirm the project's release manifest `status` reflects the actual gate state for the chunk (full source-PDF visual review with render evidence is a different state than no-Word cleanup pass; do not coalesce them).
 24. Confirm per-chunk skill review record names the exact OLE/media byte-identity check, the styles.xml merge audit, and the heading-case audit.
 25. If the chunk contains a code listing (monospace runs `w:rFonts w:ascii="Courier"`/`Consolas`, `pStyle` resolving to a SourceCode/Verbatim family, or a printed listing caption such as `Листинг N` / `Program N` / `Listing N`), confirm a provenance pointer to the project's verified-source root is present in a caption or sidenote immediately adjacent to the listing block (Class N — operational form of the global `Results-table provenance discipline`).
+26. Confirm the queue/status artifact for sequential chunk work records current coverage evidence for this chunk before the next chunk is started.
 
 ## Defect Class Index
 
