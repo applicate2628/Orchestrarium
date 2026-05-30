@@ -413,6 +413,8 @@ Side requests may refine or temporarily interrupt the current primary task, but 
 
 After handling a side request, explicitly resume the primary task and state the next concrete step.
 
+After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting. Continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
+
 An active review or verification task remains non-preemptible by ordinary side clarification unless the user explicitly changes priority.
 
 ## Execution continuity
@@ -420,6 +422,8 @@ An active review or verification task remains non-preemptible by ordinary side c
 After an accepted phase, continue directly to the next clear phase or verification step unless a real gate blocks progression.
 
 Do not stop only because one local batch of work is complete if the next concrete step is already clear.
+
+If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, or an equivalent continue-working signal, take the next concrete action inside the active task immediately instead of only acknowledging the correction.
 
 `PASS` advances immediately. Pause only on `REVISE`, `BLOCKED`, explicit user reprioritization, or a required human approval point.
 

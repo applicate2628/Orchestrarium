@@ -11,6 +11,8 @@ The provider lines share one governance model and role vocabulary, while each ke
 
 Warning: Orchestrarium is optimized for maximum execution effectiveness and low orchestration drag rather than for minimum token spend. On large tasks, multi-opinion review lanes, or aggressive external fan-out, usage can rise quickly and consume a substantial token budget in a short time.
 
+New maintenance sessions should start with [`docs/new-session-guide.md`](docs/new-session-guide.md). It records the source-first rule for this monorepo: tracked Orchestrarium source is canon, while `~/.codex/`, `~/.claude/`, project `.agents/`, and project `.claude/` are installed runtime outputs that should not be patched as the durable fix before the source owner is updated.
+
 ## Repository layout
 
 ```text
@@ -148,7 +150,7 @@ Two archetypes:
 The governance index and runtime layout are defined in [`shared/AGENTS.shared.md`](shared/AGENTS.shared.md) under `## Common skills`. Each provider source tree carries its native form under `src.<provider>/skills/<name>/`, and Claude delegate-style skills additionally register a thin Agent-tool wrapper at `src.claude/agents/<name>.md`.
 
 Currently shipped:
-- `$windows-gui-manual-testing` — delegate-style; Qt and native Windows desktop GUI manual visual verification with screen capture and theme/state evidence.
+- `$windows-gui-manual-testing` — delegate-style; Windows desktop GUI manual visual verification with screen capture, hard crop validation, and theme/state evidence across toolkit/runtime variants.
 - `$analyzing-video-bugs` — knowledge-style; frame extraction, scene-change detection, and dense sampling for any UI/animation/layout bug video.
 - `$bug-hunting` — knowledge-style; systematic runtime-bug investigation via diagnostic logging.
 - `$mathtype-book-page` — knowledge-style; bring translated technical-book DOCX pages to accepted MathType format.

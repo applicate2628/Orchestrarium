@@ -32,6 +32,15 @@ The main Qwen session launches the parallel specialist subagents. A Qwen subagen
 
 `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all. When the active external-routing profile asks for more than one external opinion, the main session may also launch multiple independent external adapters in parallel and aggregate them fail closed on top of that rule.
 
+## Primary-task lock
+
+- Keep exactly one primary in-progress task.
+- Side requests may pause it, but do not replace it unless the user explicitly reprioritizes.
+- After any side request, resume the primary task and state the next concrete step.
+- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting.
+- If the user says `stop closeout`, `завязывай с closeout`, `работай`, or an equivalent continue-working correction, take the next concrete action in the active task immediately instead of only acknowledging it.
+- Do not begin closeout work while a primary review or verification pass is still open.
+
 ## External adapters
 
 Qwen-line external adapters use `.qwen/.agents-mode.yaml`.

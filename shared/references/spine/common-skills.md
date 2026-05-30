@@ -12,7 +12,7 @@ Discovery, invocation, and installed layout:
 - Gemini and Qwen install them under their installed extension root's `skills/<name>/` directory (for example `.gemini/extensions/orchestrarium-gemini/skills/<name>/`, not the source-tree `src.gemini/skills/`) and rely on each runtime's native skill resolver; subagent-style fresh-context delegation is not modeled there.
 
 Common-skill index (installed names):
-- `$windows-gui-manual-testing` — delegate-style. Qt desktop and native Windows GUI manual visual verification with screenshots, video frames, or live inspection; owns screen capture when no recording exists and structural-vs-cosmetic classification of UI issues. Returns an evidence-backed findings package.
+- `$windows-gui-manual-testing` — delegate-style. Windows desktop GUI manual visual verification with screenshots, video frames, or live inspection across toolkit/runtime variants; owns screen capture when no recording exists, hard crop validation, and structural-vs-cosmetic classification of UI issues. Returns an evidence-backed findings package.
 - `$analyzing-video-bugs` — knowledge-style. Extract frames from any UI/animation/layout bug video (user-provided or agent-captured), locate scene transitions, dense-sample around transitions, read the smallest distinguishing frame set.
 - `$bug-hunting` — knowledge-style. Systematic runtime bug investigation via diagnostic logging: log first, never patch on unverified theory, never re-roll on guesses, remove diagnostics in the same commit cycle as the fix.
 - `$mathtype-book-page` — knowledge-style. Bring translated technical-book DOCX pages to accepted MathType format with source-PDF authority, gate discipline, and defective-chunk repair workflow.

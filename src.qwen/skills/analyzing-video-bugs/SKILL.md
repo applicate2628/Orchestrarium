@@ -9,6 +9,8 @@ This skill processes an existing video file showing a UI bug, animation glitch, 
 
 The Read tool reads images (PNG/JPG/GIF) and PDFs, but not video files. To analyze a video bug you must first extract frames with ffmpeg, then Read the resulting images.
 
+Hard crop gate: before reading, judging, or reporting any cropped frame as full-window evidence, verify the crop against an uncropped full-desktop/full-frame image. It must include the complete target window; for normal overlapped windows the top-right close button must be visible. If the crop is clipped or the close-button anchor is missing, discard those frames and re-extract from the full capture or a corrected rectangle.
+
 ## Related skills
 
 - `$windows-gui-manual-testing` — parent visual-verification workflow; owns environment/theme context, evidence-type choice (screenshot vs short video vs frame sequence), screen capture when no recording exists, and structural-vs-cosmetic classification of UI issues.
@@ -50,6 +52,7 @@ ffmpeg -v error -i "<video>" -vf "fps=2,scale=1158:-1" -q:v 4 frame_%02d.jpg
 - `scale=1158:-1` shrinks 1080p+ video so each frame is ~50–70 KB JPEG. 1158 px wide is enough to read UI text in most apps; go wider only if you cannot tell what a button says.
 - `-q:v 4` is a good middle for JPEG (lower = better quality).
 - `%02d` zero-pads filenames so they sort correctly in Glob output.
+- If the capture is full desktop or multi-monitor, make a target-window crop before judging the UI. Start from the HWND `GetWindowRect` if available, but verify it against one full-desktop frame before reading cropped frames; virtual-screen coordinates and DPI can make the first crop wrong. If the crop lacks any window edge or the close-button anchor, discard it and re-extract.
 
 Read all coarse frames in parallel (one Read tool call per frame, batched in a single message). Identify the stable states (which frames look identical) and where the transitions are.
 

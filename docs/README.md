@@ -20,6 +20,7 @@ Current docs in this branch:
 
 - [agents-mode-reference.md](agents-mode-reference.md) for the shared operator schema
 - [external-worker-design.md](external-worker-design.md) for external execution adapter design notes
+- [new-session-guide.md](new-session-guide.md) for new-session orientation and source-first maintenance rules
 - [provider-runtime-layouts.md](provider-runtime-layouts.md) for cross-provider runtime path mapping
 - [work-item-execution-tracking.md](work-item-execution-tracking.md) for the execution ledger helper and periodic active work-item checker
 - [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md)

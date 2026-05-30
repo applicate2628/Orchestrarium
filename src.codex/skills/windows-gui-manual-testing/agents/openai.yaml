@@ -1,4 +1,4 @@
 interface:
-  display_name: "Qt Windows GUI Manual Testing"
-  short_description: "Qt and Windows desktop UI manual testing"
-  default_prompt: "Use $windows-gui-manual-testing to verify a Qt desktop UI on Windows with screenshots, video frames, or live visual inspection, and return evidence-backed findings."
+  display_name: "Windows GUI Manual Testing"
+  short_description: "Windows desktop UI manual testing"
+  default_prompt: "Use $windows-gui-manual-testing to verify a Windows desktop UI (Qt, Avalonia, WinUI/WPF, WebView/native-child, or native Windows) with screenshots, video frames, or live visual inspection, validate any crop against a full-window/close-button anchor before judging it, and return evidence-backed findings."

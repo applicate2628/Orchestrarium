@@ -174,6 +174,7 @@ Do not advance work on optimism or partial acceptance.
 - Close specialist sessions once their artifact is accepted. Keep open only for bounded `REVISE`.
 - After the final reviewer or human/CI gate completes, run a consultant sweep only when it was explicitly requested by the lead or repo-local policy while `consultantMode` is enabled.
 - After any side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
 - Do not stop at one completed sub-batch when a known admitted-scope next action already exists; keep the task open and continue until a real gate or explicit user reprioritization intervenes.
 
 ## Operational rules
@@ -216,6 +217,8 @@ Periodic controls (drift detection between gates) are in [operating-model.md](co
 - Maintain exactly one primary in-progress task at a time.
 - Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
 - When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
+- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
+- If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
 - Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
 - Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.

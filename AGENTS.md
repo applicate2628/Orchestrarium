@@ -6,6 +6,8 @@ The installable Codex pack source lives in [`src.codex/`](src.codex/). The Claud
 
 Use this file together with the shared governance in [`shared/AGENTS.shared.md`](shared/AGENTS.shared.md). The local `.agents/` directory is repo-install output created by the install scripts and is not committed.
 
+At the start of a new maintenance session, read [`docs/new-session-guide.md`](docs/new-session-guide.md) before non-trivial edits. It is the repo-local orientation contract: this monorepo is the source of truth, and installed files under `~/.codex/`, `~/.claude/`, project `.agents/`, or project `.claude/` are runtime outputs to sync only after the owning source is fixed.
+
 When working inside this monorepo itself, do not assume that a missing local `.agents/` tree means the Codex install is broken. Maintainers may intentionally rely on the global Codex install under `~/.codex/` while editing the installer source. If `.agents/.agents-mode.yaml` is absent here, ordinary reads should fall back to `~/.codex/.agents-mode.yaml` before treating the state as missing. Create a repo-local install only when the user explicitly wants one, and explain that it should be created by the installer rather than ad hoc file creation.
 
 ## Codex-side maintenance

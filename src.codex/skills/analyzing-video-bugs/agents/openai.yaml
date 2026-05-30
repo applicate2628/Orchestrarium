@@ -1,4 +1,4 @@
 interface:
   display_name: "Analyzing Video Bugs"
   short_description: "Extract frames from a video bug recording and read the smallest distinguishing set"
-  default_prompt: "Use $analyzing-video-bugs to process an existing video file (.mp4/.webm/.mov/.gif) showing a UI, animation, layout, or visual bug. Extract frames with ffmpeg, locate scene transitions with the scene-change detector, dense-sample around transitions, and read the smallest set of frames that distinguishes the bug state from the working state. The video may have been provided by the user or captured via $windows-gui-manual-testing."
+  default_prompt: "Use $analyzing-video-bugs to process an existing video file (.mp4/.webm/.mov/.gif) showing a UI, animation, layout, or visual bug. Extract frames with ffmpeg, verify any crop against an uncropped full-frame/full-window anchor before judging it, locate scene transitions with the scene-change detector, dense-sample around transitions, and read the smallest set of frames that distinguishes the bug state from the working state. The video may have been provided by the user or captured via $windows-gui-manual-testing."

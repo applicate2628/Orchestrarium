@@ -2,6 +2,8 @@
 
 This file is the repo-local Claude Code development overlay for this monorepo. Claude Code reads it while working inside this repository; it is not installed into user projects.
 
+At the start of a new maintenance session, read [`docs/new-session-guide.md`](docs/new-session-guide.md) before non-trivial edits. It is the repo-local orientation contract: this monorepo is the source of truth, and installed files under `~/.codex/`, `~/.claude/`, project `.agents/`, or project `.claude/` are runtime outputs to sync only after the owning source is fixed.
+
 ## Project policies
 
 - **commit-format**: conventional

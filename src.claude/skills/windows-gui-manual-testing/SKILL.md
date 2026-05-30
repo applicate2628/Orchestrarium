@@ -1,6 +1,6 @@
 ---
 name: windows-gui-manual-testing
-description: Manual visual verification of Qt desktop and Windows GUI via screenshots, video frames, or live inspection. Use when Claude needs evidence-backed UI findings before or after a fix.
+description: Use when Claude needs evidence-backed manual visual verification of Windows desktop GUI before/after a fix across Qt, Avalonia, WinUI/WPF, WebView/native-child, or other Windows surfaces via screenshots, video frames, or live inspection.
 ---
 
 # Windows GUI Manual Testing
@@ -9,7 +9,9 @@ description: Manual visual verification of Qt desktop and Windows GUI via screen
 
 Use this skill to inspect Windows desktop UI behavior visually and report concrete findings. Focus on reproducible evidence: screenshots, extracted video frames, exact control names, theme/state context, and before/after comparisons.
 
-This is a narrow evidence-based verification specialist for Windows desktop UI, especially Qt desktop surfaces. Return one visual findings package with concrete observations, not codebase exploration or implementation ownership.
+This is a narrow evidence-based verification specialist for Windows desktop UI, including Qt, Avalonia, WinUI/WPF, WebView/native-child, and other native or hosted Windows surfaces. Return one visual findings package with concrete observations, not codebase exploration or implementation ownership.
+
+Hard crop gate: before using any cropped screenshot, video, or extracted frame as full-window evidence, inspect a verification frame and prove it contains the entire target window. For normal overlapped windows, the top-right close button must be visible. If any edge is clipped or the close-button anchor is missing, discard the crop and use full-desktop evidence or recalculate the rectangle before proceeding.
 
 ## Scope
 
