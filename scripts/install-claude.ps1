@@ -224,56 +224,7 @@ function Read-InstallMode {
     }
 }
 
-function Confirm-Removal {
-    param([string]$Path)
-    if ($Force -or $DryRun) {
-        return $true
-    }
-    if (-not (Test-Interactive)) {
-        Write-Host "Skipping interactive confirmation in non-console host." -ForegroundColor Yellow
-        return $true
-    }
-
-    $name = Split-Path $Path -Leaf
-    while ($true) {
-        $rawAnswer = Read-Host "Delete existing '$name' at '$Path' before reinstall? [y/N]"
-        $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
-        switch -Regex ($answer.Trim().ToLower()) {
-            "^(y|yes)$" { return $true }
-            "^n$|^no$|^$" { return $false }
-            default { Write-Host "Please answer y or n." }
-        }
-    }
-}
-
 # Per-item install preserves user-added files — no destructive directory wipe needed.
-
-function Copy-RequiredDirectory {
-    param(
-        [string]$SourceDir,
-        [string]$TargetDir,
-        [string]$Label
-    )
-
-    if (Test-Path -LiteralPath $TargetDir) {
-        Write-Host "  Removing old $Label..."
-        if (-not (Confirm-Removal $TargetDir)) {
-            Write-Host "Install cancelled: existing directory not removed: $TargetDir" -ForegroundColor Red
-            exit 1
-        }
-        if (-not $DryRun) {
-            Remove-Item -Recurse -Force $TargetDir
-        } else {
-            Write-Host "    [dry-run] would remove $TargetDir"
-        }
-    }
-    Write-Host "  Installing $Label..."
-    if (-not $DryRun) {
-        Copy-Item -Recurse -Force $SourceDir $TargetDir
-    } else {
-        Write-Host "    [dry-run] would copy $SourceDir -> $TargetDir"
-    }
-}
 
 function Get-DirectoryFileHashes {
     param([string]$Root)
@@ -718,10 +669,15 @@ if (-not $Force -and -not $DryRun -and (Test-Interactive)) {
     foreach ($dir in $Dirs) {
         $dst = Join-Path $TargetRoot $dir
         $src = Join-Path $Source $dir
+        # Count top-level entries (files AND subdirectories) — these are exactly the
+        # "pack items" the install loop below replaces. Matches install-claude.sh's
+        # `-e` count over `"$dst"/*` so .sh and .ps1 report the same totals for
+        # identical trees. No -Force: the bash `*` glob skips dotfiles, so we skip
+        # hidden entries too rather than diverge in the other direction.
         if (Test-Path -LiteralPath $dst) {
-            $existingTotal += (Get-ChildItem -LiteralPath $dst -File -ErrorAction SilentlyContinue).Count
+            $existingTotal += @(Get-ChildItem -LiteralPath $dst -ErrorAction SilentlyContinue).Count
         }
-        $packTotal += (Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue).Count
+        $packTotal += @(Get-ChildItem -LiteralPath $src -ErrorAction SilentlyContinue).Count
     }
     if ($existingTotal -gt 0) {
         $userCount = $existingTotal - $packTotal

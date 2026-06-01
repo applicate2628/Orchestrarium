@@ -38,7 +38,7 @@ The main Qwen session launches the parallel specialist subagents. A Qwen subagen
 - Side requests may pause it, but do not replace it unless the user explicitly reprioritizes.
 - After any side request, resume the primary task and state the next concrete step.
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting.
-- If the user says `stop closeout`, `завязывай с closeout`, `работай`, or an equivalent continue-working correction, take the next concrete action in the active task immediately instead of only acknowledging it.
+- If the user says `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working correction, take the next concrete action in the active task immediately instead of only acknowledging it.
 - Do not begin closeout work while a primary review or verification pass is still open.
 
 ## External adapters

@@ -77,7 +77,8 @@ src.claude/              ← Claude Code pack source (install copies to target .
   agents/                ← role definitions + delegate-style common-skill wrappers
     contracts/           ← operating model + subagent contracts + policy catalog
     team-templates/      ← 8 routing templates (JSON)
-    scripts/             ← validation + safety scripts
+    scripts/             ← validation + safety scripts + the 2 blocking hooks + hook_common
+    hooks/               ← the 2 warn-only audit hooks (machine-local-path, no-trash/stray-artifact)
   commands/              ← slash commands (agents-*)
   skills/                ← common skills (workflow-focused, Skill-tool invokable)
 .claude/                 ← local working install (in .gitignore, NOT committed)

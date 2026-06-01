@@ -225,56 +225,7 @@ function Read-InstallMode {
     }
 }
 
-function Confirm-Removal {
-    param([string]$Path)
-    if ($Force -or $DryRun) {
-        return $true
-    }
-    if (-not (Test-Interactive)) {
-        Write-Host "Skipping interactive confirmation in non-console host." -ForegroundColor Yellow
-        return $true
-    }
-
-    $name = Split-Path $Path -Leaf
-    while ($true) {
-        $rawAnswer = Read-Host "Delete existing '$name' at '$Path' before reinstall? [y/N]"
-        $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
-        switch -Regex ($answer.Trim().ToLower()) {
-            "^(y|yes)$" { return $true }
-            "^n$|^no$|^$" { return $false }
-            default { Write-Host "Please answer y or n." }
-        }
-    }
-}
-
 # Per-skill install preserves user-added skills — no destructive directory wipe needed.
-
-function Copy-RequiredDirectory {
-    param(
-        [string]$SourceDir,
-        [string]$TargetDir,
-        [string]$Label
-    )
-
-    if (Test-Path -LiteralPath $TargetDir) {
-        Write-Host "  Removing old $Label..."
-        if (-not (Confirm-Removal $TargetDir)) {
-            Write-Host "Install cancelled: existing directory not removed: $TargetDir" -ForegroundColor Red
-            exit 1
-        }
-        if (-not $DryRun) {
-            Remove-Item -Recurse -Force $TargetDir
-        } else {
-            Write-Host "    [dry-run] would remove $TargetDir"
-        }
-    }
-    Write-Host "  Installing $Label..."
-    if (-not $DryRun) {
-        Copy-Item -Recurse -Force $SourceDir $TargetDir
-    } else {
-        Write-Host "    [dry-run] would copy $SourceDir -> $TargetDir"
-    }
-}
 
 function Get-DirectoryFileHashes {
     param([string]$Root)
@@ -940,60 +891,65 @@ if (-not (Test-Path $srcShared) -or -not (Test-Path $srcPlatform)) {
     exit 1
 }
 
+# Assemble the pack AGENTS.md into a temp file, then merge or create. The temp
+# file is always removed in the finally block, matching the .sh `trap rm -f EXIT`.
 $srcMd = Join-Path $env:TEMP "orchestrarium-agents-assembled.md"
-$sharedContent = Get-Content $srcShared -Raw
-$platformContent = Get-Content $srcPlatform -Raw
-$assembledContent = @(
-    $script:CodexPackBeginMarker
-    $sharedContent.TrimEnd()
-    ""
-    $platformContent.TrimEnd()
-    $script:CodexPackEndMarker
-) -join "`n"
-Set-Content -Path $srcMd -Value $assembledContent -NoNewline
-
 $dstMd = $MdTarget
+try {
+    $sharedContent = Get-Content $srcShared -Raw
+    $platformContent = Get-Content $srcPlatform -Raw
+    $assembledContent = @(
+        $script:CodexPackBeginMarker
+        $sharedContent.TrimEnd()
+        ""
+        $platformContent.TrimEnd()
+        $script:CodexPackEndMarker
+    ) -join "`n"
+    Set-Content -Path $srcMd -Value $assembledContent -NoNewline
 
-Remove-DanglingLink -Path $dstMd -Label "AGENTS.md"
+    Remove-DanglingLink -Path $dstMd -Label "AGENTS.md"
 
-if (Test-Path $dstMd) {
-    $content = Get-Content $dstMd -Raw
-    if ($content -match "## Template routing") {
-        $lines = Get-Content $dstMd
-        $packStart = Get-CodexPackStartIndex -Lines $lines
-        if ($packStart -ge 0) {
-            Write-Host "  AGENTS.md: replacing Codex pack section..."
-            if (-not $DryRun) {
-                $newContent = Get-MergedCodexAgentsContent -ExistingLines $lines -PackStart $packStart -SourcePath $srcMd
-                Set-Content -Path $dstMd -Value $newContent -NoNewline
+    if (Test-Path $dstMd) {
+        $content = Get-Content $dstMd -Raw
+        if ($content -match "## Template routing") {
+            $lines = Get-Content $dstMd
+            $packStart = Get-CodexPackStartIndex -Lines $lines
+            if ($packStart -ge 0) {
+                Write-Host "  AGENTS.md: replacing Codex pack section..."
+                if (-not $DryRun) {
+                    $newContent = Get-MergedCodexAgentsContent -ExistingLines $lines -PackStart $packStart -SourcePath $srcMd
+                    Set-Content -Path $dstMd -Value $newContent -NoNewline
+                } else {
+                    Write-Host "    [dry-run] would replace Codex pack section in AGENTS.md"
+                }
             } else {
-                Write-Host "    [dry-run] would replace Codex pack section in AGENTS.md"
+                Write-Host "  AGENTS.md: full replace..."
+                if (-not $DryRun) {
+                    Copy-Item -Force $srcMd $dstMd
+                } else {
+                    Write-Host "    [dry-run] would replace AGENTS.md"
+                }
             }
         } else {
-            Write-Host "  AGENTS.md: full replace..."
+            Write-Host "  AGENTS.md: prepending Codex pack content..."
+            $existing = Get-Content $dstMd -Raw
+            $new = Get-Content $srcMd -Raw
             if (-not $DryRun) {
-                Copy-Item -Force $srcMd $dstMd
+                Set-Content -Path $dstMd -Value ($new + "`n" + $existing) -NoNewline
             } else {
-                Write-Host "    [dry-run] would replace AGENTS.md"
+                Write-Host "    [dry-run] would prepend AGENTS.md"
             }
         }
     } else {
-        Write-Host "  AGENTS.md: prepending Codex pack content..."
-        $existing = Get-Content $dstMd -Raw
-        $new = Get-Content $srcMd -Raw
+        Write-Host "  Creating AGENTS.md..."
         if (-not $DryRun) {
-            Set-Content -Path $dstMd -Value ($new + "`n" + $existing) -NoNewline
+            Copy-Item -Force $srcMd $dstMd
         } else {
-            Write-Host "    [dry-run] would prepend AGENTS.md"
+            Write-Host "    [dry-run] would create AGENTS.md"
         }
     }
-} else {
-    Write-Host "  Creating AGENTS.md..."
-    if (-not $DryRun) {
-        Copy-Item -Force $srcMd $dstMd
-    } else {
-        Write-Host "    [dry-run] would create AGENTS.md"
-    }
+} finally {
+    Remove-Item -LiteralPath $srcMd -Force -ErrorAction SilentlyContinue
 }
 
 if ($Mode -ne "global") {

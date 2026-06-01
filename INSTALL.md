@@ -182,6 +182,7 @@ project/
   AGENTS.md
   .codex/
     agents/
+    hooks.json             ← structural hook entries (PreToolUse + Stop) merged here
   .agents/
     .agents-mode.yaml
     skills/                ← role skills + common skills (e.g. windows-gui-manual-testing/, mathtype-book-page/)
@@ -189,6 +190,7 @@ project/
     .agents-mode.yaml
     AGENTS.md
     CLAUDE.md
+    settings.json          ← structural hook entries (PreToolUse + Stop) merged here
     agents/                ← role subagent definitions + delegate-style common-skill wrappers
     commands/
     skills/                ← common skills reachable via the Skill tool from main conv and subagents

@@ -948,7 +948,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CODEX_REF_DIR/subagent-operating-model.md" 120 \
     "Codex addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "f0bccfe085707f775d5e84b1ef7e8824d4309246ad606b13bea1bb01d2162163" \
+    "306d4618d7869e4e7c56d84de54df5bba012a583eee26255a76ba190c7013fe6" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
     "160e9bb3bb3df73e611626bc814a45a0923a350a4bff5b43b82bf45409c06549" \
@@ -1004,16 +1004,18 @@ echo "=== Skill metadata budget ==="
 # "full source-text coverage" trigger and is now 443 chars. Headroom ~17 chars is
 # the ceiling for this one wide-trigger common skill, NOT an invitation to grow
 # other descriptions; narrow-trigger skills still aim for <= 180. The total cap
-# (3700) was not bumped — current consumption ~3622 leaves enough headroom.
+# (3700) was not bumped — current consumption ~3689 still fits under it. These
+# rough char counts are documentation only; the live total is reported
+# authoritatively by the "Codex skill description total" pass line below.
 CODEX_SKILL_DESCRIPTION_MAX_CHARS=460
 # Total cap covers roles + utility skills + common skills. Roles alone were
 # sized at 3000 historically; raised to 3500 (2026-05-16) to accommodate the
 # common-skills category without forcing role-description churn. Raised again
 # 3500 -> 3700 (2026-05-17) to fit the mathtype-book-page long-form description
 # (the wide-trigger allowance noted above costs ~240 chars vs the prior 180-cap
-# baseline). Current consumption after that change is ~3595 chars; headroom
-# ~105 chars is enough for one future common skill at modest length without
-# another bump.
+# baseline). After later mathtype-book-page description growth, current
+# consumption is ~3689 chars; headroom is down to ~11 chars, so a future common
+# skill of any meaningful length will need the cap bumped rather than absorbed.
 CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=3700
 UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes)
 PACK_BUDGET_SKILLS=("${indexed_roles[@]}" "${UTILITY_SKILLS[@]}" "${indexed_common_skills[@]}")

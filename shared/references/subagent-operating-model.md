@@ -185,7 +185,7 @@ A subagent `PASS` still requires verification by the orchestrating owner or the 
 - Keep handoff latency low and avoid pausing between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 - When non-trivial work is interrupted, record a durable resume point: current stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting. Continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
-- If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, or an equivalent continue-working signal, take the next concrete action inside the active task immediately instead of only acknowledging the correction.
+- If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action inside the active task immediately instead of only acknowledging the correction.
 - Before marking a task, batch, or user-facing answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any still-open required follow-up.
 - Do not treat one completed sub-batch as completion when a known required next action still exists inside the admitted scope.
 

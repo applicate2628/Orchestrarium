@@ -135,7 +135,7 @@ Every external or consultant artifact should include one explicit execution reco
 - `Requested consultant mode: <external | internal | disabled>` when consultant routing is relevant; otherwise `not-applicable`
 - `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role disabled>`
 - `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
-- `Deviation reason: <none | external unavailable: [reason]>`
+- `Deviation reason: <none | external unavailable: [reason] | explicit override>`
 
 Rules:
 

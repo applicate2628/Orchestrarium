@@ -259,31 +259,6 @@ build_allowlist() {
   ALLOWLIST=("${dedup[@]}")
 }
 
-confirm_removal() {
-  local path="$1"
-  local name
-  name="$(basename "$path")"
-
-  if [ "$FORCE" -eq 1 ] || [ "$DRY_RUN" -eq 1 ]; then
-    return 0
-  fi
-
-  while true; do
-    read -r -p "Delete existing '$name' at '$path' before reinstall? [y/N] " answer
-    case "${answer,,}" in
-      y|yes)
-        return 0
-        ;;
-      n|no|"")
-        return 1
-        ;;
-      *)
-        echo "Please answer y or n."
-        ;;
-    esac
-  done
-}
-
 # Per-skill install preserves user-added skills — no destructive directory wipe needed.
 
 prompt_install_mode() {

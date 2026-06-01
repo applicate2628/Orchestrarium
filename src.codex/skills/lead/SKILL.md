@@ -215,7 +215,7 @@ Do not advance work on optimism or partial acceptance.
 - Keep the next approved role ready whenever the current gate is likely to pass so the pipeline can keep moving.
 - After any side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
-- If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
+- If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
 - Do not stop at one completed sub-batch when a known admitted-scope next action already exists; keep the task open and continue until a real gate or explicit user reprioritization intervenes.
 
 ## Session lifecycle rule

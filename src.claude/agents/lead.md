@@ -218,7 +218,7 @@ Periodic controls (drift detection between gates) are in [operating-model.md](co
 - Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
 - When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
-- If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
+- If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
 - Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
 - Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.

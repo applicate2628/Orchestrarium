@@ -423,7 +423,7 @@ After an accepted phase, continue directly to the next clear phase or verificati
 
 Do not stop only because one local batch of work is complete if the next concrete step is already clear.
 
-If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, or an equivalent continue-working signal, take the next concrete action inside the active task immediately instead of only acknowledging the correction.
+If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action inside the active task immediately instead of only acknowledging the correction.
 
 `PASS` advances immediately. Pause only on `REVISE`, `BLOCKED`, explicit user reprioritization, or a required human approval point.
 

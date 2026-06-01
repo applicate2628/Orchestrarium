@@ -10,6 +10,16 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-06-02
+
+### Changed
+
+- **Full system audit + `mathtype-book-page` reconciliation + completion of the d41ea16 continuity-rule propagation.** A 10-dimension adversarially-verified audit (27 agents) plus five targeted fix agents addressed 12 confirmed findings and reconciled the actively-iterated `mathtype-book-page` skill.
+  - **`mathtype-book-page` reconciled** (both packs byte-identical): merged the global install's newer methodology (Translation Completeness Gate, source-flow / figure-grouping / OCR-residue lanes, defect classes O–Z) with the repo's complementary **Full-Text Coverage Gate** (the 0.85 character-ratio falsification check) — neither subsumes the other, so both are kept. Project-specific facts (the source book's chapter→code map, numeric fingerprints, manifest tokens, release paths) were kept **generalized** per the skill's own Repo-Independence Contract, so the shipped pack stays reusable.
+  - **d41ea16 continuity-rule propagation completed** across all 10 mirror surfaces that lagged the always-loaded spine: the full 7-token continue-working set (`stop closeout`/`завязывай с closeout`/`работай`/`дальше`/`go`/`продолжай`/`по плану`) now matches the spine in `delegation-principles.md`, the EN/RU `subagent-operating-model` references, both Codex lead surfaces, the Claude lead role + operating-model contract, `agents-mode-reference.md`, and the Gemini/Qwen lead surfaces; the Windows-GUI delegate wrapper was broadened from Qt-only to the full Windows-surface list; the shared `subagent-operating-model` fingerprint was regenerated in both pack validators.
+  - **Audit cleanups:** 4 dispatch-index slash commands (perf/security/qa-session/test) gained their missing `## When to auto-invoke` blocks; dead installer helper functions removed and an `install-codex.ps1` temp-file leak closed (plus a reinstall item-count undercount-by-8 fixed in `install-claude.ps1`); the Claude `external-dispatch` `Deviation reason` field synced to the Codex copy; the repo-local `CLAUDE.md` and `INSTALL.md` file-layout trees gained the `agents/hooks/` dir and the `settings.json`/`hooks.json` hook-entry files; new tests cover the spine validator's fail-closed branches and the PowerShell hook/scanner wrappers.
+  - Verified: spine + both pack validators PASS; pytest 156 passed / 318 subtests (Git-Bash-first PATH); publication gate clean; merged mathtype carries no leaked project facts. Known follow-up: `tests/test_publication_safety_scanner.py` is environment-coupled (fails under a non-Git-Bash-first PATH via MSYS path conversion) — a robustness fix is tracked separately.
+
 ## 2026-05-30
 
 ### Added

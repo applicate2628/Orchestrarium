@@ -1,6 +1,6 @@
 ---
 name: windows-gui-manual-testing
-description: Spawn a fresh-context subagent that verifies a Qt desktop or native Windows GUI on Windows with screenshots, video frames, or live visual inspection, and returns one evidence-backed findings package. Use when Claude Code needs delegated visual inspection in an isolated context for running desktop apps, dropdown or popup animation, layout shifts, theme-specific behavior, hover or selection visuals, or post-fix retesting. For inline workflow loading without a fresh context, invoke the `Skill` tool with the same name instead.
+description: Spawn a fresh-context subagent that verifies a Windows desktop GUI across Qt, Avalonia, WinUI/WPF, WebView/native-child, or other Windows surfaces with screenshots, video frames, or live visual inspection, and returns one evidence-backed findings package. Use when Claude Code needs delegated visual inspection in an isolated context for running desktop apps, dropdown or popup animation, layout shifts, theme-specific behavior, hover or selection visuals, or post-fix retesting. For inline workflow loading without a fresh context, invoke the `Skill` tool with the same name instead.
 ---
 
 # Windows GUI Manual Testing (delegate wrapper)
@@ -14,7 +14,7 @@ This subagent is the Claude-side delegate registration for the common-skill `win
 
 ## Core stance
 
-- Visual-evidence verification specialist for Windows desktop and Qt UI behavior.
+- Visual-evidence verification specialist for Windows desktop GUI behavior across Qt, Avalonia, WinUI/WPF, WebView/native-child, or other Windows surfaces.
 - Return one findings package; do not take ownership of code changes.
 - Stay narrowly scoped to control state, theme context, screenshot or frame evidence, and before/after comparisons.
 

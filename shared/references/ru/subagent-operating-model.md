@@ -184,7 +184,7 @@ AI gates не заменяют внешнюю engineering policy.
 - Предел re-intake: item может быть возвращён `product-manager` для re-intake не более 2 раз. На 3-й re-intake lead обязан эскалировать к пользователю со всеми предыдущими причинами re-intake и запросить окончательное решение (сузить scope, отложить или отменить).
 - Держите handoff latency низким и не делайте пауз между принятыми артефактами, если только не нужен настоящий gate failure или policy-required human/CI check.
 - После context compaction или resume из summary восстановите active task, next unchecked step и open evidence gates до действий. Продолжайте с этой точки, если user или persisted status не говорят, что задача parked, blocked или complete.
-- Если user поправляет сессию фразами вроде `stop closeout`, `завязывай с closeout`, `работай` или equivalent continue-working signal, сразу выполните next concrete action внутри active task вместо одного только acknowledgment.
+- Если user поправляет сессию фразами вроде `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану` или equivalent continue-working signal, сразу выполните next concrete action внутри active task вместо одного только acknowledgment.
 
 ## 3.10 Периодические controls
 

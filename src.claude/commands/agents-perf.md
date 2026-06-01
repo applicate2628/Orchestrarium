@@ -2,6 +2,19 @@
 
 Fix a performance issue using the `performance-sensitive` template.
 
+## When to auto-invoke
+
+Apply this command's flow automatically when the user's request matches any of:
+
+- performance budget or SLA breach: "this endpoint is over the latency budget", "we're missing the SLA", "the p99 regressed"
+- explicit slowness with a target or constraint: "X is too slow", "speed up Y", "reduce the response time of Z", "this query takes too long"
+- throughput or resource pressure tied to a metric: "throughput dropped", "memory keeps climbing", "CPU is pegged under load"
+- performance issue filename reference: user mentions a `work-items/performance/<file>` slug
+
+The user does not need to type `/agents-perf` for this flow to fire. Apply it transparently, announce the routing decision in your first response ("I'm routing this through the performance flow because the report names a measurable budget/SLA breach"), and let the user redirect if the auto-routing was wrong.
+
+**Do NOT auto-invoke** for a functional defect with no performance dimension — that is `/agents-bugfix` territory even if the symptom looks like a hang. When a bug report names both wrong behavior and a budget/SLA breach, this performance flow takes precedence over `/agents-bugfix` per the "pick the most specialized one" resolution rule in CLAUDE.md. Confirm the bottleneck before optimizing; do not auto-route a vague "feels slow" with no metric — ask for a measurable target first.
+
 ## Steps
 
 1. **Get the issue.** Check `$ARGUMENTS`:

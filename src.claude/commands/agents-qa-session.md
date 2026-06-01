@@ -2,6 +2,18 @@
 
 Interactive testing session — you direct, one QA agent investigates and documents.
 
+## When to auto-invoke
+
+Apply this command's flow automatically when the user's request matches any of:
+
+- explicit interactive testing intent: "let's test X together", "let's QA this", "I want to poke at Y with you"
+- iterative, user-directed exploration: "let's go through the edge cases one by one", "I'll feed you scenarios as we go", "walk through Z with me and we'll probe it"
+- a multi-round investigation the user wants to steer (give a hint → see findings → give the next hint), rather than a one-shot task
+
+The user does not need to type `/agents-qa-session` for this flow to fire. Apply it transparently, announce the routing decision in your first response ("I'm routing this through the interactive QA session flow because you want to steer the testing round by round"), and let the user redirect if the auto-routing was wrong.
+
+**Do NOT auto-invoke** for a one-shot "write/verify tests for X" request — that is `/agents-test` territory; this flow is for a steered, multi-round session where the user controls pace and direction. Do not auto-route confirmed bug reports here either — those go to `/agents-bugfix`. The user is in control of the loop; never auto-advance to the next area.
+
 ## Steps
 
 1. **Start session.** Check `$ARGUMENTS`:
