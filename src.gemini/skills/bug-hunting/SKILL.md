@@ -9,9 +9,12 @@ description: Systematic bug-hunting via diagnostic logging — log first, never 
 
 **Stop guessing, start logging.** Every minute spent reasoning from architecture alone is a minute the runtime would have told you the truth in. Every diagnostic round you add narrows the search; every speculative fix you ship widens it.
 
-## Rule 0 — Never fix until logs prove the hypothesis
+## Rule 0 — Never fix until logs prove the hypothesis (ABSOLUTE, two-sided)
 
-No edit to production code while the working theory of the bug is still a theory. Before any fix lands, diagnostic output must show — in the runtime, with timestamps — exactly the cause believed to be acting. If the log does not show it, the theory is wrong or incomplete; add more logging, do not patch.
+**ABSOLUTE RULE.** Hypotheses MUST be confirmed by debugging, and NO fix is permitted until full, absolute runtime confirmation. This binds at BOTH ends of every fix — confirming the cause is necessary but not sufficient:
+
+- **Before the fix — prove the CAUSE.** No edit to production code while the working theory of the bug is still a theory. Diagnostic output must show — in the runtime, with timestamps — exactly the cause believed to be acting. If the log does not show it, the theory is wrong or incomplete; add more logging, do not patch.
+- **After the fix — prove the FIX is perfectly correct.** Identifying the cause does not make a fix "done". Re-run with the diagnostics still in and prove in the runtime that (1) the symptom is gone AND (2) no adjacent behavior regressed. "It should work now" / "this is the right fix" is never confirmation — only a clean runtime log is. Until that log exists the fix stays "implemented, not yet verified", never "done". A fix asserted correct without a runtime log proving it is a Rule 0 violation as severe as patching on an unverified cause.
 
 This applies even when the theory comes from an authoritative source: a consultant memo, a Codex/Claude answer, a Stack Overflow accepted answer, official documentation. External advice is a candidate hypothesis, not a verified one — treat it as a pointer to which signals to log next, never as a green light to ship a fix.
 

@@ -37,9 +37,14 @@ The main Qwen session launches the parallel specialist subagents. A Qwen subagen
 - Keep exactly one primary in-progress task.
 - Side requests may pause it, but do not replace it unless the user explicitly reprioritizes.
 - After any side request, resume the primary task and state the next concrete step.
-- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting.
+- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
 - If the user says `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working correction, take the next concrete action in the active task immediately instead of only acknowledging it.
-- Do not begin closeout work while a primary review or verification pass is still open.
+- When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
+- Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
+- Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope. In roadmap, super-plan, or work-item chains, a passed slice is not goal completion: record it, re-open the plan, take the next unchecked item, and continue or state the blocker.
+- Do not produce a final-style summary or ask "what next?" while a plan or a known next action still remains.
+- A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
+- Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification pass is still open unless the user explicitly parks, cancels, or reprioritizes that task.
 
 ## External adapters
 

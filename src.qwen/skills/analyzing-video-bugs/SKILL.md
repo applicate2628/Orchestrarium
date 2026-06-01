@@ -42,6 +42,7 @@ Decide a coarse sampling rate based on duration:
 - ≤ 10 s → 2 fps (~20 frames)
 - 10–60 s → 1 fps
 - > 60 s → 0.5 fps or sample only flagged ranges
+- One-frame UI artifacts captured at 60 fps often need 4 fps coarse extraction first, then 60 fps dense extraction around the transition. Do not downsample away the only bad frame.
 
 ### Step 2 — Coarse extraction
 
@@ -56,6 +57,16 @@ ffmpeg -v error -i "<video>" -vf "fps=2,scale=1158:-1" -q:v 4 frame_%02d.jpg
 
 Read all coarse frames in parallel (one Read tool call per frame, batched in a single message). Identify the stable states (which frames look identical) and where the transitions are.
 
+For many frames, build contact sheets before opening individual images:
+
+```bash
+ffmpeg -v error -framerate 4 -i "frame_%02d.jpg" \
+  -vf "scale=550:-1,tile=4x9:margin=8:padding=4:color=white" \
+  -frames:v 1 sheet.jpg
+```
+
+On Windows ffmpeg builds, `-pattern_type glob` may be unsupported; prefer numbered patterns such as `frame_%02d.jpg`.
+
 ### Step 3 — Find exact transition timestamps
 
 Coarse sampling almost always straddles the moment of change. Use ffmpeg's scene detector to get precise timestamps:
@@ -67,6 +78,8 @@ grep -E "pts_time" scene.log
 
 `scene` is the normalized frame-difference score: `0.03` catches most UI transitions, `0.1` is more selective. The `pts_time` values are your transition timestamps. Sometimes transitions come in pairs ~100–200 ms apart — the second timestamp is usually the "after" state and the first is mid-transition. This is the signal worth investigating.
 
+For low-contrast layout shifts, try thresholds in the `0.015` to `0.03` range and cross-check against coarse frames. Scene detection is a locator, not a verdict.
+
 ### Step 4 — Dense sampling around transitions
 
 Re-extract at higher rate over a narrow window:
@@ -77,6 +90,21 @@ ffmpeg -v error -ss <start> -t <duration> -i "<video>" \
 ```
 
 Then read dense frames around each suspicious timestamp.
+
+For one-frame bugs, use the source frame rate (often 60 fps) and sample several repeated transitions, not just the first clean one:
+
+```bash
+ffmpeg -v error -ss <start> -t 0.55 -i "<video>" \
+  -vf "crop=<w>:<h>:<x>:<y>,fps=60,scale=1200:-1" -q:v 3 dense_%03d.jpg
+
+ffmpeg -v error -framerate 60 -i "dense_%03d.jpg" \
+  -vf "scale=400:-1,tile=6x6:margin=8:padding=4:color=white" \
+  -frames:v 1 dense_sheet.jpg
+```
+
+Only use the `crop=<w>:<h>:<x>:<y>` dense-sampling form after the hard crop gate passed. If it has not passed, dense-sample the full frame first.
+
+If the bug is intermittent or reported "between frames", inspect dense sheets from at least 3-5 transitions and cover both directions of the UI state change when both directions exist.
 
 ### Step 5 — Verify duplicates by file size
 
@@ -112,7 +140,7 @@ These are large (700 KB+) but lossless, and the Read tool handles them fine.
 - Do not draw a conclusion from your own frame interpretation without confirming with the user what they actually see as the bug — the user's description of "the bug" almost always names a specific symptom, not the whole visual delta. Verify before coding fixes.
 - Do not `git add .scratch/video-frames/` — that folder must stay local.
 - Do not assume you must capture the video yourself; if the user has already provided one, skip capture and start at Step 1 on their file.
-- Do not assume the user will record one; if the bug is animation/timing-dependent and no video exists, fall through to `$windows-gui-manual-testing § Capture video` to record one, then return here for analysis.
+- Do not assume the user will record one; if the bug is animation/timing-dependent and no video exists, fall through to `$windows-gui-manual-testing` step 3 (Obtain and analyze video evidence) to record one, then return here for analysis.
 
 ## When the user shares only a description, not a video
 
