@@ -27,3 +27,6 @@
 # OS noise
 **/.DS_Store
 **/Thumbs.db
+
+# Windows PowerShell module cache (pwsh hooks running with cwd=repo write it here)
+/Microsoft/

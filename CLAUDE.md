@@ -69,9 +69,10 @@ When modifying `shared/AGENTS.shared.md`, `src.claude/CLAUDE.md`, `operating-mod
 shared/                  ← shared governance + shared design-reference source
   AGENTS.shared.md       ← common governance (merged by installers)
   references/            ← canonical shared design-only references
-references-codex/        ← Codex-specific addenda + compatibility pointers for shared references
 references-claude/       ← Claude-specific addenda + compatibility pointers for shared references
-src.gemini/              ← Gemini provider-pack source tree
+references-codex/        ← Codex-specific addenda + compatibility pointers for shared references
+references-gemini/       ← Gemini-specific addenda + compatibility pointers for shared references
+references-qwen/         ← Qwen-specific addenda + compatibility pointers for shared references
 src.claude/              ← Claude Code pack source (install copies to target .claude/)
   CLAUDE.md              ← product governance (installed to users)
   agents/                ← role definitions + delegate-style common-skill wrappers
@@ -81,6 +82,9 @@ src.claude/              ← Claude Code pack source (install copies to target .
     hooks/               ← the 2 warn-only audit hooks (machine-local-path, no-trash/stray-artifact)
   commands/              ← slash commands (agents-*)
   skills/                ← common skills (workflow-focused, Skill-tool invokable)
+src.codex/               ← Codex pack source; canonical Codex-line implementation
+src.gemini/              ← Gemini provider-pack source tree; example-only
+src.qwen/                ← Qwen provider-pack source tree; example-only
 .claude/                 ← local working install (in .gitignore, NOT committed)
 CLAUDE.md                ← THIS FILE (repo-local dev rules, NOT installed)
 RELEASE_NOTES.md         ← canonical tracked release log for release-relevant changes
@@ -94,6 +98,10 @@ scripts/                 ← platform-specific installers
   install-claude.sh      ← Claude Code Bash installer
   install-codex.ps1      ← Codex PowerShell installer
   install-codex.sh       ← Codex Bash installer
+  install-gemini.ps1     ← Gemini PowerShell installer
+  install-gemini.sh      ← Gemini Bash installer
+  install-qwen.ps1       ← Qwen PowerShell installer
+  install-qwen.sh        ← Qwen Bash installer
   check-publication-gate.ps1 ← repo-local publication gate wrapper
   check-publication-gate.sh  ← repo-local publication gate
 ```

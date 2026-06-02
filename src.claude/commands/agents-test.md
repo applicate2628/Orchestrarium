@@ -46,4 +46,5 @@ The user does not need to type `/agents-test` for this flow to fire. Apply it tr
 - Follow the project's testing methodology from policies.
 - Match existing test patterns and frameworks in the repo.
 - Do not change source code — only test files.
+- Do NOT commit any code. Tests are written/updated; committing is the user's decision.
 - When tests reveal defects, the QA agent must create bug files in `work-items/bugs/` following the bug registry format from the qa-engineer role. This ensures defects survive across sessions even if not fixed immediately.

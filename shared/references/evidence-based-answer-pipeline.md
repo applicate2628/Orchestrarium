@@ -62,3 +62,15 @@ The discipline has multiple structural backstops for code-bearing work:
 3. **Pre-commit (text rule only)** — before authoring a commit that fixes/alters behavior, all 5 steps of the Bootstrap (the four diagnostic steps plus Recovery readiness) must complete and the commit message must disclose the verified hypothesis chain. There is no machine check here; the agent is expected to follow the text rule.
 
 The structural hooks deliberately fire at the moments where the failure happens: the pre-fix hook catches editing before diagnostics, and the Stop hook catches passive async-wait claims before the turn ends. Tying hypothesis discipline to `git push` (an earlier design we removed) would have been theatre — by push time the unverified-hypothesis edit has already happened and the harm is done.
+
+## Terms and Abbreviations
+
+- `API`: Application Programming Interface; the programmatic contract between a system and an external or internal consumer.
+- `claim`: a verifiable assertion that must be supported by evidence or removed from the answer.
+- `evidence`: verified basis for a claim: a source, code path, command output, log line, test result, or other observable fact.
+- `high-stakes domain`: a domain where an incorrect answer can produce costly corrections, safety, financial, scientific, or operational harm.
+- `LLM`: Large Language Model; a machine-learning model trained on large text corpora to generate and reason over language.
+- `pipeline`: a sequential sequence of processing and verification steps applied to a query or output before it is accepted.
+- `stale knowledge`: knowledge not confirmed by a current verification pass; potentially outdated relative to the present state of the system.
+- `UI`: User Interface; the user-facing interaction surface.
+- `UX`: User Experience; usability, flow, comprehension, and interaction quality.

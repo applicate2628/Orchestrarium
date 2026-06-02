@@ -358,28 +358,6 @@ function Remove-DanglingLink {
     }
 }
 
-function Ensure-DefaultFile {
-    param(
-        [string]$SourceFile,
-        [string]$TargetFile,
-        [string]$Label
-    )
-
-    Remove-DanglingLink -Path $TargetFile -Label $Label
-
-    if (Test-Path -LiteralPath $TargetFile) {
-        Write-Host "  Preserving existing $Label..."
-        return
-    }
-
-    Write-Host "  Installing default $Label..."
-    if (-not $DryRun) {
-        Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
-    } else {
-        Write-Host "    [dry-run] would create $TargetFile"
-    }
-}
-
 function Get-NormalizedCodexAgentOverrideContent {
     param([string]$Content)
 
@@ -893,7 +871,7 @@ if (-not (Test-Path $srcShared) -or -not (Test-Path $srcPlatform)) {
 
 # Assemble the pack AGENTS.md into a temp file, then merge or create. The temp
 # file is always removed in the finally block, matching the .sh `trap rm -f EXIT`.
-$srcMd = Join-Path $env:TEMP "orchestrarium-agents-assembled.md"
+$srcMd = [System.IO.Path]::GetTempFileName()
 $dstMd = $MdTarget
 try {
     $sharedContent = Get-Content $srcShared -Raw

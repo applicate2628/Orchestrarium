@@ -532,24 +532,6 @@ resolve_python_command() {
   return 1
 }
 
-ensure_default_file() {
-  local src="$1" dst="$2" label="$3"
-
-  remove_dangling_symlink "$dst" "$label"
-
-  if [[ -f "$dst" ]]; then
-    echo "  Preserving existing $label..."
-    return
-  fi
-
-  echo "  Installing default $label..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    [dry-run] would create $dst"
-  else
-    cp "$src" "$dst"
-  fi
-}
-
 normalize_codex_agent_override_content() {
   sed -E 's/\r$//; s/^model[[:space:]]*=[[:space:]]*"[^"]*"$/model = "<model>"/'
 }

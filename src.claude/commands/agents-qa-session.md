@@ -57,7 +57,7 @@ The user does not need to type `/agents-qa-session` for this flow to fire. Apply
 
 ## Rules
 
-- **Launch one QA agent** via Agent tool at the start. Continue the session via `SendMessage` — do not spawn a new agent per round.
+- **The QA agent MUST be invoked via the Agent tool** (`subagent_type: qa-engineer`, or `external-reviewer` when external dispatch is preferred) at the start. Continue the session via `SendMessage` — do not spawn a new agent per round, and do not role-play the QA agent inline.
 - The QA agent keeps full context of the session across rounds — no need to repeat findings.
 - Do NOT commit any code. Tests are written but committing is the user's decision.
 - Keep each investigation focused — one direction per round, not "test everything".

@@ -502,24 +502,6 @@ resolve_python_command() {
   return 1
 }
 
-ensure_default_file() {
-  local src="$1" dst="$2" label="$3"
-
-  remove_dangling_symlink "$dst" "$label"
-
-  if [[ -f "$dst" ]]; then
-    echo "  Preserving existing $label..."
-    return
-  fi
-
-  echo "  Installing default $label..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    [dry-run] would create $dst"
-  else
-    cp "$src" "$dst"
-  fi
-}
-
 sync_agents_mode_file() {
   local template="$1" dst="$2" label="$3"
   local normalizer="$REPO_DIR/scripts/normalize-agents-mode.py"

@@ -399,28 +399,6 @@ function Remove-DanglingLink {
     }
 }
 
-function Ensure-DefaultFile {
-    param(
-        [string]$SourceFile,
-        [string]$TargetFile,
-        [string]$Label
-    )
-
-    Remove-DanglingLink -Path $TargetFile -Label $Label
-
-    if (Test-Path -LiteralPath $TargetFile) {
-        Write-Host "  Preserving existing $Label..."
-        return
-    }
-
-    Write-Host "  Installing default $Label..."
-    if (-not $DryRun) {
-        Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
-    } else {
-        Write-Host "    [dry-run] would create $TargetFile"
-    }
-}
-
 function Migrate-LegacyAgentsModeFile {
     param(
         [string]$LegacyFile,
