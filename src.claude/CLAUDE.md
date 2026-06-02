@@ -40,6 +40,7 @@ Platform-specific rules for Claude Code. Shared governance (hygiene, publication
 > - "I see the bug, let me edit X" without a captured `file:line` symptom citation or verbatim error output
 > - "the fix is to add Y" or "let me just patch Z" without a verified hypothesis about what is broken and where
 > - starting an `Edit` / `Write` tool call in a bug-report context with no diagnostic data captured in this session's conversation (user's wording verbatim, error output verbatim, return code, log line, reproduction step, or `file:line` symptom anchor)
+> - "I didn't touch that component's code, so my change can't have broken it" as a regression dismissal — behavior couples indirectly (timing, ordering, lifecycle, render/layout passes, shared state, viewport), so your change is the prime suspect until you revert it and reproduce the REAL symptom (the actual broken interaction, not a convenient proxy state); see `Indirect-regression discipline`
 >
 > **Pre-commit triggers** (fire before authoring the commit):
 >
