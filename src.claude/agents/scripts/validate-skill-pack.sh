@@ -644,7 +644,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   # intentionally tracks shared/references/subagent-operating-model.md after its
   # normalized line-ending transform, not a provider-local addendum.
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "306d4618d7869e4e7c56d84de54df5bba012a583eee26255a76ba190c7013fe6" \
+    "84a2aa4b29a742210af19f2913bbd212361dbf1c29e427b1f0cb6450cde208d3" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "f3b58ded2c928e4ad138e3ff966c75480b2f869c56c02bba8aafb4cbfe622cf6" \
