@@ -57,7 +57,7 @@ The **scout does not co-judge**: it executes spelled-out mechanical scans and su
 
 ## review-loop-state ledger (structural backstop)
 
-A shipped loop MUST persist a per-round `review-loop-state` record under `.scratch/reviews/` so the autonomous loop leaves an auditable structural trace. Per round, persist: pinned `objective` / `scope` / `runtime_root` (identical across all rounds), `round` (≤ cap), `diff`, per verdict angle (`surgical`, `deep`) a non-bare `verdict` plus the three meta-answers (`root_proven`, `scope_unchanged`, `verification_adequate`), scout `findings` + `reconciliation`, and evidence references. The structural validator `scripts/validate-review-loop-state.* --self-test` checks the SCHEMA only (anchors present + unchanged, diff present, both verdict angles + scout present, no bare PASS, cap respected); it does not and cannot check semantics.
+A shipped loop MUST persist a per-round `review-loop-state` record under `.scratch/reviews/` so the autonomous loop leaves an auditable structural trace. Per round, persist: pinned `objective` / `scope` / `runtime_root` (identical across all rounds), `round` (≤ cap), `diff`, per verdict angle (`surgical`, `deep`) a non-bare `verdict` plus the three meta-answers (`root_proven`, `scope_unchanged`, `verification_adequate`), scout `findings` + `reconciliation`, and evidence references. The structural validator `scripts/validate-review-loop-state.* --self-test` (a development/CI tool in the repo, NOT shipped into the runtime) checks the SCHEMA only (anchors present + unchanged, diff present, both verdict angles + scout present, no bare PASS, cap respected); it does not and cannot check semantics.
 
 ## Rules
 

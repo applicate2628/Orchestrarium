@@ -66,7 +66,7 @@ A SHIPPED loop in this governed pack runs autonomous-to-convergence (human only 
 - scout `findings` + their `reconciliation`
 - evidence / output-artifact references
 
-A structural validator (`scripts/validate-review-loop-state.* --self-test` in the dev repo; installed at `.claude/agents/scripts/validate-review-loop-state.py`) checks the SCHEMA (anchors present + unchanged, diff present, both verdict angles + scout present, no bare PASS, cap respected). It does NOT and cannot check the semantics (whether the reasoning was sound; that stays review territory). This is the honest boundary: structure is mechanically enforceable, soundness is not.
+A structural validator (`scripts/validate-review-loop-state.* --self-test`, a development/CI tool kept in the repo and NOT installed into the runtime) checks the SCHEMA (anchors present + unchanged, diff present, both verdict angles + scout present, no bare PASS, cap respected). It does NOT and cannot check the semantics (whether the reasoning was sound; that stays review territory). This is the honest boundary: structure is mechanically enforceable, soundness is not.
 
 ### review-loop-state schema (per loop)
 

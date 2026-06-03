@@ -823,10 +823,7 @@ $RuntimeLedgerScripts = @(
     "check-work-items-state.sh",
     "validate-work-item-state.py",
     "validate-work-item-state.ps1",
-    "validate-work-item-state.sh",
-    "validate-review-loop-state.py",
-    "validate-review-loop-state.ps1",
-    "validate-review-loop-state.sh"
+    "validate-work-item-state.sh"
 )
 Write-Host "  Installing work-item ledger helper scripts..."
 if (-not (Test-Path -LiteralPath $LeadScriptsTarget)) {
