@@ -1,6 +1,6 @@
 # Review-loop methodology (provider-neutral)
 
-Canonical DESIGN source for the autonomous parallel-review-loop. This reference is provider-neutral and is NOT installed into any runtime (per `shared/references/README.md`). Each pack ships a thin RUNTIME binding that carries the operative rules: Claude → `agents/contracts/review-loop.md` (read by `/agents-review-loop`); Codex → `skills/review-loop/`. Keep this trunk free of pack-specific execution detail (no concrete dispatch APIs, wrapper paths, or CLI syntax); those live in the per-pack bindings.
+Canonical DESIGN source for the autonomous parallel-review-loop. This reference is provider-neutral and is NOT installed into any runtime (per `shared/references/README.md`). Each production pack ships a thin RUNTIME binding that carries the operative rules: Claude → `agents/contracts/review-loop.md` (read by `/agents-review-loop`); Codex → `skills/review-loop/`. Keep this trunk free of pack-specific execution detail (no concrete dispatch APIs, wrapper paths, or CLI syntax); those live in the per-pack bindings.
 
 ## Purpose
 

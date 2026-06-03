@@ -1019,7 +1019,7 @@ CODEX_SKILL_DESCRIPTION_MAX_CHARS=460
 # consumption is ~3689 chars; headroom is down to ~11 chars, so a future common
 # skill of any meaningful length will need the cap bumped rather than absorbed.
 # Bumped 3700 -> 3800 (2026-06-03) for the new `review-loop` utility skill: its
-# 67-char single-line description (well under the 460 per-skill cap) pushed the
+# 65-char single-line description (well under the 460 per-skill cap) pushed the
 # measured total to ~3756, just over the prior 3700 ceiling. The +100 bump
 # restores ~44 chars of headroom. Visible decision rather than silent growth;
 # the live total is reported by the "Codex skill description total" pass line.
