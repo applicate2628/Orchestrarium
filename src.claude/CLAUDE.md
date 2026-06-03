@@ -200,6 +200,7 @@ The pack ships entry-point slash commands in `.claude/commands/` (`/agents-bugfi
 | Accepted plan in `work-items/active/`, user says "proceed", "continue", "next phase" | `.claude/commands/agents-implement.md` |
 | Investigation question, "how does X work", ADR exploration, code-surface understanding | `.claude/commands/agents-research.md` |
 | Review of completed work, pre-merge gate, post-implementation validation | `.claude/commands/agents-review.md` |
+| Autonomous multi-angle convergence on one fix-design: "review loop", "проводи review loop", "loop review", "автономная петля" (NOT plain "review"/"second opinion") | `.claude/commands/agents-review-loop.md` |
 | Refactor request without functional change, deduplication, readability improvement | `.claude/commands/agents-refactor.md` |
 | Performance budget breach, SLA, latency, throughput | `.claude/commands/agents-perf.md` |
 | Security, auth, credentials, trust boundary, vulnerability | `.claude/commands/agents-security.md` |

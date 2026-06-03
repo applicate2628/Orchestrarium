@@ -341,7 +341,7 @@ function Ensure-LocalOnlyGitignoreEntries {
     param([string]$ProjectRoot)
 
     $gitignore = Join-Path $ProjectRoot ".gitignore"
-    $entries = @("/.reports/", "/work-items/")
+    $entries = @("/.reports/", "/work-items/", "/.scratch/")
     $existingLines = @()
     if (Test-Path -LiteralPath $gitignore) {
         $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
@@ -720,7 +720,10 @@ $RuntimeLedgerScripts = @(
     "check-work-items-state.sh",
     "validate-work-item-state.py",
     "validate-work-item-state.ps1",
-    "validate-work-item-state.sh"
+    "validate-work-item-state.sh",
+    "validate-review-loop-state.py",
+    "validate-review-loop-state.ps1",
+    "validate-review-loop-state.sh"
 )
 $ClaudeScriptsTarget = Join-Path $TargetRoot "agents\scripts"
 Write-Host "  Installing work-item ledger helper scripts..."

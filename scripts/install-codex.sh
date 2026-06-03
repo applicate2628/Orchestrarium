@@ -469,7 +469,7 @@ install_skill() {
 ensure_local_only_gitignore_entries() {
   local project_root="$1"
   local gitignore="$project_root/.gitignore"
-  local entries=("/.reports/" "/work-items/")
+  local entries=("/.reports/" "/work-items/" "/.scratch/")
   local missing=()
 
   for entry in "${entries[@]}"; do
@@ -863,6 +863,9 @@ runtime_ledger_scripts=(
   validate-work-item-state.py
   validate-work-item-state.ps1
   validate-work-item-state.sh
+  validate-review-loop-state.py
+  validate-review-loop-state.ps1
+  validate-review-loop-state.sh
 )
 echo "  Installing work-item ledger helper scripts..."
 lead_scripts_target="$SKILLS_TARGET/lead/scripts"

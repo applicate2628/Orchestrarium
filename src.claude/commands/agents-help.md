@@ -14,6 +14,7 @@ Display a comprehensive overview of the skill-pack for the user.
 | --- | --- |
 | `/agents-help` | This overview |
 | `/agents-external-brigade` | Launch a bounded parallel set of external helpers |
+| `/agents-review-loop` | Autonomous parallel-review-loop: 2 verdict angles + 1 scout converge on one fix-design artifact |
 | `/agents-review` | Full repo-impact review from current changes or a specified target (analyst → QA → reviewer) |
 | `/agents-bugfix` | Fix a bug (analyst → implementer → QA) |
 | `/agents-test` | Write or verify tests for specified code |
