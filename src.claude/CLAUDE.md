@@ -4,9 +4,11 @@
 
 Platform-specific rules for Claude Code. Shared governance (hygiene, publication safety, role index, core delegation) is imported from `AGENTS.md` above via `@import`.
 
-## Bootstrap — before every fix or implementation (two trigger moments)
+## Bootstrap — verified premises plus edit/commit checkpoints
 
-> **STOP. Two trigger moments fire this Bootstrap, and you must run the checklist at each.**
+> **STOP. Universal premise rule first; two stricter trigger moments below.**
+>
+> Every decision, plan, review verdict, root-cause claim, fix, implementation action, or behavior-changing commit must rest on verified premises. The trigger moments below add mandatory edit/commit checkpoints; they do not limit the universal rule. Run the checklist at each trigger moment.
 >
 > **(a) Pre-fix trigger** — before the first code-mutating tool call (`Edit`, `Write`, `NotebookEdit`, or equivalent) in response to a bug report, runtime failure, error trace, regression, "does not work" claim, "не работает" claim, "broken" claim, or any user message naming a defect in behavior, **steps 1-3 must complete before the first edit lands**. The trigger fires regardless of whether the session invoked `/agents-bugfix` or any other flow — the discipline binds the session independent of the routing wrapper. Step 5 (Recovery readiness) does not apply at this moment; step 4 (Scope proportionality) and 4.5 (No-kostyl check) apply when you draft the planned edit.
 >
@@ -14,7 +16,7 @@ Platform-specific rules for Claude Code. Shared governance (hygiene, publication
 >
 > This Bootstrap is the operational form of the shared `Hypothesis disclosure discipline` and `Pre-fix diagnostic gate` rules in `AGENTS.md`. It binds the main conversation and any role that authors code mutations or commits.
 >
-> 1. **Diagnostic data.** Name the concrete observed data points that drive this fix: `file:line` citation, command output captured this session, log line, user statement quoted verbatim, reproduction transcript. If you cannot name any — go investigate first; do not commit yet.
+> 1. **Diagnostic data.** Name the concrete observed data points that drive this decision or change: `file:line` citation, command output captured this session, log line, user statement quoted verbatim, reproduction transcript. If you cannot name any — go investigate first; do not commit yet.
 >
 > 2. **Hypothesis inventory.** List every interpretive leap the fix depends on. Examples:
 >    - "Word X in the user's message means Y."
