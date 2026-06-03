@@ -57,7 +57,7 @@ MERGED_INTO_SPINE = {"Results-table provenance discipline"}
 # all genuine ELABORATION (rationale, examples, recovery procedures, the
 # glossary, common-skill layout, delegation prose) to on-demand
 # shared/references/spine/*.md extracts, taking AGENTS.shared.md from
-# 61,905 -> ~39,815 chars while keeping all 63 manifest protection tokens in the
+# 61,905 -> ~39,815 chars while keeping all 65 manifest protection tokens in the
 # spine (the 6 review-restored teeth were added after the review loop). The
 # floor near 39,815 is also set by the pack validators
 # (validate-skill-pack.sh), which require specific formula/terminology/
@@ -95,6 +95,13 @@ BANNED_CORRECTNESS_DRIVERS = [
     "probably",
     "I think",
     "this pattern usually works",
+    # Backtick-delimited on purpose: the bare forms "likely" and "in general" are
+    # substrings of the pinned reasoning phrases "most likely means" and
+    # "in general X means Y", so a bare-token pin would already be satisfied by
+    # those and would NOT protect the standalone correctness-driver occurrence in
+    # the Evidence-citation card. The backtick form is unique to that card.
+    "`likely`",
+    "`in general`",
 ]
 
 BUG_TRIGGER_SIGNALS = [
