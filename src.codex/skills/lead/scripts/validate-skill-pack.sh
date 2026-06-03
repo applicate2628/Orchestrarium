@@ -1006,7 +1006,7 @@ echo "=== Skill metadata budget ==="
 # "full source-text coverage" trigger and is now 443 chars. Headroom ~17 chars is
 # the ceiling for this one wide-trigger common skill, NOT an invitation to grow
 # other descriptions; narrow-trigger skills still aim for <= 180. The total cap
-# (3700) was not bumped — current consumption ~3689 still fits under it. These
+# was left at 3700 at that point — consumption ~3689 still fit under it. These
 # rough char counts are documentation only; the live total is reported
 # authoritatively by the "Codex skill description total" pass line below.
 CODEX_SKILL_DESCRIPTION_MAX_CHARS=460
@@ -1015,9 +1015,9 @@ CODEX_SKILL_DESCRIPTION_MAX_CHARS=460
 # common-skills category without forcing role-description churn. Raised again
 # 3500 -> 3700 (2026-05-17) to fit the mathtype-book-page long-form description
 # (the wide-trigger allowance noted above costs ~240 chars vs the prior 180-cap
-# baseline). After later mathtype-book-page description growth, current
-# consumption is ~3689 chars; headroom is down to ~11 chars, so a future common
-# skill of any meaningful length will need the cap bumped rather than absorbed.
+# baseline). After later mathtype-book-page description growth, consumption
+# reached ~3689 chars with headroom down to ~11 — which is exactly why the
+# review-loop addition below needed the cap bumped rather than absorbed.
 # Bumped 3700 -> 3800 (2026-06-03) for the new `review-loop` utility skill: its
 # 65-char single-line description (well under the 460 per-skill cap) pushed the
 # measured total to ~3756, just over the prior 3700 ceiling. The +100 bump
