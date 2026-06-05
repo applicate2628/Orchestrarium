@@ -53,6 +53,7 @@ Terms, abbreviations, role names, status labels, and provider names used across 
 - `external contract`: any promise observable outside that boundary, including APIs, configs, schemas, file formats, persisted-state expectations, events, or CLI surfaces.
 - `repo-standard checks`: validation commands, tests, lint, typecheck, build, publication scan, or review checklist the repository defines.
 - `repo-standard mechanism`: an existing repository-owned helper, subsystem, framework convention, dependency, or script that already owns the relevant capability.
+- `runtime speed`: application execution speed, latency, throughput, or responsiveness; a performance constraint, not development speed.
 - `stack choice`: the selection of repository mechanism, framework feature, dependency, library/tool, service, or custom implementation used to deliver a capability.
 - `smallest safe reversible subset`: the narrowest change that moves work forward without locking in unresolved policy, architecture, or behavior.
 - `ambient input`: hidden runtime influence such as wall clock, locale, timezone, filesystem ordering, process-global state, ambient env vars, or uncontrolled randomness.

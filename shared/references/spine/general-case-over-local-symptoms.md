@@ -8,7 +8,7 @@ Default to implementing the general case owned by the underlying boundary. A nar
 
 This is a correctness rule, not a request to make everything abstract. The right implementation targets the correct concept/abstraction level: the smallest owner-level class that explains the verified requirement or cause. It should be general enough to keep sibling cases consistent, but not so broad that it invents future requirements or hides a simpler owner.
 
-Correctness beats speed unless the user explicitly scopes the work as prototype, fastest-path, throwaway, or otherwise time-boxed. Even then, record the boundary so the shortcut is visible rather than mistaken for the canonical design.
+Correctness beats development speed unless the user explicitly scopes the work as prototype, fastest-path, throwaway, or otherwise time-boxed. Here, speed means delivery speed, not application/runtime speed. Runtime speed, latency, throughput, memory, and other performance constraints remain correctness inputs for performance-sensitive work and optimization work.
 
 This applies to all implementation work: new features, behavior changes, UI changes, refactors, workflow changes, tests, documentation that defines behavior, and bug fixes.
 
@@ -22,7 +22,7 @@ Before editing or committing an implementation, answer these checks:
 4. Would the same requirement or cause apply to sibling modes, surfaces, inputs, or timing windows?
 5. If yes, target the owner-level general case, not only the reported symptom.
 6. If no, cite the evidence that proves the defect is confined to the specific boundary.
-7. Is the chosen path correct, or merely faster? If it is a speed-scoped shortcut, cite the explicit user scope.
+7. Is the chosen path correct, or merely faster to develop? If it is a development-speed shortcut, cite the explicit user scope.
 
 ## Operational ladder
 

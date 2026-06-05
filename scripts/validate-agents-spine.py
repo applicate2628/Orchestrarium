@@ -187,7 +187,7 @@ GENERAL_CASE_TEETH = [
     "explicit user-approved boundary",
     "broader cases left untouched",
     "preserved/generalized invariant",
-    "correctness over speed",
+    "correctness over development speed",
     "other modes probably do not hit it",
     "generalize later",
 ]
@@ -199,7 +199,8 @@ REUSE_BEFORE_HAND_ROLLING_TEETH = [
     "mature optimized library/tool",
     "current viable packages",
     "stack choice",
-    "speed/convenience",
+    "development speed/convenience",
+    "runtime speed",
     "user explicitly asks",
     "record rejected options",
 ]
