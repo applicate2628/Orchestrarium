@@ -20,6 +20,8 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 
 ### Changed
 
+- **Strengthened the new general-case and reuse rules around correct abstraction and stack selection.** The shared spine now makes explicit that agents must find the correct concept/abstraction level, prefer correctness over speed unless the user explicitly scopes prototype/fastest/throwaway work, and treat stack choice as a correctness, fit, maintainability, and performance decision rather than a speed/convenience shortcut. The detailed spine references add the operational ladder from visible symptom to common concept, owner, invariant, sibling cases, and smallest correct implementation.
+
 - **Extended pack validation for common-skill parity and install readiness.** Claude, Gemini, and Qwen validators now require every Common skills entry to have a shipped `SKILL.md`; Codex keeps its description-budget guard while allowing the new skill inventory. This matters because a common skill must be present in the source packs before global install, not only in an already-installed local runtime.
 
 ## 2026-06-03

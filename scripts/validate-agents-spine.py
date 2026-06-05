@@ -182,10 +182,12 @@ REVIEW_RESTORED_TEETH = [
 
 GENERAL_CASE_TEETH = [
     "General-case over local symptoms",
+    "correct concept/abstraction level",
     "owner-level general case",
     "explicit user-approved boundary",
     "broader cases left untouched",
     "preserved/generalized invariant",
+    "correctness over speed",
     "other modes probably do not hit it",
     "generalize later",
 ]
@@ -196,6 +198,8 @@ REUSE_BEFORE_HAND_ROLLING_TEETH = [
     "repo-standard mechanism",
     "mature optimized library/tool",
     "current viable packages",
+    "stack choice",
+    "speed/convenience",
     "user explicitly asks",
     "record rejected options",
 ]

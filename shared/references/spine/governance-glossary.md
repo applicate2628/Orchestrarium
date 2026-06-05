@@ -17,6 +17,7 @@ Terms, abbreviations, role names, status labels, and provider names used across 
 - `data point`: one concrete observed value, log line, field, return code, screenshot fact, or command result used as evidence.
 - `gate`: an acceptance point that must verify an artifact before work advances.
 - `general case`: the full class of behavior governed by the same requirement, cause, owner, or invariant.
+- `concept/abstraction level`: the level of behavior being changed, from one visible symptom up through the owner-level invariant that explains all sibling cases.
 - `hash`: a deterministic digest of file bytes or content; useful for identity checks but not visual verification.
 - `hand-roll`: implement custom logic from scratch instead of using an existing repo mechanism, framework feature, installed dependency, or mature optimized library/tool.
 - `invariant`: a rule that must remain true across all relevant states.
@@ -52,5 +53,6 @@ Terms, abbreviations, role names, status labels, and provider names used across 
 - `external contract`: any promise observable outside that boundary, including APIs, configs, schemas, file formats, persisted-state expectations, events, or CLI surfaces.
 - `repo-standard checks`: validation commands, tests, lint, typecheck, build, publication scan, or review checklist the repository defines.
 - `repo-standard mechanism`: an existing repository-owned helper, subsystem, framework convention, dependency, or script that already owns the relevant capability.
+- `stack choice`: the selection of repository mechanism, framework feature, dependency, library/tool, service, or custom implementation used to deliver a capability.
 - `smallest safe reversible subset`: the narrowest change that moves work forward without locking in unresolved policy, architecture, or behavior.
 - `ambient input`: hidden runtime influence such as wall clock, locale, timezone, filesystem ordering, process-global state, ambient env vars, or uncontrolled randomness.

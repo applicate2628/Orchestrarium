@@ -12,6 +12,8 @@ The rule is not "always add a dependency." It is a build-vs-buy gate:
 
 This applies especially to parsers, serializers, schedulers, queues, caches, auth, crypto, date/time handling, numeric solvers, geometry kernels, rendering engines, diff/merge engines, test harnesses, retry/backoff logic, rate limiting, database/query layers, workflow engines, and UI/game/animation logic with established libraries.
 
+Stack choice is part of correctness. Choose the stack that best satisfies correctness, fit, maintainability, performance, security, licensing, platform, and integration constraints; do not choose the fastest familiar option unless the user explicitly scoped the work for speed/prototype/throwaway delivery.
+
 ## Operational test
 
 Before implementing a non-trivial capability, answer these checks:
@@ -20,9 +22,10 @@ Before implementing a non-trivial capability, answer these checks:
 2. Does the repo already have an owner, helper, framework feature, or installed dependency for it?
 3. If no local owner exists, what mature optimized library/tool options are viable today?
 4. What constraints matter: correctness, performance, licensing, bundle size, security, platform support, API stability, maintainability, offline/runtime requirements, and integration cost?
-5. Is hand-rolling explicitly requested, or is it justified by evidence rather than convenience?
+5. What stack choice best satisfies those constraints, and what options were rejected?
+6. Is hand-rolling explicitly requested, or is it justified by evidence rather than speed/convenience?
 
-If the answer to 1 is yes and the answer to 5 is no, do not write the capability from scratch.
+If the answer to 1 is yes and the answer to 6 is no, do not write the capability from scratch.
 
 ## Allowed hand-rolled implementations
 
@@ -53,6 +56,7 @@ These are not valid reasons to hand-roll:
 - "We can replace it with a library later."
 - "I know the algorithm, so no need to check."
 - "Avoid dependencies" without a repo-standard constraint.
+- "This stack is quicker for me."
 
 ## Terms and Abbreviations
 
@@ -60,3 +64,4 @@ These are not valid reasons to hand-roll:
 - **Hand-roll**: implement custom logic from scratch instead of using an existing repo mechanism, framework feature, installed dependency, or mature optimized library/tool.
 - **Mature optimized library/tool**: a maintained external solution with enough adoption, documentation, versioning, compatibility evidence, and fit for the task's correctness/performance constraints.
 - **Repo-standard mechanism**: an existing repository-owned helper, subsystem, framework convention, dependency, or script that already owns the relevant capability.
+- **Stack choice**: the selection of repository mechanism, framework feature, dependency, library/tool, service, or custom implementation used to deliver a capability.
