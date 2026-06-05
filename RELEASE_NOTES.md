@@ -24,6 +24,8 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 
 - **Disambiguated speed in the new abstraction and stack-choice rules.** `Speed` in the shortcut warning now means development/delivery speed, not application runtime speed. Runtime speed, latency, throughput, and responsiveness remain performance constraints, and for application optimization work runtime speed may be the primary stack-choice constraint.
 
+- **Shortened long Codex utility-skill descriptions to reduce skill-budget truncation warnings.** The affected skill bodies and workflows are unchanged; only the frontmatter descriptions for discovery/routing were compressed so Codex keeps more room for the full installed skill inventory.
+
 - **Extended pack validation for common-skill parity and install readiness.** Claude, Gemini, and Qwen validators now require every Common skills entry to have a shipped `SKILL.md`; Codex keeps its description-budget guard while allowing the new skill inventory. This matters because a common skill must be present in the source packs before global install, not only in an already-installed local runtime.
 
 ## 2026-06-03

@@ -1,6 +1,6 @@
 ---
 name: explain-simply
-description: Use when the user asks to learn, understand, explain simply, explain "na paltsakh"/"на пальцах", teach a concept, code path, result, decision, or document, or create/update learner-focused notes.
+description: Explain concepts, code, decisions, or docs simply in the user's language.
 ---
 
 # Explain Simply

@@ -1,6 +1,6 @@
 ---
 name: windows-gui-manual-testing
-description: Use when Codex needs evidence-backed manual visual verification of Windows desktop GUI before/after a fix across Qt, Avalonia, WinUI/WPF, WebView/native-child, or other Windows surfaces via screenshots, video frames, or live inspection.
+description: Verify Windows desktop GUI (Qt/Avalonia/WinUI/WebView) with screenshots, video, or live inspection.
 ---
 
 # Windows GUI Manual Testing

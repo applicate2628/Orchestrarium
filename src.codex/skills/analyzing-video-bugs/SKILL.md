@@ -1,6 +1,6 @@
 ---
 name: analyzing-video-bugs
-description: Extract frames from a UI/animation/layout bug video with ffmpeg, locate transitions, and read selected frames. Use for any video file; for static screenshots use Read directly.
+description: Extract and inspect frames from UI/animation/layout bug videos.
 ---
 
 # Analyzing video bugs

@@ -1,6 +1,6 @@
 ---
 name: mathtype-book-page
-description: Use when formatting, correcting, or reviewing translated technical-book DOCX pages that require full source-text coverage, editable MathType formulas, source-PDF typography/index proofread, book-like typography, display formula tables, equation-number cells, inline math fidelity, MathType size/alignment, figure/caption table grouping, code/listing/output fidelity, contents formatting, and visual validation against source PDF pages in any repository.
+description: Format/review translated technical-book DOCX pages with MathType formulas and PDF visual checks.
 ---
 
 # MathType Book Page

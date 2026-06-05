@@ -1,6 +1,6 @@
 ---
 name: bug-hunting
-description: Systematic bug-hunting via diagnostic logging — log first, never patch on unverified theory, never re-roll on guesses. Use when investigating runtime bugs not obvious from code.
+description: Investigate runtime bugs with diagnostic logging before any fix.
 ---
 
 # Bug Hunting
