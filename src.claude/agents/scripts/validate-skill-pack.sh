@@ -666,6 +666,13 @@ if [[ -f "$AGENTS_FILE" ]]; then
       fail "$role in role index but $PACK/agents/${role}.md missing"
     fi
   done
+  for skill in $common_skills; do
+    if [[ -f "$PACK/skills/${skill}/SKILL.md" ]]; then
+      pass "$skill common skill has skill file"
+    else
+      fail "$skill in Common skills but $PACK/skills/${skill}/SKILL.md missing"
+    fi
+  done
 
   # Check for orphaned agent files
   for f in $PACK/agents/*.md; do

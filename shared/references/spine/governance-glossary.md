@@ -9,16 +9,22 @@ Terms, abbreviations, role names, status labels, and provider names used across 
 - `artifact`: a concrete output such as a brief, research memo, design, plan, patch, review, report, or closure note.
 - `ASSUMPTION (UNVERIFIED)`: the required label for any decision-driving claim that has not been verified by one of the four evidence categories.
 - `BLOCKED`: workflow state reserved for a real external blocker, unavailable prerequisite, or missing required decision.
+- `build-vs-buy gate`: the decision point where an implementation chooses between existing mechanisms and a new custom implementation.
 - `CAD`: Computer-Aided Design; software and file formats used for technical drawings, geometry, or engineered layouts.
 - `CI`: Continuous Integration; automated checks run by a build or repository service.
 - `CLI`: Command-Line Interface; a tool invoked from a shell or terminal.
 - `correlation ID`: an identifier used to connect logs, events, requests, and state changes that belong to one user action or workflow.
 - `data point`: one concrete observed value, log line, field, return code, screenshot fact, or command result used as evidence.
 - `gate`: an acceptance point that must verify an artifact before work advances.
+- `general case`: the full class of behavior governed by the same requirement, cause, owner, or invariant.
 - `hash`: a deterministic digest of file bytes or content; useful for identity checks but not visual verification.
+- `hand-roll`: implement custom logic from scratch instead of using an existing repo mechanism, framework feature, installed dependency, or mature optimized library/tool.
+- `invariant`: a rule that must remain true across all relevant states.
 - `kostyl`: a workaround or crutch that hides a symptom without correcting the root-cause logic; allowed only as an explicitly-labeled `WORKAROUND`.
 - `KISS`: named only as an example of a vague slogan that needs an operational rule before becoming governance.
+- `local special case`: an implementation that handles one visible example while leaving the owner-level class undefined or inconsistent.
 - `Markdown`: a lightweight markup format used for repository documentation.
+- `mature optimized library/tool`: a maintained external solution with enough adoption, documentation, versioning, compatibility evidence, and fit for the task's correctness/performance constraints.
 - `MCP`: Model Context Protocol; a tool/server protocol used by some agent runtimes.
 - `metadata`: descriptive file or runtime information such as dimensions, timestamps, MIME type, or generator fields.
 - `MIME`: Multipurpose Internet Mail Extensions; a standard content-type label family used to describe file or payload formats.
@@ -42,7 +48,9 @@ Terms, abbreviations, role names, status labels, and provider names used across 
 ## Engineering-hygiene working definitions
 
 - `owning boundary`: the module, interface, or approved extension seam responsible for a behavior or invariant.
+- `owner`: the module, state machine, contract, lifecycle, or pipeline boundary responsible for maintaining an invariant.
 - `external contract`: any promise observable outside that boundary, including APIs, configs, schemas, file formats, persisted-state expectations, events, or CLI surfaces.
 - `repo-standard checks`: validation commands, tests, lint, typecheck, build, publication scan, or review checklist the repository defines.
+- `repo-standard mechanism`: an existing repository-owned helper, subsystem, framework convention, dependency, or script that already owns the relevant capability.
 - `smallest safe reversible subset`: the narrowest change that moves work forward without locking in unresolved policy, architecture, or behavior.
 - `ambient input`: hidden runtime influence such as wall clock, locale, timezone, filesystem ordering, process-global state, ambient env vars, or uncontrolled randomness.

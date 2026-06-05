@@ -57,9 +57,8 @@ MERGED_INTO_SPINE = {"Results-table provenance discipline"}
 # all genuine ELABORATION (rationale, examples, recovery procedures, the
 # glossary, common-skill layout, delegation prose) to on-demand
 # shared/references/spine/*.md extracts, taking AGENTS.shared.md from
-# 61,905 -> ~39,815 chars while keeping all 65 manifest protection tokens in the
-# spine (the 6 review-restored teeth were added after the review loop). The
-# floor near 39,815 is also set by the pack validators
+# 61,905 -> ~39,815 chars while keeping all manifest protection tokens in the
+# spine. The floor near 39,815 is also set by the pack validators
 # (validate-skill-pack.sh), which require specific formula/terminology/
 # verification phrases to be present in the installed AGENTS.md itself, not only
 # in a reference. What remains is irreducible enforcement teeth (banned-phrase
@@ -132,6 +131,8 @@ GATE_AND_DISCIPLINE_NAMES = [
     "Wire-shape verification",
     "State-synchronization ownership",
     "Mechanism inventory before new paths",
+    "General-case over local symptoms",
+    "Reuse before hand-rolling",
     "All-return-paths discipline",
     "Guard precondition discipline",
     "End-to-end channel verification",
@@ -175,6 +176,28 @@ REVIEW_RESTORED_TEETH = [
     "provenance triad",                                              # results-table provenance requirement
     "do not let UI animation or reconciliation depend on mutations", # state-sync observability teeth
     "they are not roles and do not own delivery",                    # common-skills scope clause
+    "any role or the main conversation",                             # common-skills caller scope
+    "also invocable inline",                                         # delegate-style common-skill fallback
+]
+
+GENERAL_CASE_TEETH = [
+    "General-case over local symptoms",
+    "owner-level general case",
+    "explicit user-approved boundary",
+    "broader cases left untouched",
+    "preserved/generalized invariant",
+    "other modes probably do not hit it",
+    "generalize later",
+]
+
+REUSE_BEFORE_HAND_ROLLING_TEETH = [
+    "Reuse before hand-rolling",
+    "from scratch",
+    "repo-standard mechanism",
+    "mature optimized library/tool",
+    "current viable packages",
+    "user explicitly asks",
+    "record rejected options",
 ]
 
 MANIFEST: dict[str, list[str]] = {
@@ -187,6 +210,8 @@ MANIFEST: dict[str, list[str]] = {
     "required availability probes": REQUIRED_PROBES,
     "safety clauses": SAFETY_CLAUSES,
     "review-restored teeth": REVIEW_RESTORED_TEETH,
+    "general-case teeth": GENERAL_CASE_TEETH,
+    "reuse-before-hand-rolling teeth": REUSE_BEFORE_HAND_ROLLING_TEETH,
 }
 
 

@@ -1,14 +1,15 @@
 # Spine elaboration extracts
 
-Verbatim prose extracted from the always-loaded governance spine
-(`shared/AGENTS.shared.md` → installed `AGENTS.md`) during the Task-6 size
-reduction. Each file holds the full original wording of rules whose compact
-operational form remains binding in the spine; roles read these on demand for
-depth. These are NOT standalone methodology references (those live at the top
-level of `shared/references/` with `ru/` mirrors) — they are English-only
-slices of the spine, preserving the language status the content had while it
-lived inline in `AGENTS.md`. The spine's compact form is self-sufficient for
-compliance; these extracts add examples and rationale only.
+Elaboration files for the always-loaded governance spine
+(`shared/AGENTS.shared.md` -> installed `AGENTS.md`). Most began as verbatim
+prose extracted during the Task-6 size reduction; newer files may be authored
+alongside new compact spine rules. Each file expands a rule whose operational
+form remains binding in the spine; roles read these on demand for depth. These
+are NOT separate methodology owners (those live at the top level of
+`shared/references/` with `ru/` mirrors) - they are English-only depth slices of
+the spine. The spine's compact form is self-sufficient for compliance; these
+files add operational-test detail, allowed-case elaboration, examples, rationale,
+and commit-discipline detail.
 
 **Canon and drift discipline.** The spine (`shared/AGENTS.shared.md`) is the
 canonical, binding source. These extracts are depth snapshots: if an extract

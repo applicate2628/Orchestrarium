@@ -2,7 +2,7 @@
 
 The spine validator guards `shared/AGENTS.shared.md` (the always-loaded governance
 file merged into every installed AGENTS.md) against exceeding the Claude 40k-char
-context-budget cap or dropping any of the 63 manifest "protection tokens" that the
+context-budget cap or dropping any manifest "protection tokens" that the
 spine cut promised to keep. It shipped as a manual CLI with NO caller anywhere in
 the repo (full-repo-review finding: the "fails-closed / enforces" claim was only
 true if a human remembered to run it). This test makes it run on every
@@ -40,7 +40,7 @@ def test_validator_script_exists() -> None:
 
 def test_spine_validator_passes_on_current_spine() -> None:
     # The actual gate: runs the real validator against the real spine on every
-    # test run. Fails the suite if any of the 63 protection tokens leaves the
+    # test run. Fails the suite if any protection token leaves the
     # spine, a reference pointer dies, a discipline card is orphaned, or the
     # size cap is exceeded.
     p = _run()

@@ -1020,10 +1020,12 @@ CODEX_SKILL_DESCRIPTION_MAX_CHARS=460
 # review-loop addition below needed the cap bumped rather than absorbed.
 # Bumped 3700 -> 3800 (2026-06-03) for the new `review-loop` utility skill: its
 # 65-char single-line description (well under the 460 per-skill cap) pushed the
-# measured total to ~3756, just over the prior 3700 ceiling. The +100 bump
-# restores ~44 chars of headroom. Visible decision rather than silent growth;
-# the live total is reported by the "Codex skill description total" pass line.
-CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=3800
+# measured total to ~3756, just over the prior 3700 ceiling.
+# Bumped 3800 -> 4000 (2026-06-05) for the new `explain-simply` common skill:
+# the reader-explanation trigger surface pushed the measured total near 4k.
+# Visible decision rather than silent growth; the live total is reported by the
+# "Codex skill description total" pass line.
+CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=4000
 UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes review-loop)
 PACK_BUDGET_SKILLS=("${indexed_roles[@]}" "${UTILITY_SKILLS[@]}" "${indexed_common_skills[@]}")
 mapfile -t PACK_BUDGET_SKILLS < <(printf '%s\n' "${PACK_BUDGET_SKILLS[@]}" | sort -u)

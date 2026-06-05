@@ -55,7 +55,35 @@ def _join(*parts: str) -> str:
 
 
 def _bash() -> str | None:
-    return shutil.which("bash")
+    bash = shutil.which("bash")
+    if bash and not _is_windows_wsl_bash(bash):
+        return bash
+    for candidate in _git_bash_candidates():
+        if candidate.exists():
+            return str(candidate)
+    return None if bash and _is_windows_wsl_bash(bash) else bash
+
+
+def _is_windows_wsl_bash(path: str) -> bool:
+    if os.name != "nt":
+        return False
+    parts = {part.lower() for part in Path(path).parts}
+    return Path(path).name.lower() == "bash.exe" and {"windows", "system32"}.issubset(parts)
+
+
+def _git_bash_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    git = shutil.which("git")
+    if git:
+        for parent in Path(git).parents:
+            if parent.name.lower() == "git":
+                candidates.extend((parent / "bin" / "bash.exe", parent / "usr" / "bin" / "bash.exe"))
+                break
+    for env_name in ("ProgramFiles", "ProgramFiles(x86)"):
+        base = os.environ.get(env_name)
+        if base:
+            candidates.extend((Path(base) / "Git" / "bin" / "bash.exe", Path(base) / "Git" / "usr" / "bin" / "bash.exe"))
+    return candidates
 
 
 def _git() -> str | None:
@@ -210,6 +238,16 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
                 self.assertEqual(self._run_cached(scanner, "nothing machine-local here"), 0)
+
+
+class TestPublicationSafetyScannerLauncher(unittest.TestCase):
+    def test_windows_launcher_does_not_use_wsl_bash_for_windows_paths(self) -> None:
+        if os.name != "nt":
+            self.skipTest("Windows-only launcher guard")
+        bash = _bash()
+        if bash is None:
+            self.skipTest("needs Git Bash for Windows-path scanner scripts")
+        self.assertFalse(_is_windows_wsl_bash(bash), bash)
 
 
 @unittest.skipIf(_bash() is None or _git() is None, "needs bash + git on PATH")

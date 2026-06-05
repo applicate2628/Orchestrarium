@@ -185,7 +185,7 @@ project/
     hooks.json             ← structural hook entries (PreToolUse + Stop) merged here
   .agents/
     .agents-mode.yaml
-    skills/                ← role skills + common skills (e.g. windows-gui-manual-testing/, mathtype-book-page/)
+    skills/                ← role skills + common skills (e.g. windows-gui-manual-testing/, mathtype-book-page/, explain-simply/)
   .claude/
     .agents-mode.yaml
     AGENTS.md

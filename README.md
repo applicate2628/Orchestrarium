@@ -154,6 +154,7 @@ Currently shipped:
 - `$analyzing-video-bugs` — knowledge-style; frame extraction, scene-change detection, and dense sampling for any UI/animation/layout bug video.
 - `$bug-hunting` — knowledge-style; systematic runtime-bug investigation via diagnostic logging.
 - `$mathtype-book-page` — knowledge-style; bring translated technical-book DOCX pages to accepted MathType format.
+- `$explain-simply` — knowledge-style; reader-tailored plain-language explanations for concepts, code paths, results, decisions, and learner notes.
 
 ## References and maintenance
 

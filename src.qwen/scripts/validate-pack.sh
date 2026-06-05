@@ -43,6 +43,14 @@ skill_roles=(
   visualization-engineer
 )
 
+common_skills=(
+  analyzing-video-bugs
+  bug-hunting
+  explain-simply
+  mathtype-book-page
+  windows-gui-manual-testing
+)
+
 agent_roles=(
   accessibility-reviewer
   algorithm-scientist
@@ -196,6 +204,10 @@ fi
 
 for role in "${skill_roles[@]}"; do
   [[ -f "$PACK_ROOT/skills/$role/SKILL.md" ]] || fail "missing skill role $PACK_ROOT/skills/$role/SKILL.md"
+done
+
+for skill in "${common_skills[@]}"; do
+  [[ -f "$PACK_ROOT/skills/$skill/SKILL.md" ]] || fail "missing common skill $PACK_ROOT/skills/$skill/SKILL.md"
 done
 
 for role in "${agent_roles[@]}"; do

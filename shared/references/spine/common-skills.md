@@ -16,6 +16,7 @@ Common-skill index (installed names):
 - `$analyzing-video-bugs` — knowledge-style. Extract frames from any UI/animation/layout bug video (user-provided or agent-captured), locate scene transitions, dense-sample around transitions, read the smallest distinguishing frame set.
 - `$bug-hunting` — knowledge-style. Systematic runtime bug investigation via diagnostic logging: log first, never patch on unverified theory, never re-roll on guesses, remove diagnostics in the same commit cycle as the fix.
 - `$mathtype-book-page` — knowledge-style. Bring translated technical-book DOCX pages to accepted MathType format with source-PDF authority, gate discipline, and defective-chunk repair workflow.
+- `$explain-simply` — knowledge-style. Turn concepts, code paths, results, decisions, or learner notes into reader-tailored plain-language explanations with analogies, explicit assumptions, and term definitions.
 
 ## Terms and Abbreviations
 

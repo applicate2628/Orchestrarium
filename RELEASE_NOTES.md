@@ -10,6 +10,18 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-06-05
+
+### Added
+
+- **Added `$explain-simply` as a provider-neutral common skill and registered it across Codex, Claude, Gemini, and Qwen.** The skill gives agents a reusable lane for clear explanatory answers: define terms on first use, preserve uncertainty, prefer simple examples, and avoid inventing facts. It is shipped from the source packs so global installs receive the same behavior instead of depending on stale local `.agents` copies.
+
+- **Added two compact shared-governance rules with spine references: `General-case over local symptoms` and `Reuse before hand-rolling`.** The first prevents narrow patches when the verified cause belongs to a broader owner, invariant, lifecycle, or pipeline; the second requires checking repo-standard mechanisms, installed dependencies, framework features, and mature optimized library/tool options before custom-building generic capabilities. Validators now pin the new rules so future spine compression cannot silently drop their operational teeth.
+
+### Changed
+
+- **Extended pack validation for common-skill parity and install readiness.** Claude, Gemini, and Qwen validators now require every Common skills entry to have a shipped `SKILL.md`; Codex keeps its description-budget guard while allowing the new skill inventory. This matters because a common skill must be present in the source packs before global install, not only in an already-installed local runtime.
+
 ## 2026-06-03
 
 ### Added
