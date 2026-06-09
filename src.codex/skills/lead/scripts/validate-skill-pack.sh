@@ -1124,7 +1124,7 @@ check_contains "$AGENTS_FILE" "verify every subagent result before accepting it"
   "shared governance requires verification before trusting subagent results"
 check_contains "$AGENTS_FILE" "Visual artifact verification discipline" \
   "shared governance requires visual inspection for generated visual artifacts"
-check_contains "$AGENTS_FILE" "Documentation terminology discipline" \
+check_contains "$AGENTS_FILE" "Plain-language and terminology discipline" \
   "shared governance requires terminology and abbreviation explanations in documents"
 check_contains "$AGENTS_FILE" "Markdown formula rendering format" \
   "shared governance requires previewer-safe Markdown formula formatting"
