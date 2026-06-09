@@ -145,6 +145,18 @@ def main() -> int:
     except Exception:
         return 0  # malformed envelope -> fail open
 
+    # Subagent tool calls carry `agent_id` in the envelope and run with
+    # `transcript_path` pointing at the MAIN session transcript (confirmed by
+    # captured envelopes). This guard would then key on the MAIN conversation's
+    # last genuine user message — a possibly stale or unrelated trigger, not the
+    # subagent's scoped task — and the subagent cannot inject the
+    # [skip-bugfix-discipline] override into that main transcript (it writes to
+    # its own isolated context). The dispatching main conversation owns the
+    # diagnostic discipline at the dispatch decision; re-gating the subagent here
+    # is an un-overridable false positive that blocks every subagent edit. Skip.
+    if envelope.get("agent_id"):
+        return 0
+
     transcript_path = envelope.get("transcript_path") or ""
     if not transcript_path:
         return 0

@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-06-09
+
+### Fixed
+
+- **The bugfix-discipline PreToolUse guard no longer blocks subagent tool calls.** A subagent's hook envelope carries `agent_id` and runs with `transcript_path` pointing at the MAIN session transcript (confirmed by captured envelopes — a subagent fire has `agent_id`, a main-conversation fire does not). The guard therefore keyed on the main conversation's last genuine user message — a possibly stale or unrelated bug-trigger — for a subagent's edit, and the subagent cannot inject the `[skip-bugfix-discipline]` override into that main transcript (it writes to its own isolated context). The result was an un-overridable false positive that denied every subagent (and Workflow) edit for the rest of any session whose recent main-conversation message tripped a trigger. Fix: the guard skips when `agent_id` is present — the dispatching main conversation owns the diagnostic discipline at the dispatch decision, and the subagent runs a vetted scoped task, not the human's raw bug report. Applied to both pack copies (`src.claude` + `src.codex`); main-conversation gating is byte-unchanged (the early-return fires only for `agent_id`-present envelopes). Verified with crafted envelopes against one trigger transcript: subagent+trigger → allow, main+trigger+no-discipline → deny, main+no-trigger → allow.
+
 ## 2026-06-05
 
 ### Added
