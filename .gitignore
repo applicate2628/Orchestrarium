@@ -12,6 +12,7 @@
 
 # Tool and plugin local state
 /.serena/
+/.codegraph/
 
 # Local editor state
 /.vscode/
