@@ -58,6 +58,8 @@ Codex CLI exposes hook events that can intercept tool calls and turn completion.
 
 **PreToolUse bugfix-discipline hook.** `check-bugfix-discipline.py` catches the most common pre-fix discipline violation: the model is about to make a code-mutating tool call (`apply_patch`) in response to a user message that contains a bug-report or change-request signal (e.g. `fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, `поменяй`, traceback, `Error:`), but it did NOT first invoke `/agents-bugfix` or otherwise capture diagnostic data. The hook reads the PreToolUse envelope's `transcript_path`, parses the recent transcript tail, and:
 
+- If the envelope carries `agent_id` (a subagent context) → exit 0 (allow; the dispatching main conversation owns the diagnostic discipline, and a subagent must never be blocked).
+- If the write target path is under `.reports/`, `.scratch/`, `.plans/`, `work-items/`, or `docs/` (matched as a `/`-bounded segment) → exit 0 (allow; a doc/report/scratch/plan/task-memory write is never the CODE fix this guard targets — verified on a real transcript where the guard fired legitimately on a `.reports/` memo write under a bug-fix-review prompt with no prose marker; `apply_patch` keeps its paths in the patch body and stays fully guarded).
 - If the last user message contains no bug-trigger phrase → exit 0 (allow; not a bug context).
 - If the last user message contains the override marker `[skip-bugfix-discipline]` → exit 0 (allow; user explicitly opted out).
 - If the current turn shows discipline signals (`/agents-bugfix` invocation, `agents-bugfix` skill load, text containing `diagnostic`/`hypothesis`/`reproducing`/`VERIFIED:`) → exit 0 (allow).

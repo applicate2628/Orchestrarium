@@ -22,6 +22,8 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 
 - **Retrofitted the same `agent_id` subagent-safety skip onto the passive-polling Stop hook.** Both blocking Stop guards now exit immediately on a subagent envelope, so neither can interfere with a subagent doing its work. Applied byte-identical to both pack copies; main-conversation behavior is unchanged (the early return fires only when `agent_id` is present).
 
+- **The bugfix-discipline PreToolUse guard no longer false-blocks doc/report/scratch/plan/task-memory writes.** A write whose target path is under `.reports/`, `.scratch/`, `.plans/`, `work-items/`, or `docs/` (matched as a `/`-bounded path segment) now exits 0 — those are never the CODE fix the guard exists to catch. Root cause was proven on a real failing transcript: the guard fired *legitimately* on a `.reports/` memo write because the surrounding prompt was a bug-fix-plan review dense with bug vocabulary and the headless run did not emit the `[skip-bugfix-discipline]` prose marker — not the "hook re-read its own deny text" mechanism an advisory had guessed (that hypothesis was disproven against the transcript: `extract_user_typed_text` already skips `tool_result`). Fix applied byte-identical to both packs; `apply_patch` (paths in the patch body) stays fully guarded; code writes/edits in a bug context still deny (no hole). Verified repro-then-gone plus no-hole across 11 probes; regression tests in `tests/test_bugfix_discipline_hook.py::TestBugfixExemptPaths` (10 cases × both packs).
+
 ## 2026-06-09
 
 ### Added

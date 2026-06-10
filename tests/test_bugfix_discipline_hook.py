@@ -222,5 +222,68 @@ class TestBugfixDisciplineGenuineUser(unittest.TestCase):
         )
 
 
+class TestBugfixExemptPaths(unittest.TestCase):
+    """Doc/report/scratch/plan/task-memory Writes are never the CODE fix the
+    guard targets, so bug vocabulary in the surrounding prompt must not block
+    them. Proven on a real transcript (2026-06-10): the guard fired legitimately
+    on a .reports/ memo write under a bug-fix-review prompt with no override
+    marker in prose. The fix exempts those path segments; code paths stay guarded."""
+
+    # Bug-triggers present, NO override marker, NO discipline signal -> the guard
+    # WOULD deny a code edit here; only the path exemption may allow it.
+    BUG_ENTRIES = [
+        user("Review this bug-fix plan: fix the regression, it is broken, delete the dead path, STOP-bug."),
+        assistant("Reviewing the plan now."),
+    ]
+
+    def _deny(self, script: Path, tool_input: dict, tool_name: str) -> bool:
+        with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8") as f:
+            for e in self.BUG_ENTRIES:
+                f.write(json.dumps(e, ensure_ascii=False) + "\n")
+            transcript = f.name
+        envelope = {"transcript_path": transcript, "tool_name": tool_name, "tool_input": tool_input}
+        p = subprocess.run([sys.executable, str(script)], input=json.dumps(envelope, ensure_ascii=False),
+                           capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        return denies(p)
+
+    def assert_exempt(self, tool_input: dict, exempt: bool, tool_name: str = "Write") -> None:
+        for script in HOOKS:
+            with self.subTest(pack=script.parent.parent.name, ti=tool_input):
+                self.assertEqual(self._deny(script, tool_input, tool_name), not exempt)
+
+    def test_reports_exempt(self) -> None:
+        self.assert_exempt({"file_path": ".reports/2026-06/memo.md", "content": "x"}, exempt=True)
+
+    def test_scratch_exempt(self) -> None:
+        self.assert_exempt({"file_path": ".scratch/note.md", "content": "x"}, exempt=True)
+
+    def test_plans_exempt(self) -> None:
+        self.assert_exempt({"file_path": ".plans/2026-06/p.md", "content": "x"}, exempt=True)
+
+    def test_work_items_exempt(self) -> None:
+        self.assert_exempt({"file_path": "work-items/bugs/x.md", "content": "x"}, exempt=True)
+
+    def test_docs_exempt(self) -> None:
+        self.assert_exempt({"file_path": "docs/guide.md", "content": "x"}, exempt=True)
+
+    def test_absolute_windows_reports_exempt(self) -> None:
+        self.assert_exempt({"file_path": r"D:\dev\proj\.reports\2026-06\m.md", "content": "x"}, exempt=True)
+
+    def test_notebook_path_in_scratch_exempt(self) -> None:
+        # NotebookEdit carries notebook_path, not file_path.
+        self.assert_exempt({"notebook_path": ".scratch/x.ipynb"}, exempt=True, tool_name="NotebookEdit")
+
+    def test_code_py_write_still_denies_no_hole(self) -> None:
+        self.assert_exempt({"file_path": "src.claude/agents/foo.py", "content": "x"}, exempt=False)
+
+    def test_code_ts_edit_still_denies_no_hole(self) -> None:
+        self.assert_exempt({"file_path": "src/app.ts", "old_string": "a", "new_string": "b"}, exempt=False, tool_name="Edit")
+
+    def test_mydocs_substring_is_not_exempt(self) -> None:
+        # 'mydocs' is NOT the '/docs/' path segment -> the file stays guarded.
+        self.assert_exempt({"file_path": "src/mydocs/x.py", "content": "x"}, exempt=False)
+
+
 if __name__ == "__main__":
     unittest.main()

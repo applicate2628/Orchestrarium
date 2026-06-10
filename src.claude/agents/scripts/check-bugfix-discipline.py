@@ -138,6 +138,33 @@ BUGFIX_INVOCATION_REGEX = re.compile(r"agents-bugfix", re.IGNORECASE)
 # within the last ~50 entries; reading more wastes I/O.
 TRANSCRIPT_TAIL_LINES = 100
 
+# Path SEGMENTS whose Writes/Edits are never the CODE fix this guard targets:
+# report logs, scratch, plan snapshots, task memory, and docs. A Write to one of
+# these under a bug-vocabulary prompt (reviewing a bug-fix plan, or a headless
+# run logging a report without emitting the prose override marker) is a false
+# positive. Matched as a path SEGMENT (bounded by '/') so a code file merely
+# named like "...docs" does not slip through. Proven on a real transcript: the
+# guard fired legitimately on a .reports/ memo write under a bug-vocab review
+# prompt with no marker in prose -- a real FP, not a self-trigger loop.
+EXEMPT_PATH_SEGMENTS = ("/.reports/", "/.scratch/", "/.plans/", "/work-items/", "/docs/")
+
+
+def _exempt_write_target(envelope: dict) -> bool:
+    """True when the tool writes to a non-code artifact path (report / scratch /
+    plan / task-memory / docs). Reads file_path / notebook_path / path from the
+    envelope's tool_input and fails CLOSED to False on any non-dict / missing
+    key, so a real code edit is never accidentally exempted. (apply_patch, which
+    carries its paths inside a patch body rather than file_path, is not exempted
+    here -- it stays fully guarded.)"""
+    tool_input = envelope.get("tool_input")
+    if not isinstance(tool_input, dict):
+        return False
+    raw = tool_input.get("file_path") or tool_input.get("notebook_path") or tool_input.get("path") or ""
+    if not isinstance(raw, str) or not raw:
+        return False
+    norm = "/" + raw.replace("\\", "/").strip("/")
+    return any(seg in norm for seg in EXEMPT_PATH_SEGMENTS)
+
 
 def main() -> int:
     try:
@@ -155,6 +182,15 @@ def main() -> int:
     # diagnostic discipline at the dispatch decision; re-gating the subagent here
     # is an un-overridable false positive that blocks every subagent edit. Skip.
     if envelope.get("agent_id"):
+        return 0
+
+    # Doc/report/scratch/plan/task-memory writes are never the CODE fix this
+    # guard exists to catch. A Write/Edit to .reports/ .scratch/ .plans/
+    # work-items/ docs/ must not be blocked just because the surrounding prompt
+    # carries bug vocabulary (reviewing a bug-fix plan; a headless run logging a
+    # report without the prose marker). Proven on a real transcript as the actual
+    # false-positive cause -- a legitimate-by-design fire, not a self-trigger loop.
+    if _exempt_write_target(envelope):
         return 0
 
     transcript_path = envelope.get("transcript_path") or ""
