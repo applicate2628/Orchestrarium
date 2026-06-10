@@ -1,0 +1,8 @@
+# Keep the always-loaded governance spine LF-only. CRLF line endings inflate its
+# on-disk character count past Claude Code's 40,000-char context-file warning
+# even though the rule content is well under the cap and the spine validator
+# (which reads with universal-newline normalization) measures it as 39,891.
+# Diagnosed 2026-06-10: 147 CRLF pairs pushed the on-disk count to 40,038 chars;
+# LF -> 39,891. eol=lf prevents an editor/tool from silently re-introducing CRLF.
+shared/AGENTS.shared.md text eol=lf
+shared/references/spine/*.md text eol=lf
