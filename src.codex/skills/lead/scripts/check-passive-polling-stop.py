@@ -99,6 +99,13 @@ def main() -> int:
         envelope = parse_envelope(read_stdin_utf8())
         if not envelope:
             return 0
+        # Subagent safety: a subagent's envelope carries `agent_id`; a
+        # main-conversation envelope does not. A subagent must never be blocked
+        # by a Stop guard — hooks must not interfere with subagents doing their
+        # work. This hook is registered only on the Stop event (not
+        # SubagentStop); the agent_id skip is belt-and-suspenders.
+        if envelope.get("agent_id"):
+            return 0
         if _is_truthy(envelope.get("stop_hook_active")):
             return 0
 

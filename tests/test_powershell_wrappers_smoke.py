@@ -1,8 +1,9 @@
 """Smoke tests for the PowerShell (.ps1) hook + scanner wrappers.
 
 The installer registers a .ps1 entry point as the WINDOWS hook command for the
-four hooks (check-bugfix-discipline, check-passive-polling-stop,
-check-machine-local-path, check-no-trash-in-repo) and ships a .ps1 for the
+five hooks (check-bugfix-discipline, check-passive-polling-stop,
+check-work-items-archival-stop, check-machine-local-path, check-no-trash-in-repo)
+and ships a .ps1 for the
 publication scanner — yet NO test executed any .ps1, so a syntax error, a broken
 fail-open path, or a regressed stdin pipe in the Windows entry point would have
 shipped green (every other hook test drives the .py helper via sys.executable,
@@ -12,7 +13,7 @@ Claude (src.claude/agents/{scripts,hooks}/) and Codex
 
 Two wrapper shapes, two contracts:
 
-  * The four HOOK wrappers are thin stdin pipes around their .py helper. Contract:
+  * The five HOOK wrappers are thin stdin pipes around their .py helper. Contract:
     FAIL OPEN — on empty stdin AND on malformed JSON they must exit 0 with no
     stdout and no stderr (AUDIT/decision hooks never crash the host; the helper's
     own fail-open swallows bad input). Verified under every available interpreter.
@@ -53,14 +54,16 @@ CLAUDE_HOOKS = REPO_ROOT / "src.claude" / "agents" / "hooks"
 CODEX_SCRIPTS = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts"
 CODEX_HOOKS = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 
-# The four stdin-piping hook wrappers, in BOTH install trees (8 files).
+# The five stdin-piping hook wrappers, in BOTH install trees (10 files).
 HOOK_WRAPPERS = (
     CLAUDE_SCRIPTS / "check-bugfix-discipline.ps1",
     CLAUDE_SCRIPTS / "check-passive-polling-stop.ps1",
+    CLAUDE_SCRIPTS / "check-work-items-archival-stop.ps1",
     CLAUDE_HOOKS / "check-machine-local-path.ps1",
     CLAUDE_HOOKS / "check-no-trash-in-repo.ps1",
     CODEX_SCRIPTS / "check-bugfix-discipline.ps1",
     CODEX_SCRIPTS / "check-passive-polling-stop.ps1",
+    CODEX_SCRIPTS / "check-work-items-archival-stop.ps1",
     CODEX_HOOKS / "check-machine-local-path.ps1",
     CODEX_HOOKS / "check-no-trash-in-repo.ps1",
 )
@@ -147,7 +150,7 @@ def _bash_locatable_git() -> str | None:
 
 @unittest.skipIf(not INTERPRETERS, "no PowerShell host (pwsh/powershell) on PATH")
 class TestHookWrappersFailOpen(unittest.TestCase):
-    """All four hook wrappers, in both trees, must FAIL OPEN under every available
+    """All five hook wrappers, in both trees, must FAIL OPEN under every available
     PowerShell host: exit 0 with empty stdout+stderr on empty stdin and on
     malformed JSON."""
 

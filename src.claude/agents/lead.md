@@ -74,7 +74,7 @@ The canonical brief should capture:
 - After every accepted artifact, interruption, or major routing change, update `status.md` so the next session can resume without relying on chat memory.
 - Record the durable resume point in `status.md`: current stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.
 - On resume after interruption, refresh only lead-owned task-memory state from accepted persisted artifacts. Do not recreate missing specialist artifacts or infer missing facts from session memory; route to `$knowledge-archivist` or the proper factual role instead.
-- `closure.md` is mandatory before moving an item to `work-items/archive/`. It holds the final closeout record: outcome, residual risk, and archive location.
+- `closure.md` is mandatory before moving an item to `work-items/archive/<YYYY-MM>/<date>-<slug>/` (month-bucketed, matching the existing archive layout and the main-conversation close step in `CLAUDE.md`). It holds the final closeout record: outcome, residual risk, and archive location. On archive, also move the item's row in `work-items/index.md` from Active to Archived so the index never points at an archived item still under `active/`.
 - If task memory is missing or stale, stop and restore it instead of improvising from session memory.
 - Before marking a batch closed, reconcile `brief.md`, `status.md`, the latest accepted artifact, required checks, canonical-source updates, and any open obligations. If admitted-scope work remains, keep the item active instead of closing it.
 

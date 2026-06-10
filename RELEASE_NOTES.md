@@ -10,6 +10,18 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-06-10
+
+### Added
+
+- **Closed the work-item "create-but-never-close" asymmetry in the Recovery rule.** The `requiresLead: false` Recovery rule mandated that the main conversation *create* a work-item under `work-items/active/`, but the matching *close* step lived only in the `$lead` role (`closure.md` before `work-items/archive/`), which never runs for main-conversation-driven chains. Delivered items therefore piled up in `active/` forever (and the `/agents-implement` Completion step had no close step either). Fix: the Recovery rule in `src.claude/CLAUDE.md` and `src.codex/AGENTS.codex.md` now carries a symmetric, main-conversation-owned close step — when an item is delivered (committed/pushed) or parked, write `closure.md`, move the folder to `work-items/archive/<YYYY-MM>/<date>-<slug>/`, and move its `index.md` row to Archived; the close step is stated to be as mandatory as the create step. The `/agents-implement` Completion step now reinforces it. Why it matters: work-item task memory stays a truthful active/archived ledger instead of an ever-growing graveyard, so recovery and `/agents-status` reflect what is actually in flight.
+
+- **Added a fifth structural hook: the work-items-archival Stop guard (`check-work-items-archival-stop.py`).** It is the structural backstop for the new close step — a warn-only text rule is exactly what was being ignored. At turn end it blocks the stop when an active item is unambiguously closed-but-not-moved: it has a `closure.md`, or its `status.md` has a state/status/stage/outcome line whose value begins with a done/closed word (`closed`/`done`/`complete`/`archived`). Detection is anchored to the state-key line, not free prose anywhere in the file, so chatty active-item text (`nothing pending on our side`, `phase 1 shipped + pushed`) never produces a false block — a multi-angle review caught that the original free-substring prose tier false-positived on normal active items, and it was replaced with this state-line-anchored detector. A merely-active or parked item never triggers. The block payload names each orphan and the close procedure; the per-stop `[acknowledge-open-work-items]` marker overrides one decision. **Subagent-safe by construction:** it is registered only on the `Stop` event (never `SubagentStop`) and skips immediately when the envelope carries `agent_id`, so it can never block a subagent — work-item lifecycle is the main conversation's job. Shipped byte-identical to both packs (`agents/scripts/` Claude, `skills/lead/scripts/` Codex), auto-installed by all four installers as a second `Stop` entry, with structural-enforcement docs updated (four → five hooks, three blocking + two audit) across `CLAUDE.md`, `AGENTS.codex.md`, and `INSTALL.md`. Covered by `tests/test_work_items_archival_hook.py` (20 cases × both packs, including the subagent-not-blocked invariant and active-item false-positive guards for `nothing pending` / phase-level `shipped + pushed` / `closed-loop`).
+
+### Fixed
+
+- **Retrofitted the same `agent_id` subagent-safety skip onto the passive-polling Stop hook.** Both blocking Stop guards now exit immediately on a subagent envelope, so neither can interfere with a subagent doing its work. Applied byte-identical to both pack copies; main-conversation behavior is unchanged (the early return fires only when `agent_id` is present).
+
 ## 2026-06-09
 
 ### Added

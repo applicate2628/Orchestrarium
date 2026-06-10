@@ -1425,10 +1425,11 @@ agents_line_count="$(count_codex_pack_lines "$AGENTS_FILE")"
 # both entry points, both override markers, independent removal commands,
 # and the Stop JSON shape (399 measured then; +21 ceiling reserved headroom
 # for one small governance addition). 2026-05-29 landed TWO warn-only audit
-# hooks (machine-local-path, then the redesigned no-trash-in-repo) -- now four
-# hook entries, two on the PreToolUse event, adding no new override markers --
-# contributing their bullets, removal commands, entry-point list items, and
-# "four hook entries" wording. The assembled pack section stays well under the
+# hooks (machine-local-path, then the redesigned no-trash-in-repo). 2026-06-10
+# added the work-items-archival Stop hook -- now five hook entries (two on Stop,
+# two PreToolUse audit, one PreToolUse bugfix) plus one new override marker
+# ([acknowledge-open-work-items]) -- contributing their bullets, removal
+# commands, and entry-point list items. The assembled pack section stays well under the
 # 420 ceiling (measured in the low 340s in source-repo assembly; the runtime
 # check below prints the exact count). Previous bumps: 360 -> 380 (2026-05-17, Bootstrap two trigger
 # moments); 340 -> 360 (2026-05-16, no-kostyl step 4.5); 300 -> 340

@@ -46,6 +46,7 @@ The user does not need to type `/agents-implement` for this flow to fire. Apply 
    - Run architecture reviewer (Agent tool, `subagent_type: architecture-reviewer`) on the full changeset
    - Present summary: phases completed, tests passed, open bugs, residual risk
    - Suggest `/agents-review` for final review before commit
+   - **Close the work-item once it is delivered (the user commits/pushes) or parked.** Do not leave a delivered item in `work-items/active/` — apply the Recovery rule's close step in `CLAUDE.md` (write `closure.md`, move the folder to `work-items/archive/<YYYY-MM>/<slug>/`, move its `work-items/index.md` row to Archived). If the session ends before the user commits, the work-items archival Stop-hook flags the still-open item on the next session.
 
 ## Rules
 
