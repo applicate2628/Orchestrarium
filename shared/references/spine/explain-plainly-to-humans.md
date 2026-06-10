@@ -12,6 +12,7 @@ Before sending a status or explanation to the user, answer these checks:
 2. Is every technical term either avoided or glossed in one phrase the first time it appears (e.g. "supervisor — the program that keeps all the servers running")?
 3. When a decision is needed, is there a clear "what to do" with numbered choices?
 4. Is the dense technical detail kept where it belongs (commit messages, PR/issue bodies, code) rather than dumped into the human-facing message?
+5. Does it describe a *change* by its meaning — what concept, owner, invariant, contract, or abstraction changed and why — rather than a symbol-level before/after diff or a sprinkle of identifiers? Name what the change accomplishes at the concept level, not the literal tokens it touched. The aim is sharper substance, not more words.
 
 If the message is a list of identifiers with no plain-language framing, rewrite it before sending.
 
@@ -23,7 +24,7 @@ The user steers the work as the operator; they are not tracking the internal voc
 
 Applies to all human-facing output: chat status, explanations, decision prompts, progress reports. It does NOT apply to commit messages, PR/issue bodies, code comments, or other technical artifacts, where precise terminology is correct and expected. When the user explicitly asks for technical depth, give it — but still frame it in plain language first.
 
-This rule wins over terseness modes (e.g. a "caveman" brevity mode): brevity drops filler, it does not license a jargon dump. Clarity for the human is non-negotiable. It composes with the spine's `Plain-language and terminology discipline` (which requires expanding terms on first use): terminology-discipline says *define the term*; this rule says *lead with the meaning and the decision, not the identifiers*.
+This rule wins over terseness modes (e.g. a "caveman" brevity mode): brevity drops filler, it does not license a jargon dump. Clarity for the human is non-negotiable. It composes with the spine's `Plain-language and terminology discipline` (which requires expanding terms on first use): terminology-discipline says *define the term*; this rule says *lead with the meaning and the decision, not the identifiers*. The two rules hold together and neither cancels the other — still expand every domain term, role/provider/model name, and acronym on first use, AND describe the change by its meaning rather than its raw symbols. The "describe by meaning" point is about sharper substance, never about giving fewer explanations or skipping a gloss.
 
 ## Terms and Abbreviations
 
