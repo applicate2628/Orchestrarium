@@ -268,7 +268,7 @@ class TestBugfixExemptPaths(unittest.TestCase):
         self.assert_exempt({"file_path": "docs/guide.md", "content": "x"}, exempt=True)
 
     def test_absolute_windows_reports_exempt(self) -> None:
-        self.assert_exempt({"file_path": r"D:\dev\proj\.reports\2026-06\m.md", "content": "x"}, exempt=True)
+        self.assert_exempt({"file_path": r"Z:\fixtures\demo\.reports\2026-06\m.md", "content": "x"}, exempt=True)
 
     def test_notebook_path_in_scratch_exempt(self) -> None:
         # NotebookEdit carries notebook_path, not file_path.
