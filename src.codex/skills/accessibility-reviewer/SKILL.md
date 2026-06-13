@@ -1,6 +1,6 @@
 ---
 name: accessibility-reviewer
-description: Gate approved work for keyboard access, focus order, semantics, contrast, and assistive tech exposure.
+description: "Review keyboard, focus, semantics, contrast, and assistive tech."
 ---
 
 # Accessibility Reviewer

@@ -20,6 +20,7 @@ OPTIONAL_DIRS=()
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
+NO_HYPOTHESIS_HOOK=0
 MODE=""
 TARGET=""
 
@@ -258,31 +259,6 @@ build_allowlist() {
   ALLOWLIST=("${dedup[@]}")
 }
 
-confirm_removal() {
-  local path="$1"
-  local name
-  name="$(basename "$path")"
-
-  if [ "$FORCE" -eq 1 ] || [ "$DRY_RUN" -eq 1 ]; then
-    return 0
-  fi
-
-  while true; do
-    read -r -p "Delete existing '$name' at '$path' before reinstall? [y/N] " answer
-    case "${answer,,}" in
-      y|yes)
-        return 0
-        ;;
-      n|no|"")
-        return 1
-        ;;
-      *)
-        echo "Please answer y or n."
-        ;;
-    esac
-  done
-}
-
 # Per-skill install preserves user-added skills — no destructive directory wipe needed.
 
 prompt_install_mode() {
@@ -363,6 +339,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-unsafe-target)
       ALLOW_UNSAFE_TARGET=1
+      shift
+      ;;
+    --no-hypothesis-hook)
+      NO_HYPOTHESIS_HOOK=1
       shift
       ;;
     -h|--help)
@@ -489,7 +469,7 @@ install_skill() {
 ensure_local_only_gitignore_entries() {
   local project_root="$1"
   local gitignore="$project_root/.gitignore"
-  local entries=("/.reports/" "/work-items/")
+  local entries=("/.reports/" "/work-items/" "/.scratch/")
   local missing=()
 
   for entry in "${entries[@]}"; do
@@ -552,13 +532,103 @@ resolve_python_command() {
   return 1
 }
 
-ensure_default_file() {
+normalize_codex_agent_override_content() {
+  sed -E 's/\r$//; s/^model[[:space:]]*=[[:space:]]*"[^"]*"$/model = "<model>"/'
+}
+
+normalized_codex_agent_override_file() {
+  local path="$1"
+  normalize_codex_agent_override_content < "$path"
+}
+
+legacy_codex_agent_override_template() {
+  local name="$1"
+  case "$name" in
+    default.toml)
+      cat <<'EOF'
+name = "default"
+description = "General-purpose fallback agent."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+General-purpose fallback agent.
+Inherit the parent session's task context and focus on the assigned subtask.
+Stay within the requested scope and return a concise, usable result.
+"""
+EOF
+      ;;
+    worker.toml)
+      cat <<'EOF'
+name = "worker"
+description = "Execution-focused agent for implementation and fixes."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+Execution-focused agent for implementation and fixes.
+Carry out the assigned implementation task directly, stay within scope, and avoid redesign unless the parent explicitly asks for it.
+Return concrete progress and outcomes for the requested slice.
+"""
+EOF
+      ;;
+    explorer.toml)
+      cat <<'EOF'
+name = "explorer"
+description = "Read-heavy codebase exploration agent."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+Read-heavy codebase exploration agent.
+Stay in exploration mode, gather evidence efficiently, and return factual findings with clear pointers.
+Do not drift into implementation unless the parent explicitly asks for it.
+"""
+EOF
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_pack_owned_codex_agent_override() {
+  local src="$1" dst="$2" name="$3"
+  local target_norm source_norm legacy_norm
+
+  target_norm="$(normalized_codex_agent_override_file "$dst")"
+  source_norm="$(normalized_codex_agent_override_file "$src")"
+  if [[ "$target_norm" == "$source_norm" ]]; then
+    return 0
+  fi
+
+  legacy_norm="$(legacy_codex_agent_override_template "$name" || true)"
+  if [[ -n "$legacy_norm" && "$target_norm" == "$legacy_norm" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_codex_agent_override_file() {
   local src="$1" dst="$2" label="$3"
+  local name
+  name="$(basename "$src")"
 
   remove_dangling_symlink "$dst" "$label"
 
   if [[ -f "$dst" ]]; then
-    echo "  Preserving existing $label..."
+    if is_pack_owned_codex_agent_override "$src" "$dst" "$name"; then
+      if cmp -s "$src" "$dst"; then
+        echo "  OK  $label unchanged"
+      else
+        echo "  Refreshing stale pack-owned $label..."
+        if [ "$DRY_RUN" -eq 1 ]; then
+          echo "    [dry-run] would replace $dst"
+        else
+          cp "$src" "$dst"
+        fi
+      fi
+    else
+      echo "  Preserving existing custom $label..."
+    fi
     return
   fi
 
@@ -781,7 +851,41 @@ if [[ -d "$SKILLS_TARGET" ]]; then
   done
 fi
 
-# Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
+# Runtime ledger helpers are sourced once from repo-root scripts/ and installed
+# beside the lead scripts so installed packs have a local helper surface too.
+runtime_ledger_scripts=(
+  agent-run-ledger.py
+  agent-run-ledger.ps1
+  agent-run-ledger.sh
+  check-work-items-state.py
+  check-work-items-state.ps1
+  check-work-items-state.sh
+  validate-work-item-state.py
+  validate-work-item-state.ps1
+  validate-work-item-state.sh
+)
+echo "  Installing work-item ledger helper scripts..."
+lead_scripts_target="$SKILLS_TARGET/lead/scripts"
+if [[ ! -d "$lead_scripts_target" ]]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $lead_scripts_target"
+  else
+    mkdir -p "$lead_scripts_target"
+  fi
+fi
+for script_name in "${runtime_ledger_scripts[@]}"; do
+  script_source="$REPO_DIR/scripts/$script_name"
+  script_target="$lead_scripts_target/$script_name"
+  if [[ ! -f "$script_source" ]]; then
+    echo "FAIL: Missing runtime helper source $script_source" >&2
+    exit 1
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would copy $script_source -> $script_target"
+  else
+    cp "$script_source" "$script_target"
+  fi
+done
 
 echo "  Installing built-in agent overrides (preserving existing custom files)..."
 if [[ ! -d "$AGENT_OVERRIDES_TARGET" ]]; then
@@ -793,7 +897,7 @@ if [[ ! -d "$AGENT_OVERRIDES_TARGET" ]]; then
 fi
 for agent_file in "$AGENTS_SOURCE"/*.toml; do
   [[ -f "$agent_file" ]] || continue
-  ensure_default_file "$agent_file" "$AGENT_OVERRIDES_TARGET/$(basename "$agent_file")" "built-in agent override $(basename "$agent_file")"
+  ensure_codex_agent_override_file "$agent_file" "$AGENT_OVERRIDES_TARGET/$(basename "$agent_file")" "built-in agent override $(basename "$agent_file")"
 done
 
 # AGENTS.md: assemble from shared + codex-specific, then merge or create
@@ -865,6 +969,99 @@ fi
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 sync_agents_mode_file "$SHARED_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml" "codex"
 
+# Shared cross-pack global .agents-mode.yaml lives at $HOME/.agents-mode.yaml
+# (alongside ~/.claude.json). Lowest-precedence fallback layer below pack-local
+# globals and project-local overlays. Sync is normalize-not-overwrite, so calling
+# from both pack installers is idempotent. Only created/normalized during global installs.
+if [ "$MODE" = "global" ]; then
+  SHARED_GLOBAL_AGENTS_MODE="$HOME/.agents-mode.yaml"
+  sync_agents_mode_file "$SHARED_AGENTS_MODE_SOURCE" "$SHARED_GLOBAL_AGENTS_MODE" "shared global ~/.agents-mode.yaml" "shared"
+fi
+
+# Install structural hooks into ~/.codex/hooks.json
+# (global) or <project>/.codex/hooks.json (target). Idempotent JSON merge that
+# preserves all other user keys and other hooks. Opt out with --no-hypothesis-hook
+# or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1. Codex's matcher field has no `if`-style
+# argument filter, so the hook script self-filters by parsing tool_input.command.
+if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
+  hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
+  if [ ! -f "$hook_installer" ]; then
+    echo "WARN: hypothesis-hook installer not found at $hook_installer; skipping hook install" >&2
+  else
+    python_cmd="$(resolve_python_command || true)"
+    if [ -z "$python_cmd" ]; then
+      echo "FAIL: python or python3 is required to auto-install the structural hooks" >&2
+      echo "      Rerun with --no-hypothesis-hook to skip, or install Python and re-run." >&2
+      exit 1
+    fi
+    # OS-aware host-os flag. On Windows the Codex hook entry uses
+    # `powershell.exe ... -File <.ps1>` to avoid the PATH gotcha where
+    # `bash` may resolve to the WSL launcher (System32\bash.exe) instead of
+    # Git Bash — WSL bash cannot resolve `C:\Users\...` paths and the entry
+    # silently fails. PowerShell.exe always resolves to one known system
+    # path with no PATH ambiguity. On POSIX, plain `bash <script.sh>` works.
+    case "$(uname -s 2>/dev/null)" in
+      MINGW*|MSYS*|CYGWIN*) hook_host_os="windows" ;;
+      *) hook_host_os="posix" ;;
+    esac
+    # TARGET is ~/.codex (global) or <project>/.codex (target). Codex hooks.json
+    # lives in the .codex/ directory in both modes.
+    # AGENTS_ROOT is ~/.codex (global) or <project>/.agents (target) — skills
+    # live under AGENTS_ROOT.
+    hooks_target="$TARGET/hooks.json"
+    if [ "$hook_host_os" = "windows" ]; then
+      bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.ps1"
+      stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.ps1"
+      wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.ps1"
+      machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.ps1"
+      notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.ps1"
+    else
+      bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.sh"
+      stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.sh"
+      wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.sh"
+      machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.sh"
+      notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.sh"
+    fi
+    echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-path "$bugfix_script_target"
+    echo "  Installing passive-polling Stop hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --hook-event Stop \
+      --script-marker check-passive-polling-stop \
+      --script-path "$stop_script_target"
+    echo "  Installing work-items-archival Stop hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --hook-event Stop \
+      --script-marker check-work-items-archival-stop \
+      --script-path "$wi_archival_script_target"
+    echo "  Installing machine-local-path PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-marker check-machine-local-path \
+      --script-path "$machine_path_script_target"
+    echo "  Installing no-trash-in-repo PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-marker check-no-trash-in-repo \
+      --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash" \
+      --script-path "$notrash_script_target"
+  fi
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
   echo "RESULT: DRY-RUN complete (no files modified)."
@@ -907,6 +1104,9 @@ check_file "$SKILLS_TARGET/lead/subagent-contracts.md" "skills/lead/subagent-con
 check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.sh" "skills/lead/scripts/check-publication-safety.sh"
 check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.ps1" "skills/lead/scripts/check-publication-safety.ps1"
 check_file "$SKILLS_TARGET/lead/scripts/validate-skill-pack.sh" "skills/lead/scripts/validate-skill-pack.sh"
+for script_name in "${runtime_ledger_scripts[@]}"; do
+  check_file "$SKILLS_TARGET/lead/scripts/$script_name" "skills/lead/scripts/$script_name"
+done
 check_file "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 check_file "$AGENT_OVERRIDES_TARGET/default.toml" "agents/default.toml"
 check_file "$AGENT_OVERRIDES_TARGET/worker.toml" "agents/worker.toml"

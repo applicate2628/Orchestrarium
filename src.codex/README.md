@@ -1,10 +1,10 @@
 # Codex Pack Source
 
-This directory contains the Codex-provider source tree for the standalone Codex branch.
+This directory contains the Codex-provider source tree inside the Orchestrarium monorepo.
 
 Use it together with:
 
-- [../docs/README.md](../docs/README.md) for the branch-level docs surface
+- [../docs/README.md](../docs/README.md) for the common branch-level docs surface
 - [../shared/references/README.md](../shared/references/README.md) for the shared design core
 - [../references-codex/README.md](../references-codex/README.md) for the Codex-side provider addendum
 
@@ -21,7 +21,7 @@ Architecture decision: the installed Codex `AGENTS.md` is intentionally the comp
 
 Keep `SKILL.md` frontmatter `description:` values compact because Codex loads them as startup metadata before any one skill body is selected. Put detailed trigger logic, scope, and gate rules in the body of the skill instead; `skills/lead/scripts/validate-skill-pack.*` enforces the Codex metadata budget.
 
-This subtree is the Codex runtime source owned by this branch. Shared governance and shared references stay one level up; only the provider-specific runtime source lives here.
+This subtree is the Codex runtime source owned by the monorepo. Shared governance and shared references stay one level up; only the provider-specific runtime source lives here.
 
 ## Terms and Abbreviations
 

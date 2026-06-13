@@ -1,6 +1,6 @@
 ---
 name: external-worker
-description: Run eligible worker-side roles through the selected external provider with clear provenance and fail-fast handling.
+description: "Run eligible worker roles via external provider; keep provenance."
 ---
 
 # External Worker
@@ -38,10 +38,11 @@ description: Run eligible worker-side roles through the selected external provid
   - Gemini path: `gemini`
   - Qwen path: `qwen`
 - Honor `externalClaudeProfile` only when the selected provider is Claude. On the Codex line, this is a narrower override than the shared `externalModelMode`: `sonnet-high` maps to `--model sonnet --effort high`; `opus-max` maps to `--model opus --effort max`.
-- Honor `parallelMode`, `externalPriorityProfile`, `externalPriorityProfiles`, and `externalOpinionCounts` when `externalProvider: auto` is in effect. Multi-opinion lanes collect fail-closed rather than silently dropping shortfalls, and example-only providers stay out of shipped `auto` profiles.
+- Honor `parallelMode`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts` when `externalProvider: auto` is in effect. Multi-opinion lanes collect fail-closed rather than silently dropping shortfalls, and example-only providers stay out of shipped `auto` profiles.
 - `parallelMode` is the general helper fan-out rule across internal and external lanes; `externalOpinionCounts` governs distinct-provider opinions for one lane and does not cap how many same-provider worker instances may run in parallel for different disjoint lanes or slices.
-- Honor `externalModelMode` before provider-specific model fallbacks: `runtime-default` keeps the selected provider on its runtime default model/profile; `pinned-top-pro` uses the strongest documented production-provider model/profile and allows one named same-provider fallback on retryable provider exhaustion where the production contract defines one.
-- Do not honor `claude-secret` or the secret-backed Claude wrapper for worker-side lanes. `externalClaudeApiMode` only controls the supplemental `claude-secret` candidate in `advisory.*` and `review.*` profile orders, after primary `claude`/`codex`; it is not a worker transport, not a retry for primary Claude, and not an implementation/editing fallback.
+- Honor `externalCodexProfile` when the selected provider is Codex: `default` inherits `externalModelMode`; `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade) and must record unavailable or deviated if that model tier cannot be verified against the installed runtime; `gpt-5.5-xhigh` (shipped as default) explicitly requests model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`, symmetric to Claude's `opus-max`.
+- Honor `externalModelMode` before provider-specific model fallbacks when no narrower provider profile overrides it: `runtime-default` keeps the selected provider on its runtime default model/profile; `pinned-top-pro` uses the strongest documented production-provider model/profile and allows one named same-provider fallback on retryable provider exhaustion where the production contract defines one.
+- Do not honor `reserve` for worker-side lanes. It is a supplemental read-only candidate only in `advisory.*` and `review.*` profile orders after primary `claude`/`codex`, and `reserveResolver` must not turn it into a worker transport, primary-Claude retry, or implementation/editing fallback.
 - Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths. Neither example-only provider gains separate shared production fallback keys in this pack.
 - Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
 - If the selected Claude CLI path fails for a worker artifact, do not convert that same primary `claude` run to the secret-backed wrapper. Treat Claude as unavailable or reroute honestly.

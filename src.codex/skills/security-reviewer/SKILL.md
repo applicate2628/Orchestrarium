@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: Gate approved work for auth, secrets, dependency risk, data exposure, dangerous config, or vulnerabilities.
+description: "Review auth, secrets, dependencies, data exposure, vulnerabilities."
 ---
 
 # Security Reviewer

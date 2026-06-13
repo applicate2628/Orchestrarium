@@ -1,6 +1,6 @@
 ---
 name: security-engineer
-description: "Define secure design constraints: trust boundaries, threats, required controls, safe defaults, and must-fix risks."
+description: "Define threats, trust boundaries, controls, safe defaults, must-fix risks."
 ---
 
 # Security Engineer

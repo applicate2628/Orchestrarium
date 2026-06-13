@@ -1,6 +1,6 @@
 ---
 name: performance-engineer
-description: Set performance budgets, bottleneck models, measurement plans, and constraints before performance-sensitive work.
+description: "Define performance budgets, bottlenecks, measurements, constraints."
 ---
 
 # Performance Engineer

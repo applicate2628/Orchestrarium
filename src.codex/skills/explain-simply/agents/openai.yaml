@@ -1,0 +1,4 @@
+interface:
+  display_name: "Explain Simply"
+  short_description: "Reader-tailored plain-language explanations"
+  default_prompt: "Use $explain-simply to explain a concept, code path, document, result, or decision in the reader's preferred language with plain-language analogies, grounded facts, explicit assumptions, and a concise glossary."

@@ -1,6 +1,6 @@
 ---
 name: geometry-engineer
-description: "Implement approved geometry or spatial work: transforms, intersections, meshing, indexing, curves, and predicates."
+description: "Implement geometry: transforms, intersections, meshing, indexing, predicates."
 ---
 
 # Geometry Engineer

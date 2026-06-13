@@ -1,6 +1,6 @@
 ---
 name: architect
-description: "Design from accepted research: architecture decisions, tradeoffs, APIs, data models, security, observability, and tests."
+description: "Design from accepted research: architecture, APIs, data, security, tests."
 ---
 
 # Architect
@@ -36,9 +36,11 @@ description: "Design from accepted research: architecture decisions, tradeoffs, 
 - Prefer the smallest durable design that satisfies the validated requirements.
 - Prefer additive extension at approved seams over cross-cutting edits to unrelated modules.
 - Document rejected options when they materially affect future work.
+- When the design makes a cross-cutting or long-lived architecture decision (one that outlives this work-item or constrains others), file it in the `work-items/decisions/` registry as `status: proposed` (lead skill `## Decisions`) and REFERENCE it by id from this design package, rather than burying it in a `design.md` that will be archived with the item. Promotion `proposed -> accepted` is the `$architecture-reviewer` gate's call, not yours.
 - Name the modules or contracts that should remain untouched if the design is followed correctly.
 - Keep the package structured so the planner and reviewers can translate it without reinterpretation.
 - Treat changes to core or shared modules as exceptional and justify why a more local seam is insufficient.
+- For non-foundation features in the design, require a single feature gate at the owning module's boundary (settings model or capability registry), not scattered consumer-side conditionals. Disabled state must be fully inert across every reachable surface — UI, command palette, hotkeys, deep links, IPC, background watchers, persistence writes — and the design must define what happens to persisted state when the feature is removed, renamed, split, or default-flipped.
 - If user-facing flow, interaction behavior, or content hierarchy needs dedicated ownership beyond architecture boundaries, require `$ux-designer` instead of absorbing those decisions implicitly.
 
 ## Adjacent findings protocol

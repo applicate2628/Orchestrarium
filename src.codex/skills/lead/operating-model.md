@@ -33,6 +33,8 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - Maintain exactly one primary in-progress task at a time.
 - Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
 - After handling a side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
+- If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
 - When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
 - Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
 - Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
@@ -183,6 +185,9 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery when task memory is in use.
 - Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
 - On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
+- Epics group several work-items: persist an epic as a flat `work-items/epics/<date>-<slug>.md` (`status: active|closed`, `## Goal` / `## Children` slug list); each child work-item carries a single `Epic: <slug>` line in its `status.md`. Derive the epic roll-up live from the children (resolve each slug across `active/` + `archive/`); close the epic only when all children are closed and the goal is met. Full rules in the lead skill `## Epics`.
+- Cross-cutting decisions: durable architecture decisions persist as a flat `work-items/decisions/<date>-<slug>.md` (`status: proposed|accepted|dropped|superseded|reverted`, plus `decided-by`/`context`/`supersedes`/`superseded-by`), referenced (not duplicated) from a work-item's `design.md`. Cross-work-item dependencies persist as a `Depends-on: <slug>, <slug>` line in the dependent item's `status.md`. Full rules in the architect + lead skills.
+- Delivery lessons: a keep-worthy lesson from a delivery retrospective persists as a flat `work-items/lessons/<date>-<slug>.md` entry, the same flat shape as `work-items/decisions/`. Full rules in the lead skill `## Lessons`.
 
 ## Lead quick checklist
 

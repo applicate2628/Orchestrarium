@@ -173,3 +173,13 @@ Lifecycle of `constraints/claims.md` in the work-item folder:
 - Reviewers tag cross-domain findings with `[CROSS-DOMAIN: <target-domain>]`; the orchestrator routes them to the appropriate specialist.
 - Any role files adjacent findings in `work-items/bugs/` without expanding scope.
 - Every completed chain persists artifacts: canonical docs in `work-items/`, session logs in `.reports/`, plan logs in `.plans/`.
+
+## Terms and Abbreviations
+
+- `CI`: Continuous Integration; automated repository checks run before merge, push, or release.
+- `Claim-Verify`: a reviewer mode in which the reviewer checks the builder's explicit claims against evidence.
+- `Codex`: the OpenAI Codex runtime used by this pack as a code-generation and task-execution engine.
+- `QA`: Quality Assurance; the verification stage for behavior, acceptance criteria, and regressions.
+- `REVISE`: a gate result meaning bounded correction is required; work returns to the same role for up to three consecutive cycles.
+- `UI`: User Interface; the user-facing interaction surface.
+- `UX`: User Experience; usability, flow, comprehension, and interaction quality.

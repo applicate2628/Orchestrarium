@@ -12,11 +12,15 @@ SCRIPT_DIR_LOGICAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 DEV_REPO=0
 CODEX_RUNTIME_ROOT=""
-if [[ -d "src.codex/skills" && -f "shared/AGENTS.shared.md" && -f "src.codex/AGENTS.codex.md" ]]; then
+SOURCE_SCRIPTS_DIR=""
+if [[ -d "src.codex/skills/lead/scripts" ]]; then
+  SOURCE_SCRIPTS_DIR="$(cd "src.codex/skills/lead/scripts" && pwd -P)"
+fi
+if [[ -n "$SOURCE_SCRIPTS_DIR" && "$SCRIPT_DIR" == "$SOURCE_SCRIPTS_DIR" && -f "shared/AGENTS.shared.md" && -f "src.codex/AGENTS.codex.md" ]]; then
   # Dev repo: assemble AGENTS.md from split source files for validation
   SKILLS_DIR="$(cd "src.codex/skills" && pwd -P)"
-  SCRIPTS_DIR="$(cd "src.codex/skills/lead/scripts" && pwd -P)"
-  REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd -P)"
+  SCRIPTS_DIR="$SOURCE_SCRIPTS_DIR"
+  REPO_ROOT="$(pwd -P)"
   DEV_REPO=1
   AGENTS_FILE="$(mktemp)"
   {
@@ -129,6 +133,32 @@ check_file() {
   fi
 }
 
+check_agent_run_ledger_contract() {
+  local label="$1"
+  if [[ $DEV_REPO -ne 1 ]]; then
+    warn "$label (dev repo validator unavailable in installed layout)"
+    return
+  fi
+
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_cmd="python"
+  else
+    warn "$label (python unavailable)"
+    return
+  fi
+
+  local output
+  if output="$("$python_cmd" "$REPO_ROOT/scripts/check-agent-run-ledger-contract.py" --root "$REPO_ROOT" 2>&1)"; then
+    pass "$label"
+  else
+    printf '%s\n' "$output"
+    fail "$label"
+  fi
+}
+
 check_not_exists() {
   local path="$1"
   local label="$2"
@@ -161,14 +191,23 @@ check_normalizer_strips_example_auto_providers() {
   target="$tmpdir/.agents-mode.yaml"
   cat > "$target" <<'EOF'
 externalProvider: auto
+externalClaudeApiMode: force
 externalPriorityProfile: custom-demo
+reserveResolver: wrapper:tools/reserve-review.ps1
 externalPriorityProfiles:
   custom-demo:
-    advisory.repo-understanding: [claude, codex, claude-secret, gemini, qwen]
-    review.visual: [claude, codex, claude-secret, gemini]
-    worker.default-implementation: [claude-secret, claude, gemini, qwen, codex]
-    worker.secret-only: [claude-secret, gemini, qwen]
-externalOpinionCounts: {}
+    advisory.repo-understanding: [claude, codex, reserve, gemini, qwen]
+    advisory.design-adr: [claude-secret, codex, claude]
+    advisory.legacy-secret-only: [claude-secret]
+    review.security: [reserve, claude, codex]
+    review.ui-visual-correctness: [claude, codex, reserve, gemini]
+    design.ui-ux-structure: [reserve, codex, gemini, claude, qwen]
+    worker.default-implementation: [reserve, claude, gemini, qwen, codex]
+    worker.ui-structural-modernization: [codex, claude]
+    review.visual: [claude, codex, reserve]
+    worker.secret-only: [reserve, gemini, qwen]
+externalOpinionCounts:
+  review.visual: 2
 EOF
 
   if "$python_cmd" "$REPO_ROOT/scripts/normalize-agents-mode.py" \
@@ -176,12 +215,63 @@ EOF
     --target "$target" \
     --provider shared >/dev/null 2>&1 &&
     grep -Fq "  custom-demo:" "$target" &&
-    grep -Fq "    advisory.repo-understanding: [claude, codex, claude-secret]" "$target" &&
-    grep -Fq "    review.visual: [claude, codex, claude-secret]" "$target" &&
+    grep -Fq "    advisory.repo-understanding: [claude, codex, reserve]" "$target" &&
+    grep -Fq "    advisory.design-adr: [codex, claude, reserve]" "$target" &&
+    grep -Fq "    advisory.legacy-secret-only: [reserve]" "$target" &&
+    grep -Fq "    review.security: [claude, codex, reserve]" "$target" &&
+    grep -Fq "    review.ui-visual-correctness: [claude, codex, reserve]" "$target" &&
+    grep -Fq "    design.ui-ux-structure: [codex, claude]" "$target" &&
     grep -Fq "    worker.default-implementation: [claude, codex]" "$target" &&
+    grep -Fq "reserveResolver: wrapper:tools/reserve-review.ps1" "$target" &&
+    ! grep -Fq "externalClaudeApiMode" "$target" &&
     ! grep -Fq "worker.secret-only" "$target" &&
+    ! grep -Fq "worker.ui-structural-modernization" "$target" &&
+    ! grep -Fq "review.visual" "$target" &&
     ! grep -E '^[[:space:]]{4}.*: \[[^]]*(gemini|qwen)' "$target" >/dev/null &&
-    ! grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*claude-secret' "$target" >/dev/null; then
+    ! grep -E '^[[:space:]]{4}(design|worker)\.[^:]+: \[[^]]*reserve' "$target" >/dev/null; then
+    :
+  else
+    fail "$label"
+    rm -rf "$tmpdir"
+    return
+  fi
+
+  target="$tmpdir/.agents-mode-disabled.yaml"
+  cat > "$target" <<'EOF'
+externalProvider: auto
+reserveResolver: disabled
+EOF
+
+  if "$python_cmd" "$REPO_ROOT/scripts/normalize-agents-mode.py" \
+    --template "$REPO_ROOT/shared/agents-mode.defaults.yaml" \
+    --target "$target" \
+    --provider shared >/dev/null 2>&1 &&
+    grep -Fq "reserveResolver: disabled" "$target" &&
+    grep -Fq "    advisory.repo-understanding: [claude, codex]" "$target" &&
+    grep -Fq "    review.ui-visual-correctness: [codex, claude]" "$target" &&
+    ! grep -E '^[[:space:]]{4}.*: \[[^]]*reserve' "$target" >/dev/null; then
+    :
+  else
+    fail "$label"
+    rm -rf "$tmpdir"
+    return
+  fi
+
+  target="$tmpdir/.agents-mode-legacy-disabled.yaml"
+  cat > "$target" <<'EOF'
+externalProvider: auto
+externalClaudeApiMode: disabled
+EOF
+
+  if "$python_cmd" "$REPO_ROOT/scripts/normalize-agents-mode.py" \
+    --template "$REPO_ROOT/shared/agents-mode.defaults.yaml" \
+    --target "$target" \
+    --provider shared >/dev/null 2>&1 &&
+    grep -Fq "reserveResolver: disabled" "$target" &&
+    grep -Fq "    advisory.repo-understanding: [claude, codex]" "$target" &&
+    grep -Fq "    review.ui-visual-correctness: [codex, claude]" "$target" &&
+    ! grep -E '^[[:space:]]{4}.*: \[[^]]*reserve' "$target" >/dev/null &&
+    ! grep -Fq "externalClaudeApiMode" "$target"; then
     pass "$label"
   else
     fail "$label"
@@ -189,7 +279,7 @@ EOF
   rm -rf "$tmpdir"
 }
 
-check_shared_defaults_claude_secret_policy() {
+check_shared_defaults_reserve_policy() {
   local label="$1"
   if [[ $DEV_REPO -ne 1 ]]; then
     warn "$label (dev repo defaults unavailable in installed layout)"
@@ -202,19 +292,34 @@ check_shared_defaults_claude_secret_policy() {
     return
   fi
 
-  local lane
-  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.performance-architecture review.visual; do
-    if ! grep -Fq "    $lane: [claude, codex, claude-secret]" "$defaults"; then
-      fail "$label ($lane missing claude-secret as last advisory/review candidate)"
+  if grep -Fq "externalClaudeApiMode" "$defaults"; then
+    fail "$label (retired externalClaudeApiMode should not be in shared defaults)"
+    return
+  fi
+  if ! grep -Fq "reserveResolver: claude-sonnet" "$defaults"; then
+    fail "$label (shared defaults should define reserveResolver default)"
+    return
+  fi
+
+  local lane expected
+  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.security review.performance-architecture review.ui-visual-correctness; do
+    expected="    $lane: [claude, codex, reserve]"
+    case "$lane" in
+      review.performance-architecture|review.ui-visual-correctness)
+        expected="    $lane: [codex, claude, reserve]"
+        ;;
+    esac
+    if ! grep -Fq "$expected" "$defaults"; then
+      fail "$label ($lane missing reserve as last advisory/review candidate)"
       return
     fi
   done
 
-  if grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*(claude-secret|gemini|qwen)' "$defaults" >/dev/null; then
-    fail "$label (worker lane contains forbidden provider)"
+  if grep -E '^[[:space:]]{4}(design|worker)\.[^:]+: \[[^]]*(reserve|gemini|qwen)' "$defaults" >/dev/null; then
+    fail "$label (design/worker lane contains forbidden provider)"
     return
   fi
-  if grep -E '^[[:space:]]{4}(advisory|review|worker)\.[^:]+: \[[^]]*(gemini|qwen)' "$defaults" >/dev/null; then
+  if grep -E '^[[:space:]]{4}(advisory|design|review|worker)\.[^:]+: \[[^]]*(gemini|qwen)' "$defaults" >/dev/null; then
     fail "$label (Gemini/Qwen appear in shipped production profile)"
     return
   fi
@@ -561,6 +666,8 @@ for f in \
   "$SKILLS_DIR/external-brigade/agents/openai.yaml" \
   "$SKILLS_DIR/consultant/SKILL.md" \
   "$SKILLS_DIR/second-opinion/SKILL.md" \
+  "$SKILLS_DIR/review-loop/SKILL.md" \
+  "$SKILLS_DIR/review-loop/agents/openai.yaml" \
   "$SCRIPTS_DIR/check-publication-safety.sh" \
   "$SCRIPTS_DIR/check-publication-safety.ps1" \
   "$SCRIPTS_DIR/validate-skill-pack.sh"
@@ -575,37 +682,38 @@ if [[ $DEV_REPO -eq 1 ]]; then
   CLAUDE_REF_DIR="$REPO_ROOT/references-claude"
   GEMINI_REF_DIR="$REPO_ROOT/references-gemini"
   QWEN_REF_DIR="$REPO_ROOT/references-qwen"
-  STANDALONE_PROVIDER_REPO=0
-  if [[ ! -f "$REPO_ROOT/install.sh" && ! -f "$REPO_ROOT/install.ps1" ]]; then
-    STANDALONE_PROVIDER_REPO=1
-  fi
 
   echo ""
   echo "=== Common branch-level surface ==="
 
-  common_branch_files=(
+  for f in \
     "$REPO_ROOT/src.codex/agents/default.toml" \
     "$REPO_ROOT/src.codex/agents/worker.toml" \
     "$REPO_ROOT/src.codex/agents/explorer.toml" \
     "$REPO_ROOT/src.codex/README.md" \
+    "$REPO_ROOT/src.claude/README.md" \
+    "$REPO_ROOT/src.gemini/README.md" \
+    "$REPO_ROOT/src.qwen/README.md" \
     "$DOCS_DIR/README.md" \
     "$DOCS_DIR/agents-mode-reference.md" \
+    "$DOCS_DIR/external-worker-design.md" \
     "$DOCS_DIR/provider-runtime-layouts.md" \
-    "$CODEX_REF_DIR/README.md"
-  )
-  if [[ $STANDALONE_PROVIDER_REPO -eq 0 ]]; then
-    common_branch_files+=(
-      "$REPO_ROOT/src.claude/README.md" \
-      "$REPO_ROOT/src.gemini/README.md" \
-      "$REPO_ROOT/src.qwen/README.md" \
-      "$DOCS_DIR/external-worker-design.md" \
-      "$CLAUDE_REF_DIR/README.md" \
-      "$GEMINI_REF_DIR/README.md" \
-      "$QWEN_REF_DIR/README.md"
-    )
-  fi
-
-  for f in "${common_branch_files[@]}"; do
+    "$REPO_ROOT/shared/schemas/agent-runs.schema.json" \
+    "$REPO_ROOT/scripts/check-agent-run-ledger-contract.py" \
+    "$REPO_ROOT/scripts/agent-run-ledger.py" \
+    "$REPO_ROOT/scripts/agent-run-ledger.sh" \
+    "$REPO_ROOT/scripts/agent-run-ledger.ps1" \
+    "$REPO_ROOT/scripts/check-work-items-state.py" \
+    "$REPO_ROOT/scripts/check-work-items-state.sh" \
+    "$REPO_ROOT/scripts/check-work-items-state.ps1" \
+    "$REPO_ROOT/scripts/validate-work-item-state.py" \
+    "$REPO_ROOT/scripts/validate-work-item-state.sh" \
+    "$REPO_ROOT/scripts/validate-work-item-state.ps1" \
+    "$CODEX_REF_DIR/README.md" \
+    "$CLAUDE_REF_DIR/README.md" \
+    "$GEMINI_REF_DIR/README.md" \
+    "$QWEN_REF_DIR/README.md"
+  do
     if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
   done
 
@@ -618,11 +726,32 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "$SHARED_REF_DIR/subagent-operating-model.md" \
     "$SHARED_REF_DIR/workflow-strategy-comparison.md" \
     "$SHARED_REF_DIR/repository-publication-safety.md" \
+    "$SHARED_REF_DIR/ru/evidence-based-answer-pipeline.md" \
     "$SHARED_REF_DIR/ru/subagent-operating-model.md" \
     "$SHARED_REF_DIR/ru/workflow-strategy-comparison.md" \
     "$SHARED_REF_DIR/ru/repository-publication-safety.md"
   do
     if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
+  done
+
+  # ru/ localization policy (INTENTIONAL SCOPE — not glob folklore): every
+  # TOP-LEVEL standalone methodology reference under each ref dir must have a
+  # Russian mirror in ru/. The 'find -maxdepth 1' below is a deliberate policy
+  # boundary: typed subdirectories such as shared/references/spine/ hold
+  # English-only extracts (verbatim slices of the always-loaded AGENTS.md spine,
+  # which was itself English-only before the Task-6 cut) and are EXEMPT from the
+  # ru/ mirror requirement by design. Do NOT make this recursive without an
+  # explicit decision to localize the spine extracts.
+  for ref_dir in "$SHARED_REF_DIR" "$CODEX_REF_DIR" "$CLAUDE_REF_DIR" "$GEMINI_REF_DIR" "$QWEN_REF_DIR"; do
+    while IFS= read -r source_file; do
+      name="$(basename "$source_file")"
+      [[ "$name" == "README.md" ]] && continue
+      if [[ -f "$ref_dir/ru/$name" ]]; then
+        pass "$ref_dir/ru/$name mirrors $name"
+      else
+        fail "$ref_dir/ru/$name missing for $name"
+      fi
+    done < <(find "$ref_dir" -maxdepth 1 -type f -name '*.md' | sort)  # maxdepth 1: top-level only; subdirs (spine/) intentionally exempt per note above
   done
 
   echo ""
@@ -632,16 +761,20 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_pointer "$CODEX_REF_DIR/subagent-operating-model.md" "../shared/references/subagent-operating-model.md"
   check_pointer "$CODEX_REF_DIR/workflow-strategy-comparison.md" "../shared/references/workflow-strategy-comparison.md"
   check_pointer "$CODEX_REF_DIR/repository-publication-safety.md" "../shared/references/repository-publication-safety.md"
+  check_pointer "$CODEX_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
   check_pointer "$CODEX_REF_DIR/ru/subagent-operating-model.md" "../../shared/references/ru/subagent-operating-model.md"
   check_pointer "$CODEX_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
   check_pointer "$CODEX_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
-  if [[ $STANDALONE_PROVIDER_REPO -eq 0 ]]; then
-    check_pointer "$GEMINI_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
-    check_pointer "$GEMINI_REF_DIR/workflow-strategy-comparison.md" "../shared/references/workflow-strategy-comparison.md"
-    check_pointer "$GEMINI_REF_DIR/repository-publication-safety.md" "../shared/references/repository-publication-safety.md"
-    check_pointer "$GEMINI_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
-    check_pointer "$GEMINI_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
-  fi
+  check_pointer "$CLAUDE_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
+  check_pointer "$CLAUDE_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
+  check_pointer "$GEMINI_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
+  check_pointer "$GEMINI_REF_DIR/workflow-strategy-comparison.md" "../shared/references/workflow-strategy-comparison.md"
+  check_pointer "$GEMINI_REF_DIR/repository-publication-safety.md" "../shared/references/repository-publication-safety.md"
+  check_pointer "$GEMINI_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
+  check_pointer "$GEMINI_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
+  check_pointer "$GEMINI_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
+  check_pointer "$QWEN_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
+  check_pointer "$QWEN_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
 
   echo ""
   echo "=== Shared core / addendum semantics ==="
@@ -710,6 +843,12 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "shared subagent-operating-model keeps the role-map section in the shared core"
   check_contains "$SHARED_REF_DIR/subagent-operating-model.md" "## 8. Gates: what each stage must prove" \
     "shared subagent-operating-model keeps the gate model in the shared core"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'agent-runs.jsonl` is the machine-readable execution ledger' \
+    "shared subagent-operating-model documents the agent execution ledger"
+  check_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
+    'no accepted `PASS` without evidence' \
+    "shared subagent-operating-model rejects PASS without evidence"
   check_h2_section_contains "$SHARED_REF_DIR/subagent-operating-model.md" \
     "## 3.10 Periodic controls" \
     'Use the corresponding pack-local `periodic-control-matrix.md` named in the local addendum as the canonical cadence, owner, evidence, and fail-action matrix.' \
@@ -734,7 +873,8 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "## 11. Governance notes" \
     "## 12. Team composition" \
     "## 13. Short memo for the lead" \
-    "## 14. Final wording to give the lead"
+    "## 14. Final wording to give the lead" \
+    "## Terms and Abbreviations"
 
   check_h2_section_contains "$CODEX_REF_DIR/subagent-operating-model.md" \
     "## Codex-specific runtime notes" \
@@ -758,39 +898,28 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex runtime-notes section does not accidentally carry Claude agents-mode paths"
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Codex-specific runtime notes" \
     "Codex addendum keeps the Codex runtime-notes section"
-  if [[ $STANDALONE_PROVIDER_REPO -eq 0 ]]; then
-    check_contains "$GEMINI_REF_DIR/subagent-operating-model.md" "## Gemini-specific runtime notes" \
-      "Gemini addendum keeps the Gemini runtime-notes section"
-    check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Qwen-specific runtime notes" \
-      "Qwen addendum keeps the Qwen runtime-notes section"
-    check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
-      "## Gemini-specific runtime notes" \
-      ".gemini/.agents-mode.yaml" \
-      "Gemini runtime-notes section documents the Gemini agents-mode overlay"
-    check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
-      "## Gemini-specific runtime notes" \
-      ".gemini/settings.json" \
-      "Gemini runtime-notes section documents the Gemini native runtime config surface"
-    check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
-      "## Gemini-specific runtime notes" \
-      "sequential and human-steered" \
-      "Gemini runtime-notes section keeps the sequential human-steered runtime note"
-    check_h2_section_contains "$QWEN_REF_DIR/subagent-operating-model.md" \
-      "## Qwen-specific runtime notes" \
-      "sequential and human-steered" \
-      "Qwen runtime-notes section keeps the sequential human-steered runtime note"
-    check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Shared core now owns" \
-      "Qwen addendum keeps the shared-core ownership handoff section"
-  else
-    check_not_exists "$REPO_ROOT/src.claude" \
-      "standalone Codex branch omits Claude source tree"
-    check_not_exists "$REPO_ROOT/src.gemini" \
-      "standalone Codex branch omits Gemini source tree"
-    check_not_exists "$REPO_ROOT/src.qwen" \
-      "standalone Codex branch omits Qwen source tree"
-    check_contains "$REPO_ROOT/README.md" "does not carry the Claude, Gemini, or Qwen source trees" \
-      "standalone Codex README states other provider trees are absent"
-  fi
+  check_contains "$GEMINI_REF_DIR/subagent-operating-model.md" "## Gemini-specific runtime notes" \
+    "Gemini addendum keeps the Gemini runtime-notes section"
+  check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Qwen-specific runtime notes" \
+    "Qwen addendum keeps the Qwen runtime-notes section"
+  check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+    "## Gemini-specific runtime notes" \
+    ".gemini/.agents-mode.yaml" \
+    "Gemini runtime-notes section documents the Gemini agents-mode overlay"
+  check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+    "## Gemini-specific runtime notes" \
+    ".gemini/settings.json" \
+    "Gemini runtime-notes section documents the Gemini native runtime config surface"
+  check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+    "## Gemini-specific runtime notes" \
+    "sequential and human-steered" \
+    "Gemini runtime-notes section keeps the sequential human-steered runtime note"
+  check_h2_section_contains "$QWEN_REF_DIR/subagent-operating-model.md" \
+    "## Qwen-specific runtime notes" \
+    "sequential and human-steered" \
+    "Qwen runtime-notes section keeps the sequential human-steered runtime note"
+  check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Shared core now owns" \
+    "Qwen addendum keeps the shared-core ownership handoff section"
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Codex-side repository concretization" \
     "Codex addendum keeps the Codex repository-concretization section"
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Shared core now owns" \
@@ -821,7 +950,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CODEX_REF_DIR/subagent-operating-model.md" 120 \
     "Codex addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "3901809876c178947ce1903527b5175447bf64a735d3fe3ea35526e73e7b001b" \
+    "5e6191321fec27bbcef9310565d5116e8f041eda2ab5310bcf2a9d50e1e38fee" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
     "160e9bb3bb3df73e611626bc814a45a0923a350a4bff5b43b82bf45409c06549" \
@@ -832,7 +961,14 @@ echo ""
 echo "=== Role index consistency ==="
 
 mapfile -t indexed_roles < <(
-  grep -oE '\$[a-z][a-z-]{2,}' "$AGENTS_FILE" \
+  awk '/^## Role index/{flag=1; next} /^## /{flag=0} flag' "$AGENTS_FILE" \
+    | grep -oE '\$[a-z][a-z-]{2,}' \
+    | sed 's/^\$//' \
+    | sort -u
+)
+mapfile -t indexed_common_skills < <(
+  awk '/^## Common skills/{flag=1; next} /^## /{flag=0} flag' "$AGENTS_FILE" \
+    | grep -oE '\$[a-z][a-z-]{2,}' \
     | sed 's/^\$//' \
     | sort -u
 )
@@ -858,10 +994,40 @@ done
 echo ""
 echo "=== Skill metadata budget ==="
 
-CODEX_SKILL_DESCRIPTION_MAX_CHARS=180
-CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=5000
-UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes)
-PACK_BUDGET_SKILLS=("${indexed_roles[@]}" "${UTILITY_SKILLS[@]}")
+# Per-skill description cap. Bumped 180 -> 440 (2026-05-17) for the mathtype-
+# book-page common skill specifically: the user adopted the long-form 10-trigger
+# description from active downstream use (Itoh2) for better Skill-tool relevance
+# matching; the new description is 416 chars where the prior 180-char cap was a
+# pre-common-skills UX guideline. Future common skills should still aim for
+# <= 180 chars where the trigger surface is narrow; this cap is the wide-trigger
+# allowance, not a license for verbose role-style descriptions.
+# Bumped 440 -> 460 (2026-05-29) for the mathtype-book-page "Full-Text Coverage
+# Gate" backport from active Codex downstream use: the description gained the
+# "full source-text coverage" trigger and is now 443 chars. Headroom ~17 chars is
+# the ceiling for this one wide-trigger common skill, NOT an invitation to grow
+# other descriptions; narrow-trigger skills still aim for <= 180. The total cap
+# was left at 3700 at that point — consumption ~3689 still fit under it. These
+# rough char counts are documentation only; the live total is reported
+# authoritatively by the "Codex skill description total" pass line below.
+CODEX_SKILL_DESCRIPTION_MAX_CHARS=460
+# Total cap covers roles + utility skills + common skills. Roles alone were
+# sized at 3000 historically; raised to 3500 (2026-05-16) to accommodate the
+# common-skills category without forcing role-description churn. Raised again
+# 3500 -> 3700 (2026-05-17) to fit the mathtype-book-page long-form description
+# (the wide-trigger allowance noted above costs ~240 chars vs the prior 180-cap
+# baseline). After later mathtype-book-page description growth, consumption
+# reached ~3689 chars with headroom down to ~11 — which is exactly why the
+# review-loop addition below needed the cap bumped rather than absorbed.
+# Bumped 3700 -> 3800 (2026-06-03) for the new `review-loop` utility skill: its
+# 65-char single-line description (well under the 460 per-skill cap) pushed the
+# measured total to ~3756, just over the prior 3700 ceiling.
+# Bumped 3800 -> 4000 (2026-06-05) for the new `explain-simply` common skill:
+# the reader-explanation trigger surface pushed the measured total near 4k.
+# Visible decision rather than silent growth; the live total is reported by the
+# "Codex skill description total" pass line.
+CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=4000
+UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes review-loop)
+PACK_BUDGET_SKILLS=("${indexed_roles[@]}" "${UTILITY_SKILLS[@]}" "${indexed_common_skills[@]}")
 mapfile -t PACK_BUDGET_SKILLS < <(printf '%s\n' "${PACK_BUDGET_SKILLS[@]}" | sort -u)
 check_skill_frontmatter_yaml "${PACK_BUDGET_SKILLS[@]}"
 check_skill_description_budget "$CODEX_SKILL_DESCRIPTION_MAX_CHARS" "$CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS" "${PACK_BUDGET_SKILLS[@]}"
@@ -876,12 +1042,20 @@ for dir in "$SKILLS_DIR"/*/; do
     if [[ "$util" == "$role" ]]; then is_utility=1; break; fi
   done
   if [[ $is_utility -eq 1 ]]; then continue; fi
+  is_common_skill=0
+  for cs in "${indexed_common_skills[@]}"; do
+    if [[ "$cs" == "$role" ]]; then is_common_skill=1; break; fi
+  done
+  if [[ $is_common_skill -eq 1 ]]; then
+    pass "Directory $dir is registered as a common skill"
+    continue
+  fi
   found=0
   for indexed in "${indexed_roles[@]}"; do
     if [[ "$indexed" == "$role" ]]; then found=1; break; fi
   done
   if [[ $found -eq 0 ]]; then
-    warn "Directory $dir exists but \$$role is not in AGENTS.md role index"
+    warn "Directory $dir exists but \$$role is not in AGENTS.md role index or common-skill index"
   fi
 done
 
@@ -914,6 +1088,18 @@ check_absent "$SKILLS_DIR/lead/external-dispatch.md" "fallback approved by user"
   "external-dispatch does not record consultant fallback approvals"
 check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "Read and normalize \`.agents/.agents-mode.yaml\` before trusting its flags." \
   "subagent-contracts require read-time agents-mode normalization"
+check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "agent-runs.jsonl format" \
+  "subagent-contracts define the agent run ledger format"
+check_contains "$SKILLS_DIR/lead/subagent-contracts.md" 'A `PASS` in `status.md` is not accepted' \
+  "subagent-contracts reject PASS without ledger evidence"
+check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "shared/schemas/agent-runs.schema.json" \
+  "subagent-contracts point to the shared ledger schema"
+check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "scripts/agent-run-ledger.*" \
+  "subagent-contracts point to the work-item ledger helper"
+check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "scripts/validate-work-item-state.* --work-item" \
+  "subagent-contracts point to the work-item state validator"
+check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "scripts/check-work-items-state.* --root" \
+  "subagent-contracts point to the periodic work-item state checker"
 check_contains "$SKILLS_DIR/init-project/SKILL.md" "normalize it to the current canonical format before presenting or trusting the current values." \
   "init-project normalizes existing agents-mode before reading values"
 check_contains "$SKILLS_DIR/init-project/SKILL.md" "Any read of \`.agents/.agents-mode.yaml\` that drives a decision should normalize the file to the current canonical format before trusting the flags." \
@@ -926,11 +1112,19 @@ check_contains "$AGENTS_FILE" "must use direct external launch" \
   "shared governance requires direct external launch"
 check_contains "$AGENTS_FILE" "substantive task prompt must use file-based prompt delivery" \
   "shared governance requires file-based external CLI prompts"
+check_contains "$AGENTS_FILE" "Mechanism inventory before new paths" \
+  "shared governance requires owner inventory before new mechanisms"
+check_contains "$AGENTS_FILE" "State-synchronization ownership" \
+  "shared governance requires state synchronization ownership discipline"
+check_contains "$AGENTS_FILE" "split-brain state sync as an architecture bug" \
+  "shared governance rejects split-brain state synchronization"
+check_contains "$AGENTS_FILE" "correlation IDs" \
+  "shared governance requires traceable state synchronization diagnostics"
 check_contains "$AGENTS_FILE" "verify every subagent result before accepting it" \
   "shared governance requires verification before trusting subagent results"
 check_contains "$AGENTS_FILE" "Visual artifact verification discipline" \
   "shared governance requires visual inspection for generated visual artifacts"
-check_contains "$AGENTS_FILE" "Documentation terminology discipline" \
+check_contains "$AGENTS_FILE" "Plain-language and terminology discipline" \
   "shared governance requires terminology and abbreviation explanations in documents"
 check_contains "$AGENTS_FILE" "Markdown formula rendering format" \
   "shared governance requires previewer-safe Markdown formula formatting"
@@ -1025,58 +1219,75 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex platform rules document the example-only Gemini/Qwen provider universe"
   check_contains "$REPO_ROOT/shared/references/README.md" "current Gemini and Qwen example integrations" \
     "shared reference index treats Gemini/Qwen as current example integrations"
-  if [[ -f "$REPO_ROOT/install.sh" || -f "$REPO_ROOT/install.ps1" ]]; then
-    check_contains "$REPO_ROOT/install.sh" "default production install" \
-      "root bash installer defaults to the Codex/Claude production pair"
-    check_contains "$REPO_ROOT/install.ps1" "default production install" \
-      "root PowerShell installer defaults to the Codex/Claude production pair"
-    check_absent "$REPO_ROOT/install.sh" "All available root installs" \
-      "root bash installer does not offer all-provider default installs"
-    check_absent "$REPO_ROOT/install.ps1" "All available root installs" \
-      "root PowerShell installer does not offer all-provider default installs"
-    check_contains "$REPO_ROOT/install.sh" "if [[ -z \"\$choice\" ]]; then" \
-      "root bash installer maps empty selection to the default"
-    check_contains "$REPO_ROOT/install.sh" "choice=3" \
-      "root bash installer maps default selection to option 3"
-    check_contains "$REPO_ROOT/install.ps1" '$normalizedChoice = "3"' \
-      "root PowerShell installer maps empty selection to option 3"
-    check_contains "$REPO_ROOT/install.sh" "run_installer install-codex.sh" \
-      "root bash installer option 3 includes Codex"
-    check_contains "$REPO_ROOT/install.sh" "run_installer install-claude.sh" \
-      "root bash installer option 3 includes Claude"
-    check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' \
-      "root PowerShell installer option 3 includes Codex"
-    check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' \
-      "root PowerShell installer option 3 includes Claude"
-    bash_default_block="$(awk '/^  3\)/,/^  4\)/ { print }' "$REPO_ROOT/install.sh")"
-    if grep -Fq "run_installer install-codex.sh" <<<"$bash_default_block" &&
-       grep -Fq "run_installer install-claude.sh" <<<"$bash_default_block" &&
-       ! grep -Eq 'install-(gemini|qwen)\.sh' <<<"$bash_default_block"; then
-      pass "root bash installer default dispatch is Codex plus Claude only"
-    else
-      fail "root bash installer default dispatch must be Codex plus Claude only"
-    fi
-    ps_default_block="$(awk '/^    "3" {/,/^    "4" {/ { print }' "$REPO_ROOT/install.ps1")"
-    if grep -Fq 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' <<<"$ps_default_block" &&
-       grep -Fq 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' <<<"$ps_default_block" &&
-       ! grep -Eq 'install-(gemini|qwen)\.ps1' <<<"$ps_default_block"; then
-      pass "root PowerShell installer default dispatch is Codex plus Claude only"
-    else
-      fail "root PowerShell installer default dispatch must be Codex plus Claude only"
-    fi
-    check_absent "$REPO_ROOT/install.sh" "run_all_available" \
-      "root bash installer has no aggregate all-provider helper"
-    check_absent "$REPO_ROOT/install.ps1" "Invoke-AllAvailableInstallers" \
-      "root PowerShell installer has no aggregate all-provider helper"
+  check_contains "$REPO_ROOT/install.sh" "default production install" \
+    "root bash installer defaults to the Codex/Claude production pair"
+  check_contains "$REPO_ROOT/install.ps1" "default production install" \
+    "root PowerShell installer defaults to the Codex/Claude production pair"
+  check_absent "$REPO_ROOT/install.sh" "All available root installs" \
+    "root bash installer does not offer all-provider default installs"
+  check_absent "$REPO_ROOT/install.ps1" "All available root installs" \
+    "root PowerShell installer does not offer all-provider default installs"
+  check_contains "$REPO_ROOT/install.sh" "if [[ -z \"\$choice\" ]]; then" \
+    "root bash installer maps empty selection to the default"
+  check_contains "$REPO_ROOT/install.sh" "choice=3" \
+    "root bash installer maps default selection to option 3"
+  check_contains "$REPO_ROOT/install.ps1" '$normalizedChoice = "3"' \
+    "root PowerShell installer maps empty selection to option 3"
+  check_contains "$REPO_ROOT/install.sh" "run_installer install-codex.sh" \
+    "root bash installer option 3 includes Codex"
+  check_contains "$REPO_ROOT/install.sh" "run_installer install-claude.sh" \
+    "root bash installer option 3 includes Claude"
+  check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' \
+    "root PowerShell installer option 3 includes Codex"
+  check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' \
+    "root PowerShell installer option 3 includes Claude"
+  bash_default_block="$(awk '/^  3\)/,/^  4\)/ { print }' "$REPO_ROOT/install.sh")"
+  if grep -Fq "run_installer install-codex.sh" <<<"$bash_default_block" &&
+     grep -Fq "run_installer install-claude.sh" <<<"$bash_default_block" &&
+     ! grep -Eq 'install-(gemini|qwen)\.sh' <<<"$bash_default_block"; then
+    pass "root bash installer default dispatch is Codex plus Claude only"
   else
-    pass "standalone provider branch omits root router installers"
+    fail "root bash installer default dispatch must be Codex plus Claude only"
   fi
+  ps_default_block="$(awk '/^    "3" {/,/^    "4" {/ { print }' "$REPO_ROOT/install.ps1")"
+  if grep -Fq 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' <<<"$ps_default_block" &&
+     grep -Fq 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' <<<"$ps_default_block" &&
+     ! grep -Eq 'install-(gemini|qwen)\.ps1' <<<"$ps_default_block"; then
+    pass "root PowerShell installer default dispatch is Codex plus Claude only"
+  else
+    fail "root PowerShell installer default dispatch must be Codex plus Claude only"
+  fi
+  check_absent "$REPO_ROOT/install.sh" "run_all_available" \
+    "root bash installer has no aggregate all-provider helper"
+  check_absent "$REPO_ROOT/install.ps1" "Invoke-AllAvailableInstallers" \
+    "root PowerShell installer has no aggregate all-provider helper"
   check_contains "$REPO_ROOT/README.md" "Pressing Enter selects the default production install" \
     "README documents the Codex/Claude default root install"
   check_contains "$REPO_ROOT/INSTALL.md" "Pressing Enter selects the default production install" \
     "INSTALL.md documents the Codex/Claude default root install"
   check_contains "$REPO_ROOT/INSTALL.md" ".agents-mode.yaml" \
     "INSTALL.md default project result includes provider overlay files"
+  check_contains "$REPO_ROOT/docs/agents-mode-reference.md" '`power-mode` | hardest-task maximum result' \
+    "agents-mode reference documents power-mode preset"
+  check_contains "$REPO_ROOT/src.codex/skills/init-project/SKILL.md" '`power-mode` (hardest-task maximum result)' \
+    "Codex init-project exposes power-mode preset"
+  for lane in review.security review.ui-visual-correctness; do
+    check_contains "$REPO_ROOT/src.codex/skills/init-project/SKILL.md" "$lane: 2" \
+      "Codex init-project correctness-first/power-mode presets raise $lane"
+  done
+  if command -v python3 >/dev/null 2>&1; then
+    contract_python_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    contract_python_cmd="python"
+  else
+    contract_python_cmd=""
+  fi
+  if [[ -n "$contract_python_cmd" ]] &&
+     "$contract_python_cmd" "$REPO_ROOT/scripts/validate-agents-mode-contract.py" --root "$REPO_ROOT" >/dev/null; then
+    pass "agents-mode machine-readable contract matches docs and init preset surfaces"
+  else
+    fail "agents-mode machine-readable contract matches docs and init preset surfaces"
+  fi
 fi
 
 check_contains "$SKILLS_DIR/consultant/SKILL.md" 'Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED` example-only routes' \
@@ -1103,11 +1314,15 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "agents-mode reference documents profile provider sanitization"
   check_contains "$DOCS_DIR/agents-mode-reference.md" "Substantive task prompts are file-based by default" \
     "agents-mode reference documents file-based external CLI prompts"
+  check_contains "$DOCS_DIR/agents-mode-reference.md" "agent-runs.jsonl" \
+    "agents-mode reference documents ledger fan-out tracking"
+  check_contains "$DOCS_DIR/external-worker-design.md" "Work-item ledger rule" \
+    "external-worker design maps execution records to the ledger"
   check_normalizer_strips_example_auto_providers \
-    "agents-mode normalizer strips Gemini/Qwen and worker claude-secret from custom auto profiles"
+    "agents-mode normalizer strips Gemini/Qwen and keeps reserve last or absent in custom auto profiles"
   check_file "$REPO_ROOT/shared/agents-mode.defaults.yaml" "shared/agents-mode.defaults.yaml"
-  check_shared_defaults_claude_secret_policy \
-    "shared agents-mode defaults keep claude-secret advisory/review-only"
+  check_shared_defaults_reserve_policy \
+    "shared agents-mode defaults keep reserve advisory/review-only"
   check_not_exists "$REPO_ROOT/src.codex/agents-mode.defaults.yaml" \
     "src.codex/agents-mode.defaults.yaml removed from the monorepo"
   check_contains "$REPO_ROOT/INSTALL.md" ".codex/agents/default.toml" \
@@ -1116,6 +1331,80 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "provider runtime layouts document global Codex built-in agent overrides"
   check_contains "$REPO_ROOT/src.codex/README.md" "agents/default.toml" \
     "src.codex/README.md documents the built-in agent override payload"
+  check_contains "$REPO_ROOT/README.md" "scripts/validate-work-item-state.* --work-item" \
+    "README documents the work-item state validator"
+  check_contains "$REPO_ROOT/README.md" "scripts/agent-run-ledger.* --work-item" \
+    "README documents the work-item ledger helper"
+  check_contains "$REPO_ROOT/README.md" "scripts/check-work-items-state.* --root" \
+    "README documents the periodic work-item state checker"
+  check_contains "$REPO_ROOT/INSTALL.md" "agent-runs.jsonl" \
+    "INSTALL documents local work-item execution tracking"
+  check_contains "$REPO_ROOT/INSTALL.md" "scripts/agent-run-ledger.* --work-item" \
+    "INSTALL documents the work-item ledger helper"
+  check_contains "$REPO_ROOT/INSTALL.md" "scripts/check-work-items-state.* --root" \
+    "INSTALL documents the periodic work-item state checker"
+  check_contains "$REPO_ROOT/RELEASE_NOTES.md" "machine-readable work-item execution tracking contract" \
+    "release notes document the work-item execution tracking contract"
+  check_contains "$REPO_ROOT/RELEASE_NOTES.md" "ledger append/init helper" \
+    "release notes document the ledger append/init helper"
+  check_contains "$REPO_ROOT/RELEASE_NOTES.md" "periodic active work-item state checker" \
+    "release notes document the periodic work-item checker"
+  check_contains "$REPO_ROOT/scripts/agent-run-ledger.py" "validate_work_item" \
+    "agent-run-ledger helper reuses the work-item state validator"
+  check_contains "$REPO_ROOT/scripts/agent-run-ledger.py" "restore_ledger" \
+    "agent-run-ledger helper rolls back invalid appends"
+  check_contains "$REPO_ROOT/scripts/agent-run-ledger.sh" "agent-run-ledger.py" \
+    "agent-run-ledger Bash wrapper targets the Python helper"
+  check_contains "$REPO_ROOT/scripts/agent-run-ledger.ps1" "agent-run-ledger.py" \
+    "agent-run-ledger PowerShell wrapper targets the Python helper"
+  check_contains "$REPO_ROOT/scripts/check-work-items-state.py" "validate_work_item" \
+    "periodic work-item checker reuses the work-item state validator"
+  check_contains "$REPO_ROOT/scripts/check-work-items-state.py" "stale running agent" \
+    "periodic work-item checker reports stale running agents"
+  check_contains "$REPO_ROOT/scripts/check-work-items-state.sh" "check-work-items-state.py" \
+    "periodic work-item Bash wrapper targets the Python checker"
+  check_contains "$REPO_ROOT/scripts/check-work-items-state.ps1" "check-work-items-state.py" \
+    "periodic work-item PowerShell wrapper targets the Python checker"
+  check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "PASS gate requires evidence" \
+    "work-item state validator enforces evidence for PASS"
+  check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "escapes the work item" \
+    "work-item state validator confines PASS artifacts to the work item"
+  check_contains "$REPO_ROOT/scripts/validate-work-item-state.py" "agent-runs.jsonl" \
+    "work-item state validator loads the agent run ledger"
+  check_contains "$REPO_ROOT/scripts/validate-work-item-state.sh" "validate-work-item-state.py" \
+    "work-item state Bash wrapper targets the Python validator"
+  check_contains "$REPO_ROOT/scripts/validate-work-item-state.ps1" "validate-work-item-state.py" \
+    "work-item state PowerShell wrapper targets the Python validator"
+  check_contains "$REPO_ROOT/shared/schemas/agent-runs.schema.json" "agent-runs.schema.json" \
+    "agent run ledger schema has a stable id"
+  check_contains "$REPO_ROOT/shared/schemas/agent-runs.schema.json" '"executionRole"' \
+    "agent run ledger schema defines executionRole"
+  check_contains "$REPO_ROOT/shared/schemas/agent-runs.schema.json" '"evidence"' \
+    "agent run ledger schema defines evidence"
+  check_agent_run_ledger_contract \
+    "agent run ledger schema and validator reject schema-invalid events"
+else
+  echo ""
+  echo "=== Installed work-item runtime helper scripts ==="
+  for f in \
+    "$SCRIPTS_DIR/agent-run-ledger.py" \
+    "$SCRIPTS_DIR/agent-run-ledger.sh" \
+    "$SCRIPTS_DIR/agent-run-ledger.ps1" \
+    "$SCRIPTS_DIR/check-work-items-state.py" \
+    "$SCRIPTS_DIR/check-work-items-state.sh" \
+    "$SCRIPTS_DIR/check-work-items-state.ps1" \
+    "$SCRIPTS_DIR/validate-work-item-state.py" \
+    "$SCRIPTS_DIR/validate-work-item-state.sh" \
+    "$SCRIPTS_DIR/validate-work-item-state.ps1"
+  do
+    check_file "$f" "$f installed"
+  done
+  check_contains "$SCRIPTS_DIR/agent-run-ledger.py" "validate_work_item" \
+    "installed agent-run-ledger helper reuses the validator"
+  check_contains "$SCRIPTS_DIR/check-work-items-state.py" "stale running agent" \
+    "installed periodic work-item checker reports stale running agents"
+  check_contains "$SCRIPTS_DIR/validate-work-item-state.py" "PASS gate requires evidence" \
+    "installed work-item state validator enforces evidence for PASS"
 fi
 
 if [[ -n "$CODEX_RUNTIME_ROOT" ]]; then
@@ -1130,10 +1419,25 @@ echo ""
 echo "=== AGENTS.md required sections ==="
 
 agents_line_count="$(count_codex_pack_lines "$AGENTS_FILE")"
-if [[ "$agents_line_count" -le 300 ]]; then
-  pass "Codex AGENTS.md pack section line budget <= 300 ($agents_line_count)"
+# Budget bumped 380 -> 420 (2026-05-17) to accommodate the passive-polling
+# Stop hook structural-enforcement section beside the existing PreToolUse
+# bugfix-discipline hook: as of that bump the docs named both hook events,
+# both entry points, both override markers, independent removal commands,
+# and the Stop JSON shape (399 measured then; +21 ceiling reserved headroom
+# for one small governance addition). 2026-05-29 landed TWO warn-only audit
+# hooks (machine-local-path, then the redesigned no-trash-in-repo). 2026-06-10
+# added the work-items-archival Stop hook -- now five hook entries (two on Stop,
+# two PreToolUse audit, one PreToolUse bugfix) plus one new override marker
+# ([acknowledge-open-work-items]) -- contributing their bullets, removal
+# commands, and entry-point list items. The assembled pack section stays well under the
+# 420 ceiling (measured in the low 340s in source-repo assembly; the runtime
+# check below prints the exact count). Previous bumps: 360 -> 380 (2026-05-17, Bootstrap two trigger
+# moments); 340 -> 360 (2026-05-16, no-kostyl step 4.5); 300 -> 340
+# (Bootstrap itself). Visible decision rather than silent budget growth.
+if [[ "$agents_line_count" -le 420 ]]; then
+  pass "Codex AGENTS.md pack section line budget <= 420 ($agents_line_count)"
 else
-  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 300)"
+  fail "Codex AGENTS.md pack section line budget exceeded ($agents_line_count > 420)"
 fi
 
 for section in "delegation" "Role index" "Engineering hygiene"; do

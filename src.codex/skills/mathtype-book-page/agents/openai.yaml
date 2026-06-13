@@ -1,0 +1,4 @@
+interface:
+  display_name: "MathType Book Page"
+  short_description: "Full-coverage MathType technical-book DOCX pages with source-PDF authority"
+  default_prompt: "Use $mathtype-book-page to bring translated technical-book DOCX pages to the accepted MathType-based format, verifying full source-text coverage, translation completeness, display-formula tables, inline math, figure/caption grouping, equation-number cells, code/listing/output fidelity, MathType size/alignment, and typography against the corresponding source PDF before claiming PASS."

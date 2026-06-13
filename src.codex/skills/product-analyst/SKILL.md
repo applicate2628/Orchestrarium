@@ -1,6 +1,6 @@
 ---
 name: product-analyst
-description: "Produce product discovery briefs: user context, constraints, metrics, scope questions, and evidence before design."
+description: "Produce discovery briefs: users, constraints, metrics, scope, evidence."
 ---
 
 # Product Analyst

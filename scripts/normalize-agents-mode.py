@@ -9,17 +9,27 @@ retired canonical keys, and restores the current inline comments/order.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 
 TOP_KEY_RE = re.compile(r"^([A-Za-z][A-Za-z0-9]*):(?:\s*(.*))?$")
 INDENT2_KEY_RE = re.compile(r"^ {2}([^:#][^:]*):(?:\s*(.*))?$")
 INDENT4_KEY_RE = re.compile(r"^ {4}([^:#][^:]*):\s*(.*)$")
 RETIRED_PROFILE_NAMES = {"gemini-crosscheck"}
+RETIRED_PROFILE_LANE_NAMES = {
+    "worker.long-autonomous",
+    "worker.ui-structural-modernization",
+    "worker.ui-surgical-patch-cleanup",
+    "worker.visual-icon-decorative",
+    "review.visual",
+}
+LEGACY_PROVIDER_ALIASES = {"claude-secret": "reserve"}
 PRODUCTION_PROFILE_PROVIDERS = {"codex", "claude"}
-ADVISORY_REVIEW_PROFILE_PROVIDERS = {"codex", "claude", "claude-secret"}
+SUPPLEMENTAL_PROFILE_PROVIDERS = {"reserve"}
 
 
 @dataclass
@@ -46,6 +56,84 @@ class BlockMeta:
     comment: str
     order: list[str] = field(default_factory=list)
     entries: dict[str, ProfileMeta | LaneMeta] = field(default_factory=dict)
+
+
+@dataclass
+class ContractPolicy:
+    production_profile_providers: set[str]
+    supplemental_profile_providers: set[str]
+    provider_scalar_defaults: dict[str, dict[str, ScalarMeta]] = field(
+        default_factory=dict
+    )
+
+
+def load_contract_policy(template_path: str) -> ContractPolicy:
+    """Load provider/lane policy from the schema next to the shared template."""
+    schema_data = load_adjacent_schema(template_path)
+    if schema_data is None:
+        return ContractPolicy(
+            production_profile_providers=set(PRODUCTION_PROFILE_PROVIDERS),
+            supplemental_profile_providers=set(SUPPLEMENTAL_PROFILE_PROVIDERS),
+            provider_scalar_defaults={
+                "codex": {
+                    "externalClaudeProfile": ScalarMeta(
+                        value="opus-max",
+                        comment="# allowed: sonnet-high | opus-max; default: opus-max",
+                    )
+                }
+            },
+        )
+
+    provider_scalars: dict[str, dict[str, ScalarMeta]] = {}
+    for scalar in schema_data.get("scalarKeys", []):
+        providers = scalar.get("providers")
+        if not providers:
+            continue
+        allowed = scalar.get("allowed", [])
+        if not isinstance(providers, list) or not isinstance(allowed, list):
+            continue
+        name = str(scalar["name"])
+        default = str(scalar["default"])
+        comment = f"# allowed: {' | '.join(str(value) for value in allowed)}; default: {default}"
+        for provider in providers:
+            provider_scalars.setdefault(str(provider), {})[name] = ScalarMeta(
+                value=default,
+                comment=comment,
+            )
+
+    return ContractPolicy(
+        production_profile_providers={
+            str(provider) for provider in schema_data["productionAutoProviders"]
+        },
+        supplemental_profile_providers={
+            str(provider)
+            for provider in schema_data.get("advisoryReviewSupplementalProviders", [])
+        },
+        provider_scalar_defaults=provider_scalars,
+    )
+
+
+def load_adjacent_schema(template_path: str) -> dict[str, Any] | None:
+    template_dir = os.path.dirname(os.path.abspath(template_path))
+    parent_dir = os.path.dirname(template_dir)
+    candidates = [
+        os.path.join(template_dir, "agents-mode.schema.json"),
+        os.path.join(parent_dir, "shared", "agents-mode.schema.json"),
+    ]
+    seen: set[str] = set()
+    for candidate in candidates:
+        normalized = os.path.normcase(os.path.abspath(candidate))
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        if not os.path.exists(candidate):
+            continue
+        with open(candidate, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+        if not isinstance(data, dict):
+            raise ValueError(f"{candidate} must contain a JSON object.")
+        return data
+    return None
 
 
 def split_value_and_comment(rest: str | None) -> tuple[str, str]:
@@ -146,22 +234,47 @@ def comment_suffix(comment: str) -> str:
     return f"  {comment}" if comment else ""
 
 
+def rendered_lane_comment(comment: str, providers: str) -> str:
+    """Keep lane comments aligned when legacy migration strips reserve."""
+    if "reserve" in {part.strip() for part in providers.split(",")}:
+        return comment
+    comment = re.sub(r"\s*>\s*reserve\b", "", comment)
+    comment = re.sub(r",?\s*reserve last\b", "", comment)
+    return comment.strip()
+
+
 def is_advisory_or_review_lane(lane_name: str) -> bool:
     return lane_name.startswith("advisory.") or lane_name.startswith("review.")
 
 
-def sanitize_profile_providers(value: str, lane_name: str) -> str:
+def sanitize_profile_providers(
+    value: str,
+    lane_name: str,
+    policy: ContractPolicy,
+    allow_reserve: bool = True,
+) -> str:
     """Keep profile providers on production-approved providers for the lane."""
-    allowed = (
-        ADVISORY_REVIEW_PROFILE_PROVIDERS
-        if is_advisory_or_review_lane(lane_name)
-        else PRODUCTION_PROFILE_PROVIDERS
-    )
+    allowed = set(policy.production_profile_providers)
+    if is_advisory_or_review_lane(lane_name):
+        allowed |= policy.supplemental_profile_providers
+    if not allow_reserve:
+        allowed = allowed - {"reserve"}
     providers: list[str] = []
+    reserve_requested = False
     for raw_part in value.split(","):
         provider = raw_part.strip().lower()
+        provider = LEGACY_PROVIDER_ALIASES.get(provider, provider)
+        if provider == "reserve":
+            reserve_requested = True
+            continue
         if provider in allowed and provider not in providers:
             providers.append(provider)
+    if (
+        reserve_requested
+        and allow_reserve
+        and is_advisory_or_review_lane(lane_name)
+    ):
+        providers.append("reserve")
     return ", ".join(providers)
 
 
@@ -170,7 +283,11 @@ def read_text_lines(path: str) -> list[str]:
         return handle.read().splitlines()
 
 
-def template_metadata(template_path: str, provider: str) -> tuple[list[str], dict[str, ScalarMeta], BlockMeta, BlockMeta]:
+def template_metadata(
+    template_path: str,
+    provider: str,
+    policy: ContractPolicy,
+) -> tuple[list[str], dict[str, ScalarMeta], BlockMeta, BlockMeta]:
     order, blocks = collect_top_level_blocks(read_text_lines(template_path))
     scalar_meta: dict[str, ScalarMeta] = {}
     profiles_meta: BlockMeta | None = None
@@ -187,12 +304,10 @@ def template_metadata(template_path: str, provider: str) -> tuple[list[str], dic
     if profiles_meta is None or counts_meta is None:
         raise ValueError("Template is missing required priority/count blocks.")
 
-    if provider == "codex" and "externalClaudeProfile" not in scalar_meta:
-        order.append("externalClaudeProfile")
-        scalar_meta["externalClaudeProfile"] = ScalarMeta(
-            value="opus-max",
-            comment="# allowed: sonnet-high | opus-max; default: opus-max",
-        )
+    for key, meta in policy.provider_scalar_defaults.get(provider, {}).items():
+        if key not in scalar_meta:
+            order.append(key)
+            scalar_meta[key] = meta
 
     return order, scalar_meta, profiles_meta, counts_meta
 
@@ -228,6 +343,34 @@ def existing_metadata(
     return scalar_values, profiles_block, counts_block, unknown_blocks
 
 
+def legacy_reserve_disabled(target_path: str | None) -> bool:
+    """Preserve legacy externalClaudeApiMode: disabled by removing reserve."""
+    if not target_path or not os.path.exists(target_path):
+        return False
+
+    _, blocks = collect_top_level_blocks(read_text_lines(target_path))
+    raw_block = blocks.get("externalClaudeApiMode")
+    if not raw_block:
+        return False
+
+    try:
+        value = parse_scalar_block(raw_block).value.strip().lower()
+    except ValueError:
+        return False
+    return value == "disabled"
+
+
+def reserve_resolver_allows_reserve(
+    scalar_meta: dict[str, ScalarMeta],
+    existing_scalars: dict[str, ScalarMeta],
+) -> bool:
+    """Return whether the configured reserve resolver keeps reserve enabled."""
+    resolver = existing_scalars.get("reserveResolver") or scalar_meta.get("reserveResolver")
+    if not resolver:
+        return True
+    return resolver.value.strip().lower() != "disabled"
+
+
 def render_scalar(key: str, meta: ScalarMeta, existing: dict[str, ScalarMeta]) -> list[str]:
     current = existing.get(key)
     value = current.value if current and current.value else meta.value
@@ -239,6 +382,8 @@ def render_scalar(key: str, meta: ScalarMeta, existing: dict[str, ScalarMeta]) -
 def render_profiles(
     meta: BlockMeta,
     existing: BlockMeta | None,
+    policy: ContractPolicy,
+    allow_reserve: bool = True,
 ) -> list[str]:
     lines = [f"externalPriorityProfiles:{comment_suffix(meta.comment)}"]
     existing_profiles = existing.entries if existing else {}
@@ -258,19 +403,36 @@ def render_profiles(
 
         for lane_name in profile_meta.lane_order:
             lane_meta = profile_meta.lanes[lane_name]
+            sanitized_value = sanitize_profile_providers(
+                lane_meta.value,
+                lane_name,
+                policy,
+                allow_reserve=allow_reserve,
+            )
+            if not sanitized_value:
+                continue
+            lane_comment = rendered_lane_comment(lane_meta.comment, sanitized_value)
             lines.append(
-                f"    {lane_name}: [{lane_meta.value}]{comment_suffix(lane_meta.comment)}"
+                f"    {lane_name}: [{sanitized_value}]{comment_suffix(lane_comment)}"
             )
 
         for lane_name in existing_lane_order:
             if lane_name in profile_meta.lanes:
                 continue
+            if lane_name in RETIRED_PROFILE_LANE_NAMES:
+                continue
             extra_lane = existing_lanes[lane_name]
-            sanitized_value = sanitize_profile_providers(extra_lane.value, lane_name)
+            sanitized_value = sanitize_profile_providers(
+                extra_lane.value,
+                lane_name,
+                policy,
+                allow_reserve=allow_reserve,
+            )
             if not sanitized_value:
                 continue
+            lane_comment = rendered_lane_comment(extra_lane.comment, sanitized_value)
             lines.append(
-                f"    {lane_name}: [{sanitized_value}]{comment_suffix(extra_lane.comment)}"
+                f"    {lane_name}: [{sanitized_value}]{comment_suffix(lane_comment)}"
             )
 
     for profile_name in existing_order:
@@ -283,12 +445,20 @@ def render_profiles(
             continue
         lines.append(f"  {profile_name}:{comment_suffix(existing_profile.comment)}")
         for lane_name in existing_profile.lane_order:
+            if lane_name in RETIRED_PROFILE_LANE_NAMES:
+                continue
             lane = existing_profile.lanes[lane_name]
-            sanitized_value = sanitize_profile_providers(lane.value, lane_name)
+            sanitized_value = sanitize_profile_providers(
+                lane.value,
+                lane_name,
+                policy,
+                allow_reserve=allow_reserve,
+            )
             if not sanitized_value:
                 continue
+            lane_comment = rendered_lane_comment(lane.comment, sanitized_value)
             lines.append(
-                f"    {lane_name}: [{sanitized_value}]{comment_suffix(lane.comment)}"
+                f"    {lane_name}: [{sanitized_value}]{comment_suffix(lane_comment)}"
             )
 
     return lines
@@ -311,6 +481,8 @@ def render_counts(meta: BlockMeta, existing: BlockMeta | None) -> list[str]:
     for lane_name in existing_order:
         if lane_name in meta.entries:
             continue
+        if lane_name in RETIRED_PROFILE_LANE_NAMES:
+            continue
         existing_lane = existing_entries.get(lane_name)
         if not isinstance(existing_lane, LaneMeta):
             continue
@@ -322,9 +494,15 @@ def render_counts(meta: BlockMeta, existing: BlockMeta | None) -> list[str]:
 
 
 def normalize_file(template: str, target: str, provider: str) -> str:
-    order, scalar_meta, profiles_meta, counts_meta = template_metadata(template, provider)
+    policy = load_contract_policy(template)
+    order, scalar_meta, profiles_meta, counts_meta = template_metadata(
+        template,
+        provider,
+        policy,
+    )
     known_keys = set(order) | {"externalPriorityProfiles", "externalOpinionCounts"}
     retired_keys = {
+        "externalClaudeApiMode",
         "externalClaudeSecretMode",
         "externalGeminiFallbackMode",
         "externalGeminiWorkdirMode",
@@ -332,16 +510,27 @@ def normalize_file(template: str, target: str, provider: str) -> str:
     if provider != "codex":
         retired_keys.add("externalClaudeProfile")
 
+    target_path = target if os.path.exists(target) else None
     existing_scalars, existing_profiles, existing_counts, unknown_blocks = existing_metadata(
-        target if os.path.exists(target) else None,
+        target_path,
         known_keys=known_keys,
         retired_keys=retired_keys,
     )
+    if legacy_reserve_disabled(target_path) and "reserveResolver" not in existing_scalars:
+        existing_scalars["reserveResolver"] = ScalarMeta(value="disabled", comment="")
+    allow_reserve = reserve_resolver_allows_reserve(scalar_meta, existing_scalars)
 
     output: list[str] = []
     for key in order:
         if key == "externalPriorityProfiles":
-            output.extend(render_profiles(profiles_meta, existing_profiles))
+            output.extend(
+                render_profiles(
+                    profiles_meta,
+                    existing_profiles,
+                    policy,
+                    allow_reserve=allow_reserve,
+                )
+            )
         elif key == "externalOpinionCounts":
             output.extend(render_counts(counts_meta, existing_counts))
         else:

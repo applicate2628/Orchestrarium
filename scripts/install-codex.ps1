@@ -14,7 +14,8 @@ param(
     [string]$Target,
     [switch]$Force,
     [switch]$DryRun,
-    [switch]$AllowUnsafeTarget
+    [switch]$AllowUnsafeTarget,
+    [switch]$NoHypothesisHook
 )
 
 $ErrorActionPreference = "Stop"
@@ -224,56 +225,7 @@ function Read-InstallMode {
     }
 }
 
-function Confirm-Removal {
-    param([string]$Path)
-    if ($Force -or $DryRun) {
-        return $true
-    }
-    if (-not (Test-Interactive)) {
-        Write-Host "Skipping interactive confirmation in non-console host." -ForegroundColor Yellow
-        return $true
-    }
-
-    $name = Split-Path $Path -Leaf
-    while ($true) {
-        $rawAnswer = Read-Host "Delete existing '$name' at '$Path' before reinstall? [y/N]"
-        $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
-        switch -Regex ($answer.Trim().ToLower()) {
-            "^(y|yes)$" { return $true }
-            "^n$|^no$|^$" { return $false }
-            default { Write-Host "Please answer y or n." }
-        }
-    }
-}
-
 # Per-skill install preserves user-added skills — no destructive directory wipe needed.
-
-function Copy-RequiredDirectory {
-    param(
-        [string]$SourceDir,
-        [string]$TargetDir,
-        [string]$Label
-    )
-
-    if (Test-Path -LiteralPath $TargetDir) {
-        Write-Host "  Removing old $Label..."
-        if (-not (Confirm-Removal $TargetDir)) {
-            Write-Host "Install cancelled: existing directory not removed: $TargetDir" -ForegroundColor Red
-            exit 1
-        }
-        if (-not $DryRun) {
-            Remove-Item -Recurse -Force $TargetDir
-        } else {
-            Write-Host "    [dry-run] would remove $TargetDir"
-        }
-    }
-    Write-Host "  Installing $Label..."
-    if (-not $DryRun) {
-        Copy-Item -Recurse -Force $SourceDir $TargetDir
-    } else {
-        Write-Host "    [dry-run] would copy $SourceDir -> $TargetDir"
-    }
-}
 
 function Get-DirectoryFileHashes {
     param([string]$Root)
@@ -348,7 +300,7 @@ function Ensure-LocalOnlyGitignoreEntries {
     param([string]$ProjectRoot)
 
     $gitignore = Join-Path $ProjectRoot ".gitignore"
-    $entries = @("/.reports/", "/work-items/")
+    $entries = @("/.reports/", "/work-items/", "/.scratch/")
     $existingLines = @()
     if (Test-Path -LiteralPath $gitignore) {
         $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
@@ -406,7 +358,93 @@ function Remove-DanglingLink {
     }
 }
 
-function Ensure-DefaultFile {
+function Get-NormalizedCodexAgentOverrideContent {
+    param([string]$Content)
+
+    $normalized = $Content -replace "`r`n", "`n"
+    $normalized = $normalized -replace "`r", "`n"
+    $normalized = [regex]::Replace(
+        $normalized,
+        '(?m)^model\s*=\s*"[^"]*"\s*$',
+        'model = "<model>"'
+    )
+    return $normalized.TrimEnd("`n")
+}
+
+function Get-LegacyCodexAgentOverrideTemplate {
+    param([string]$Name)
+
+    switch ($Name) {
+        "default.toml" {
+            return @'
+name = "default"
+description = "General-purpose fallback agent."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+General-purpose fallback agent.
+Inherit the parent session's task context and focus on the assigned subtask.
+Stay within the requested scope and return a concise, usable result.
+"""
+'@
+        }
+        "worker.toml" {
+            return @'
+name = "worker"
+description = "Execution-focused agent for implementation and fixes."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+Execution-focused agent for implementation and fixes.
+Carry out the assigned implementation task directly, stay within scope, and avoid redesign unless the parent explicitly asks for it.
+Return concrete progress and outcomes for the requested slice.
+"""
+'@
+        }
+        "explorer.toml" {
+            return @'
+name = "explorer"
+description = "Read-heavy codebase exploration agent."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+Read-heavy codebase exploration agent.
+Stay in exploration mode, gather evidence efficiently, and return factual findings with clear pointers.
+Do not drift into implementation unless the parent explicitly asks for it.
+"""
+'@
+        }
+        default {
+            return $null
+        }
+    }
+}
+
+function Test-PackOwnedCodexAgentOverride {
+    param(
+        [string]$SourceFile,
+        [string]$TargetFile
+    )
+
+    $name = Split-Path $SourceFile -Leaf
+    $targetNorm = Get-NormalizedCodexAgentOverrideContent -Content (Get-Content -LiteralPath $TargetFile -Raw)
+    $sourceNorm = Get-NormalizedCodexAgentOverrideContent -Content (Get-Content -LiteralPath $SourceFile -Raw)
+    if ($targetNorm -eq $sourceNorm) {
+        return $true
+    }
+
+    $legacyTemplate = Get-LegacyCodexAgentOverrideTemplate -Name $name
+    if ($null -ne $legacyTemplate) {
+        $legacyNorm = Get-NormalizedCodexAgentOverrideContent -Content $legacyTemplate
+        if ($targetNorm -eq $legacyNorm) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Ensure-CodexAgentOverrideFile {
     param(
         [string]$SourceFile,
         [string]$TargetFile,
@@ -416,7 +454,20 @@ function Ensure-DefaultFile {
     Remove-DanglingLink -Path $TargetFile -Label $Label
 
     if (Test-Path -LiteralPath $TargetFile) {
-        Write-Host "  Preserving existing $Label..."
+        if (Test-PackOwnedCodexAgentOverride -SourceFile $SourceFile -TargetFile $TargetFile) {
+            if ((Get-FileHash -LiteralPath $SourceFile).Hash -eq (Get-FileHash -LiteralPath $TargetFile).Hash) {
+                Write-Host "  OK  $Label unchanged"
+            } else {
+                Write-Host "  Refreshing stale pack-owned $Label..."
+                if (-not $DryRun) {
+                    Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
+                } else {
+                    Write-Host "    [dry-run] would replace $TargetFile"
+                }
+            }
+        } else {
+            Write-Host "  Preserving existing custom $Label..."
+        }
         return
     }
 
@@ -761,7 +812,40 @@ if (Test-Path -LiteralPath $SkillsTarget) {
     }
 }
 
-# Scripts live inside skills/lead/scripts/ — installed automatically with the lead skill.
+# Runtime ledger helpers are sourced once from repo-root scripts/ and installed
+# beside the lead scripts so installed packs have a local helper surface too.
+$RuntimeLedgerScripts = @(
+    "agent-run-ledger.py",
+    "agent-run-ledger.ps1",
+    "agent-run-ledger.sh",
+    "check-work-items-state.py",
+    "check-work-items-state.ps1",
+    "check-work-items-state.sh",
+    "validate-work-item-state.py",
+    "validate-work-item-state.ps1",
+    "validate-work-item-state.sh"
+)
+Write-Host "  Installing work-item ledger helper scripts..."
+if (-not (Test-Path -LiteralPath $LeadScriptsTarget)) {
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Path $LeadScriptsTarget -Force | Out-Null
+    } else {
+        Write-Host "    [dry-run] would create $LeadScriptsTarget"
+    }
+}
+foreach ($scriptName in $RuntimeLedgerScripts) {
+    $scriptSource = Join-Path (Join-Path $RepoDir "scripts") $scriptName
+    $scriptTarget = Join-Path $LeadScriptsTarget $scriptName
+    if (-not (Test-Path -LiteralPath $scriptSource)) {
+        Write-Host "FAIL: Missing runtime helper source $scriptSource" -ForegroundColor Red
+        exit 1
+    }
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $scriptSource -Destination $scriptTarget -Force
+    } else {
+        Write-Host "    [dry-run] would copy $scriptSource -> $scriptTarget"
+    }
+}
 
 Write-Host "  Installing built-in agent overrides (preserving existing custom files)..."
 if (-not (Test-Path -LiteralPath $AgentOverridesTarget)) {
@@ -773,7 +857,7 @@ if (-not (Test-Path -LiteralPath $AgentOverridesTarget)) {
 }
 foreach ($agentFile in Get-ChildItem -LiteralPath $AgentsSource -File) {
     $targetFile = Join-Path $AgentOverridesTarget $agentFile.Name
-    Ensure-DefaultFile -SourceFile $agentFile.FullName -TargetFile $targetFile -Label ("built-in agent override {0}" -f $agentFile.Name)
+    Ensure-CodexAgentOverrideFile -SourceFile $agentFile.FullName -TargetFile $targetFile -Label ("built-in agent override {0}" -f $agentFile.Name)
 }
 
 # AGENTS.md: assemble from shared + codex-specific, then merge or create
@@ -785,60 +869,65 @@ if (-not (Test-Path $srcShared) -or -not (Test-Path $srcPlatform)) {
     exit 1
 }
 
-$srcMd = Join-Path $env:TEMP "orchestrarium-agents-assembled.md"
-$sharedContent = Get-Content $srcShared -Raw
-$platformContent = Get-Content $srcPlatform -Raw
-$assembledContent = @(
-    $script:CodexPackBeginMarker
-    $sharedContent.TrimEnd()
-    ""
-    $platformContent.TrimEnd()
-    $script:CodexPackEndMarker
-) -join "`n"
-Set-Content -Path $srcMd -Value $assembledContent -NoNewline
-
+# Assemble the pack AGENTS.md into a temp file, then merge or create. The temp
+# file is always removed in the finally block, matching the .sh `trap rm -f EXIT`.
+$srcMd = [System.IO.Path]::GetTempFileName()
 $dstMd = $MdTarget
+try {
+    $sharedContent = Get-Content $srcShared -Raw
+    $platformContent = Get-Content $srcPlatform -Raw
+    $assembledContent = @(
+        $script:CodexPackBeginMarker
+        $sharedContent.TrimEnd()
+        ""
+        $platformContent.TrimEnd()
+        $script:CodexPackEndMarker
+    ) -join "`n"
+    Set-Content -Path $srcMd -Value $assembledContent -NoNewline
 
-Remove-DanglingLink -Path $dstMd -Label "AGENTS.md"
+    Remove-DanglingLink -Path $dstMd -Label "AGENTS.md"
 
-if (Test-Path $dstMd) {
-    $content = Get-Content $dstMd -Raw
-    if ($content -match "## Template routing") {
-        $lines = Get-Content $dstMd
-        $packStart = Get-CodexPackStartIndex -Lines $lines
-        if ($packStart -ge 0) {
-            Write-Host "  AGENTS.md: replacing Codex pack section..."
-            if (-not $DryRun) {
-                $newContent = Get-MergedCodexAgentsContent -ExistingLines $lines -PackStart $packStart -SourcePath $srcMd
-                Set-Content -Path $dstMd -Value $newContent -NoNewline
+    if (Test-Path $dstMd) {
+        $content = Get-Content $dstMd -Raw
+        if ($content -match "## Template routing") {
+            $lines = Get-Content $dstMd
+            $packStart = Get-CodexPackStartIndex -Lines $lines
+            if ($packStart -ge 0) {
+                Write-Host "  AGENTS.md: replacing Codex pack section..."
+                if (-not $DryRun) {
+                    $newContent = Get-MergedCodexAgentsContent -ExistingLines $lines -PackStart $packStart -SourcePath $srcMd
+                    Set-Content -Path $dstMd -Value $newContent -NoNewline
+                } else {
+                    Write-Host "    [dry-run] would replace Codex pack section in AGENTS.md"
+                }
             } else {
-                Write-Host "    [dry-run] would replace Codex pack section in AGENTS.md"
+                Write-Host "  AGENTS.md: full replace..."
+                if (-not $DryRun) {
+                    Copy-Item -Force $srcMd $dstMd
+                } else {
+                    Write-Host "    [dry-run] would replace AGENTS.md"
+                }
             }
         } else {
-            Write-Host "  AGENTS.md: full replace..."
+            Write-Host "  AGENTS.md: prepending Codex pack content..."
+            $existing = Get-Content $dstMd -Raw
+            $new = Get-Content $srcMd -Raw
             if (-not $DryRun) {
-                Copy-Item -Force $srcMd $dstMd
+                Set-Content -Path $dstMd -Value ($new + "`n" + $existing) -NoNewline
             } else {
-                Write-Host "    [dry-run] would replace AGENTS.md"
+                Write-Host "    [dry-run] would prepend AGENTS.md"
             }
         }
     } else {
-        Write-Host "  AGENTS.md: prepending Codex pack content..."
-        $existing = Get-Content $dstMd -Raw
-        $new = Get-Content $srcMd -Raw
+        Write-Host "  Creating AGENTS.md..."
         if (-not $DryRun) {
-            Set-Content -Path $dstMd -Value ($new + "`n" + $existing) -NoNewline
+            Copy-Item -Force $srcMd $dstMd
         } else {
-            Write-Host "    [dry-run] would prepend AGENTS.md"
+            Write-Host "    [dry-run] would create AGENTS.md"
         }
     }
-} else {
-    Write-Host "  Creating AGENTS.md..."
-    if (-not $DryRun) {
-        Copy-Item -Force $srcMd $dstMd
-    } else {
-        Write-Host "    [dry-run] would create AGENTS.md"
-    }
+} finally {
+    Remove-Item -LiteralPath $srcMd -Force -ErrorAction SilentlyContinue
 }
 
 if ($Mode -ne "global") {
@@ -847,6 +936,76 @@ if ($Mode -ne "global") {
 
 Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
 Sync-AgentsModeFile -TemplateFile $SharedAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml" -Provider codex
+
+# Shared cross-pack global .agents-mode.yaml lives at $HOME/.agents-mode.yaml
+# (alongside ~/.claude.json). Lowest-precedence fallback layer below pack-local
+# globals and project-local overlays. Sync is normalize-not-overwrite, so calling
+# from both pack installers is idempotent. Only created/normalized during global installs.
+if ($Mode -eq "global") {
+    $SharedGlobalAgentsMode = Join-Path $HOME ".agents-mode.yaml"
+    Sync-AgentsModeFile -TemplateFile $SharedAgentsModeSource -TargetFile $SharedGlobalAgentsMode -Label "shared global ~/.agents-mode.yaml" -Provider shared
+}
+
+# Install structural hooks into ~/.codex/hooks.json
+# (global) or <project>/.codex/hooks.json (target). Idempotent JSON merge.
+# Opt out with -NoHypothesisHook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
+if (-not $NoHypothesisHook -and -not $DryRun) {
+    $HookInstaller = Join-Path $RepoDir "scripts\install-hypothesis-hook.py"
+    if (-not (Test-Path $HookInstaller)) {
+        Write-Warning "hypothesis-hook installer not found at $HookInstaller; skipping hook install"
+    } else {
+        $PythonCmd = Get-PythonCommand
+        if (-not $PythonCmd) {
+            Write-Error "python or python3 is required to auto-install the structural hooks. Rerun with -NoHypothesisHook to skip, or install Python and re-run."
+            exit 1
+        }
+        # PowerShell installer runs on Windows by definition. Codex hook entry
+        # uses native `powershell.exe ... -File <.ps1>` invocation — explicit
+        # powershell.exe avoids the Windows PATH gotcha where `bash` may
+        # resolve to the WSL launcher (System32\bash.exe) instead of Git
+        # Bash; WSL bash cannot resolve `C:\Users\...` paths and the entry
+        # silently failed on every Bash tool call. User must run `codex`
+        # interactively after install and trust the hook via TUI before it
+        # fires — Codex marks newly-installed hooks as untrusted by design,
+        # and the installer cannot trust them programmatically.
+        $HooksTarget = Join-Path $TargetRoot "hooks.json"
+        $BugfixScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-bugfix-discipline.ps1"
+        $StopScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-passive-polling-stop.ps1"
+        $WiArchivalScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-work-items-archival-stop.ps1"
+        $MachinePathScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-machine-local-path.ps1"
+        $NoTrashScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-no-trash-in-repo.ps1"
+        Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-path $BugfixScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing passive-polling Stop hook (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --hook-event Stop --script-marker check-passive-polling-stop --script-path $StopScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing work-items-archival Stop hook (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --hook-event Stop --script-marker check-work-items-archival-stop --script-path $WiArchivalScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing machine-local-path PreToolUse hook [AUDIT] (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-machine-local-path --script-path $MachinePathScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing no-trash-in-repo PreToolUse hook [AUDIT] (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-no-trash-in-repo --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash" --script-path $NoTrashScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+    }
+}
 
 if ($DryRun) {
     Write-Host ""
@@ -898,6 +1057,9 @@ Test-InstalledFile (Join-Path $SkillsTarget "lead/subagent-contracts.md") "skill
 Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.sh") "skills/lead/scripts/check-publication-safety.sh"
 Test-InstalledFile (Join-Path $LeadScriptsTarget "check-publication-safety.ps1") "skills/lead/scripts/check-publication-safety.ps1"
 Test-InstalledFile (Join-Path $LeadScriptsTarget "validate-skill-pack.sh") "skills/lead/scripts/validate-skill-pack.sh"
+foreach ($scriptName in $RuntimeLedgerScripts) {
+    Test-InstalledFile (Join-Path $LeadScriptsTarget $scriptName) "skills/lead/scripts/$scriptName"
+}
 Test-InstalledFile $AgentsModeTarget ".agents-mode.yaml"
 Test-InstalledFile (Join-Path $AgentOverridesTarget "default.toml") "agents/default.toml"
 Test-InstalledFile (Join-Path $AgentOverridesTarget "worker.toml") "agents/worker.toml"

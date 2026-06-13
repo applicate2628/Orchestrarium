@@ -1,9 +1,25 @@
 ---
 name: consultant
-description: Give non-blocking advice to the lead on tradeoffs, ambiguity, or cross-cutting concerns; never approve gates.
+description: "Advise on tradeoffs, ambiguity, cross-cutting concerns; never approve gates."
 ---
 
 # Consultant
+
+## Bootstrap — first action
+
+> **DO NOT draft an advisory response yet.** When this skill is invoked, execute in this order before producing any opinion text:
+>
+> 1. Read `.agents/.agents-mode.yaml` (or its global fallback) and determine `consultantMode` and the resolved external provider per the active `externalPriorityProfile`.
+> 2. **Branch on `consultantMode`:**
+>    - `disabled` or no overlay: return the standard "second opinion skipped — consultant disabled" memo immediately and stop. Do not improvise an internal advisory. Steps 3-6 do not apply.
+>    - `internal`: proceed to formulate an internal advisory memo directly (skip steps 3-5). Steps 3-5 and the end-of-response violation clause do **not** apply in this mode; the memo is authored from your own reasoning by design. Continue to step 6 with "internal advisory" as the source.
+>    - `external`: continue to steps 3-6 below; the violation clause at the end of this block applies.
+> 3. (external mode) Identify the selected external provider for the current lane. **Verification is a real shell call, not a text claim.** Run `command -v <provider>` (POSIX) or `Get-Command <provider>` (PowerShell) in the current session and record the output. Treat any reasoning that does not include such a shell call as unverified — the provider's unavailability is then a claim with no evidence, not a fact. **The absence of a repo-specific wrapper script is never sufficient to conclude the provider is unavailable**: wrappers are convenience surfaces, not authentication gates; the canonical availability check is whether the binary resolves on PATH. See the shared `Active-availability probe discipline` for the binding form of this rule. If the binary is genuinely not callable, return an unavailable memo and surface the gap; do not silently switch providers and do not author the opinion yourself.
+> 4. (external mode) Write the full advisory prompt body to `.scratch/<provider>-prompts/<topic>.md`. Argv to the provider stays for launcher flags only. This rule is binding for every consultant invocation — see the shared `External CLI prompt delivery` governance.
+> 5. (external mode) Shell out to the selected provider with the prompt redirected from the file and stdout/stderr captured to sibling files. Wait the appropriate time for the selected model/profile (5–15 minutes for ordinary advisory; up to 45–60 minutes for Claude opus/max deep review). Do not abandon the run on the first short timeout; check stdout/stderr files and process status first.
+> 6. Only after the provider returns (in external mode) or after you have completed your internal reasoning (in internal mode) may you formulate the consultant memo. In external mode the memo summarizes the external response and applies your own framing; it does not substitute your own opinion for the external one. In internal mode the memo is authored from your own reasoning and is explicitly labeled as `internal advisory` at the top.
+>
+> **Violation clause (external mode only):** if `consultantMode == external` and you reach the end of your response while step 5 was never actually executed via a tool call (shell-out), you have violated the role. Abort the response, return an unavailable memo with the explicit reason "external provider call was not actually executed", and surface the gap to the user. This clause does NOT fire for `internal` mode — internal advisory by design has no external shell-out — nor for `disabled` mode where the response stopped at step 2.
 
 ## Core stance
 
@@ -37,18 +53,19 @@ The shared dispatch contract lives in [../lead/external-dispatch.md](../lead/ext
 - `preferExternalReviewer`
 - `externalProvider`
 - `externalPriorityProfile`
+- `reserveResolver`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalCodexWorkdirMode`
 - `externalClaudeWorkdirMode`
 - `externalModelMode`
-- `externalClaudeApiMode`
+- `externalCodexProfile`
 - `externalClaudeProfile`
 
 Read and normalize the effective Codex overlay before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
-If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.codex/.agents-mode.yaml` and then global legacy `~/.codex/.agents-mode`. Normalize whichever file supplied the effective config in place and do not recreate any legacy file.
+If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Normalize whichever file supplied the effective config in place and do not recreate any legacy file.
 
-When changing `consultantMode`, preserve the other keys, including the profile, opinion-count, workdir, model-policy, transport, Claude-profile, and general `parallelMode` fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `externalClaudeApiMode` to `auto`, `delegationMode` to `manual`, `parallelMode` to `auto`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, and `externalClaudeProfile` to `opus-max` unless the user explicitly requested a different Claude profile override.
+When changing `consultantMode`, preserve the other keys, including the profile, reserve resolver, opinion-count, workdir, model-policy, Codex-profile, Claude-profile, and general `parallelMode` fields if they exist. When creating the file from scratch, initialize the full canonical shape and default `delegationMode` to `manual`, `parallelMode` to `auto`, `mcpMode` to `auto`, `externalProvider` to `auto`, `externalPriorityProfile` to `balanced`, `reserveResolver` to `claude-sonnet`, the shipped `externalPriorityProfiles` and `externalOpinionCounts` blocks, `externalCodexWorkdirMode` / `externalClaudeWorkdirMode` to `neutral`, `externalModelMode` to `runtime-default`, `externalCodexProfile` to `default`, and `externalClaudeProfile` to `opus-max` unless the user explicitly requested a different Claude profile override.
 Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 
 ## When to invoke
@@ -116,10 +133,13 @@ If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfil
 - `opus-max` → `--model opus --effort max`
 - key missing → use the current default Claude CLI invocation for this pack unless `externalModelMode: pinned-top-pro` requests the stronger Claude path
 
-Honor `externalModelMode` before provider-specific transport selection:
+Honor `externalCodexProfile` and `externalModelMode` before provider-specific transport selection:
 
 - `runtime-default` → keep the selected provider on its native runtime default model/profile.
-- `pinned-top-pro` on the Codex line → use `gpt-5.4 --reasoning-effort xhigh` for consultant work. Do not downgrade consultant memos to `gpt-5.3-codex-spark`.
+- **Consultant Codex calls always use best effort**, regardless of `externalModelMode` or `externalCodexProfile`: model `gpt-5.5` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path. Symmetric to the consultant Claude path which always uses `--model opus --effort max`. The shipped default `externalCodexProfile: gpt-5.5-xhigh` matches this rule; `pinned-top-pro` mode and `externalCodexProfile: gpt-5.5-xhigh` both resolve to the same xhigh path. Do not downgrade consultant memos to `gpt-5.3-codex-spark` or to runtime-default, and do not silently switch to `gpt-5.5-fast` between attempts on the same consultant lane.
+- `externalCodexProfile: default` → inherit the selected `externalModelMode` when Codex is selected or `auto` resolves to Codex.
+- `externalCodexProfile: gpt-5.5-fast` → select the fast Codex model tier (the underlying model variant; reasoning_effort still stays `xhigh`, so this is a model-tier choice, not an effort downgrade) when Codex is selected or `auto` resolves to Codex; record unavailable or deviated if that model tier cannot be verified against the installed runtime. The consultant lane itself always uses `gpt-5.5-xhigh`, so this branch only applies to operator-set callers, not to consultant memo dispatch.
+- `externalCodexProfile: gpt-5.5-xhigh` → shipped as the default and used unconditionally by the consultant lane; explicitly request model `gpt-5.5` with `model_reasoning_effort = "xhigh"` via `-c model_reasoning_effort=xhigh` regardless of `externalModelMode`, symmetric to `externalClaudeProfile: opus-max`.
 - Gemini and Qwen routes stay manual demonstration or compatibility paths only. Both are `WEAK MODEL / NOT RECOMMENDED` example-only routes, and this pack does not add shared production fallback keys for them.
 
 Examples:
@@ -137,24 +157,27 @@ cmd.exe /c claude.exe -p --model opus --effort max --permission-mode bypassPermi
 ```
 Fallback if `claude.exe` is not on PATH: use `claude.cmd` instead.
 
-Claude secret advisory candidate:
-- If an advisory profile order reaches `claude-secret`, `externalClaudeApiMode: auto` allows the installed secret-backed Claude wrapper after primary `claude`/`codex` candidates have been considered.
-- If an advisory profile order reaches `claude-secret`, `externalClaudeApiMode: force` keeps that supplemental candidate available even when plain Claude is unavailable; it still does not skip earlier profile candidates or replace primary `claude`.
-- The secret-backed Claude path is a weaker supplemental advisory candidate, not a scalar provider and not a fallback, retry, or transport swap for a failed primary Claude run.
+Reserve advisory candidate:
+- If an advisory profile order reaches `reserve`, bind it through `reserveResolver` after primary `claude`/`codex` candidates have been considered.
+- `reserveResolver: wrapper:<command>` must be a PATH-resolved command or repo-relative wrapper path; if arguments are needed, create a wrapper script and keep the substantive prompt file-based through stdin or supported file input.
+- The concrete `reserve` resolver must be recorded in the execution artifact.
+- The resolved `reserve` path is a supplemental advisory candidate, not a scalar provider and not a fallback, retry, or transport swap for a failed primary Claude run.
 
 **Rules:**
 - If `externalClaudeProfile` is present, use it instead of improvising a different Claude model or effort level.
 - If `externalProvider: gemini` or `externalProvider: qwen` is selected, keep the route explicit. Gemini and Qwen are `WEAK MODEL / NOT RECOMMENDED` example-only routes, and neither route should be described as shipped production `auto`.
 - If the requested Claude profile is unavailable because of auth, client support, or non-limit CLI failures, treat that as external-provider unavailability and return an unavailable memo.
-- If the requested primary Claude profile fails on the plain Claude CLI path, do not silently convert that same run to the wrapper. Advisory lanes may later collect `claude-secret` as a separate profile candidate when enabled; otherwise return an unavailable memo.
-- If an advisory route resolves to `claude-secret` and that wrapper is unavailable, disclose a dependency/config failure instead of pretending the advisory path was complete.
+- If the requested primary Claude profile fails on the plain Claude CLI path, do not silently convert that same run to the wrapper. Advisory lanes may later collect `reserve` as a separate profile candidate when enabled; otherwise return an unavailable memo.
+- If an advisory route resolves to `reserve` and that wrapper is unavailable, disclose a dependency/config failure instead of pretending the advisory path was complete.
 - If an example-only Gemini or Qwen route fails, disclose provider failure explicitly instead of inventing a hidden production fallback or silently switching providers.
 - Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
+- **Never invoke a non-interactive Claude review with `--permission-mode plan`.** Plan mode makes Claude research and then present a plan for approval (ExitPlanMode) instead of emitting the verdict; under `claude -p` there is no approver, so the captured stdout is only the final handoff / "waiting for your direction" turn and the actual review never lands in the file. Use `--permission-mode bypassPermissions` exactly as the examples above show; if you want a read-only reviewer, constrain it with `--tools "Read,Grep,Glob"`, not with plan mode. The mode is not a safety lever here — the tool set and the prompt are.
+- **Demand a single-turn, self-contained verdict and verify it landed.** The review prompt must require the complete verdict in stdout between explicit `BEGIN_REVIEW` / `END_REVIEW` markers, forbid "as above" or deferred references, and forbid ending the turn with a handoff, a plan, or a "what next?" question (it is the reviewer's only turn). After the run, confirm the captured file actually contains the markers and the required sections; a file holding only a handoff phrase or a bare `PASS` is `REVISE` for the review-output contract, not a passed review — re-run with a sharper prompt or a different reviewer. (Recurring failure class: the 2026-05-28 review-output-contract kosyak.)
 - Do not use TTY when a non-interactive invocation is available.
 - On Windows, keep command-line prompts short enough to avoid `cmd.exe` truncation.
 - On Windows, keep the ordinary shell path unchanged and try the native Windows shell first. If that shell path fails because of shell bootstrap, execution-policy, or environment-policy problems, retry once through Git-for-Windows Bash / MSYS when available. Do not use the WSL `bash.exe` stub as a fallback, and do not reinterpret ordinary provider auth, quota, or model failures as shell-fallback triggers.
 - Wait 5–15 minutes before treating a single advisory run as stalled. Do not launch a duplicate advisory call for the same memo while the first may still be running; independent external lanes may still run in parallel when their scopes are disjoint and the routing contract allows it.
-- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note, including whether the failing candidate was primary `claude` or supplemental `claude-secret`. Do not silently fall back; return an unavailable memo and require the lead to keep routing honest.
+- If Claude returns quota, auth, or limit errors, record that in the relevant plan or note, including whether the failing candidate was primary `claude` or supplemental `reserve`. Do not silently fall back; return an unavailable memo and require the lead to keep routing honest.
 
 ### No implicit fallback
 

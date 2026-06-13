@@ -1,6 +1,6 @@
 ---
 name: lead
-description: Coordinate approved delivery across specialist stages, artifacts, gates, recovery state, and risk owners.
+description: "Coordinate approved delivery across stages, artifacts, gates, recovery, risks."
 ---
 
 # Lead
@@ -76,8 +76,58 @@ The canonical brief should capture:
 - Record the durable resume point in `status.md`: current stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.
 - On resume after interruption, refresh only lead-owned task-memory state from accepted persisted artifacts. Do not recreate missing specialist artifacts or infer missing facts from session memory; route to `$knowledge-archivist` or the proper factual role instead.
 - If task memory is missing or stale, stop and restore it instead of improvising from session memory when task memory is in use.
-- `closure.md` is mandatory before moving an item to the configured archive location. It holds the final closeout record: outcome, residual risk, and archive location.
+- `closure.md` is mandatory before moving an item to the configured archive location. It holds the final closeout record: outcome, residual risk, and archive location, and MUST carry a `Closed: <YYYY-MM-DD>` line. It MAY include a `## Retrospective` (`What went well` / `What didn't` / `Lessons` — each keep-worthy lesson filed in the lessons registry by id). Proportionality (anti-ceremony): the retrospective is EXPECTED for substantial or troubled items (multi-phase, a regression, a wrong-assumption rework) and OPTIONAL for trivial ones — the close step stays mandatory, the retro within it is proportionate. Residual (honest): governance-enforced only — no hook verifies a troubled close got a retrospective. On archive, also update the recovery entry point so it never points at an archived item still listed as active (move the item's row from Active to Archived).
 - Before marking a batch closed, reconcile `brief.md`, `status.md`, the latest accepted artifact, required checks, canonical-source updates, and any open obligations. If admitted-scope work remains, keep the item active instead of closing it.
+
+## Epics (grouping multiple work-items)
+
+An **epic** groups multiple work-items under one goal or milestone. An epic is a flat single file `work-items/epics/<date>-<slug>.md` — the same flat typed-subtree shape as `work-items/bugs/<date>-<slug>.md` (`work-items/performance/` is the governance-defined sibling, not yet materialized) — with `status: active | closed` frontmatter and `## Goal`, `## Children` (a list of child work-item slugs), and `## Closure` (only when closed) sections.
+
+- **Admission.** An epic is the admitted initiative/milestone — `$product-manager` admits it; the Coherence gate in the product-manager skill IS the epic admission test (an epic must name the shared goal, contract, or mechanism that makes its members one unit). Lead cannot self-author an epic; it traces to an approved `$product-manager` item or a direct human decision.
+- **Linking.** Each child work-item declares its parent with a single bare `Epic: <epic-slug>` line in its `status.md` (single-valued — at most one parent epic). The epic file's `## Children` lists the child slugs.
+- **Roll-up (derived, no stored cache).** Epic progress is derived live, never kept as a maintained count in the epic file (a cache drifts). A child is **done** iff its `status.md` carries a bare done-state line (`status:` / `state:` / `stage:` / `outcome:` whose value begins `closed|done|complete|completed|archived` — the same predicate `check-work-items-archival-stop.py` uses), OR it lives under `work-items/archive/`, OR it has a `closure.md`. Resolve each child slug across BOTH `work-items/active/` AND `work-items/archive/` (the slug is stable across the close-move). Roll-up = all done -> `ready-to-close (n/n)`; some -> `in-progress (k/n)`; none -> `open`.
+- **Close.** Set the epic file `status: closed` and write its `## Closure` (outcome, residual risk, and a `Closed: <YYYY-MM-DD>` line) ONLY when ALL child work-items are closed AND the epic goal is met. This mirrors the per-item `closure.md`-before-archive discipline. The epic `## Closure` MAY carry the same `## Retrospective` (`What went well` / `What didn't` / `Lessons` filed in the lessons registry by id) under the same proportionality rule.
+- **Edge cases.** A 0-child epic rolls up as `open/empty`, never `ready-to-close`. Work-items without an epic are valid — they simply omit the `Epic:` line. Reopening a child of a closed epic MUST reopen the epic. An `Epic:` value with no matching epic file is a dangling link — flag and fix. A work-item belongs to at most one epic.
+- **Vocabulary.** Express the epic and child closed-state with key `status` or `state` and a value drawn ONLY from `{closed, done, complete, completed, archived}` so the reused done-predicate matches; do NOT use the bug-registry `fixed`/`resolved` words for the done-line.
+- **Local index + ownership.** Keep the `## Epics` section of the local recovery index current (gitignored task-memory hygiene, not a committed change). Epic archive moves and index sync are the `$knowledge-archivist` hygiene lane; the epic lifecycle RULES are owned by `$product-manager` and `$lead`.
+- **Residual (honest).** The work-items-archival Stop hook scans `work-items/epics/` (Batch B): it flags a ready-to-close epic (all children done but still `status: active`) and a stale-closed epic (`status: closed` with a child not done), reading `status` from the `---` frontmatter and requiring the `(active|closed)` child marker. Still governance-only: nothing verifies the epic's `## Goal` is actually met (only that the children are closed), and a marker-less child line is ignored.
+
+## Dependencies (work-item -> work-item)
+
+A work-item that needs another finished first declares `Depends-on: <slug>, <slug>` — a bare, comma-separated line of work-item slugs — in its `status.md`. This is a standing, planned inter-work-item dependency edge. It is RELATED TO but NOT identical to the runtime `BLOCKED:*` gate verdicts: `BLOCKED:prerequisite` is the in-flight discovery of unplanned adjacent work, which is filed in the bug registry, and `BLOCKED:dependency` is an external blocker — `Depends-on` is neither; it is a declared edge between two planned work-items.
+
+- **Scope.** `Depends-on` targets are work-items ONLY, resolved by slug across `work-items/active/` AND `work-items/archive/`. A slug matching a bug/epic/decision but no work-item — or matching nothing — is a dangling target: flag and fix. Bugs are not dependency targets.
+- **Derived (no stored cache).** `blocked-by(X)` = X's `Depends-on` targets that are not closed (closed = lives under `archive/`, OR has `closure.md`, OR its `status.md` has a bare done-state line — the same predicate `check-work-items-archival-stop.py` uses). The `ready-set` = active items whose every `Depends-on` target is closed (or which have none). The lead derives `blocked-by` and the ready-set live by scanning the active set's `Depends-on` lines.
+- **Rule.** Record `Depends-on` when admitting or planning an item that needs prior work; do NOT start a blocked item's implementation while it has an open blocker. When a dependency closes, the dependent may become ready.
+- **Integrity (authoring rule, not live detection).** Self-dependency is forbidden, and you must not author a dependency cycle (any `a -> ... -> a`); these are authoring-time obligations on `$lead`, not live detection. Flag a dangling `Depends-on`.
+- **Residual (honest).** Dependency edges are governance-enforced only — no hook enforces them, so an item started while a dependency is still open is not structurally caught.
+
+## Decisions (cross-cutting ADR registry)
+
+Durable, cross-cutting architecture decisions live in a flat registry `work-items/decisions/<date>-<slug>.md` (the same flat list-item-frontmatter shape as `work-items/bugs/`), so a decision survives its originating work-item's archival instead of being buried in that item's `design.md`.
+
+- **Shape.** Frontmatter uses the bug-registry list-item style (`- key:` bullets, no `---` fences): `- id:`, `- status: proposed | accepted | dropped | superseded | reverted`, `- decided-by: <role or human>`, `- context: <work-item slug | cross-cutting>`, `- supersedes: <decision id | none>`, `- superseded-by: <decision id | none>`. Body: `## Decision`, `## Rationale`, `## Consequences`, `## Alternatives rejected`. The decision `status` lifecycle is SELF-CONTAINED — independent of the work-item/epic done-predicate.
+- **Authoring + acceptance gate.** `$architect` authors a cross-cutting or long-lived decision in `status: proposed`; a work-item's `design.md` REFERENCES it by id rather than duplicating it. Promotion `proposed -> accepted` happens only after the corresponding `$architecture-reviewer` gate passes. `proposed -> dropped` (with a one-line reason) retires a declined proposal.
+- **Supersede (two-way edge).** When decision B supersedes A, set B's `- supersedes: A` AND A's `- status: superseded` + `- superseded-by: B` in one step — a stored bidirectional link (mirroring the epic child<->parent join). `reverted` keeps a one-line reason.
+- **Ownership.** Lifecycle TRANSITIONS are a SEMANTIC act owned by `$architect`/`$lead`; `$knowledge-archivist` does ONLY the non-semantic bookkeeping (writing the stored back-link field, local index sync).
+- **Stale-proposed accountability.** The lead is accountable for resolving a `proposed` decision that the decision scan keeps surfacing — drive it to `accepted` (after the `$architecture-reviewer` gate) or `dropped` (with a one-line reason). Do not let a proposal idle indefinitely; surfacing it is visibility, not closure.
+- **Residual (honest).** Registry hygiene is governance-enforced only — no hook scans `work-items/decisions/`, so a stale `proposed` decision is not structurally caught.
+
+## Lessons (delivery lessons-learned registry)
+
+Lessons learned during delivery (a recurring miss, a wrong assumption, a process gap) live in a flat registry `work-items/lessons/<date>-<slug>.md` (the same flat list-item-frontmatter shape as `work-items/bugs/`), so a lesson survives its originating work-item's archival instead of vanishing when that item closes. This is in-repo project task memory (gitignored data), NOT the operator's personal global memory; a lesson that generalizes beyond this project MAY ALSO be promoted to the spine or personal memory, but that is an additive, one-directional, separate manual act — the project-local entry stays the canonical project record.
+
+- **Shape.** Frontmatter uses the bug-registry list-item style (`- key:` bullets, no `---` fences): `- id:`, `- status: open | applied | dropped | archived`, `- source: <work-item | bug | review | incident>`, `- category: process | technical | governance | tooling`. Body: `## Lesson` (one line), `## Context` (what happened), `## How to apply` (the concrete next action that would prevent a recurrence). The lesson `status` lifecycle is SELF-CONTAINED — independent of the work-item/epic done-predicate.
+- **Lifecycle.** `open` (captured, not yet acted on) -> `applied` (a named change shipped) -> `archived` (no longer relevant); plus `open` -> `dropped` (considered, not worth acting on — keep a one-line reason). A lesson stays in the registry as history, never deleted.
+- **Capture.** A lesson is captured by the closing role that ran the retrospective — `$lead` for lead-chains, main-conv for `requiresLead:false` — or by `$qa-engineer`/a reviewer when they spot a recurring miss. The retrospective in `closure.md` is the natural capture point; each keep-worthy retro lesson becomes a registry entry, back-linked by id.
+- **Ownership.** Lifecycle TRANSITIONS (open | applied | dropped | archived) are a SEMANTIC act owned by the CLOSING role that captured the lesson (`$lead` for lead-chains, main-conv for `requiresLead:false`), escalating to `$lead`/`$product-manager` when applying a lesson admits follow-up work; `$knowledge-archivist` does ONLY the non-semantic bookkeeping (local index sync, back-reference id). The archivist does NOT decide a lesson status transition.
+- **Stale-open accountability.** `$lead` (main-conv for `requiresLead:false`) is accountable for resolving an `open` lesson that keeps getting surfaced — drive it to `applied` or `dropped` (one-line reason). Listing it is visibility, not closure.
+- **Surfacing.** The lead derives the open-lessons count live by scanning `work-items/lessons/` for `status: open` (count + id + `## Lesson` first line). `$product-manager` consults open lessons when admitting similar work so the same mistake is not repeated.
+- **Residual (honest).** Registry hygiene is governance-enforced only — no hook scans `work-items/lessons/`, so an `open` lesson nobody applies is not structurally caught.
+
+## Backlog (index-section spec)
+
+The local recovery index gets a `## Backlog` section — items admitted by `$product-manager` but not yet started: a holding area between roadmap admission and active delivery, distinct from Active (in-flight) and Archived (done), placed between Active and Archived. Lightweight: one line per item (slug + priority + one-liner). `$lead` (main-conv for `requiresLead:false`) moves an item from Backlog to Active when work starts. The lead derives and surfaces the backlog set live by scanning the index. The index is gitignored local task memory, so this is the index-section SPEC (like the `## Epics` index-section spec), not a committed change; the live index may be behind its spec.
 
 ## Operating pipeline
 
@@ -214,6 +264,8 @@ Do not advance work on optimism or partial acceptance.
 - Do not pause between accepted artifacts unless a true gate failure or a policy-required human or CI check requires it.
 - Keep the next approved role ready whenever the current gate is likely to pass so the pipeline can keep moving.
 - After any side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
+- If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
 - Do not stop at one completed sub-batch when a known admitted-scope next action already exists; keep the task open and continue until a real gate or explicit user reprioritization intervenes.
 
 ## Session lifecycle rule
@@ -263,6 +315,7 @@ Do not advance work on optimism or partial acceptance.
 - `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - Be conservative with write-heavy work. Parallel edits are acceptable only when write scopes and contracts are already fixed.
 - Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.
+- **Subagent thread-limit discipline**: in-session subagent fan-out is bounded by the runtime; assume a practical limit of four concurrent in-session agents unless the runtime explicitly reports a higher available limit. Before spawning a new in-session agent, check whether existing agents are still needed and close completed or parked ones once their result is accepted. If more than four independent lanes are useful, run only the top-priority four in-session and route extra lanes through external CLI tools, provider CLIs, scripts, or sequential execution; a spawn that fails with a thread-limit error is not a retry trigger but a re-plan signal. Report reduced fan-out in the session log when the original workflow expected more parallel agents.
 - If merge or coordination cost is likely to exceed the benefit, do not parallelize.
 
 ## Governance rule

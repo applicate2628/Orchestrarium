@@ -1,0 +1,86 @@
+---
+name: review-loop
+description: "Run the autonomous parallel-review-loop on a fix-design artifact."
+---
+
+# Review Loop
+
+Get independent multi-angle convergence on one written fix-design artifact BEFORE the change lands. Three scope angles (two SMART verdicts + one mechanical SCOUT) review the same artifact; the loop revises and re-dispatches autonomously under an anti-drift guard and gates the human only at convergence.
+
+This is the Codex-line binding of the provider-neutral review-loop methodology. The design trunk (`shared/references/review-loop-methodology.md`) is NOT installed; this skill carries the operative rules for the Codex runtime.
+
+## Codex execution model (NOT the Claude background-Agent loop)
+
+Codex has no Claude `Agent()` background fan-out: it does not spawn three concurrent in-process subagents that fire completion notifications. The Codex loop runs the three angles through the **external-dispatch / external-brigade surface** and synthesizes sequentially:
+
+- The angles are dispatched as external helper runs (per `$external-brigade` and `external-dispatch.md`), each carrying its scope and the pinned objective verbatim.
+- Where the host runtime cannot launch a scope concurrently, run the angles **sequentially** and synthesize their outputs; sequential execution does not change the loop's logic, only its concurrency.
+- Read each angle's captured output file before counting it; a launch is not a verdict.
+
+## The angles: two SMART verdicts + one mechanical SCOUT
+
+Angles are defined by **SCOPE, not by vendor**. The FOCUS each is given makes it independent. Vendors are symmetric; the Codex-line default below mirrors the Claude-line mapping (the Codex host puts Claude on the large-context/strategic scope and Codex on the surgical scope, per the symmetry rule in the trunk).
+
+| Angle | Scope | Produces | Codex-line default |
+| --- | --- | --- | --- |
+| **Surgical correctness** | the specific defect, contract/seam violation, "this exact line/binding is wrong", visual-bug detection | a VERDICT (PASS/REVISE) | the surgery-strong engine (Codex on its own line; the host scope) |
+| **Deep reasoning** | blast-radius, cross-system ripple, large-context synthesis, ADR / framing / "is this the right shape" | a VERDICT (PASS/REVISE) | the most capable deep-reasoning engine via `$external-reviewer` (`auto` resolves to Claude on the Codex line) |
+| **Mechanical scout** | fully-specified scans: "does referenced X exist?", "list every reference to Y", sketch-vs-code, symbol/style | FINDINGS (no verdict) | a fast factual role; surfaces raw findings + blind-spot hints |
+
+The **scout does not co-judge**: it executes spelled-out mechanical scans and surfaces raw facts that FEED the two verdict angles. A scout finding is an INPUT to a verdict, not a verdict. The scout maps to a FACTUAL, non-judging role, never a judging one.
+
+## Steps
+
+1. **Read the routing surface.** Read and normalize `.agents/.agents-mode.yaml` first; honor `parallelMode`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalModelMode`, and `externalCodexProfile`. Shipped `auto` stays on `codex | claude`.
+2. **Confirm the runtime-verified root (hard gate).** The artifact's root must be runtime-captured THIS session. A second-hand root (commit message, prior plan, report) is runtime-verified first or the loop does not start. Never pin the root `CONFIRMED — do not re-litigate`.
+3. **Write the fix-design artifact** under `.scratch/reviews/fix-design-YYYY-MM-DD-<topic>.md`: runtime-verified root with trace/`file:line` citations, candidate options with cost/risk, recommended option, implementation sketch, validation plan, and what each scope angle should evaluate.
+4. **Dispatch the three scope angles** through the external surface, each with the ORIGINAL objective verbatim. Use file-based prompt delivery (write the prompt body to a temporary prompt file; argv stays for launcher flags and file paths). Run concurrently when the runtime supports it, else sequentially.
+5. **Converge autonomously, persisting `review-loop-state` per round.** No human gate per round. Each round: revise the artifact to fold in every open blocker and unreconciled scout finding; run the mandatory anti-drift check (goal, admitted scope, runtime root all unchanged — drift stops the loop); re-dispatch all angles. Persist one `review-loop-state` record per round under `.scratch/reviews/`.
+6. **Human gate at convergence only** — never per round: (a) converged (both verdict angles PASS + all scout findings reconciled); (b) drift (present what would shift off the pinned objective); (c) deadlock (cap N=3 reached). 
+7. **Implement after acceptance**, with every guard/invariant/instrumentation the angles named; run the validation plan and capture evidence before the commit gate.
+
+## Autonomous convergence + anti-drift
+
+- **Revise → anti-drift check → re-dispatch**, every round. Re-dispatching an unchanged artifact is forbidden (a verdict cannot change on identical input).
+- **Anti-drift (mandatory):** the revised artifact must still serve the ORIGINAL pinned objective; a shift in goal, a widened scope, or a new unverified premise is drift → stop and escalate.
+- **Convergence** = both VERDICT angles PASS AND every scout finding reconciled.
+- **Runaway guard:** cap at **N = 3** rounds; escalate early if the same blocker survives two rounds.
+
+## Hardening invariants (every round)
+
+1. Runtime-evidence is a hard gate, not a section (root captured this session; never pinned `CONFIRMED`).
+2. Every angle answers "root proven (runtime)?", "scope unchanged?", "verification adequate?" — not only its scope.
+3. Reject bare `PASS` — cite specific blockers (`file:line` / evidence) or a specific no-blocker rationale.
+4. Per-round diff — what changed and why (which blocker it answers).
+5. Verify OUTPUTS, not launch acknowledgements.
+6. Escalate early on a stuck blocker.
+
+## review-loop-state ledger (structural backstop)
+
+A shipped loop MUST persist a per-round `review-loop-state` record under `.scratch/reviews/` so the autonomous loop leaves an auditable structural trace. Per round, persist: pinned `objective` / `scope` / `runtime_root` (identical across all rounds), `round` (≤ cap), `diff`, per verdict angle (`surgical`, `deep`) a non-bare `verdict` plus the three meta-answers (`root_proven`, `scope_unchanged`, `verification_adequate`), scout `findings` + `reconciliation`, and evidence references. The structural validator `scripts/validate-review-loop-state.* --self-test` (a development/CI tool in the repo, NOT shipped into the runtime) checks the SCHEMA only (anchors present + unchanged, diff present, both verdict angles + scout present, no bare PASS, cap respected); it does not and cannot check semantics.
+
+## Rules
+
+- This is a utility skill, not a new specialist role, and not a replacement for `$lead`.
+- The strategic/deep angle returns its verdict DIRECTLY; it is NOT the standalone external-mode `$consultant` (which shells out to its own provider — the role-confusion). `consultant` stays untouched.
+- The mechanical scout casts no verdict; map it to a factual role, never a QA-gate role.
+- Do not silently downgrade an external angle to internal execution.
+- Do NOT commit, push, or install from this skill. Implementation stops at the human commit gate.
+
+## Non-goals
+
+- Not a single advisory opinion (that is `$second-opinion` / `$consultant`).
+- Not disjoint parallel helper lanes that each own a different artifact (that is `$external-brigade`).
+- Not a post-implementation specialist review chain.
+- Not for trivial one-line changes, and not for a root that is still an unmeasured runtime value.
+
+## Terms and Abbreviations
+
+- **angle**: one independent review lens (surgical / deep / mechanical-scout) in the loop.
+- **scout**: the mechanical angle — surfaces raw findings, casts no verdict, feeds the verdict angles.
+- **anti-drift**: the per-round check that the revised artifact still serves the original pinned objective.
+- **convergence**: both verdict angles PASS and all scout findings reconciled.
+- **ledger / review-loop-state**: the per-round persisted record giving the autonomous loop an auditable structural backstop.
+- **ADR**: Architecture Decision Record, a written record of a significant design decision and its rationale.
+- **CLI**: Command-Line Interface, a terminal command surface such as `codex` or `claude`.
+- **PASS / REVISE / BLOCKED**: gate verdicts — accept, return for bounded correction, or stop on a real external blocker.
