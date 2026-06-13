@@ -26,6 +26,8 @@ Current docs in this branch:
 - [epics.md](epics.md) for grouping work-items under one goal or milestone (epic -> work-item -> phase)
 - [decisions.md](decisions.md) for the cross-item architecture-decision registry (ADR store)
 - [dependencies.md](dependencies.md) for cross-work-item `Depends-on` edges and the blocked/ready derivation
+- [lessons.md](lessons.md) for the in-repo delivery-lessons registry (capture lessons learned so they survive a work-item's archival)
+- [definition-of-ready-done.md](definition-of-ready-done.md) for the DoR/DoD vocabulary map onto existing admission and close gates
 - [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md)
 
 ## Terms and Abbreviations
@@ -36,7 +38,9 @@ Current docs in this branch:
 - `Codex`: OpenAI Codex runtime and provider line.
 - `Claude`: Anthropic Claude runtime and provider line.
 - `decision registry`: flat cross-item store of durable architecture decisions under `work-items/decisions/` (the ADR pattern in task memory).
+- `Definition of Ready/Done`: agile DoR/DoD vocabulary mapped onto existing admission and close gates by `definition-of-ready-done.md` (a pointer map, not a new checklist).
 - `Depends-on`: standing cross-work-item dependency edge declared in `status.md`; drives the derived blocked-by / ready-set views.
+- `lessons registry`: flat in-repo store of durable delivery lessons under `work-items/lessons/` (a recurring miss, wrong assumption, or process gap), captured so it survives a work-item's archival.
 - `Gemini`: Google Gemini CLI provider line, documented here as an example integration.
 - `MCP`: Model Context Protocol; a protocol for exposing tools and resources to agent runtimes.
 - `Qwen`: Qwen provider line, documented here as an example integration.

@@ -63,6 +63,7 @@ updated: <YYYY-MM-DD HH:MM>
 - **Open obligations before closeout**: <none | remaining required work still inside admitted scope>
 - **Epic**: <parent epic slug, or none> — present only when this work-item belongs to an epic; a single bare `Epic: <slug>` line is the join key the epic roll-up reads (see the lead skill `## Epics`)
 - **Depends-on**: <comma-separated work-item slugs, or none> — other work-items this one needs completed first; a single bare `Depends-on: <slug>, <slug>` line is what the derivation reads. A standing, planned inter-work-item dependency edge (distinct from the runtime `BLOCKED:*` gate verdicts). Targets are work-items only (resolved across `active/` + `archive/`). The lead derives `blocked-by` (open targets) and the ready-set from these lines (see the lead skill `## Dependencies`)
+- **Priority**: <high | medium | low, or none> — scheduling urgency set by `$product-manager` at admission; distinct from bug/perf SEVERITY (defect impact). A low-severity bug can still be high-priority.
 
 ## Active agents
 

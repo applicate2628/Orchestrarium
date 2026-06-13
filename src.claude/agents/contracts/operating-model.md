@@ -255,6 +255,7 @@ Every completed chain that produces an accepted artifact MUST persist it before 
 | Performance issue | `work-items/performance/YYYY-MM-DD_slug.md` | — |
 | Epic (groups work-items) | `work-items/epics/<date>-<slug>.md` | — |
 | Decision (cross-item ADR) | `work-items/decisions/<date>-<slug>.md` | — |
+| Lesson (delivery retrospective) | `work-items/lessons/<date>-<slug>.md` | — |
 
 Session logs are summaries pointing to canonical artifacts, not copies. See `AGENTS.md` § "Session logging rule" for the mandatory logging contract.
 

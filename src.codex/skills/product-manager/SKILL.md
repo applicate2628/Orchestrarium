@@ -39,6 +39,10 @@ description: "Own roadmap, priority, milestones, and discovery/delivery admissio
 - Prefer roadmap decisions that can be turned into a canonical brief without major reinterpretation.
 - An **epic** — an initiative grouping several work-items toward one goal or milestone — is admitted here like any item, and the Coherence gate (below) IS the epic test: it must name the shared goal, contract, or mechanism that makes its members one unit. Produce the epic's goal, milestone, and bounded scope in the roadmap decision package; `$lead` materializes it as `work-items/epics/<date>-<slug>.md` and links the member work-items. Keep epic scope bounded so member work-items do not creep without re-admission.
 - When the roadmap decision package's dependency notes or sequencing constraints name a cross-work-item prerequisite (item B needs item A first), say so explicitly so `$lead` records it as a `Depends-on:` edge on the admitted item (lead skill `## Dependencies`). This turns prose "sequence after X" into a standing, derivable blocker rather than a one-off note.
+- When admitting work similar to a prior item, consult the OPEN lessons in `work-items/lessons/` (status `open`) so a captured lesson is applied at admission rather than the same mistake repeated. Surface a relevant lesson's `## How to apply` in the roadmap decision package.
+- Set an admission **Priority** on the admitted item — `Priority: high | medium | low` — recorded on the item's `status.md`. Priority is scheduling URGENCY, distinct from defect severity (which is IMPACT): a low-severity bug can still be high-priority. State the priority and its rationale in the roadmap decision package.
+- When an initiative groups work toward a milestone, name the milestone in the roadmap decision package; `$lead` stamps it on the epic (the epic frontmatter already carries `milestone:` — no new field on `status.md`).
+- An item admitted but not yet started goes to the `## Backlog` section of the local `work-items/index.md` (a holding area between admission and active delivery), not straight to Active; `$lead`/main-conv move it Backlog -> Active when work starts.
 
 ## Research admission filter
 

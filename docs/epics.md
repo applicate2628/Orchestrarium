@@ -31,7 +31,9 @@ milestone: <one-liner>
 - ...
 
 ## Closure          (only when status: closed)
+Closed: <YYYY-MM-DD>
 <outcome, residual risk>
+## Retrospective    (optional; What went well / What didn't / Lessons filed in work-items/lessons/ by id)
 ```
 
 ## Linking work-items to an epic
