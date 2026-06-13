@@ -7,6 +7,19 @@ disable-model-invocation: true
 
 Fix a performance issue using the `performance-sensitive` template.
 
+## When to auto-invoke
+
+Apply this command's flow automatically when the user's request matches any of:
+
+- performance budget or SLA breach: "this endpoint is over the latency budget", "we're missing the SLA", "the p99 regressed"
+- explicit slowness with a target or constraint: "X is too slow", "speed up Y", "reduce the response time of Z", "this query takes too long"
+- throughput or resource pressure tied to a metric: "throughput dropped", "memory keeps climbing", "CPU is pegged under load"
+- performance issue filename reference: user mentions a `work-items/performance/<file>` slug
+
+The user does not need to type `/agents-perf` for this flow to fire. Apply it transparently, announce the routing decision in your first response ("I'm routing this through the performance flow because the report names a measurable budget/SLA breach"), and let the user redirect if the auto-routing was wrong.
+
+**Do NOT auto-invoke** for a functional defect with no performance dimension — that is `/agents-bugfix` territory even if the symptom looks like a hang. When a bug report names both wrong behavior and a budget/SLA breach, this performance flow takes precedence over `/agents-bugfix` per the "pick the most specialized one" resolution rule in CLAUDE.md. Confirm the bottleneck before optimizing; do not auto-route a vague "feels slow" with no metric — ask for a measurable target first.
+
 ## Steps
 
 1. **Get the issue.** Check `$ARGUMENTS`:
@@ -20,12 +33,12 @@ Fix a performance issue using the `performance-sensitive` template.
    - Recommend optimization strategy and constraints
    - If the issue is architectural, recommend escalation to `full-delivery`
 
-3. **Implement.** Invoke **Implementer** (Agent tool, appropriate engineer `subagent_type`):
-   - Apply the optimization within the performance engineer's constraints
+3. **Implement.** Invoke **Implementer** (Agent tool, appropriate engineer `subagent_type`, or `external-worker` when external dispatch is preferred):
+   - Apply the optimization within the performance engineer's constraints. When external dispatch is preferred, the implementer may be `external-worker`.
    - Measure before/after
 
-4. **Verify.** Invoke **QA** (Agent tool, `subagent_type: qa-engineer`):
-   - Verify no functional regressions
+4. **Verify.** Invoke **QA** (Agent tool, `subagent_type: qa-engineer`, or `external-reviewer` when external dispatch is preferred):
+   - Verify no functional regressions. When external dispatch is preferred, the QA slot may be `external-reviewer`.
 
 5. **Performance review.** Invoke **Performance reviewer** (Agent tool, `subagent_type: performance-reviewer`):
    - Verify the optimization meets the budget

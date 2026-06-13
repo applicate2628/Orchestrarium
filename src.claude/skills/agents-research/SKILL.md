@@ -7,6 +7,19 @@ disable-model-invocation: true
 
 Investigate a question using the `research` template chain.
 
+## When to auto-invoke
+
+Apply this command's flow automatically when:
+
+- user asks an investigation question: "how does X work?", "where is Y defined?", "trace data flow for Z"
+- user asks for ADR or alternatives without yet committing to implementation: "what are the options for X?", "compare approaches to Y"
+- user wants understanding of existing code surface: "investigate auth module", "find similar implementations of Z"
+- user explicitly asks read-only exploration: "research X", "look into how Y is handled"
+
+The user does not need to type `/agents-research` for this flow to fire. Apply it transparently and announce the routing decision.
+
+**Do NOT auto-invoke** if the user also wants to design or implement — that is `/agents-design` (research + architect + planner). If the user said "research X and propose a plan", route to `agents-design.md` instead.
+
 ## Steps
 
 1. **Get the question.** Use `$ARGUMENTS` as the research question. If empty, ask the user what to investigate.

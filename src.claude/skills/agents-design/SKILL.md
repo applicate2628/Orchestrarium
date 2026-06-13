@@ -7,6 +7,19 @@ disable-model-invocation: true
 
 Run the full research-to-plan chain using the `research` template.
 
+## When to auto-invoke
+
+Apply this command's flow automatically when:
+
+- user requests a new feature without an accepted plan: "build X", "add Y to the app", "design Z"
+- user asks for full research-to-plan: "design and plan X", "go from idea to plan for Y"
+- after `/agents-research` produced findings that need to become a plan
+- user describes an unclear or exploratory creative request: "we should improve X, but I'm not sure how"
+
+The user does not need to type `/agents-design` for this flow to fire. Apply it transparently and announce the routing decision.
+
+This is the standard entry point for non-trivial new work that lacks a `work-items/active/<slug>/plan.md`. For unclear creative work, invoke `Skill: superpowers:brainstorming` before Step 2 to clarify intent and direction first; once admitted scope is clear, the analyst/architect/planner chain converts it into a delivery plan.
+
 ## Steps
 
 1. **Get the task.** Use `$ARGUMENTS` as the feature or change description. If empty, ask the user what to design.

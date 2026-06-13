@@ -1,11 +1,11 @@
 ---
 name: agents-validate
-description: Run the structural integrity check for the Claudestrator skill-pack.
+description: Run the structural integrity check for the Claude Code pack.
 disable-model-invocation: true
 ---
 # Validate Skill-Pack
 
-Run the structural integrity check for the Claudestrator skill-pack.
+Run the structural integrity check for the Claude Code pack.
 
 ## Steps
 

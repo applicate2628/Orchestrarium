@@ -12,6 +12,8 @@ Resume an interrupted agent chain from its saved state.
 1. **Find interrupted work.** Check `$ARGUMENTS`:
    - If a slug is given, load that work-item from `work-items/active/`
    - If empty, scan `work-items/active/` for all items. Display each with: slug, template, current stage, last completed agent, next action.
+   - Also scan `work-items/epics/` for active epics and show each epic's roll-up (k/n children done), so a mid-epic resume restores the epic context, not just the single item.
+   - For each item, read the optional `Depends-on: <slug>, <slug>` line in its `status.md` and resolve each target across `work-items/active/` + `work-items/archive/` (done-predicate as in `/agents-status`). Show open targets as `blocked-by`, so the resume picture reflects standing blockers, not just the next action.
    - If no active work-items found, say "Nothing to resume."
 
 2. **Load state.** Read `status.md` from the selected work-item:
@@ -24,6 +26,7 @@ Resume an interrupted agent chain from its saved state.
    - Check that referenced artifacts still exist
    - Check that the codebase hasn't diverged significantly (quick `git log` since `updated` timestamp)
    - If significant changes detected, warn the user and suggest re-running the analyst stage
+   - If the selected item has an open `Depends-on` target (blocked-by is non-empty), warn that it is `blocked` — resuming its implementation while a declared prerequisite work-item is still open ignores a standing dependency edge. Offer to resume the blocking item instead, or proceed only if the user confirms the dependency is no longer real.
 
 4. **Resume execution.** Pick up from the next action in `status.md`:
    - For `requiresLead: false` templates — main conversation continues the chain from where it stopped

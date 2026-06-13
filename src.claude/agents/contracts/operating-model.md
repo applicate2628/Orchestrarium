@@ -39,6 +39,8 @@ When lead coordinates, or when the main conversation needs to decide between rol
 - Maintain exactly one primary in-progress task at a time.
 - Side requests may refine or temporarily interrupt the primary task, but do not replace it unless the user explicitly reprioritizes.
 - After handling a side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
+- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
+- If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
 - When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
 - Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
 - Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
@@ -50,14 +52,14 @@ When lead coordinates, or when the main conversation needs to decide between rol
 Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 
 - `consultantMode` continues to govern `$consultant`.
-- `externalClaudeApiMode: disabled | auto | force` controls the supplemental `claude-secret` advisory/review profile candidate. `auto` allows `claude-secret` only when an `advisory.*` or `review.*` order reaches it after primary `claude`/`codex`, while `force` keeps that candidate available for advisory/review even when plain Claude is unavailable. It is independent of primary `claude` and must not be used for worker, mutating implementation, code-generation, file-editing, installer, publication, or write-producing repository-hygiene routes.
+- `reserve` is a symbolic supplemental read-only candidate for `advisory.*` and `review.*` profile orders only. It is considered only after primary `claude`/`codex`, is independent of primary `claude`, and must not be used for worker, mutating implementation, code-generation, file-editing, installer, publication, or write-producing repository-hygiene routes.
 - `delegationMode: manual` keeps delegation explicit-by-request, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist.
 - `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - `mcpMode: auto` allows MCP use by judgment when appropriate; `force` makes relevant MCP use an explicit standing instruction.
 - `preferExternalWorker: true` prefers `$external-worker` for eligible worker-side slots.
 - `preferExternalReviewer: true` prefers `$external-reviewer` for eligible review and QA-side slots.
 - `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default; shipped `auto` uses `codex | claude` only. Explicit `codex`, `claude`, `gemini`, or `qwen` may be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths.
-- The Claude-line canonical schema may include the shared `externalModelMode` and `externalClaudeApiMode` when the resolved provider is Claude; `externalClaudeProfile` remains Codex-line only.
+- The Claude-line canonical schema may include the shared `externalModelMode` and `externalCodexProfile`; `externalClaudeProfile` remains Codex-line only.
 - The team template JSON does not change; routing substitutions happen at execution time.
 - `Assigned role` in provenance names the internal role being replaced; it does not narrow the adapter to only one profession.
 - Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.
@@ -251,6 +253,9 @@ Every completed chain that produces an accepted artifact MUST persist it before 
 | Advisory memo | `work-items/active/<slug>/advisory.md` | Session log entry summarizing advisory |
 | Bug finding | `work-items/bugs/YYYY-MM-DD_slug.md` | — |
 | Performance issue | `work-items/performance/YYYY-MM-DD_slug.md` | — |
+| Epic (groups work-items) | `work-items/epics/<date>-<slug>.md` | — |
+| Decision (cross-item ADR) | `work-items/decisions/<date>-<slug>.md` | — |
+| Lesson (delivery retrospective) | `work-items/lessons/<date>-<slug>.md` | — |
 
 Session logs are summaries pointing to canonical artifacts, not copies. See `AGENTS.md` § "Session logging rule" for the mandatory logging contract.
 

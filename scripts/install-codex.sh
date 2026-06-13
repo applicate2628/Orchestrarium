@@ -1,0 +1,1144 @@
+#!/usr/bin/env bash
+# Install Codex pack.
+# Usage:
+#   bash scripts/install-codex.sh                  install into current repo (.agents/ + AGENTS.md)
+#   bash scripts/install-codex.sh --global         install into ~/.codex/
+#   bash scripts/install-codex.sh --target DIR     install into DIR as a project (.agents/ + AGENTS.md)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SOURCE="$REPO_DIR/src.codex"
+AGENTS_SOURCE="$SOURCE/agents"
+SHARED_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
+CODEX_PACK_BEGIN_MARKER='<!-- BEGIN ORCHESTRARIUM CODEX PACK -->'
+CODEX_PACK_END_MARKER='<!-- END ORCHESTRARIUM CODEX PACK -->'
+
+# Directories to install (order doesn't matter)
+DIRS=(skills)
+OPTIONAL_DIRS=()
+FORCE=0
+DRY_RUN=0
+ALLOW_UNSAFE_TARGET=0
+NO_HYPOTHESIS_HOOK=0
+MODE=""
+TARGET=""
+
+usage() {
+  echo "Usage:"
+  echo "  bash scripts/install-codex.sh                          Install into current repo (.agents/ + AGENTS.md)"
+  echo "  bash scripts/install-codex.sh --global                 Install into ~/.codex/"
+  echo "  bash scripts/install-codex.sh --target DIR             Install into DIR as a project (.agents/ + AGENTS.md)"
+  echo "  bash scripts/install-codex.sh --force                  Skip deletion prompts"
+  echo "  bash scripts/install-codex.sh --dry-run                Print planned actions without changing files"
+  echo "  bash scripts/install-codex.sh --allow-unsafe-target    Override allowlist for custom target path"
+  echo "  bash scripts/install-codex.sh --help                   Show help"
+  exit 1
+}
+
+canonical_path() {
+  local input_path="$1"
+  local expanded="${input_path/#\~/$HOME}"
+  local converter=""
+
+  if [ -z "$expanded" ]; then
+    echo ""
+    return 1
+  fi
+
+  if [[ "$expanded" =~ ^[A-Za-z]:[\\/].* ]]; then
+    if command -v cygpath >/dev/null 2>&1; then
+      converter="cygpath"
+    elif command -v wslpath >/dev/null 2>&1; then
+      converter="wslpath"
+    fi
+
+    if [ -n "$converter" ]; then
+      expanded="$("$converter" -u "$expanded")"
+    else
+      expanded="${expanded//\\//}"
+    fi
+  fi
+
+  if [ -d "$expanded" ] || [ -L "$expanded" ]; then
+    local resolved
+    resolved="$(cd "$expanded" && pwd -P)"
+    echo "$resolved"
+    return 0
+  fi
+
+  # For non-existing paths, resolve component-by-component preserving all
+  # virtual segments so we keep the intended directory structure.
+  local result=""
+  local part
+  local next
+
+  if [ "${expanded:0:1}" = "/" ]; then
+    result="/"
+  else
+    result="$(pwd -P)"
+  fi
+
+  local IFS='/'
+  for part in ${expanded}; do
+    case "$part" in
+      ""|".")
+        continue
+        ;;
+      "..")
+        result="$(dirname "$result")"
+        if [ -z "$result" ]; then
+          result="/"
+        fi
+        ;;
+      *)
+        next="$result/$part"
+        if [ "$result" = "/" ]; then
+          next="/$part"
+        fi
+
+        if [ -e "$next" ] || [ -L "$next" ]; then
+          if [ -d "$next" ] || [ -L "$next" ]; then
+            next="$(cd "$next" && pwd -P)"
+          fi
+        fi
+
+        result="$next"
+        ;;
+    esac
+  done
+
+  echo "$result"
+}
+
+resolve_install_target() {
+  local input_path="$1"
+  local normalized
+
+  normalized="$(canonical_path "$input_path")"
+  if [ -z "$normalized" ]; then
+    echo "FAIL: unable to resolve target path '$input_path'" >&2
+    return 1
+  fi
+
+  if [ "$(basename "$normalized")" = ".codex" ]; then
+    printf "%s" "$normalized"
+  else
+    printf "%s/.codex" "$normalized"
+  fi
+}
+
+path_has_reparse_component() {
+  local path="$1"
+  local current="$path"
+
+  while :; do
+    if [ -e "$current" ] && [ -L "$current" ]; then
+      return 0
+    fi
+
+    local parent
+    parent="$(dirname "$current")"
+    if [ "$parent" = "$current" ] || [ -z "$parent" ]; then
+      break
+    fi
+    current="$parent"
+  done
+
+  return 1
+}
+
+is_allowed_target() {
+  local target="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
+  local candidate
+  for candidate in "${ALLOWLIST[@]}"; do
+    candidate="$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]')"
+    if [ "$target" = "$candidate" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+validate_target_root() {
+  local path="$1"
+  local mode="$2"
+
+  if path_has_reparse_component "$path"; then
+    echo "FAIL: target path '$path' contains a symlink/junction component." >&2
+    return 1
+  fi
+
+  local target
+  target="$(resolve_install_target "$path")"
+  local target_lower
+  target_lower="$(printf '%s' "$target" | tr '[:upper:]' '[:lower:]')"
+
+  if [ -z "$target_lower" ]; then
+    echo "FAIL: empty target" >&2
+    return 1
+  fi
+
+  if [ "$(basename "$target_lower")" != ".codex" ]; then
+    echo "FAIL: target '$target' must resolve to .codex directory" >&2
+    return 1
+  fi
+
+  if [ "$mode" = "target" ] && [ "$ALLOW_UNSAFE_TARGET" -ne 1 ]; then
+    if ! is_allowed_target "$target"; then
+      if [ -t 0 ]; then
+        while :; do
+          echo "WARNING: target '$target' is outside the default allowlist."
+          read -r -p "Type ALLOW to proceed with this target, or press Enter to abort: " confirm
+          if [ "${confirm^^}" = "ALLOW" ]; then
+            break
+          fi
+          if [ -z "$confirm" ]; then
+            echo "Install cancelled: unsafe target denied." >&2
+            return 1
+          fi
+          echo "Please type ALLOW to continue, or press Enter to cancel." >&2
+        done
+      else
+        echo "FAIL: unsafe target denied for non-interactive install. Use --allow-unsafe-target." >&2
+        return 1
+      fi
+    fi
+  fi
+
+  printf "%s" "$target"
+}
+
+build_allowlist() {
+  ALLOWLIST=()
+  local repo_root
+
+  if git rev-parse --show-toplevel &>/dev/null; then
+    repo_root="$(git rev-parse --show-toplevel)"
+  else
+    repo_root="$(pwd)"
+  fi
+
+  if [ "$MODE" = "repo" ] || [ "$MODE" = "target" ]; then
+    ALLOWLIST+=("$(resolve_install_target "$repo_root")")
+  fi
+
+  if [ "$MODE" = "global" ] || [ "$MODE" = "target" ]; then
+    ALLOWLIST+=("$(resolve_install_target "$HOME")")
+  fi
+
+  if [ -n "${CODEX_INSTALL_ALLOWLIST:-}" ]; then
+    IFS=',' read -r -a ALLOWLIST_EXTRA <<< "$CODEX_INSTALL_ALLOWLIST"
+    for raw in "${ALLOWLIST_EXTRA[@]}"; do
+      if [ -n "$raw" ]; then
+        ALLOWLIST+=("$(resolve_install_target "$raw")")
+      fi
+    done
+  fi
+
+  # normalize duplicates
+  local dedup=()
+  local existing
+  for entry in "${ALLOWLIST[@]}"; do
+    local norm
+    norm="$(printf '%s' "$entry" | tr '[:upper:]' '[:lower:]')"
+    if [ -z "$norm" ]; then
+      continue
+    fi
+    existing=0
+    for item in "${dedup[@]}"; do
+      if [ "$(printf '%s' "$item" | tr '[:upper:]' '[:lower:]')" = "$norm" ]; then
+        existing=1
+        break
+      fi
+    done
+    if [ "$existing" -ne 1 ]; then
+      dedup+=("$entry")
+    fi
+  done
+  ALLOWLIST=("${dedup[@]}")
+}
+
+# Per-skill install preserves user-added skills — no destructive directory wipe needed.
+
+prompt_install_mode() {
+  if [ ! -t 0 ]; then
+    echo "FAIL: No install target specified and not running interactively." >&2
+    echo "Use: bash scripts/install-codex.sh --global  or  bash scripts/install-codex.sh --target <path>" >&2
+    exit 1
+  fi
+
+  while true; do
+    echo "Select installation target:"
+    echo "  1) Local repo (.agents/skills + root AGENTS.md)"
+    echo "  2) Global (~/.codex/)"
+    echo "  3) Custom project directory (.agents/skills + root AGENTS.md)"
+    echo "  4) Abort"
+    echo -n "Choose [1-4, default: 1]: "
+    read -r choice
+    choice="${choice:-1}"
+
+    case "$choice" in
+      1)
+        MODE="repo"
+        return
+        ;;
+      2)
+        MODE="global"
+        TARGET="$HOME/.codex"
+        return
+        ;;
+      3)
+        MODE="target"
+        while true; do
+          echo -n "Enter target directory path: "
+          read -r custom
+          if [ -z "$custom" ]; then
+            echo "Target cannot be empty." >&2
+            continue
+          fi
+          TARGET="$custom"
+          return
+        done
+        ;;
+      4)
+        echo "Install aborted by user." >&2
+        exit 1
+        ;;
+      *)
+        echo "Please enter 1, 2, 3, or 4."
+        ;;
+    esac
+  done
+}
+
+# Parse args
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --global)
+      MODE="global"
+      TARGET="$HOME/.codex"
+      shift
+      ;;
+    --target)
+      if [[ $# -lt 2 ]]; then
+        echo "Missing value for --target." >&2
+        usage
+      fi
+      TARGET="$2"
+      MODE="target"
+      shift 2
+      ;;
+    --force)
+      FORCE=1
+      shift
+      ;;
+    --dry-run)
+      DRY_RUN=1
+      shift
+      ;;
+    --allow-unsafe-target)
+      ALLOW_UNSAFE_TARGET=1
+      shift
+      ;;
+    --no-hypothesis-hook)
+      NO_HYPOTHESIS_HOOK=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      ;;
+    *)
+      echo "Unknown option: $1"
+      usage
+      ;;
+  esac
+done
+
+if [ -z "$MODE" ]; then
+  prompt_install_mode
+  if [ "$MODE" != "repo" ] && [ "$MODE" != "global" ] && [ "$MODE" != "target" ]; then
+    MODE="repo"
+  fi
+
+  if [ -z "$TARGET" ]; then
+    if [ "$MODE" = "repo" ]; then
+      if git rev-parse --show-toplevel &>/dev/null; then
+        TARGET="$(git rev-parse --show-toplevel)/.codex"
+      else
+        TARGET="$(pwd)/.codex"
+      fi
+    elif [ "$MODE" = "global" ]; then
+      TARGET="$HOME/.codex"
+    else
+      echo "Missing target path in non-interactive mode." >&2
+      usage
+    fi
+  fi
+fi
+
+if [ "$MODE" = "repo" ] || [ "$MODE" = "global" ] || [ "$MODE" = "target" ]; then
+  build_allowlist
+  TARGET="$(validate_target_root "$TARGET" "$MODE")"
+else
+  echo "Invalid mode '$MODE'." >&2
+  usage
+fi
+
+# Derive per-mode target paths.
+# Global: everything goes into ~/.codex/ (mirrors src.codex/).
+# Repo/target: skills go into .agents/skills/,
+#              AGENTS.md merges into project root AGENTS.md.
+if [ "$MODE" = "global" ]; then
+  AGENTS_ROOT="$TARGET"
+  SKILLS_TARGET="$TARGET/skills"
+  AGENT_OVERRIDES_TARGET="$TARGET/agents"
+  MD_TARGET="$TARGET/AGENTS.md"
+else
+  # Repo-level: TARGET is <root>/.codex but skills go into <root>/.agents/
+  PROJECT_ROOT="$(dirname "$TARGET")"
+  AGENTS_ROOT="$PROJECT_ROOT/.agents"
+  SKILLS_TARGET="$AGENTS_ROOT/skills"
+  AGENT_OVERRIDES_TARGET="$TARGET/agents"
+  MD_TARGET="$PROJECT_ROOT/AGENTS.md"
+fi
+AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode.yaml"
+LEGACY_AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode"
+
+echo "=== Codex Installer ==="
+echo "Source: $SOURCE"
+echo "Skills target: $SKILLS_TARGET"
+echo "Built-in agent overrides: $AGENT_OVERRIDES_TARGET"
+echo "AGENTS.md target: $MD_TARGET"
+echo "agents-mode: $AGENTS_MODE_TARGET"
+echo "Mode:   $MODE"
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo "Mode:   dry-run"
+fi
+echo
+
+# Verify source
+if [[ ! -d "$SOURCE/skills" ]]; then
+  echo "FAIL: Source directory $SOURCE/skills not found."
+  echo "Run this script from the Orchestrarium repo root."
+  exit 1
+fi
+if [[ ! -d "$AGENTS_SOURCE" ]]; then
+  echo "FAIL: Source directory $AGENTS_SOURCE not found."
+  echo "Run this script from the Orchestrarium repo root."
+  exit 1
+fi
+if [[ ! -f "$SHARED_AGENTS_MODE_SOURCE" ]]; then
+  echo "FAIL: missing shared agents-mode template at $SHARED_AGENTS_MODE_SOURCE" >&2
+  exit 1
+fi
+
+# Create target parent directories as needed
+for tdir in "$SKILLS_TARGET" "$AGENT_OVERRIDES_TARGET"; do
+  parent="$(dirname "$tdir")"
+  if [[ ! -d "$parent" ]]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "[dry-run] would create: $parent"
+    else
+      mkdir -p "$parent"
+    fi
+  fi
+done
+
+# Per-skill install: only replace pack skills, preserve user-added skills
+install_skill() {
+  local src="$1" dst="$2" label="$3"
+  if [[ -d "$dst" ]]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would replace $label"
+    elif diff -qr "$src" "$dst" >/dev/null; then
+      echo "    OK  $label unchanged"
+    else
+      rm -rf "$dst"
+      cp -r "$src" "$dst"
+    fi
+  else
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would install $label"
+    else
+      cp -r "$src" "$dst"
+    fi
+  fi
+}
+
+ensure_local_only_gitignore_entries() {
+  local project_root="$1"
+  local gitignore="$project_root/.gitignore"
+  local entries=("/.reports/" "/work-items/" "/.scratch/")
+  local missing=()
+
+  for entry in "${entries[@]}"; do
+    local alternate="${entry#/}"
+    if [[ -f "$gitignore" ]] && { grep -Fxq "$entry" "$gitignore" || grep -Fxq "$alternate" "$gitignore"; }; then
+      continue
+    fi
+    missing+=("$entry")
+  done
+
+  if [[ ${#missing[@]} -eq 0 ]]; then
+    echo "  .gitignore: local-only entries already present"
+    return
+  fi
+
+  echo "  Ensuring .gitignore ignores local-only task-memory paths..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    for entry in "${missing[@]}"; do
+      if [[ -f "$gitignore" ]]; then
+        echo "    [dry-run] would append '$entry' to $gitignore"
+      else
+        echo "    [dry-run] would create $gitignore with '$entry'"
+      fi
+    done
+    return
+  fi
+
+  if [[ ! -f "$gitignore" ]]; then
+    printf '%s\n' "${missing[@]}" > "$gitignore"
+  else
+    for entry in "${missing[@]}"; do
+      printf '\n%s\n' "$entry" >> "$gitignore"
+    done
+  fi
+}
+
+remove_dangling_symlink() {
+  local path="$1"
+  local label="$2"
+
+  if [[ -L "$path" && ! -e "$path" ]]; then
+    echo "  Removing dangling symlink for $label..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would remove dangling symlink $path"
+    else
+      rm -f "$path"
+    fi
+  fi
+}
+
+resolve_python_command() {
+  if command -v python >/dev/null 2>&1; then
+    printf '%s' "python"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "python3"
+    return 0
+  fi
+  return 1
+}
+
+normalize_codex_agent_override_content() {
+  sed -E 's/\r$//; s/^model[[:space:]]*=[[:space:]]*"[^"]*"$/model = "<model>"/'
+}
+
+normalized_codex_agent_override_file() {
+  local path="$1"
+  normalize_codex_agent_override_content < "$path"
+}
+
+legacy_codex_agent_override_template() {
+  local name="$1"
+  case "$name" in
+    default.toml)
+      cat <<'EOF'
+name = "default"
+description = "General-purpose fallback agent."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+General-purpose fallback agent.
+Inherit the parent session's task context and focus on the assigned subtask.
+Stay within the requested scope and return a concise, usable result.
+"""
+EOF
+      ;;
+    worker.toml)
+      cat <<'EOF'
+name = "worker"
+description = "Execution-focused agent for implementation and fixes."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+Execution-focused agent for implementation and fixes.
+Carry out the assigned implementation task directly, stay within scope, and avoid redesign unless the parent explicitly asks for it.
+Return concrete progress and outcomes for the requested slice.
+"""
+EOF
+      ;;
+    explorer.toml)
+      cat <<'EOF'
+name = "explorer"
+description = "Read-heavy codebase exploration agent."
+model = "<model>"
+model_reasoning_effort = "xhigh"
+developer_instructions = """
+Read-heavy codebase exploration agent.
+Stay in exploration mode, gather evidence efficiently, and return factual findings with clear pointers.
+Do not drift into implementation unless the parent explicitly asks for it.
+"""
+EOF
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+is_pack_owned_codex_agent_override() {
+  local src="$1" dst="$2" name="$3"
+  local target_norm source_norm legacy_norm
+
+  target_norm="$(normalized_codex_agent_override_file "$dst")"
+  source_norm="$(normalized_codex_agent_override_file "$src")"
+  if [[ "$target_norm" == "$source_norm" ]]; then
+    return 0
+  fi
+
+  legacy_norm="$(legacy_codex_agent_override_template "$name" || true)"
+  if [[ -n "$legacy_norm" && "$target_norm" == "$legacy_norm" ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
+ensure_codex_agent_override_file() {
+  local src="$1" dst="$2" label="$3"
+  local name
+  name="$(basename "$src")"
+
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    if is_pack_owned_codex_agent_override "$src" "$dst" "$name"; then
+      if cmp -s "$src" "$dst"; then
+        echo "  OK  $label unchanged"
+      else
+        echo "  Refreshing stale pack-owned $label..."
+        if [ "$DRY_RUN" -eq 1 ]; then
+          echo "    [dry-run] would replace $dst"
+        else
+          cp "$src" "$dst"
+        fi
+      fi
+    else
+      echo "  Preserving existing custom $label..."
+    fi
+    return
+  fi
+
+  echo "  Installing default $label..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $dst"
+  else
+    cp "$src" "$dst"
+  fi
+}
+
+write_codex_default_agents_mode_file() {
+  local template="$1" dst="$2"
+  cat "$template" > "$dst"
+  if ! grep -q '^externalClaudeProfile:' "$dst"; then
+    printf '\nexternalClaudeProfile: opus-max  # allowed: sonnet-high | opus-max; default: opus-max\n' >> "$dst"
+  fi
+}
+
+migrate_legacy_agents_mode_file() {
+  local legacy="$1" dst="$2" label="$3"
+
+  remove_dangling_symlink "$legacy" "legacy $label"
+  remove_dangling_symlink "$dst" "$label"
+
+  if [[ -f "$dst" ]]; then
+    if [[ -f "$legacy" ]]; then
+      echo "  Canonical $label already exists; leaving legacy file untouched: $legacy"
+    fi
+    return
+  fi
+
+  if [[ ! -f "$legacy" ]]; then
+    return
+  fi
+
+  echo "  Migrating legacy $label to $dst..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would move $legacy -> $dst"
+  else
+    mv "$legacy" "$dst"
+  fi
+}
+
+sync_agents_mode_file() {
+  local template="$1" dst="$2" label="$3" provider="$4"
+  local normalizer="$REPO_DIR/scripts/normalize-agents-mode.py"
+  local python_cmd=""
+
+  remove_dangling_symlink "$dst" "$label"
+  python_cmd="$(resolve_python_command || true)"
+
+  if [[ -n "$python_cmd" && -f "$normalizer" ]]; then
+    if [[ -f "$dst" ]]; then
+      echo "  Normalizing existing $label to current canonical format..."
+    else
+      echo "  Installing canonical $label..."
+    fi
+
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+      echo "    [dry-run] would normalize $dst"
+    else
+      "$python_cmd" "$normalizer" --template "$template" --target "$dst" --provider "$provider"
+    fi
+    return
+  fi
+
+  if [[ -f "$dst" ]]; then
+    echo "FAIL: python or python3 is required to normalize existing $label at $dst" >&2
+    exit 1
+  fi
+
+  echo "  Installing canonical $label..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would create $dst"
+  elif [[ "$provider" == "codex" ]]; then
+    write_codex_default_agents_mode_file "$template" "$dst"
+  else
+    cp "$template" "$dst"
+  fi
+}
+
+find_codex_pack_start_line() {
+  local file="$1"
+  local marker_line
+  marker_line="$(grep -n "^$CODEX_PACK_BEGIN_MARKER$" "$file" 2>/dev/null | head -1 | cut -d: -f1 || true)"
+  if [[ -n "$marker_line" ]]; then
+    printf "%s" "$marker_line"
+    return
+  fi
+  grep -n "^# Shared Governance$\|^# Codex Platform Rules$\|^# Default Delegation Rule$" "$file" 2>/dev/null | head -1 | cut -d: -f1
+}
+
+find_codex_pack_end_line() {
+  local existing="$1"
+  local src="$2"
+  local pack_start="$3"
+  local footer
+
+  if awk -v start="$pack_start" -v marker="$CODEX_PACK_END_MARKER" '
+    NR < start { next }
+    $0 == marker { print NR; found=1; exit }
+    END { exit(found ? 0 : 1) }
+  ' "$existing"; then
+    return
+  fi
+
+  if awk -v start="$pack_start" '
+    NR <= start { next }
+    $0 == "## Project policies" { print NR - 1; found=1; exit }
+    END { exit(found ? 0 : 1) }
+  ' "$existing"; then
+    return
+  fi
+
+  footer="$(awk 'NF { line=$0 } END { print line }' "$src")"
+
+  if [[ -n "$footer" ]]; then
+    awk -v start="$pack_start" -v footer="$footer" '
+      NR < start { next }
+      $0 == footer { print NR; exit }
+    ' "$existing"
+  fi
+}
+
+write_merged_codex_agents_md() {
+  local existing="$1"
+  local src="$2"
+  local output="$3"
+  local pack_start="$4"
+  local total_lines head_lines tail_start pack_end new_lines footer_end
+
+  total_lines=$(wc -l < "$existing")
+  new_lines=$(wc -l < "$src")
+  footer_end="$(find_codex_pack_end_line "$existing" "$src" "$pack_start")"
+
+  if [[ -n "$footer_end" ]]; then
+    pack_end="$footer_end"
+  else
+    pack_end=$((pack_start + new_lines - 1))
+    if [[ "$pack_end" -gt "$total_lines" ]]; then
+      pack_end="$total_lines"
+    fi
+  fi
+
+  head_lines=$((pack_start - 1))
+  tail_start=$((pack_end + 1))
+
+  {
+    if [[ "$head_lines" -gt 0 ]]; then
+      head -n "$head_lines" "$existing"
+    fi
+    cat "$src"
+    if [[ "$tail_start" -le "$total_lines" ]]; then
+      tail -n "+$tail_start" "$existing"
+    fi
+  } > "$output"
+}
+
+echo "  Installing skills (per-skill, preserving user-added skills)..."
+if [[ ! -d "$SKILLS_TARGET" ]]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $SKILLS_TARGET"
+  else
+    mkdir -p "$SKILLS_TARGET"
+  fi
+fi
+
+# Count what will be replaced and confirm
+pack_skills=()
+for skill_dir in "$SOURCE/skills"/*/; do
+  [[ -d "$skill_dir" ]] || continue
+  pack_skills+=("$(basename "$skill_dir")")
+done
+
+existing_count=0
+if [[ -d "$SKILLS_TARGET" ]]; then
+  for d in "$SKILLS_TARGET"/*/; do
+    [[ -d "$d" ]] || continue
+    existing_count=$((existing_count + 1))
+  done
+fi
+
+if [ "$existing_count" -gt 0 ] && [ "$FORCE" -ne 1 ] && [ "$DRY_RUN" -ne 1 ] && [ -t 0 ]; then
+  user_count=$((existing_count - ${#pack_skills[@]}))
+  if [ "$user_count" -lt 0 ]; then user_count=0; fi
+  echo ""
+  echo "  Reinstall will replace ${#pack_skills[@]} pack skills. $user_count user skill(s) will be preserved."
+  while true; do
+    read -r -p "  Proceed? [y/N] " answer
+    case "${answer,,}" in
+      y|yes) break ;;
+      n|no|"") echo "Install cancelled by user." >&2; exit 1 ;;
+      *) echo "  Please answer y or n." ;;
+    esac
+  done
+fi
+
+pack_skills=()
+for skill_dir in "$SOURCE/skills"/*/; do
+  [[ -d "$skill_dir" ]] || continue
+  skill_name="$(basename "$skill_dir")"
+  pack_skills+=("$skill_name")
+  install_skill "$skill_dir" "$SKILLS_TARGET/$skill_name" "skills/$skill_name"
+done
+echo "  Installed ${#pack_skills[@]} pack skills."
+
+# Report user-added skills that were preserved
+if [[ -d "$SKILLS_TARGET" ]]; then
+  for existing_dir in "$SKILLS_TARGET"/*/; do
+    [[ -d "$existing_dir" ]] || continue
+    existing_name="$(basename "$existing_dir")"
+    is_pack=0
+    for ps in "${pack_skills[@]}"; do
+      if [[ "$ps" == "$existing_name" ]]; then is_pack=1; break; fi
+    done
+    if [[ $is_pack -eq 0 ]]; then
+      echo "  Preserved user skill: $existing_name"
+    fi
+  done
+fi
+
+# Runtime ledger helpers are sourced once from repo-root scripts/ and installed
+# beside the lead scripts so installed packs have a local helper surface too.
+runtime_ledger_scripts=(
+  agent-run-ledger.py
+  agent-run-ledger.ps1
+  agent-run-ledger.sh
+  check-work-items-state.py
+  check-work-items-state.ps1
+  check-work-items-state.sh
+  validate-work-item-state.py
+  validate-work-item-state.ps1
+  validate-work-item-state.sh
+)
+echo "  Installing work-item ledger helper scripts..."
+lead_scripts_target="$SKILLS_TARGET/lead/scripts"
+if [[ ! -d "$lead_scripts_target" ]]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $lead_scripts_target"
+  else
+    mkdir -p "$lead_scripts_target"
+  fi
+fi
+for script_name in "${runtime_ledger_scripts[@]}"; do
+  script_source="$REPO_DIR/scripts/$script_name"
+  script_target="$lead_scripts_target/$script_name"
+  if [[ ! -f "$script_source" ]]; then
+    echo "FAIL: Missing runtime helper source $script_source" >&2
+    exit 1
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would copy $script_source -> $script_target"
+  else
+    cp "$script_source" "$script_target"
+  fi
+done
+
+echo "  Installing built-in agent overrides (preserving existing custom files)..."
+if [[ ! -d "$AGENT_OVERRIDES_TARGET" ]]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $AGENT_OVERRIDES_TARGET"
+  else
+    mkdir -p "$AGENT_OVERRIDES_TARGET"
+  fi
+fi
+for agent_file in "$AGENTS_SOURCE"/*.toml; do
+  [[ -f "$agent_file" ]] || continue
+  ensure_codex_agent_override_file "$agent_file" "$AGENT_OVERRIDES_TARGET/$(basename "$agent_file")" "built-in agent override $(basename "$agent_file")"
+done
+
+# AGENTS.md: assemble from shared + codex-specific, then merge or create
+src_shared="$REPO_DIR/shared/AGENTS.shared.md"
+src_platform="$SOURCE/AGENTS.codex.md"
+
+if [[ ! -f "$src_shared" ]] || [[ ! -f "$src_platform" ]]; then
+  echo "FAIL: Missing $src_shared or $src_platform"
+  exit 1
+fi
+
+# Assemble pack AGENTS.md from two source files
+src_md="$(mktemp)"
+{
+  printf '%s\n' "$CODEX_PACK_BEGIN_MARKER"
+  cat "$src_shared"
+  printf '\n'
+  cat "$src_platform"
+  printf '\n%s\n' "$CODEX_PACK_END_MARKER"
+} > "$src_md"
+trap "rm -f '$src_md'" EXIT
+
+dst_md="$MD_TARGET"
+
+remove_dangling_symlink "$dst_md" "AGENTS.md"
+
+if [[ -f "$dst_md" ]]; then
+  if grep -q "## Template routing" "$dst_md" 2>/dev/null; then
+    pack_start="$(find_codex_pack_start_line "$dst_md")"
+    if [[ -n "$pack_start" ]]; then
+      echo "  AGENTS.md: replacing Codex pack section..."
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "    [dry-run] would replace Codex pack section in AGENTS.md"
+      else
+        write_merged_codex_agents_md "$dst_md" "$src_md" "$dst_md.tmp" "$pack_start"
+        mv "$dst_md.tmp" "$dst_md"
+      fi
+    else
+      echo "  AGENTS.md: full replace..."
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "    [dry-run] would replace AGENTS.md"
+      else
+        cp "$src_md" "$dst_md"
+      fi
+    fi
+  else
+    echo "  AGENTS.md: prepending Codex pack content..."
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "    [dry-run] would prepend AGENTS.md"
+    else
+      existing="$(cat "$dst_md")"
+      new="$(cat "$src_md")"
+      printf '%s\n%s' "$new" "$existing" > "$dst_md"
+    fi
+  fi
+else
+  echo "  Creating AGENTS.md..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create AGENTS.md"
+  else
+    cp "$src_md" "$dst_md"
+  fi
+fi
+
+if [ "$MODE" != "global" ]; then
+  ensure_local_only_gitignore_entries "$PROJECT_ROOT"
+fi
+
+migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+sync_agents_mode_file "$SHARED_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml" "codex"
+
+# Shared cross-pack global .agents-mode.yaml lives at $HOME/.agents-mode.yaml
+# (alongside ~/.claude.json). Lowest-precedence fallback layer below pack-local
+# globals and project-local overlays. Sync is normalize-not-overwrite, so calling
+# from both pack installers is idempotent. Only created/normalized during global installs.
+if [ "$MODE" = "global" ]; then
+  SHARED_GLOBAL_AGENTS_MODE="$HOME/.agents-mode.yaml"
+  sync_agents_mode_file "$SHARED_AGENTS_MODE_SOURCE" "$SHARED_GLOBAL_AGENTS_MODE" "shared global ~/.agents-mode.yaml" "shared"
+fi
+
+# Install structural hooks into ~/.codex/hooks.json
+# (global) or <project>/.codex/hooks.json (target). Idempotent JSON merge that
+# preserves all other user keys and other hooks. Opt out with --no-hypothesis-hook
+# or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1. Codex's matcher field has no `if`-style
+# argument filter, so the hook script self-filters by parsing tool_input.command.
+if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
+  hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
+  if [ ! -f "$hook_installer" ]; then
+    echo "WARN: hypothesis-hook installer not found at $hook_installer; skipping hook install" >&2
+  else
+    python_cmd="$(resolve_python_command || true)"
+    if [ -z "$python_cmd" ]; then
+      echo "FAIL: python or python3 is required to auto-install the structural hooks" >&2
+      echo "      Rerun with --no-hypothesis-hook to skip, or install Python and re-run." >&2
+      exit 1
+    fi
+    # OS-aware host-os flag. On Windows the Codex hook entry uses
+    # `powershell.exe ... -File <.ps1>` to avoid the PATH gotcha where
+    # `bash` may resolve to the WSL launcher (System32\bash.exe) instead of
+    # Git Bash — WSL bash cannot resolve `C:\Users\...` paths and the entry
+    # silently fails. PowerShell.exe always resolves to one known system
+    # path with no PATH ambiguity. On POSIX, plain `bash <script.sh>` works.
+    case "$(uname -s 2>/dev/null)" in
+      MINGW*|MSYS*|CYGWIN*) hook_host_os="windows" ;;
+      *) hook_host_os="posix" ;;
+    esac
+    # TARGET is ~/.codex (global) or <project>/.codex (target). Codex hooks.json
+    # lives in the .codex/ directory in both modes.
+    # AGENTS_ROOT is ~/.codex (global) or <project>/.agents (target) — skills
+    # live under AGENTS_ROOT.
+    hooks_target="$TARGET/hooks.json"
+    if [ "$hook_host_os" = "windows" ]; then
+      bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.ps1"
+      stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.ps1"
+      wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.ps1"
+      machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.ps1"
+      notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.ps1"
+    else
+      bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.sh"
+      stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.sh"
+      wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.sh"
+      machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.sh"
+      notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.sh"
+    fi
+    echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-path "$bugfix_script_target"
+    echo "  Installing passive-polling Stop hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --hook-event Stop \
+      --script-marker check-passive-polling-stop \
+      --script-path "$stop_script_target"
+    echo "  Installing work-items-archival Stop hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --hook-event Stop \
+      --script-marker check-work-items-archival-stop \
+      --script-path "$wi_archival_script_target"
+    echo "  Installing machine-local-path PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-marker check-machine-local-path \
+      --script-path "$machine_path_script_target"
+    echo "  Installing no-trash-in-repo PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-marker check-no-trash-in-repo \
+      --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash" \
+      --script-path "$notrash_script_target"
+  fi
+fi
+
+if [ "$DRY_RUN" -eq 1 ]; then
+  echo ""
+  echo "RESULT: DRY-RUN complete (no files modified)."
+  exit 0
+fi
+
+# Verification — explicit required-file manifest check
+
+echo ""
+echo "=== Verification ==="
+errors=0
+
+check_file() {
+  local path="$1"
+  local label="$2"
+
+  if [[ -f "$path" ]]; then
+    echo "  OK  $label"
+  else
+    echo "  FAIL  $label"
+    errors=$((errors+1))
+  fi
+}
+
+check_installed_manifest() {
+  local source_dir="$1"
+  local target_base="$2"
+  local source_base="$3"
+  while IFS= read -r -d '' source_file; do
+    local rel_path="${source_file#$source_base/}"
+    check_file "$target_base/$rel_path" "$rel_path"
+  done < <(find "$source_dir" -type f -print0)
+}
+
+check_installed_manifest "$SOURCE/skills" "$SKILLS_TARGET" "$SOURCE/skills"
+check_installed_manifest "$AGENTS_SOURCE" "$AGENT_OVERRIDES_TARGET" "$AGENTS_SOURCE"
+
+check_file "$SKILLS_TARGET/lead/operating-model.md" "skills/lead/operating-model.md"
+check_file "$SKILLS_TARGET/lead/subagent-contracts.md" "skills/lead/subagent-contracts.md"
+check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.sh" "skills/lead/scripts/check-publication-safety.sh"
+check_file "$SKILLS_TARGET/lead/scripts/check-publication-safety.ps1" "skills/lead/scripts/check-publication-safety.ps1"
+check_file "$SKILLS_TARGET/lead/scripts/validate-skill-pack.sh" "skills/lead/scripts/validate-skill-pack.sh"
+for script_name in "${runtime_ledger_scripts[@]}"; do
+  check_file "$SKILLS_TARGET/lead/scripts/$script_name" "skills/lead/scripts/$script_name"
+done
+check_file "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+check_file "$AGENT_OVERRIDES_TARGET/default.toml" "agents/default.toml"
+check_file "$AGENT_OVERRIDES_TARGET/worker.toml" "agents/worker.toml"
+check_file "$AGENT_OVERRIDES_TARGET/explorer.toml" "agents/explorer.toml"
+
+if [[ -f "$dst_md" ]]; then
+  line_count=$(wc -l < "$dst_md")
+  echo "  OK  AGENTS.md ($line_count lines)"
+  for section in "## Template routing" "## Role index" "## Engineering hygiene" "## Publication safety"; do
+    if grep -q "$section" "$dst_md"; then
+      echo "  OK  AGENTS.md has '$section'"
+    else
+      echo "  FAIL  AGENTS.md missing '$section'"
+      errors=$((errors+1))
+    fi
+  done
+else
+  echo "  FAIL  AGENTS.md missing"
+  errors=$((errors+1))
+fi
+
+echo ""
+if [[ $errors -gt 0 ]]; then
+  echo "RESULT: FAIL ($errors errors)"
+  exit 1
+else
+  echo "RESULT: OK — Codex pack installed"
+  echo "  Skills: $SKILLS_TARGET"
+  echo "  Built-in agent overrides: $AGENT_OVERRIDES_TARGET"
+  echo "  AGENTS.md: $MD_TARGET"
+  echo "  agents-mode: $AGENTS_MODE_TARGET"
+  echo ""
+  echo "Next: open Codex in the target project and run '\$init-project' to review/update project policies and the installed default .agents/.agents-mode.yaml."
+  echo "Then run 'bash $SKILLS_TARGET/lead/scripts/validate-skill-pack.sh' if you are validating the installation from a maintainer shell."
+fi

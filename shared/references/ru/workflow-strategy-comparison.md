@@ -47,9 +47,20 @@
 | `Spec-first + compliance review` | design-control mode | spec vs implementation | API/schema fidelity, предсказуемое выполнение на стабильных контрактах | слабее, если сам spec неверный | средняя - высокая | когда контракты и интерфейсы — главный риск | используется в части design/plan flow |
 | `Audit sampling` | governance mode | весь поток vs sampled review | throughput в high-volume flows | по определению может пропускать проблемы | низкая - средняя | bulk operations, где полный review слишком дорог | не core pattern |
 
-## 4. Стратегии защиты workflow
+## 4. Матрица классификации изменений
 
-Embedded repository defaults shown in **bold**.
+Используйте эту матрицу до выбора workflow path. Она показывает риск изменения и gates, которые оно должно форсировать.
+
+| Класс изменения | Обязательный routing / gates | Пример |
+|---|---|---|
+| `cosmetic` | Обычно только QA; без extra specialist lane по умолчанию | wording, formatting, comments, local refactors без observable behavior change |
+| `additive` | Normal delivery loop; QA обязателен; specialist lane добавляется только если появляется новый risk owner. Lead может использовать fast lane только когда change остаётся в одном module или clearly bounded seam, не вводит новый risk owner и не меняет existing contracts или shared abstractions | new code или docs, которые расширяют behavior без изменения existing contracts или defaults |
+| `behavioral` | Сначала factual/design owner, если evidence тонкое; QA обязателен; independent reviewer добавляется, когда важны contracts, flow или failure modes | runtime behavior, validation, error handling или user-facing flow changes |
+| `breaking-or-cross-cutting` | Architect и обычно planner; re-review affected downstream artifacts; integration owner, когда несколько phases или specialists land together; reviewer lanes as needed | contract, migration, seam, dependency direction, rollout/rollback или multi-boundary changes |
+
+## 5. Стратегии защиты workflow
+
+Embedded repository defaults показаны **bold**.
 
 | Стратегия | Главная цель | Лучше всего предотвращает | Когда эскалировать | Статус в репозитории |
 |---|---|---|---|---|
@@ -66,7 +77,7 @@ Embedded repository defaults shown in **bold**.
 | **`Parallel read lanes`** | ускорить независимый сбор evidence | serial read-only bottlenecks | scopes overlap или synthesis cost выше выгоды | **supported** |
 | `Parallel write lanes` | ускорить disjoint implementation work | ненужная serial implementation, когда boundaries уже frozen | write scopes overlap или contracts ещё двигаются | conditional only |
 
-## 5. Краткий guide выбора
+## 6. Краткий guide выбора
 
 | Если ситуация такая | Начать с | Потом добавить |
 |---|---|---|
@@ -79,7 +90,7 @@ Embedded repository defaults shown in **bold**.
 | Работу должны вместе land'ить несколько implementation phases | `Integration ownership` | QA и reviewer gates после появления одного integrated artifact |
 | Diff стал слишком широким для local change | `Change isolation` | перекинуть на `architect`, `planner` или `architecture-reviewer` |
 
-## 6. Эвристики выбора
+## 7. Эвристики выбора
 
 - Используйте `Claim-Verify`, когда reviewer должен проверить, что builder действительно отдал обещанное.
 - Используйте `Adversarial`, когда reviewer должен искать то, что builder мог вообще не смоделировать.
@@ -88,3 +99,13 @@ Embedded repository defaults shown in **bold**.
 - Используйте `Re-intake`, когда admitted item изменился, а не просто текущий artifact.
 - Используйте `Integration ownership`, когда QA иначе получит частично собранную работу.
 - Считайте `change isolation` первичной защитой, а не implementation detail.
+
+## Термины и сокращения
+
+- `Adversarial`: режим ревью, где reviewer ищет blind spots, unknown risks и failure modes, которые builder мог не смоделировать.
+- `CI`: Continuous Integration; автоматические checks перед merge, push или release.
+- `Claim-Verify`: режим ревью, где reviewer проверяет explicit claims builder'а against evidence.
+- `QA`: Quality Assurance; проверка поведения, acceptance criteria и регрессий.
+- `Re-intake`: возврат изменившегося item к roadmap/admission owner перед новым delivery loop.
+- `UI`: User Interface; пользовательский интерфейс.
+- `UX`: User Experience; качество пользовательского опыта.

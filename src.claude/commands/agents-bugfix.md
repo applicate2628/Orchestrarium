@@ -2,6 +2,17 @@
 
 Classify the bug severity and run the appropriate template chain.
 
+## When to auto-invoke
+
+Apply this command's flow automatically when the user's request matches any of:
+
+- explicit bug report: "fix this bug", "не работает", "crashes", "broken", error trace or stack pasted
+- defective behavior named without a proposed fix: "X is producing wrong output", "Y returns empty when it shouldn't"
+- regression flagged: "this used to work", "this broke after change Z"
+- bug filename reference: user mentions a `work-items/bugs/<file>` slug
+
+The user does not need to type `/agents-bugfix` for this flow to fire. Apply it transparently, announce the routing decision in your first response ("I'm routing this through the bugfix flow because..."), and let the user redirect if the auto-routing was wrong. If the bug's cause is not obvious from the description, load common-skill `$bug-hunting` before the analyst triage in Step 2; if the superpowers plugin is also installed, additionally invoke `Skill: superpowers:systematic-debugging` for the broader diagnostic methodology. The `$bug-hunting` common-skill is shipped by this pack and always available; `superpowers:systematic-debugging` is an external plugin and may not be present in every install.
+
 ## Steps
 
 1. **Get the bug description.** Use `$ARGUMENTS` as the bug description. If empty, check `work-items/bugs/` for files with `status: open`. If open bugs exist, list them (filename, severity, first line of Description) and ask the user to pick one or describe a new bug. If no open bugs and no arguments, ask the user to describe the bug.
@@ -50,4 +61,4 @@ Classify the bug severity and run the appropriate template chain.
 - When routing preferences favor external dispatch, `external-worker` may replace the chosen implementer and `external-reviewer` may replace the QA/review-side slot. Mandatory security and performance reviewers remain internal in their sensitive templates.
 - Follow evidence-based completion: show fresh execution evidence before claiming done.
 - **Do NOT commit after fixing.** Present the fix to the user with evidence. The user decides when to commit — only after they are satisfied with testing and fix reliability. Suggest running `/agents-test` or `/agents-review` before committing.
-- When fixing a bug from the registry, update its file: set `status: fixed` only after QA confirms the fix AND the user approves. If QA says REVISE, keep `status: open`.
+- When fixing a bug from the registry, update its file: set `status: fixed` only after QA confirms the fix AND the user approves. If QA says REVISE, keep `status: open`. Two other terminal states exist for bugs that are not fixed: `wontfix` (the bug is acknowledged but deliberately not fixed — keep a one-line reason) and `duplicate` (the bug restates an existing one — name the surviving bug id). The canonical bug status enum (`open | fixed | wontfix | duplicate`) and its transition rules are defined once in `qa-engineer.md`'s bug status lifecycle; this command follows that enum, it does not redefine it. The `/agents-status` open-scan still lists only `status: open`.

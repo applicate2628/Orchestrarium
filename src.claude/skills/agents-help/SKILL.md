@@ -3,7 +3,7 @@ name: agents-help
 description: Display a comprehensive overview of the skill-pack for the user.
 disable-model-invocation: true
 ---
-# Claudestrator Help
+# Claude Code Pack Help
 
 Display a comprehensive overview of the skill-pack for the user.
 
@@ -18,14 +18,15 @@ Display a comprehensive overview of the skill-pack for the user.
 | Command | Purpose |
 | --- | --- |
 | `/agents-help` | This overview |
-| `/agents-review` | Code review current changes (analyst → QA → reviewer) |
+| `/agents-external-brigade` | Launch a bounded parallel set of external helpers |
+| `/agents-review-loop` | Autonomous parallel-review-loop: 2 verdict angles + 1 scout converge on one fix-design artifact |
+| `/agents-review` | Full repo-impact review from current changes or a specified target (analyst → QA → reviewer) |
 | `/agents-bugfix` | Fix a bug (analyst → implementer → QA) |
 | `/agents-test` | Write or verify tests for specified code |
 | `/agents-research` | Investigate a question (analyst → architect) |
 | `/agents-design` | Full research-to-plan chain (analyst → architect → planner) |
 | `/agents-security` | Security review (security-engineer → security-reviewer) |
 | `/agents-second-opinion` | Get a second opinion via consultant (Codex; preserves routing prefs) |
-| `/agents-external-brigade` | Launch a bounded parallel external-helper brigade |
 | `/agents-implement` | Execute an approved plan phase by phase |
 | `/agents-perf` | Fix a performance issue (perf-engineer → impl → QA → perf-reviewer) |
 | `/agents-refactor` | Safe refactoring with blast-radius analysis |
@@ -63,7 +64,7 @@ Show 3-4 natural language examples of how to invoke agents:
 - "build a new export feature for reports" → full-delivery
 - "$external-worker implement this approved phase through Codex CLI" → direct invocation
 - "$external-reviewer audit this change through Codex CLI" → direct invocation
-- "/agents-external-brigade run two external-reviewer lanes and one Gemini visual worker lane" → launch a bounded parallel external-helper brigade
+- "/agents-external-brigade run two external-reviewer lanes plus one explicit example-only Gemini visual worker lane" → direct invocation
 - "$consultant what do you think about this approach?" → direct invocation
 
 ### Project policies

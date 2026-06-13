@@ -14,7 +14,8 @@ param(
     [string]$Target,
     [switch]$Force,
     [switch]$DryRun,
-    [switch]$AllowUnsafeTarget
+    [switch]$AllowUnsafeTarget,
+    [switch]$NoHypothesisHook
 )
 
 $ErrorActionPreference = "Stop"
@@ -23,7 +24,7 @@ $RepoDir = Split-Path -Parent $ScriptDir
 $Source = Join-Path $RepoDir "src.claude"
 $DefaultAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
 
-$Dirs = @("agents", "commands")
+$Dirs = @("agents", "commands", "skills")
 $OptionalDirs = @("memory")
 $script:PromptMode = $null
 
@@ -223,56 +224,7 @@ function Read-InstallMode {
     }
 }
 
-function Confirm-Removal {
-    param([string]$Path)
-    if ($Force -or $DryRun) {
-        return $true
-    }
-    if (-not (Test-Interactive)) {
-        Write-Host "Skipping interactive confirmation in non-console host." -ForegroundColor Yellow
-        return $true
-    }
-
-    $name = Split-Path $Path -Leaf
-    while ($true) {
-        $rawAnswer = Read-Host "Delete existing '$name' at '$Path' before reinstall? [y/N]"
-        $answer = if ($null -eq $rawAnswer) { "" } else { $rawAnswer.Trim().ToLower() }
-        switch -Regex ($answer.Trim().ToLower()) {
-            "^(y|yes)$" { return $true }
-            "^n$|^no$|^$" { return $false }
-            default { Write-Host "Please answer y or n." }
-        }
-    }
-}
-
 # Per-item install preserves user-added files — no destructive directory wipe needed.
-
-function Copy-RequiredDirectory {
-    param(
-        [string]$SourceDir,
-        [string]$TargetDir,
-        [string]$Label
-    )
-
-    if (Test-Path -LiteralPath $TargetDir) {
-        Write-Host "  Removing old $Label..."
-        if (-not (Confirm-Removal $TargetDir)) {
-            Write-Host "Install cancelled: existing directory not removed: $TargetDir" -ForegroundColor Red
-            exit 1
-        }
-        if (-not $DryRun) {
-            Remove-Item -Recurse -Force $TargetDir
-        } else {
-            Write-Host "    [dry-run] would remove $TargetDir"
-        }
-    }
-    Write-Host "  Installing $Label..."
-    if (-not $DryRun) {
-        Copy-Item -Recurse -Force $SourceDir $TargetDir
-    } else {
-        Write-Host "    [dry-run] would copy $SourceDir -> $TargetDir"
-    }
-}
 
 function Get-DirectoryFileHashes {
     param([string]$Root)
@@ -389,7 +341,7 @@ function Ensure-LocalOnlyGitignoreEntries {
     param([string]$ProjectRoot)
 
     $gitignore = Join-Path $ProjectRoot ".gitignore"
-    $entries = @("/.reports/", "/work-items/")
+    $entries = @("/.reports/", "/work-items/", "/.scratch/")
     $existingLines = @()
     if (Test-Path -LiteralPath $gitignore) {
         $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
@@ -444,28 +396,6 @@ function Remove-DanglingLink {
         } else {
             Remove-Item -LiteralPath $Path -Force
         }
-    }
-}
-
-function Ensure-DefaultFile {
-    param(
-        [string]$SourceFile,
-        [string]$TargetFile,
-        [string]$Label
-    )
-
-    Remove-DanglingLink -Path $TargetFile -Label $Label
-
-    if (Test-Path -LiteralPath $TargetFile) {
-        Write-Host "  Preserving existing $Label..."
-        return
-    }
-
-    Write-Host "  Installing default $Label..."
-    if (-not $DryRun) {
-        Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
-    } else {
-        Write-Host "    [dry-run] would create $TargetFile"
     }
 }
 
@@ -717,10 +647,15 @@ if (-not $Force -and -not $DryRun -and (Test-Interactive)) {
     foreach ($dir in $Dirs) {
         $dst = Join-Path $TargetRoot $dir
         $src = Join-Path $Source $dir
+        # Count top-level entries (files AND subdirectories) — these are exactly the
+        # "pack items" the install loop below replaces. Matches install-claude.sh's
+        # `-e` count over `"$dst"/*` so .sh and .ps1 report the same totals for
+        # identical trees. No -Force: the bash `*` glob skips dotfiles, so we skip
+        # hidden entries too rather than diverge in the other direction.
         if (Test-Path -LiteralPath $dst) {
-            $existingTotal += (Get-ChildItem -LiteralPath $dst -File -ErrorAction SilentlyContinue).Count
+            $existingTotal += @(Get-ChildItem -LiteralPath $dst -ErrorAction SilentlyContinue).Count
         }
-        $packTotal += (Get-ChildItem -LiteralPath $src -File -ErrorAction SilentlyContinue).Count
+        $packTotal += @(Get-ChildItem -LiteralPath $src -ErrorAction SilentlyContinue).Count
     }
     if ($existingTotal -gt 0) {
         $userCount = $existingTotal - $packTotal
@@ -773,6 +708,40 @@ foreach ($dir in $Dirs) {
         if ($packItems -notcontains $existing.Name) {
             Write-Host "  Preserved user file: $dir/$($existing.Name)"
         }
+    }
+}
+
+$RuntimeLedgerScripts = @(
+    "agent-run-ledger.py",
+    "agent-run-ledger.ps1",
+    "agent-run-ledger.sh",
+    "check-work-items-state.py",
+    "check-work-items-state.ps1",
+    "check-work-items-state.sh",
+    "validate-work-item-state.py",
+    "validate-work-item-state.ps1",
+    "validate-work-item-state.sh"
+)
+$ClaudeScriptsTarget = Join-Path $TargetRoot "agents\scripts"
+Write-Host "  Installing work-item ledger helper scripts..."
+if (-not (Test-Path -LiteralPath $ClaudeScriptsTarget)) {
+    if (-not $DryRun) {
+        New-Item -ItemType Directory -Path $ClaudeScriptsTarget -Force | Out-Null
+    } else {
+        Write-Host "    [dry-run] would create $ClaudeScriptsTarget"
+    }
+}
+foreach ($scriptName in $RuntimeLedgerScripts) {
+    $scriptSource = Join-Path (Join-Path $RepoDir "scripts") $scriptName
+    $scriptTarget = Join-Path $ClaudeScriptsTarget $scriptName
+    if (-not (Test-Path -LiteralPath $scriptSource)) {
+        Write-Host "FAIL: Missing runtime helper source $scriptSource" -ForegroundColor Red
+        exit 1
+    }
+    if (-not $DryRun) {
+        Copy-Item -LiteralPath $scriptSource -Destination $scriptTarget -Force
+    } else {
+        Write-Host "    [dry-run] would copy $scriptSource -> $scriptTarget"
     }
 }
 
@@ -896,6 +865,70 @@ if ($Mode -ne "global") {
 Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
 Sync-AgentsModeFile -TemplateFile $DefaultAgentsModeSource -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
 
+# Shared cross-pack global .agents-mode.yaml lives at $HOME/.agents-mode.yaml
+# (alongside ~/.claude.json). Lowest-precedence fallback layer below pack-local
+# globals and project-local overlays. Sync is normalize-not-overwrite, so calling
+# from both pack installers is idempotent. Only created/normalized during global installs.
+if ($Mode -eq "global") {
+    $SharedGlobalAgentsMode = Join-Path $HOME ".agents-mode.yaml"
+    Sync-AgentsModeFile -TemplateFile $DefaultAgentsModeSource -TargetFile $SharedGlobalAgentsMode -Label "shared global ~/.agents-mode.yaml"
+}
+
+# Install structural hooks by merging them into the
+# user's settings.json idempotently. Preserves all other user keys and other
+# hooks. Opt out with -NoHypothesisHook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
+# Fails closed (non-zero exit) if Python is required but unavailable.
+if (-not $NoHypothesisHook -and -not $DryRun) {
+    $HookInstaller = Join-Path $RepoDir "scripts\install-hypothesis-hook.py"
+    if (-not (Test-Path $HookInstaller)) {
+        Write-Warning "hypothesis-hook installer not found at $HookInstaller; skipping hook install"
+    } else {
+        $PythonCmd = Get-PythonCommand
+        if (-not $PythonCmd) {
+            Write-Error "python or python3 is required to auto-install the structural hooks. Rerun with -NoHypothesisHook to skip, or install Python and re-run."
+            exit 1
+        }
+        $SettingsTarget = Join-Path $TargetRoot "settings.json"
+        # PowerShell installer always emits Windows-native exec form referencing
+        # the .ps1 hook script. Bash form is reserved for the .sh installer.
+        $BugfixScriptTarget = Join-Path $TargetRoot "agents\scripts\check-bugfix-discipline.ps1"
+        $StopScriptTarget = Join-Path $TargetRoot "agents\scripts\check-passive-polling-stop.ps1"
+        $WiArchivalScriptTarget = Join-Path $TargetRoot "agents\scripts\check-work-items-archival-stop.ps1"
+        $MachinePathScriptTarget = Join-Path $TargetRoot "agents\hooks\check-machine-local-path.ps1"
+        $NoTrashScriptTarget = Join-Path $TargetRoot "agents\hooks\check-no-trash-in-repo.ps1"
+        Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-path $BugfixScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing passive-polling Stop hook (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event Stop --script-marker check-passive-polling-stop --script-path $StopScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing work-items-archival Stop hook (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event Stop --script-marker check-work-items-archival-stop --script-path $WiArchivalScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing machine-local-path PreToolUse hook [AUDIT] (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-machine-local-path --script-path $MachinePathScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing no-trash-in-repo PreToolUse hook [AUDIT] (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-no-trash-in-repo --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash" --script-path $NoTrashScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+    }
+}
+
 if ($DryRun) {
     Write-Host ""
     Write-Host "RESULT: DRY-RUN complete (no files modified)."
@@ -938,6 +971,9 @@ foreach ($dir in $Dirs) {
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/operating-model.md") "agents/contracts/operating-model.md"
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/subagent-contracts.md") "agents/contracts/subagent-contracts.md"
 Test-InstalledFile (Join-Path $TargetRoot "agents/contracts/policies-catalog.md") "agents/contracts/policies-catalog.md"
+foreach ($scriptName in $RuntimeLedgerScripts) {
+    Test-InstalledFile (Join-Path $TargetRoot "agents/scripts/$scriptName") "agents/scripts/$scriptName"
+}
 Test-InstalledFile $AgentsModeTarget ".agents-mode.yaml"
 
 # Check CLAUDE.md (Claude-specific sections)

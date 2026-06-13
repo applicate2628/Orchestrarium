@@ -12,11 +12,12 @@ SOURCE="$REPO_DIR/src.claude"
 DEFAULT_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 
 # Directories to install (order doesn't matter)
-DIRS=(agents commands)
+DIRS=(agents commands skills)
 OPTIONAL_DIRS=(memory)
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
+NO_HYPOTHESIS_HOOK=0
 MODE=""
 TARGET=""
 
@@ -240,31 +241,6 @@ build_allowlist() {
   ALLOWLIST=("${dedup[@]}")
 }
 
-confirm_removal() {
-  local path="$1"
-  local name
-  name="$(basename "$path")"
-
-  if [ "$FORCE" -eq 1 ] || [ "$DRY_RUN" -eq 1 ]; then
-    return 0
-  fi
-
-  while true; do
-    read -r -p "Delete existing '$name' at '$path' before reinstall? [y/N] " answer
-    case "${answer,,}" in
-      y|yes)
-        return 0
-        ;;
-      n|no|"")
-        return 1
-        ;;
-      *)
-        echo "Please answer y or n."
-        ;;
-    esac
-  done
-}
-
 # Per-item install preserves user-added files — no destructive directory wipe needed.
 
 prompt_install_mode() {
@@ -345,6 +321,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-unsafe-target)
       ALLOW_UNSAFE_TARGET=1
+      shift
+      ;;
+    --no-hypothesis-hook)
+      NO_HYPOTHESIS_HOOK=1
       shift
       ;;
     -h|--help)
@@ -459,7 +439,7 @@ install_item() {
 ensure_local_only_gitignore_entries() {
   local project_root="$1"
   local gitignore="$project_root/.gitignore"
-  local entries=("/.reports/" "/work-items/")
+  local entries=("/.reports/" "/work-items/" "/.scratch/")
   local missing=()
 
   for entry in "${entries[@]}"; do
@@ -520,24 +500,6 @@ resolve_python_command() {
     return 0
   fi
   return 1
-}
-
-ensure_default_file() {
-  local src="$1" dst="$2" label="$3"
-
-  remove_dangling_symlink "$dst" "$label"
-
-  if [[ -f "$dst" ]]; then
-    echo "  Preserving existing $label..."
-    return
-  fi
-
-  echo "  Installing default $label..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    [dry-run] would create $dst"
-  else
-    cp "$src" "$dst"
-  fi
 }
 
 sync_agents_mode_file() {
@@ -722,6 +684,40 @@ for dir in "${DIRS[@]}"; do
   done
 done
 
+runtime_ledger_scripts=(
+  agent-run-ledger.py
+  agent-run-ledger.ps1
+  agent-run-ledger.sh
+  check-work-items-state.py
+  check-work-items-state.ps1
+  check-work-items-state.sh
+  validate-work-item-state.py
+  validate-work-item-state.ps1
+  validate-work-item-state.sh
+)
+echo "  Installing work-item ledger helper scripts..."
+claude_scripts_target="$TARGET/agents/scripts"
+if [[ ! -d "$claude_scripts_target" ]]; then
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would create $claude_scripts_target"
+  else
+    mkdir -p "$claude_scripts_target"
+  fi
+fi
+for script_name in "${runtime_ledger_scripts[@]}"; do
+  script_source="$REPO_DIR/scripts/$script_name"
+  script_target="$claude_scripts_target/$script_name"
+  if [[ ! -f "$script_source" ]]; then
+    echo "FAIL: Missing runtime helper source $script_source" >&2
+    exit 1
+  fi
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "    [dry-run] would copy $script_source -> $script_target"
+  else
+    cp "$script_source" "$script_target"
+  fi
+done
+
 # Optional dirs: copy if not present, don't overwrite
 for dir in "${OPTIONAL_DIRS[@]}"; do
   src="$SOURCE/$dir"
@@ -828,6 +824,96 @@ fi
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 
+# Shared cross-pack global .agents-mode.yaml lives at $HOME/.agents-mode.yaml
+# (alongside ~/.claude.json). It is the lowest-precedence fallback layer below
+# pack-local globals and project-local overlays. The sync function is
+# normalize-not-overwrite, so calling it from both pack installers is idempotent.
+# Only created/normalized during default global installs (--global mode).
+if [ "$MODE" = "global" ]; then
+  SHARED_GLOBAL_AGENTS_MODE="$HOME/.agents-mode.yaml"
+  sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$SHARED_GLOBAL_AGENTS_MODE" "shared global ~/.agents-mode.yaml"
+fi
+
+# Install structural hooks by merging them into the
+# user's settings.json idempotently. Preserves all other user keys and other
+# hooks. Opt out with --no-hypothesis-hook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
+# Fails closed (non-zero exit) if Python is required but unavailable, matching
+# the agents-mode sync contract — silent skip would leave the user thinking
+# the hook is active when it is not.
+if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
+  hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
+  if [ ! -f "$hook_installer" ]; then
+    echo "WARN: hypothesis-hook installer not found at $hook_installer; skipping hook install" >&2
+  else
+    python_cmd="$(resolve_python_command || true)"
+    if [ -z "$python_cmd" ]; then
+      echo "FAIL: python or python3 is required to auto-install the structural hooks" >&2
+      echo "      Rerun with --no-hypothesis-hook to skip, or install Python and re-run." >&2
+      exit 1
+    fi
+    settings_target="$TARGET/settings.json"
+    # OS-aware host detection: on Windows under Git Bash / MSYS / Cygwin we
+    # emit the native PowerShell exec form referencing .ps1; on POSIX we emit
+    # the bash exec form referencing .sh. The Python helper builds the right
+    # entry shape from --host-os.
+    case "$(uname -s 2>/dev/null)" in
+      MINGW*|MSYS*|CYGWIN*)
+        hook_host_os="windows"
+        bugfix_script_target="$TARGET/agents/scripts/check-bugfix-discipline.ps1"
+        stop_script_target="$TARGET/agents/scripts/check-passive-polling-stop.ps1"
+        wi_archival_script_target="$TARGET/agents/scripts/check-work-items-archival-stop.ps1"
+        machine_path_script_target="$TARGET/agents/hooks/check-machine-local-path.ps1"
+        notrash_script_target="$TARGET/agents/hooks/check-no-trash-in-repo.ps1"
+        ;;
+      *)
+        hook_host_os="posix"
+        bugfix_script_target="$TARGET/agents/scripts/check-bugfix-discipline.sh"
+        stop_script_target="$TARGET/agents/scripts/check-passive-polling-stop.sh"
+        wi_archival_script_target="$TARGET/agents/scripts/check-work-items-archival-stop.sh"
+        machine_path_script_target="$TARGET/agents/hooks/check-machine-local-path.sh"
+        notrash_script_target="$TARGET/agents/hooks/check-no-trash-in-repo.sh"
+        ;;
+    esac
+    echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --script-path "$bugfix_script_target"
+    echo "  Installing passive-polling Stop hook (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --hook-event Stop \
+      --script-marker check-passive-polling-stop \
+      --script-path "$stop_script_target"
+    echo "  Installing work-items-archival Stop hook (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --hook-event Stop \
+      --script-marker check-work-items-archival-stop \
+      --script-path "$wi_archival_script_target"
+    echo "  Installing machine-local-path PreToolUse hook [AUDIT] (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --script-marker check-machine-local-path \
+      --script-path "$machine_path_script_target"
+    echo "  Installing no-trash-in-repo PreToolUse hook [AUDIT] (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --script-marker check-no-trash-in-repo \
+      --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash" \
+      --script-path "$notrash_script_target"
+  fi
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
   echo ""
   echo "RESULT: DRY-RUN complete (no files modified)."
@@ -867,6 +953,9 @@ done
 check_file "$TARGET/agents/contracts/operating-model.md" "agents/contracts/operating-model.md"
 check_file "$TARGET/agents/contracts/subagent-contracts.md" "agents/contracts/subagent-contracts.md"
 check_file "$TARGET/agents/contracts/policies-catalog.md" "agents/contracts/policies-catalog.md"
+for script_name in "${runtime_ledger_scripts[@]}"; do
+  check_file "$TARGET/agents/scripts/$script_name" "agents/scripts/$script_name"
+done
 check_file "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 
 # Check CLAUDE.md (Claude-specific sections)

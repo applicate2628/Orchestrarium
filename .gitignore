@@ -1,12 +1,33 @@
-# Local repo-install outputs (created by install scripts, not committed)
+# Local install outputs and working copies
 /.agents/
 /.codex/
 /.claude/
+/.gemini/
 
-# Local-only scratch and legacy plan history.
+# Local-only scratch and planning state
 /.scratch/
 /.plans/
+/.reports/
 /work-items/
 
-# Plugin/tool local state
+# Tool and plugin local state
 /.serena/
+/.codegraph/
+
+# Local editor state
+/.vscode/
+/.idea/
+
+# Common local runtime caches
+**/node_modules/
+**/.pytest_cache/
+**/__pycache__/
+**/*.pyc
+**/coverage/
+
+# OS noise
+**/.DS_Store
+**/Thumbs.db
+
+# Windows PowerShell module cache (pwsh hooks running with cwd=repo write it here)
+/Microsoft/

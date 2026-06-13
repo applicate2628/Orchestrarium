@@ -7,6 +7,19 @@ disable-model-invocation: true
 
 Run a security-focused review using the `security-sensitive` template roles.
 
+## When to auto-invoke
+
+Apply this command's flow automatically when the user's request matches any of:
+
+- security or vulnerability concern raised: "is this secure?", "review X for vulnerabilities", "could this be exploited?"
+- auth, authz, or credential surface touched: "review the login flow", "check how we handle tokens/secrets", "audit the permission checks"
+- trust boundary or data-exposure question: "is this input validated?", "are we leaking data here?", "what's the attack surface of Y?"
+- dependency or supply-chain risk: "is this library safe to add?", "check the new dependency for known CVEs"
+
+The user does not need to type `/agents-security` for this flow to fire. Apply it transparently, announce the routing decision in your first response ("I'm routing this through the security flow because the request touches a trust boundary / credential surface"), and let the user redirect if the auto-routing was wrong.
+
+**Do NOT auto-invoke** for a general code-quality or architecture review with no trust-boundary, auth, credential, or data-exposure dimension — that is `/agents-review` territory. When a bug or change involves auth, credentials, or a trust boundary, this security flow takes precedence over `/agents-bugfix` and `/agents-review` per the "pick the most specialized one" resolution rule in CLAUDE.md. This flow is read-only — it produces a threat model and findings, not fixes.
+
 ## Steps
 
 1. **Determine scope.** Check `$ARGUMENTS`:

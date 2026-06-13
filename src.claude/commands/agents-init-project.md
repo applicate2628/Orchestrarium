@@ -15,33 +15,37 @@ You are guiding the user through project policy configuration for the Claude Cod
 
 Presets are init-time shortcuts only. They expand into canonical `agents-mode` keys. The preset name is NOT persisted in the file.
 
-| Key | `default` (safe-init) | `absolute-balance` (everyday center) | `external-aggressive` (aggressive external use) | `correctness-first` (no-time-limit correctness) | `max-speed` (speed-first) |
-|---|---|---|---|---|---|
-| `consultantMode` | `disabled` | `internal` | `external` | `external` | `disabled` |
-| `externalClaudeApiMode` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `delegationMode` | `manual` | `auto` | `force` | `force` | `auto` |
-| `parallelMode` | `auto` | `auto` | `force` | `auto` | `force` |
-| `mcpMode` | `auto` | `auto` | `auto` | `force` | `auto` |
-| `preferExternalWorker` | `false` | `false` | `true` | `true` | `false` |
-| `preferExternalReviewer` | `false` | `true` | `true` | `true` | `false` |
-| `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` |
-| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `balanced` |
-| `externalPriorityProfiles` | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is |
-| `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review lanes `2`, others `1` | all `1` |
-| `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
-| `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
-| `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `runtime-default` |
+| Key | `default` (safe-init) | `absolute-balance` (everyday center) | `external-aggressive` (aggressive external use) | `correctness-first` (no-time-limit correctness) | `power-mode` (hardest-task maximum result) | `max-speed` (speed-first) |
+|---|---|---|---|---|---|---|
+| `consultantMode` | `disabled` | `internal` | `external` | `external` | `external` | `disabled` |
+| `delegationMode` | `manual` | `auto` | `force` | `force` | `force` | `auto` |
+| `parallelMode` | `auto` | `auto` | `force` | `auto` | `force` | `force` |
+| `mcpMode` | `auto` | `auto` | `auto` | `force` | `force` | `auto` |
+| `preferExternalWorker` | `false` | `false` | `true` | `true` | `true` | `false` |
+| `preferExternalReviewer` | `false` | `true` | `true` | `true` | `true` | `false` |
+| `externalProvider` | `auto` | `auto` | `auto` | `auto` | `auto` | `auto` |
+| `externalPriorityProfile` | `balanced` | `balanced` | `balanced` | `balanced` | `quality-first` | `balanced` |
+| `reserveResolver` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` | `claude-sonnet` |
+| `externalPriorityProfiles` | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is | shipped as-is |
+| `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review lanes `2`, others `1` | advisory+review lanes `2`, others `1` | all `1` |
+| `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
+| `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
+| `externalCodexProfile` | `gpt-5.5-xhigh` | `default` | `default` | `gpt-5.5-xhigh` | `gpt-5.5-xhigh` | `gpt-5.5-fast` |
 
-`correctness-first` lane-specific opinion counts:
+`correctness-first` and `power-mode` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
 - `advisory.design-adr: 2`
 - `review.pre-pr: 2`
+- `review.security: 2`
 - `review.performance-architecture: 2`
+- `review.ui-visual-correctness: 2`
 - all other lanes: `1`
 
 Routing conventions (not persisted as keys):
 - **same-host fast-path**: under `external-aggressive` and `max-speed`, when neutral isolation is not required, allow per-invocation explicit self-provider override. Keep the stored file canonical; this is a routing rule, not a persisted key.
 - **overflow means spill, not serialize**: under `external-aggressive`, internal slot saturation pushes independent eligible lanes into `$external-worker`, `$external-reviewer`, or `$external-brigade` by default.
+- **power-mode means hardest-task maximum useful result**: start from the `quality-first` provider-priority profile, then combine `correctness-first` validation density with `external-aggressive` fan-out, while keeping neutral workdirs and production-only `auto` routing so the extra power does not become a hidden project-state or example-provider shortcut.
 
 ## Steps
 
@@ -66,7 +70,7 @@ Routing conventions (not persisted as keys):
    - If the user says "defaults for the rest" or similar, apply defaults to all remaining policies
 
 4. **Select a preset (optional).**
-    - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, or `max-speed`.
+    - Ask the user if they want to start from a preset: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `power-mode`, or `max-speed`.
     - If the user picks a preset, apply its full key expansion from the table above as the starting values.
     - After applying a preset, ask whether to write that preset as-is or fine-tune individual keys first.
     - If the user says `use the preset`, `preset only`, `apply as-is`, or otherwise declines manual tweaking, skip the key-by-key operator-mode walkthrough and carry the preset-expanded values straight to confirmation.
@@ -77,7 +81,6 @@ Routing conventions (not persisted as keys):
     - Run this step only when the user started from `custom`, skipped preset selection, or explicitly asked to fine-tune after selecting a preset.
     - Walk through the canonical Claude-line `agents-mode` keys one at a time:
       - `consultantMode`
-      - `externalClaudeApiMode`
       - `delegationMode`
       - `parallelMode`
       - `mcpMode`
@@ -85,14 +88,15 @@ Routing conventions (not persisted as keys):
       - `preferExternalReviewer`
       - `externalProvider`
       - `externalPriorityProfile`
+      - `reserveResolver`
       - `externalPriorityProfiles`
       - `externalOpinionCounts`
       - `externalCodexWorkdirMode`
       - `externalClaudeWorkdirMode`
       - `externalModelMode`
+      - `externalCodexProfile`
     - Use the existing value when present, the preset-expanded value if one was selected, or otherwise default to:
       - `consultantMode: disabled`
-      - `externalClaudeApiMode: auto`
       - `delegationMode: manual`
       - `parallelMode: auto`
       - `mcpMode: auto`
@@ -100,11 +104,13 @@ Routing conventions (not persisted as keys):
       - `preferExternalReviewer: false`
       - `externalProvider: auto`
       - `externalPriorityProfile: balanced`
+      - `reserveResolver: claude-sonnet`
       - shipped `externalPriorityProfiles`
       - `externalOpinionCounts` defaulting each documented lane to `1`
       - `externalCodexWorkdirMode: neutral`
       - `externalClaudeWorkdirMode: neutral`
       - `externalModelMode: runtime-default`
+      - `externalCodexProfile: default`
     - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on `codex | claude`; explicit `codex`, `claude`, `gemini`, or `qwen` may still be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths.
     - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
@@ -126,19 +132,20 @@ Routing conventions (not persisted as keys):
 
    ```yaml
    consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-   externalClaudeApiMode: {value}  # controls advisory/review-only claude-secret candidate: disabled | auto | force; default: auto
    delegationMode: {value}  # allowed: manual | auto | force; default: manual
    parallelMode: {value}  # allowed: manual | auto | force; default: auto
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false
    preferExternalReviewer: {value}  # allowed: false | true; default: false
    externalProvider: {value}  # allowed here: auto | codex | claude | gemini | qwen; default: auto; gemini/qwen are explicit example-only and not recommended
-   externalPriorityProfile: {value}  # allowed: balanced | <repo-local production profile>; default: balanced
+   externalPriorityProfile: {value}  # allowed: balanced | quality-first | <repo-local production profile>; default: balanced
+   reserveResolver: {value}  # allowed: disabled | claude-sonnet | claude-wrapper | wrapper:<command>; default: claude-sonnet
    externalPriorityProfiles: {value}  # allowed: structured profile map
    externalOpinionCounts: {value}  # allowed: structured lane-count map
    externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
+   externalCodexProfile: {value}  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh | gpt-5.3-codex-spark; default: gpt-5.5-xhigh
    ```
 
 8. **Write to CLAUDE.md.** Add or replace the `## Project policies` section in `.claude/CLAUDE.md`. Place it between `## Engineering hygiene` and `## Publication safety`. Use this format:

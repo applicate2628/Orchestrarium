@@ -1,11 +1,11 @@
 ---
 name: agents-external-brigade
-description: Launch a bounded parallel set of external helpers for independent admitted lanes or disjoint slices.
+description: Plan or launch a bounded parallel set of external helpers for independent admitted lanes or disjoint slices.
 disable-model-invocation: true
 ---
 # External Brigade
 
-Launch a bounded parallel set of external helpers for independent admitted lanes or disjoint slices.
+Plan or launch a bounded parallel set of external helpers for independent admitted lanes or disjoint slices.
 
 ## Steps
 
@@ -31,14 +31,15 @@ Launch a bounded parallel set of external helpers for independent admitted lanes
    - Do not turn one vague request into an implicit brigade.
 
 4. **Route the brigade honestly.**
-   - Use `.claude/.agents-mode.yaml` for `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalClaudeSecretMode`, and `externalClaudeApiMode`.
+   - Use `.claude/.agents-mode.yaml` for `parallelMode`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, and eligible advisory/review `reserve` profile entries.
+   - Keep `parallelMode` as the general helper fan-out rule. Brigade launch is an explicit bounded overlay on top of that rule, not a second general concurrency model.
    - Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. Do not misuse it as a concurrency cap.
    - Allow repeated same-provider helper instances when different brigade items own different admitted artifacts or disjoint slices and the runtime supports concurrent non-interactive execution.
    - If one brigade item requires multiple same-lane opinions, satisfy that distinct-provider requirement fail closed before declaring that item complete.
 
 5. **Launch only the eligible items.**
    - Run independent external helpers in parallel when their scopes are honestly disjoint.
-   - Do not silently downgrade a failed external item to an internal specialist inside this skill.
+   - Do not silently downgrade a failed external item to an internal specialist inside this command.
 
 6. **Return one brigade report.**
    - Include:
@@ -52,11 +53,11 @@ Launch a bounded parallel set of external helpers for independent admitted lanes
 
 | Item | Execution role | Assigned / replaced internal role | Requested provider | Resolved provider | Scope | Result |
 | --- | --- | --- | --- | --- | --- | --- |
-| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
+| `<item>` | `<role>` | `<role or none>` | `<internal | codex | claude | gemini | qwen>` | `<provider or none>` | `<one-line scope>` | `<PASS | REVISE | BLOCKED>` |
 
 ## Rules
 
-- This is an operator surface, not a new specialist role.
+- This is an operator command, not a new specialist role.
 - Keep one brigade item equal to one helper instance, one admitted artifact, and one gate.
 - Optional brigade items must be explicitly marked optional in the approved brief.
 - If a required brigade item cannot run or cannot satisfy its distinct-opinion requirement, the brigade stays blocked.

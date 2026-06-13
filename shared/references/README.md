@@ -19,11 +19,15 @@ Exact operational instructions belong in the root repository docs and the corres
 
 Cross-provider dispatch invariants may be named here at design level. For example, provider-backed external CLI launches treat substantive prompt payloads as file-based inputs; exact provider commands and shell syntax stay in runtime pack docs.
 
+Repo-wide source-tree organization rules may also name pack-source-tree paths when the path identity itself is the governed exception (e.g. a grandfathered co-located directory preserved for a documented design constraint such as user-copy/install-script convenience). Exact runtime commands, install runbooks, and CLI invocation syntax still stay in root and pack docs per the rules above; only the path-as-named-exception is in scope here.
+
 For exact provider runtime layout differences such as `global` vs `local` install roots, instruction entrypoints, and native command or extension directories, keep that reference outside `shared/references/`; the current canonical runtime-layout note lives in [`docs/provider-runtime-layouts.md`](../../docs/provider-runtime-layouts.md).
 
 Provider-specific reference trees such as `references-codex/` and `references-claude/` should keep only provider-specific material plus thin compatibility pointers when an older path must remain stable for existing links, reports, or notes.
 
 Shared-core documents may still keep provider-local addenda when the shared blueprint needs runtime-specific concretization. `subagent-operating-model` now follows that pattern: the canonical shared core lives here, while each provider-local tree keeps only its runtime and repository-specific addendum.
+
+Russian translations live under `shared/references/ru/` for shared documents that are mirrored for Russian-language operators.
 
 Intentional pack-local exceptions:
 - `periodic-control-matrix` stays pack-local because it still embeds provider/runtime vocabulary, task-memory layout, and runtime-doc links rather than a generic shared skeleton.

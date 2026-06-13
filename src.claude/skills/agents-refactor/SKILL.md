@@ -7,6 +7,19 @@ disable-model-invocation: true
 
 Run a safe refactoring chain with blast-radius analysis and verification.
 
+## When to auto-invoke
+
+Apply this command's flow automatically when:
+
+- user asks for structural improvement: "refactor X module", "clean up Y", "extract Z into its own file"
+- user wants non-functional improvement: "simplify error handling in module W", "improve readability of file V"
+- user asks for code consolidation: "deduplicate the logic between A and B"
+- user explicitly says "refactor" or "restructure" without describing a behavior change
+
+The user does not need to type `/agents-refactor` for this flow to fire. Apply it transparently and announce the routing decision.
+
+**Do NOT auto-invoke** for bug fixes — that is `/agents-bugfix` territory. If refactoring is needed to enable a fix, the bugfix flow may include a small refactor as part of its scope, but the entry point stays `/agents-bugfix`.
+
 ## Steps
 
 1. **Get the scope.** Use `$ARGUMENTS` as the refactoring description. If empty, ask the user what to refactor and why.
@@ -27,9 +40,9 @@ Run a safe refactoring chain with blast-radius analysis and verification.
    - Save plan to `work-items/active/` and suggest `/agents-implement`
 
 5. **Execute.** If single-phase (or user wants immediate execution):
-   - **Implementer** (Agent tool, appropriate engineer `subagent_type`): apply the refactoring within the architect's constraints
-   - **QA** (Agent tool, `subagent_type: qa-engineer`): verify no regressions — all existing tests pass, behavior preserved
-   - **Architecture reviewer** (Agent tool, `subagent_type: architecture-reviewer`): confirm the result improves readability, maintainability, and fits the architecture
+   - **Implementer** (Agent tool, appropriate engineer `subagent_type`, or `external-worker` when external dispatch is preferred): apply the refactoring within the architect's constraints
+   - **QA** (Agent tool, `subagent_type: qa-engineer`, or `external-reviewer` when external dispatch is preferred): verify no regressions — all existing tests pass, behavior preserved
+   - **Architecture reviewer** (Agent tool, `subagent_type: architecture-reviewer`, or `external-reviewer` when the slot is eligible): confirm the result improves readability, maintainability, and fits the architecture
 
 6. **Handle reviewer verdict:**
    - If architecture reviewer returns `PASS` → proceed to report

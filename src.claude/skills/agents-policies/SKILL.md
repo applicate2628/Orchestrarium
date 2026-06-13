@@ -1,11 +1,11 @@
 ---
 name: agents-policies
-description: You are showing or updating project policies for the Claudestrator skill-pack.
+description: You are showing or updating project policies for the Claude Code pack.
 disable-model-invocation: true
 ---
 # View or Update Project Policies
 
-You are showing or updating project policies for the Claudestrator skill-pack.
+You are showing or updating project policies for the Claude Code pack.
 
 ## Steps
 

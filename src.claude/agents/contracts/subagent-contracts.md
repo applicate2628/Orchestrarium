@@ -12,8 +12,8 @@ Use this contract when `subagent_type` is `external-worker` or `external-reviewe
 
 - These roles are routing adapters, not new business professions.
 - The `Assigned role` field names the internal role being replaced for provenance.
-- Read and normalize `.claude/.agents-mode.yaml` first. Honor `parallelMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalModelMode`, and `externalClaudeApiMode` when they are present. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode.yaml` file; it remains Codex-line only.
-- If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.claude/.agents-mode.yaml` and then global legacy `~/.claude/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
+- Read and normalize `.claude/.agents-mode.yaml` first. Honor `parallelMode`, `preferExternalWorker`, `preferExternalReviewer`, `externalProvider`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, `externalOpinionCounts`, `externalCodexWorkdirMode`, `externalClaudeWorkdirMode`, `externalModelMode`, `externalCodexProfile`, and advisory/review-only `reserve` profile entries when they are present. Drop retired canonical keys during normalization. On the Claude line, do not write `externalClaudeProfile` into the canonical `.agents-mode.yaml` file; it remains Codex-line only.
+- If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 - Resolve external routing in this order: `role eligibility -> provider selection -> CLI availability`.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`. If a request lands in one of those lanes, fail fast with an unsupported-route explanation instead of probing providers.
 - Do not silently fall back to an internal specialist if the external CLI is unavailable; the adapter is disabled and the orchestrator may reroute.
@@ -84,6 +84,9 @@ updated: <YYYY-MM-DD HH:MM>
 - **Main conv role**: <what main conversation is doing: orchestrating | waiting for agents | reviewing artifact | idle>
 - **Last accepted artifact**: <filename or "none">
 - **Open obligations before closeout**: <none | remaining required work still inside admitted scope>
+- **Epic**: <parent epic slug, or none> — present only when this work-item belongs to an epic; a single bare `Epic: <slug>` line is the join key the epic roll-up reads (see `lead.md` `## Epics`)
+- **Depends-on**: <comma-separated work-item slugs, or none> — other work-items this one needs completed first; a single bare `Depends-on: <slug>, <slug>` line is what the derivation reads. A standing, planned inter-work-item dependency edge (distinct from the runtime `BLOCKED:*` gate verdicts). Targets are work-items only (resolved across `active/` + `archive/`). `/agents-status` derives `blocked-by` (open targets) and the ready-set from these lines (see `lead.md` `## Dependencies`)
+- **Priority**: <high | medium | low, or none> — scheduling urgency set by `$product-manager` at admission; distinct from bug/perf SEVERITY (defect impact). A low-severity bug can still be high-priority.
 
 ## Active agents
 
@@ -113,6 +116,18 @@ updated: <YYYY-MM-DD HH:MM>
 ```
 
 The REVISE loop section is optional — include it only when a stage has returned REVISE and the loop is active. Remove it when the loop resolves (PASS or escalation).
+
+### agent-runs.jsonl format
+
+When task memory is configured, every delegated role, external adapter, consultant sweep, and main-session gate action that produces or accepts an artifact must append one JSON object to `agent-runs.jsonl` in the same work-item directory.
+
+The ledger is machine-readable execution state; `status.md` remains the human-readable recovery summary. A `PASS` in `status.md` is not accepted unless the corresponding ledger event has `gate: "PASS"`, `status: "completed"`, an artifact path, and at least one evidence entry.
+
+Minimum required fields are defined by `shared/schemas/agent-runs.schema.json`: `schemaVersion`, `runId`, `workItem`, `role`, `executionRole`, `status`, `gate`, `scope`, `startedAt`, and `updatedAt`.
+
+When `scripts/agent-run-ledger.*` or an installed equivalent is available, prefer its `append` command so the event is validated and rolled back on failure. Use its `init` command for one-time migration of legacy work items with missing status sections or ledger files. Manual JSONL append is acceptable only when no helper is available.
+
+Before closeout, run `scripts/validate-work-item-state.* --work-item <path>` or the installed equivalent when the repository exposes one. Before broad closeout, interruption recovery, or publication review, run `scripts/check-work-items-state.* --root <repo>` or the installed equivalent to scan all active work items. Closeout is blocked while the ledger contains running agents, duplicate run IDs, missing artifacts for `PASS`, `PASS` without evidence, stale running agents, or inconsistent `BLOCKED` / `REVISE` status.
 
 No-artifact interruption rule:
 - A handoff interrupt or worker stall without an artifact does not count as a substantive REVISE artifact.
@@ -195,3 +210,20 @@ Ask these before advancing:
 6. Is an independent reviewer or human gate still required?
 7. Is the blast radius still inside the approved change surface?
 8. Is any admitted-scope obligation still open even though one sub-batch is finished?
+
+## Terms and Abbreviations
+
+- `agent-run-ledger.*`: helper script family that initializes legacy work-item ledger files and appends validated `agent-runs.jsonl` events.
+- `agent-runs.jsonl`: JSONL execution ledger stored beside `status.md` for machine-readable work-item state.
+- `check-work-items-state.*`: helper script family that checks every active work item under a repository root.
+- `artifact`: concrete work product such as a memo, plan, patch, review, or closure note.
+- `BLOCKED`: workflow state for a real missing dependency, prerequisite, or unavailable route.
+- `CLI`: Command-Line Interface; a provider or tool invoked from a shell.
+- `evidence`: concrete verification data such as a command, artifact path, review result, log summary, or observed output supporting a gate.
+- `gate`: acceptance checkpoint that verifies whether an artifact may move forward.
+- `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
+- `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
+- `PASS`: workflow state meaning the scoped artifact passed the relevant gate.
+- `QA`: Quality Assurance; verification work for tests, regressions, and acceptance criteria.
+- `REVISE`: workflow state meaning the artifact must return to the same role for bounded correction.
+- `status.md`: human-readable recovery summary for the active work item.

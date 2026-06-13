@@ -32,6 +32,7 @@ description: Implement approved platform and infrastructure phases without drift
 - Prefer small, reviewable diffs over opportunistic refactors.
 - Make deployment ordering, environment differences, and rollback behavior explicit.
 - If the approved plan conflicts with platform reality, stop and return the exact conflict instead of improvising.
+- When porting platform behavior across OS or runtimes (Windows ↔ POSIX process model, signal vs exception semantics, OS lifecycle behavior such as POSIX reparenting vs Windows parent-alive heuristics, filesystem case sensitivity), apply the cross-platform port discipline from shared governance: compare documented semantics of source and destination, do not port surface syntax alone, and declare deviations explicitly when source behavior cannot be reproduced at the destination.
 
 ## Adjacent findings protocol
 
