@@ -39,30 +39,29 @@ description: "Verify phases with tests, regressions, edge cases, QA verdicts."
 
 ## Bug registry
 
-When the gate decision is REVISE or BLOCKED, record the defect in `work-items/bugs/` (or the configured bug registry path) before returning the verdict:
+When the gate decision is REVISE or BLOCKED, record the defect in a flat file `work-items/bugs/<date>-<slug>.md` (or the configured bug registry path) before returning the verdict. The canonical format is the bug-style list-item frontmatter (`- key:` bullets, NO `---` YAML fences — the same shape on disk and in `docs/decisions.md`), with the title carried by a `# Bug:` H1 and a free-form body:
 
 ```markdown
----
-title: <short description>
-severity: critical | high | medium | low
-found-by: qa-engineer
-found-in-phase: <phase name>
-affected-surface: <file or module>
-context: <work-item slug or "standalone">
-status: open
----
+# Bug: <short description>
 
-## Reproduction
-<steps or test command to reproduce>
-
-## Expected vs actual
-<what should happen vs what happens>
-
-## Files involved
-- <file:line>
+- id: <date>-<slug>
+- context: <work-item slug | standalone | adjacent-finding>
+- status: open | fixed | wontfix | duplicate
+- severity: critical | high | medium | low
+- area: <file or module>
+- found-by: qa-engineer
 ```
 
-Always write bug files before returning a REVISE or BLOCKED verdict so that defects survive across sessions.
+Body is free-form; lead with the reproduction (steps or test command) and expected-vs-actual, then any files involved (`file:line`). Always write bug files before returning a REVISE or BLOCKED verdict so that defects survive across sessions.
+
+## Bug status lifecycle
+
+- `open` — filed; the defect is recorded and unresolved.
+- `open -> fixed` — only after QA confirms the fix AND the user approves; a REVISE verdict keeps it `open`.
+- `open -> wontfix` — terminal; carry a one-line reason for not fixing.
+- `open -> duplicate` — terminal; name the surviving bug id it duplicates.
+
+Residual (honest): governance-enforced only — no hook validates that a `duplicate` names a real id or that a `wontfix` carries its reason.
 
 ## Test failure classification
 
