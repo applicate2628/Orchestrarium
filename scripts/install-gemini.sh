@@ -357,7 +357,7 @@ write_merged_gemini_md() {
 merge_gemini_file() {
   local src="$1" dst="$2"
   local managed existing start_line end_line
-  managed="$(sed -E 's|^@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)$|@./AGENTS.md|' "$src")"
+  managed="$(sed -E 's#^@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)$#@./AGENTS.md#' "$src")"
   if [[ ! -f "$dst" ]]; then
     echo "  Creating GEMINI.md..."
     if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -689,11 +689,19 @@ install_pack_file "$EXTENSION_MANIFEST_SOURCE" "$EXTENSION_MANIFEST_TARGET" "ext
 install_pack_file "$EXTENSION_README_SOURCE" "$EXTENSION_README_TARGET" "extension README"
 extension_gemini_tmp="$(mktemp)"
 trap 'rm -f "$extension_gemini_tmp"' EXIT
-sed -E 's|@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)|@./AGENTS.md|' "$SOURCE/GEMINI.md" > "$extension_gemini_tmp"
+sed -E 's#@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)#@./AGENTS.md#' "$SOURCE/GEMINI.md" > "$extension_gemini_tmp"
 install_pack_content_file "$extension_gemini_tmp" "$EXTENSION_GEMINI_TARGET" "extension GEMINI.md"
 install_pack_file "$SHARED_AGENTS_SOURCE" "$EXTENSION_AGENTS_TARGET" "extension AGENTS.md"
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
+
+# Shared cross-pack global .agents-mode.yaml at $HOME/.agents-mode.yaml — lowest-precedence
+# fallback layer below pack-local globals. Idempotent across all 4 pack installers.
+if [[ "$MODE" == "global" ]]; then
+  SHARED_GLOBAL_AGENTS_MODE="$HOME/.agents-mode.yaml"
+  sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$SHARED_GLOBAL_AGENTS_MODE" "shared global ~/.agents-mode.yaml"
+fi
+
 remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"
 remove_legacy_pack_file "$LEGACY_AGENTS_README_TARGET" "agents/README.md"
 remove_legacy_pack_file "$LEGACY_EXTENSION_SHARED_TARGET" "extension AGENTS.shared.md"

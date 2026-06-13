@@ -17,11 +17,11 @@ This file keeps only Gemini-specific runtime and repository concretization for t
 - Gemini is an example-only integration on this line: the repository classifies it as `WEAK MODEL / NOT RECOMMENDED`.
 - Gemini-line `externalProvider: auto` still resolves by lane type through the active named priority profile rather than by a single Gemini-line default, but the shipped production profile excludes Gemini and Qwen and stays on `codex | claude`.
 - Explicit `externalProvider: gemini` is a manual example or compatibility path only, not a production recommendation.
-- On Gemini-line external routing, `externalClaudeApiMode` controls only the supplemental `claude-secret` advisory/review candidate (`disabled | auto | force`, default `auto`); worker lanes must not use it.
+- On Gemini-line external routing, `reserve` is a symbolic supplemental advisory/review candidate inside eligible profile orders and is bound through `reserveResolver`; worker lanes must not use it.
 
 ## Gemini-side repository concretization
 
-- `references-gemini/` keeps Gemini-specific addenda plus compatibility pointers for the shared core.
+- `references-gemini/` keeps Gemini-specific addenda plus compatibility pointers for the monorepo common layer.
 - [../docs/agents-mode-reference.md](../docs/agents-mode-reference.md) is the canonical operator reference when Gemini-line `.gemini/.agents-mode.yaml` behavior matters.
 - Task-memory root, recovery entry point, active-item directory, and archive location remain repository-defined when tracked task memory is enabled.
 - Periodic controls stay pack-local in [periodic-control-matrix.md](periodic-control-matrix.md).

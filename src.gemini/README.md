@@ -7,7 +7,7 @@ This pack remains installable and inspectable, but the repository classifies Gem
 This branch keeps only Gemini-specific source, but it now ships the same full role vocabulary as the neighboring packs:
 
 - Gemini owns `GEMINI.md` through the built-in `/init` flow.
-- Orchestrarium keeps one shared-governance source in `shared/AGENTS.shared.md`, which `src.gemini/GEMINI.md` imports in this branch and installers materialize as runtime `AGENTS.md`.
+- Orchestrarium keeps one shared-governance source in `shared/AGENTS.shared.md`, which `src.gemini/GEMINI.md` imports in the monorepo and installers materialize as runtime `AGENTS.md`.
 - Gemini runtime config stays in `.gemini/settings.json`.
 - Orchestrarium seeds `.gemini/.agents-mode.yaml` as the shared routing overlay for named priority profiles and per-lane opinion counts.
 - Stable expertise lives in `src.gemini/skills/`.
@@ -52,7 +52,7 @@ This branch is a standalone Gemini example pack with a full Gemini-line role sur
 
 ## Gemini bootstrap model
 
-1. Install the pack with `scripts/install-gemini.ps1` or `scripts/install-gemini.sh`.
+1. Install the pack with `install-gemini.ps1` or `install-gemini.sh`.
 2. If the target repository already has a user-owned `GEMINI.md`, the installer preserves it and prepends only the managed Orchestrarium pack block.
 3. Run Gemini's built-in `/init` when you want Gemini to refresh or extend the user-owned portion of `GEMINI.md`.
 4. Use the installed extension payload under `.gemini/extensions/orchestrarium-gemini/` for the full shared role principle, including `external-brigade` when one bounded batch needs multiple parallel external helpers.

@@ -99,3 +99,13 @@ Embedded repository defaults are shown in **bold**.
 - Use `Re-intake` when the admitted item has changed, not just the current artifact.
 - Use `Integration ownership` when QA would otherwise receive partially assembled work.
 - Treat `change isolation` as a first-class protection, not as an implementation detail.
+
+## Terms and Abbreviations
+
+- `Adversarial`: a reviewer mode in which the reviewer searches for blind spots, unknown risks, and failure modes that the builder may never have modeled.
+- `CI`: Continuous Integration; automated repository checks run before merge, push, or release.
+- `Claim-Verify`: a reviewer mode in which the reviewer checks the builder's explicit claims against evidence.
+- `QA`: Quality Assurance; verification work that checks behavior, acceptance criteria, and regressions.
+- `Re-intake`: returning a changed item to the roadmap or admission owner before opening a new delivery loop.
+- `UI`: User Interface; the user-facing interaction surface.
+- `UX`: User Experience; usability, flow, comprehension, and interaction quality.

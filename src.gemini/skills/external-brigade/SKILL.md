@@ -41,27 +41,28 @@ One brigade item equals one helper instance, one admitted artifact, and one gate
 ## Routing rules
 
 1. Read and normalize `.gemini/.agents-mode.yaml` before trusting any flags.
-2. If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
+2. If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.gemini/.agents-mode.yaml`, pack-local global legacy `~/.gemini/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 3. Honor the current external routing fields, including:
    - `consultantMode`
-   - `externalClaudeApiMode`
    - `parallelMode`
    - `externalProvider`
    - `externalPriorityProfile`
+   - `reserveResolver`
    - `externalPriorityProfiles`
    - `externalOpinionCounts`
    - `externalCodexWorkdirMode`
    - `externalClaudeWorkdirMode`
    - `externalModelMode`
+   - `externalCodexProfile`
 4. Reject unsupported owner routes before provider resolution.
 5. Keep `parallelMode` as the general helper fan-out rule. Brigade launch is an explicit bounded overlay on top of that rule, not a second general concurrency model.
 6. Keep `externalOpinionCounts` scoped to same-lane distinct-opinion requirements. It does not cap how many same-provider brigade items may run in parallel across different disjoint lanes or slices.
 7. Allow repeated same-provider fan-out when each brigade item owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
 8. If a brigade item itself requires `2+` same-lane opinions, satisfy that distinct-provider requirement first or fail that item closed.
-9. Honor `externalModelMode` before provider-specific transport knobs. On shipped production paths that means Codex/Claude behavior only; explicit Gemini or Qwen runs remain manual example or compatibility paths rather than a separate production fallback policy.
+9. Honor `externalCodexProfile` when Codex is resolved; `default` inherits `externalModelMode`; `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, not an effort downgrade) and requires installed-runtime verification; `gpt-5.5-xhigh` (shipped as default in the Codex/Claude packs) pins model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`. Honor `externalModelMode` before other provider-specific transport knobs. On shipped production paths that means Codex/Claude behavior only; explicit Gemini or Qwen runs remain manual example or compatibility paths rather than a separate production fallback policy.
 10. Do not silently downgrade external items to internal execution inside the brigade.
 
-When a brigade review/advisory item resolves to `claude-secret`, `externalClaudeApiMode` controls whether that supplemental candidate is available (`disabled | auto | force`, default `auto`). Worker-side brigade items must not use `claude-secret`.
+When a brigade review/advisory item resolves to `reserve`, bind that symbolic supplemental candidate through `reserveResolver`. Worker-side brigade items must not use `reserve`.
 
 Example-only provider rule:
 

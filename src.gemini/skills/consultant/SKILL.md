@@ -14,31 +14,35 @@ description: Provide an independent advisory memo for the lead without becoming 
 ## Toggle state
 
 Read and normalize `.gemini/.agents-mode.yaml` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
-Read and normalize `.gemini/.agents-mode.yaml` before routing. If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.gemini/.agents-mode.yaml` and then global legacy `~/.gemini/.agents-mode`. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
+Read and normalize `.gemini/.agents-mode.yaml` before routing. If local `.gemini/.agents-mode.yaml` is missing, read local legacy `.gemini/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.gemini/.agents-mode.yaml`, pack-local global legacy `~/.gemini/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 
 Relevant keys:
 
 - `consultantMode`
 - `parallelMode`
-- `externalClaudeApiMode`
 - `externalProvider`
 - `externalPriorityProfile`
+- `reserveResolver`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalModelMode`
+- `externalCodexProfile`
 
 Gemini-line provider rules:
 
 - `externalProvider: auto` resolves through the active named priority profile, not a Gemini-line default provider
 - `externalPriorityProfile` defaults to `balanced`
+- `reserveResolver` binds symbolic `reserve` to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`
 - `balanced` mirrors the ordinary shared production matrix and keeps shipped `auto` routing on `codex | claude`
 - `externalProvider: codex` means Codex CLI explicitly
 - `externalProvider: claude` means Claude CLI explicitly
 - `externalProvider: gemini` is allowed only as an explicit self-provider override for a manual example or compatibility run
 - `externalProvider: qwen` is allowed only as an explicit manual example or compatibility override when Qwen is installed
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved production provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile on the production provider paths
-- `externalClaudeApiMode` controls only the supplemental `claude-secret` advisory/review profile candidate; allowed values are `disabled | auto | force`, with `auto` as the default
-- `claude-secret` appears only after primary `claude`/`codex` when an advisory/review order reaches it; it is independent of primary `claude` and is not a retry, fallback, or worker transport
+- `externalCodexProfile: default` inherits `externalModelMode` when Codex is selected or auto-resolved; `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade) and must be verified against the installed Codex runtime; `gpt-5.5-xhigh` (shipped as default in the Codex/Claude packs) pins model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`, symmetric to Claude's `opus-max`
+- the consultant lane always runs at best effort regardless of the operator-set `externalModelMode` or `externalCodexProfile`: when Codex resolves, model `gpt-5.5` with `model_reasoning_effort = "xhigh"`; when Claude resolves, `--model opus --effort max`. Do not downgrade consultant memos to `gpt-5.3-codex-spark`, to runtime-default, or to `gpt-5.5-fast` between attempts on the same consultant lane
+- `reserve` is a symbolic supplemental read-only candidate inside eligible advisory/review profile orders
+- `reserve` appears only after primary `claude`/`codex` when an advisory/review order reaches it; it is bound through `reserveResolver`, independent of primary `claude`, and not a retry, fallback, or worker transport
 - `parallelMode` is the general helper fan-out rule across internal and external lanes
 - Gemini is `WEAK MODEL / NOT RECOMMENDED` on this line; it remains installable for inspection and explicit example runs, but it is not part of shipped production `auto` routing
 - Same-provider Gemini routing must be explicit; ordinary `auto` must still avoid self-bounce and example-only providers must stay out of shipped or repo-local production profiles

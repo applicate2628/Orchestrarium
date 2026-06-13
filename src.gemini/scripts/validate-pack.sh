@@ -43,6 +43,14 @@ skill_roles=(
   visualization-engineer
 )
 
+common_skills=(
+  analyzing-video-bugs
+  bug-hunting
+  explain-simply
+  mathtype-book-page
+  windows-gui-manual-testing
+)
+
 agent_roles=(
   accessibility-reviewer
   algorithm-scientist
@@ -154,6 +162,16 @@ done
 if [[ "$MODE" == "source" ]]; then
   [[ -f "$SHARED_SOURCE_FILE" ]] || fail "missing $SHARED_SOURCE_FILE"
   [[ -f "$SHARED_REF_FILE" ]] || fail "missing $SHARED_REF_FILE"
+  [[ -f "$ROOT/shared/schemas/agent-runs.schema.json" ]] || fail "missing shared agent run ledger schema"
+  [[ -f "$ROOT/scripts/agent-run-ledger.py" ]] || fail "missing agent run ledger helper"
+  [[ -f "$ROOT/scripts/agent-run-ledger.sh" ]] || fail "missing agent run ledger Bash wrapper"
+  [[ -f "$ROOT/scripts/agent-run-ledger.ps1" ]] || fail "missing agent run ledger PowerShell wrapper"
+  [[ -f "$ROOT/scripts/check-work-items-state.py" ]] || fail "missing periodic work-item state checker"
+  [[ -f "$ROOT/scripts/check-work-items-state.sh" ]] || fail "missing periodic work-item state Bash wrapper"
+  [[ -f "$ROOT/scripts/check-work-items-state.ps1" ]] || fail "missing periodic work-item state PowerShell wrapper"
+  [[ -f "$ROOT/scripts/validate-work-item-state.py" ]] || fail "missing work-item state validator"
+  [[ -f "$ROOT/scripts/validate-work-item-state.sh" ]] || fail "missing work-item state Bash wrapper"
+  [[ -f "$ROOT/scripts/validate-work-item-state.ps1" ]] || fail "missing work-item state PowerShell wrapper"
   [[ ! -e "$PACK_ROOT/AGENTS.shared.md" ]] || fail "$PACK_ROOT/AGENTS.shared.md should not duplicate shared/AGENTS.shared.md"
   [[ ! -e "$RUNTIME_AGENTS_FILE" ]] || fail "$RUNTIME_AGENTS_FILE should not exist in the source tree"
   [[ -f "$EXTENSION_README_FILE" ]] || fail "missing $EXTENSION_README_FILE"
@@ -186,6 +204,10 @@ fi
 
 for role in "${skill_roles[@]}"; do
   [[ -f "$PACK_ROOT/skills/$role/SKILL.md" ]] || fail "missing skill role $PACK_ROOT/skills/$role/SKILL.md"
+done
+
+for skill in "${common_skills[@]}"; do
+  [[ -f "$PACK_ROOT/skills/$skill/SKILL.md" ]] || fail "missing common skill $PACK_ROOT/skills/$skill/SKILL.md"
 done
 
 for role in "${agent_roles[@]}"; do
@@ -245,17 +267,23 @@ grep -Fq 'Any read of `.gemini/.agents-mode.yaml` that drives a decision should 
 grep -Fq 'read and normalize `.gemini/.agents-mode.yaml`, then print the current resolved values' "$PACK_ROOT/skills/second-opinion/SKILL.md" || fail "second-opinion should normalize agents-mode before reporting status"
 grep -Fq 'Read and normalize `.gemini/.agents-mode.yaml` before routing.' "$PACK_ROOT/skills/consultant/SKILL.md" || fail "consultant should normalize agents-mode before routing"
 grep -Fq 'externalModelMode' "$PACK_ROOT/skills/consultant/SKILL.md" || fail "consultant should document shared external model policy"
+grep -Fq 'externalCodexProfile' "$PACK_ROOT/skills/consultant/SKILL.md" || fail "consultant should document shared Codex fast-profile policy"
 grep -Fq 'WEAK MODEL / NOT RECOMMENDED' "$PACK_ROOT/skills/consultant/SKILL.md" || fail "consultant should mark Gemini as not recommended example-only routing"
 grep -Fq 'Any read of `.gemini/.agents-mode.yaml` that influences routing must normalize an existing file to the current canonical format before trusting the flags.' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should require read-time agents-mode normalization"
 grep -Fq 'externalModelMode' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should document shared external model policy"
+grep -Fq 'externalCodexProfile' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should document shared Codex fast-profile policy"
 grep -Fq 'WEAK MODEL / NOT RECOMMENDED' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should mark Gemini as not recommended example-only routing"
 if [[ "$MODE" == "source" ]]; then
   grep -Fq 'Adapter host runtime' "$SHARED_SOURCE_FILE" && fail "shared governance should not allow adapter-host metadata for external execution"
   grep -Fq 'must use direct external launch' "$SHARED_SOURCE_FILE" || fail "shared governance should require direct external launch"
   grep -Fq 'substantive task prompt must use file-based prompt delivery' "$SHARED_SOURCE_FILE" || fail "shared governance should require file-based external CLI prompts"
+  grep -Fq 'Mechanism inventory before new paths' "$SHARED_SOURCE_FILE" || fail "shared governance should require owner inventory before new mechanisms"
+  grep -Fq 'State-synchronization ownership' "$SHARED_SOURCE_FILE" || fail "shared governance should require state synchronization ownership discipline"
+  grep -Fq 'split-brain state sync as an architecture bug' "$SHARED_SOURCE_FILE" || fail "shared governance should reject split-brain state synchronization"
+  grep -Fq 'correlation IDs' "$SHARED_SOURCE_FILE" || fail "shared governance should require traceable state synchronization diagnostics"
   grep -Fq 'verify every subagent result before accepting it' "$SHARED_SOURCE_FILE" || fail "shared governance should require verification before trusting subagent results"
   grep -Fq 'Visual artifact verification discipline' "$SHARED_SOURCE_FILE" || fail "shared governance should require visual inspection for generated visual artifacts"
-  grep -Fq 'Documentation terminology discipline' "$SHARED_SOURCE_FILE" || fail "shared governance should require terminology and abbreviation explanations in documents"
+  grep -Fq 'Plain-language and terminology discipline' "$SHARED_SOURCE_FILE" || fail "shared governance should require terminology and abbreviation explanations in documents"
   grep -Fq 'Markdown formula rendering format' "$SHARED_SOURCE_FILE" || fail "shared governance should require previewer-safe Markdown formula formatting"
   grep -Fq 'split long derivations into several short one-line' "$SHARED_SOURCE_FILE" || fail "shared governance should preserve fragile previewer formula fallback"
   grep -Fq 'Do not use multi-line `$$...$$` display blocks' "$SHARED_SOURCE_FILE" || fail "shared governance should reject unverified multi-line display math"
@@ -273,13 +301,42 @@ if [[ "$MODE" == "source" ]]; then
   grep -Fq 'Formula scope and assumptions amendment' "$SHARED_REF_FILE" || fail "shared subagent-operating-model should document formula scope discipline"
   grep -Fq 'tool availability' "$SHARED_REF_FILE" || fail "shared subagent-operating-model should preserve canonical-source ambiguity inspection"
   grep -Fq 'smallest safe reversible subset' "$SHARED_REF_FILE" || fail "shared subagent-operating-model should preserve user-intent fallback discipline"
+  grep -Fq 'agent-runs.jsonl` is the machine-readable execution ledger' "$SHARED_REF_FILE" || fail "shared subagent-operating-model should document the agent execution ledger"
+  grep -Fq 'no accepted `PASS` without evidence' "$SHARED_REF_FILE" || fail "shared subagent-operating-model should reject PASS without evidence"
+  grep -Fq 'agent-runs.jsonl` — машиночитаемый журнал исполнения work-item' "$ROOT/shared/references/ru/subagent-operating-model.md" || fail "shared RU subagent-operating-model should document the agent execution ledger"
+  grep -Fq 'PASS` без evidence' "$ROOT/shared/references/ru/subagent-operating-model.md" || fail "shared RU subagent-operating-model should reject PASS without evidence"
+  grep -Fq 'agent-runs.jsonl' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document ledger fan-out tracking"
+  grep -Fq 'Work-item ledger rule' "$ROOT/docs/external-worker-design.md" || fail "external-worker design should map execution records to the ledger"
+  grep -Fq 'scripts/validate-work-item-state.* --work-item' "$ROOT/README.md" || fail "README should document the work-item state validator"
+  grep -Fq 'scripts/agent-run-ledger.* --work-item' "$ROOT/README.md" || fail "README should document the work-item ledger helper"
+  grep -Fq 'scripts/check-work-items-state.* --root' "$ROOT/README.md" || fail "README should document the periodic work-item state checker"
+  grep -Fq 'agent-runs.jsonl' "$ROOT/INSTALL.md" || fail "INSTALL should document local work-item execution tracking"
+  grep -Fq 'scripts/agent-run-ledger.* --work-item' "$ROOT/INSTALL.md" || fail "INSTALL should document the work-item ledger helper"
+  grep -Fq 'scripts/check-work-items-state.* --root' "$ROOT/INSTALL.md" || fail "INSTALL should document the periodic work-item state checker"
+  grep -Fq 'machine-readable work-item execution tracking contract' "$ROOT/RELEASE_NOTES.md" || fail "release notes should document work-item execution tracking"
+  grep -Fq 'ledger append/init helper' "$ROOT/RELEASE_NOTES.md" || fail "release notes should document the ledger append/init helper"
+  grep -Fq 'periodic active work-item state checker' "$ROOT/RELEASE_NOTES.md" || fail "release notes should document the periodic work-item checker"
+  grep -Fq 'validate_work_item' "$ROOT/scripts/agent-run-ledger.py" || fail "agent-run-ledger helper should reuse the validator"
+  grep -Fq 'restore_ledger' "$ROOT/scripts/agent-run-ledger.py" || fail "agent-run-ledger helper should roll back invalid appends"
+  grep -Fq 'validate_work_item' "$ROOT/scripts/check-work-items-state.py" || fail "periodic work-item checker should reuse the validator"
+  grep -Fq 'stale running agent' "$ROOT/scripts/check-work-items-state.py" || fail "periodic work-item checker should report stale running agents"
+  grep -Fq 'agent-runs.schema.json' "$ROOT/shared/schemas/agent-runs.schema.json" || fail "agent run ledger schema should have a stable id"
+  grep -Fq '"executionRole"' "$ROOT/shared/schemas/agent-runs.schema.json" || fail "agent run ledger schema should define executionRole"
+  grep -Fq '"evidence"' "$ROOT/shared/schemas/agent-runs.schema.json" || fail "agent run ledger schema should define evidence"
+  grep -Fq 'PASS gate requires evidence' "$ROOT/scripts/validate-work-item-state.py" || fail "work-item state validator should enforce evidence for PASS"
+  grep -Fq 'escapes the work item' "$ROOT/scripts/validate-work-item-state.py" || fail "work-item state validator should confine PASS artifacts to the work item"
+  grep -Fq 'agent-runs.jsonl' "$ROOT/scripts/validate-work-item-state.py" || fail "work-item state validator should load the agent run ledger"
 else
   grep -Fq 'Adapter host runtime' "$RUNTIME_AGENTS_FILE" && fail "shared governance should not allow adapter-host metadata for external execution"
   grep -Fq 'must use direct external launch' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require direct external launch"
   grep -Fq 'substantive task prompt must use file-based prompt delivery' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require file-based external CLI prompts"
+  grep -Fq 'Mechanism inventory before new paths' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require owner inventory before new mechanisms"
+  grep -Fq 'State-synchronization ownership' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require state synchronization ownership discipline"
+  grep -Fq 'split-brain state sync as an architecture bug' "$RUNTIME_AGENTS_FILE" || fail "shared governance should reject split-brain state synchronization"
+  grep -Fq 'correlation IDs' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require traceable state synchronization diagnostics"
   grep -Fq 'verify every subagent result before accepting it' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require verification before trusting subagent results"
   grep -Fq 'Visual artifact verification discipline' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require visual inspection for generated visual artifacts"
-  grep -Fq 'Documentation terminology discipline' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require terminology and abbreviation explanations in documents"
+  grep -Fq 'Plain-language and terminology discipline' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require terminology and abbreviation explanations in documents"
   grep -Fq 'Markdown formula rendering format' "$RUNTIME_AGENTS_FILE" || fail "shared governance should require previewer-safe Markdown formula formatting"
   grep -Fq 'split long derivations into several short one-line' "$RUNTIME_AGENTS_FILE" || fail "shared governance should preserve fragile previewer formula fallback"
   grep -Fq 'Do not use multi-line `$$...$$` display blocks' "$RUNTIME_AGENTS_FILE" || fail "shared governance should reject unverified multi-line display math"
@@ -292,12 +349,20 @@ fi
 grep -Fq 'Adapter host runtime:' "$PACK_ROOT/skills/lead/external-dispatch.md" && fail "external-dispatch should not record adapter host runtime"
 grep -Fq 'must use direct external launch' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should require direct external launch"
 grep -Fq 'substantive task prompt must use file-based prompt delivery' "$PACK_ROOT/skills/lead/external-dispatch.md" || fail "external-dispatch should require file-based external CLI prompts"
+grep -Fq 'agent-runs.jsonl format' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent-contracts should define the agent run ledger format"
+grep -Fq 'A `PASS` in `status.md` is not accepted' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent-contracts should reject PASS without ledger evidence"
+grep -Fq 'shared/schemas/agent-runs.schema.json' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent-contracts should point to the shared ledger schema"
+grep -Fq 'scripts/agent-run-ledger.*' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent-contracts should point to the work-item ledger helper"
+grep -Fq 'scripts/validate-work-item-state.* --work-item' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent-contracts should point to the work-item state validator"
+grep -Fq 'scripts/check-work-items-state.* --root' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent-contracts should point to the periodic work-item state checker"
 grep -Fq 'Read and normalize `.gemini/.agents-mode.yaml` to the current canonical format before trusting its flags.' "$PACK_ROOT/skills/external-worker/SKILL.md" || fail "external-worker should normalize agents-mode before routing"
 grep -Fq 'Read and normalize `.gemini/.agents-mode.yaml` to the current canonical format before trusting its flags.' "$PACK_ROOT/skills/external-reviewer/SKILL.md" || fail "external-reviewer should normalize agents-mode before routing"
 grep -Fq 'externalPriorityProfile' "$PACK_ROOT/skills/external-worker/SKILL.md" || fail "external-worker should honor structured profile keys"
 grep -Fq 'externalPriorityProfile' "$PACK_ROOT/skills/external-reviewer/SKILL.md" || fail "external-reviewer should honor structured profile keys"
 grep -Fq 'externalModelMode' "$PACK_ROOT/skills/external-worker/SKILL.md" || fail "external-worker should honor shared external model policy"
 grep -Fq 'externalModelMode' "$PACK_ROOT/skills/external-reviewer/SKILL.md" || fail "external-reviewer should honor shared external model policy"
+grep -Fq 'externalCodexProfile' "$PACK_ROOT/skills/external-worker/SKILL.md" || fail "external-worker should honor shared Codex fast-profile policy"
+grep -Fq 'externalCodexProfile' "$PACK_ROOT/skills/external-reviewer/SKILL.md" || fail "external-reviewer should honor shared Codex fast-profile policy"
 grep -Fq 'file-based prompt delivery' "$PACK_ROOT/skills/external-worker/SKILL.md" || fail "external-worker should require file-based external CLI prompts"
 grep -Fq 'file-based prompt delivery' "$PACK_ROOT/skills/external-reviewer/SKILL.md" || fail "external-reviewer should require file-based external CLI prompts"
 grep -Fq 'WEAK MODEL / NOT RECOMMENDED' "$PACK_ROOT/skills/external-worker/SKILL.md" || fail "external-worker should mark Gemini as not recommended example-only routing"
@@ -305,6 +370,7 @@ grep -Fq 'WEAK MODEL / NOT RECOMMENDED' "$PACK_ROOT/skills/external-reviewer/SKI
 grep -Fq 'direct external launch contract' "$PACK_ROOT/skills/external-worker/SKILL.md" || fail "external-worker should require direct external launch"
 grep -Fq 'direct external launch contract' "$PACK_ROOT/skills/external-reviewer/SKILL.md" || fail "external-reviewer should require direct external launch"
 grep -Fq 'externalModelMode' "$PACK_ROOT/skills/external-brigade/SKILL.md" || fail "external-brigade should document shared external model policy"
+grep -Fq 'externalCodexProfile' "$PACK_ROOT/skills/external-brigade/SKILL.md" || fail "external-brigade should document shared Codex fast-profile policy"
 grep -Fq 'same-provider brigade items may run in parallel' "$PACK_ROOT/skills/external-brigade/SKILL.md" || fail "external-brigade should document same-provider parallel reuse"
 grep -Fq 'It does not cap how many same-provider brigade items may run in parallel' "$PACK_ROOT/skills/external-brigade/SKILL.md" || fail "external-brigade should keep opinion counts separate from concurrency"
 grep -Fq 'WEAK MODEL / NOT RECOMMENDED' "$GEMINI_FILE" || fail "GEMINI.md should mark Gemini as a not recommended example-only pack"
@@ -319,39 +385,53 @@ if [[ "$MODE" == "source" ]]; then
   grep -Fq 'WEAK MODEL / NOT RECOMMENDED' "$ROOT/references-gemini/subagent-operating-model.md" || fail "references-gemini should mark Gemini as a not recommended example-only integration"
   grep -Fq 'example-only / WEAK MODEL / NOT RECOMMENDED' "$ROOT/scripts/install-gemini.sh" || fail "install-gemini.sh should announce example-only Gemini policy"
   grep -Fq 'example-only / WEAK MODEL / NOT RECOMMENDED' "$ROOT/scripts/install-gemini.ps1" || fail "install-gemini.ps1 should announce example-only Gemini policy"
-  if [[ -f "$ROOT/install.sh" || -f "$ROOT/install.ps1" ]]; then
-    grep -Fq 'default production install' "$ROOT/install.sh" || fail "root bash installer should default to the Codex/Claude production pair"
-    grep -Fq 'default production install' "$ROOT/install.ps1" || fail "root PowerShell installer should default to the Codex/Claude production pair"
-    ! grep -Fq 'All available root installs' "$ROOT/install.sh" || fail "root bash installer should not offer all-provider default installs"
-    ! grep -Fq 'All available root installs' "$ROOT/install.ps1" || fail "root PowerShell installer should not offer all-provider default installs"
-    grep -Fq 'if [[ -z "$choice" ]]; then' "$ROOT/install.sh" || fail "root bash installer should map empty selection to the default"
-    grep -Fq 'choice=3' "$ROOT/install.sh" || fail "root bash installer should map default selection to option 3"
-    grep -Fq '$normalizedChoice = "3"' "$ROOT/install.ps1" || fail "root PowerShell installer should map empty selection to option 3"
-    bash_default_block="$(awk '/^  3\)/,/^  4\)/ { print }' "$ROOT/install.sh")"
-    grep -Fq 'run_installer install-codex.sh' <<<"$bash_default_block" || fail "root bash installer default should include Codex"
-    grep -Fq 'run_installer install-claude.sh' <<<"$bash_default_block" || fail "root bash installer default should include Claude"
-    ! grep -Eq 'install-(gemini|qwen)\.sh' <<<"$bash_default_block" || fail "root bash installer default should not include Gemini or Qwen"
-    ps_default_block="$(awk '/^    "3" {/,/^    "4" {/ { print }' "$ROOT/install.ps1")"
-    grep -Fq 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' <<<"$ps_default_block" || fail "root PowerShell installer default should include Codex"
-    grep -Fq 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' <<<"$ps_default_block" || fail "root PowerShell installer default should include Claude"
-    ! grep -Eq 'install-(gemini|qwen)\.ps1' <<<"$ps_default_block" || fail "root PowerShell installer default should not include Gemini or Qwen"
-    ! grep -Fq 'run_all_available' "$ROOT/install.sh" || fail "root bash installer should not keep an aggregate all-provider helper"
-    ! grep -Fq 'Invoke-AllAvailableInstallers' "$ROOT/install.ps1" || fail "root PowerShell installer should not keep an aggregate all-provider helper"
-  else
-    echo "PASS: standalone provider branch omits root router installers"
-  fi
+  grep -Fq 'default production install' "$ROOT/install.sh" || fail "root bash installer should default to the Codex/Claude production pair"
+  grep -Fq 'default production install' "$ROOT/install.ps1" || fail "root PowerShell installer should default to the Codex/Claude production pair"
+  ! grep -Fq 'All available root installs' "$ROOT/install.sh" || fail "root bash installer should not offer all-provider default installs"
+  ! grep -Fq 'All available root installs' "$ROOT/install.ps1" || fail "root PowerShell installer should not offer all-provider default installs"
+  grep -Fq 'if [[ -z "$choice" ]]; then' "$ROOT/install.sh" || fail "root bash installer should map empty selection to the default"
+  grep -Fq 'choice=3' "$ROOT/install.sh" || fail "root bash installer should map default selection to option 3"
+  grep -Fq '$normalizedChoice = "3"' "$ROOT/install.ps1" || fail "root PowerShell installer should map empty selection to option 3"
+  bash_default_block="$(awk '/^  3\)/,/^  4\)/ { print }' "$ROOT/install.sh")"
+  grep -Fq 'run_installer install-codex.sh' <<<"$bash_default_block" || fail "root bash installer default should include Codex"
+  grep -Fq 'run_installer install-claude.sh' <<<"$bash_default_block" || fail "root bash installer default should include Claude"
+  ! grep -Eq 'install-(gemini|qwen)\.sh' <<<"$bash_default_block" || fail "root bash installer default should not include Gemini or Qwen"
+  ps_default_block="$(awk '/^    "3" {/,/^    "4" {/ { print }' "$ROOT/install.ps1")"
+  grep -Fq 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' <<<"$ps_default_block" || fail "root PowerShell installer default should include Codex"
+  grep -Fq 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' <<<"$ps_default_block" || fail "root PowerShell installer default should include Claude"
+  ! grep -Eq 'install-(gemini|qwen)\.ps1' <<<"$ps_default_block" || fail "root PowerShell installer default should not include Gemini or Qwen"
+  ! grep -Fq 'run_all_available' "$ROOT/install.sh" || fail "root bash installer should not keep an aggregate all-provider helper"
+  ! grep -Fq 'Invoke-AllAvailableInstallers' "$ROOT/install.ps1" || fail "root PowerShell installer should not keep an aggregate all-provider helper"
   grep -Fq 'Pressing Enter selects the default production install' "$ROOT/INSTALL.md" || fail "INSTALL.md should document the Codex/Claude default root install"
   grep -Fq '.agents-mode.yaml' "$ROOT/INSTALL.md" || fail "INSTALL.md default project result should include provider overlay files"
 fi
 
 if [[ "$MODE" == "source" && -f "$ROOT/docs/agents-mode-reference.md" ]]; then
   grep -Fq '## Canonical maintenance' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should define canonical maintenance"
+  grep -Fq '`power-mode` | hardest-task maximum result' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document power-mode preset"
+  grep -Fq '`power-mode` (hardest-task maximum result)' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "Gemini init-project should expose power-mode preset"
+  if command -v python >/dev/null 2>&1; then
+    CONTRACT_PYTHON_BIN=python
+  elif command -v python3 >/dev/null 2>&1; then
+    CONTRACT_PYTHON_BIN=python3
+  else
+    fail "python or python3 is required to validate the agents-mode contract"
+  fi
+  "$CONTRACT_PYTHON_BIN" "$ROOT/scripts/validate-agents-mode-contract.py" --root "$ROOT" >/dev/null || fail "agents-mode machine-readable contract should match docs and init preset surfaces"
   grep -Fq 'Read-time normalization preserves the effective values of known keys' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document read-time normalization semantics"
   [[ -f "$ROOT/shared/agents-mode.defaults.yaml" ]] || fail "shared agents-mode defaults exemplar should exist"
-  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.performance-architecture review.visual; do
-    grep -Fq "    $lane: [claude, codex, claude-secret]" "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should keep claude-secret last on $lane"
+  ! grep -Fq 'externalClaudeApiMode' "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should not keep retired externalClaudeApiMode"
+  grep -Fq 'reserveResolver: claude-sonnet' "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should define reserveResolver default"
+  for lane in advisory.repo-understanding advisory.design-adr review.pre-pr review.security review.performance-architecture review.ui-visual-correctness; do
+    expected="    $lane: [claude, codex, reserve]"
+    case "$lane" in
+      review.performance-architecture|review.ui-visual-correctness)
+        expected="    $lane: [codex, claude, reserve]"
+        ;;
+    esac
+    grep -Fq "$expected" "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should keep reserve last on $lane"
   done
-  ! grep -E '^[[:space:]]{4}worker\.[^:]+: \[[^]]*(claude-secret|gemini|qwen)' "$ROOT/shared/agents-mode.defaults.yaml" >/dev/null || fail "shared defaults should keep worker lanes off claude-secret/Gemini/Qwen"
+  ! grep -E '^[[:space:]]{4}(design|worker)\.[^:]+: \[[^]]*(reserve|gemini|qwen)' "$ROOT/shared/agents-mode.defaults.yaml" >/dev/null || fail "shared defaults should keep design/worker lanes off reserve/Gemini/Qwen"
   [[ ! -e "$ROOT/src.gemini/agents-mode.defaults.yaml" ]] || fail "src.gemini/agents-mode.defaults.yaml should not exist in the monorepo"
 fi
 
@@ -385,6 +465,9 @@ json_targets=(
 )
 
 json_targets+=("$EXTENSION_MANIFEST_FILE")
+if [[ "$MODE" == "source" ]]; then
+  json_targets+=("$ROOT/shared/schemas/agent-runs.schema.json")
+fi
 
 "$PYTHON_BIN" - "$PACK_ROOT/commands/agents/help.toml" "$PACK_ROOT/commands/agents/external-brigade.toml" "$PACK_ROOT/commands/agents/init-project.toml" "${json_targets[@]}" <<'PY'
 import json

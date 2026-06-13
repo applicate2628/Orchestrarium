@@ -1,0 +1,153 @@
+{
+  "version": 1,
+  "presetOrder": [
+    "default",
+    "absolute-balance",
+    "external-aggressive",
+    "correctness-first",
+    "power-mode",
+    "max-speed"
+  ],
+  "raisedOpinionCountLanes": [
+    "advisory.repo-understanding",
+    "advisory.design-adr",
+    "review.pre-pr",
+    "review.security",
+    "review.performance-architecture",
+    "review.ui-visual-correctness"
+  ],
+  "presets": {
+    "default": {
+      "role": "safe-init only",
+      "whenToUse": "First-time bootstrap; quiet shared baseline with no standing external preference",
+      "expansion": {
+        "consultantMode": "disabled",
+        "delegationMode": "manual",
+        "parallelMode": "auto",
+        "mcpMode": "auto",
+        "preferExternalWorker": "false",
+        "preferExternalReviewer": "false",
+        "externalProvider": "auto",
+        "externalPriorityProfile": "balanced",
+        "reserveResolver": "claude-sonnet",
+        "externalPriorityProfiles": "shipped-as-is",
+        "externalOpinionCounts": "all-1",
+        "externalCodexWorkdirMode": "neutral",
+        "externalClaudeWorkdirMode": "neutral",
+        "externalModelMode": "runtime-default",
+        "externalCodexProfile": "gpt-5.5-xhigh",
+        "externalClaudeProfile": "opus-max"
+      }
+    },
+    "absolute-balance": {
+      "role": "true everyday center",
+      "whenToUse": "Daily operation with moderate delegation, internal consultant availability, and external review preference",
+      "expansion": {
+        "consultantMode": "internal",
+        "delegationMode": "auto",
+        "parallelMode": "auto",
+        "mcpMode": "auto",
+        "preferExternalWorker": "false",
+        "preferExternalReviewer": "true",
+        "externalProvider": "auto",
+        "externalPriorityProfile": "balanced",
+        "reserveResolver": "claude-sonnet",
+        "externalPriorityProfiles": "shipped-as-is",
+        "externalOpinionCounts": "all-1",
+        "externalCodexWorkdirMode": "neutral",
+        "externalClaudeWorkdirMode": "neutral",
+        "externalModelMode": "runtime-default",
+        "externalCodexProfile": "default",
+        "externalClaudeProfile": "sonnet-high"
+      }
+    },
+    "external-aggressive": {
+      "role": "aggressive external use",
+      "whenToUse": "Maximize external execution on preferred lanes while keeping the stored file canonical",
+      "expansion": {
+        "consultantMode": "external",
+        "delegationMode": "force",
+        "parallelMode": "force",
+        "mcpMode": "auto",
+        "preferExternalWorker": "true",
+        "preferExternalReviewer": "true",
+        "externalProvider": "auto",
+        "externalPriorityProfile": "balanced",
+        "reserveResolver": "claude-sonnet",
+        "externalPriorityProfiles": "shipped-as-is",
+        "externalOpinionCounts": "all-1",
+        "externalCodexWorkdirMode": "neutral",
+        "externalClaudeWorkdirMode": "neutral",
+        "externalModelMode": "runtime-default",
+        "externalCodexProfile": "default",
+        "externalClaudeProfile": "sonnet-high"
+      }
+    },
+    "correctness-first": {
+      "role": "no-time-limit correctness",
+      "whenToUse": "Favor deeper validation, forced delegation, forced MCP use, and multi-opinion advisory or review lanes",
+      "expansion": {
+        "consultantMode": "external",
+        "delegationMode": "force",
+        "parallelMode": "auto",
+        "mcpMode": "force",
+        "preferExternalWorker": "true",
+        "preferExternalReviewer": "true",
+        "externalProvider": "auto",
+        "externalPriorityProfile": "balanced",
+        "reserveResolver": "claude-sonnet",
+        "externalPriorityProfiles": "shipped-as-is",
+        "externalOpinionCounts": "advisory-review-2",
+        "externalCodexWorkdirMode": "neutral",
+        "externalClaudeWorkdirMode": "neutral",
+        "externalModelMode": "pinned-top-pro",
+        "externalCodexProfile": "gpt-5.5-xhigh",
+        "externalClaudeProfile": "opus-max"
+      }
+    },
+    "power-mode": {
+      "role": "hardest-task maximum result",
+      "whenToUse": "Start from quality-first provider priority, then add top model policy, forced delegation, forced MCP, parallel fan-out, external adapters, and multi-opinion review for maximum useful output on complex work",
+      "expansion": {
+        "consultantMode": "external",
+        "delegationMode": "force",
+        "parallelMode": "force",
+        "mcpMode": "force",
+        "preferExternalWorker": "true",
+        "preferExternalReviewer": "true",
+        "externalProvider": "auto",
+        "externalPriorityProfile": "quality-first",
+        "reserveResolver": "claude-sonnet",
+        "externalPriorityProfiles": "shipped-as-is",
+        "externalOpinionCounts": "advisory-review-2",
+        "externalCodexWorkdirMode": "neutral",
+        "externalClaudeWorkdirMode": "neutral",
+        "externalModelMode": "pinned-top-pro",
+        "externalCodexProfile": "gpt-5.5-xhigh",
+        "externalClaudeProfile": "opus-max"
+      }
+    },
+    "max-speed": {
+      "role": "lowest-friction throughput",
+      "whenToUse": "Minimize latency and ceremony; prefer project workdirs and no extra opinion overhead",
+      "expansion": {
+        "consultantMode": "disabled",
+        "delegationMode": "auto",
+        "parallelMode": "force",
+        "mcpMode": "auto",
+        "preferExternalWorker": "false",
+        "preferExternalReviewer": "false",
+        "externalProvider": "auto",
+        "externalPriorityProfile": "balanced",
+        "reserveResolver": "claude-sonnet",
+        "externalPriorityProfiles": "shipped-as-is",
+        "externalOpinionCounts": "all-1",
+        "externalCodexWorkdirMode": "project",
+        "externalClaudeWorkdirMode": "project",
+        "externalModelMode": "runtime-default",
+        "externalCodexProfile": "gpt-5.5-fast",
+        "externalClaudeProfile": "sonnet-high"
+      }
+    }
+  }
+}

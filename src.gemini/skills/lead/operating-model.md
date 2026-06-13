@@ -48,6 +48,8 @@ The main Gemini session launches the parallel specialist subagents. A Gemini sub
 - Keep exactly one primary in-progress task.
 - Side requests may pause it, but do not replace it unless the user explicitly reprioritizes.
 - After any side request, resume the primary task and state the next concrete step.
+- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting.
+- If the user says `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working correction, take the next concrete action in the active task immediately instead of only acknowledging it.
 - Do not begin closeout work while a primary review or verification pass is still open.
 
 ## Execution continuity
@@ -66,9 +68,9 @@ Canonical provider semantics:
 | Key | Meaning |
 |---|---|
 | `consultantMode` | consultant behavior toggle for Gemini-line routing; `disabled` skips consultant work by default, `internal` keeps consultant internal-only, and `external` allows consultant requests to use external routing |
-| `externalClaudeApiMode` | controls the supplemental `claude-secret` candidate for `advisory.*` and `review.*` profile orders only; `disabled` removes it, `auto` allows it after primary `claude`/`codex`, and `force` keeps it available for advisory/review even when plain Claude is unavailable; never a primary-Claude retry, worker transport, or editing path; default `auto` |
+| `reserve` | symbolic supplemental read-only candidate for `advisory.*` and `review.*` profile orders only; considered after primary `claude`/`codex`; never a primary-Claude retry, worker transport, or editing path |
 | `parallelMode` | general helper parallelism rule across internal and external lanes; `manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified |
-| `externalProvider: auto` | Resolve by the active named production priority profile and then apply the self-provider filter; shipped `balanced` keeps `auto` on `codex | claude` only |
+| `externalProvider: auto` | Resolve by the active named production priority profile and then apply the self-provider filter; shipped production profiles `balanced` and `quality-first` keep `auto` on `codex | claude` only |
 | `externalProvider: codex` | explicit Codex CLI path |
 | `externalProvider: claude` | explicit Claude CLI path |
 | `externalProvider: gemini` | explicit self-provider override only; manual example or compatibility path, not a production recommendation |
@@ -77,6 +79,7 @@ Canonical provider semantics:
 | `externalPriorityProfiles` | stores the profile -> lane -> ordered provider lists |
 | `externalOpinionCounts` | stores how many distinct external opinions to collect per lane |
 | `externalModelMode` | shared cross-provider model policy; `runtime-default` keeps provider runtime selection, `pinned-top-pro` pins the strongest documented production-provider model/profile path |
+| `externalCodexProfile` | Codex-specific profile override after provider resolution; `default` inherits `externalModelMode`; `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, not an effort downgrade); `gpt-5.5-xhigh` (shipped as default in Codex/Claude packs) pins `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode` |
 
 Gemini does not write `externalProvider: gemini` into the Gemini-line overlay because that would collapse into the current provider.
 - Resolve any `external` request in this order: `role eligibility -> provider selection -> CLI availability`.

@@ -49,6 +49,8 @@ Read these adjacent files when the task needs more than a trivial route decision
 ## Working rules
 
 - Do not treat a side request as cancellation of the primary task unless the user explicitly reprioritizes.
+- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting.
+- If the user says `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working correction, take the next concrete action in the active task immediately instead of only acknowledging it.
 - Do not stop at one completed sub-batch when the next required action is already clear.
 - Do not claim the Gemini pack is aligned unless the role surface, the subagent surface, and the documents all match.
 - Do not invent Gemini-only role names when the shared role vocabulary already covers the work.
