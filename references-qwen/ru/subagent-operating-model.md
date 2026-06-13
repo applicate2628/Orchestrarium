@@ -18,7 +18,7 @@
 - Qwen на этой линии поддерживается как explicit example и compatibility integration со статусом `WEAK MODEL / NOT RECOMMENDED`: shipped production `externalProvider: auto` профили остаются на `codex | claude`.
 - На Qwen-линии `externalProvider: auto` по-прежнему разрешается по lane type через active named production priority profile, а не через один жёсткий Qwen-line default, но shipped production profile исключает Gemini и Qwen и остаётся на `codex | claude`.
 - Явный `externalProvider: qwen` — это только manual example path, а не production recommendation.
-- На Qwen-line external routing `externalClaudeApiMode` управляет только supplemental `claude-secret` candidate для advisory/review (`disabled | auto | force`, default `auto`); worker lanes не должны его использовать.
+- На Qwen-line external routing `reserve` является symbolic supplemental candidate внутри eligible advisory/review profile orders и привязывается через `reserveResolver`; worker lanes не должны его использовать.
 
 ## Qwen-side repository concretization
 

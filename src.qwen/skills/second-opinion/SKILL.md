@@ -21,23 +21,26 @@ Manage these keys in `.qwen/.agents-mode.yaml`:
 - `preferExternalReviewer`
 - `externalProvider`
 - `externalPriorityProfile`
+- `reserveResolver`
 - `externalPriorityProfiles`
 - `externalOpinionCounts`
 - `externalModelMode`
-- `externalClaudeApiMode`
+- `externalCodexProfile`
 
 Qwen-line rules:
 
 - `externalProvider: auto` resolves through the active named priority profile, not a Qwen-line default provider
 - `externalPriorityProfile` defaults to `balanced`
+- `reserveResolver` binds symbolic `reserve` to `claude-sonnet`, `claude-wrapper`, `wrapper:<command>`, or `disabled`
 - the shipped `balanced` profile is production-only and keeps `auto` routing on `codex | claude`
 - explicit providers are `codex`, `claude`, `gemini`, and `qwen`
 - `externalProvider: gemini` and `externalProvider: qwen` are explicit example-only overrides; both are `WEAK MODEL / NOT RECOMMENDED`
 - `externalModelMode` is the shared cross-provider model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native production path for the resolved provider
-- `externalClaudeApiMode` matters only when provider resolves to Claude
+- `externalCodexProfile: default` inherits `externalModelMode` when Codex is selected or auto-resolved; `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade) and must be verified against the installed Codex runtime; `gpt-5.5-xhigh` (shipped as default in the Codex/Claude packs) pins model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`, symmetric to Claude's `opus-max`
+- `reserve` matters only when an advisory/review profile order reaches that symbolic supplemental candidate and is bound through `reserveResolver`
 - if a repository wants Qwen participation for a specific example lane, express that through a scalar explicit provider override, not a profile entry
 - same-provider Qwen routing must be explicit; ordinary `auto` must still avoid self-bounce
-- preserve unknown keys and keep the three new profile/count keys in expanded multi-key form rather than collapsing them into a consultant-only shape
+- preserve unknown keys and keep `reserveResolver` plus the profile/count keys in expanded multi-key form rather than collapsing them into a consultant-only shape
 - `parallelMode` is the general helper fan-out rule across internal and external lanes
 - `externalOpinionCounts` is lane-specific; when a lane asks for more than one opinion, the lead may invoke the matching external skill repeatedly and aggregate fail closed on top of `parallelMode`
 
@@ -47,7 +50,7 @@ Qwen-line rules:
 - `internal` -> `consultantMode: internal`
 - `disable` -> `consultantMode: disabled`
 - `status` -> read and normalize `.qwen/.agents-mode.yaml`, then print the current resolved values
-- If local `.qwen/.agents-mode.yaml` is missing, read local legacy `.qwen/.agents-mode` as compatibility input only; if both local files are missing, fall back to global `~/.qwen/.agents-mode.yaml` and then global legacy `~/.qwen/.agents-mode` before reporting status
+- If local `.qwen/.agents-mode.yaml` is missing, read local legacy `.qwen/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.qwen/.agents-mode.yaml`, pack-local global legacy `~/.qwen/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults (each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale) and reporting status
 
 Preserve unknown keys on write and normalize comment-free, partial, or older-layout files to the current canonical format on read. Keep one key per line with inline allowed-value comments. Legacy `.qwen/.agents-mode` is compatibility input only and must not be recreated.
 
