@@ -79,6 +79,19 @@ The canonical brief should capture:
 - `closure.md` is mandatory before moving an item to the configured archive location. It holds the final closeout record: outcome, residual risk, and archive location. On archive, also update the recovery entry point so it never points at an archived item still listed as active (move the item's row from Active to Archived).
 - Before marking a batch closed, reconcile `brief.md`, `status.md`, the latest accepted artifact, required checks, canonical-source updates, and any open obligations. If admitted-scope work remains, keep the item active instead of closing it.
 
+## Epics (grouping multiple work-items)
+
+An **epic** groups multiple work-items under one goal or milestone. An epic is a flat single file `work-items/epics/<date>-<slug>.md` — the same flat typed-subtree shape as `work-items/bugs/<date>-<slug>.md` (`work-items/performance/` is the governance-defined sibling, not yet materialized) — with `status: active | closed` frontmatter and `## Goal`, `## Children` (a list of child work-item slugs), and `## Closure` (only when closed) sections.
+
+- **Admission.** An epic is the admitted initiative/milestone — `$product-manager` admits it; the Coherence gate in the product-manager skill IS the epic admission test (an epic must name the shared goal, contract, or mechanism that makes its members one unit). Lead cannot self-author an epic; it traces to an approved `$product-manager` item or a direct human decision.
+- **Linking.** Each child work-item declares its parent with a single bare `Epic: <epic-slug>` line in its `status.md` (single-valued — at most one parent epic). The epic file's `## Children` lists the child slugs.
+- **Roll-up (derived, no stored cache).** Epic progress is derived live, never kept as a maintained count in the epic file (a cache drifts). A child is **done** iff its `status.md` carries a bare done-state line (`status:` / `state:` / `stage:` / `outcome:` whose value begins `closed|done|complete|completed|archived` — the same predicate `check-work-items-archival-stop.py` uses), OR it lives under `work-items/archive/`, OR it has a `closure.md`. Resolve each child slug across BOTH `work-items/active/` AND `work-items/archive/` (the slug is stable across the close-move). Roll-up = all done -> `ready-to-close (n/n)`; some -> `in-progress (k/n)`; none -> `open`.
+- **Close.** Set the epic file `status: closed` and write its `## Closure` (outcome, residual risk) ONLY when ALL child work-items are closed AND the epic goal is met. This mirrors the per-item `closure.md`-before-archive discipline.
+- **Edge cases.** A 0-child epic rolls up as `open/empty`, never `ready-to-close`. Work-items without an epic are valid — they simply omit the `Epic:` line. Reopening a child of a closed epic MUST reopen the epic. An `Epic:` value with no matching epic file is a dangling link — flag and fix. A work-item belongs to at most one epic.
+- **Vocabulary.** Express the epic and child closed-state with key `status` or `state` and a value drawn ONLY from `{closed, done, complete, completed, archived}` so the reused done-predicate matches; do NOT use the bug-registry `fixed`/`resolved` words for the done-line.
+- **Local index + ownership.** Keep the `## Epics` section of the local recovery index current (gitignored task-memory hygiene, not a committed change). Epic archive moves and index sync are the `$knowledge-archivist` hygiene lane; the epic lifecycle RULES are owned by `$product-manager` and `$lead`.
+- **Residual (honest).** Epic closure is governance-enforced ONLY — the work-items-archival Stop hook scans `work-items/active/`, not `work-items/epics/`, so a never-closed or stale-closed epic, and an epic not reopened after a child reopens, are NOT structurally caught (materially weaker than per-item close, which the hook backstops). A ~3-line hook extension to scan `work-items/epics/` is a tracked follow-up.
+
 ## Operating pipeline
 
 0. `Roadmap / Intake`

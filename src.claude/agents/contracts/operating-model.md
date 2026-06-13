@@ -253,6 +253,7 @@ Every completed chain that produces an accepted artifact MUST persist it before 
 | Advisory memo | `work-items/active/<slug>/advisory.md` | Session log entry summarizing advisory |
 | Bug finding | `work-items/bugs/YYYY-MM-DD_slug.md` | — |
 | Performance issue | `work-items/performance/YYYY-MM-DD_slug.md` | — |
+| Epic (groups work-items) | `work-items/epics/<date>-<slug>.md` | — |
 
 Session logs are summaries pointing to canonical artifacts, not copies. See `AGENTS.md` § "Session logging rule" for the mandatory logging contract.
 

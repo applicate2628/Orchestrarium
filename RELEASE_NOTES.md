@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-06-13
+
+### Added
+
+- **First-class Epics — group multiple work-items under one goal or milestone.** Adds the agile Epic -> Story -> Task hierarchy to Orchestrarium's file-based task memory (epic -> work-item -> phase). An epic is a flat local file `work-items/epics/<date>-<slug>.md` (the same flat shape as the existing `work-items/bugs/` registry, with `status: active|closed` frontmatter + `## Goal` / `## Children` slug list); each child work-item declares a single bare `Epic: <slug>` line in its `status.md`. Epic progress is DERIVED live from the children — a child counts as done by the SAME predicate `check-work-items-archival-stop.py` uses, resolving each slug across `work-items/active/` + `work-items/archive/` (the slug is stable across the close-move) — and is shown by `/agents-status` and `/agents-resume`. `$product-manager` admits the epic (the existing Coherence gate is the epic admission test); `$lead` links the children, keeps the roll-up, and closes the epic (`status: closed` + `## Closure`) only when ALL children are closed AND the goal is met. Governance-only — no new code, tooling, command, or hook; the epic DATA stays under gitignored `work-items/`, only the rules are committed. Shipped to BOTH packs symmetrically: Recovery rule (`CLAUDE.md` + `AGENTS.codex.md`), `$product-manager` + `$lead` role rules, the `status.md` format in `subagent-contracts.md`, the operating-model "where to save" persistence surface, and the status/resume/implement commands, plus a `docs/epics.md` reference + README pointer. Designed and deep-multiscope-opus-reviewed (24 confirmed findings applied: flat single-file structure corrected from a wrong "like bugs/performance folders" premise; `status:` key aligned with the bug registry; child resolution across active+archive; explicit edge cases; honest closure residual). **Known limitation:** epic closure is governance-enforced only — the work-items-archival Stop hook scans `work-items/active/`, not `work-items/epics/`, so a never-closed or stale-closed epic is not structurally caught; a ~3-line hook extension is a tracked follow-up.
+
 ## 2026-06-10
 
 ### Added

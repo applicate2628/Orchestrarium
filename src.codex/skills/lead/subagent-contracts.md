@@ -61,6 +61,7 @@ updated: <YYYY-MM-DD HH:MM>
 - **Main conv role**: <what main conversation is doing: orchestrating | waiting for agents | reviewing artifact | idle>
 - **Last accepted artifact**: <filename or "none">
 - **Open obligations before closeout**: <none | remaining required work still inside admitted scope>
+- **Epic**: <parent epic slug, or none> — present only when this work-item belongs to an epic; a single bare `Epic: <slug>` line is the join key the epic roll-up reads (see the lead skill `## Epics`)
 
 ## Active agents
 

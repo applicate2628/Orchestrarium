@@ -11,6 +11,7 @@ Show a compact status dashboard for the current project.
    - Last completed agent and its result
    - Next action
    If no active work-items, say "No active chains."
+   - **Epics.** Also check `work-items/epics/` for epic `.md` files. For each, read `status:` and `## Children`, then derive k/n done by resolving each child slug across `work-items/active/` + `work-items/archive/` (a child counts as done if it lives under `archive/`, has a `closure.md`, or its `status.md` has a bare done-state line — the same predicate as `check-work-items-archival-stop.py`). Show `Epic | goal | k/n done | status`; flag any epic at `ready-to-close (n/n)` and any `Epic:` value with no matching epic file. If no epics, say "No epics."
 
 2. **Project policies.** Read `.claude/CLAUDE.md` and check for `## Project policies` section.
    - If present, list each configured policy (key: value).

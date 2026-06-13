@@ -185,6 +185,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery when task memory is in use.
 - Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
 - On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
+- Epics group several work-items: persist an epic as a flat `work-items/epics/<date>-<slug>.md` (`status: active|closed`, `## Goal` / `## Children` slug list); each child work-item carries a single `Epic: <slug>` line in its `status.md`. Derive the epic roll-up live from the children (resolve each slug across `active/` + `archive/`); close the epic only when all children are closed and the goal is met. Full rules in the lead skill `## Epics`.
 
 ## Lead quick checklist
 

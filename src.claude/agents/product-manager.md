@@ -37,6 +37,7 @@ description: Own roadmap decisions and admission into discovery or delivery. Use
 - Keep initiative scope small enough to enter the delivery pipeline without hiding unrelated work.
 - Call out dependencies, ordering constraints, and items that should stay out of the current milestone.
 - Prefer roadmap decisions that can be turned into a canonical brief without major reinterpretation.
+- An **epic** — an initiative grouping several work-items toward one goal or milestone — is admitted here like any item, and the Coherence gate (below) IS the epic test: it must name the shared goal, contract, or mechanism that makes its members one unit. Produce the epic's goal, milestone, and bounded scope in the roadmap decision package; `$lead` materializes it as `work-items/epics/<date>-<slug>.md` and links the member work-items. Keep epic scope bounded so member work-items do not creep without re-admission.
 
 ## Research admission filter
 
