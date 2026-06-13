@@ -195,5 +195,165 @@ class TestWorkItemsArchivalHook(unittest.TestCase):
                 self.assertIn("done2", p.stdout)
 
 
+def make_epic_repo(
+    epic_status: str,
+    children: list[str],
+    *,
+    active: dict[str, str] | None = None,
+    archived: list[str] | None = None,
+    epic_name: str = "2026-06-13-demo-epic",
+) -> str:
+    """Build a temp repo with work-items/epics/<epic_name>.md + child work-items.
+
+    children: child slugs listed in the epic ## Children section.
+    active: {slug: status.md text} children placed under active/ (NOT done unless
+            the status text says so).
+    archived: slugs placed under archive/2026-06/<slug>/ (counts as done).
+    """
+    root = tempfile.mkdtemp(prefix="wi-epic-")
+    base = Path(root) / "work-items"
+    (base / "active").mkdir(parents=True, exist_ok=True)
+    epics = base / "epics"
+    epics.mkdir(parents=True, exist_ok=True)
+    child_lines = "\n".join(f"- {c} (active)" for c in children) or "(none yet)"
+    (epics / f"{epic_name}.md").write_text(
+        f"---\nstatus: {epic_status}\nepic-id: {epic_name}\nowner: $lead\n---\n"
+        f"# Epic: demo\n\n## Goal\nship the thing\n\n## Children\n{child_lines}\n",
+        encoding="utf-8",
+    )
+    for slug, text in (active or {}).items():
+        d = base / "active" / slug
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "status.md").write_text(text, encoding="utf-8")
+    for slug in (archived or []):
+        d = base / "archive" / "2026-06" / slug
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "status.md").write_text("State: closed\n", encoding="utf-8")
+    return root
+
+
+def write_raw_epic(
+    epic_text: str,
+    *,
+    archived: list[str] | None = None,
+    active: dict[str, str] | None = None,
+    epic_name: str = "2026-06-13-raw-epic",
+) -> str:
+    """Build a temp repo with a RAW epic file body (for parser edge-case tests)."""
+    root = tempfile.mkdtemp(prefix="wi-epic-raw-")
+    base = Path(root) / "work-items"
+    (base / "active").mkdir(parents=True, exist_ok=True)
+    (base / "epics").mkdir(parents=True, exist_ok=True)
+    (base / "epics" / f"{epic_name}.md").write_text(epic_text, encoding="utf-8")
+    for slug, text in (active or {}).items():
+        d = base / "active" / slug
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "status.md").write_text(text, encoding="utf-8")
+    for slug in (archived or []):
+        d = base / "archive" / "2026-06" / slug
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "status.md").write_text("State: closed\n", encoding="utf-8")
+    return root
+
+
+class TestEpicCloseHook(unittest.TestCase):
+    """B1 extension: the same Stop guard catches epic-lifecycle orphans in
+    work-items/epics/ — a ready-to-close epic never closed, or a closed epic
+    whose child was reopened. Fail-open when epics/ is absent or an epic is
+    malformed; a 0-child epic never flags; a subagent is never blocked."""
+
+    def assert_outcome(self, envelope: dict, should_block: bool, *, expect_in: str | None = None) -> None:
+        for script in HOOKS:
+            with self.subTest(pack=script.parent.parent.name):
+                p = run_hook(script, envelope)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(blocks(p), should_block, f"stdout={p.stdout!r}")
+                if should_block and expect_in:
+                    self.assertIn(expect_in, p.stdout)
+
+    def test_ready_to_close_epic_blocks(self) -> None:
+        # epic active, every child archived (done) -> should be closed.
+        repo = make_epic_repo("active", ["c1", "c2"], archived=["c1", "c2"])
+        self.assert_outcome(
+            {"cwd": repo, "last_assistant_message": "done"},
+            should_block=True, expect_in="2026-06-13-demo-epic",
+        )
+
+    def test_epic_with_active_children_does_not_block(self) -> None:
+        repo = make_epic_repo("active", ["c1"], active={"c1": "State: active\n"})
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
+    def test_stale_closed_epic_blocks(self) -> None:
+        # epic closed, but c2 is still active -> should reopen.
+        repo = make_epic_repo("closed", ["c1", "c2"], archived=["c1"], active={"c2": "State: active\n"})
+        self.assert_outcome(
+            {"cwd": repo, "last_assistant_message": "done"},
+            should_block=True, expect_in="reopen",
+        )
+
+    def test_fully_closed_epic_does_not_block(self) -> None:
+        repo = make_epic_repo("closed", ["c1", "c2"], archived=["c1", "c2"])
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
+    def test_zero_child_epic_does_not_block(self) -> None:
+        repo = make_epic_repo("active", [])
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
+    def test_subagent_never_blocks_epic_orphan(self) -> None:
+        repo = make_epic_repo("active", ["c1"], archived=["c1"])
+        self.assert_outcome(
+            {"cwd": repo, "agent_id": "sub-9", "last_assistant_message": "done"},
+            should_block=False,
+        )
+
+    def test_child_done_via_status_line_counts(self) -> None:
+        # child resolved as done via its in-active status.md done-line (not archive).
+        # (this child is ALSO an item-orphan, so the stop blocks; assert the epic
+        #  ready-to-close reason is present too.)
+        repo = make_epic_repo("active", ["c1"], active={"c1": "State: closed\n"})
+        self.assert_outcome(
+            {"cwd": repo, "last_assistant_message": "done"},
+            should_block=True, expect_in="close it",
+        )
+
+    def test_malformed_epic_file_fails_open(self) -> None:
+        # an epic file with no status: line is skipped (no crash, no flag).
+        root = tempfile.mkdtemp(prefix="wi-epic-bad-")
+        base = Path(root) / "work-items"
+        (base / "active").mkdir(parents=True, exist_ok=True)
+        (base / "epics").mkdir(parents=True, exist_ok=True)
+        (base / "epics" / "junk.md").write_text("no frontmatter here\n", encoding="utf-8")
+        self.assert_outcome({"cwd": root, "last_assistant_message": "done"}, should_block=False)
+
+    # --- FP regressions (review MAJOR): _parse_epic_children over-collection ---
+
+    def test_closed_epic_with_prose_bullet_under_children_does_not_block(self) -> None:
+        # A prose note bullet (no '(active|closed)' marker) under ## Children must
+        # NOT be read as a phantom child that re-opens a correctly-closed epic.
+        epic = (
+            "---\nstatus: closed\n---\n# Epic: demo\n\n## Children\n"
+            "- c1 (closed)\n- migration follow-up tracked separately in the bug registry\n"
+        )
+        repo = write_raw_epic(epic, archived=["c1"])
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
+    def test_closed_epic_with_h3_under_children_does_not_block(self) -> None:
+        # An h3 subsection under ## Children must reset the section so its bullets
+        # are not collected as phantom children of a closed epic.
+        epic = (
+            "---\nstatus: closed\n---\n# Epic: demo\n\n## Children\n- c1 (closed)\n"
+            "\n### Deferred ideas\n- some idea that is not a child work-item\n"
+        )
+        repo = write_raw_epic(epic, archived=["c1"])
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
+    def test_body_status_line_without_frontmatter_is_ignored(self) -> None:
+        # A body line 'status: active' (NOT in --- frontmatter) must not be read
+        # as the epic status; with no frontmatter the epic is skipped (fail-open).
+        epic = "# Epic: demo\n\n## Goal\ng\n\nstatus: active\n\n## Children\n- c1 (closed)\n"
+        repo = write_raw_epic(epic, archived=["c1"])
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
+
 if __name__ == "__main__":
     unittest.main()

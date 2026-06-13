@@ -123,7 +123,40 @@ def restore_ledger(path: Path, previous: str | None) -> None:
         path.write_text(previous, encoding="utf-8")
 
 
+def _read_ledger(item: Path) -> tuple[list[dict[str, Any]], int]:
+    """Return (events, malformed_line_count). A corrupt or non-object JSONL line
+    is skipped but COUNTED so the rollup can surface it — an audit surface
+    (evidence coverage) must not silently under-count corrupt input."""
+    ledger = item / "agent-runs.jsonl"
+    events: list[dict[str, Any]] = []
+    malformed = 0
+    if not ledger.exists():
+        return events, malformed
+    for line in ledger.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            parsed = json.loads(line)
+        except json.JSONDecodeError:
+            malformed += 1
+            continue
+        if isinstance(parsed, dict):
+            events.append(parsed)
+        else:
+            malformed += 1
+    return events, malformed
+
+
+def _iter_active_items(active_dir: Path) -> list[Path]:
+    if not active_dir.is_dir():
+        return []
+    return sorted(path for path in active_dir.iterdir() if path.is_dir())
+
+
 def command_init(args: argparse.Namespace) -> int:
+    if args.work_item is None:
+        print("FAIL: init requires --work-item", file=sys.stderr)
+        return 1
     item = args.work_item.resolve()
     item.mkdir(parents=True, exist_ok=True)
     ensure_status_sections(item, args)
@@ -133,6 +166,9 @@ def command_init(args: argparse.Namespace) -> int:
 
 
 def command_append(args: argparse.Namespace) -> int:
+    if args.work_item is None:
+        print("FAIL: append requires --work-item", file=sys.stderr)
+        return 1
     item = args.work_item.resolve()
     if not item.exists():
         print(f"FAIL: missing work item: {item}", file=sys.stderr)
@@ -163,9 +199,84 @@ def command_append(args: argparse.Namespace) -> int:
     return 0
 
 
+def _fmt_counts(counts: dict[str, int]) -> str:
+    return ", ".join(f"{key}={value}" for key, value in sorted(counts.items())) or "(none)"
+
+
+def command_rollup(args: argparse.Namespace) -> int:
+    """Aggregate agent-runs.jsonl events for one work-item (--work-item) or across
+    all active items (--root). Read-only summary; never mutates a ledger."""
+    if args.work_item is not None:
+        items = [args.work_item.resolve()]
+    else:
+        active_dir = (args.root.resolve() / args.active_dir).resolve()
+        items = _iter_active_items(active_dir)
+
+    total = 0
+    malformed_total = 0
+    by_role: dict[str, int] = {}
+    by_execution_role: dict[str, int] = {}
+    by_gate: dict[str, int] = {}
+    by_status: dict[str, int] = {}
+    with_evidence = 0
+    per_item: list[tuple[str, int]] = []
+
+    for item in items:
+        events, malformed = _read_ledger(item)
+        malformed_total += malformed
+        per_item.append((item.name, len(events)))
+        for event in events:
+            total += 1
+            for field, bucket in (
+                ("role", by_role),
+                ("executionRole", by_execution_role),
+                ("gate", by_gate),
+                ("status", by_status),
+            ):
+                key = str(event.get(field, "<none>"))
+                bucket[key] = bucket.get(key, 0) + 1
+            evidence = event.get("evidence")
+            if isinstance(evidence, list) and evidence:
+                with_evidence += 1
+
+    if args.json:
+        print(json.dumps(
+            {
+                "items": len(items),
+                "totalRuns": total,
+                "byRole": by_role,
+                "byExecutionRole": by_execution_role,
+                "byGate": by_gate,
+                "byStatus": by_status,
+                "evidenceCoverage": {"withEvidence": with_evidence, "total": total},
+                "malformedLines": malformed_total,
+                "perItem": dict(per_item),
+            },
+            ensure_ascii=False, indent=2,
+        ))
+        return 0
+
+    scope = items[0].name if (args.work_item is not None and items) else f"{len(items)} active items"
+    print(f"=== agent-run ledger rollup ({scope}) ===")
+    print(f"total runs: {total}")
+    print(f"by role: {_fmt_counts(by_role)}")
+    print(f"by execution-role: {_fmt_counts(by_execution_role)}")
+    print(f"by gate: {_fmt_counts(by_gate)}")
+    print(f"by status: {_fmt_counts(by_status)}")
+    print(f"evidence coverage: {with_evidence}/{total}")
+    print(f"malformed lines: {malformed_total}")
+    if args.work_item is None and per_item:
+        print("per-item runs: " + ", ".join(f"{name}={count}" for name, count in per_item))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Initialize and append Orchestrarium agent-run ledger events.")
-    parser.add_argument("--work-item", required=True, type=Path, help="Path to one work-items/active/<item> directory")
+    parser = argparse.ArgumentParser(description="Initialize, append, and roll up Orchestrarium agent-run ledger events.")
+    parser.add_argument(
+        "--work-item",
+        type=Path,
+        help="Path to one work-items/active/<item> directory. Required for init/append; optional for rollup (omit to roll up all active items via --root).",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init = subparsers.add_parser("init", help="Create missing status sections and an empty agent-runs.jsonl")
@@ -192,6 +303,12 @@ def build_parser() -> argparse.ArgumentParser:
     append.add_argument("--updated-at", help="ISO-like update timestamp. Defaults to started-at.")
     append.add_argument("--notes", help="Short operational note.")
     append.set_defaults(func=command_append)
+
+    rollup = subparsers.add_parser("rollup", help="Aggregate ledger events (one work-item via --work-item, or all active via --root)")
+    rollup.add_argument("--root", type=Path, default=Path("."), help="Repository root for an all-active rollup (when --work-item is omitted).")
+    rollup.add_argument("--active-dir", default="work-items/active", help="Active dir relative to --root. Defaults to work-items/active.")
+    rollup.add_argument("--json", action="store_true", help="Emit the rollup as JSON instead of a human-readable summary.")
+    rollup.set_defaults(func=command_rollup)
     return parser
 
 

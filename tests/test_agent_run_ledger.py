@@ -124,6 +124,94 @@ def test_append_rolls_back_invalid_pass_without_evidence(tmp_path: Path):
     assert not (item / "agent-runs.jsonl").exists()
 
 
+def run_rollup_root(root: Path, *extra: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(LEDGER), "rollup", "--root", str(root), *extra],
+        text=True, capture_output=True,
+    )
+
+
+def append_valid(item: Path, run_id: str) -> subprocess.CompletedProcess:
+    return run_ledger(
+        item, "append",
+        "--run-id", run_id,
+        "--role", "qa-engineer", "--execution-role", "internal",
+        "--status", "completed", "--gate", "PASS",
+        "--scope", "scripts/agent-run-ledger.py", "--artifact", "reviews/qa.md",
+        "--evidence", "command:pytest",
+        "--started-at", "2026-05-03T10:00:00Z", "--updated-at", "2026-05-03T10:05:00Z",
+    )
+
+
+def make_second_item(tmp_path: Path, name: str) -> Path:
+    item = tmp_path / "work-items" / "active" / name
+    (item / "reviews").mkdir(parents=True)
+    (item / "status.md").write_text(valid_status(), encoding="utf-8")
+    (item / "reviews" / "qa.md").write_text("PASS\n", encoding="utf-8")
+    return item
+
+
+# --- B3: ledger rollup -------------------------------------------------------
+
+def test_rollup_single_item_counts_events(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    assert append_valid(item, "rollup-001").returncode == 0
+    assert append_valid(item, "rollup-002").returncode == 0
+    result = run_ledger(item, "rollup")
+    assert result.returncode == 0, result.stderr
+    assert "total runs: 2" in result.stdout
+    assert "PASS=2" in result.stdout
+    assert "evidence coverage: 2/2" in result.stdout
+
+
+def test_rollup_all_active_aggregates(tmp_path: Path):
+    i1 = prepare_valid_work_item(tmp_path)
+    assert append_valid(i1, "rollup-i1-01").returncode == 0
+    i2 = make_second_item(tmp_path, "item-two")
+    assert append_valid(i2, "rollup-i2-01").returncode == 0
+    result = run_rollup_root(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "2 active items" in result.stdout
+    assert "total runs: 2" in result.stdout
+    assert "per-item runs:" in result.stdout
+
+
+def test_rollup_json_shape(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    assert append_valid(item, "rollup-001").returncode == 0
+    result = run_rollup_root(tmp_path, "--json")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data["totalRuns"] == 1
+    assert data["byGate"]["PASS"] == 1
+    assert data["evidenceCoverage"] == {"withEvidence": 1, "total": 1}
+
+
+def test_rollup_empty_ledger(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    (item / "agent-runs.jsonl").write_text("", encoding="utf-8")
+    result = run_ledger(item, "rollup")
+    assert result.returncode == 0, result.stderr
+    assert "total runs: 0" in result.stdout
+
+
+def test_rollup_surfaces_malformed_ledger_lines(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    assert append_valid(item, "rollup-001").returncode == 0
+    with (item / "agent-runs.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write("{ this is not valid json\n")
+    result = run_ledger(item, "rollup")
+    assert result.returncode == 0, result.stderr
+    assert "malformed lines: 1" in result.stdout
+    assert "total runs: 1" in result.stdout  # the one valid event is still counted
+
+
+def test_init_requires_work_item_guard():
+    result = subprocess.run([sys.executable, str(LEDGER), "init"], text=True, capture_output=True)
+    assert result.returncode == 1
+    assert "init requires --work-item" in result.stderr
+
+
 def test_init_adds_missing_status_sections_without_clobbering_existing_text(tmp_path: Path):
     item = tmp_path / "work-items" / "active" / "legacy-item"
     item.mkdir(parents=True)

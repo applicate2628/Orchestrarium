@@ -121,22 +121,135 @@ def _detect_orphans(active_dir: Path) -> list[tuple[str, str]]:
     return orphans
 
 
-def _block_reason(orphans: list[tuple[str, str]]) -> str:
-    lines = "\n".join(f"  - {name}: {why}" for name, why in orphans)
-    return (
-        "work-items archival Stop guard: one or more delivered/closed work-items "
-        "are still sitting in work-items/active/ instead of being archived:\n\n"
-        f"{lines}\n\n"
-        "The Recovery rule's close step is as mandatory as the create step: a "
-        "delivered item must not be left in active/. Before stopping, pick one:\n\n"
-        "  (a) Close each item now: write closure.md (outcome, residual risk, "
-        "archive location) if it is absent, move the folder to "
-        "work-items/archive/<YYYY-MM>/<slug>/, and move its row in "
-        "work-items/index.md from Active to Archived.\n\n"
-        "  (b) If leaving a closed-marked item in active/ is intentional this "
-        "turn (e.g. closure.md is written but the archive move is deferred for a "
-        "stated reason), include [acknowledge-open-work-items] in your reply."
+# --- Epic lifecycle orphans (work-items/epics/) ------------------------------
+# The same Stop guard also catches epics that drifted out of sync with their
+# children (the docs/epics.md "Known limitation"): a ready-to-close epic that was
+# never closed, or a closed epic whose child was reopened. Fail-open when
+# work-items/epics/ is absent (it may not exist yet).
+
+EPIC_HEADING_RE = re.compile(r"#{1,6}\s")
+EPIC_CHILDREN_HEADING_RE = re.compile(r"##\s+children\b", re.IGNORECASE)
+EPIC_CHILD_LINE_RE = re.compile(r"-\s*([A-Za-z0-9][\w.-]*)\s*\((?:active|closed)\)\s*$", re.IGNORECASE)
+EPIC_FRONTMATTER_STATUS_RE = re.compile(r"\s*status\s*:\s*([A-Za-z]+)", re.IGNORECASE)
+
+
+def _epic_status(text: str) -> str | None:
+    """Read the epic status from its leading --- ... --- frontmatter ONLY. A body
+    line that happens to start with 'status: closed' must NOT be treated as the
+    epic status (FP-critical on a blocking hook). Returns None when there is no
+    frontmatter status -> the epic is skipped (fail-open)."""
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        match = EPIC_FRONTMATTER_STATUS_RE.match(line)
+        if match:
+            return match.group(1).lower()
+    return None
+
+
+def _slug_is_done(active_dir: Path, archive_dir: Path, slug: str) -> bool:
+    """A child work-item is done iff it is archived, has closure.md, or its
+    status.md carries a bare done-state line — the same predicate used for items,
+    resolved across work-items/active/ + work-items/archive/."""
+    try:
+        for cand in [archive_dir / slug, *archive_dir.glob(f"*/{slug}")]:
+            if cand.is_dir():
+                return True
+    except Exception:
+        pass
+    item = active_dir / slug
+    try:
+        if (item / "closure.md").is_file():
+            return True
+    except Exception:
+        pass
+    text = _read_status(item)
+    return bool(text and DONE_STATE_LINE_REGEX.search(text))
+
+
+def _parse_epic_children(text: str) -> list[str]:
+    """Extract child work-item slugs from the epic file's ## Children section.
+
+    Hardened against false BLOCKs on a closed epic: reset the section on ANY ATX
+    heading (so an h3 under ## Children does not keep collecting), and require the
+    documented '- <slug> (active|closed)' marker (so a prose note bullet under
+    ## Children is not mis-read as a phantom child). Dropping a marker-less child
+    line is fail-safe: it can only suppress a flag, never create one."""
+    children: list[str] = []
+    in_children = False
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if EPIC_HEADING_RE.match(stripped):
+            in_children = bool(EPIC_CHILDREN_HEADING_RE.match(stripped))
+            continue
+        if in_children:
+            match = EPIC_CHILD_LINE_RE.match(stripped)
+            if match:
+                children.append(match.group(1))
+    return children
+
+
+def _detect_epic_orphans(active_dir: Path) -> list[tuple[str, str]]:
+    orphans: list[tuple[str, str]] = []
+    epics_dir = active_dir.parent / "epics"
+    archive_dir = active_dir.parent / "archive"
+    try:
+        if not epics_dir.is_dir():
+            return []
+        files = sorted(p for p in epics_dir.iterdir() if p.is_file() and p.suffix == ".md")
+    except Exception:
+        return []
+    for epic in files:
+        try:
+            text = epic.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            continue
+        status = _epic_status(text)
+        if status not in ("active", "closed"):
+            continue
+        children = _parse_epic_children(text)
+        if not children:
+            continue  # a 0-child epic never flags
+        all_done = all(_slug_is_done(active_dir, archive_dir, c) for c in children)
+        if status == "active" and all_done:
+            orphans.append((epic.stem, "all child work-items are closed but the epic is still status: active (close it)"))
+        elif status == "closed" and not all_done:
+            orphans.append((epic.stem, "epic is status: closed but a child work-item is not closed (reopen the epic)"))
+    return orphans
+
+
+def _block_reason(item_orphans: list[tuple[str, str]], epic_orphans: list[tuple[str, str]]) -> str:
+    parts = ["work-items archival Stop guard: task-memory items need a close action before stopping."]
+    if item_orphans:
+        lines = "\n".join(f"  - {name}: {why}" for name, why in item_orphans)
+        parts.append(
+            "One or more delivered/closed work-items are still sitting in "
+            "work-items/active/ instead of being archived:\n\n"
+            f"{lines}\n\n"
+            "The Recovery rule's close step is as mandatory as the create step. "
+            "Close each item: write closure.md (outcome, residual risk, archive "
+            "location) if it is absent, move the folder to "
+            "work-items/archive/<YYYY-MM>/<slug>/, and move its row in "
+            "work-items/index.md from Active to Archived."
+        )
+    if epic_orphans:
+        lines = "\n".join(f"  - {name}: {why}" for name, why in epic_orphans)
+        parts.append(
+            "One or more epics in work-items/epics/ are out of sync with their "
+            "children:\n\n"
+            f"{lines}\n\n"
+            "Update the epic file's status line: close a ready-to-close epic "
+            "(status: closed + ## Closure) or reopen an epic whose child reopened "
+            "(status: active)."
+        )
+    parts.append(
+        "If leaving this as-is is intentional this turn, include "
+        "[acknowledge-open-work-items] in your reply."
     )
+    return "\n\n".join(parts)
 
 
 def main() -> int:
@@ -165,11 +278,12 @@ def main() -> int:
         if active_dir is None:
             return 0  # no work-items/active in scope; allow
 
-        orphans = _detect_orphans(active_dir)
-        if not orphans:
+        item_orphans = _detect_orphans(active_dir)
+        epic_orphans = _detect_epic_orphans(active_dir)
+        if not item_orphans and not epic_orphans:
             return 0
 
-        print(json.dumps({"decision": "block", "reason": _block_reason(orphans)}))
+        print(json.dumps({"decision": "block", "reason": _block_reason(item_orphans, epic_orphans)}))
         return 0
     except Exception:
         return 0  # fail open on any internal error

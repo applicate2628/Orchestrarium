@@ -84,13 +84,23 @@ python scripts/check-work-items-state.py --root . --stale-hours 24
 .\scripts\check-work-items-state.ps1 --root . --stale-hours 24
 ```
 
-`--root` points to the repository root. `--active-dir` defaults to `work-items/active`. `--stale-hours 0` disables age checks; any positive value reports running events older than that threshold.
+`--root` points to the repository root. `--active-dir` defaults to `work-items/active`. `--stale-hours 0` disables age checks; any positive value reports running events older than that threshold. `--max-age-days <N>` reports (informational, never a FAIL) active items whose `<date>-` directory prefix is older than N days; the checker also reports any open `Depends-on` blockers and dangling dependency targets it derives from each item's `status.md`. These informational notes are printed as `info:` lines and never change the exit code — a blocked or aging active item is expected state, not a defect.
 
 For deterministic automation, pass `--now`:
 
 ```bash
 python scripts/check-work-items-state.py --root . --stale-hours 24 --now 2026-05-03T12:00:00Z
 ```
+
+## Roll Up Ledger Events
+
+```bash
+python scripts/agent-run-ledger.py rollup --root .            # all active items
+python scripts/agent-run-ledger.py --work-item work-items/active/<slug> rollup   # one item
+python scripts/agent-run-ledger.py rollup --root . --json     # machine-readable
+```
+
+`rollup` aggregates `agent-runs.jsonl` events read-only: total runs, counts by role, execution-role, gate, and status, evidence coverage, and a malformed-line count. Use it for a quick execution audit across the active set or one item.
 
 ## Installed Runtime Paths
 

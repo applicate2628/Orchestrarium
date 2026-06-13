@@ -2,8 +2,9 @@
 import argparse
 import importlib.util
 import json
+import re
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,97 @@ def stale_running_errors(item: Path, now: datetime, stale_after: timedelta) -> l
     return errors
 
 
+DIR_DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})-")
+SLUG_RE = re.compile(r"^[A-Za-z0-9][\w.-]*$")
+DONE_STATE_LINE_RE = re.compile(
+    r"(?im)^\s*>?\s*\*{0,3}\s*(?:current\s+)?(?:state|status|stage|outcome)"
+    r"\s*\*{0,3}\s*:\s*\*{0,3}\s*(?:closed|done|complete|completed|archived)(?![\w-])"
+)
+DEPENDS_ON_RE = re.compile(r"(?im)^\s*-?\s*\*{0,2}Depends-on\*{0,2}\s*:\s*(.+?)\s*$")
+
+
+def item_aging_notes(item: Path, today: date, max_age_days: float) -> list[str]:
+    """Informational: flag an active item whose <date>- dir prefix is older than
+    max_age_days. Aging is a staleness SIGNAL, not a failure."""
+    if max_age_days <= 0:
+        return []
+    match = DIR_DATE_RE.match(item.name)
+    if not match:
+        return []
+    try:
+        created = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return []
+    age_days = (today - created).days
+    if age_days > max_age_days:
+        return [f"aging: active {age_days}d (since {created.isoformat()}, threshold {max_age_days:.0f}d)"]
+    return []
+
+
+def _slug_archived(slug: str, archive_dir: Path) -> bool:
+    try:
+        for cand in [archive_dir / slug, *archive_dir.glob(f"*/{slug}")]:
+            if cand.is_dir():
+                return True
+    except OSError:
+        return False
+    return False
+
+
+def _slug_done(slug: str, active_dir: Path, archive_dir: Path) -> bool:
+    if _slug_archived(slug, archive_dir):
+        return True
+    item = active_dir / slug
+    try:
+        if (item / "closure.md").is_file():
+            return True
+        status = item / "status.md"
+        if status.is_file() and DONE_STATE_LINE_RE.search(status.read_text(encoding="utf-8", errors="replace")):
+            return True
+    except OSError:
+        return False
+    return False
+
+
+def _slug_exists(slug: str, active_dir: Path, archive_dir: Path) -> bool:
+    try:
+        if (active_dir / slug).is_dir():
+            return True
+    except OSError:
+        return False
+    return _slug_archived(slug, archive_dir)
+
+
+def blocked_by_notes(item: Path, active_dir: Path, archive_dir: Path) -> list[str]:
+    """Informational: open Depends-on blockers + dangling targets for an active
+    item. A blocked item is EXPECTED state, NOT a failure (so this never flips the
+    exit code) — it mirrors the /agents-status governance derivation in a script."""
+    status = item / "status.md"
+    try:
+        text = status.read_text(encoding="utf-8", errors="replace") if status.is_file() else ""
+    except OSError:
+        return []
+    match = DEPENDS_ON_RE.search(text)
+    if not match:
+        return []
+    open_targets: list[str] = []
+    dangling: list[str] = []
+    for token in match.group(1).split(","):
+        slug = token.strip().strip("`")
+        if not slug or slug.lower() == "none" or slug.startswith("<") or not SLUG_RE.match(slug):
+            continue
+        if not _slug_exists(slug, active_dir, archive_dir):
+            dangling.append(slug)
+        elif not _slug_done(slug, active_dir, archive_dir):
+            open_targets.append(slug)
+    notes: list[str] = []
+    if open_targets:
+        notes.append(f"blocked-by: {', '.join(open_targets)} (open Depends-on)")
+    if dangling:
+        notes.append(f"dangling Depends-on: {', '.join(dangling)} (no matching work-item)")
+    return notes
+
+
 def iter_work_items(active_dir: Path) -> list[Path]:
     if not active_dir.exists():
         return []
@@ -85,12 +177,19 @@ def command_check(args: argparse.Namespace) -> int:
 
     validator = load_validator()
     now = parse_time(args.now) if args.now else datetime.now(UTC)
+    today = now.date()
     stale_after = timedelta(hours=args.stale_hours)
+    archive_dir = active_dir.parent / "archive"
     failed = 0
 
     for item in items:
         errors = validator.validate_work_item(item)
         errors.extend(stale_running_errors(item, now, stale_after))
+        # Informational notes (aging, blocked-by) are NOT failures: a blocked or
+        # aging active item is expected state, not a defect, so they never flip
+        # the exit code or the RESULT line.
+        notes = item_aging_notes(item, today, args.max_age_days)
+        notes.extend(blocked_by_notes(item, active_dir, archive_dir))
         label = item.name
         if errors:
             failed += 1
@@ -99,6 +198,8 @@ def command_check(args: argparse.Namespace) -> int:
                 print(f"  - {error}")
         else:
             print(f"PASS {label}")
+        for note in notes:
+            print(f"  info: {note}")
 
     if failed:
         print(f"RESULT: FAIL ({failed}/{len(items)} active work-items failed)")
@@ -123,6 +224,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report running events older than this many hours. Use 0 to disable stale checks.",
     )
     parser.add_argument("--now", help="UTC-ish timestamp for deterministic stale checks. Defaults to current UTC.")
+    parser.add_argument(
+        "--max-age-days",
+        type=float,
+        default=0.0,
+        help="Report (informational) active items whose <date>- dir prefix is older than this many days. Use 0 to disable.",
+    )
     return parser
 
 

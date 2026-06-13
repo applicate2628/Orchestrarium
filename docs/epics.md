@@ -79,12 +79,15 @@ all done -> `ready-to-close (n/n)`; some -> `in-progress (k/n)`; none -> `open`.
 
 ## Known limitation
 
-Epic closure is **governance-enforced only**. The work-items-archival Stop hook
-scans `work-items/active/` (work-items), NOT `work-items/epics/`, so a
-never-closed or stale-closed epic — and an epic not reopened after a child
-reopens — are not structurally caught. This is weaker than per-item close, which
-the hook backstops. A ~3-line hook extension to also scan `work-items/epics/` is
-a tracked follow-up. Full role rules: `lead.md` / the lead skill `## Epics`.
+The work-items-archival Stop hook now ALSO scans `work-items/epics/` (Batch B):
+at turn end it flags a ready-to-close epic (every child done but the epic still
+`status: active`) and a stale-closed epic (`status: closed` but a child is not
+done), the same way it flags an unarchived work-item — subagent-safe (skips on
+`agent_id`) and failing open when `work-items/epics/` is absent. Still
+governance-only: nothing verifies the epic's `## Goal` is actually met (only that
+the children are closed), and a child line written without the documented
+`(active|closed)` marker is ignored by the scan. Full role rules: `lead.md` / the
+lead skill `## Epics`.
 
 ## Terms and Abbreviations
 
