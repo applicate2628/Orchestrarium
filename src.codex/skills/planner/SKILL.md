@@ -43,6 +43,7 @@ description: "Plan accepted design into phases, scope, dependencies, checks, gat
 ## Non-goals
 
 - Do not change architecture during planning.
+- Do not model CROSS-work-item dependencies (`Depends-on:` between items) — those are owned by `$lead` as standing blockers. You own only the WITHIN-item phase dependencies and execution order.
 - Do not write implementation code.
 - Do not approve a phase without checks and rollback thinking.
 - Do not hide broad architectural churn inside a supposedly local feature phase.

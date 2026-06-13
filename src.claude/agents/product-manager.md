@@ -38,6 +38,7 @@ description: Own roadmap decisions and admission into discovery or delivery. Use
 - Call out dependencies, ordering constraints, and items that should stay out of the current milestone.
 - Prefer roadmap decisions that can be turned into a canonical brief without major reinterpretation.
 - An **epic** — an initiative grouping several work-items toward one goal or milestone — is admitted here like any item, and the Coherence gate (below) IS the epic test: it must name the shared goal, contract, or mechanism that makes its members one unit. Produce the epic's goal, milestone, and bounded scope in the roadmap decision package; `$lead` materializes it as `work-items/epics/<date>-<slug>.md` and links the member work-items. Keep epic scope bounded so member work-items do not creep without re-admission.
+- When the roadmap decision package's dependency notes or sequencing constraints name a cross-work-item prerequisite (item B needs item A first), say so explicitly so `$lead` records it as a `Depends-on:` edge on the admitted item (`lead.md` `## Dependencies`). This turns prose "sequence after X" into a standing, derivable blocker rather than a one-off note.
 
 ## Research admission filter
 

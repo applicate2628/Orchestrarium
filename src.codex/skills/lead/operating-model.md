@@ -186,6 +186,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
 - On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
 - Epics group several work-items: persist an epic as a flat `work-items/epics/<date>-<slug>.md` (`status: active|closed`, `## Goal` / `## Children` slug list); each child work-item carries a single `Epic: <slug>` line in its `status.md`. Derive the epic roll-up live from the children (resolve each slug across `active/` + `archive/`); close the epic only when all children are closed and the goal is met. Full rules in the lead skill `## Epics`.
+- Cross-cutting decisions: durable architecture decisions persist as a flat `work-items/decisions/<date>-<slug>.md` (`status: proposed|accepted|dropped|superseded|reverted`, plus `decided-by`/`context`/`supersedes`/`superseded-by`), referenced (not duplicated) from a work-item's `design.md`. Cross-work-item dependencies persist as a `Depends-on: <slug>, <slug>` line in the dependent item's `status.md`. Full rules in the architect + lead skills.
 
 ## Lead quick checklist
 

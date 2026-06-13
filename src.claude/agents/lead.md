@@ -91,6 +91,27 @@ An **epic** groups multiple work-items under one goal or milestone. An epic is a
 - **Local index.** Keep the `## Epics` section of the local `work-items/index.md` (Epic | goal | k/n done | status) current. `work-items/` is gitignored, so this is local task-memory hygiene, not a committed change. Epic archive moves and index sync are the `$knowledge-archivist` hygiene lane; the epic lifecycle RULES (admit/link/roll-up/close) are owned by `$product-manager` and `$lead`.
 - **Residual (honest).** Epic closure is governance-enforced ONLY. The work-items-archival Stop hook scans `work-items/active/` (work-items), not `work-items/epics/`, so a never-closed or stale-closed epic — and an epic not reopened after a child reopens — are NOT structurally caught. This is materially weaker than per-item close, which the hook backstops (the hook exists precisely because unenforced close steps get skipped). A ~3-line extension to scan `work-items/epics/` for `status: closed`-stale and all-children-done epics is a tracked follow-up.
 
+## Dependencies (work-item -> work-item)
+
+A work-item that needs another finished first declares `Depends-on: <slug>, <slug>` — a bare, comma-separated line of work-item slugs — in its `status.md`. This is a standing, planned inter-work-item dependency edge. It is RELATED TO but NOT identical to the runtime `BLOCKED:*` gate verdicts: `BLOCKED:prerequisite` is the in-flight discovery of unplanned adjacent work, which is filed in the bug registry, and `BLOCKED:dependency` is an external blocker — `Depends-on` is neither; it is a declared edge between two planned work-items.
+
+- **Scope.** `Depends-on` targets are work-items ONLY, resolved by slug across `work-items/active/` AND `work-items/archive/`. A slug that matches a bug/epic/decision but no work-item — or matches nothing — is a dangling target: flag and fix. Bugs are not dependency targets.
+- **Derived (no stored cache).** `blocked-by(X)` = X's `Depends-on` targets that are not closed (closed = lives under `archive/`, OR has `closure.md`, OR its `status.md` has a bare done-state line — the same predicate `check-work-items-archival-stop.py` uses). The `ready-set` = active items whose every `Depends-on` target is closed (or which have none). `/agents-status` and `/agents-resume` compute these live from the active set.
+- **Rule.** Record `Depends-on` when admitting or planning an item that needs prior work; do NOT start a blocked item's implementation while it has an open blocker. When a dependency closes, the dependent may become ready — `/agents-status` surfaces the newly-ready set.
+- **Integrity (authoring rule, not live detection).** Self-dependency is forbidden, and you must not author a dependency cycle (any `a -> ... -> a`). These are authoring-time obligations on `$lead`; the MVP does not run live cycle detection. `/agents-status` flags a dangling `Depends-on`.
+- **Residual (honest).** Dependency edges are governance-enforced only — no hook enforces them, so an item started while a dependency is still open is not structurally caught.
+
+## Decisions (cross-cutting ADR registry)
+
+Durable, cross-cutting architecture decisions live in a flat registry `work-items/decisions/<date>-<slug>.md` (the same flat list-item-frontmatter shape as `work-items/bugs/`), so a decision survives its originating work-item's archival instead of being buried in that item's `design.md`.
+
+- **Shape.** Frontmatter uses the bug-registry list-item style (`- key:` bullets, no `---` fences): `- id:`, `- status: proposed | accepted | dropped | superseded | reverted`, `- decided-by: <role or human>`, `- context: <work-item slug | cross-cutting>`, `- supersedes: <decision id | none>`, `- superseded-by: <decision id | none>`. Body: `## Decision`, `## Rationale`, `## Consequences`, `## Alternatives rejected`. The decision `status` lifecycle is SELF-CONTAINED — independent of the work-item/epic done-predicate (a decision is never "closed" by it).
+- **Authoring + acceptance gate.** `$architect` authors a cross-cutting or long-lived decision in `status: proposed`; a work-item's `design.md` REFERENCES it by id rather than duplicating it. Promotion `proposed -> accepted` happens only after the corresponding `$architecture-reviewer` gate passes. `proposed -> dropped` (with a one-line reason) retires a declined proposal.
+- **Supersede (two-way edge).** When decision B supersedes A, set B's `- supersedes: A` AND A's `- status: superseded` + `- superseded-by: B` in one step — a stored bidirectional link (mirroring the epic child<->parent join), not a registry-wide grep. `reverted` keeps a one-line reason.
+- **Ownership.** Lifecycle TRANSITIONS (proposed/accepted/dropped/superseded/reverted) are a SEMANTIC act owned by `$architect`/`$lead`; `$knowledge-archivist` does ONLY the non-semantic bookkeeping (writing the stored back-link field, local index sync). `/agents-status` shows `proposed` decisions awaiting acceptance.
+- **Stale-proposed accountability.** `$lead` is accountable for resolving a `proposed` decision that `/agents-status` keeps surfacing — drive it to `accepted` (after the `$architecture-reviewer` gate) or `dropped` (with a one-line reason). Do not let a proposal idle indefinitely; listing it is visibility, not closure.
+- **Residual (honest).** Registry hygiene is governance-enforced only — no hook scans `work-items/decisions/`, so a stale `proposed` decision is not structurally caught.
+
 ## Operating pipeline
 
 0. `Roadmap / Intake`

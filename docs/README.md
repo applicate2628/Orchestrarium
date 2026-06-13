@@ -23,6 +23,9 @@ Current docs in this branch:
 - [new-session-guide.md](new-session-guide.md) for new-session orientation and source-first maintenance rules
 - [provider-runtime-layouts.md](provider-runtime-layouts.md) for cross-provider runtime path mapping
 - [work-item-execution-tracking.md](work-item-execution-tracking.md) for the execution ledger helper and periodic active work-item checker
+- [epics.md](epics.md) for grouping work-items under one goal or milestone (epic -> work-item -> phase)
+- [decisions.md](decisions.md) for the cross-item architecture-decision registry (ADR store)
+- [dependencies.md](dependencies.md) for cross-work-item `Depends-on` edges and the blocked/ready derivation
 - [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md)
 
 ## Terms and Abbreviations
@@ -32,6 +35,8 @@ Current docs in this branch:
 - `check-work-items-state.*`: helper script family that checks every active work item under a repository root.
 - `Codex`: OpenAI Codex runtime and provider line.
 - `Claude`: Anthropic Claude runtime and provider line.
+- `decision registry`: flat cross-item store of durable architecture decisions under `work-items/decisions/` (the ADR pattern in task memory).
+- `Depends-on`: standing cross-work-item dependency edge declared in `status.md`; drives the derived blocked-by / ready-set views.
 - `Gemini`: Google Gemini CLI provider line, documented here as an example integration.
 - `MCP`: Model Context Protocol; a protocol for exposing tools and resources to agent runtimes.
 - `Qwen`: Qwen provider line, documented here as an example integration.
