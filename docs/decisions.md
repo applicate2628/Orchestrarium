@@ -114,7 +114,7 @@ when you look.
 - **ADR (Architecture Decision Record)**: an industry pattern of recording one
   architecture decision (context, decision, consequences) as a small versioned
   document. The registry is the ADR idea adapted to Orchestrarium task memory.
-- **proposed / accepted / dropped / superseded / reverted**: the decision status
+- **proposed | accepted | dropped | superseded | reverted**: the decision status
   enum (independent of the work-item done-predicate).
 - **supersede**: replace one decision with a newer one; stored as a two-way
   `supersedes:` / `superseded-by:` edge.

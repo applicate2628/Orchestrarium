@@ -120,7 +120,7 @@ only if and when you look.
 
 - **Lessons registry**: the flat cross-item store of durable delivery lessons
   under `work-items/lessons/`.
-- **open / applied / dropped / archived**: the lesson status enum (independent
+- **open | applied | dropped | archived**: the lesson status enum (independent
   of the work-item done-predicate).
 - **applied**: the resolution where a lesson drove a named change (a rule, a
   checklist item, a fix) — the loop-closing transition.
