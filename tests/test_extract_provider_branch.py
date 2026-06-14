@@ -56,14 +56,30 @@ def test_docs_only_allowlisted_pulled_from_main():
     assert inc("docs/decisions.md")
     assert inc("docs/work-item-execution-tracking.md")
     assert inc("docs/epics.md")
-    # NON-allowlisted docs are NOT pulled from main (carried from the branch instead,
-    # because the monorepo copies link to excluded paths) or excluded outright
-    assert not inc("docs/agents-mode-reference.md")    # carried from branch (links to routing/)
-    assert not inc("docs/provider-runtime-layouts.md")  # carried from branch (cross-provider)
-    assert not inc("docs/README.md")                    # carried from branch (monorepo index)
-    assert not inc("docs/external-worker-design.md")     # excluded (links to routing/)
+    # provider-runtime-layouts has no markdown links at all -> pulled fresh from main
+    assert inc("docs/provider-runtime-layouts.md")
+    # agents-mode-reference is pulled fresh from main but its one excluded-subtree link
+    # (docs/routing/) is unwrapped to plain text by a DOCS_FROM_MAIN_TRANSFORMED transform
+    assert inc("docs/agents-mode-reference.md")
+    # docs/README is the standalone single-provider index -> still carried from the branch
+    assert not inc("docs/README.md")
+    # external-worker-design is still excluded (it links to routing/ and has no transform)
+    assert not inc("docs/external-worker-design.md")
     assert not inc("docs/routing/12-lane-routing-matrix-v1-2026-04-18.md")
     assert not inc("docs/superpowers/plans/x.md")
+
+
+def test_delink_excluded_unwraps_only_excluded_subtree_links():
+    src = (
+        "See [`docs/routing/x.md`](routing/x.md) and "
+        "[plan](./superpowers/p.md) but keep "
+        "[epics](epics.md) and [ext](https://example.com).\n"
+    ).encode("utf-8")
+    out = mod._delink_excluded(src).decode("utf-8")
+    assert "](routing/" not in out and "](./superpowers/" not in out
+    assert "`docs/routing/x.md`" in out and "plan" in out          # link TEXT preserved
+    assert "[epics](epics.md)" in out                               # in-tree link untouched
+    assert "[ext](https://example.com)" in out                      # external url untouched
 
 
 def test_codex_provider_scopes_correctly():
