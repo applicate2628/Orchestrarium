@@ -8,6 +8,7 @@ set -euo pipefail
 SCRIPT_DIR_LOGICAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 DEV_REPO=0
+STANDALONE=0
 SOURCE_SCRIPTS_DIR=""
 if [[ -d "src.claude/agents/scripts" ]]; then
   SOURCE_SCRIPTS_DIR="$(cd "src.claude/agents/scripts" && pwd -P)"
@@ -17,6 +18,14 @@ if [[ -n "$SOURCE_SCRIPTS_DIR" && "$SCRIPT_DIR" == "$SOURCE_SCRIPTS_DIR" && -d "
   AGENTS_FILE="shared/AGENTS.shared.md"
   REPO_ROOT="$(pwd -P)"
   DEV_REPO=1
+  # A single-provider STANDALONE branch carries ONLY its own src.claude/ tree, so the
+  # monorepo-wide surfaces (root install.sh/.ps1, RELEASE_NOTES.md, docs/external-worker-design.md,
+  # the cross-provider README/INSTALL work-item sections, the all-provider agents-mode contract)
+  # are absent. Detect it by the ABSENCE of the sibling production pack src.codex (a positive
+  # structural signal the full monorepo always carries) rather than by a monorepo-only file's
+  # absence, so renaming or moving a root doc can never silently flip the monorepo itself to
+  # standalone and skip the cross-provider checks. Pack-content checks run in both modes.
+  [[ -d "src.codex" ]] || STANDALONE=1
 elif [[ -d ".claude/agents" ]]; then
   PACK=".claude"
   if [[ -f "$PACK/AGENTS.md" ]]; then
@@ -927,6 +936,9 @@ check_contains "$PACK/agents/contracts/operating-model.md" 'Gemini and Qwen stay
 if [[ $DEV_REPO -eq 1 ]]; then
   check_contains "$REPO_ROOT/shared/references/README.md" "current Gemini and Qwen example integrations" \
     "shared reference index treats Gemini/Qwen as current example integrations"
+  if [[ $STANDALONE -eq 0 ]]; then
+    # Root multi-provider installer (install.sh/.ps1) and its README/INSTALL dispatch
+    # docs exist only in the monorepo; a single-provider standalone branch omits them.
   check_contains "$REPO_ROOT/install.sh" "default production install" \
     "root bash installer defaults to the Codex/Claude production pair"
   check_contains "$REPO_ROOT/install.ps1" "default production install" \
@@ -969,6 +981,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "root bash installer has no aggregate all-provider helper"
   check_absent "$REPO_ROOT/install.ps1" "Invoke-AllAvailableInstallers" \
     "root PowerShell installer has no aggregate all-provider helper"
+  fi
   check_contains "$REPO_ROOT/README.md" "Pressing Enter selects the default production install" \
     "README documents the Codex/Claude default root install"
   check_contains "$REPO_ROOT/INSTALL.md" "Pressing Enter selects the default production install" \
@@ -990,11 +1003,16 @@ if [[ $DEV_REPO -eq 1 ]]; then
   else
     contract_python_cmd=""
   fi
-  if [[ -n "$contract_python_cmd" ]] &&
-     "$contract_python_cmd" "$REPO_ROOT/scripts/validate-agents-mode-contract.py" --root "$REPO_ROOT" >/dev/null; then
-    pass "agents-mode machine-readable contract matches docs and init preset surfaces"
-  else
-    fail "agents-mode machine-readable contract matches docs and init preset surfaces"
+  if [[ $STANDALONE -eq 0 ]]; then
+    # The agents-mode machine-readable contract cross-checks EVERY provider's init-project
+    # surface (it reads src.codex/, src.gemini/, src.qwen/ init-project files); a single-provider
+    # standalone tree carries only its own pack, so the cross-provider checker cannot run there.
+    if [[ -n "$contract_python_cmd" ]] &&
+       "$contract_python_cmd" "$REPO_ROOT/scripts/validate-agents-mode-contract.py" --root "$REPO_ROOT" >/dev/null; then
+      pass "agents-mode machine-readable contract matches docs and init preset surfaces"
+    else
+      fail "agents-mode machine-readable contract matches docs and init preset surfaces"
+    fi
   fi
   check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "## Canonical maintenance" \
     "agents-mode reference defines canonical maintenance"
@@ -1006,8 +1024,11 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "agents-mode reference documents file-based external CLI prompts"
   check_contains "$REPO_ROOT/docs/agents-mode-reference.md" "agent-runs.jsonl" \
     "agents-mode reference documents ledger fan-out tracking"
-  check_contains "$REPO_ROOT/docs/external-worker-design.md" "Work-item ledger rule" \
-    "external-worker design maps execution records to the ledger"
+  if [[ $STANDALONE -eq 0 ]]; then
+    # docs/external-worker-design.md is a cross-provider design doc the standalone branch omits.
+    check_contains "$REPO_ROOT/docs/external-worker-design.md" "Work-item ledger rule" \
+      "external-worker design maps execution records to the ledger"
+  fi
   check_normalizer_strips_example_auto_providers \
     "agents-mode normalizer strips Gemini/Qwen and keeps reserve last or absent in custom auto profiles"
   check_file "$REPO_ROOT/shared/agents-mode.defaults.yaml" "shared/agents-mode.defaults.yaml"
@@ -1015,6 +1036,9 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "shared agents-mode defaults keep reserve advisory/review-only"
   check_not_exists "$REPO_ROOT/src.claude/agents-mode.defaults.yaml" \
     "src.claude/agents-mode.defaults.yaml removed from the monorepo"
+  if [[ $STANDALONE -eq 0 ]]; then
+    # The cross-provider README/INSTALL work-item sections and RELEASE_NOTES.md exist only in
+    # the monorepo; the standalone branch curates these surfaces away and ships no RELEASE_NOTES.md.
   check_contains "$REPO_ROOT/README.md" "scripts/validate-work-item-state.* --work-item" \
     "README documents the work-item state validator"
   check_contains "$REPO_ROOT/README.md" "scripts/agent-run-ledger.* --work-item" \
@@ -1033,6 +1057,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "release notes document the ledger append/init helper"
   check_contains "$REPO_ROOT/RELEASE_NOTES.md" "periodic active work-item state checker" \
     "release notes document the periodic work-item checker"
+  fi
   check_contains "$REPO_ROOT/scripts/agent-run-ledger.py" "validate_work_item" \
     "agent-run-ledger helper reuses the work-item state validator"
   check_contains "$REPO_ROOT/scripts/agent-run-ledger.py" "restore_ledger" \
