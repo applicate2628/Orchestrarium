@@ -1,12 +1,12 @@
 description = "Summarize the Gemini example-pack structure, role surface, and orchestration layers."
 prompt = """
-Read GEMINI.md, README.md, skills/README.md, skills/lead/SKILL.md, and agents/lead.md.
+Read GEMINI.md, README.md, skills/README.md, and skills/lead/SKILL.md.
 
 Summarize:
 - the current Gemini example-pack structure
 - the role of GEMINI.md
-- the distinction between stable skills and preview specialist agents
-- the role of agents/team-templates in the shared role principle
+- the universal role-skill catalog under skills/ (one skill per role, read by Gemini CLI and Antigravity)
+- the role of skills/lead/team-templates in the shared role principle
 - why Gemini orchestration stays in the main session under the lead skill
 - why external routing must check role eligibility before provider or CLI feasibility
 - how the three external roles split advisory, worker-side, and review-side substitution

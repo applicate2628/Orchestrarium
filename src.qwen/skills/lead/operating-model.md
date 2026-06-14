@@ -4,8 +4,7 @@ This file is the Qwen-line orchestration reference for the common role principle
 
 ## Structural truth
 
-- Qwen `skills/` are the stable expertise layer.
-- Qwen `agents/` are the explicit specialist-team layer.
+- Qwen `skills/` are the universal role-skill catalog — one skill per role.
 - Orchestrarium keeps orchestration in the main Qwen session instead of collapsing routing and execution into one subagent.
 - The main Qwen session, with `$lead` active, is the orchestration owner for team-template execution.
 
@@ -13,12 +12,12 @@ This file is the Qwen-line orchestration reference for the common role principle
 
 | Template type | Owner | Specialist execution |
 |---|---|---|
-| `requiresLead: false` | main Qwen session | main session invokes the matching specialist subagents directly |
-| `requiresLead: true` | main Qwen session under `$lead` | main session reads the team template, invokes the needed specialist subagents, and owns integration |
+| `requiresLead: false` | main Qwen session | main session activates the matching specialist role skills directly |
+| `requiresLead: true` | main Qwen session under `$lead` | main session reads the team template, activates the needed specialist role skills, and owns integration |
 
 ## Team-template source
 
-Use the JSON templates under `../../agents/team-templates/`. These templates are repo-local orchestration metadata, not a Qwen-native settings surface.
+Use the JSON templates under `team-templates/`. These templates are repo-local orchestration metadata, not a Qwen-native settings surface.
 
 ## Parallel execution
 
@@ -28,7 +27,7 @@ Parallel specialist runs are allowed only when:
 - allowed change surfaces are disjoint
 - one integration owner is explicit before QA or review
 
-The main Qwen session launches the parallel specialist subagents. A Qwen subagent does not launch peers.
+The main Qwen session activates the parallel specialist role skills. Orchestration stays in the main session; a specialist does not launch peers.
 
 `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all. When the active external-routing profile asks for more than one external opinion, the main session may also launch multiple independent external adapters in parallel and aggregate them fail closed on top of that rule.
 

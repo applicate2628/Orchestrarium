@@ -51,42 +51,6 @@ common_skills=(
   windows-gui-manual-testing
 )
 
-agent_roles=(
-  accessibility-reviewer
-  algorithm-scientist
-  analyst
-  architect
-  architecture-reviewer
-  backend-engineer
-  computational-scientist
-  consultant
-  data-engineer
-  external-reviewer
-  external-worker
-  frontend-engineer
-  geometry-engineer
-  graphics-engineer
-  knowledge-archivist
-  lead
-  model-view-engineer
-  performance-engineer
-  performance-reviewer
-  planner
-  platform-engineer
-  product-analyst
-  product-manager
-  qa-engineer
-  qt-ui-engineer
-  reliability-engineer
-  security-engineer
-  security-reviewer
-  toolchain-engineer
-  ui-test-engineer
-  ux-designer
-  ux-reviewer
-  visualization-engineer
-)
-
 team_templates=(
   combined-critical
   full-delivery
@@ -151,8 +115,7 @@ required_common=(
   "$PACK_ROOT/commands/agents/help.toml"
   "$PACK_ROOT/commands/agents/external-brigade.toml"
   "$PACK_ROOT/commands/agents/init-project.toml"
-  "$PACK_ROOT/agents/lead.md"
-  "$PACK_ROOT/agents/team-templates/quick-fix.json"
+  "$PACK_ROOT/skills/lead/team-templates/quick-fix.json"
 )
 
 for path in "${required_common[@]}"; do
@@ -189,10 +152,9 @@ else
   [[ -f "$EXTENSION_ROOT/commands/agents/help.toml" ]] || fail "missing installed extension help command $EXTENSION_ROOT/commands/agents/help.toml"
   [[ -f "$EXTENSION_ROOT/commands/agents/external-brigade.toml" ]] || fail "missing installed extension brigade command $EXTENSION_ROOT/commands/agents/external-brigade.toml"
   [[ -f "$EXTENSION_ROOT/commands/agents/init-project.toml" ]] || fail "missing installed extension init-project command $EXTENSION_ROOT/commands/agents/init-project.toml"
-  [[ -f "$EXTENSION_ROOT/agents/lead.md" ]] || fail "missing installed extension lead agent $EXTENSION_ROOT/agents/lead.md"
-  [[ -f "$EXTENSION_ROOT/agents/team-templates/quick-fix.json" ]] || fail "missing installed extension team template $EXTENSION_ROOT/agents/team-templates/quick-fix.json"
+  [[ -f "$EXTENSION_ROOT/skills/lead/team-templates/quick-fix.json" ]] || fail "missing installed extension team template $EXTENSION_ROOT/skills/lead/team-templates/quick-fix.json"
   [[ ! -e "$EXTENSION_ROOT/AGENTS.shared.md" ]] || fail "$EXTENSION_ROOT/AGENTS.shared.md should not exist in the installed extension runtime"
-  [[ ! -e "$EXTENSION_ROOT/agents/README.md" ]] || fail "$EXTENSION_ROOT/agents/README.md must not exist in the installed extension runtime"
+  [[ ! -e "$EXTENSION_ROOT/agents" ]] || fail "$EXTENSION_ROOT/agents must not exist in the installed extension runtime (roles are skills-only; a stale agents/ tree means legacy cleanup did not run)"
   [[ ! -e "$LEGACY_RUNTIME_ROOT/skills/lead/SKILL.md" ]] || fail "$LEGACY_RUNTIME_ROOT/skills/lead/SKILL.md should not exist in the installed runtime"
   [[ ! -e "$LEGACY_RUNTIME_ROOT/skills/init-project/SKILL.md" ]] || fail "$LEGACY_RUNTIME_ROOT/skills/init-project/SKILL.md should not exist in the installed runtime"
   [[ ! -e "$LEGACY_RUNTIME_ROOT/agents/lead.md" ]] || fail "$LEGACY_RUNTIME_ROOT/agents/lead.md should not exist in the installed runtime"
@@ -210,21 +172,10 @@ for skill in "${common_skills[@]}"; do
   [[ -f "$PACK_ROOT/skills/$skill/SKILL.md" ]] || fail "missing common skill $PACK_ROOT/skills/$skill/SKILL.md"
 done
 
-for role in "${agent_roles[@]}"; do
-  [[ -f "$PACK_ROOT/agents/$role.md" ]] || fail "missing agent role $PACK_ROOT/agents/$role.md"
-done
-
-[[ ! -e "$PACK_ROOT/agents/README.md" ]] || fail "$PACK_ROOT/agents/README.md must not exist; all top-level agents/*.md files are loader-visible agent definitions"
-
-shopt -s nullglob
-for agent_md in "$PACK_ROOT"/agents/*.md; do
-  first_line="$(head -n 1 "$agent_md" || true)"
-  [[ "$first_line" == "---" ]] || fail "agent markdown must start with YAML frontmatter: $agent_md"
-done
-shopt -u nullglob
+[[ ! -e "$PACK_ROOT/agents" ]] || fail "$PACK_ROOT/agents must not exist; roles are skills-only (one SKILL.md per role under skills/)"
 
 for template in "${team_templates[@]}"; do
-  [[ -f "$PACK_ROOT/agents/team-templates/$template.json" ]] || fail "missing team template $PACK_ROOT/agents/team-templates/$template.json"
+  [[ -f "$PACK_ROOT/skills/lead/team-templates/$template.json" ]] || fail "missing team template $PACK_ROOT/skills/lead/team-templates/$template.json"
 done
 
 IMPORT_ROOT="$(dirname "$GEMINI_FILE")"
@@ -251,12 +202,12 @@ else
 fi
 grep -q '/init' "$GEMINI_FILE" || fail "GEMINI.md should mention the official Gemini /init bootstrap path"
 grep -q '\.gemini/settings\.json' "$GEMINI_FILE" || fail "GEMINI.md should mention .gemini/settings.json as the official Gemini runtime-state surface"
-grep -q 'agents/team-templates/' "$GEMINI_FILE" || fail "GEMINI.md should mention agents/team-templates/"
+grep -q 'skills/lead/team-templates/' "$GEMINI_FILE" || fail "GEMINI.md should mention skills/lead/team-templates/"
 grep -Fq 'WEAK MODEL / NOT RECOMMENDED' "$EXTENSION_README_FILE" || fail "Gemini extension README should mark Gemini as not recommended example-only routing"
 grep -q 'cannot recursively call' "$PACK_ROOT/skills/lead/SKILL.md" || fail "lead skill should state the Gemini subagent recursion constraint"
 grep -q 'main Gemini session' "$PACK_ROOT/skills/lead/SKILL.md" || fail "lead skill should identify the main Gemini session as orchestration owner"
 grep -q 'external-brigade' "$PACK_ROOT/skills/lead/SKILL.md" || fail "lead skill should mention the external-brigade utility"
-grep -q 'agents/team-templates' "$PACK_ROOT/commands/agents/help.toml" || fail "help command should describe the team-template layer"
+grep -q 'skills/lead/team-templates' "$PACK_ROOT/commands/agents/help.toml" || fail "help command should describe the team-template layer"
 grep -q 'external-brigade' "$PACK_ROOT/commands/agents/help.toml" || fail "help command should describe the external-brigade surface"
 ! grep -Fq 'consultantMode: auto' "$PACK_ROOT/skills/second-opinion/SKILL.md" || fail "second-opinion skill should not expose consultantMode auto"
 ! grep -Fq 'allowed: external | auto | internal | disabled' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "init-project skill should restrict consultantMode to external/internal/disabled"
@@ -454,14 +405,14 @@ else
 fi
 
 json_targets=(
-  "$PACK_ROOT/agents/team-templates/combined-critical.json"
-  "$PACK_ROOT/agents/team-templates/full-delivery.json"
-  "$PACK_ROOT/agents/team-templates/geometry-review.json"
-  "$PACK_ROOT/agents/team-templates/performance-sensitive.json"
-  "$PACK_ROOT/agents/team-templates/quick-fix.json"
-  "$PACK_ROOT/agents/team-templates/research.json"
-  "$PACK_ROOT/agents/team-templates/review.json"
-  "$PACK_ROOT/agents/team-templates/security-sensitive.json"
+  "$PACK_ROOT/skills/lead/team-templates/combined-critical.json"
+  "$PACK_ROOT/skills/lead/team-templates/full-delivery.json"
+  "$PACK_ROOT/skills/lead/team-templates/geometry-review.json"
+  "$PACK_ROOT/skills/lead/team-templates/performance-sensitive.json"
+  "$PACK_ROOT/skills/lead/team-templates/quick-fix.json"
+  "$PACK_ROOT/skills/lead/team-templates/research.json"
+  "$PACK_ROOT/skills/lead/team-templates/review.json"
+  "$PACK_ROOT/skills/lead/team-templates/security-sensitive.json"
 )
 
 json_targets+=("$EXTENSION_MANIFEST_FILE")

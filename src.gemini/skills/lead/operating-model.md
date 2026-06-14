@@ -4,8 +4,7 @@ This file is the Gemini-line orchestration reference for the common role princip
 
 ## Structural truth
 
-- Gemini `skills/` are the stable expertise layer.
-- Gemini `agents/` are the preview specialist-team layer.
+- Gemini `skills/` are the universal role-skill catalog — one skill per role, the cross-tool surface read by Gemini CLI and Antigravity.
 - Gemini subagents cannot call other subagents, so recursive orchestration does not live inside a Gemini subagent.
 - The main Gemini session, with `$lead` active, is the orchestration owner for team-template execution.
 
@@ -13,21 +12,21 @@ This file is the Gemini-line orchestration reference for the common role princip
 
 | Template type | Owner | Specialist execution |
 |---|---|---|
-| `requiresLead: false` | main Gemini session | main session invokes the matching specialist subagents directly |
-| `requiresLead: true` | main Gemini session under `$lead` | main session reads the team template, invokes the needed specialist subagents, and owns integration |
+| `requiresLead: false` | main Gemini session | main session activates the matching specialist role skills directly |
+| `requiresLead: true` | main Gemini session under `$lead` | main session reads the team template, activates the needed specialist role skills, and owns integration |
 
 ## Team-template source
 
 Use:
 
-- `../../agents/team-templates/quick-fix.json`
-- `../../agents/team-templates/research.json`
-- `../../agents/team-templates/review.json`
-- `../../agents/team-templates/full-delivery.json`
-- `../../agents/team-templates/security-sensitive.json`
-- `../../agents/team-templates/performance-sensitive.json`
-- `../../agents/team-templates/geometry-review.json`
-- `../../agents/team-templates/combined-critical.json`
+- `team-templates/quick-fix.json`
+- `team-templates/research.json`
+- `team-templates/review.json`
+- `team-templates/full-delivery.json`
+- `team-templates/security-sensitive.json`
+- `team-templates/performance-sensitive.json`
+- `team-templates/geometry-review.json`
+- `team-templates/combined-critical.json`
 
 These templates are repo-local orchestration metadata, not a Gemini-native settings surface.
 
@@ -39,7 +38,7 @@ Parallel specialist runs are allowed only when:
 - allowed change surfaces are disjoint
 - one integration owner is explicit before QA or review
 
-The main Gemini session launches the parallel specialist subagents. A Gemini subagent does not launch peers.
+The main Gemini session activates the parallel specialist role skills. Orchestration stays in the main session; a specialist does not launch peers.
 
 `parallelMode` is the general orchestrator rule for whether independent helper lanes should be parallelized by judgment at all. When the active external-routing profile asks for more than one external opinion, the main session may also launch multiple independent external adapters in parallel and aggregate them fail closed on top of that rule.
 

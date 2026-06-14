@@ -2,7 +2,7 @@
 
 This directory is the source-owned extension manifest surface for the installed Qwen example package.
 
-Qwen installers materialize it into `.qwen/extensions/orchestrarium-qwen/` for project installs and `~/.qwen/extensions/orchestrarium-qwen/` for global installs. The installed extension carries this manifest and README plus the mirrored Qwen runtime payload (`skills/`, `agents/`, `commands/`, `QWEN.md`, and `AGENTS.md`).
+Qwen installers materialize it into `.qwen/extensions/orchestrarium-qwen/` for project installs and `~/.qwen/extensions/orchestrarium-qwen/` for global installs. The installed extension carries this manifest and README plus the mirrored Qwen runtime payload (`skills/`, `commands/`, `QWEN.md`, and `AGENTS.md`).
 
 Qwen remains a `WEAK MODEL / NOT RECOMMENDED` example-only integration in this repository. Production `auto` routing stays on `codex | claude`; explicit Qwen routing is for manual example, compatibility, or inspection use only.
 

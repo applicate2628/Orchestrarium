@@ -1,13 +1,13 @@
 # Qwen Specialist Handoff Contract
 
-Use this template whenever the main Qwen session delegates to a Qwen specialist subagent.
+Use this template whenever the main Qwen session delegates to a Qwen specialist role skill.
 
 ## Invocation rule
 
-- Invoke the matching subagent tool by role name, or force it explicitly with `@role` at the beginning of the prompt, except for provider-backed external adapter routes.
-- Do not role-play specialists inline when a matching Qwen subagent exists.
-- Do not ask one subagent to own the whole feature.
-- `$external-worker` and `$external-reviewer` are direct external launch routes, not Qwen subagent hosts. Do not satisfy them by spawning an internal helper or agent that then relays to another CLI.
+- Activate the matching role skill by name (dispatched as a subagent where the runtime supports skill-backed subagents, activated in-session otherwise), except for provider-backed external adapter routes.
+- Do not role-play specialists inline when a matching role skill exists.
+- Do not ask one role to own the whole feature.
+- `$external-worker` and `$external-reviewer` are direct external launch routes, not internal skill-activation hosts. Do not satisfy them by spawning an internal helper or agent that then relays to another CLI.
 
 ## Handoff template
 
@@ -68,7 +68,7 @@ Use `external-dispatch.md` when the main Qwen session prefers or explicitly sele
 - `$external-reviewer` covers review and QA-side work only.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`.
 - If the selected external CLI is unavailable, the adapter is disabled and the main Qwen session reroutes explicitly.
-- If the current runtime cannot launch the selected external provider directly, the route is unavailable; do not proxy it through a Qwen subagent host.
+- If the current runtime cannot launch the selected external provider directly, the route is unavailable; do not proxy it through an internal Qwen skill-activation host.
 - `externalProvider: auto` resolves through the active named priority profile, not a line-specific default. Shipped production profiles are `balanced` and `quality-first`; shipped and repo-local production profiles stay on `codex | claude`. If a repository wants a Qwen demonstration lane, express that through a scalar explicit provider override, not a profile entry.
 - Honor `externalCodexProfile` first when Codex is the resolved provider: `default` inherits `externalModelMode`; `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade) and must record unavailable or deviated if that model tier cannot be verified against the installed runtime; `gpt-5.5-xhigh` (shipped as default in the Codex/Claude packs) pins model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`. If Codex is resolved and the inherited model policy is pinned, start on model `gpt-5.5` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path; only an explicitly configured repo-local fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path, and the route must not silently downgrade below that floor. Example-only Qwen routes remain explicit/manual and do not add separate provider-local fallback keys to the shared schema.
 - Honor `reserve` only when an advisory or review profile order reaches that symbolic supplemental candidate. It is separate from primary providers, appears after primary `claude`/`codex`, and must not be used for worker, implementation, code-generation, file-editing, or publication work.
@@ -85,8 +85,8 @@ Use `external-dispatch.md` when the main Qwen session prefers or explicitly sele
 ## Mandatory rules
 
 - The main Qwen session remains the orchestrator and owns stage progression.
-- A specialist subagent returns one artifact for one gate.
-- A subagent does not launch another subagent.
+- A specialist role returns one artifact for one gate.
+- A specialist does not launch another specialist.
 - If evidence is missing, route to the correct factual role instead of guessing.
 - If a review artifact is still missing, the review is not complete.
 

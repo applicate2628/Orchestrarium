@@ -10,16 +10,11 @@ This directory is the stable Qwen expertise layer for the full shared role vocab
 - Qwen-line `second-opinion`, `consultant`, and external adapter skills that honor the shared routing overlay, named priority profiles, and per-lane opinion counts
 - Qwen-line `external-brigade` as the bounded parallel external-helper orchestration utility
 
-## Why both `skills/` and `agents/` exist
+## Why everything lives in `skills/`
 
-Qwen now uses two official provider surfaces on purpose:
-
-- `skills/` for stable on-demand expertise
-- `agents/` for explicit preview specialist delegation
-
-The common role principle depends on both:
+`skills/` is the universal cross-tool agent-skill surface, so the common role principle ships as one universal skill per role:
 
 - skills provide the full durable role catalog
-- agents provide the explicit team members that the main Qwen session can delegate to
+- the main Qwen session activates the matching role skill to delegate work to a specialist
 
 Orchestration remains in `skills/lead`, not in a recursive lead subagent. The lead skill also owns the overlay-aware external routing story so the Qwen line stays inspectable as an example pack while shipped production `auto` routing remains on `codex | claude`.

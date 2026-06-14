@@ -1,13 +1,13 @@
 # Gemini Specialist Handoff Contract
 
-Use this template whenever the main Gemini session delegates to a Gemini specialist subagent.
+Use this template whenever the main Gemini session delegates to a Gemini specialist role skill.
 
 ## Invocation rule
 
-- Invoke the matching subagent tool by role name, or force it explicitly with `@role` at the beginning of the prompt, except for provider-backed external adapter routes.
-- Do not role-play specialists inline when a matching Gemini subagent exists.
-- Do not ask one subagent to own the whole feature.
-- `$external-worker` and `$external-reviewer` are direct external launch routes, not Gemini subagent hosts. Do not satisfy them by spawning an internal helper/agent that then relays to another CLI.
+- Activate the matching role skill by name (dispatched as a subagent where the runtime supports skill-backed subagents, activated in-session otherwise), except for provider-backed external adapter routes.
+- Do not role-play specialists inline when a matching role skill exists.
+- Do not ask one role to own the whole feature.
+- `$external-worker` and `$external-reviewer` are direct external launch routes, not internal skill-activation hosts. Do not satisfy them by spawning an internal helper/agent that then relays to another CLI.
 
 ## Handoff template
 
@@ -68,7 +68,7 @@ Use `external-dispatch.md` when the main Gemini session prefers or explicitly se
 - `$external-reviewer` covers review and QA-side work only.
 - There is no generic external adapter for owner roles such as `$product-manager` or `$lead`. If a request lands in one of those lanes, fail fast with an unsupported-route explanation instead of probing providers.
 - If the selected external CLI is unavailable, the adapter is disabled and the main Gemini session reroutes explicitly.
-- If the current runtime cannot launch the selected external provider directly, the route is unavailable; do not proxy it through a Gemini subagent host.
+- If the current runtime cannot launch the selected external provider directly, the route is unavailable; do not proxy it through an internal Gemini skill-activation host.
 - `externalProvider: auto` resolves through the active named priority profile, not a line-specific default. Shipped production profiles are `balanced` and `quality-first`, and both stay on `codex | claude`. Gemini and Qwen are example-only providers and must stay out of shipped or repo-local production `auto` profiles.
 - Honor `externalCodexProfile` first when Codex is the resolved provider: `default` inherits `externalModelMode`; `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade) and must record unavailable or deviated if that model tier cannot be verified against the installed runtime; `gpt-5.5-xhigh` (shipped as default in the Codex/Claude packs) pins model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`. If Codex is resolved and the inherited model policy is pinned, start on model `gpt-5.5` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path; only an explicitly configured repo-local fully autonomous low-reasoning worker lane may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path, and the route must not silently downgrade below that floor. Explicit Gemini example routes remain manual example or compatibility runs rather than a pinned production model policy.
 - Honor `reserve` only when an advisory or review profile order reaches that symbolic supplemental candidate. It is separate from primary providers, appears after primary `claude`/`codex`, and must not be used for worker, implementation, code-generation, file-editing, or publication work.
@@ -89,8 +89,8 @@ Use `external-dispatch.md` when the main Gemini session prefers or explicitly se
 ## Mandatory rules
 
 - The main Gemini session remains the orchestrator and owns stage progression.
-- A specialist subagent returns one artifact for one gate.
-- A subagent does not launch another subagent.
+- A specialist role returns one artifact for one gate.
+- A specialist does not launch another specialist.
 - If evidence is missing, route to the correct factual role instead of guessing.
 - If a review artifact is still missing, the review is not complete.
 
