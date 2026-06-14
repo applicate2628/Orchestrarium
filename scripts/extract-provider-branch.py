@@ -53,7 +53,25 @@ DOCS_ALLOW_FROM_MAIN = frozenset({
     "docs/lessons.md",
     "docs/definition-of-ready-done.md",
     "docs/work-item-execution-tracking.md",
+    "docs/provider-runtime-layouts.md",
 })
+
+# Docs pulled FRESH from the monorepo but post-processed to drop markdown links into
+# subtrees a single-provider standalone branch excludes (docs/routing/, docs/superpowers/).
+# The link TEXT is kept; only the broken link target is unwrapped. Without this the monorepo
+# copy would carry a dead link, which is why these docs were previously frozen as stale
+# branch copies (and silently fell behind the monorepo).
+_EXCLUDED_LINK_RE = re.compile(r"\[([^\]]+)\]\((?:\.?/)?(?:routing|superpowers)/[^)]*\)")
+
+
+def _delink_excluded(content: bytes) -> bytes:
+    return _EXCLUDED_LINK_RE.sub(r"\1", content.decode("utf-8")).encode("utf-8")
+
+
+# path -> transform applied to the monorepo copy before writing into the standalone tree.
+DOCS_FROM_MAIN_TRANSFORMED = {
+    "docs/agents-mode-reference.md": _delink_excluded,
+}
 
 # Standalone files that MUST be carried from the published branch (fail closed if missing).
 REQUIRED_CARRY = ("README.md", "INSTALL.md")
@@ -98,7 +116,7 @@ def include_from_main(path: str, provider: str) -> bool:
         return True
     if path in SHARED_FILES:
         return True
-    return path in DOCS_ALLOW_FROM_MAIN
+    return path in DOCS_ALLOW_FROM_MAIN or path in DOCS_FROM_MAIN_TRANSFORMED
 
 
 def command_tagline(text: str) -> str:
@@ -158,7 +176,11 @@ def extract(provider: str, source_ref: str, branch_ref: str, out: Path) -> dict[
     # 1. include provider subtree + shared + allowlisted docs from the monorepo
     for path in source_paths:
         if include_from_main(path, provider):
-            write_file(out, path, show(source_ref, path))
+            content = show(source_ref, path)
+            transform = DOCS_FROM_MAIN_TRANSFORMED.get(path)
+            if transform:
+                content = transform(content)
+            write_file(out, path, content)
             counts["copied"] += 1
 
     # 2. claude only: generate a skill per agents-* command
@@ -174,7 +196,10 @@ def extract(provider: str, source_ref: str, branch_ref: str, out: Path) -> dict[
     # 3. carry from the published branch: required standalone files + the branch's
     #    curated docs that are not pulled fresh from main (link-consistent versions).
     carry = list(REQUIRED_CARRY) + [
-        p for p in branch_paths if p.startswith("docs/") and p not in DOCS_ALLOW_FROM_MAIN
+        p for p in branch_paths
+        if p.startswith("docs/")
+        and p not in DOCS_ALLOW_FROM_MAIN
+        and p not in DOCS_FROM_MAIN_TRANSFORMED
     ]
     for rel in carry:
         if rel in REQUIRED_CARRY and rel not in branch_paths:

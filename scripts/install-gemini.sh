@@ -564,6 +564,51 @@ remove_legacy_mirrored_files() {
   remove_empty_dir_if_present "$dst"
 }
 
+# Roles are now skills-only (one SKILL.md per role under skills/). The former
+# Gemini-native agents/ role layer is removed. This cleanup is source-independent
+# (the source no longer ships agents/), so it works on upgrade from any prior install:
+#   - extension tier: a pack-owned tree, safe to remove wholesale.
+#   - user override tier ($AGENTS_TARGET, e.g. ~/.gemini/agents): remove ONLY the
+#     known pack-authored basenames by static allowlist; never rm -rf the whole dir,
+#     because it may hold genuine user-authored subagents the pack must not touch.
+LEGACY_AGENT_BASENAMES=(
+  accessibility-reviewer.md algorithm-scientist.md analyst.md architect.md
+  architecture-reviewer.md backend-engineer.md computational-scientist.md
+  consultant.md data-engineer.md external-reviewer.md external-worker.md
+  frontend-engineer.md geometry-engineer.md graphics-engineer.md
+  knowledge-archivist.md lead.md model-view-engineer.md performance-engineer.md
+  performance-reviewer.md planner.md platform-engineer.md product-analyst.md
+  product-manager.md qa-engineer.md qt-ui-engineer.md reliability-engineer.md
+  security-engineer.md security-reviewer.md toolchain-engineer.md
+  ui-test-engineer.md ux-designer.md ux-reviewer.md visualization-engineer.md
+)
+
+remove_path() {
+  local target="$1" label="$2"
+  [[ -e "$target" ]] || return 0
+  echo "  Removing legacy $label..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "    [dry-run] would remove $target"
+  else
+    rm -rf "$target"
+  fi
+}
+
+remove_legacy_agent_layer() {
+  # Extension tier: pack-owned, remove the whole stale agents/ tree.
+  remove_path "$EXTENSION_ROOT/agents" "extension/agents (roles are skills-only)"
+  # User override tier: remove only pack-authored basenames + the team-templates dir.
+  if [[ -d "$AGENTS_TARGET" ]]; then
+    local base
+    for base in "${LEGACY_AGENT_BASENAMES[@]}"; do
+      remove_path "$AGENTS_TARGET/$base" "user-tier agents/$base"
+    done
+    remove_path "$AGENTS_TARGET/README.md" "user-tier agents/README.md"
+    remove_path "$AGENTS_TARGET/team-templates" "user-tier agents/team-templates"
+    remove_empty_dir_if_present "$AGENTS_TARGET"
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --global)
@@ -598,7 +643,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -d "$SOURCE/skills" || ! -d "$SOURCE/agents" || ! -d "$SOURCE/commands" || ! -f "$SOURCE/GEMINI.md" || ! -f "$SHARED_AGENTS_SOURCE" ]]; then
+if [[ ! -d "$SOURCE/skills" || ! -d "$SOURCE/commands" || ! -f "$SOURCE/GEMINI.md" || ! -f "$SHARED_AGENTS_SOURCE" ]]; then
   echo "FAIL: src.gemini is incomplete at $SOURCE" >&2
   exit 1
 fi
@@ -646,13 +691,11 @@ else
   AGENTS_TARGET="$INSTALL_ROOT/agents"
   COMMANDS_TARGET="$INSTALL_ROOT/commands"
 fi
-LEGACY_AGENTS_README_TARGET="$AGENTS_TARGET/README.md"
 EXTENSION_MANIFEST_TARGET="$EXTENSION_ROOT/gemini-extension.json"
 EXTENSION_README_TARGET="$EXTENSION_ROOT/README.md"
 EXTENSION_GEMINI_TARGET="$EXTENSION_ROOT/GEMINI.md"
 EXTENSION_AGENTS_TARGET="$EXTENSION_ROOT/AGENTS.md"
 LEGACY_EXTENSION_SHARED_TARGET="$EXTENSION_ROOT/AGENTS.shared.md"
-LEGACY_EXTENSION_AGENTS_README_TARGET="$EXTENSION_ROOT/agents/README.md"
 
 echo "=== Orchestrarium Gemini Example Pack Installer ==="
 echo "Source: $SOURCE"
@@ -676,7 +719,6 @@ fi
 
 ensure_dir "$INSTALL_ROOT"
 install_tree "$SOURCE/skills" "$EXTENSION_ROOT/skills" "extension/skills"
-install_tree "$SOURCE/agents" "$EXTENSION_ROOT/agents" "extension/agents"
 install_tree "$SOURCE/commands" "$EXTENSION_ROOT/commands" "extension/commands"
 merge_gemini_file "$SOURCE/GEMINI.md" "$GEMINI_TARGET"
 if [[ "$MODE" == "global" ]]; then
@@ -703,11 +745,9 @@ if [[ "$MODE" == "global" ]]; then
 fi
 
 remove_legacy_pack_file "$LEGACY_SHARED_TARGET" "AGENTS.shared.md"
-remove_legacy_pack_file "$LEGACY_AGENTS_README_TARGET" "agents/README.md"
 remove_legacy_pack_file "$LEGACY_EXTENSION_SHARED_TARGET" "extension AGENTS.shared.md"
-remove_legacy_pack_file "$LEGACY_EXTENSION_AGENTS_README_TARGET" "extension agents/README.md"
 remove_legacy_top_level_pack_entries "$SOURCE/skills" "$SKILLS_TARGET" "skills"
-remove_legacy_mirrored_files "$SOURCE/agents" "$AGENTS_TARGET" "agents"
+remove_legacy_agent_layer
 remove_legacy_mirrored_files "$SOURCE/commands" "$COMMANDS_TARGET" "commands"
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -728,8 +768,7 @@ for path in \
   "$EXTENSION_AGENTS_TARGET" \
   "$EXTENSION_ROOT/skills/lead/SKILL.md" \
   "$EXTENSION_ROOT/skills/init-project/SKILL.md" \
-  "$EXTENSION_ROOT/agents/lead.md" \
-  "$EXTENSION_ROOT/agents/team-templates/full-delivery.json" \
+  "$EXTENSION_ROOT/skills/lead/team-templates/full-delivery.json" \
   "$EXTENSION_ROOT/commands/agents/help.toml"; do
   if [[ -e "$path" ]]; then
     echo "  OK  $path"
@@ -741,6 +780,7 @@ done
 
 for legacy_path in \
   "$SKILLS_TARGET/lead/SKILL.md" \
+  "$EXTENSION_ROOT/agents" \
   "$AGENTS_TARGET/lead.md" \
   "$AGENTS_TARGET/team-templates/full-delivery.json" \
   "$COMMANDS_TARGET/agents/help.toml" \

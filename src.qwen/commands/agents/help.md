@@ -2,14 +2,14 @@
 description: Summarize the Qwen example-pack structure, role surface, and routing boundaries.
 ---
 
-Read `QWEN.md`, `README.md`, `skills/README.md`, `skills/lead/SKILL.md`, and `agents/lead.md`.
+Read `QWEN.md`, `README.md`, `skills/README.md`, and `skills/lead/SKILL.md`.
 
 Summarize:
 
 - the current Qwen example-pack structure
 - the role of `QWEN.md`
-- the distinction between stable skills and explicit specialist subagents
-- the role of `agents/team-templates/` in the shared role principle
+- the universal role-skill catalog under `skills/` (one skill per role)
+- the role of `skills/lead/team-templates/` in the shared role principle
 - why Orchestrarium keeps Qwen orchestration in the main session under the lead skill
 - why external routing must check role eligibility before provider or CLI feasibility
 - how the three external roles split advisory, worker-side, and review-side substitution

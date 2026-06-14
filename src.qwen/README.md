@@ -10,10 +10,9 @@ This branch keeps only Qwen-specific source, but it ships the same full role voc
 - Orchestrarium keeps one shared-governance source in `shared/AGENTS.shared.md`, which `src.qwen/QWEN.md` imports in the monorepo and installers materialize as runtime `AGENTS.md`.
 - Qwen runtime config stays in `.qwen/settings.json`.
 - Orchestrarium seeds `.qwen/.agents-mode.yaml` as the shared routing overlay for named priority profiles and per-lane opinion counts.
-- Stable expertise lives in `src.qwen/skills/`.
+- The full role catalog lives in `src.qwen/skills/` as one universal role skill per role.
 - Bounded parallel external-helper orchestration lives in `src.qwen/skills/external-brigade/` and the Qwen command wrapper under `commands/agents/external-brigade.md`.
-- Specialist-team execution lives in `src.qwen/agents/`.
-- Every markdown file directly under `src.qwen/agents/` must be a real Qwen agent definition with YAML frontmatter; explanatory docs stay outside that loader-visible path.
+- Repo-local team compositions live in `src.qwen/skills/lead/team-templates/`.
 
 ## Repository Layout
 
@@ -23,9 +22,8 @@ scripts/install-qwen.sh     POSIX installer
 references-qwen/            Required Qwen-side maintainer references
 src.qwen/                   Qwen pack source tree
   QWEN.md                   Native Qwen entrypoint
-  skills/<name>/SKILL.md    Qwen skills
-  agents/*.md               Qwen specialist subagents only
-  agents/team-templates/    Repo-local team compositions
+  skills/<name>/SKILL.md    Qwen skills (full role catalog + common skills)
+  skills/lead/team-templates/  Repo-local team compositions
   commands/**/*.md          Qwen custom commands
   extension/                Extension manifest source for the installed Qwen extension package
   scripts/validate-pack.sh  Standalone pack validation (bash)
