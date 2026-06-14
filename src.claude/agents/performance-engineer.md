@@ -30,7 +30,7 @@ description: Define performance budgets, measurement strategy, bottleneck models
 
 ## Working rules
 
-- Confirm the bottleneck before optimizing it.
+- Profile or diagnose the real bottleneck before optimizing it — never on a code-hypothesis. Distinguish computation from waiting: an idle timer, lock, or missed-signal wait reads as idle CPU in a profiler — a different defect class than slow computation.
 - Keep performance guidance measurable, scoped, and reversible.
 - Call out workload assumptions, environment limits, and the strength of the evidence.
 
