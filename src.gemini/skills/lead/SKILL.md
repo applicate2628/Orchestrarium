@@ -7,10 +7,7 @@ description: Coordinate Gemini-line work through the same shared role vocabulary
 
 Use `$lead` as the Gemini-line orchestration owner.
 
-This pack now carries the same role vocabulary as the neighboring packs in two layers:
-
-- stable Gemini `skills/` for the full role catalog
-- Gemini preview `agents/` for explicit specialist delegation and team composition
+This pack carries the same role vocabulary as the neighboring packs as the universal Gemini `skills/` catalog — one skill per role, the cross-tool surface read by Gemini CLI and Antigravity alike.
 
 ## Core rule
 
@@ -19,9 +16,9 @@ Gemini subagents cannot recursively call other subagents, so the orchestration o
 That means:
 
 - the main session owns routing, stage gates, and task continuity
-- specialist execution happens through matching Gemini subagents in `../../agents/*.md`
-- `../../agents/team-templates/*.json` is the repo-local team map for the common role principle
-- the lead skill is the canonical orchestration contract; `agents/lead.md` is only a bounded lead-side helper, not the recursive dispatcher
+- specialist execution happens by activating the matching role skill in `../../<role>/SKILL.md` (dispatched as a subagent where the runtime supports skill-backed subagents, activated in-session otherwise)
+- `team-templates/*.json` is the repo-local team map for the common role principle
+- the lead skill is the canonical orchestration contract for the whole role catalog
 
 ## Responsibilities
 
@@ -29,8 +26,8 @@ That means:
 - keep one primary in-progress task open until the original request, the current result, and any open obligations have been reconciled
 - maintain the canonical brief and next concrete step when non-trivial work is interrupted
 - choose the narrowest matching specialist role instead of role-playing inline
-- use the shared team templates in `../../agents/team-templates/` for common workflow shapes
-- keep specialist delegation inside Gemini-native subagents where possible
+- use the shared team templates in `team-templates/` for common workflow shapes
+- keep specialist work inside the matching role skill instead of role-playing it inline
 - keep official Gemini runtime surfaces straight:
   - `GEMINI.md` is the runtime entrypoint
   - `.gemini/settings.json` remains the official Gemini runtime config surface
@@ -52,10 +49,8 @@ Read these adjacent files when the task needs more than a trivial route decision
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting.
 - If the user says `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working correction, take the next concrete action in the active task immediately instead of only acknowledging it.
 - Do not stop at one completed sub-batch when the next required action is already clear.
-- Do not claim the Gemini pack is aligned unless the role surface, the subagent surface, and the documents all match.
+- Do not claim the Gemini pack is aligned unless the role-skill surface and the documents all match.
 - Do not invent Gemini-only role names when the shared role vocabulary already covers the work.
-- Do not treat `agents/` as a replacement for `skills/`; Gemini uses both on purpose.
-- Do not place plain documentation in `agents/`; every top-level `agents/*.md` file is loader-visible and must be a real Gemini agent definition with YAML frontmatter.
 
 ## Output
 

@@ -10,10 +10,9 @@ This branch keeps only Gemini-specific source, but it now ships the same full ro
 - Orchestrarium keeps one shared-governance source in `shared/AGENTS.shared.md`, which `src.gemini/GEMINI.md` imports in the monorepo and installers materialize as runtime `AGENTS.md`.
 - Gemini runtime config stays in `.gemini/settings.json`.
 - Orchestrarium seeds `.gemini/.agents-mode.yaml` as the shared routing overlay for named priority profiles and per-lane opinion counts.
-- Stable expertise lives in `src.gemini/skills/`.
+- The full role catalog lives in `src.gemini/skills/` as one universal role skill per role — the cross-tool surface read by Gemini CLI and Antigravity.
 - Bounded parallel external-helper orchestration lives in `src.gemini/skills/external-brigade/` and the Gemini command wrapper under `commands/agents/external-brigade.toml`.
-- Preview specialist-team execution lives in `src.gemini/agents/`.
-- Every markdown file directly under `src.gemini/agents/` must be a real Gemini agent definition with YAML frontmatter; explanatory docs stay outside that loader-visible path.
+- Repo-local team compositions live in `src.gemini/skills/lead/team-templates/`.
 
 ## Repository layout
 
@@ -23,9 +22,8 @@ scripts/install-gemini.sh   POSIX installer
 references-gemini/          Required Gemini-side maintainer references
 src.gemini/                 Gemini pack source tree
   GEMINI.md                 Native Gemini entrypoint
-  skills/<name>/SKILL.md    Gemini Agent Skills
-  agents/*.md               Gemini preview specialist subagents only
-  agents/team-templates/    Repo-local team compositions
+  skills/<name>/SKILL.md    Gemini Agent Skills (full role catalog + common skills)
+  skills/lead/team-templates/  Repo-local team compositions
   commands/**/*.toml        Gemini custom commands
   extension/                Extension manifest source for the installed Gemini extension package
   scripts/validate-pack.sh  Standalone pack validation (bash)

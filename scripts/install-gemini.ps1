@@ -659,6 +659,63 @@ function Remove-LegacyMirroredFiles {
     Remove-EmptyDirIfPresent -TargetDir $TargetDir
 }
 
+# Roles are now skills-only (one SKILL.md per role under skills/). The former
+# Gemini-native agents/ role layer is removed. This cleanup is source-independent
+# (the source no longer ships agents/), so it works on upgrade from any prior install:
+#   - extension tier: a pack-owned tree, safe to remove wholesale.
+#   - user override tier ($AgentsTarget): remove ONLY the known pack-authored
+#     basenames by static allowlist; never remove the whole dir, because it may
+#     hold genuine user-authored subagents the pack must not touch.
+$LegacyAgentBasenames = @(
+    'accessibility-reviewer.md','algorithm-scientist.md','analyst.md','architect.md',
+    'architecture-reviewer.md','backend-engineer.md','computational-scientist.md',
+    'consultant.md','data-engineer.md','external-reviewer.md','external-worker.md',
+    'frontend-engineer.md','geometry-engineer.md','graphics-engineer.md',
+    'knowledge-archivist.md','lead.md','model-view-engineer.md','performance-engineer.md',
+    'performance-reviewer.md','planner.md','platform-engineer.md','product-analyst.md',
+    'product-manager.md','qa-engineer.md','qt-ui-engineer.md','reliability-engineer.md',
+    'security-engineer.md','security-reviewer.md','toolchain-engineer.md',
+    'ui-test-engineer.md','ux-designer.md','ux-reviewer.md','visualization-engineer.md'
+)
+
+function Remove-LegacyPath {
+    param(
+        [string]$Target,
+        [string]$Label
+    )
+
+    if (-not (Test-Path -LiteralPath $Target)) {
+        return
+    }
+
+    Write-Host "  Removing legacy $Label..."
+    if (-not $DryRun) {
+        Remove-Item -LiteralPath $Target -Recurse -Force
+    } else {
+        Write-Host "    [dry-run] would remove $Target"
+    }
+}
+
+function Remove-LegacyAgentLayer {
+    param(
+        [string]$ExtensionRoot,
+        [string]$AgentsTarget
+    )
+
+    # Extension tier: pack-owned, remove the whole stale agents/ tree.
+    Remove-LegacyPath -Target (Join-Path $ExtensionRoot "agents") -Label "extension/agents (roles are skills-only)"
+
+    # User override tier: remove only pack-authored basenames + the team-templates dir.
+    if (Test-Path -LiteralPath $AgentsTarget -PathType Container) {
+        foreach ($base in $LegacyAgentBasenames) {
+            Remove-LegacyPath -Target (Join-Path $AgentsTarget $base) -Label "user-tier agents/$base"
+        }
+        Remove-LegacyPath -Target (Join-Path $AgentsTarget "README.md") -Label "user-tier agents/README.md"
+        Remove-LegacyPath -Target (Join-Path $AgentsTarget "team-templates") -Label "user-tier agents/team-templates"
+        Remove-EmptyDirIfPresent -TargetDir $AgentsTarget
+    }
+}
+
 if ($Global) {
     if (-not $env:USERPROFILE) { throw "USERPROFILE is not set." }
     $Mode = "global"
@@ -685,7 +742,6 @@ if ($Mode -eq "global") {
     $GeminiTarget = Join-Path $InstallRoot "GEMINI.md"
     $SharedTarget = Join-Path $InstallRoot "AGENTS.md"
     $LegacySharedTarget = Join-Path $InstallRoot "AGENTS.shared.md"
-    $LegacyAgentsReadmeTarget = Join-Path $AgentsTarget "README.md"
 } else {
     $InstallRoot = Join-Path $ProjectRoot ".gemini"
     $SkillsTarget = Join-Path $InstallRoot "skills"
@@ -698,7 +754,6 @@ if ($Mode -eq "global") {
     $GeminiTarget = Join-Path $ProjectRoot "GEMINI.md"
     $SharedTarget = Join-Path $ProjectRoot "AGENTS.md"
     $LegacySharedTarget = Join-Path $ProjectRoot "AGENTS.shared.md"
-    $LegacyAgentsReadmeTarget = Join-Path $AgentsTarget "README.md"
 }
 
 $ExtensionManifestTarget = Join-Path $ExtensionRoot "gemini-extension.json"
@@ -706,7 +761,6 @@ $ExtensionReadmeTarget = Join-Path $ExtensionRoot "README.md"
 $ExtensionGeminiTarget = Join-Path $ExtensionRoot "GEMINI.md"
 $ExtensionAgentsTarget = Join-Path $ExtensionRoot "AGENTS.md"
 $LegacyExtensionSharedTarget = Join-Path $ExtensionRoot "AGENTS.shared.md"
-$LegacyExtensionAgentsReadmeTarget = Join-Path (Join-Path $ExtensionRoot "agents") "README.md"
 
 Write-Host "=== Orchestrarium Gemini Example Pack Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
@@ -722,7 +776,6 @@ if ($DryRun) { Write-Host "Mode:   dry-run" -ForegroundColor Yellow }
 Write-Host ""
 
 if (-not (Test-Path -LiteralPath (Join-Path $Source "skills"))) { throw "Missing source skills/ directory." }
-if (-not (Test-Path -LiteralPath (Join-Path $Source "agents"))) { throw "Missing source agents/ directory." }
 if (-not (Test-Path -LiteralPath (Join-Path $Source "commands"))) { throw "Missing source commands/ directory." }
 if (-not (Test-Path -LiteralPath $ExtensionManifestSource)) { throw "Missing source Gemini extension manifest." }
 if (-not (Test-Path -LiteralPath $ExtensionReadmeSource)) { throw "Missing source Gemini extension README." }
@@ -739,7 +792,6 @@ if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $AgentsTa
 
 Ensure-Dir $InstallRoot
 Install-Tree -SourceDir (Join-Path $Source "skills") -TargetDir (Join-Path $ExtensionRoot "skills") -Label "extension/skills"
-Install-Tree -SourceDir (Join-Path $Source "agents") -TargetDir (Join-Path $ExtensionRoot "agents") -Label "extension/agents"
 Install-Tree -SourceDir (Join-Path $Source "commands") -TargetDir (Join-Path $ExtensionRoot "commands") -Label "extension/commands"
 Merge-GeminiFile -SourceFile (Join-Path $Source "GEMINI.md") -TargetFile $GeminiTarget
 if ($Mode -eq "global") {
@@ -763,11 +815,9 @@ if ($Mode -eq "global") {
 }
 
 Remove-LegacyPackFile -TargetFile $LegacySharedTarget -Label "AGENTS.shared.md"
-Remove-LegacyPackFile -TargetFile $LegacyAgentsReadmeTarget -Label "agents/README.md"
 Remove-LegacyPackFile -TargetFile $LegacyExtensionSharedTarget -Label "extension AGENTS.shared.md"
-Remove-LegacyPackFile -TargetFile $LegacyExtensionAgentsReadmeTarget -Label "extension agents/README.md"
 Remove-LegacyTopLevelPackEntries -SourceDir (Join-Path $Source "skills") -TargetDir $SkillsTarget -Label "skills"
-Remove-LegacyMirroredFiles -SourceDir (Join-Path $Source "agents") -TargetDir $AgentsTarget -Label "agents"
+Remove-LegacyAgentLayer -ExtensionRoot $ExtensionRoot -AgentsTarget $AgentsTarget
 Remove-LegacyMirroredFiles -SourceDir (Join-Path $Source "commands") -TargetDir $CommandsTarget -Label "commands"
 
 if ($DryRun) {
@@ -788,8 +838,7 @@ foreach ($path in @(
     $ExtensionAgentsTarget,
     (Join-Path $ExtensionRoot "skills\lead\SKILL.md"),
     (Join-Path $ExtensionRoot "skills\init-project\SKILL.md"),
-    (Join-Path $ExtensionRoot "agents\lead.md"),
-    (Join-Path $ExtensionRoot "agents\team-templates\full-delivery.json"),
+    (Join-Path $ExtensionRoot "skills\lead\team-templates\full-delivery.json"),
     (Join-Path $ExtensionRoot "commands\agents\help.toml")
 )) {
     if (Test-Path -LiteralPath $path) {
@@ -802,6 +851,7 @@ foreach ($path in @(
 
 foreach ($legacyPath in @(
     (Join-Path $SkillsTarget "lead\SKILL.md"),
+    (Join-Path $ExtensionRoot "agents"),
     (Join-Path $AgentsTarget "lead.md"),
     (Join-Path $AgentsTarget "team-templates\full-delivery.json"),
     (Join-Path $CommandsTarget "agents\help.toml"),

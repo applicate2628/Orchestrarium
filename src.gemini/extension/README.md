@@ -2,7 +2,7 @@
 
 This directory is the source-owned extension manifest surface for the installed Gemini example package.
 
-Gemini installers materialize it into `.gemini/extensions/orchestrarium-gemini/` for project installs and `~/.gemini/extensions/orchestrarium-gemini/` for global installs. The installed extension carries this manifest and README plus the mirrored Gemini runtime payload (`skills/`, `agents/`, `commands/`, `GEMINI.md`, and `AGENTS.md`).
+Gemini installers materialize it into `.gemini/extensions/orchestrarium-gemini/` for project installs and `~/.gemini/extensions/orchestrarium-gemini/` for global installs. The installed extension carries this manifest and README plus the mirrored Gemini runtime payload (`skills/`, `commands/`, `GEMINI.md`, and `AGENTS.md`).
 
 Gemini remains a `WEAK MODEL / NOT RECOMMENDED` example-only integration in this repository. Production `auto` routing stays on `codex | claude`; explicit Gemini routing is for manual example, compatibility, or inspection use only.
 
