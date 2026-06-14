@@ -11,6 +11,7 @@ set -euo pipefail
 SCRIPT_DIR_LOGICAL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 DEV_REPO=0
+STANDALONE=0
 CODEX_RUNTIME_ROOT=""
 SOURCE_SCRIPTS_DIR=""
 if [[ -d "src.codex/skills/lead/scripts" ]]; then
@@ -22,6 +23,18 @@ if [[ -n "$SOURCE_SCRIPTS_DIR" && "$SCRIPT_DIR" == "$SOURCE_SCRIPTS_DIR" && -f "
   SCRIPTS_DIR="$SOURCE_SCRIPTS_DIR"
   REPO_ROOT="$(pwd -P)"
   DEV_REPO=1
+  # A single-provider STANDALONE branch (the published `codex` tree) carries the
+  # same src.codex/ source layout that flips DEV_REPO=1, but it deliberately omits
+  # every OTHER provider plus the monorepo-wide root surfaces (src.{claude,gemini,
+  # qwen}/, references-{claude,gemini,qwen}/, root install.sh/.ps1, RELEASE_NOTES.md,
+  # docs/external-worker-design.md, the cross-provider agents-mode contract). Detect
+  # it by the ABSENCE of a sibling production pack (src.claude) — a positive
+  # structural signal the full monorepo always carries — rather than by a monorepo-
+  # only file's absence, so renaming or moving a root doc can never silently flip the
+  # monorepo itself to standalone and skip its cross-provider checks (fail-open). All
+  # codex-own / references-codex / shared / scripts / carried-docs checks run in both
+  # modes; only the cross-provider / monorepo-wide subset is gated behind STANDALONE.
+  [[ -d "src.claude" ]] || STANDALONE=1
   AGENTS_FILE="$(mktemp)"
   {
     printf '%s\n' '<!-- BEGIN ORCHESTRARIUM CODEX PACK -->'
@@ -691,12 +704,8 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "$REPO_ROOT/src.codex/agents/worker.toml" \
     "$REPO_ROOT/src.codex/agents/explorer.toml" \
     "$REPO_ROOT/src.codex/README.md" \
-    "$REPO_ROOT/src.claude/README.md" \
-    "$REPO_ROOT/src.gemini/README.md" \
-    "$REPO_ROOT/src.qwen/README.md" \
     "$DOCS_DIR/README.md" \
     "$DOCS_DIR/agents-mode-reference.md" \
-    "$DOCS_DIR/external-worker-design.md" \
     "$DOCS_DIR/provider-runtime-layouts.md" \
     "$REPO_ROOT/shared/schemas/agent-runs.schema.json" \
     "$REPO_ROOT/scripts/check-agent-run-ledger-contract.py" \
@@ -709,13 +718,26 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "$REPO_ROOT/scripts/validate-work-item-state.py" \
     "$REPO_ROOT/scripts/validate-work-item-state.sh" \
     "$REPO_ROOT/scripts/validate-work-item-state.ps1" \
-    "$CODEX_REF_DIR/README.md" \
-    "$CLAUDE_REF_DIR/README.md" \
-    "$GEMINI_REF_DIR/README.md" \
-    "$QWEN_REF_DIR/README.md"
+    "$CODEX_REF_DIR/README.md"
   do
     if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
   done
+
+  if [[ $STANDALONE -eq 0 ]]; then
+    # Cross-provider surfaces: a standalone single-provider codex branch carries
+    # none of the sibling provider packs/references nor docs/external-worker-design.md.
+    for f in \
+      "$REPO_ROOT/src.claude/README.md" \
+      "$REPO_ROOT/src.gemini/README.md" \
+      "$REPO_ROOT/src.qwen/README.md" \
+      "$DOCS_DIR/external-worker-design.md" \
+      "$CLAUDE_REF_DIR/README.md" \
+      "$GEMINI_REF_DIR/README.md" \
+      "$QWEN_REF_DIR/README.md"
+    do
+      if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
+    done
+  fi
 
   echo ""
   echo "=== Shared references ==="
@@ -742,7 +764,13 @@ if [[ $DEV_REPO -eq 1 ]]; then
   # which was itself English-only before the Task-6 cut) and are EXEMPT from the
   # ru/ mirror requirement by design. Do NOT make this recursive without an
   # explicit decision to localize the spine extracts.
-  for ref_dir in "$SHARED_REF_DIR" "$CODEX_REF_DIR" "$CLAUDE_REF_DIR" "$GEMINI_REF_DIR" "$QWEN_REF_DIR"; do
+  # A standalone codex branch only carries shared/references and references-codex;
+  # the sibling references-{claude,gemini,qwen}/ dirs exist only in the monorepo.
+  ru_mirror_ref_dirs=("$SHARED_REF_DIR" "$CODEX_REF_DIR")
+  if [[ $STANDALONE -eq 0 ]]; then
+    ru_mirror_ref_dirs+=("$CLAUDE_REF_DIR" "$GEMINI_REF_DIR" "$QWEN_REF_DIR")
+  fi
+  for ref_dir in "${ru_mirror_ref_dirs[@]}"; do
     while IFS= read -r source_file; do
       name="$(basename "$source_file")"
       [[ "$name" == "README.md" ]] && continue
@@ -765,16 +793,19 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_pointer "$CODEX_REF_DIR/ru/subagent-operating-model.md" "../../shared/references/ru/subagent-operating-model.md"
   check_pointer "$CODEX_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
   check_pointer "$CODEX_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
-  check_pointer "$CLAUDE_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
-  check_pointer "$CLAUDE_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
-  check_pointer "$GEMINI_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
-  check_pointer "$GEMINI_REF_DIR/workflow-strategy-comparison.md" "../shared/references/workflow-strategy-comparison.md"
-  check_pointer "$GEMINI_REF_DIR/repository-publication-safety.md" "../shared/references/repository-publication-safety.md"
-  check_pointer "$GEMINI_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
-  check_pointer "$GEMINI_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
-  check_pointer "$GEMINI_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
-  check_pointer "$QWEN_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
-  check_pointer "$QWEN_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
+  if [[ $STANDALONE -eq 0 ]]; then
+    # Sibling provider compatibility pointers live only in the monorepo.
+    check_pointer "$CLAUDE_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
+    check_pointer "$CLAUDE_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
+    check_pointer "$GEMINI_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
+    check_pointer "$GEMINI_REF_DIR/workflow-strategy-comparison.md" "../shared/references/workflow-strategy-comparison.md"
+    check_pointer "$GEMINI_REF_DIR/repository-publication-safety.md" "../shared/references/repository-publication-safety.md"
+    check_pointer "$GEMINI_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
+    check_pointer "$GEMINI_REF_DIR/ru/workflow-strategy-comparison.md" "../../shared/references/ru/workflow-strategy-comparison.md"
+    check_pointer "$GEMINI_REF_DIR/ru/repository-publication-safety.md" "../../shared/references/ru/repository-publication-safety.md"
+    check_pointer "$QWEN_REF_DIR/evidence-based-answer-pipeline.md" "../shared/references/evidence-based-answer-pipeline.md"
+    check_pointer "$QWEN_REF_DIR/ru/evidence-based-answer-pipeline.md" "../../shared/references/ru/evidence-based-answer-pipeline.md"
+  fi
 
   echo ""
   echo "=== Shared core / addendum semantics ==="
@@ -898,28 +929,31 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex runtime-notes section does not accidentally carry Claude agents-mode paths"
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Codex-specific runtime notes" \
     "Codex addendum keeps the Codex runtime-notes section"
-  check_contains "$GEMINI_REF_DIR/subagent-operating-model.md" "## Gemini-specific runtime notes" \
-    "Gemini addendum keeps the Gemini runtime-notes section"
-  check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Qwen-specific runtime notes" \
-    "Qwen addendum keeps the Qwen runtime-notes section"
-  check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
-    "## Gemini-specific runtime notes" \
-    ".gemini/.agents-mode.yaml" \
-    "Gemini runtime-notes section documents the Gemini agents-mode overlay"
-  check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
-    "## Gemini-specific runtime notes" \
-    ".gemini/settings.json" \
-    "Gemini runtime-notes section documents the Gemini native runtime config surface"
-  check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
-    "## Gemini-specific runtime notes" \
-    "sequential and human-steered" \
-    "Gemini runtime-notes section keeps the sequential human-steered runtime note"
-  check_h2_section_contains "$QWEN_REF_DIR/subagent-operating-model.md" \
-    "## Qwen-specific runtime notes" \
-    "sequential and human-steered" \
-    "Qwen runtime-notes section keeps the sequential human-steered runtime note"
-  check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Shared core now owns" \
-    "Qwen addendum keeps the shared-core ownership handoff section"
+  if [[ $STANDALONE -eq 0 ]]; then
+    # Sibling Gemini/Qwen addenda exist only in the monorepo.
+    check_contains "$GEMINI_REF_DIR/subagent-operating-model.md" "## Gemini-specific runtime notes" \
+      "Gemini addendum keeps the Gemini runtime-notes section"
+    check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Qwen-specific runtime notes" \
+      "Qwen addendum keeps the Qwen runtime-notes section"
+    check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+      "## Gemini-specific runtime notes" \
+      ".gemini/.agents-mode.yaml" \
+      "Gemini runtime-notes section documents the Gemini agents-mode overlay"
+    check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+      "## Gemini-specific runtime notes" \
+      ".gemini/settings.json" \
+      "Gemini runtime-notes section documents the Gemini native runtime config surface"
+    check_h2_section_contains "$GEMINI_REF_DIR/subagent-operating-model.md" \
+      "## Gemini-specific runtime notes" \
+      "sequential and human-steered" \
+      "Gemini runtime-notes section keeps the sequential human-steered runtime note"
+    check_h2_section_contains "$QWEN_REF_DIR/subagent-operating-model.md" \
+      "## Qwen-specific runtime notes" \
+      "sequential and human-steered" \
+      "Qwen runtime-notes section keeps the sequential human-steered runtime note"
+    check_contains "$QWEN_REF_DIR/subagent-operating-model.md" "## Shared core now owns" \
+      "Qwen addendum keeps the shared-core ownership handoff section"
+  fi
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Codex-side repository concretization" \
     "Codex addendum keeps the Codex repository-concretization section"
   check_contains "$CODEX_REF_DIR/subagent-operating-model.md" "## Shared core now owns" \
@@ -1219,54 +1253,60 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex platform rules document the example-only Gemini/Qwen provider universe"
   check_contains "$REPO_ROOT/shared/references/README.md" "current Gemini and Qwen example integrations" \
     "shared reference index treats Gemini/Qwen as current example integrations"
-  check_contains "$REPO_ROOT/install.sh" "default production install" \
-    "root bash installer defaults to the Codex/Claude production pair"
-  check_contains "$REPO_ROOT/install.ps1" "default production install" \
-    "root PowerShell installer defaults to the Codex/Claude production pair"
-  check_absent "$REPO_ROOT/install.sh" "All available root installs" \
-    "root bash installer does not offer all-provider default installs"
-  check_absent "$REPO_ROOT/install.ps1" "All available root installs" \
-    "root PowerShell installer does not offer all-provider default installs"
-  check_contains "$REPO_ROOT/install.sh" "if [[ -z \"\$choice\" ]]; then" \
-    "root bash installer maps empty selection to the default"
-  check_contains "$REPO_ROOT/install.sh" "choice=3" \
-    "root bash installer maps default selection to option 3"
-  check_contains "$REPO_ROOT/install.ps1" '$normalizedChoice = "3"' \
-    "root PowerShell installer maps empty selection to option 3"
-  check_contains "$REPO_ROOT/install.sh" "run_installer install-codex.sh" \
-    "root bash installer option 3 includes Codex"
-  check_contains "$REPO_ROOT/install.sh" "run_installer install-claude.sh" \
-    "root bash installer option 3 includes Claude"
-  check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' \
-    "root PowerShell installer option 3 includes Codex"
-  check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' \
-    "root PowerShell installer option 3 includes Claude"
-  bash_default_block="$(awk '/^  3\)/,/^  4\)/ { print }' "$REPO_ROOT/install.sh")"
-  if grep -Fq "run_installer install-codex.sh" <<<"$bash_default_block" &&
-     grep -Fq "run_installer install-claude.sh" <<<"$bash_default_block" &&
-     ! grep -Eq 'install-(gemini|qwen)\.sh' <<<"$bash_default_block"; then
-    pass "root bash installer default dispatch is Codex plus Claude only"
-  else
-    fail "root bash installer default dispatch must be Codex plus Claude only"
+  if [[ $STANDALONE -eq 0 ]]; then
+    # Root multi-provider installer (install.sh/.ps1) and its Codex/Claude default-pair
+    # documentation in README.md/INSTALL.md exist only in the monorepo. A standalone
+    # single-provider branch carries its own curated README/INSTALL without the root
+    # selector installer.
+    check_contains "$REPO_ROOT/install.sh" "default production install" \
+      "root bash installer defaults to the Codex/Claude production pair"
+    check_contains "$REPO_ROOT/install.ps1" "default production install" \
+      "root PowerShell installer defaults to the Codex/Claude production pair"
+    check_absent "$REPO_ROOT/install.sh" "All available root installs" \
+      "root bash installer does not offer all-provider default installs"
+    check_absent "$REPO_ROOT/install.ps1" "All available root installs" \
+      "root PowerShell installer does not offer all-provider default installs"
+    check_contains "$REPO_ROOT/install.sh" "if [[ -z \"\$choice\" ]]; then" \
+      "root bash installer maps empty selection to the default"
+    check_contains "$REPO_ROOT/install.sh" "choice=3" \
+      "root bash installer maps default selection to option 3"
+    check_contains "$REPO_ROOT/install.ps1" '$normalizedChoice = "3"' \
+      "root PowerShell installer maps empty selection to option 3"
+    check_contains "$REPO_ROOT/install.sh" "run_installer install-codex.sh" \
+      "root bash installer option 3 includes Codex"
+    check_contains "$REPO_ROOT/install.sh" "run_installer install-claude.sh" \
+      "root bash installer option 3 includes Claude"
+    check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' \
+      "root PowerShell installer option 3 includes Codex"
+    check_contains "$REPO_ROOT/install.ps1" 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' \
+      "root PowerShell installer option 3 includes Claude"
+    bash_default_block="$(awk '/^  3\)/,/^  4\)/ { print }' "$REPO_ROOT/install.sh")"
+    if grep -Fq "run_installer install-codex.sh" <<<"$bash_default_block" &&
+       grep -Fq "run_installer install-claude.sh" <<<"$bash_default_block" &&
+       ! grep -Eq 'install-(gemini|qwen)\.sh' <<<"$bash_default_block"; then
+      pass "root bash installer default dispatch is Codex plus Claude only"
+    else
+      fail "root bash installer default dispatch must be Codex plus Claude only"
+    fi
+    ps_default_block="$(awk '/^    "3" {/,/^    "4" {/ { print }' "$REPO_ROOT/install.ps1")"
+    if grep -Fq 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' <<<"$ps_default_block" &&
+       grep -Fq 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' <<<"$ps_default_block" &&
+       ! grep -Eq 'install-(gemini|qwen)\.ps1' <<<"$ps_default_block"; then
+      pass "root PowerShell installer default dispatch is Codex plus Claude only"
+    else
+      fail "root PowerShell installer default dispatch must be Codex plus Claude only"
+    fi
+    check_absent "$REPO_ROOT/install.sh" "run_all_available" \
+      "root bash installer has no aggregate all-provider helper"
+    check_absent "$REPO_ROOT/install.ps1" "Invoke-AllAvailableInstallers" \
+      "root PowerShell installer has no aggregate all-provider helper"
+    check_contains "$REPO_ROOT/README.md" "Pressing Enter selects the default production install" \
+      "README documents the Codex/Claude default root install"
+    check_contains "$REPO_ROOT/INSTALL.md" "Pressing Enter selects the default production install" \
+      "INSTALL.md documents the Codex/Claude default root install"
+    check_contains "$REPO_ROOT/INSTALL.md" ".agents-mode.yaml" \
+      "INSTALL.md default project result includes provider overlay files"
   fi
-  ps_default_block="$(awk '/^    "3" {/,/^    "4" {/ { print }' "$REPO_ROOT/install.ps1")"
-  if grep -Fq 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' <<<"$ps_default_block" &&
-     grep -Fq 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' <<<"$ps_default_block" &&
-     ! grep -Eq 'install-(gemini|qwen)\.ps1' <<<"$ps_default_block"; then
-    pass "root PowerShell installer default dispatch is Codex plus Claude only"
-  else
-    fail "root PowerShell installer default dispatch must be Codex plus Claude only"
-  fi
-  check_absent "$REPO_ROOT/install.sh" "run_all_available" \
-    "root bash installer has no aggregate all-provider helper"
-  check_absent "$REPO_ROOT/install.ps1" "Invoke-AllAvailableInstallers" \
-    "root PowerShell installer has no aggregate all-provider helper"
-  check_contains "$REPO_ROOT/README.md" "Pressing Enter selects the default production install" \
-    "README documents the Codex/Claude default root install"
-  check_contains "$REPO_ROOT/INSTALL.md" "Pressing Enter selects the default production install" \
-    "INSTALL.md documents the Codex/Claude default root install"
-  check_contains "$REPO_ROOT/INSTALL.md" ".agents-mode.yaml" \
-    "INSTALL.md default project result includes provider overlay files"
   check_contains "$REPO_ROOT/docs/agents-mode-reference.md" '`power-mode` | hardest-task maximum result' \
     "agents-mode reference documents power-mode preset"
   check_contains "$REPO_ROOT/src.codex/skills/init-project/SKILL.md" '`power-mode` (hardest-task maximum result)' \
@@ -1275,18 +1315,22 @@ if [[ $DEV_REPO -eq 1 ]]; then
     check_contains "$REPO_ROOT/src.codex/skills/init-project/SKILL.md" "$lane: 2" \
       "Codex init-project correctness-first/power-mode presets raise $lane"
   done
-  if command -v python3 >/dev/null 2>&1; then
-    contract_python_cmd="python3"
-  elif command -v python >/dev/null 2>&1; then
-    contract_python_cmd="python"
-  else
-    contract_python_cmd=""
-  fi
-  if [[ -n "$contract_python_cmd" ]] &&
-     "$contract_python_cmd" "$REPO_ROOT/scripts/validate-agents-mode-contract.py" --root "$REPO_ROOT" >/dev/null; then
-    pass "agents-mode machine-readable contract matches docs and init preset surfaces"
-  else
-    fail "agents-mode machine-readable contract matches docs and init preset surfaces"
+  if [[ $STANDALONE -eq 0 ]]; then
+    # The agents-mode machine-readable contract cross-checks ALL providers' init-project
+    # surfaces; a standalone single-provider tree carries only its own pack.
+    if command -v python3 >/dev/null 2>&1; then
+      contract_python_cmd="python3"
+    elif command -v python >/dev/null 2>&1; then
+      contract_python_cmd="python"
+    else
+      contract_python_cmd=""
+    fi
+    if [[ -n "$contract_python_cmd" ]] &&
+       "$contract_python_cmd" "$REPO_ROOT/scripts/validate-agents-mode-contract.py" --root "$REPO_ROOT" >/dev/null; then
+      pass "agents-mode machine-readable contract matches docs and init preset surfaces"
+    else
+      fail "agents-mode machine-readable contract matches docs and init preset surfaces"
+    fi
   fi
 fi
 
@@ -1316,8 +1360,11 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "agents-mode reference documents file-based external CLI prompts"
   check_contains "$DOCS_DIR/agents-mode-reference.md" "agent-runs.jsonl" \
     "agents-mode reference documents ledger fan-out tracking"
-  check_contains "$DOCS_DIR/external-worker-design.md" "Work-item ledger rule" \
-    "external-worker design maps execution records to the ledger"
+  if [[ $STANDALONE -eq 0 ]]; then
+    # docs/external-worker-design.md is a monorepo-only doc; the standalone tree omits it.
+    check_contains "$DOCS_DIR/external-worker-design.md" "Work-item ledger rule" \
+      "external-worker design maps execution records to the ledger"
+  fi
   check_normalizer_strips_example_auto_providers \
     "agents-mode normalizer strips Gemini/Qwen and keeps reserve last or absent in custom auto profiles"
   check_file "$REPO_ROOT/shared/agents-mode.defaults.yaml" "shared/agents-mode.defaults.yaml"
@@ -1331,24 +1378,29 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "provider runtime layouts document global Codex built-in agent overrides"
   check_contains "$REPO_ROOT/src.codex/README.md" "agents/default.toml" \
     "src.codex/README.md documents the built-in agent override payload"
-  check_contains "$REPO_ROOT/README.md" "scripts/validate-work-item-state.* --work-item" \
-    "README documents the work-item state validator"
-  check_contains "$REPO_ROOT/README.md" "scripts/agent-run-ledger.* --work-item" \
-    "README documents the work-item ledger helper"
-  check_contains "$REPO_ROOT/README.md" "scripts/check-work-items-state.* --root" \
-    "README documents the periodic work-item state checker"
-  check_contains "$REPO_ROOT/INSTALL.md" "agent-runs.jsonl" \
-    "INSTALL documents local work-item execution tracking"
-  check_contains "$REPO_ROOT/INSTALL.md" "scripts/agent-run-ledger.* --work-item" \
-    "INSTALL documents the work-item ledger helper"
-  check_contains "$REPO_ROOT/INSTALL.md" "scripts/check-work-items-state.* --root" \
-    "INSTALL documents the periodic work-item state checker"
-  check_contains "$REPO_ROOT/RELEASE_NOTES.md" "machine-readable work-item execution tracking contract" \
-    "release notes document the work-item execution tracking contract"
-  check_contains "$REPO_ROOT/RELEASE_NOTES.md" "ledger append/init helper" \
-    "release notes document the ledger append/init helper"
-  check_contains "$REPO_ROOT/RELEASE_NOTES.md" "periodic active work-item state checker" \
-    "release notes document the periodic work-item checker"
+  if [[ $STANDALONE -eq 0 ]]; then
+    # The root README.md/INSTALL.md work-item-tracking sections and RELEASE_NOTES.md are
+    # monorepo surfaces; the standalone tree carries its own curated README/INSTALL and
+    # no RELEASE_NOTES.md.
+    check_contains "$REPO_ROOT/README.md" "scripts/validate-work-item-state.* --work-item" \
+      "README documents the work-item state validator"
+    check_contains "$REPO_ROOT/README.md" "scripts/agent-run-ledger.* --work-item" \
+      "README documents the work-item ledger helper"
+    check_contains "$REPO_ROOT/README.md" "scripts/check-work-items-state.* --root" \
+      "README documents the periodic work-item state checker"
+    check_contains "$REPO_ROOT/INSTALL.md" "agent-runs.jsonl" \
+      "INSTALL documents local work-item execution tracking"
+    check_contains "$REPO_ROOT/INSTALL.md" "scripts/agent-run-ledger.* --work-item" \
+      "INSTALL documents the work-item ledger helper"
+    check_contains "$REPO_ROOT/INSTALL.md" "scripts/check-work-items-state.* --root" \
+      "INSTALL documents the periodic work-item state checker"
+    check_contains "$REPO_ROOT/RELEASE_NOTES.md" "machine-readable work-item execution tracking contract" \
+      "release notes document the work-item execution tracking contract"
+    check_contains "$REPO_ROOT/RELEASE_NOTES.md" "ledger append/init helper" \
+      "release notes document the ledger append/init helper"
+    check_contains "$REPO_ROOT/RELEASE_NOTES.md" "periodic active work-item state checker" \
+      "release notes document the periodic work-item checker"
+  fi
   check_contains "$REPO_ROOT/scripts/agent-run-ledger.py" "validate_work_item" \
     "agent-run-ledger helper reuses the work-item state validator"
   check_contains "$REPO_ROOT/scripts/agent-run-ledger.py" "restore_ledger" \
