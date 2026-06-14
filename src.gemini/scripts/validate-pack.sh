@@ -106,6 +106,19 @@ EXTENSION_README_FILE="$EXTENSION_ROOT/README.md"
 EXTENSION_GEMINI_FILE="$EXTENSION_ROOT/GEMINI.md"
 EXTENSION_AGENTS_FILE="$EXTENSION_ROOT/AGENTS.md"
 
+# A single-provider STANDALONE branch carries ONLY its own src.<provider>/ tree, so the
+# monorepo-wide surfaces (root install.sh/.ps1, RELEASE_NOTES.md, docs/external-worker-design.md,
+# the cross-provider README/INSTALL work-item sections, the all-provider agents-mode contract)
+# are absent. Detect it by the ABSENCE of the sibling production packs (src.claude + src.codex)
+# — a positive structural signal the full monorepo always carries — rather than by a monorepo-only
+# file's absence, so renaming or moving a root doc can never silently flip the monorepo itself to
+# standalone and skip the cross-provider checks (fail-open). Pack-content checks run in both modes.
+if [[ "$MODE" == "source" && ! -d "$ROOT/src.claude" && ! -d "$ROOT/src.codex" ]]; then
+  STANDALONE=1
+else
+  STANDALONE=0
+fi
+
 required_common=(
   "$GEMINI_FILE"
   "$PACK_ROOT/skills/README.md"
@@ -257,16 +270,20 @@ if [[ "$MODE" == "source" ]]; then
   grep -Fq 'agent-runs.jsonl` — машиночитаемый журнал исполнения work-item' "$ROOT/shared/references/ru/subagent-operating-model.md" || fail "shared RU subagent-operating-model should document the agent execution ledger"
   grep -Fq 'PASS` без evidence' "$ROOT/shared/references/ru/subagent-operating-model.md" || fail "shared RU subagent-operating-model should reject PASS without evidence"
   grep -Fq 'agent-runs.jsonl' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document ledger fan-out tracking"
-  grep -Fq 'Work-item ledger rule' "$ROOT/docs/external-worker-design.md" || fail "external-worker design should map execution records to the ledger"
-  grep -Fq 'scripts/validate-work-item-state.* --work-item' "$ROOT/README.md" || fail "README should document the work-item state validator"
-  grep -Fq 'scripts/agent-run-ledger.* --work-item' "$ROOT/README.md" || fail "README should document the work-item ledger helper"
-  grep -Fq 'scripts/check-work-items-state.* --root' "$ROOT/README.md" || fail "README should document the periodic work-item state checker"
-  grep -Fq 'agent-runs.jsonl' "$ROOT/INSTALL.md" || fail "INSTALL should document local work-item execution tracking"
-  grep -Fq 'scripts/agent-run-ledger.* --work-item' "$ROOT/INSTALL.md" || fail "INSTALL should document the work-item ledger helper"
-  grep -Fq 'scripts/check-work-items-state.* --root' "$ROOT/INSTALL.md" || fail "INSTALL should document the periodic work-item state checker"
-  grep -Fq 'machine-readable work-item execution tracking contract' "$ROOT/RELEASE_NOTES.md" || fail "release notes should document work-item execution tracking"
-  grep -Fq 'ledger append/init helper' "$ROOT/RELEASE_NOTES.md" || fail "release notes should document the ledger append/init helper"
-  grep -Fq 'periodic active work-item state checker' "$ROOT/RELEASE_NOTES.md" || fail "release notes should document the periodic work-item checker"
+  if [[ "$STANDALONE" -eq 0 ]]; then
+    # Monorepo-wide surfaces: a standalone single-provider branch omits these files
+    # (external-worker design doc, RELEASE_NOTES) and curates its own README/INSTALL.
+    grep -Fq 'Work-item ledger rule' "$ROOT/docs/external-worker-design.md" || fail "external-worker design should map execution records to the ledger"
+    grep -Fq 'scripts/validate-work-item-state.* --work-item' "$ROOT/README.md" || fail "README should document the work-item state validator"
+    grep -Fq 'scripts/agent-run-ledger.* --work-item' "$ROOT/README.md" || fail "README should document the work-item ledger helper"
+    grep -Fq 'scripts/check-work-items-state.* --root' "$ROOT/README.md" || fail "README should document the periodic work-item state checker"
+    grep -Fq 'agent-runs.jsonl' "$ROOT/INSTALL.md" || fail "INSTALL should document local work-item execution tracking"
+    grep -Fq 'scripts/agent-run-ledger.* --work-item' "$ROOT/INSTALL.md" || fail "INSTALL should document the work-item ledger helper"
+    grep -Fq 'scripts/check-work-items-state.* --root' "$ROOT/INSTALL.md" || fail "INSTALL should document the periodic work-item state checker"
+    grep -Fq 'machine-readable work-item execution tracking contract' "$ROOT/RELEASE_NOTES.md" || fail "release notes should document work-item execution tracking"
+    grep -Fq 'ledger append/init helper' "$ROOT/RELEASE_NOTES.md" || fail "release notes should document the ledger append/init helper"
+    grep -Fq 'periodic active work-item state checker' "$ROOT/RELEASE_NOTES.md" || fail "release notes should document the periodic work-item checker"
+  fi
   grep -Fq 'validate_work_item' "$ROOT/scripts/agent-run-ledger.py" || fail "agent-run-ledger helper should reuse the validator"
   grep -Fq 'restore_ledger' "$ROOT/scripts/agent-run-ledger.py" || fail "agent-run-ledger helper should roll back invalid appends"
   grep -Fq 'validate_work_item' "$ROOT/scripts/check-work-items-state.py" || fail "periodic work-item checker should reuse the validator"
@@ -336,39 +353,46 @@ if [[ "$MODE" == "source" ]]; then
   grep -Fq 'WEAK MODEL / NOT RECOMMENDED' "$ROOT/references-gemini/subagent-operating-model.md" || fail "references-gemini should mark Gemini as a not recommended example-only integration"
   grep -Fq 'example-only / WEAK MODEL / NOT RECOMMENDED' "$ROOT/scripts/install-gemini.sh" || fail "install-gemini.sh should announce example-only Gemini policy"
   grep -Fq 'example-only / WEAK MODEL / NOT RECOMMENDED' "$ROOT/scripts/install-gemini.ps1" || fail "install-gemini.ps1 should announce example-only Gemini policy"
-  grep -Fq 'default production install' "$ROOT/install.sh" || fail "root bash installer should default to the Codex/Claude production pair"
-  grep -Fq 'default production install' "$ROOT/install.ps1" || fail "root PowerShell installer should default to the Codex/Claude production pair"
-  ! grep -Fq 'All available root installs' "$ROOT/install.sh" || fail "root bash installer should not offer all-provider default installs"
-  ! grep -Fq 'All available root installs' "$ROOT/install.ps1" || fail "root PowerShell installer should not offer all-provider default installs"
-  grep -Fq 'if [[ -z "$choice" ]]; then' "$ROOT/install.sh" || fail "root bash installer should map empty selection to the default"
-  grep -Fq 'choice=3' "$ROOT/install.sh" || fail "root bash installer should map default selection to option 3"
-  grep -Fq '$normalizedChoice = "3"' "$ROOT/install.ps1" || fail "root PowerShell installer should map empty selection to option 3"
-  bash_default_block="$(awk '/^  3\)/,/^  4\)/ { print }' "$ROOT/install.sh")"
-  grep -Fq 'run_installer install-codex.sh' <<<"$bash_default_block" || fail "root bash installer default should include Codex"
-  grep -Fq 'run_installer install-claude.sh' <<<"$bash_default_block" || fail "root bash installer default should include Claude"
-  ! grep -Eq 'install-(gemini|qwen)\.sh' <<<"$bash_default_block" || fail "root bash installer default should not include Gemini or Qwen"
-  ps_default_block="$(awk '/^    "3" {/,/^    "4" {/ { print }' "$ROOT/install.ps1")"
-  grep -Fq 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' <<<"$ps_default_block" || fail "root PowerShell installer default should include Codex"
-  grep -Fq 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' <<<"$ps_default_block" || fail "root PowerShell installer default should include Claude"
-  ! grep -Eq 'install-(gemini|qwen)\.ps1' <<<"$ps_default_block" || fail "root PowerShell installer default should not include Gemini or Qwen"
-  ! grep -Fq 'run_all_available' "$ROOT/install.sh" || fail "root bash installer should not keep an aggregate all-provider helper"
-  ! grep -Fq 'Invoke-AllAvailableInstallers' "$ROOT/install.ps1" || fail "root PowerShell installer should not keep an aggregate all-provider helper"
-  grep -Fq 'Pressing Enter selects the default production install' "$ROOT/INSTALL.md" || fail "INSTALL.md should document the Codex/Claude default root install"
-  grep -Fq '.agents-mode.yaml' "$ROOT/INSTALL.md" || fail "INSTALL.md default project result should include provider overlay files"
+  if [[ "$STANDALONE" -eq 0 ]]; then
+    # Root multi-provider installer + its INSTALL.md docs exist only in the monorepo.
+    grep -Fq 'default production install' "$ROOT/install.sh" || fail "root bash installer should default to the Codex/Claude production pair"
+    grep -Fq 'default production install' "$ROOT/install.ps1" || fail "root PowerShell installer should default to the Codex/Claude production pair"
+    ! grep -Fq 'All available root installs' "$ROOT/install.sh" || fail "root bash installer should not offer all-provider default installs"
+    ! grep -Fq 'All available root installs' "$ROOT/install.ps1" || fail "root PowerShell installer should not offer all-provider default installs"
+    grep -Fq 'if [[ -z "$choice" ]]; then' "$ROOT/install.sh" || fail "root bash installer should map empty selection to the default"
+    grep -Fq 'choice=3' "$ROOT/install.sh" || fail "root bash installer should map default selection to option 3"
+    grep -Fq '$normalizedChoice = "3"' "$ROOT/install.ps1" || fail "root PowerShell installer should map empty selection to option 3"
+    bash_default_block="$(awk '/^  3\)/,/^  4\)/ { print }' "$ROOT/install.sh")"
+    grep -Fq 'run_installer install-codex.sh' <<<"$bash_default_block" || fail "root bash installer default should include Codex"
+    grep -Fq 'run_installer install-claude.sh' <<<"$bash_default_block" || fail "root bash installer default should include Claude"
+    ! grep -Eq 'install-(gemini|qwen)\.sh' <<<"$bash_default_block" || fail "root bash installer default should not include Gemini or Qwen"
+    ps_default_block="$(awk '/^    "3" {/,/^    "4" {/ { print }' "$ROOT/install.ps1")"
+    grep -Fq 'Invoke-ChildInstaller -ScriptName "install-codex.ps1"' <<<"$ps_default_block" || fail "root PowerShell installer default should include Codex"
+    grep -Fq 'Invoke-ChildInstaller -ScriptName "install-claude.ps1"' <<<"$ps_default_block" || fail "root PowerShell installer default should include Claude"
+    ! grep -Eq 'install-(gemini|qwen)\.ps1' <<<"$ps_default_block" || fail "root PowerShell installer default should not include Gemini or Qwen"
+    ! grep -Fq 'run_all_available' "$ROOT/install.sh" || fail "root bash installer should not keep an aggregate all-provider helper"
+    ! grep -Fq 'Invoke-AllAvailableInstallers' "$ROOT/install.ps1" || fail "root PowerShell installer should not keep an aggregate all-provider helper"
+    grep -Fq 'Pressing Enter selects the default production install' "$ROOT/INSTALL.md" || fail "INSTALL.md should document the Codex/Claude default root install"
+    grep -Fq '.agents-mode.yaml' "$ROOT/INSTALL.md" || fail "INSTALL.md default project result should include provider overlay files"
+  fi
 fi
 
 if [[ "$MODE" == "source" && -f "$ROOT/docs/agents-mode-reference.md" ]]; then
   grep -Fq '## Canonical maintenance' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should define canonical maintenance"
   grep -Fq '`power-mode` | hardest-task maximum result' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document power-mode preset"
   grep -Fq '`power-mode` (hardest-task maximum result)' "$PACK_ROOT/skills/init-project/SKILL.md" || fail "Gemini init-project should expose power-mode preset"
-  if command -v python >/dev/null 2>&1; then
-    CONTRACT_PYTHON_BIN=python
-  elif command -v python3 >/dev/null 2>&1; then
-    CONTRACT_PYTHON_BIN=python3
-  else
-    fail "python or python3 is required to validate the agents-mode contract"
+  if [[ "$STANDALONE" -eq 0 ]]; then
+    # The agents-mode machine-readable contract cross-checks ALL providers' init-project
+    # surfaces; a single-provider standalone tree carries only its own pack.
+    if command -v python >/dev/null 2>&1; then
+      CONTRACT_PYTHON_BIN=python
+    elif command -v python3 >/dev/null 2>&1; then
+      CONTRACT_PYTHON_BIN=python3
+    else
+      fail "python or python3 is required to validate the agents-mode contract"
+    fi
+    "$CONTRACT_PYTHON_BIN" "$ROOT/scripts/validate-agents-mode-contract.py" --root "$ROOT" >/dev/null || fail "agents-mode machine-readable contract should match docs and init preset surfaces"
   fi
-  "$CONTRACT_PYTHON_BIN" "$ROOT/scripts/validate-agents-mode-contract.py" --root "$ROOT" >/dev/null || fail "agents-mode machine-readable contract should match docs and init preset surfaces"
   grep -Fq 'Read-time normalization preserves the effective values of known keys' "$ROOT/docs/agents-mode-reference.md" || fail "agents-mode reference should document read-time normalization semantics"
   [[ -f "$ROOT/shared/agents-mode.defaults.yaml" ]] || fail "shared agents-mode defaults exemplar should exist"
   ! grep -Fq 'externalClaudeApiMode' "$ROOT/shared/agents-mode.defaults.yaml" || fail "shared defaults should not keep retired externalClaudeApiMode"
