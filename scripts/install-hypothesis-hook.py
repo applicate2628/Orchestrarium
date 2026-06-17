@@ -379,7 +379,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--hook-event",
-        choices=("PreToolUse", "Stop"),
+        choices=("PreToolUse", "Stop", "SessionStart"),
         default="PreToolUse",
         help="Hook event to install under (default: PreToolUse)",
     )
