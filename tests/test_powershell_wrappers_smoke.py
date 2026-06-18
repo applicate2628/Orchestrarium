@@ -1,9 +1,9 @@
 """Smoke tests for the PowerShell (.ps1) hook + scanner wrappers.
 
 The installer registers a .ps1 entry point as the WINDOWS hook command for the
-five hooks (check-bugfix-discipline, check-passive-polling-stop,
-check-work-items-archival-stop, check-machine-local-path, check-no-trash-in-repo)
-and ships a .ps1 for the
+five structural/audit hooks (check-bugfix-discipline, check-passive-polling-stop,
+check-work-items-archival-stop, check-machine-local-path, check-no-trash-in-repo),
+the informational mcp-usage-reminder SessionStart hook, and ships a .ps1 for the
 publication scanner — yet NO test executed any .ps1, so a syntax error, a broken
 fail-open path, or a regressed stdin pipe in the Windows entry point would have
 shipped green (every other hook test drives the .py helper via sys.executable,
@@ -13,7 +13,7 @@ Claude (src.claude/agents/{scripts,hooks}/) and Codex
 
 Two wrapper shapes, two contracts:
 
-  * The five HOOK wrappers are thin stdin pipes around their .py helper. Contract:
+  * The five structural/audit HOOK wrappers are thin stdin pipes around their .py helper. Contract:
     FAIL OPEN — on empty stdin AND on malformed JSON they must exit 0 with no
     stdout and no stderr (AUDIT/decision hooks never crash the host; the helper's
     own fail-open swallows bad input). Verified under every available interpreter.
@@ -54,7 +54,7 @@ CLAUDE_HOOKS = REPO_ROOT / "src.claude" / "agents" / "hooks"
 CODEX_SCRIPTS = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts"
 CODEX_HOOKS = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 
-# The five stdin-piping hook wrappers, in BOTH install trees (10 files).
+# The five stdin-piping structural/audit hook wrappers, in BOTH install trees (10 files).
 HOOK_WRAPPERS = (
     CLAUDE_SCRIPTS / "check-bugfix-discipline.ps1",
     CLAUDE_SCRIPTS / "check-passive-polling-stop.ps1",
@@ -66,6 +66,12 @@ HOOK_WRAPPERS = (
     CODEX_SCRIPTS / "check-work-items-archival-stop.ps1",
     CODEX_HOOKS / "check-machine-local-path.ps1",
     CODEX_HOOKS / "check-no-trash-in-repo.ps1",
+)
+
+# The informational SessionStart reminder wrappers, in BOTH install trees (2 files).
+REMINDER_WRAPPERS = (
+    CLAUDE_SCRIPTS / "mcp-usage-reminder.ps1",
+    CODEX_SCRIPTS / "mcp-usage-reminder.ps1",
 )
 
 # The publication scanner wrapper, in BOTH install trees (2 files).
@@ -172,6 +178,23 @@ class TestHookWrappersFailOpen(unittest.TestCase):
 
     def test_malformed_json_fails_open(self) -> None:
         self._assert_fail_open(MALFORMED_JSON)
+
+
+@unittest.skipIf(not INTERPRETERS, "no PowerShell host (pwsh/powershell) on PATH")
+class TestReminderWrappersEmitContext(unittest.TestCase):
+    """The MCP reminder is informational, not stdin-driven. It must execute and
+    emit the operational checkpoint text under every available PowerShell host."""
+
+    def test_reminder_outputs_mcp_checkpoint(self) -> None:
+        for interp in INTERPRETERS:
+            for wrapper in REMINDER_WRAPPERS:
+                self.assertTrue(wrapper.is_file(), f"missing reminder wrapper: {wrapper}")
+                with self.subTest(interp=Path(interp).stem, wrapper=str(wrapper.relative_to(REPO_ROOT))):
+                    p = _run_ps1(interp, wrapper, stdin="")
+                    self.assertEqual(p.returncode, 0, p.stderr)
+                    self.assertIn("MCP / tools reminder", p.stdout)
+                    self.assertIn("tool discovery", p.stdout)
+                    self.assertIn("mcpMode: force", p.stdout)
 
 
 @unittest.skipIf(not INTERPRETERS or GIT is None, "needs a PowerShell host and git on PATH")

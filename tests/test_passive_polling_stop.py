@@ -171,6 +171,13 @@ class TestPassivePollingStop(unittest.TestCase):
         )
         self.assert_allowed(result)
 
+    def test_bare_waiting_for_reply_from_bot_blocks_without_probe(self) -> None:
+        result = self.run_hook(
+            message="waiting for reply from bot",
+            transcript_entries=[entry("user", "status?")],
+        )
+        self.assert_blocked(result)
+
     def test_user_handoff_russian_allows_stop(self) -> None:
         result = self.run_hook(
             message="жду твоего подтверждения",

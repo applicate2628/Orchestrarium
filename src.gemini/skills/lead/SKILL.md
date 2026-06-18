@@ -20,6 +20,21 @@ That means:
 - `team-templates/*.json` is the repo-local team map for the common role principle
 - the lead skill is the canonical orchestration contract for the whole role catalog
 
+## Bootstrap — first action
+
+> **DO NOT implement.** When receiving a request or delegation, execute in order:
+
+1. **Verify work-items task memory (ENFORCED)** — for non-trivial lead-managed work, the default repository task-memory root is `work-items/`:
+   - Check `work-items/active/` for existing items. For each active item, verify: `roadmap.md` exists and is current, `brief.md` has scope/owners/stage, and `status.md` has current snapshot.
+   - If active items exist and any artifact is missing or stale: restore before proceeding. For multiple active items or complex recovery state, invoke `$knowledge-archivist` for a completeness audit before continuing.
+   - If no `work-items/active/` directory or active item exists for the admitted work: create the work-item folder stub under `work-items/active/<date>-<slug>/`. Step 3 populates lead-owned artifacts.
+   - Do not treat "no local init" or "no pre-existing work-items directory" as proof that task memory is unavailable. Shared governance supplies the default `work-items/` contract for non-trivial lead items unless an explicit repo-local policy or direct user instruction disables it.
+   - Lead cannot proceed to classification until task-memory state is either verified current or the new stub is created.
+   - **Admission source (ENFORCED):** every `roadmap.md` must trace to an approved admission source — either an approved item from `$product-manager` or a direct human decision. Lead cannot generate a roadmap item on its own authority.
+2. **Classify** the request: cosmetic | additive | behavioral | breaking-or-cross-cutting.
+3. **Restore or create lead-owned task memory only**: `roadmap.md`, `brief.md`, `status.md` in the active work-item folder.
+4. **Route** to the narrowest specialist role — do not perform specialist work yourself.
+
 ## Responsibilities
 
 - classify the current task before routing
@@ -51,6 +66,10 @@ Read these adjacent files when the task needs more than a trivial route decision
 - Do not stop at one completed sub-batch when the next required action is already clear.
 - Do not claim the Gemini pack is aligned unless the role-skill surface and the documents all match.
 - Do not invent Gemini-only role names when the shared role vocabulary already covers the work.
+
+## Epics
+
+An epic groups multiple work-items under one goal or milestone. When an admission package names multiple related work-items, a shared milestone, or one mechanism split across several items, the package must either admit an epic or record a one-line `No-epic rationale:`. Lead materializes admitted epics under `work-items/epics/<date>-<slug>.md` and links child work-items with a single `Epic: <slug>` line in each child `status.md`.
 
 ## Output
 

@@ -194,7 +194,13 @@ def pass_rows() -> dict[str, str]:
 
 @unittest.skipIf(_bash() is None or _git() is None, "needs bash + git on PATH")
 class TestPublicationSafetyScanner(unittest.TestCase):
-    def _run_cached(self, scanner: Path, content: str, env_overrides: dict | None = None) -> int:
+    def _run_cached(
+        self,
+        scanner: Path,
+        content: str,
+        env_overrides: dict | None = None,
+        filename: str = "fixture.txt",
+    ) -> int:
         """Stage `content` as a file in a throwaway repo and run the REAL scanner
         in its production --cached tracked mode (cwd = the throwaway repo). The
         scanner resolves its allowlist owner via its own absolute BASH_SOURCE, so
@@ -205,8 +211,10 @@ class TestPublicationSafetyScanner(unittest.TestCase):
             subprocess.run([git, "init", "-q", td], check=True, capture_output=True)
             subprocess.run([git, "-C", td, "config", "user.email", "t@t"], check=True, capture_output=True)
             subprocess.run([git, "-C", td, "config", "user.name", "t"], check=True, capture_output=True)
-            (Path(td) / "fixture.txt").write_text(content + "\n", encoding="utf-8")
-            subprocess.run([git, "-C", td, "add", "fixture.txt"], check=True, capture_output=True)
+            fixture = Path(td) / filename
+            fixture.parent.mkdir(parents=True, exist_ok=True)
+            fixture.write_text(content + "\n", encoding="utf-8")
+            subprocess.run([git, "-C", td, "add", filename], check=True, capture_output=True)
             env = dict(os.environ)
             if env_overrides:
                 env.update(env_overrides)
@@ -238,6 +246,60 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
                 self.assertEqual(self._run_cached(scanner, "nothing machine-local here"), 0)
+
+    def test_env_filename_blocks_even_without_secret_content(self) -> None:
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                self.assertEqual(self._run_cached(scanner, "PUBLIC_VALUE=1", filename=".env"), 1)
+
+    def test_scanner_file_itself_is_scanned_for_real_secret_content(self) -> None:
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                secret = "pass" + "word" + ": hunter2"
+                self.assertEqual(
+                    self._run_cached(
+                        scanner,
+                        f"nonpath_patterns=(\\n  {secret!r}\\n)",
+                        filename="scripts/check-publication-safety.sh",
+                    ),
+                    1,
+                )
+
+    def test_scanner_file_allows_exact_intentional_regex_catalog_lines(self) -> None:
+        catalog = "\n".join(
+            [
+                "nonpath_patterns=(",
+                "  'BEGIN RSA PRIVATE KEY'",
+                "  'BEGIN OPENSSH PRIVATE KEY'",
+                "  'BEGIN PRIVATE KEY'",
+                "  'private_key'",
+                "  'secret_key'",
+                ")",
+            ]
+        )
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                self.assertEqual(
+                    self._run_cached(
+                        scanner,
+                        catalog,
+                        filename="scripts/check-publication-safety.sh",
+                    ),
+                    0,
+                )
+
+    def test_scanner_file_blocks_catalog_line_with_secret_comment(self) -> None:
+        secret = "pass" + "word" + ": hunter2"
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                self.assertEqual(
+                    self._run_cached(
+                        scanner,
+                        f"  'secret_key' # {secret}",
+                        filename="scripts/check-publication-safety.sh",
+                    ),
+                    1,
+                )
 
 
 class TestPublicationSafetyScannerLauncher(unittest.TestCase):

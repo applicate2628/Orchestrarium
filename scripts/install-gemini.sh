@@ -9,11 +9,39 @@ EXTENSION_MANIFEST_SOURCE="$EXTENSION_SOURCE/gemini-extension.json"
 EXTENSION_README_SOURCE="$EXTENSION_SOURCE/README.md"
 SHARED_AGENTS_SOURCE="$REPO_DIR/shared/AGENTS.shared.md"
 DEFAULT_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
+UNIVERSAL_HOOK_SCRIPTS_SOURCE="$REPO_DIR/scripts/universal-hooks/scripts"
+UNIVERSAL_HOOK_HOOKS_SOURCE="$REPO_DIR/scripts/universal-hooks/hooks"
 MANAGED_START='<!-- ORCHESTRARIUM_GEMINI_PACK:START -->'
 MANAGED_END='<!-- ORCHESTRARIUM_GEMINI_PACK:END -->'
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
+
+UNIVERSAL_RUNTIME_SCRIPT_NAMES=(
+  hook_common.py
+  check-bugfix-discipline.py
+  check-bugfix-discipline.sh
+  check-bugfix-discipline.ps1
+  check-passive-polling-stop.py
+  check-passive-polling-stop.sh
+  check-passive-polling-stop.ps1
+  check-work-items-archival-stop.py
+  check-work-items-archival-stop.sh
+  check-work-items-archival-stop.ps1
+  mcp-usage-reminder.sh
+  mcp-usage-reminder.ps1
+  check-publication-safety.sh
+  check-publication-safety.ps1
+)
+
+UNIVERSAL_RUNTIME_HOOK_NAMES=(
+  check-machine-local-path.py
+  check-machine-local-path.sh
+  check-machine-local-path.ps1
+  check-no-trash-in-repo.py
+  check-no-trash-in-repo.sh
+  check-no-trash-in-repo.ps1
+)
 MODE="repo"
 TARGET=""
 
@@ -491,6 +519,20 @@ install_pack_content_file() {
   fi
 }
 
+install_universal_hook_helpers() {
+  local scripts_dst="$1" hooks_dst="$2" name
+  ensure_dir "$scripts_dst"
+  ensure_dir "$hooks_dst"
+
+  echo "  Installing universal hook/helper scripts..."
+  for name in "${UNIVERSAL_RUNTIME_SCRIPT_NAMES[@]}"; do
+    install_pack_file "$UNIVERSAL_HOOK_SCRIPTS_SOURCE/$name" "$scripts_dst/$name" "extension universal hook/helper scripts/$name"
+  done
+  for name in "${UNIVERSAL_RUNTIME_HOOK_NAMES[@]}"; do
+    install_pack_file "$UNIVERSAL_HOOK_HOOKS_SOURCE/$name" "$hooks_dst/$name" "extension universal hook/helper hooks/$name"
+  done
+}
+
 remove_legacy_pack_file() {
   local dst="$1" label="$2"
   if [[ ! -e "$dst" ]]; then
@@ -655,6 +697,22 @@ if [[ ! -f "$DEFAULT_AGENTS_MODE_SOURCE" ]]; then
   echo "FAIL: missing default agents-mode template at $DEFAULT_AGENTS_MODE_SOURCE" >&2
   exit 1
 fi
+if [[ ! -d "$UNIVERSAL_HOOK_SCRIPTS_SOURCE" || ! -d "$UNIVERSAL_HOOK_HOOKS_SOURCE" ]]; then
+  echo "FAIL: missing universal hook/helper sources under scripts/universal-hooks" >&2
+  exit 1
+fi
+for script_name in "${UNIVERSAL_RUNTIME_SCRIPT_NAMES[@]}"; do
+  if [[ ! -f "$UNIVERSAL_HOOK_SCRIPTS_SOURCE/$script_name" ]]; then
+    echo "FAIL: missing universal hook/helper script $script_name" >&2
+    exit 1
+  fi
+done
+for script_name in "${UNIVERSAL_RUNTIME_HOOK_NAMES[@]}"; do
+  if [[ ! -f "$UNIVERSAL_HOOK_HOOKS_SOURCE/$script_name" ]]; then
+    echo "FAIL: missing universal hook/helper hook $script_name" >&2
+    exit 1
+  fi
+done
 
 EXTENSION_NAME="$(extension_name_from_manifest "$EXTENSION_MANIFEST_SOURCE")"
 
@@ -734,6 +792,7 @@ trap 'rm -f "$extension_gemini_tmp"' EXIT
 sed -E 's#@(\./AGENTS\.shared\.md|\.\./shared/AGENTS\.shared\.md)#@./AGENTS.md#' "$SOURCE/GEMINI.md" > "$extension_gemini_tmp"
 install_pack_content_file "$extension_gemini_tmp" "$EXTENSION_GEMINI_TARGET" "extension GEMINI.md"
 install_pack_file "$SHARED_AGENTS_SOURCE" "$EXTENSION_AGENTS_TARGET" "extension AGENTS.md"
+install_universal_hook_helpers "$EXTENSION_ROOT/scripts" "$EXTENSION_ROOT/hooks"
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 
@@ -766,6 +825,11 @@ for path in \
   "$EXTENSION_MANIFEST_TARGET" \
   "$EXTENSION_GEMINI_TARGET" \
   "$EXTENSION_AGENTS_TARGET" \
+  "$EXTENSION_ROOT/scripts/check-bugfix-discipline.py" \
+  "$EXTENSION_ROOT/scripts/check-work-items-archival-stop.py" \
+  "$EXTENSION_ROOT/scripts/mcp-usage-reminder.sh" \
+  "$EXTENSION_ROOT/hooks/check-machine-local-path.py" \
+  "$EXTENSION_ROOT/hooks/check-no-trash-in-repo.py" \
   "$EXTENSION_ROOT/skills/lead/SKILL.md" \
   "$EXTENSION_ROOT/skills/init-project/SKILL.md" \
   "$EXTENSION_ROOT/skills/lead/team-templates/full-delivery.json" \

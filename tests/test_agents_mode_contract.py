@@ -78,6 +78,39 @@ class AgentsModeContractTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("PASS: agents-mode contract validated", result.stdout)
 
+    def test_runtime_docs_include_full_read_order(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        expectations = {
+            "src.codex/AGENTS.codex.md": [
+                "local legacy `.agents/.agents-mode`",
+                "pack-local global legacy `~/.codex/.agents-mode`",
+                "shared cross-pack global `~/.agents-mode.yaml`",
+            ],
+            "src.claude/CLAUDE.md": [
+                "local legacy `.claude/.agents-mode`",
+                "pack-local global legacy `~/.claude/.agents-mode`",
+                "shared cross-pack global `~/.agents-mode.yaml`",
+            ],
+            "src.codex/skills/init-project/SKILL.md": [
+                "global legacy `~/.codex/.agents-mode`, then the shared cross-pack global",
+                "externalCodexProfile: gpt-5.5-xhigh",
+            ],
+            "src.claude/commands/agents-init-project.md": [
+                "global legacy `~/.claude/.agents-mode`, then the shared cross-pack global",
+                "externalCodexProfile: gpt-5.5-xhigh",
+            ],
+            "docs/agents-mode-reference.md": [
+                "Use `scripts/resolve-agents-mode.py --provider <provider> --json`",
+                "| Codex | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh`",
+                "| Claude Code | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh`",
+            ],
+        }
+        for relative, snippets in expectations.items():
+            text = (root / relative).read_text(encoding="utf-8")
+            for snippet in snippets:
+                with self.subTest(relative=relative, snippet=snippet):
+                    self.assertIn(snippet, text)
+
     def test_validator_rejects_init_canonical_shape_drift(self) -> None:
         root = Path(__file__).resolve().parents[1]
 

@@ -38,7 +38,8 @@ OVERRIDE_MARKER_REGEX = re.compile(r"\[acknowledge-passive-stop\]", re.IGNORECAS
 
 USER_HANDOFF_REGEX = re.compile(
     r"(?ix)"
-    r"waiting\s+for\s+(your\s+)?(response|reply|input|approval|confirmation|feedback|answer|decision)|"
+    r"waiting\s+for\s+(your\s+)?(response|input|approval|confirmation|feedback|answer|decision)|"
+    r"waiting\s+for\s+your\s+reply|"
     r"жду\s+(твоего\s+|вашего\s+)?(подтверждени|ответа\s+от\s+тебя|решени|реакц|инструкци)|"
     r"дай\s+знать|"
     r"let\s+me\s+know\s+(if|when|whether)|"

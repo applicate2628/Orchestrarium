@@ -4,9 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  bash src.codex/skills/lead/scripts/check-publication-safety.sh        (dev repo)
-  bash .codex/skills/lead/scripts/check-publication-safety.sh           (global install)
-  bash .agents/skills/lead/scripts/check-publication-safety.sh          (repo-local install)
+  bash <path>/check-publication-safety.sh
   bash <path>/check-publication-safety.sh --path <dir>
 
 By default, scans staged tracked files in the repository for publication-safety issues.
@@ -71,7 +69,6 @@ nonpath_patterns=(
   'BEGIN RSA PRIVATE KEY'
   'BEGIN OPENSSH PRIVATE KEY'
   'BEGIN PRIVATE KEY'
-  '\.env$'
   'private_key'
   'secret_key'
   '/private/var/folders/'
@@ -112,11 +109,15 @@ ref_module="$script_dir/../hooks/check-machine-local-path.py"
 
 if [[ "$scan_mode" == "tracked" ]]; then
   staged_paths=()
+  regular_staged_paths=()
+  scanner_staged_paths=()
   while IFS= read -r -d '' staged_path; do
-    if [[ "$staged_path" == *"/check-publication-safety.sh" ]]; then
-      continue
-    fi
     staged_paths+=("$staged_path")
+    if [[ "$staged_path" == *"/check-publication-safety.sh" || "$staged_path" == "check-publication-safety.sh" ]]; then
+      scanner_staged_paths+=("$staged_path")
+    else
+      regular_staged_paths+=("$staged_path")
+    fi
   done < <(git diff --cached --name-only --diff-filter=ACMRTUXB -z --)
 
   if [[ ${#staged_paths[@]} -eq 0 ]]; then
@@ -127,13 +128,36 @@ else
   scan_files=("$scan_path")
 fi
 
+path_name_block=0
+for scan_file in "${scan_files[@]}"; do
+  base_name="${scan_file##*/}"
+  if [[ "$base_name" == ".env" ]]; then
+    echo "$scan_file: blocked filename .env (staged secret/config file)" >&2
+    path_name_block=1
+  fi
+done
+
+is_intentional_scanner_regex_line() {
+  local trimmed="${1#"${1%%[![:space:]]*}"}"
+  trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+  [[ "$trimmed" == "'BEGIN RSA PRIVATE KEY'" ]] ||
+    [[ "$trimmed" == "'BEGIN OPENSSH PRIVATE KEY'" ]] ||
+    [[ "$trimmed" == "'BEGIN PRIVATE KEY'" ]] ||
+    [[ "$trimmed" == "'private_key'" ]] ||
+    [[ "$trimmed" == "'secret_key'" ]]
+}
+
 # Build the non-path git grep command (unconditional block source).
 nonpath_cmd=(git grep -n -I -E --full-name)
 for pattern in "${nonpath_patterns[@]}"; do
   nonpath_cmd+=(-e "$pattern")
 done
 if [[ "$scan_mode" == "tracked" ]]; then
-  nonpath_cmd+=(--cached -- "${scan_files[@]}")
+  if [[ ${#regular_staged_paths[@]} -gt 0 ]]; then
+    nonpath_cmd+=(--cached -- "${regular_staged_paths[@]}")
+  else
+    nonpath_cmd=()
+  fi
 else
   nonpath_cmd+=(--no-index -- "$scan_path")
 fi
@@ -143,8 +167,12 @@ fi
 # (e.g. /var/folders/) into Windows paths, so they silently match nothing. It
 # is safe for every pattern (grep patterns are not real paths).
 set +e
-MSYS2_ARG_CONV_EXCL='*' "${nonpath_cmd[@]}"
-nonpath_status=$?
+if [[ ${#nonpath_cmd[@]} -gt 0 ]]; then
+  MSYS2_ARG_CONV_EXCL='*' "${nonpath_cmd[@]}"
+  nonpath_status=$?
+else
+  nonpath_status=1
+fi
 set -e
 
 # nonpath_status: 0 = a non-path leak marker was found (BLOCK); 1 = none; >=2 =
@@ -152,6 +180,33 @@ set -e
 nonpath_block=0
 if [[ $nonpath_status -eq 0 ]]; then
   nonpath_block=1
+fi
+if [[ "$scan_mode" == "tracked" && ${#scanner_staged_paths[@]} -gt 0 ]]; then
+  scanner_nonpath_cmd=(git grep -n -I -E --full-name)
+  for pattern in "${nonpath_patterns[@]}"; do
+    scanner_nonpath_cmd+=(-e "$pattern")
+  done
+  scanner_nonpath_cmd+=(--cached -- "${scanner_staged_paths[@]}")
+  set +e
+  scanner_nonpath_output="$(MSYS2_ARG_CONV_EXCL='*' "${scanner_nonpath_cmd[@]}")"
+  scanner_nonpath_status=$?
+  set -e
+  if [[ $scanner_nonpath_status -eq 0 ]]; then
+    while IFS= read -r scanner_line; do
+      [[ -z "$scanner_line" ]] && continue
+      if [[ "$scanner_line" =~ ^([^:]+):([0-9]+):(.*)$ ]]; then
+        scanner_content="${BASH_REMATCH[3]}"
+        if is_intentional_scanner_regex_line "$scanner_content"; then
+          continue
+        fi
+      fi
+      echo "$scanner_line" >&2
+      nonpath_block=1
+    done <<< "$scanner_nonpath_output"
+  elif [[ $scanner_nonpath_status -ge 2 ]]; then
+    echo "publication-safety: scanner-file nonpath grep failed (status $scanner_nonpath_status); over-blocking" >&2
+    nonpath_block=1
+  fi
 fi
 
 # Path check: prefer approach B (Python allowlist owner, immune to MSYS argv
@@ -273,7 +328,7 @@ else
   fi
 fi
 
-if [[ $nonpath_block -eq 1 || $path_block -eq 1 ]]; then
+if [[ $path_name_block -eq 1 || $nonpath_block -eq 1 || $path_block -eq 1 ]]; then
   echo "publication-safety scan found potential tracked-content leak markers" >&2
   exit 1
 fi

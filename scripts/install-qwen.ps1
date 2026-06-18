@@ -27,6 +27,8 @@ $ExtensionManifestSource = Join-Path $ExtensionSource "qwen-extension.json"
 $ExtensionReadmeSource = Join-Path $ExtensionSource "README.md"
 $SharedAgentsSource = Join-Path (Join-Path $RepoDir "shared") "AGENTS.shared.md"
 $DefaultAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
+$UniversalHookScriptsSource = Join-Path $RepoDir "scripts/universal-hooks/scripts"
+$UniversalHookHooksSource = Join-Path $RepoDir "scripts/universal-hooks/hooks"
 $ManagedStart = "<!-- ORCHESTRARIUM_QWEN_PACK:START -->"
 $ManagedEnd = "<!-- ORCHESTRARIUM_QWEN_PACK:END -->"
 
@@ -157,6 +159,32 @@ function Get-PythonCommand {
     }
     return $null
 }
+
+$UniversalRuntimeScriptNames = @(
+    "hook_common.py",
+    "check-bugfix-discipline.py",
+    "check-bugfix-discipline.sh",
+    "check-bugfix-discipline.ps1",
+    "check-passive-polling-stop.py",
+    "check-passive-polling-stop.sh",
+    "check-passive-polling-stop.ps1",
+    "check-work-items-archival-stop.py",
+    "check-work-items-archival-stop.sh",
+    "check-work-items-archival-stop.ps1",
+    "mcp-usage-reminder.sh",
+    "mcp-usage-reminder.ps1",
+    "check-publication-safety.sh",
+    "check-publication-safety.ps1"
+)
+
+$UniversalRuntimeHookNames = @(
+    "check-machine-local-path.py",
+    "check-machine-local-path.sh",
+    "check-machine-local-path.ps1",
+    "check-no-trash-in-repo.py",
+    "check-no-trash-in-repo.sh",
+    "check-no-trash-in-repo.ps1"
+)
 
 function Get-DirectoryFileHashes {
     param([string]$Root)
@@ -496,6 +524,31 @@ function Install-PackFile {
     }
 }
 
+function Install-UniversalHookHelpers {
+    param(
+        [string]$ScriptsTarget,
+        [string]$HooksTarget
+    )
+
+    Ensure-Dir $ScriptsTarget
+    Ensure-Dir $HooksTarget
+    Write-Host "  Installing universal hook/helper scripts..."
+
+    foreach ($scriptName in $UniversalRuntimeScriptNames) {
+        Install-PackFile `
+            -SourceFile (Join-Path $UniversalHookScriptsSource $scriptName) `
+            -TargetFile (Join-Path $ScriptsTarget $scriptName) `
+            -Label "extension universal hook/helper scripts/$scriptName"
+    }
+
+    foreach ($hookName in $UniversalRuntimeHookNames) {
+        Install-PackFile `
+            -SourceFile (Join-Path $UniversalHookHooksSource $hookName) `
+            -TargetFile (Join-Path $HooksTarget $hookName) `
+            -Label "extension universal hook/helper hooks/$hookName"
+    }
+}
+
 function Sync-AgentsModeFile {
     param(
         [string]$TemplateFile,
@@ -760,6 +813,8 @@ $ExtensionManifestTarget = Join-Path $ExtensionRoot "qwen-extension.json"
 $ExtensionReadmeTarget = Join-Path $ExtensionRoot "README.md"
 $ExtensionQwenTarget = Join-Path $ExtensionRoot "QWEN.md"
 $ExtensionAgentsTarget = Join-Path $ExtensionRoot "AGENTS.md"
+$ExtensionScriptsTarget = Join-Path $ExtensionRoot "scripts"
+$ExtensionHooksTarget = Join-Path $ExtensionRoot "hooks"
 $LegacyExtensionSharedTarget = Join-Path $ExtensionRoot "AGENTS.shared.md"
 
 Write-Host "=== Orchestrarium Qwen Example Pack Installer ===" -ForegroundColor Cyan
@@ -782,6 +837,19 @@ if (-not (Test-Path -LiteralPath $ExtensionReadmeSource)) { throw "Missing sourc
 if (-not (Test-Path -LiteralPath (Join-Path $Source "QWEN.md"))) { throw "Missing source QWEN.md." }
 if (-not (Test-Path -LiteralPath $SharedAgentsSource)) { throw "Missing shared AGENTS.shared.md." }
 if (-not (Test-Path -LiteralPath $DefaultAgentsModeSource)) { throw "Missing source agents-mode.defaults.yaml." }
+if (-not (Test-Path -LiteralPath $UniversalHookScriptsSource -PathType Container) -or -not (Test-Path -LiteralPath $UniversalHookHooksSource -PathType Container)) {
+    throw "Missing universal hook/helper sources under $(Join-Path $RepoDir 'scripts/universal-hooks')."
+}
+foreach ($scriptName in $UniversalRuntimeScriptNames) {
+    if (-not (Test-Path -LiteralPath (Join-Path $UniversalHookScriptsSource $scriptName) -PathType Leaf)) {
+        throw "Missing universal hook/helper script $scriptName."
+    }
+}
+foreach ($hookName in $UniversalRuntimeHookNames) {
+    if (-not (Test-Path -LiteralPath (Join-Path $UniversalHookHooksSource $hookName) -PathType Leaf)) {
+        throw "Missing universal hook/helper hook $hookName."
+    }
+}
 
 if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $AgentsTarget) -or (Test-Path -LiteralPath $CommandsTarget) -or (Test-Path -LiteralPath $ExtensionRoot) -or (Test-Path -LiteralPath $QwenTarget) -or (Test-Path -LiteralPath $SharedTarget)) {
     if (-not (Confirm-Action "Proceed with reinstall/update of the Qwen pack?")) {
@@ -793,6 +861,7 @@ if ((Test-Path -LiteralPath $SkillsTarget) -or (Test-Path -LiteralPath $AgentsTa
 Ensure-Dir $InstallRoot
 Install-Tree -SourceDir (Join-Path $Source "skills") -TargetDir (Join-Path $ExtensionRoot "skills") -Label "extension/skills"
 Install-Tree -SourceDir (Join-Path $Source "commands") -TargetDir (Join-Path $ExtensionRoot "commands") -Label "extension/commands"
+Install-UniversalHookHelpers -ScriptsTarget $ExtensionScriptsTarget -HooksTarget $ExtensionHooksTarget
 Merge-QwenFile -SourceFile (Join-Path $Source "QWEN.md") -TargetFile $QwenTarget
 if ($Mode -eq "global") {
     Install-PackFile -SourceFile $SharedAgentsSource -TargetFile $SharedTarget -Label "AGENTS.md"
@@ -839,6 +908,11 @@ foreach ($path in @(
     (Join-Path $ExtensionRoot "skills\lead\SKILL.md"),
     (Join-Path $ExtensionRoot "skills\init-project\SKILL.md"),
     (Join-Path $ExtensionRoot "skills\lead\team-templates\full-delivery.json"),
+    (Join-Path $ExtensionScriptsTarget "check-bugfix-discipline.py"),
+    (Join-Path $ExtensionScriptsTarget "check-work-items-archival-stop.py"),
+    (Join-Path $ExtensionScriptsTarget "mcp-usage-reminder.sh"),
+    (Join-Path $ExtensionHooksTarget "check-machine-local-path.py"),
+    (Join-Path $ExtensionHooksTarget "check-no-trash-in-repo.py"),
     (Join-Path $ExtensionRoot "commands\agents\help.md")
 )) {
     if (Test-Path -LiteralPath $path) {

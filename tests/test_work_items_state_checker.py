@@ -93,6 +93,20 @@ def status_with_depends(dep_value: str) -> str:
     )
 
 
+def status_with_epic(epic_value: str) -> str:
+    return valid_status().replace(
+        "**Primary task status**: open",
+        "**Primary task status**: open\n**Epic**: " + epic_value,
+    )
+
+
+def status_with_no_epic_rationale() -> str:
+    return valid_status().replace(
+        "**Primary task status**: open",
+        "**Primary task status**: open\n**No-epic rationale**: standalone fixes",
+    )
+
+
 def write_item_with_status(root: Path, name: str, status_text: str) -> Path:
     item = root / "work-items" / "active" / name
     (item / "reviews").mkdir(parents=True)
@@ -159,6 +173,41 @@ def test_depends_on_none_no_note(tmp_path: Path):
     assert result.returncode == 0
     assert "blocked-by" not in result.stdout
     assert "dangling" not in result.stdout
+
+
+# --- epic visibility: informational, never a failure ------------------------
+
+def test_dangling_epic_reported(tmp_path: Path):
+    write_item_with_status(tmp_path, "item-epic", status_with_epic("2026-06-18-missing-epic"))
+    result = run_checker(tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert "dangling Epic: 2026-06-18-missing-epic" in result.stdout
+
+
+def test_existing_epic_not_reported(tmp_path: Path):
+    epics = tmp_path / "work-items" / "epics"
+    epics.mkdir(parents=True)
+    (epics / "2026-06-18-demo.md").write_text("---\nstatus: active\n---\n", encoding="utf-8")
+    write_item_with_status(tmp_path, "item-epic", status_with_epic("2026-06-18-demo"))
+    result = run_checker(tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert "dangling Epic" not in result.stdout
+
+
+def test_multiple_active_items_without_epics_surface_adoption_prompt(tmp_path: Path):
+    write_valid_item(tmp_path, "item-a")
+    write_valid_item(tmp_path, "item-b")
+    result = run_checker(tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert "no work-items/epics/ directory for multiple active items" in result.stdout
+
+
+def test_no_epic_rationale_suppresses_adoption_prompt(tmp_path: Path):
+    write_item_with_status(tmp_path, "item-a", status_with_no_epic_rationale())
+    write_valid_item(tmp_path, "item-b")
+    result = run_checker(tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert "no work-items/epics/ directory" not in result.stdout
 
 
 def test_checker_reports_stale_running_agent_when_threshold_is_enabled(tmp_path: Path):

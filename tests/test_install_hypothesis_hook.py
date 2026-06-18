@@ -27,6 +27,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK_INSTALLER = REPO_ROOT / "scripts" / "install-hypothesis-hook.py"
 SCRIPT_PATH = "/tmp/check-bugfix-discipline.sh"
 STOP_SCRIPT_PATH = "/tmp/check-passive-polling-stop.sh"
+REMINDER_SCRIPT_PATH = "/tmp/mcp-usage-reminder.sh"
 
 
 def run_installer(
@@ -142,6 +143,17 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertIn("bash", hook["command"])
         self.assertIn(SCRIPT_PATH, hook["command"])
 
+    def test_install_generic_posix_exec_form(self) -> None:
+        result = run_installer(self.target, platform="generic")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = load_json(self.target)
+        entry = data["hooks"]["PreToolUse"][0]
+        hook = entry["hooks"][0]
+        self.assertEqual(entry["matcher"], "Edit|Write|NotebookEdit|apply_patch")
+        self.assertEqual(hook["command"], "bash")
+        self.assertEqual(hook["args"], [SCRIPT_PATH])
+        self.assertNotIn("if", hook)
+
     def test_codex_windows_writes_entry_with_powershell_form(self) -> None:
         # Codex+Windows writes the hook entry in powershell.exe shell form.
         # Explicit powershell.exe avoids the Windows PATH gotcha where `bash`
@@ -166,6 +178,35 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertIn("-File", hook["command"])
         self.assertIn("check-bugfix-discipline", hook["command"])
         self.assertNotIn(" bash ", " " + hook["command"] + " ")
+
+    def test_codex_windows_escapes_powershell_single_quote_in_path(self) -> None:
+        ps1_path = "C:\\Users\\O'Brien\\.codex\\skills\\lead\\scripts\\check-bugfix-discipline.ps1"
+        result = run_installer(self.target, platform="codex", host_os="windows", script_path=ps1_path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = load_json(self.target)
+        command = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        self.assertIn("powershell.exe", command)
+        self.assertIn("C:\\Users\\O''Brien", command)
+        self.assertNotIn("C:\\Users\\O'Brien", command)
+
+    def test_install_sessionstart_hook_entry_shape(self) -> None:
+        result = run_installer(
+            self.target,
+            "--hook-event",
+            "SessionStart",
+            "--script-marker",
+            "mcp-usage-reminder",
+            script_path=REMINDER_SCRIPT_PATH,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = load_json(self.target)
+        entries = data["hooks"]["SessionStart"]
+        self.assertEqual(len(entries), 1)
+        self.assertNotIn("matcher", entries[0])
+        hook = entries[0]["hooks"][0]
+        self.assertEqual(hook["command"], "bash")
+        self.assertEqual(hook["args"], [REMINDER_SCRIPT_PATH])
+        self.assertIn("mcp-usage-reminder", hook["args"][0])
 
     def test_codex_windows_remove_works(self) -> None:
         # Removal must work the same way on Codex+Windows as on POSIX.

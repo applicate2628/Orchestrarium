@@ -228,6 +228,12 @@ if [[ "$MODE" == "source" ]]; then
 fi
 grep -q 'main Qwen session' "$PACK_ROOT/skills/lead/SKILL.md" || fail "lead skill should identify the main Qwen session as orchestration owner"
 grep -q 'external-brigade' "$PACK_ROOT/skills/lead/SKILL.md" || fail "lead skill should mention the external-brigade utility"
+grep -Fq 'work-items/active/<date>-<slug>/' "$PACK_ROOT/skills/lead/SKILL.md" || fail "lead skill should enforce work-items bootstrap"
+grep -Fq 'No-epic rationale:' "$PACK_ROOT/skills/lead/SKILL.md" || fail "lead skill should document epic adoption/no-epic rationale"
+grep -Fq 'No-epic rationale:' "$PACK_ROOT/skills/product-manager/SKILL.md" || fail "product-manager should document epic adoption/no-epic rationale"
+grep -Fq 'universal hook/helper scripts' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent contracts should require installed universal hook/helper availability"
+grep -Fq "installed extension's \`scripts/\` and \`hooks/\`" "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent contracts should point to installed extension hook/helper paths"
+! grep -Fq 'do not auto-install the production Codex/Claude helper or hook surfaces' "$PACK_ROOT/skills/lead/subagent-contracts.md" || fail "subagent contracts should not describe Qwen hook/helper surfaces as absent"
 grep -q 'skills/lead/team-templates' "$PACK_ROOT/commands/agents/help.md" || fail "help command should describe the team-template layer"
 grep -q 'external-brigade' "$PACK_ROOT/commands/agents/help.md" || fail "help command should describe the external-brigade surface"
 
