@@ -64,6 +64,9 @@ all done -> `ready-to-close (n/n)`; some -> `in-progress (k/n)`; none -> `open`.
   an epic must name the shared goal, contract, or mechanism that makes its
   members one unit of work. The PM also bounds the scope so members do not creep
   without re-admission.
+- When a roadmap decision package names multiple related work-items, a shared
+  milestone, or one mechanism split across several items, it must either admit
+  an epic or record `No-epic rationale: <why these remain standalone>`.
 - `$lead` **links** children (stamps each child `Epic: <slug>`), keeps the local
   `work-items/index.md` `## Epics` row current, and **closes** the epic
   (`status: closed` + `## Closure`) ONLY when ALL children are closed AND the
