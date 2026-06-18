@@ -110,7 +110,7 @@ Routing conventions (not persisted as keys):
       - `externalCodexWorkdirMode: neutral`
       - `externalClaudeWorkdirMode: neutral`
       - `externalModelMode: runtime-default`
-      - `externalCodexProfile: default`
+      - `externalCodexProfile: gpt-5.5-xhigh`
     - `externalProvider: auto` resolves by lane type through the active named production priority profile rather than a Claude-line default provider. Shipped `auto` stays on `codex | claude`; explicit `codex`, `claude`, `gemini`, or `qwen` may still be selected when the route is eligible, but Gemini and Qwen stay explicit `WEAK MODEL / NOT RECOMMENDED` example-only paths.
     - Accept shorthand answers such as `force`, `external reviewer only`, or `defaults for the rest`.
 
@@ -177,5 +177,5 @@ Routing conventions (not persisted as keys):
 - Do not invent extra `agents-mode` keys beyond the canonical Claude-line schema.
 - Preserve unknown keys in `.claude/.agents-mode.yaml` when updating.
 - Any read of `.claude/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
-- Any read that drives a decision should prefer local `.claude/.agents-mode.yaml`, then local legacy `.claude/.agents-mode`, then global `~/.claude/.agents-mode.yaml`, then global legacy `~/.claude/.agents-mode`; normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
+- Any read that drives a decision should prefer local `.claude/.agents-mode.yaml`, then local legacy `.claude/.agents-mode`, then global `~/.claude/.agents-mode.yaml`, then global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`; normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 - Do not change any other section of CLAUDE.md.

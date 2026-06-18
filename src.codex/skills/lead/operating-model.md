@@ -175,14 +175,14 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 
 ## Repository task memory
 
-- Use the repository-defined recovery entry point, if the repository uses task memory.
-- Keep each active lead-routed non-trivial item in its own dated directory inside the configured task-memory root, if the repository uses one.
-- Require `roadmap.md`, `brief.md`, and `status.md` before non-trivial work starts or resumes when task memory is configured.
-- Require `plan.md` before implementation or review begins when task memory is configured.
+- Use `work-items/index.md` as the default recovery entry point for non-trivial lead-managed work unless an explicit repo-local policy disables task memory.
+- Keep each active lead-routed non-trivial item in its own dated directory inside `work-items/active/`.
+- Require `roadmap.md`, `brief.md`, and `status.md` before non-trivial work starts or resumes.
+- Require `plan.md` before implementation or review begins.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
-- Update `status.md` after accepted artifacts, interruptions, or stage changes so work can resume without relying on chat memory when task memory is configured.
+- Update `status.md` after accepted artifacts, interruptions, or stage changes so work can resume without relying on chat memory.
 - Keep `status.md` explicit about the next concrete action and any open obligations that still block closeout.
-- If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery when task memory is in use.
+- If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery.
 - Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
 - On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
 - Epics group several work-items: persist an epic as a flat `work-items/epics/<date>-<slug>.md` (`status: active|closed`, `## Goal` / `## Children` slug list); each child work-item carries a single `Epic: <slug>` line in its `status.md`. Derive the epic roll-up live from the children (resolve each slug across `active/` + `archive/`); close the epic only when all children are closed and the goal is met. Full rules in the lead skill `## Epics`.
@@ -198,7 +198,7 @@ Do:
 - require one artifact and one explicit gate decision per stage
 - block progression until the current artifact is accepted
 - keep one source of truth for the brief, accepted decisions, constraints, and status
-- keep durable task memory in the configured task-memory directory instead of relying on session memory
+- keep durable task memory in `work-items/` instead of relying on session memory
 - route roadmap questions to `product-manager` instead of burying them inside the lead lane
 - route an in-flight item back to `product-manager` when admitted scope, priority, or milestone intent changes materially
 - route unknowns to factual roles before escalating into opinion-heavy discussion
@@ -380,7 +380,7 @@ Every completed chain producing an accepted artifact MUST persist it before the 
 
 | Tier | Location | When to use |
 |---|---|---|
-| Canonical | `configured task-memory directory` | Lead-routed non-trivial work: brief, status, research, design, plan, review, closure |
+| Canonical | `work-items/active/<date>-<slug>/` | Lead-routed non-trivial work: brief, status, research, design, plan, review, closure |
 | Session log | `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Brief record of what happened — summary, not a copy of the canonical artifact |
 | Plan log | `.plans/YYYY-MM/plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Plan snapshots when a plan is created or materially revised |
 
