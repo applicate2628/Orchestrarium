@@ -71,6 +71,12 @@ Residual (honest): governance-enforced only — no hook validates that a `duplic
 | `contract-change` | Test expectation is outdated because the contract changed intentionally | Implementer who changed the behavior updates the tests |
 | `test-rot` | Test was always wrong or is testing an irrelevant invariant | QA updates or removes the test |
 
+## Architecture layering hygiene (test ownership)
+
+Test-architecture layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md`. Load-bearing for this role:
+
+- **Shared test support is a single-owner, test-only module** parameterized over the production contract (an interface, not a concrete impl), isolated from production targets, and never homed inside one implementation's tests. Removing or demoting an implementation must be a PURE DELETE with zero edits to other implementations' tests; if a test-support file is imported by implementation B's tests while living under implementation A, it is mis-homed.
+
 ## Non-goals
 
 - Do not implement product features outside test scope.

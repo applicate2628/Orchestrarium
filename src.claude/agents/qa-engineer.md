@@ -75,6 +75,12 @@ When existing tests fail after implementation changes, classify each failure:
 
 Include the classification in the verification report for each failing test. For `contract-change`: do NOT attempt to fix tests yourself — return `REVISE` so the implementer can update them under the new contract.
 
+## Architecture layering hygiene (test ownership)
+
+Test-architecture layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md`. Load-bearing for this role:
+
+- **Shared test support is a single-owner, test-only module** parameterized over the production contract (an interface, not a concrete impl), isolated from production targets, and never homed inside one implementation's tests. Removing or demoting an implementation must be a PURE DELETE with zero edits to other implementations' tests; if a test-support file is imported by implementation B's tests while living under implementation A, it is mis-homed.
+
 ## Non-goals
 
 - Do not implement product features outside test scope.

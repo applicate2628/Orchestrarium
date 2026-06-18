@@ -172,6 +172,32 @@ check_agent_run_ledger_contract() {
   fi
 }
 
+check_arch_layering_slices() {
+  local label="$1"
+  if [[ $DEV_REPO -ne 1 ]]; then
+    warn "$label (dev repo validator unavailable in installed layout)"
+    return
+  fi
+
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_cmd="python"
+  else
+    warn "$label (python unavailable)"
+    return
+  fi
+
+  local output
+  if output="$("$python_cmd" "$REPO_ROOT/scripts/validate-arch-layering-slices.py" "$REPO_ROOT" 2>&1)"; then
+    pass "$label"
+  else
+    printf '%s\n' "$output"
+    fail "$label"
+  fi
+}
+
 check_not_exists() {
   local path="$1"
   local label="$2"
@@ -1435,6 +1461,8 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "agent run ledger schema defines evidence"
   check_agent_run_ledger_contract \
     "agent run ledger schema and validator reject schema-invalid events"
+  check_arch_layering_slices \
+    "architecture-layering slices consistent across roles and claude/codex packs"
 else
   echo ""
   echo "=== Installed work-item runtime helper scripts ==="

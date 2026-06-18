@@ -48,6 +48,14 @@ If a finding falls outside performance review (e.g., a security concern, archite
 2. Do NOT evaluate severity outside your expertise — state the observation factually
 3. The orchestrator routes the tagged finding to the appropriate specialist (see cross-domain escalation protocol in `operating-model.md`)
 
+## Architecture layering hygiene (performance)
+
+Performance-relevant layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md`. Load-bearing for this role:
+
+- **A boundary is a link/call boundary by default;** collapse or inline a seam FOR SPEED only when a profile measurement shows it on a measured-critical path AND one coherent owner remains (ownership/lifecycle/resource-cleanup/contracts/tests inside one module). Speculative inlining without a measurement is a violation, not an optimization.
+- **Never split a measured-critical or order-sensitive sequence across a boundary** (a hot loop, an order-sensitive reduction, a transaction, a streaming stage stays in one unit; the seam sits at its input/output).
+- **Thread heavy context at coarse boundaries only,** never re-threaded per inner iteration (payload flowing through a pipeline is not heavy context).
+
 ## Non-goals
 
 - Do not replace `performance-engineer`.

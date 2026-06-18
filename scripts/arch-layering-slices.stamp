@@ -1,0 +1,6 @@
+# Review stamp for the inlined architecture-layering role slices.
+# SHA-256 of shared/references/architecture-layering-hygiene.md (CRLF-normalized) that the
+# inlined slices were last reviewed for fidelity against. Regenerate with:
+#   python scripts/validate-arch-layering-slices.py --update-stamp
+# ONLY after re-reviewing every role slice against the changed reference.
+548d3de2d298a8c492aae7d6b3bb567c04b101de3f3c868d5f9cc0b7267273fd
