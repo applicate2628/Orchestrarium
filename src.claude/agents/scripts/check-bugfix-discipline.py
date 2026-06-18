@@ -151,11 +151,12 @@ EXEMPT_PATH_SEGMENTS = ("/.reports/", "/.scratch/", "/.plans/", "/work-items/", 
 
 def _exempt_write_target(envelope: dict) -> bool:
     """True when the tool writes to a non-code artifact path (report / scratch /
-    plan / task-memory / docs). Reads file_path / notebook_path / path from the
-    envelope's tool_input and fails CLOSED to False on any non-dict / missing
-    key, so a real code edit is never accidentally exempted. (apply_patch, which
-    carries its paths inside a patch body rather than file_path, is not exempted
-    here -- it stays fully guarded.)"""
+    plan / task-memory / docs) or authors a skill DEFINITION (a SKILL.md file).
+    Reads file_path / notebook_path / path from the envelope's tool_input and
+    fails CLOSED to False on any non-dict / missing key, so a real code edit is
+    never accidentally exempted. (apply_patch, which carries its paths inside a
+    patch body rather than file_path, is not exempted here -- it stays fully
+    guarded.)"""
     tool_input = envelope.get("tool_input")
     if not isinstance(tool_input, dict):
         return False
@@ -163,6 +164,12 @@ def _exempt_write_target(envelope: dict) -> bool:
     if not isinstance(raw, str) or not raw:
         return False
     norm = "/" + raw.replace("\\", "/").strip("/")
+    # A SKILL.md write authors a skill DEFINITION (prose / instructions), never the
+    # CODE fix this guard targets. Exempt it by basename so it holds under any skills
+    # root (~/.claude/skills, a plugin's skills dir, a repo's skills/). Skill SCRIPTS
+    # (skills/<name>/scripts/*.py) carry a different basename and stay fully guarded.
+    if norm.rsplit("/", 1)[-1] == "SKILL.md":
+        return True
     return any(seg in norm for seg in EXEMPT_PATH_SEGMENTS)
 
 

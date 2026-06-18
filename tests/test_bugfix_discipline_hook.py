@@ -267,6 +267,21 @@ class TestBugfixExemptPaths(unittest.TestCase):
     def test_docs_exempt(self) -> None:
         self.assert_exempt({"file_path": "docs/guide.md", "content": "x"}, exempt=True)
 
+    def test_skill_md_exempt(self) -> None:
+        # Authoring a skill DEFINITION (SKILL.md) is prose/instructions, never the code fix this guard targets.
+        self.assert_exempt({"file_path": "skills/my-skill/SKILL.md", "content": "x"}, exempt=True)
+
+    def test_skill_md_absolute_skills_root_exempt(self) -> None:
+        # The reported false-positive precedent: a new skill authored under the global skills root.
+        self.assert_exempt(
+            {"file_path": r"C:\Users\dev\.claude\skills\vak-dissertation-review\SKILL.md", "content": "x"},
+            exempt=True,
+        )
+
+    def test_skill_script_still_denies_no_hole(self) -> None:
+        # A skill's SCRIPT is code and stays guarded -- the SKILL.md basename exemption must not over-reach.
+        self.assert_exempt({"file_path": "skills/my-skill/scripts/run.py", "content": "x"}, exempt=False)
+
     def test_absolute_windows_reports_exempt(self) -> None:
         self.assert_exempt({"file_path": r"Z:\fixtures\demo\.reports\2026-06\m.md", "content": "x"}, exempt=True)
 
