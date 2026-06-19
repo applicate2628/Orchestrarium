@@ -1022,7 +1022,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "5e6191321fec27bbcef9310565d5116e8f041eda2ab5310bcf2a9d50e1e38fee" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
-    "160e9bb3bb3df73e611626bc814a45a0923a350a4bff5b43b82bf45409c06549" \
+    "9c392ebe8a95921d65d7b16ac567907e557818cfc57b468d9d67680f9a088f19" \
     "Codex addendum matches the current canonical normalized fingerprint"
 fi
 
