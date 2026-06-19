@@ -46,10 +46,11 @@ from pathlib import Path
 # role -> group. Groups with >=2 members must have byte-identical blocks across members.
 GROUPS = {
     "impl": [
-        "backend-engineer", "frontend-engineer", "data-engineer", "platform-engineer",
-        "toolchain-engineer", "model-view-engineer", "qt-ui-engineer", "geometry-engineer",
+        "backend-engineer", "frontend-engineer", "data-engineer",
+        "model-view-engineer", "qt-ui-engineer", "geometry-engineer",
         "graphics-engineer", "visualization-engineer",
     ],
+    "release": ["platform-engineer", "toolchain-engineer"],
     "spec": ["algorithm-scientist", "computational-scientist"],
     "perf": ["performance-engineer", "performance-reviewer"],
     "stability": ["reliability-engineer"],
