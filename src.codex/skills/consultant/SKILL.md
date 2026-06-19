@@ -170,7 +170,7 @@ If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfil
 Honor `externalCodexProfile` and `externalModelMode` before provider-specific transport selection:
 
 - `runtime-default` → keep the selected provider on its native runtime default model/profile.
-- **Consultant Codex calls always use best effort**, regardless of `externalModelMode` or `externalCodexProfile`: model `gpt-5.5` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path. Symmetric to the consultant Claude path which always uses `--model opus --effort max`. The shipped default `externalCodexProfile: gpt-5.5-xhigh` matches this rule; `pinned-top-pro` mode and `externalCodexProfile: gpt-5.5-xhigh` both resolve to the same xhigh path. Do not downgrade consultant memos to `gpt-5.3-codex-spark` or to runtime-default, and do not silently switch to `gpt-5.5-fast` between attempts on the same consultant lane.
+- **Consultant calls run at high effort by default**, regardless of `externalModelMode` or `externalCodexProfile`: Codex uses model `gpt-5.5` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path; the Claude path uses `--model opus --effort xhigh`. **`xhigh` is the default for BOTH providers. For especially heavy / complex tasks that genuinely need more depth, the orchestrator may escalate the consultant to the provider's deepest tier (Claude `--effort max`).** Do not DOWNSHIFT a consultant lane below `xhigh`. The shipped default `externalCodexProfile: gpt-5.5-xhigh` matches this rule; `pinned-top-pro` mode and `externalCodexProfile: gpt-5.5-xhigh` both resolve to the same xhigh path. Do not downgrade consultant memos to `gpt-5.3-codex-spark` or to runtime-default, and do not silently switch to `gpt-5.5-fast` between attempts on the same consultant lane.
 - `externalCodexProfile: default` → inherit the selected `externalModelMode` when Codex is selected or `auto` resolves to Codex.
 - `externalCodexProfile: gpt-5.5-fast` → select the fast Codex model tier (the underlying model variant; reasoning_effort still stays `xhigh`, so this is a model-tier choice, not an effort downgrade) when Codex is selected or `auto` resolves to Codex; record unavailable or deviated if that model tier cannot be verified against the installed runtime. The consultant lane itself always uses `gpt-5.5-xhigh`, so this branch only applies to operator-set callers, not to consultant memo dispatch.
 - `externalCodexProfile: gpt-5.5-xhigh` → shipped as the default and used unconditionally by the consultant lane; explicitly request model `gpt-5.5` with `model_reasoning_effort = "xhigh"` via `-c model_reasoning_effort=xhigh` regardless of `externalModelMode`, symmetric to `externalClaudeProfile: opus-max`.
@@ -181,13 +181,13 @@ Examples:
 **macOS / Linux:**
 ```bash
 claude -p --model sonnet --effort high --permission-mode bypassPermissions < "$PROMPT_FILE"
-claude -p --model opus --effort max --permission-mode bypassPermissions < "$PROMPT_FILE"
+claude -p --model opus --effort xhigh --permission-mode bypassPermissions < "$PROMPT_FILE"
 ```
 
 **Windows (Git Bash inside Codex):**
 ```bash
 cmd.exe /c claude.exe -p --model sonnet --effort high --permission-mode bypassPermissions < "$PROMPT_FILE"
-cmd.exe /c claude.exe -p --model opus --effort max --permission-mode bypassPermissions < "$PROMPT_FILE"
+cmd.exe /c claude.exe -p --model opus --effort xhigh --permission-mode bypassPermissions < "$PROMPT_FILE"
 ```
 Fallback if `claude.exe` is not on PATH: use `claude.cmd` instead.
 
