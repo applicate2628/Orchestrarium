@@ -1,20 +1,6 @@
 ---
 name: vak-dissertation-review
-description: >-
-  Review a Russian doctoral or candidate dissertation (диссертация) together with its
-  autoreferat (автореферат) for scientific-degree defense. Covers нормоконтроль, научная
-  новизна and ВАК-соответствие audit, паспорт-специальности fit, заимствования/плагиат,
-  русский язык, формулы и числа, ссылки и список литературы, публикации по перечню ВАК,
-  патенты, рисунки/таблицы, and prior-art / степень разработанности (что было ДО → в чём
-  приращение). Use this skill whenever the user shares or names a диссертация, автореферат,
-  рецензия, отзыв, замечания, нормоконтроль, предзащита, защита, ВАК, диссовет, паспорт
-  специальности, or asks to review / check / critique / proofread an academic work for a
-  Russian scientific degree (кандидат or доктор наук) — even when they only say "проверь
-  диссертацию", "посмотри автореферат", "подготовь рецензию", "замечания к работе", "проверь
-  новизну", or "это правда новое?". It produces рекомендательные review documents where EVERY
-  note carries a verifiable proof reference (страница / формула / норма / DOI / инструментальная
-  проверка). Do NOT use it for grading school homework, non-Russian theses, or generic
-  copy-editing with no defense context.
+description: Review a Russian dissertation (диссертация) and its autoreferat (автореферат) for a кандидат/доктор наук defense — нормоконтроль, научная новизна, ВАК-соответствие, заимствования, ссылки, публикации ВАК, степень разработанности. Use when the user names диссертация, автореферат, рецензия, замечания, нормоконтроль, защита, ВАК, диссовет, or asks to review an academic work for a Russian scientific degree.
 ---
 
 # Рецензирование диссертации и автореферата (ВАК)

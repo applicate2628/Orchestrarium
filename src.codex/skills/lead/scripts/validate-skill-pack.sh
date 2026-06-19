@@ -427,11 +427,6 @@ def fallback_check(path, frontmatter):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
-        # An indented line is block-scalar / multi-line continuation content. The fallback already
-        # admits a block scalar on its key line (the value-prefix check below allows `>`/`|`), so its
-        # indented content lines are valid YAML, not key:value pairs -- accept them.
-        if line[:1] in (" ", "\t"):
-            continue
         match = re.match(r"^[A-Za-z0-9_-]+:\s*(.*)$", line)
         if not match:
             return f"line {offset}: unsupported frontmatter line"
@@ -487,6 +482,9 @@ check_skill_description_budget() {
   local multiline_descriptions=()
   local skill_file
   local role
+  # Count codepoints, not bytes, so a Cyrillic description is measured the way codex measures it
+  # (its limit is in characters). ${#var} counts bytes under a non-UTF-8 locale; force UTF-8 here.
+  local LC_ALL=C.UTF-8
 
   if [[ "$#" -gt 0 ]]; then
     for role in "$@"; do
@@ -503,7 +501,10 @@ check_skill_description_budget() {
         continue
       fi
 
-      if [[ "$description" == ">" || "$description" == "|" ]]; then
+      if [[ "$description" == ">"* || "$description" == "|"* ]]; then
+        # Any YAML block-scalar indicator (>, |, and the chomp/keep variants >-, |-, >+, |+).
+        # Codex skill descriptions must be single-line metadata; a block scalar is rejected here
+        # rather than mis-measured as a 2-char value.
         multiline_descriptions+=("$role")
         continue
       fi
@@ -531,7 +532,10 @@ check_skill_description_budget() {
         continue
       fi
 
-      if [[ "$description" == ">" || "$description" == "|" ]]; then
+      if [[ "$description" == ">"* || "$description" == "|"* ]]; then
+        # Any YAML block-scalar indicator (>, |, and the chomp/keep variants >-, |-, >+, |+).
+        # Codex skill descriptions must be single-line metadata; a block scalar is rejected here
+        # rather than mis-measured as a 2-char value.
         multiline_descriptions+=("$role")
         continue
       fi
