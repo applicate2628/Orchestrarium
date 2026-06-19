@@ -84,6 +84,29 @@ INSTALLER_CASES = [
     ),
 ]
 
+UNIVERSAL_HOOK_HELPER_PATHS = (
+    "scripts/hook_common.py",
+    "scripts/check-bugfix-discipline.py",
+    "scripts/check-bugfix-discipline.sh",
+    "scripts/check-bugfix-discipline.ps1",
+    "scripts/check-passive-polling-stop.py",
+    "scripts/check-passive-polling-stop.sh",
+    "scripts/check-passive-polling-stop.ps1",
+    "scripts/check-work-items-archival-stop.py",
+    "scripts/check-work-items-archival-stop.sh",
+    "scripts/check-work-items-archival-stop.ps1",
+    "scripts/mcp-usage-reminder.sh",
+    "scripts/mcp-usage-reminder.ps1",
+    "scripts/check-publication-safety.sh",
+    "scripts/check-publication-safety.ps1",
+    "hooks/check-machine-local-path.py",
+    "hooks/check-machine-local-path.sh",
+    "hooks/check-machine-local-path.ps1",
+    "hooks/check-no-trash-in-repo.py",
+    "hooks/check-no-trash-in-repo.sh",
+    "hooks/check-no-trash-in-repo.ps1",
+)
+
 
 class InstallerRegressionError(Exception):
     """Raised when installer output does not match the agents-mode contract."""
@@ -337,6 +360,27 @@ def validate_overlay(
         )
 
 
+def validate_example_provider_universal_hooks(
+    root: Path,
+    case: InstallerCase,
+    project_root: Path,
+) -> None:
+    if case.name not in {"gemini", "qwen"}:
+        return
+
+    manifest_path = root / f"src.{case.name}" / "extension" / f"{case.name}-extension.json"
+    extension_name = load_json(manifest_path).get("name")
+    if not extension_name:
+        raise InstallerRegressionError(f"{case.name} extension manifest has no name")
+
+    extension_root = project_root / f".{case.name}" / "extensions" / extension_name
+    for rel in UNIVERSAL_HOOK_HELPER_PATHS:
+        if not (extension_root / rel).is_file():
+            raise InstallerRegressionError(
+                f"{case.name} installer did not install universal hook/helper {rel}"
+            )
+
+
 def run_regression(root: Path) -> None:
     if shutil.which("bash") is None:
         raise InstallerRegressionError("bash is required for installer regression")
@@ -360,6 +404,7 @@ def run_regression(root: Path) -> None:
                 / f"{case.name}-project",
             )
             validate_overlay(case, overlay, schema_data)
+            validate_example_provider_universal_hooks(root, case, project_root)
             if case.codex_line:
                 validate_codex_agent_overrides(project_root, root)
 
