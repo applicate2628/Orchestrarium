@@ -49,7 +49,7 @@ When a significant issue is found outside the performance domain:
 
 ## Architecture layering hygiene (performance)
 
-Performance-relevant layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md`. Load-bearing for this role:
+Performance-relevant layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md` (maintainer reference; not installed at runtime). Load-bearing for this role:
 
 - **A boundary is a link/call boundary by default;** collapse or inline a seam FOR SPEED only when a profile measurement shows it on a measured-critical path AND one coherent owner remains (ownership/lifecycle/resource-cleanup/contracts/tests inside one module). Speculative inlining without a measurement is a violation, not an optimization.
 - **Never split a measured-critical or order-sensitive sequence across a boundary** (a hot loop, an order-sensitive reduction, a transaction, a streaming stage stays in one unit; the seam sits at its input/output).

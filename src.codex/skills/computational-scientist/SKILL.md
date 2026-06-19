@@ -43,7 +43,7 @@ description: "Frame physics/numerics: equations, units, discretization, solvers,
 
 ## Architecture layering hygiene
 
-Frame the layering as constraints for the implementers who build from your spec; full narrative + checklist: `shared/references/architecture-layering-hygiene.md`. Load-bearing for this role:
+Frame the layering as constraints for the implementers who build from your spec; full narrative + checklist: `shared/references/architecture-layering-hygiene.md` (maintainer reference; not installed at runtime). Load-bearing for this role:
 
 - **Name the owning layer:** specify the single lowest module that should own each capability (the one depending only on what is below it), so implementers do not scatter it or fork it into a parallel silo.
 - **Specify the stable contract, not a scenario-specific backend reach:** define the capability as a contract on a stable surface (a lower module or a neutral interface leaf) that callers depend on and implementations are injected into; never require a higher module to import a private/impl module of a lower one.

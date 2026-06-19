@@ -43,7 +43,7 @@ description: "Review maintainability, cohesion, contracts, complexity, control-p
 
 ## Architecture layering hygiene checks
 
-Review structural and control-plane changes against the falsifiable checklist in `shared/references/architecture-layering-hygiene.md`; each finding names the violated law, the single owner, and the enforcement probe. Highest-value blocking checks:
+Review structural and control-plane changes against the falsifiable checklist in `shared/references/architecture-layering-hygiene.md` (maintainer reference; not installed at runtime); each finding names the violated law, the single owner, and the enforcement probe. Highest-value blocking checks:
 
 - **Dependency graph:** no upward or cyclic edge, no edge into a sibling's private/internal module across a band; the acyclic downward graph is gate-enforced (build/lint/import-graph/validator/CI).
 - **Adapter vs backend:** a new scenario landed in an adapter/composition/interface, not as a scenario-specific backend edit; a backend edit (if any) generalized a missing capability and protected existing consumers.
