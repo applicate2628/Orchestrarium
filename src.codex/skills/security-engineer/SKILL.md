@@ -34,6 +34,14 @@ description: "Define threats, trust boundaries, controls, safe defaults, must-fi
 - Call out unsafe defaults, missing checks, and privileged flows explicitly.
 - Distinguish confirmed exposure from suspected risk that still needs proof.
 
+## Architecture layering hygiene (security)
+
+Security-relevant layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md`. Load-bearing for this role:
+
+- **Single owner per security invariant (C1):** an auth/authz predicate, a trust-boundary check, a security mode (strict/permissive), or a secret-handling rule has exactly one owner every consumer calls; re-deriving it per call site is the bug (copies drift, and a missed copy is a vulnerability) — except a generated-from-one-source or drift-gated duplicate across a hard process/ABI/schema/external-protocol boundary.
+- **Security config is resolved at the boundary and injected down (C2):** auth/credential/policy config is parsed once at the trust boundary into typed config and passed inward; a lower module reading ambient credential/policy state is an upward control-flow leak even with no dependency edge (the only exception is documented diagnostic/observability instrumentation with no business/semantic/output/persistence/security/control-flow effect).
+- **Trust-boundary contracts live on a stable surface (A6):** define the security contract on a stable surface both sides may depend on (a neutral interface leaf) and inject the implementation from above; never import a private/impl security module across a layer.
+
 ## Non-goals
 
 - Do not act as the final security approval gate.

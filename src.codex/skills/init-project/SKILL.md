@@ -121,7 +121,7 @@ Routing conventions (not persisted as keys):
      - `externalCodexWorkdirMode: neutral`
      - `externalClaudeWorkdirMode: neutral`
      - `externalModelMode: runtime-default`
-     - `externalCodexProfile: default`
+     - `externalCodexProfile: gpt-5.5-xhigh`
      - `externalClaudeProfile: opus-max`
    - Accept shorthand answers such as `force`, `external reviewer only`, `opus`, or `defaults for the rest`.
 
@@ -190,6 +190,6 @@ Routing conventions (not persisted as keys):
 - Preserve unknown keys in `.agents/.agents-mode.yaml` when updating.
 - Any read of `.agents/.agents-mode.yaml` that drives a decision should normalize the file to the current canonical format before trusting the flags.
 - Any read of the effective Codex overlay that drives a decision should normalize that file to the current canonical format before trusting the flags.
-- Any read that drives a decision should prefer local `.agents/.agents-mode.yaml`, then local legacy `.agents/.agents-mode`, then global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`; normalize whichever file supplied the effective config in the same scope and do not recreate any legacy file.
+- Any read that drives a decision should prefer local `.agents/.agents-mode.yaml`, then local legacy `.agents/.agents-mode`, then global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`; normalize whichever file supplied the effective config in the same scope and do not recreate any legacy file.
 - Do not modify any other section of `AGENTS.md`.
 - Treat root `AGENTS.md` as the project-runtime target, not the Orchestrarium monorepo maintenance overlay.
