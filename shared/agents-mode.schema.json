@@ -71,8 +71,8 @@
     },
     {
       "name": "externalClaudeProfile",
-      "default": "opus-max",
-      "allowed": ["sonnet-high", "opus-max"],
+      "default": "opus-xhigh",
+      "allowed": ["sonnet-high", "opus-xhigh", "opus-max"],
       "providers": ["codex"]
     }
   ],

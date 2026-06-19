@@ -87,7 +87,7 @@ class ResolveAgentsModeTest(unittest.TestCase):
             self.assertEqual(values["preferExternalReviewer"], "true")
             self.assertEqual(values["delegationMode"], "manual")
             self.assertEqual(sources["delegationMode"]["rank"], "defaults")
-            self.assertEqual(values["externalClaudeProfile"], "opus-max")
+            self.assertEqual(values["externalClaudeProfile"], "opus-xhigh")
 
             self.assertFalse((project / ".agents" / ".agents-mode.yaml.generated").exists())
 

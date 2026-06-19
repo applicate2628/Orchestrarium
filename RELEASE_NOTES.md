@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-06-19
+
+### Changed
+
+- **Codex-line `externalClaudeProfile` default lowered from `opus-max` to a new `opus-xhigh` value (`--model opus --effort xhigh`); `opus-max` is now an explicit max-depth escalation, not the standing default.** This completes the consultant-effort symmetry work: the consultant lane already runs both providers at `xhigh` by default (Codex `gpt-5.5` + `model_reasoning_effort=xhigh`, Claude `--model opus --effort xhigh`), but the Codex-line `externalClaudeProfile` knob — which governs every Codex→Claude dispatch (consultant, external-worker, external-reviewer) — still defaulted to `opus-max` (`--effort max`), so the shipped default was asymmetric and more expensive than intended. A new `opus-xhigh` profile value is added to the schema `allowed` list and becomes the first-write default (installer seed, normalizer, `default` preset, per-provider/per-preset reference tables); `opus-max` stays a selectable value reserved for especially hard tasks at the caller's discretion. **Preserved:** the `pinned-top-pro` model mode and the explicit max-quality presets (`correctness-first`, `power-mode`) still resolve Claude to `opus-max` — pinned-top-pro means the strongest documented path, and those presets are the operator deliberately choosing maximum depth. Affected operators: new Codex `.agents/.agents-mode.yaml` files now seed `externalClaudeProfile: opus-xhigh` instead of `opus-max`; existing files and explicit overrides are untouched. Docs (`docs/agents-mode-reference.md` value-enum + tables, `INSTALL.md`, `README.md`, `references-codex/`) and the `gpt-5.5-xhigh ↔ opus-xhigh` best-effort-sibling framing are updated across all four packs to keep the symmetry description accurate.
+
 ## 2026-06-14
 
 ### Added

@@ -113,7 +113,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
      review.ui-visual-correctness: 1
    externalModelMode: runtime-default
    externalCodexProfile: default
-   externalClaudeProfile: opus-max
+   externalClaudeProfile: opus-xhigh
    ```
 
    - `consultantMode` — consultant-only mode: `external`, `internal`, `disabled`
@@ -128,11 +128,11 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
    - `externalPriorityProfiles` — per-profile lane matrix with ordered provider lists; the shipped production profile set stays on Codex plus Claude provider families, with `reserve` only as the supplemental advisory/review candidate
    - `externalOpinionCounts` — per-lane number of distinct external opinions required under `externalProvider: auto`; not a global cap on helper multiplicity
    - `externalModelMode` — shared production model policy: `runtime-default` leaves the resolved provider on its runtime default model/profile, while `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on retryable provider exhaustion
-   - `externalCodexProfile` — shared Codex-specific profile override: `default` inherits `externalModelMode`; `gpt-5.5-fast` selects the fast Codex model tier after provider resolution (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade) and must be verified against the installed runtime; `gpt-5.5-xhigh` (shipped as default) pins model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`, symmetric to Claude's `opus-max`
+   - `externalCodexProfile` — shared Codex-specific profile override: `default` inherits `externalModelMode`; `gpt-5.5-fast` selects the fast Codex model tier after provider resolution (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade) and must be verified against the installed runtime; `gpt-5.5-xhigh` (shipped as default) pins model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`, symmetric to Claude's `opus-xhigh`
    - `reserve` — symbolic supplemental candidate that may appear only in advisory/review profile orders; it is not a scalar provider key, not a primary `claude` retry, and not available to worker-side implementation/editing lanes
-   - `externalClaudeProfile` — Codex-line only optional Claude CLI execution profile: `sonnet-high` or `opus-max`
+   - `externalClaudeProfile` — Codex-line only optional Claude CLI execution profile: `sonnet-high`, `opus-xhigh` (shipped default), or `opus-max` (max-depth escalation)
    - Each toggle is independent
-   - Default full shape on first creation: `delegationMode: manual`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `reserveResolver: claude-sonnet`, shipped `externalPriorityProfiles` on the Codex/Claude pair plus advisory/review-only `reserve`, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; the shared model policy defaults to `externalModelMode: runtime-default`; the Codex profile override defaults to `externalCodexProfile: default`; Codex also writes `externalClaudeProfile: opus-max`
+   - Default full shape on first creation: `delegationMode: manual`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `reserveResolver: claude-sonnet`, shipped `externalPriorityProfiles` on the Codex/Claude pair plus advisory/review-only `reserve`, and `externalOpinionCounts` defaulting every documented lane to `1`; provider-specific workdir keys default to `neutral`; the shared model policy defaults to `externalModelMode: runtime-default`; the Codex profile override defaults to `externalCodexProfile: default`; Codex also writes `externalClaudeProfile: opus-xhigh`
 
 3. **Dispatch protocol (platform-dependent)**
 
@@ -212,7 +212,7 @@ The orchestrator (lead or main conversation) **prefers** external roles by defau
 - `externalModelMode: runtime-default | pinned-top-pro` — shared production model policy; `runtime-default` keeps provider runtime selection, while `pinned-top-pro` asks each production provider for its strongest documented native path with one named same-provider fallback on retryable provider exhaustion
 - `externalCodexProfile: default | gpt-5.5-fast | gpt-5.5-xhigh` — shared Codex-specific profile override; `default` inherits `externalModelMode`; `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, not an effort downgrade) and is explicit opt-in after provider resolution; `gpt-5.5-xhigh` (shipped as default) pins model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`
 - `reserve` in `externalPriorityProfiles` — advisory/review-only supplemental candidate bound by `reserveResolver`; it is independent of primary `claude`, not a scalar provider key, and not available to worker or mutating routes
-- `externalClaudeProfile: sonnet-high | opus-max` — Codex-line only; when Codex dispatches to Claude CLI, prefer the matching model/effort profile instead of the provider default or the broader shared model policy
+- `externalClaudeProfile: sonnet-high | opus-xhigh | opus-max` — Codex-line only; when Codex dispatches to Claude CLI, prefer the matching model/effort profile instead of the provider default or the broader shared model policy
 
 Domain specialist is selected instead only when:
 

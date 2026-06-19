@@ -30,7 +30,7 @@ class AgentsModeContractTest(unittest.TestCase):
         scalars = {scalar["name"]: scalar for scalar in schema["scalarKeys"]}
         codex_profile = scalars["externalCodexProfile"]
 
-        # Shipped default is the best-effort profile (symmetric to externalClaudeProfile: opus-max).
+        # Shipped default is the best-effort profile (symmetric to externalClaudeProfile: opus-xhigh).
         self.assertEqual(codex_profile["default"], "gpt-5.5-xhigh")
         # 4th allowed value gpt-5.3-codex-spark added in schema commit 6555faa
         # (fast external-mechanical tier); keep this list in sync with
@@ -135,7 +135,7 @@ class AgentsModeContractTest(unittest.TestCase):
             codex_init = tmp_root / "src.codex" / "skills" / "init-project" / "SKILL.md"
             text = codex_init.read_text(encoding="utf-8")
             text = text.replace(
-                "   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max; default: opus-max",
+                "   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh",
                 "   externalFastProfile: {value}  # invalid drift from Codex-only scalar",
                 1,
             )

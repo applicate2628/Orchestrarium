@@ -36,7 +36,7 @@
         "externalClaudeWorkdirMode": "neutral",
         "externalModelMode": "runtime-default",
         "externalCodexProfile": "gpt-5.5-xhigh",
-        "externalClaudeProfile": "opus-max"
+        "externalClaudeProfile": "opus-xhigh"
       }
     },
     "absolute-balance": {
