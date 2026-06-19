@@ -37,7 +37,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
 | `externalCodexProfile` | `gpt-5.5-xhigh` | `default` | `default` | `gpt-5.5-xhigh` | `gpt-5.5-xhigh` | `gpt-5.5-fast` |
-| `externalClaudeProfile` | `opus-max` | `sonnet-high` | `sonnet-high` | `opus-max` | `opus-max` | `sonnet-high` |
+| `externalClaudeProfile` | `opus-xhigh` | `sonnet-high` | `sonnet-high` | `opus-max` | `opus-max` | `sonnet-high` |
 
 `correctness-first` and `power-mode` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
@@ -122,7 +122,7 @@ Routing conventions (not persisted as keys):
      - `externalClaudeWorkdirMode: neutral`
      - `externalModelMode: runtime-default`
      - `externalCodexProfile: gpt-5.5-xhigh`
-     - `externalClaudeProfile: opus-max`
+     - `externalClaudeProfile: opus-xhigh`
    - Accept shorthand answers such as `force`, `external reviewer only`, `opus`, or `defaults for the rest`.
 
 6. **Confirm the final choices.**
@@ -156,7 +156,7 @@ Routing conventions (not persisted as keys):
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
    externalCodexProfile: {value}  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh | gpt-5.3-codex-spark; default: gpt-5.5-xhigh
-   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-max; default: opus-max
+   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh
    ```
 
 8. **Write `## Project policies` to `AGENTS.md`.**
