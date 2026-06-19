@@ -350,7 +350,7 @@ def validate_overlay(
                     )
 
     if case.codex_line:
-        if scalars.get("externalClaudeProfile") != "opus-max":
+        if scalars.get("externalClaudeProfile") != "opus-xhigh":
             raise InstallerRegressionError(
                 f"{case.name} missing Codex-only externalClaudeProfile"
             )
