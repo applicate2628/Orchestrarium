@@ -33,6 +33,7 @@ description: Implement an approved frontend phase without redefining product or 
 - Keep state changes, component changes, and visual changes easy to review.
 - If the specification is ambiguous or the plan conflicts with reality, stop and return `BLOCKED` with the exact gap.
 - When fixing a runtime bug whose cause is not obvious from code, invoke `$bug-hunting` to load diagnostic-logging discipline. For UI/animation/layout bugs needing visual evidence, route through `$windows-gui-manual-testing` and `$analyzing-video-bugs` rather than reading raw video.
+- The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol
 

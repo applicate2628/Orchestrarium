@@ -32,6 +32,7 @@ description: Implement an approved data phase without changing upstream architec
 - Make data contract changes explicit and easy to review.
 - Call out operational impacts such as backfills, recomputes, deployment ordering, or recovery steps.
 - If the plan conflicts with the real data shape or platform limits, stop and return the exact conflict.
+- The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol
 
