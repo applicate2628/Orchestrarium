@@ -427,6 +427,11 @@ def fallback_check(path, frontmatter):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
+        # An indented line is block-scalar / multi-line continuation content. The fallback already
+        # admits a block scalar on its key line (the value-prefix check below allows `>`/`|`), so its
+        # indented content lines are valid YAML, not key:value pairs -- accept them.
+        if line[:1] in (" ", "\t"):
+            continue
         match = re.match(r"^[A-Za-z0-9_-]+:\s*(.*)$", line)
         if not match:
             return f"line {offset}: unsupported frontmatter line"
