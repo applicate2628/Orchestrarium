@@ -40,6 +40,19 @@ description: Review an approved implementation phase or repository control-plane
 - Treat passing tests as insufficient if architectural cohesion, seam integrity, or module isolation were degraded.
 - For semantic control-plane docs, focus on ownership boundaries, independent gates, route coherence, policy blast radius, and contradictions between source-of-truth files.
 
+## Architecture layering hygiene checks
+
+Review structural and control-plane changes against the falsifiable checklist in `shared/references/architecture-layering-hygiene.md`; each finding names the violated law, the single owner, and the enforcement probe. Highest-value blocking checks:
+
+- **Dependency graph:** no upward or cyclic edge, no edge into a sibling's private/internal module across a band; the acyclic downward graph is gate-enforced (build/lint/import-graph/validator/CI).
+- **Adapter vs backend:** a new scenario landed in an adapter/composition/interface, not as a scenario-specific backend edit; a backend edit (if any) generalized a missing capability and protected existing consumers.
+- **Single-owner invariant:** no cross-cutting predicate/constant/ordering re-defined or re-typed "to stay consistent" (except a generated-from-one-source or drift-gated hard-boundary duplicate).
+- **Config injection:** no lower module reads env/CLI/global scenario policy; config is parsed once at the top and injected down (the only exception is documented diagnostic/observability instrumentation with no business/semantic/output/persistence/security/control-flow effect).
+- **Grandfathered debt:** accepted debt is a tracked entry (owner, scope, expiry or review trigger, explicit no-expansion), not a silent re-bless; current debt is never precedent for a new violation of the same shape.
+- **Entry-point thinness:** no app/tool holds a decision a second entry point would also need.
+- **Test-support ownership:** generic test support is test-only and contract-parameterized; removing an implementation edits no other tests.
+- **Performance seam:** a hot-path seam collapse cites a profile measurement and keeps one coherent owner; no seam splits a measured-critical/order-sensitive sequence.
+
 ## REVISE routing
 
 When returning REVISE, specify the target:

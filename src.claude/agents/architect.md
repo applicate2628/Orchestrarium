@@ -43,6 +43,20 @@ description: Produce a design package from accepted research without writing imp
 - For non-foundation features in the design, require a single feature gate at the owning module's boundary (settings model or capability registry), not scattered consumer-side conditionals. Disabled state must be fully inert across every reachable surface — UI, command palette, hotkeys, deep links, IPC, background watchers, persistence writes — and the design must define what happens to persisted state when the feature is removed, renamed, split, or default-flipped.
 - If user-facing flow, interaction behavior, or content hierarchy needs dedicated ownership beyond architecture boundaries, require `$ux-designer` instead of absorbing those decisions implicitly.
 
+## Architecture layering hygiene
+
+Design as single-owner layers composed by thin assemblies, not per-feature silos that copy shared layers. Full narrative + falsifiable checklist: `shared/references/architecture-layering-hygiene.md`. Apply these decidable laws as pressure tests (defaults with named exceptions), and name the single owner + the enforcement probe for each structural decision in the claims section:
+
+- **Own by the dependency graph:** a capability belongs to the lowest module depending only on what is below it; edges (imports/links), not names or levels, are the authority. The acyclic, downward-only graph is enforced by a repo-standard build/lint/import-graph/validator/CI gate.
+- **Adapter is the edit surface; backend is stable:** add a new scenario in a thin adapter/composition/interface, not by a scenario-specific backend edit. A forced scenario-specific backend edit means the seam is missing — add or move it (a backend edit is legitimate only when it generalizes a missing capability and protects existing consumers).
+- **Dependency inversion onto a stable surface:** when a lower module must be invoked by a higher one, put the contract on a stable surface both sides may depend on (the lower module or a neutral interface leaf) and inject the implementation from above; never import a private/impl module across a layer.
+- **Thin = process-binding only (second-consumer test):** an entry point owns args/env/exit/IO only; any decision a second entry point (a tool, a test, a future GUI) would also need is library capability.
+- **Generic engine names no specific consumer:** a new consumer supplies an input/callback, never a method branch inside the engine; a new variant is a plugin + thin scenario, never a parallel silo.
+- **One owner per cross-cutting invariant:** a mode predicate, canonical ordering, shared constant, or flag meaning has exactly one owner all consumers call; re-typing it "to stay consistent" is the bug (except a generated-from-one-source or drift-gated duplicate across a hard process/ABI/schema boundary).
+- **Config is an upper-layer input:** parse env/CLI/scenario selectors once at the top into typed config and pass resolved values down; a lower module reading ambient policy is an upward control-flow leak even with no dependency edge (the only exception is documented diagnostic/observability instrumentation with no business/semantic/output/persistence/security/control-flow effect).
+- **Performance boundaries:** a seam is a link boundary by default; collapse it for speed only when a profile measurement justifies it and one coherent owner remains; never split a measured-critical or order-sensitive sequence.
+- **Test support is single-owner, test-only,** parameterized over the production contract, so removing an implementation is a pure delete.
+
 ## Adjacent findings protocol
 
 When scope investigation reveals issues outside the admitted scope:
