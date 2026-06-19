@@ -187,7 +187,8 @@ Use the handoff template and response format in [subagent-contracts.md](contract
 
 ## Fact-first rule
 
-- Prefer factual artifacts before interpretive artifacts whenever the next decision depends on unknowns.
+Routing unknowns to factual roles before interpretive ones, and citing accepted evidence for decisions, is the spine's rule; the lead's concrete routing on top:
+
 - Use `$analyst` for code and system facts, `$product-analyst` for user or product facts, and accepted metrics or constraints as the basis for roadmap or design decisions.
 - Require decision-making roles such as `$product-manager`, `$architect`, and specialist constraint roles to separate evidence, judgment, assumptions, and open questions explicitly.
 - Treat `$consultant` as optional independent judgment only after the strongest relevant factual slice is already available.
@@ -219,13 +220,11 @@ Do not advance work on optimism or partial acceptance.
 
 ## Flow rules
 
-- The system operates as a rolling loop: `PASS` immediately advances, `REVISE` stays in the same role, `BLOCKED` waits for external resolution.
+The rolling loop (`PASS` advances, `REVISE` stays in-role, `BLOCKED` waits), the resume-the-primary-task-after-a-side-request and restore-after-compaction discipline, and "a passed sub-batch is not goal completion — continue to the next admitted action" are inherited from the spine's `Core delegation principles`; the lead-specific flow on top:
+
 - Do not pause between accepted artifacts unless a gate failure or human/CI check requires it.
 - Close specialist sessions once their artifact is accepted. Keep open only for bounded `REVISE`.
 - After the final reviewer or human/CI gate completes, run a consultant sweep only when it was explicitly requested by the lead or repo-local policy while `consultantMode` is enabled.
-- After any side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
-- After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
-- Do not stop at one completed sub-batch when a known admitted-scope next action already exists; keep the task open and continue until a real gate or explicit user reprioritization intervenes.
 
 ## Operational rules
 

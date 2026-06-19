@@ -46,7 +46,7 @@ if ([string]::IsNullOrEmpty($TopicSlug) -or
 }
 
 if (-not $ClaudeFlags -or $ClaudeFlags.Count -eq 0) {
-  $ClaudeFlags = @('-p', '--quiet', '--output-format', 'text')
+  $ClaudeFlags = @('-p', '--output-format', 'text')  # current claude CLI removed top-level --quiet
 }
 
 $claudeBin = if ($env:CLAUDE_BIN) { $env:CLAUDE_BIN } else { 'claude' }

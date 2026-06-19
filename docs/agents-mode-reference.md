@@ -168,7 +168,7 @@ Notes:
 - Any spawned internal subagent, even if prompted to "use Gemini Pro" or another external provider, is still an internal execution path. For `$external-worker` and `$external-reviewer`, `external` means the real provider CLI or approved transport wrapper only.
 - `auto` uses the active named production provider-order profile and must not silently self-bounce into the same provider line.
 - Example-only providers such as Gemini and Qwen are explicit-only. They must not appear in shipped or repo-local `auto` production profiles.
-- Explicit self-provider selection is allowed only as an override for isolation, profile, transport, or an intentionally independent rerun.
+- Explicit self-provider selection is allowed only as an override for isolation, profile, transport, or an intentionally independent rerun — and NOT for the consultant lane, which always requires a model different from the orchestrator's own (a same-model consultant is the orchestrator echoing itself; see the consultant role's different-model rule).
 - `reserve` is a symbolic supplemental profile candidate for advisory/review lanes only. It is independent of primary `claude` and `codex`, appears after them in shipped advisory/review orders, and is not a scalar `externalProvider` value.
 - Explicit user override and documented repo-local task-domain heuristics beat the ordinary `auto` meaning.
 

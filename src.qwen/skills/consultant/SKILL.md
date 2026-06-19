@@ -10,6 +10,12 @@ description: Provide an independent advisory memo for the lead without becoming 
 - Advisory-only.
 - One memo per invocation, then stop.
 - No routing authority, no gate authority, no hidden fallback.
+- **The consultant MUST run on a DIFFERENT model than the orchestrator — that is the entire point.** A
+  same-model consultant is the orchestrator echoing itself and adds no second signal. The external
+  consultant must resolve to a provider whose model differs from the orchestrating runtime's own; if only
+  the orchestrator's own model is available, return a "no independent (different-model) consultant
+  available" memo rather than a same-model echo. The explicit self-provider override in the provider rules
+  below is for NON-consultant lanes.
 
 ## Toggle state
 
