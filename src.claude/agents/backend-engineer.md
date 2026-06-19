@@ -34,6 +34,7 @@ description: Implement an approved backend phase without redesigning the system.
 - If the design or plan conflicts with reality, stop and return the exact conflict instead of patching around it.
 - When fixing a runtime bug whose cause is not obvious from code inspection, invoke `$bug-hunting` to load diagnostic-logging discipline — log first, never patch on unverified theory, never re-roll on guesses.
 - When porting backend logic between languages or libraries (regex case sensitivity, locale handling, JSON tag conventions, error semantics, encoding defaults), apply the cross-platform/cross-language port discipline from shared governance: compare documented semantics of source and destination primitives, do not assume surface syntax preserves behavior, and verify with a target-environment smoke test before claiming the port works.
+- The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol
 

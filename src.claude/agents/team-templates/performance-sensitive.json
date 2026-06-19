@@ -6,7 +6,7 @@
   "chain": ["research", "design", "plan", "implement", "QA", "review"],
   "roles": [
     { "agentType": "analyst", "stage": "research", "required": true },
-    { "agentType": "architect", "stage": "design", "required": true },
+    { "agentType": "architect", "stage": "design", "whenNeeded": "the budget fix changes a seam, contract, or dependency direction" },
     { "agentType": "performance-engineer", "stage": "design", "required": true },
     { "agentType": "planner", "stage": "plan", "required": true },
     { "agentType": "backend-engineer", "stage": "implement", "whenNeeded": "server-side optimization" },
@@ -15,7 +15,7 @@
     { "agentType": "qa-engineer", "stage": "QA", "required": true },
     { "agentType": "performance-reviewer", "stage": "review", "required": true }
   ],
-  "requiredRoles": ["analyst", "architect", "performance-engineer", "planner", "qa-engineer", "performance-reviewer"],
-  "minRoles": 6,
-  "notes": "Lead coordinates. Review strategy: Claim-Verify for defined budgets, Adversarial when bottleneck is novel."
+  "requiredRoles": ["analyst", "performance-engineer", "planner", "qa-engineer", "performance-reviewer"],
+  "minRoles": 5,
+  "notes": "Lead coordinates. Architect is conditional: pull in only when the budget fix changes a seam, contract, or dependency direction (a within-seam tune needs no architect). Review strategy: Claim-Verify for defined budgets, Adversarial when bottleneck is novel."
 }

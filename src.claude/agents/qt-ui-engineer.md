@@ -34,6 +34,7 @@ description: Implement an approved Qt desktop UI phase for Widgets-based screens
 - Keep state changes, event handling, and visual updates easy to review.
 - If the specification is ambiguous or the plan conflicts with reality, stop and return `BLOCKED` with the exact gap.
 - For Qt UI runtime bugs invoke `$bug-hunting` before changing code (log first, never patch on theory). For visual evidence of Qt UI issues use `$windows-gui-manual-testing` and route any video through `$analyzing-video-bugs`.
+- The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol
 

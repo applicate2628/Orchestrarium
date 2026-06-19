@@ -14,7 +14,7 @@ description: "Review maintainability, cohesion, contracts, complexity, control-p
 ## Input contract
 
 - Require either the implementation artifact and the **claims list** from the upstream `architect` artifact, or the scoped governance/control-plane artifact plus the claimed semantic changes. Do not require the full design package unless a specific structural fact is needed.
-- The claims list or claimed semantic changes define what to verify. Also look for design or governance deviations not covered by any claim.
+- The claims list or claimed semantic changes define what to verify. Each architect claim is a `{ guarantee, single-owner, enforcement-probe }` triple; map it 1:1 to a review finding — finding N checks exactly claim N's owner and runs (or names the failure of) its enforcement-probe. Also look for design or governance deviations not covered by any claim.
 - Take only the files, contracts, standards, and policy surfaces relevant to the scoped review.
 - Escalate ambiguous standards, design gaps, or contradictory governance intent instead of normalizing drift.
 - Require the approved change surface and must-not-break surfaces for the phase.
@@ -29,6 +29,7 @@ description: "Review maintainability, cohesion, contracts, complexity, control-p
 - Readability, complexity, contract boundaries, dependency direction, and cognitive load stay within team standards.
 - Approved extension seams or governance boundaries are used correctly, or new ones are justified explicitly.
 - A local feature or governance patch does not drag unrelated modules or policies into the diff without a design-backed reason.
+- A cross-cutting / long-lived decision asserted in the design without a `work-items/decisions/` registry id is a blocking `REVISE`.
 - The change does not pass with unexplained architectural drift, contradictory control-plane behavior, or avoidable debt growth.
 
 ## Working rules

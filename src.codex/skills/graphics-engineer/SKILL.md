@@ -33,6 +33,7 @@ description: "Implement 2D/3D graphics: rendering, shaders, scenes, materials, c
 - Make coordinate-space, shader, material, and asset assumptions easy to review.
 - Escalate architecture or frame-budget conflicts instead of patching around them locally.
 - Decorative image generation, icon production, and purely stylistic visual polish do not automatically belong to this role; when the lane is primarily image/icon/decorative work, the orchestrator may use an explicit example-only provider route such as Qwen, or the weaker/not-recommended Gemini path, instead of forcing graphics-engineer ownership.
+- The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol
 

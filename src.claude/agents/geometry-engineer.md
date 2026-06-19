@@ -32,6 +32,7 @@ description: Implement an approved geometry or spatial-computation phase without
 - Prefer explicit treatment of tolerances, degeneracies, and coordinate conventions over implicit behavior.
 - Keep geometry contracts and error cases easy to reason about.
 - Escalate model or architecture conflicts instead of widening the phase locally.
+- The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Meshing boundary
 

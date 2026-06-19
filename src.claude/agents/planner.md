@@ -15,6 +15,7 @@ description: Break an accepted design into small independent delivery phases wit
 
 - Require an accepted design artifact, accepted UX design guidance when the change is user-facing, plus any accepted algorithm, security, or performance constraints that apply.
 - Take only the repo constraints and delivery context needed to plan execution.
+- The must-not-break surfaces and approved seam set ARE the architect's **Change-Surface Contract**; consume it as given and allocate phases WITHIN it — you do not redefine the seam or blast radius.
 - Escalate missing design or specialist decisions instead of inventing them in the plan.
 
 ## Return exactly one artifact
@@ -34,7 +35,7 @@ description: Break an accepted design into small independent delivery phases wit
 - Prefer phases that can be committed, reviewed, and rolled back cleanly.
 - Prefer phases that isolate change behind existing or explicitly approved seams.
 - Minimize write conflicts and cross-phase ambiguity.
-- If a supposedly local phase requires unrelated module edits, shared abstraction churn, or dependency-direction changes, send it back for design review instead of normalizing it in the plan.
+- If a phase cannot fit inside the architect's Change-Surface Contract (it requires unrelated module edits, shared abstraction churn, dependency-direction changes, or a touch of a protected surface), ESCALATE it as a `REVISE`-to-architect instead of normalizing the expanded surface in the plan.
 - Give each acceptance criterion a stable per-phase id (`AC1`, `AC2`, ...) so `$qa-engineer` can map evidence back to it ("AC3 verified / AC5 failed"). AC-IDs are append-only per phase within a plan revision — never renumber an existing criterion; a removed criterion's id is retired, not reused.
 - Call out phases that require specialist review before implementation or merge.
 - Split shared or core module changes into explicit enabling phases with tighter review instead of hiding them inside feature work.
