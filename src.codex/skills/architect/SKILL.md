@@ -22,12 +22,14 @@ description: "Design from accepted research: architecture, APIs, data, security,
 ## Return exactly one artifact
 
 - Return one design package containing the chosen approach, one to three realistic alternatives with tradeoffs, boundaries of change, approved extension seams, dependency direction, stable internal and external contracts, components and interactions, data model changes, failure modes, observability expectations, security-by-design requirements, and test strategy.
-- Include a numbered **claims section**: falsifiable guarantees this design makes. Example: "1. Module A is not modified — all changes attach at seam S. 2. Interface I remains stable. 3. No new shared dependencies are introduced." This list is the primary input to `architecture-reviewer`.
+- Include a required named **Change-Surface Contract** sub-field — `{ intended change surface, approved extension seam(s), protected / must-not-touch surfaces, declared blast radius }` — as a named field (not prose). You OWN this seam / blast-radius decision; the planner and implementers CONSUME it and may flag a conflict (`REVISE`-to-architect) but MAY NOT redefine it.
+- Include a numbered **claims section**: falsifiable guarantees this design makes, each claim a fixed three-field shape — `{ guarantee, single-owner, enforcement-probe }` (what is guaranteed, the single owner that holds it, the falsifying probe — a `file:line`, command, test id, or gate). Example: "1. `{ guarantee: Module A is not modified — all changes attach at seam S; single-owner: seam S; enforcement-probe: grep shows no diff in module A }`. 2. Interface I remains stable. 3. No new shared dependencies are introduced." This list is the primary input to `architecture-reviewer`, which maps each claim 1:1 to a review finding.
 
 ## Gate
 
 - The design is traceable to accepted research facts and constraints.
 - Alternatives, interfaces, extension seams, dependency direction, expected blast radius, failure modes, observability, and test strategy are explicit.
+- Every cross-cutting / long-lived decision in the claims section carries a `work-items/decisions/` id (you author it as `status: proposed`); a local single-work-item decision stays inline in `design.md`.
 - No implementation code is included.
 - End with one explicit gate decision: `PASS`, `REVISE`, or `BLOCKED`.
 

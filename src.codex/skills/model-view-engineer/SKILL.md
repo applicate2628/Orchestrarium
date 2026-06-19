@@ -34,6 +34,7 @@ description: "Implement Qt model/view: models, proxies, delegates, selection, in
 - Keep data roles, row and column mappings, and index lifetimes easy to reason about.
 - Make performance-sensitive behavior explicit when changing large tables or trees.
 - If the spec conflicts with Qt semantics or the existing model shape, stop and return the exact conflict.
+- The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol
 

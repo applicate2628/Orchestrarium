@@ -33,6 +33,7 @@ description: "Implement scientific/data visuals: charts, plots, overlays, axes, 
 - Make units, color-scale choices, coordinate transforms, and aggregation assumptions explicit.
 - Escalate conflicts between domain truth and visual design instead of silently biasing the visualization.
 - Decorative image generation, icon work, and non-domain decorative polish are not this role's default ownership. When the lane is primarily visual styling rather than truthful scientific or data representation, the orchestrator may use an explicit example-only provider route such as Qwen, or the weaker/not-recommended Gemini path.
+- The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol
 
