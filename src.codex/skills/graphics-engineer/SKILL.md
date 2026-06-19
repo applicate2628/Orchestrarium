@@ -46,7 +46,7 @@ When implementation reveals bugs, risks, or improvement opportunities outside th
 
 ## Architecture layering hygiene
 
-Implement within the layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md`. Load-bearing for this role:
+Implement within the layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md` (maintainer reference; not installed at runtime). Load-bearing for this role:
 
 - **Own by the dependency graph:** put a capability in the lowest module depending only on what is below it; never add an upward or cyclic dependency (it must fail the repo-standard build/lint/import-graph/validator/CI gate).
 - **Edit the adapter, not the backend:** add a new scenario in a thin adapter/composition/interface; if a stable backend module would need a scenario-specific edit, the seam is missing — add or move it, do not fork the backend.

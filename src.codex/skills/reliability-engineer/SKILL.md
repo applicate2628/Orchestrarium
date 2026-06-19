@@ -35,7 +35,7 @@ description: "Define SLOs, failure modes, resilience, observability, rollout, ro
 
 ## Architecture layering hygiene (stability)
 
-Stability-relevant layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md`. Load-bearing for this role:
+Stability-relevant layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md` (maintainer reference; not installed at runtime). Load-bearing for this role:
 
 - **One owner per cross-cutting invariant:** a mode predicate, canonical ordering, shared constant, or flag meaning has exactly one owner all consumers call; re-defining or re-typing it "to stay consistent" is the bug (copies drift) — except a generated-from-one-source or drift-gated duplicate across a hard process/ABI/schema boundary. Reproducibility depends on this.
 - **Config and control-flow are upper-layer inputs:** parsed once at the top into typed immutable config and injected down; a lower module reading env/CLI/global mode is an upward control-flow leak even with no dependency edge (the only exception is documented diagnostic/observability instrumentation with no business/semantic/output/persistence/security/control-flow effect).
