@@ -9,7 +9,7 @@ Covers the cases listed in the architecture review of commit 79aa5eb:
   - ORCHESTRARIUM_NO_HYPOTHESIS_HOOK blocks install but NOT remove
   - shlex-quoted script paths defend against command injection
   - malformed-but-valid JSON (non-list entry["hooks"]) is handled without crash
-  - symlink target is refused
+  - symlink target is written through (link preserved, real target updated)
 """
 
 from __future__ import annotations
@@ -472,18 +472,28 @@ class TestInstallHypothesisHook(unittest.TestCase):
         # Our entry should have been appended despite the malformed neighbour.
         self.assertEqual(len(data["hooks"]["PreToolUse"]), 2)
 
-    def test_symlink_target_is_refused(self) -> None:
-        if os.name == "nt":
-            # Creating a symlink on Windows requires SeCreateSymbolicLinkPrivilege
-            # or developer mode. Skip on Windows CI.
-            self.skipTest("symlink test requires elevated privileges on Windows")
+    def test_symlink_target_is_written_through(self) -> None:
+        # The installer writes THROUGH a symlink: it updates the link's real
+        # target and preserves the link itself (a synced shared-env hooks.json is
+        # commonly symlinked). os.replace runs on the resolved real path so the
+        # link is not clobbered with a regular file.
         real = self.tmpdir / "real-settings.json"
         real.write_text("{}", encoding="utf-8")
         link = self.tmpdir / "settings-link.json"
-        os.symlink(real, link)
+        try:
+            os.symlink(real, link)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlink creation not permitted in this environment")
         result = run_installer(link)
-        self.assertNotEqual(result.returncode, 0, "symlink write should be refused")
-        self.assertIn("symbolic link", result.stderr.lower())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # The link itself is preserved...
+        self.assertTrue(link.is_symlink(), "symlink must be preserved, not clobbered")
+        # ...and the hook was written through to the real target file.
+        data = json.loads(real.read_text(encoding="utf-8"))
+        self.assertIn("hooks", data)
+        self.assertTrue(
+            any(data["hooks"].values()), "hook entry must be written through to the real target"
+        )
 
     def test_hooks_top_level_not_a_dict_fails_closed(self) -> None:
         self.target.write_text(json.dumps({"hooks": "not-a-dict"}), encoding="utf-8")

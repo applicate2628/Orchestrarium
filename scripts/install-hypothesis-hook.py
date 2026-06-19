@@ -285,23 +285,23 @@ def load_existing(target: Path) -> dict[str, Any]:
 
 
 def write_atomic(target: Path, data: dict[str, Any]) -> None:
-    """Write target atomically via temp file in same dir + os.replace.
+    """Write target atomically via temp file + os.replace.
 
-    Refuses to write through a symlink (lstat-based check). The temp file is
-    created in the same directory as target so os.replace is atomic on the
-    same filesystem.
+    Writes THROUGH a symlink: when target is a symlink, the atomic replace runs
+    on the symlink's resolved real path, so the link itself is preserved and its
+    target's content is updated. (os.replace on the symlink path would clobber
+    the link with a regular file -- the reason this used to refuse symlinks.)
+    The temp file is created beside the REAL target so os.replace stays atomic on
+    the same filesystem, even when the symlink points across a filesystem
+    boundary (e.g. ~/.codex/hooks.json -> a synced shared-env volume).
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    if target.is_symlink():
-        sys.stderr.write(
-            f"FAIL: {target} is a symbolic link; refusing to write through it. "
-            "Resolve the symlink or move it aside before re-running.\n"
-        )
-        sys.exit(1)
+    real_target = target.resolve() if target.is_symlink() else target
+    real_target.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-    # tempfile in the same directory so os.replace is atomic on the same FS.
+    # tempfile beside the REAL target so os.replace is atomic on the same FS.
     fd, tmp_path_str = tempfile.mkstemp(
-        prefix=".install-hypothesis-hook.", suffix=".tmp", dir=str(target.parent)
+        prefix=".install-hypothesis-hook.", suffix=".tmp", dir=str(real_target.parent)
     )
     tmp_path = Path(tmp_path_str)
     try:
@@ -314,7 +314,7 @@ def write_atomic(target: Path, data: dict[str, Any]) -> None:
                 # fsync may not be available on every filesystem (Windows
                 # remote shares, some FUSE mounts); best-effort only.
                 pass
-        os.replace(tmp_path, target)
+        os.replace(tmp_path, real_target)
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -499,10 +499,13 @@ def main() -> int:
     if args.remove and not data:
         if target.exists():
             if target.is_symlink():
-                sys.stderr.write(
-                    f"FAIL: {target} is a symbolic link; refusing to delete\n"
+                # Preserve the symlink: write the cleared data THROUGH it to the
+                # real target instead of deleting the link itself.
+                write_atomic(target, data)
+                sys.stdout.write(
+                    f"  {args.script_marker} hook {action}; cleared {target} (symlink preserved)\n"
                 )
-                return 1
+                return 0
             target.unlink()
             sys.stdout.write(
                 f"  {args.script_marker} hook {action}; deleted now-empty {target}\n"
