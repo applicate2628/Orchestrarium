@@ -36,7 +36,7 @@ description: Define secure design constraints and threat-aware implementation re
 
 ## Architecture layering hygiene (security)
 
-Security-relevant layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md`. Load-bearing for this role:
+Security-relevant layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md` (maintainer reference; not installed at runtime). Load-bearing for this role:
 
 - **Single owner per security invariant (C1):** an auth/authz predicate, a trust-boundary check, a security mode (strict/permissive), or a secret-handling rule has exactly one owner every consumer calls; re-deriving it per call site is the bug (copies drift, and a missed copy is a vulnerability) — except a generated-from-one-source or drift-gated duplicate across a hard process/ABI/schema/external-protocol boundary.
 - **Security config is resolved at the boundary and injected down (C2):** auth/credential/policy config is parsed once at the trust boundary into typed config and passed inward; a lower module reading ambient credential/policy state is an upward control-flow leak even with no dependency edge (the only exception is documented diagnostic/observability instrumentation with no business/semantic/output/persistence/security/control-flow effect).

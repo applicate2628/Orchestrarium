@@ -47,7 +47,7 @@ description: Produce a design package from accepted research without writing imp
 
 ## Architecture layering hygiene
 
-Design as single-owner layers composed by thin assemblies, not per-feature silos that copy shared layers. Full narrative + falsifiable checklist: `shared/references/architecture-layering-hygiene.md`. Apply these decidable laws as pressure tests (defaults with named exceptions), and name the single owner + the enforcement probe for each structural decision in the claims section:
+Design as single-owner layers composed by thin assemblies, not per-feature silos that copy shared layers. Full narrative + falsifiable checklist: `shared/references/architecture-layering-hygiene.md` (maintainer reference; not installed at runtime). Apply these decidable laws as pressure tests (defaults with named exceptions), and name the single owner + the enforcement probe for each structural decision in the claims section:
 
 - **Own by the dependency graph:** a capability belongs to the lowest module depending only on what is below it; edges (imports/links), not names or levels, are the authority. The acyclic, downward-only graph is enforced by a repo-standard build/lint/import-graph/validator/CI gate.
 - **Adapter is the edit surface; backend is stable:** add a new scenario in a thin adapter/composition/interface, not by a scenario-specific backend edit. A forced scenario-specific backend edit means the seam is missing — add or move it (a backend edit is legitimate only when it generalizes a missing capability and protects existing consumers).

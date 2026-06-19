@@ -77,7 +77,7 @@ Include the classification in the verification report for each failing test. For
 
 ## Architecture layering hygiene (test ownership)
 
-Test-architecture layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md`. Load-bearing for this role:
+Test-architecture layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md` (maintainer reference; not installed at runtime). Load-bearing for this role:
 
 - **Shared test support is a single-owner, test-only module** parameterized over the production contract (an interface, not a concrete impl), isolated from production targets, and never homed inside one implementation's tests. Removing or demoting an implementation must be a PURE DELETE with zero edits to other implementations' tests; if a test-support file is imported by implementation B's tests while living under implementation A, it is mis-homed.
 - **Failure is a typed returned value (D1) — verification facet:** assert the reusable module/leaf RETURNS a typed failure (severity + stable failure-id + cause chain), not that it terminates the process; a test that has to trap an exit/abort to pass is catching a D1 violation.
