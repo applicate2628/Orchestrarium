@@ -77,8 +77,8 @@ def load_contract_policy(template_path: str) -> ContractPolicy:
             provider_scalar_defaults={
                 "codex": {
                     "externalClaudeProfile": ScalarMeta(
-                        value="opus-max",
-                        comment="# allowed: sonnet-high | opus-max; default: opus-max",
+                        value="opus-xhigh",
+                        comment="# allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh",
                     )
                 }
             },
