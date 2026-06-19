@@ -1015,6 +1015,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.ps1"
       machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.ps1"
       notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.ps1"
+      stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.ps1"
       reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.ps1"
     else
       bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.sh"
@@ -1022,6 +1023,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.sh"
       machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.sh"
       notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.sh"
+      stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.sh"
       reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.sh"
     fi
     echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
@@ -1061,6 +1063,13 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --script-marker check-no-trash-in-repo \
       --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash" \
       --script-path "$notrash_script_target"
+    echo "  Installing stale-relation-residue PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-marker check-stale-relation-residue \
+      --script-path "$stale_relation_script_target"
     echo "  Installing MCP-usage-reminder SessionStart hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
     "$python_cmd" "$hook_installer" \
       --target "$hooks_target" \
