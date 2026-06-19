@@ -9,12 +9,14 @@ args fields, so re-runs update in place rather than appending
 duplicates).
 
 Supported targets:
-  --platform claude  →  Claude Code settings.json (e.g. ~/.claude/settings.json)
-  --platform codex   →  Codex hooks.json (e.g. ~/.codex/hooks.json)
+  --platform claude   →  Claude Code settings.json (e.g. ~/.claude/settings.json)
+  --platform codex    →  Codex hooks.json (e.g. ~/.codex/hooks.json)
+  --platform generic  →  Provider-neutral exec-form JSON for compatible runtimes
+                         or approved wrapper-driven hook wiring.
 
 Cross-platform behavior:
-  Claude uses exec form; Codex uses shell form. POSIX hosts use bash wrappers.
-  Windows hosts use PowerShell wrappers.
+  Claude/generic use exec form; Codex uses shell form. POSIX hosts use bash
+  wrappers. Windows hosts use PowerShell wrappers.
 
 Removal:
   --remove  Removes ALL of our hook entries (handles duplicates from earlier
@@ -56,6 +58,16 @@ DEFAULT_SCRIPT_MARKER = "check-bugfix-discipline"
 # This hook fires on every code edit; the script self-filters on bug-context
 # detected from the session transcript.
 TOOL_MATCHER_REGEX = "Edit|Write|NotebookEdit|apply_patch"
+
+
+def powershell_single_quote(value: str) -> str:
+    """Return a PowerShell single-quoted literal for a shell command string.
+
+    PowerShell single-quoted strings escape an embedded apostrophe by doubling it.
+    Codex hook entries are command strings, so the script path must be quoted in
+    the target shell's syntax instead of treated as a pre-split argv element.
+    """
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _with_event_matcher(
@@ -131,6 +143,23 @@ def build_claude_entry(
     )
 
 
+def build_generic_entry(
+    script_path: str,
+    host_os: str,
+    hook_event: str = "PreToolUse",
+    tool_matcher: str | None = None,
+) -> dict[str, Any]:
+    """Build a provider-neutral exec-form hook entry.
+
+    This is intentionally the same shape as the Claude exec form: a command
+    plus literal argv list, with `hooks.<event>[]` and optional PreToolUse
+    matcher. Runtimes or wrappers that support this JSON shape can consume it
+    without pretending to be Claude; runtimes with a different native schema
+    should adapt from the universal hook/helper scripts directly.
+    """
+    return build_claude_entry(script_path, host_os, hook_event, tool_matcher)
+
+
 def build_codex_entry(
     script_path: str,
     host_os: str,
@@ -167,10 +196,10 @@ def build_codex_entry(
     if host_os == "windows":
         # Native PowerShell on Windows — single-quote the script path so any
         # space in $HOME or path component is interpreted as part of the
-        # filename, not as a flag boundary. PowerShell parses single-quoted
-        # strings literally with no further escaping.
+        # filename, not as a flag boundary.
+        quoted = powershell_single_quote(script_path)
         command_str = (
-            f"powershell.exe -NoProfile -ExecutionPolicy Bypass -File '{script_path}'"
+            f"powershell.exe -NoProfile -ExecutionPolicy Bypass -File {quoted}"
         )
     else:
         quoted = shlex.quote(script_path)
@@ -256,23 +285,23 @@ def load_existing(target: Path) -> dict[str, Any]:
 
 
 def write_atomic(target: Path, data: dict[str, Any]) -> None:
-    """Write target atomically via temp file in same dir + os.replace.
+    """Write target atomically via temp file + os.replace.
 
-    Refuses to write through a symlink (lstat-based check). The temp file is
-    created in the same directory as target so os.replace is atomic on the
-    same filesystem.
+    Writes THROUGH a symlink: when target is a symlink, the atomic replace runs
+    on the symlink's resolved real path, so the link itself is preserved and its
+    target's content is updated. (os.replace on the symlink path would clobber
+    the link with a regular file -- the reason this used to refuse symlinks.)
+    The temp file is created beside the REAL target so os.replace stays atomic on
+    the same filesystem, even when the symlink points across a filesystem
+    boundary (e.g. ~/.codex/hooks.json -> a synced shared-env volume).
     """
     target.parent.mkdir(parents=True, exist_ok=True)
-    if target.is_symlink():
-        sys.stderr.write(
-            f"FAIL: {target} is a symbolic link; refusing to write through it. "
-            "Resolve the symlink or move it aside before re-running.\n"
-        )
-        sys.exit(1)
+    real_target = target.resolve() if target.is_symlink() else target
+    real_target.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
-    # tempfile in the same directory so os.replace is atomic on the same FS.
+    # tempfile beside the REAL target so os.replace is atomic on the same FS.
     fd, tmp_path_str = tempfile.mkstemp(
-        prefix=".install-hypothesis-hook.", suffix=".tmp", dir=str(target.parent)
+        prefix=".install-hypothesis-hook.", suffix=".tmp", dir=str(real_target.parent)
     )
     tmp_path = Path(tmp_path_str)
     try:
@@ -285,7 +314,7 @@ def write_atomic(target: Path, data: dict[str, Any]) -> None:
                 # fsync may not be available on every filesystem (Windows
                 # remote shares, some FUSE mounts); best-effort only.
                 pass
-        os.replace(tmp_path, target)
+        os.replace(tmp_path, real_target)
     except Exception:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -358,11 +387,11 @@ def main() -> int:
     parser.add_argument(
         "--target",
         required=True,
-        help="Path to settings.json (Claude) or hooks.json (Codex)",
+        help="Path to settings/hooks JSON for the selected platform",
     )
     parser.add_argument(
         "--platform",
-        choices=("claude", "codex"),
+        choices=("claude", "codex", "generic"),
         required=True,
         help="Which platform's hook config schema to write",
     )
@@ -445,8 +474,12 @@ def main() -> int:
             entry = build_claude_entry(
                 args.script_path, args.host_os, args.hook_event, args.tool_matcher
             )
-        else:
+        elif args.platform == "codex":
             entry = build_codex_entry(
+                args.script_path, args.host_os, args.hook_event, args.tool_matcher
+            )
+        else:
+            entry = build_generic_entry(
                 args.script_path, args.host_os, args.hook_event, args.tool_matcher
             )
         changed = install(data, entry, args.hook_event, args.script_marker)
@@ -466,10 +499,13 @@ def main() -> int:
     if args.remove and not data:
         if target.exists():
             if target.is_symlink():
-                sys.stderr.write(
-                    f"FAIL: {target} is a symbolic link; refusing to delete\n"
+                # Preserve the symlink: write the cleared data THROUGH it to the
+                # real target instead of deleting the link itself.
+                write_atomic(target, data)
+                sys.stdout.write(
+                    f"  {args.script_marker} hook {action}; cleared {target} (symlink preserved)\n"
                 )
-                return 1
+                return 0
             target.unlink()
             sys.stdout.write(
                 f"  {args.script_marker} hook {action}; deleted now-empty {target}\n"

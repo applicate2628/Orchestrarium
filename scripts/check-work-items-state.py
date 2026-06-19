@@ -77,6 +77,8 @@ DONE_STATE_LINE_RE = re.compile(
     r"\s*\*{0,3}\s*:\s*\*{0,3}\s*(?:closed|done|complete|completed|archived)(?![\w-])"
 )
 DEPENDS_ON_RE = re.compile(r"(?im)^\s*-?\s*\*{0,2}Depends-on\*{0,2}\s*:\s*(.+?)\s*$")
+EPIC_RE = re.compile(r"(?im)^\s*-?\s*\*{0,2}Epic\*{0,2}\s*:\s*(.+?)\s*$")
+NO_EPIC_RE = re.compile(r"(?im)^\s*-?\s*\*{0,2}No-epic rationale\*{0,2}\s*:")
 
 
 def item_aging_notes(item: Path, today: date, max_age_days: float) -> list[str]:
@@ -161,6 +163,57 @@ def blocked_by_notes(item: Path, active_dir: Path, archive_dir: Path) -> list[st
     return notes
 
 
+def _read_status_text(item: Path) -> str:
+    status = item / "status.md"
+    try:
+        return status.read_text(encoding="utf-8", errors="replace") if status.is_file() else ""
+    except OSError:
+        return ""
+
+
+def epic_link_notes(item: Path, active_dir: Path) -> list[str]:
+    """Informational: surface a child work-item that claims a missing epic.
+
+    Missing epics are adoption/routing signals, not validity failures. The
+    production hook only catches lifecycle drift for already-created epics, so
+    this checker provides the status-surface prompt for bad or dangling links.
+    """
+    text = _read_status_text(item)
+    match = EPIC_RE.search(text)
+    if not match:
+        return []
+    slug = match.group(1).strip().strip("`")
+    if not slug or slug.lower() == "none" or slug.startswith("<"):
+        return []
+    if not SLUG_RE.match(slug):
+        return [f"invalid Epic: {slug}"]
+    epic_path = active_dir.parent / "epics" / f"{slug}.md"
+    if not epic_path.is_file():
+        return [f"dangling Epic: {slug} (no matching work-items/epics/{slug}.md)"]
+    return []
+
+
+def epic_adoption_notes(items: list[Path], active_dir: Path) -> list[str]:
+    """Informational: nudge multi-item initiatives toward an epic or rationale."""
+    if len(items) < 2:
+        return []
+    epics_dir = active_dir.parent / "epics"
+    if epics_dir.is_dir():
+        return []
+    saw_epic_or_rationale = False
+    for item in items:
+        text = _read_status_text(item)
+        if EPIC_RE.search(text) or NO_EPIC_RE.search(text):
+            saw_epic_or_rationale = True
+            break
+    if saw_epic_or_rationale:
+        return []
+    return [
+        "no work-items/epics/ directory for multiple active items; "
+        "if they serve one initiative, admit an epic or record No-epic rationale"
+    ]
+
+
 def iter_work_items(active_dir: Path) -> list[Path]:
     if not active_dir.exists():
         return []
@@ -181,6 +234,7 @@ def command_check(args: argparse.Namespace) -> int:
     stale_after = timedelta(hours=args.stale_hours)
     archive_dir = active_dir.parent / "archive"
     failed = 0
+    global_notes = epic_adoption_notes(items, active_dir)
 
     for item in items:
         errors = validator.validate_work_item(item)
@@ -190,6 +244,7 @@ def command_check(args: argparse.Namespace) -> int:
         # the exit code or the RESULT line.
         notes = item_aging_notes(item, today, args.max_age_days)
         notes.extend(blocked_by_notes(item, active_dir, archive_dir))
+        notes.extend(epic_link_notes(item, active_dir))
         label = item.name
         if errors:
             failed += 1
@@ -200,6 +255,8 @@ def command_check(args: argparse.Namespace) -> int:
             print(f"PASS {label}")
         for note in notes:
             print(f"  info: {note}")
+    for note in global_notes:
+        print(f"info: {note}")
 
     if failed:
         print(f"RESULT: FAIL ({failed}/{len(items)} active work-items failed)")
