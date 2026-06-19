@@ -32,7 +32,7 @@ Do NOT auto-invoke for trivial changes (one-line typo, doc edit, single-file ref
    - **Surgical verdict** → `subagent_type: external-reviewer` (routes to the external provider).
    - **Deep verdict** → `subagent_type: architecture-reviewer`, `model: opus` (direct strategic verdict — NOT `consultant`).
    - **Mechanical scout** → `subagent_type: analyst`, `model: sonnet` (factual `file:line`, NO verdict — it feeds the verdicts).
-   Carry the ORIGINAL pinned objective verbatim into every angle. Do not poll; wait for notifications and read each angle's captured OUTPUT (not its notification) before counting it.
+   Carry the ORIGINAL pinned objective verbatim into every angle. Collection is split by lane: same-vendor Agent subagents fire a reliable notification (wait for it); an external-provider shell-out lane (its notification is not always delivered) is verified by actively reading its captured `.out`/`.err` + process status. Read each angle's captured OUTPUT (not its notification) before counting it.
 
 5. **Converge autonomously, persisting `review-loop-state` per round.** No human gate per round. Each round: revise the artifact to fold in every open blocker and unreconciled scout finding; run the mandatory anti-drift check; re-dispatch all angles on the revised artifact. Persist one `review-loop-state` record per round under `.scratch/reviews/` in the contract's schema (pinned objective/scope/runtime_root identical across rounds, per-round diff, both verdict angles + scout, no bare PASS, round ≤ cap). The persisted ledger is the runtime trace; its schema is checked by `scripts/validate-review-loop-state.* --self-test` in the repo (development/CI), not a shipped runtime tool.
 

@@ -23,7 +23,9 @@ Get an independent second opinion via the consultant agent.
 
 1. **Get the question.** Use `$ARGUMENTS` as the question or topic. If empty, ask the user what they want a second opinion on.
 
-2. **Invoke consultant.** Use `subagent_type: consultant`:
+2. **Invoke the consultant by mode** (`consultantMode` governs how — see the consultant role's "Invocation by mode"):
+   - **`internal` mode** → dispatch the consultant via the Agent tool (`subagent_type: consultant`); it returns a synchronous in-turn advisory.
+   - **`external` mode** → the consultant is a runtime-launched external-CLI on a DIFFERENT-model provider than this orchestrator; THIS command's runtime launches the provider CLI/wrapper directly (own the run + read its `.out`), it is NOT a background `subagent_type: consultant` (that strands — see the spawn-and-wait trap). If the only available provider is this orchestrator's own model, return a "no independent (different-model) consultant available" memo.
    - Pass the question along with relevant context (current file, recent changes, or accepted artifacts)
   - Normalize the effective Claude overlay to the current canonical format before trusting its flags.
   - Resolve in this order: local `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, global `~/.claude/.agents-mode.yaml`, then global legacy `~/.claude/.agents-mode`.
@@ -43,7 +45,7 @@ Get an independent second opinion via the consultant agent.
 
 ## Rules
 
-- **The consultant MUST be invoked via the Agent tool** with `subagent_type: consultant`. Do not role-play the consultant inline.
+- **The consultant is invoked by mode:** `internal` via the Agent tool (`subagent_type: consultant`); `external` as a direct runtime-launched provider CLI on a different-model provider (NOT a background subagent — it would strand). Do not role-play the consultant inline.
 - Consultant is advisory-only — do not treat the memo as a blocking gate.
 - The toggle file is shared with the external dispatch contract, so never rewrite it into a mode-only shape.
 - Do not modify any files.

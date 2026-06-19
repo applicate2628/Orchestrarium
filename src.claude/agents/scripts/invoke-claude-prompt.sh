@@ -17,7 +17,8 @@
 #   echo "<prompt body>" | bash .claude/agents/scripts/invoke-claude-prompt.sh <topic-slug> [-- claude-flags...]
 #   bash .claude/agents/scripts/invoke-claude-prompt.sh <topic-slug> --prompt-file <path> [-- claude-flags...]
 #
-# Default claude flags (applied when no `--` block is given): -p --quiet --output-format text
+# Default claude flags (applied when no `--` block is given): -p --output-format text
+# (the current claude CLI removed the top-level `--quiet` flag; `-p`/`--print` is the non-interactive mode)
 #
 # Environment overrides:
 #   CLAUDE_BIN          Claude executable or absolute path (default: claude on PATH)
@@ -44,7 +45,7 @@ EOF
 
 TOPIC=""
 PROMPT_FILE=""
-CLAUDE_FLAGS=("-p" "--quiet" "--output-format" "text")
+CLAUDE_FLAGS=("-p" "--output-format" "text")
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)

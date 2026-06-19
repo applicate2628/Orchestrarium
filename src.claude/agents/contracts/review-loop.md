@@ -20,7 +20,7 @@ The **scout does not co-judge**: it executes spelled-out mechanical scans and su
 
 ## Claude dispatch mapping
 
-Each angle is dispatched DIRECTLY by the orchestrator via the Agent tool and returns its own result — no angle re-dispatches to another provider or spawns its own waiter. Independent angles launch in parallel (`run_in_background: true`); do not poll, wait for notifications.
+Each angle is dispatched DIRECTLY by the orchestrator and returns its own result — no angle re-dispatches to another provider or spawns its own waiter. Independent angles launch in parallel (`run_in_background: true`). Collection is split by lane: same-vendor Agent subagents fire a reliable notification — wait for those; an external-provider shell-out lane is verified by actively reading its captured `.out`/`.err` + process status, because that notification is not always delivered.
 
 | Angle | `subagent_type` | Model / tier | Why this role |
 | --- | --- | --- | --- |
