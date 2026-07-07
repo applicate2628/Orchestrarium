@@ -1,0 +1,4 @@
+interface:
+  display_name: "VAK Dissertation Review"
+  short_description: "Review a Russian dissertation and autoreferat for a VAK degree defense"
+  default_prompt: "Use $vak-dissertation-review to review a Russian dissertation (диссертация) and its autoreferat for a кандидат/доктор наук defense: нормоконтроль, scientific novelty, VAK compliance, borrowings, references, VAK-list publications, degree-of-development. Advisory tone; every finding carries a verifiable anchor."

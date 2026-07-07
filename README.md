@@ -20,10 +20,10 @@ shared/             Shared cross-provider governance and canonical reference cor
 docs/               Common branch-level docs index and operator/runtime references
 src.codex/          Codex provider-pack source
 src.claude/         Claude Code provider-pack source
-src.gemini/         Gemini example-provider source tree with `GEMINI.md`,
-                    stable `skills/`, and preview `agents/`
-src.qwen/           Qwen example-pack source tree with `QWEN.md`,
-                    stable `skills/`, and preview `agents/`
+src.gemini/         Gemini example-provider source tree with `GEMINI.md`
+                    and the universal `skills/` surface (skills-only)
+src.qwen/           Qwen example-pack source tree with `QWEN.md`
+                    and the universal `skills/` surface (skills-only)
 references-codex/   Codex-specific addenda and compatibility pointers
 references-claude/  Claude Code-specific addenda and compatibility pointers
 references-gemini/  Gemini-specific addenda and compatibility pointers
@@ -100,7 +100,7 @@ Important: operator preferences live in per-provider `agents-mode` files; all pr
 - Gemini and Qwen remain explicit example-only integrations in this repository. They are `WEAK MODEL / NOT RECOMMENDED`, do not participate in the shipped production `auto` profiles, and should be treated as manual example or compatibility paths rather than production defaults.
 - `externalPriorityProfile` selects the active named provider-order profile, `reserveResolver` binds the symbolic `reserve` slot to a concrete read-only resolver, `externalPriorityProfiles` stores the switchable per-lane provider orders, and `externalOpinionCounts` raises specific lanes above the default single-opinion behavior when one external opinion is not enough. Those counts are lane-local distinct-opinion requirements, not a cap on how many parallel external helper instances may run overall; `parallelMode` remains the general fan-out rule for any helper lane, while bounded same-provider external helper fan-out lives under the dedicated brigade surfaces.
 - `externalModelMode: runtime-default | pinned-top-pro` remains the shared production model policy for the Codex/Claude pair. `runtime-default` leaves the resolved provider on its runtime default model/profile; `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on limit-style failures.
-- `externalCodexProfile: default | gpt-5.5-fast | gpt-5.5-xhigh` is the Codex-specific external profile override. The shipped value is `gpt-5.5-xhigh` (symmetric to Claude's `opus-xhigh`), which pins model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`. `default` instead inherits `externalModelMode` after provider resolution. `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade) and must be verified against the installed Codex runtime.
+- `externalCodexProfile: default | gpt-5.5-fast | gpt-5.5-xhigh | gpt-5.3-codex-spark` is the Codex-specific external profile override (`gpt-5.3-codex-spark` is the bounded mechanical-overflow path). The shipped value is `gpt-5.5-xhigh` (symmetric to Claude's `opus-xhigh`), which pins model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`. `default` instead inherits `externalModelMode` after provider resolution. `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade) and must be verified against the installed Codex runtime.
 - Explicit self-provider selection is allowed only as an override for isolation, transport, profile, or an intentionally independent rerun.
 - `reserve` is a symbolic advisory/review-only profile candidate. It is not a scalar provider, not a worker path, and not a silent fallback from primary `claude` or `codex`; `reserveResolver: claude-sonnet | claude-wrapper | wrapper:<command> | disabled` selects the concrete read-only resolver, where `wrapper:<command>` is a PATH-resolved command or repo-relative wrapper path.
 - External provider CLI launches use file-based prompts by default: write substantive task prompts to temporary prompt files and feed them through stdin or a provider-supported file-input mechanism instead of putting the full prompt in argv.
@@ -155,6 +155,7 @@ Currently shipped:
 - `$bug-hunting` — knowledge-style; systematic runtime-bug investigation via diagnostic logging.
 - `$mathtype-book-page` — knowledge-style; bring translated technical-book DOCX pages to accepted MathType format.
 - `$explain-simply` — knowledge-style; reader-tailored plain-language explanations for concepts, code paths, results, decisions, and learner notes.
+- `$vak-dissertation-review` — knowledge-style; review of a Russian dissertation (диссертация) and autoreferat for a кандидат/доктор наук defense — нормоконтроль, novelty, ВАК compliance, borrowings, references, ВАК-list publications.
 
 ## References and maintenance
 

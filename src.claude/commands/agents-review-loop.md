@@ -11,7 +11,7 @@ Auto-invoke this flow ONLY on the narrow, explicit loop triggers:
 - "loop review"
 - "автономная петля"
 
-Do NOT auto-invoke on `review`, `second opinion`, or `let's review` — those own `/agents-review` and `/agents-second-opinion` respectively. The loop is a deliberate, heavier surface (three angles, multi-round, autonomous convergence); it is not the default for an ordinary review or a single second opinion.
+Do NOT auto-invoke on `review` / `let's review` (owned by `/agents-review`) or `second opinion` (owned by `/agents-second-opinion`). The loop is a deliberate, heavier surface (three angles, multi-round, autonomous convergence); it is not the default for an ordinary review or a single second opinion.
 
 Do NOT auto-invoke for trivial changes (one-line typo, doc edit, single-file refactor with no behavior change) or when the bug's root is an unmeasured runtime value — capture the runtime root FIRST, then loop on the fix design.
 

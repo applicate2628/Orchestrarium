@@ -121,15 +121,15 @@ def block_rows() -> dict[str, str]:
     return {
         "b01_win_home": _join(WIN, BS, USERS, BS, REAL),
         "b02_win_home_deep": _join(WIN, BS, USERS, BS, REAL, BS, ".claude", BS, "agents"),
-        "b03_win_home_lower": _join(WIN_LOWER, BS, users_lower, BS, "dima"),
+        "b03_win_home_lower": _join(WIN_LOWER, BS, users_lower, BS, "petya"),
         "b04_win_home_fwd": _join(WIN, FS, USERS, FS, REAL),
-        "b05_dev_root": _join(WIN_D, BS, DEV, BS, "Orchestrator", BS, "Orchestrarium"),
+        "b05_dev_root": _join(WIN_D, BS, DEV, BS, "SomeOrg", BS, "SomeProj"),
         "b06_work_root": _join(WIN_D, BS, WORK, BS, "proj"),
-        "b07_projects_root": _join(WIN, BS, PROJ, BS, "dima"),  # realistic name (see adjacent finding re: \x)
-        "b08_posix_home": _join(FS, HOME, FS, "dima", FS, WORK),
-        "b09_macos_home": _join(FS, USERS, FS, "dima", FS, "proj"),
-        "b10_msys_home": _join(FS, "c", FS, USERS, FS, "dima", FS, "x"),
-        "b11_msys_dev": _join(FS, "d", FS, DEV, FS, "Orchestrator"),
+        "b07_projects_root": _join(WIN, BS, PROJ, BS, "petya"),  # realistic name (see adjacent finding re: \x)
+        "b08_posix_home": _join(FS, HOME, FS, "petya", FS, WORK),
+        "b09_macos_home": _join(FS, USERS, FS, "petya", FS, "proj"),
+        "b10_msys_home": _join(FS, "c", FS, USERS, FS, "petya", FS, "x"),
+        "b11_msys_dev": _join(FS, "d", FS, DEV, FS, "SomeOrg"),
         "b12_token_substring_username2": _join(WIN, BS, USERS, BS, "username2"),
         "b13_token_substring_meadow": _join(WIN, BS, USERS, BS, "meadow"),
         # non-path secrets / transcript markers (assembled so no real secret literal sits in source)

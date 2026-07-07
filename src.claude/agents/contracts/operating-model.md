@@ -251,8 +251,8 @@ Every completed chain that produces an accepted artifact MUST persist it before 
 | Security review | `work-items/active/<slug>/security-review.md` | Session log entry summarizing review outcome |
 | Test report | `work-items/active/<slug>/test-report.md` | Session log entry summarizing QA verdict |
 | Advisory memo | `work-items/active/<slug>/advisory.md` | Session log entry summarizing advisory |
-| Bug finding | `work-items/bugs/YYYY-MM-DD_slug.md` | — |
-| Performance issue | `work-items/performance/YYYY-MM-DD_slug.md` | — |
+| Bug finding | `work-items/bugs/<date>-<slug>.md` | — |
+| Performance issue | `work-items/performance/<date>-<slug>.md` | — |
 | Epic (groups work-items) | `work-items/epics/<date>-<slug>.md` | — |
 | Decision (cross-item ADR) | `work-items/decisions/<date>-<slug>.md` | — |
 | Lesson (delivery retrospective) | `work-items/lessons/<date>-<slug>.md` | — |

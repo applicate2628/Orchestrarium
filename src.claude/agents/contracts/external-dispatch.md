@@ -6,7 +6,7 @@ This contract defines the shared Claude-line routing semantics for the consultan
 
 - Canonical path: `.claude/.agents-mode.yaml`
 - Legacy `.claude/.agents-mode` is compatibility input only. Resolve Claude overlay state in this read order (highest to lowest precedence, per-key resolution): local `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), then built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope, do not recreate any legacy file, and do not synthesize a local override on read alone.
-- Full value-by-value operator semantics live in [../../../docs/agents-mode-reference.md](../../../docs/agents-mode-reference.md).
+- Full value-by-value operator semantics live in `docs/agents-mode-reference.md` in the source repository (maintainer reference; not installed at runtime).
 
 Supported canonical keys:
 
@@ -120,7 +120,7 @@ Rules:
 - `externalPriorityProfile` selects the named provider-order map used only when `externalProvider: auto`.
 - `balanced` is the shipped default profile and must always exist.
 - `quality-first` is the shipped alternate production profile for maximum result quality; it biases near-tie advisory, source-bound, and review lanes toward Codex while preserving Claude-first lanes where the benchmark evidence gives Claude a clearer compact or visual-worker edge.
-- The shipped `balanced` and `quality-first` profiles follow the release-backed `12 + 1` routing read in `docs/routing/full-v2-hard-r2-routing-evidence-2026-05-01.md`; the `L00 owner/control` line is not an external profile lane because owner roles have no generic external adapter.
+- The shipped `balanced` and `quality-first` profiles follow the release-backed `12 + 1` routing read in `docs/routing/full-v2-hard-r2-routing-evidence-2026-05-01.md` (maintainer reference; not installed at runtime); the `L00 owner/control` line is not an external profile lane because owner roles have no generic external adapter.
 - Repo-local heuristics may refine lane classification, but they must not invent a different provider universe.
 - Ordinary `auto` must not resolve to the same provider as the current host line.
 

@@ -18,8 +18,8 @@ When adding, renaming, or removing a skill (`src.claude/commands/agents-*.md`):
 2. Update `src.claude/commands/agents-help.md` — add to the skills table
 3. Update `README.md` and `INSTALL.md` if the change affects documented pack structure, counts, install surface, or entry points
 4. Update `RELEASE_NOTES.md` if the skill change is release-relevant under repo policy
-5. Update `scripts/install-claude.ps1` — update skill count threshold in verification when the expected command count changes
-6. Update `scripts/install-claude.sh` — update skill count threshold in verification when the expected command count changes
+5. Verify `scripts/install-claude.ps1` install output totals after adding/removing a skill (installers count pack items dynamically — no hardcoded threshold to edit)
+6. Verify `scripts/install-claude.sh` install output totals after adding/removing a skill (same dynamic count)
 7. Update `src.claude/agents/scripts/validate-skill-pack.sh` — add the skill to validation only if it is not auto-discovered
 8. Run `/agents-validate` to confirm structural integrity
 9. Run `scripts/install-claude.ps1 -Global` to install and verify when install behavior or pack structure changed materially
@@ -112,7 +112,7 @@ scripts/                 ← platform-specific installers
 - Every skill must have the `agents-` prefix
 - Every workflow skill must contain "MUST be invoked via the Agent tool"
 - Every code-writing skill must contain "Do NOT commit"
-- Install script thresholds must match actual counts
+- Install output totals must match actual pack counts (installers count dynamically; verify after add/remove)
 - `src.claude/CLAUDE.md` must NOT contain repo-local content — that goes here
 - `$consultant` stays advisory-only; external execution and external review/QA belong to `$external-worker` and `$external-reviewer`
 - Team template JSON stays unchanged when external dispatch semantics change; routing substitutions belong in contracts and role docs

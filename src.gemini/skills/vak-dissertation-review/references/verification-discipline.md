@@ -62,6 +62,16 @@ a reference number that is *reconstructed by position* (the entry sits between [
 not literally printed in the source must be described positionally («ненумерованная позиция перед
 [N+2]»), never asserted as «[N+1]».
 
+**The mirror of that trap — a note that QUOTES the reviewed work's error must preserve the wrong form.**
+When a finding cites the author's mistake (a unit typo, a wrong number, a broken reference), keep the
+erroneous text verbatim in quotes and put the correction beside it — do NOT normalize the quoted value
+to your corrected one. Otherwise a later consistency scan reads your two spots (the quote and your
+corrected statement elsewhere) as a self-contradiction, and "fixing" the quote erases the very defect
+you were reporting. War story: a sheet quoted the dissertation's «0,643 мВ» (a unit typo) and a
+different note stated the corrected «0,643 мВт» — a scan flagged the two as inconsistent; verification
+showed the quote was deliberate and correct. A quoted error and its correction side by side is right,
+not a drift.
+
 ## 4. Verify arithmetic, don't eyeball it
 
 Units, unit conversions, percentages, trigonometry, dimensional analysis — run them through a
@@ -121,8 +131,68 @@ warnings.
   ~2–4 independent agents, not 15+ at once.
 - **Don't claim done from a notification alone:** verify the actual output artifact (file present,
   expected markers grep-confirmed, 0 unresolved placeholders) before reporting completion.
+- **Check existing project notes before deep-debugging a tool.** Before reverse-engineering why a
+  converter/decoder fails, search the repo's own notes and prior-session memory — a known-broken build
+  and its working alternative may already be recorded. Reinventing a solved diagnosis burns the budget
+  the review needs.
+- **Prefer the project's pinned known-good binary over a system one.** A system package manager's build
+  of a tool may be broken where a project-vendored standalone build works; when a tool fails
+  mysteriously, try the project-pinned copy before concluding the input is unreadable.
 
 ## 9. Advisory tone, always
 
 The product is рекомендательное. No "годен/не годен", no "провал". Lead each item with plain meaning
 and a concrete "рекомендуется…". The qualification verdict is the диссовет's and ВАК's, not yours.
+
+## 10. ВАК publication counting — journal status at the article's PUBLICATION DATE
+
+A journal's Перечень status is read at each article's **publication date**, not the current date. This governs its ВАК-membership (temporal validity), the specialty it covered, the **отрасль** (which decides whether the article counts toward the specific degree's отрасль), and its category. Audit the candidate's list **per-article by year**, applying the perechen in force that year; never collapse it to "the journal has this category / отрасль now".
+
+- **Find the governing regulation's transitional clauses before applying its current requirement.** A category or threshold requirement introduced by a recent amendment usually does NOT apply retroactively — locate the transitional provision (typically a cutoff date) that exempts earlier publications. Read the primary Положение, not a summary of it.
+- **A nomenclature or category reform reclassifies journals by date.** When specialty codes are renumbered or categories are introduced, the same journal can change отрасль / specialty / category at the reform boundary, so an article's classification depends on whether it predates or postdates the reform. Establish the reform act's effective date (and any transitional window) from the primary act, not from inference.
+- **Cite primary sources, not aggregators.** The official перечень-по-специальностям (with отрасли), the governing Положение with its transitional clauses, and the reform act are the authority; a third-party lookup site is a hint to verify, never a source. Don't take the «на дату публикации» rule on memory alone — anchor each load-bearing claim to the primary document.
+- **Assemble the proof chain in the document, not just in your head.** For a threshold or eligibility claim that rests on regulations (publication count, category mix, specialty/отрасль match), put a short normative-basis block (each governing clause with its source) and a per-item correspondence table (each item → specialty / отрасль / category / counts-or-not / date) into the sheet. A reviewer who can show the chain survives the first opponent's question; one who only asserts the conclusion does not.
+- War story: a journal's отрасль was framed twice by its *current* status (first "it is X now → risk", then "an older perechen shows Y → no risk") — both wrong reasoning. The correct frame is per-publication-date, and a recently-introduced category threshold may not apply to pre-cutoff publications at all. The concrete dates, codes, and journal identities for a given review belong in repo-local notes, not in this skill.
+
+## 11. Multi-document packages — cross-document consistency, not just per-sheet
+
+A review delivered as several sheets (defects-of-dissertation, defects-of-autoreferat, novelty/eligibility,
+summary, language/borrowing, strengthening) is one package: a fact stated on two sheets must agree, and an
+edit that corrects one sheet can leave a sibling stale. Per-sheet correctness is necessary but not
+sufficient.
+
+- **Distinguish a contradiction from legitimate silence.** Drift is two sheets stating *different* things
+  about the *same* fact. A sheet simply not covering a topic that another sheet owns is NOT drift — it is
+  scope division (the summary defers the canonical count to the sheet that owns it). Flagging silence as
+  drift wastes the gate and erodes trust in it; reconcile only genuine disagreements.
+- **After changing a load-bearing fact, re-check every sheet that repeats it.** Numbers, framings,
+  category/eligibility verdicts, and key dates get echoed in the summary and cross-referenced elsewhere.
+  List the sheets that mention the fact and verify each carries the *current* form — a half-propagated
+  correction is worse than the original error because it looks settled.
+- **Run the cross-check as a two-phase pass.** Phase one: scan each sheet and extract verbatim what it says
+  on each hot fact (or "not mentioned here"). Phase two: an independent adversarial pass compares the
+  extracts, re-reads the cited spots, and CONFIRMS or REJECTS each candidate drift (default REJECT). The
+  scan over-flags because it cannot see scope ownership; the adversarial phase is what separates real drift
+  from a misread. A single blind pass either misses propagation gaps or "fixes" non-problems.
+- **Keep cross-references mutually coherent.** When one sheet points to another ("details on sheet X, §N"),
+  the target section must exist and own that content; a pointer to a section that does not cover the claim
+  is itself a defect.
+
+## 12. Collect and verify the cited sources, with a manifest
+
+Every source the review leans on — the governing regulations, the reform acts, the candidate's own
+publications it audits, and the first-sources behind any borrowing it alleges — should be collected into one
+sources tree with a manifest, not left as bare citations. A claim about a source you have not opened is a
+hypothesis.
+
+- **Verify each collected file is the thing it claims to be.** Open the title/first page and confirm author,
+  title, edition, and year before filing it — a file named for a citation can be a different edition, a
+  different work by the same author, or mis-downloaded. Record the verified bibliographic line in the
+  manifest, and note where the collected edition differs from the one the work cites (same work, different
+  year is common).
+- **Track collected vs reference-only honestly.** Some sources (paywalled, rare) cannot be obtained; the
+  manifest must say which are present as files and which remain DOI/ISBN references verified-but-not-attached.
+  Do not let "cited" read as "collected" — surface the gap and let the author close it.
+- **Prefer the primary artifact over a secondary description for any load-bearing fact.** If an effective
+  date, a transitional clause, or a classification drives a verdict, read it in the collected primary
+  document; a search summary or aggregator entry is a lead to confirm, not the evidence.

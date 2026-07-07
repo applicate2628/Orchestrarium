@@ -108,7 +108,7 @@ externalCodexProfile: {value}  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh
 Read and normalize `.claude/.agents-mode.yaml` before routing. Comment-free, partial, or older-layout files are legacy input that must be rewritten to the current canonical format before the flags are trusted.
 If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
 
-For the full `value | meaning` tables, see [../../docs/agents-mode-reference.md](../../docs/agents-mode-reference.md).
+For the full `value | meaning` tables, see `docs/agents-mode-reference.md` in the source repository (maintainer reference; not installed at runtime).
 
 ## Return exactly one artifact
 

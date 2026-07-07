@@ -29,6 +29,7 @@ Current docs in this branch:
 - [lessons.md](lessons.md) for the in-repo delivery-lessons registry (capture lessons learned so they survive a work-item's archival)
 - [definition-of-ready-done.md](definition-of-ready-done.md) for the DoR/DoD vocabulary map onto existing admission and close gates
 - [routing/12-lane-routing-matrix-v1-2026-04-18.md](routing/12-lane-routing-matrix-v1-2026-04-18.md)
+- [routing/full-v2-hard-r2-routing-evidence-2026-05-01.md](routing/full-v2-hard-r2-routing-evidence-2026-05-01.md) — release-backed routing evidence behind the shipped priority profiles
 
 ## Terms and Abbreviations
 

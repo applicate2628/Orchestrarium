@@ -144,10 +144,10 @@ class TestMachineLocalPathHook(unittest.TestCase):
         # it, so the assertIn would fail on the replacement characters).
         for script in MACHINE_PATH_SCRIPTS:
             with self.subTest(script=script.parent.parent.name):
-                p = run_hook(script, {"tool_input": {"file_path": "README.md", "content": f"see C:/{_USERS}/Дима/secret"}})
+                p = run_hook(script, {"tool_input": {"file_path": "README.md", "content": f"see C:/{_USERS}/Петя/secret"}})
                 self.assertEqual(p.returncode, 0, p.stderr)
                 self.assertTrue(p.stderr.strip(), "expected a warning")
-                self.assertIn("Дима", p.stderr)
+                self.assertIn("Петя", p.stderr)
 
     def test_malformed_stdin_fails_open(self) -> None:
         for script in MACHINE_PATH_SCRIPTS:

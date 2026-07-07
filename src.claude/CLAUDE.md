@@ -213,6 +213,7 @@ The pack ships entry-point slash commands in `.claude/commands/` (`/agents-bugfi
 | Investigation question, "how does X work", ADR exploration, code-surface understanding | `.claude/commands/agents-research.md` |
 | Review of completed work, pre-merge gate, post-implementation validation | `.claude/commands/agents-review.md` |
 | Autonomous multi-angle convergence on one fix-design: "review loop", "проводи review loop", "loop review", "автономная петля" (NOT plain "review"/"second opinion") | `.claude/commands/agents-review-loop.md` |
+| One independent opinion on a decision/artifact: "second opinion", "второе мнение", "ask the consultant" (NOT plain "review", NOT "review loop") | `.claude/commands/agents-second-opinion.md` |
 | Refactor request without functional change, deduplication, readability improvement | `.claude/commands/agents-refactor.md` |
 | Performance budget breach, SLA, latency, throughput | `.claude/commands/agents-perf.md` |
 | Security, auth, credentials, trust boundary, vulnerability | `.claude/commands/agents-security.md` |
@@ -233,7 +234,7 @@ When the Claude Code superpowers plugin is installed alongside this pack, the tw
 
 1. If a superpowers process skill applies to the incoming request, invoke it via the `Skill` tool **before** picking an Orchestrator template — brainstorming for new or unclear creative work, systematic-debugging for runtime bugs whose cause is not obvious, writing-plans for multi-step work that lacks a plan, requesting-code-review before merge.
 2. After the process skill yields a clear admitted scope (accepted design, logged root cause, written plan), pick an Orchestrator template per the decision tree above and delegate specialists via the Agent tool.
-3. Subagents themselves may invoke common-skills (`$bug-hunting`, `$analyzing-video-bugs`, `$windows-gui-manual-testing`, `$mathtype-book-page`, `$explain-simply`) via the `Skill` tool inside their own context. Subagents typically cannot spawn other subagents — common-skills are the canonical way roles share methodology across the delegation tree.
+3. Subagents themselves may invoke common-skills (`$bug-hunting`, `$analyzing-video-bugs`, `$windows-gui-manual-testing`, `$mathtype-book-page`, `$explain-simply`, `$vak-dissertation-review`) via the `Skill` tool inside their own context. Subagents typically cannot spawn other subagents — common-skills are the canonical way roles share methodology across the delegation tree.
 
 **Resolving apparent overlaps:**
 

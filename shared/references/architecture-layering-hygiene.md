@@ -237,7 +237,7 @@ that aborts the process). ONLY the composition root / app entry point owns proce
 fatal-severity returned failure IT makes an EXPLICIT termination / degradation / recovery decision (the
 severity is the input to that decision, not an implicit exit). A leaf that kills the process is
 UNEMBEDDABLE (in-process UI, API host, test harness, a second instance in one process) and erases the
-caller's diagnostic context. This is fail-loud UP the call chain, not by killing every other caller. The
+caller's diagnostic context. This is fail-loud UP the call chain, not by killing every other caller. The failure idiom is chosen per LAYER and is uniform within it: process exit at the composition root; typed returned status from libraries/leaves; an in-band poison value (e.g. NaN-poison) ONLY where no status channel exists (a numeric kernel with no side-band), documented at the contract. The
 three fields are load-bearing: severity → response choice; stable failure-id → a machine key for
 tooling/tests; cause chain → originating context. The severity must distinguish at minimum the response
 classes the composition root can select (e.g. recoverable / degrade / fatal). (Source L11: leaves NEVER
@@ -251,7 +251,7 @@ to "the repo-standard gate"; where no boundary is declared, the scope is every s
 entry point (not `main.*`, not in an entry dir such as `cmd/`/`bin/`/`app/`) and NOT a test binary — a
 binary scope the reviewer records) — for termination primitives; a NEW occurrence in this change FAILS;
 the existing baseline is a frozen debt that only decreases — a repo CI counter where one is configured,
-else the probe is review-bound (the reviewer counts new termination primitives in the diff). [spine:
+else the probe is review-bound (the reviewer counts new termination primitives in the diff); idiom-uniformity: two failure idioms for one failure class within one layer is a finding (review-bound). [spine:
 Failure transparency and diagnosability, Operational-contract scope discipline]
 
 **D2 — Observability is one support-owned, injected diagnostic port with stable event IDs and a

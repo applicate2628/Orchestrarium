@@ -2,6 +2,15 @@
 
 Get an independent second opinion via the consultant agent.
 
+## When to auto-invoke
+
+Apply this flow when the user asks for one independent opinion on a decision or artifact:
+
+- "second opinion", "второе мнение", "ask the consultant", "спроси консультанта"
+- "what would another model say", "получи независимое мнение"
+
+Do NOT auto-invoke on plain `review` / `let's review` (owned by `/agents-review`) or on "review loop" / "автономная петля" (owned by `/agents-review-loop`). Toggle sub-commands (`enable`/`internal`/`disable`/`status`) are explicit-only.
+
 ## Steps
 
 0. **Check toggle mode.** Before invoking the consultant:

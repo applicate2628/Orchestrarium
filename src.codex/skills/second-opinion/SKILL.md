@@ -1,6 +1,6 @@
 ---
 name: second-opinion
-description: "Get independent consultant opinion or manage consultant toggle."
+description: "Command wrapper: one consultant opinion on a decision, or the consultant mode toggle."
 ---
 
 # Second Opinion
