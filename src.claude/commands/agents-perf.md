@@ -58,7 +58,7 @@ The user does not need to type `/agents-perf` for this flow to fire. Apply it tr
 ## Rules
 
 - **Every stage MUST be invoked via the Agent tool** with the specified `subagent_type`. Do not role-play specialists inline.
-- When fixing an issue from the registry, update its file: set `status: fixed` only after the performance reviewer confirms AND the user approves. If the reviewer says REVISE, keep `status: open`.
+- When fixing an issue from the registry, update its file (the status enum `open | fixed | wontfix` is owned by `$performance-engineer`): set `status: fixed` only after the performance reviewer confirms AND the user approves; `wontfix` records an accepted-tradeoff reason. If the reviewer says REVISE, keep `status: open`.
 - **Save recovery state** between stages in `work-items/active/<date>-<slug>/` per the recovery rule in CLAUDE.md: `status.md` + the accepted artifact from each completed stage.
 - Follow evidence-based completion: show measured results, not estimates.
 - Confirm the bottleneck before optimizing — do not guess.

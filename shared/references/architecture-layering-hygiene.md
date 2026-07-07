@@ -120,7 +120,7 @@ per-consumer GLUE — not a copy — but it must CALL the core, never re-derive 
 depend on a sandbox / experiment" need is satisfied by GRADUATING the core to its owning module FIRST
 (so production reuses the graduated core), NEVER by re-implementing it to dodge the dependency.
 Re-implementing a graduated core "to avoid the dependency" is a defect, not isolation. (Hard-boundary
-exception: see C1.) [spine: No logic duplication, Reuse before hand-rolling]
+exception: see C1.) [spine: No logic duplication / no fix layering, Reuse before hand-rolling]
 
 ## B. Performance
 
@@ -155,7 +155,7 @@ consumer CALLS. No module re-decides it, and no module re-defines or re-types it
 protocol boundary is allowed ONLY when it is derived from one owned source (codegen, a shared schema)
 or guarded by a drift / contract gate that fails on divergence; unchecked hand re-typing across such a
 boundary remains the bug. Reproducibility (bit-identical or contract-identical results) depends on
-this single ownership. [spine: No logic duplication]
+this single ownership. [spine: No logic duplication / no fix layering]
 
 **C2 — Config and control-flow are upper-layer inputs: parse once at the top, inject down.** Process
 environment, command-line options, deck / scenario selectors, validation labels, file paths, and mode

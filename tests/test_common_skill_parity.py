@@ -1,8 +1,7 @@
 """Cross-pack parity for the shared common-skills.
 
-The common-skills (bug-hunting, analyzing-video-bugs, explain-simply,
-mathtype-book-page, windows-gui-manual-testing) are shipped per-pack under
-src.<provider>/skills/<name>/SKILL.md. The INVARIANT is that the skill BODY (the
+The common-skills (the set is derived from the spine's `## Common skills` line,
+see _common_skills) are shipped per-pack under src.<provider>/skills/<name>/SKILL.md. The INVARIANT is that the skill BODY (the
 methodology, everything after the YAML frontmatter) is byte-identical across all 4
 packs — a silent body drift in one pack must be caught. No pack validator
 content-checks them today (they assert existence only, and hash the shared
@@ -17,13 +16,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKS = ("src.claude", "src.codex", "src.gemini", "src.qwen")
-COMMON_SKILLS = (
-    "bug-hunting",
-    "analyzing-video-bugs",
-    "explain-simply",
-    "mathtype-book-page",
-    "windows-gui-manual-testing",
-)
+
+
+def _common_skills() -> tuple:
+    """Derive the common-skill set from its single owner — the spine's
+    `## Common skills` `Set:` line — so this test cannot drift when a skill is
+    added/removed (a hardcoded list here silently excluded a shipped skill until
+    2026-07-07). Parses the `$name` tokens from that one sentence."""
+    import re
+
+    spine = (ROOT / "shared" / "AGENTS.shared.md").read_text(encoding="utf-8")
+    m = re.search(r"^## Common skills\b.*?\bSet:\s*(.+?)\.", spine, re.S | re.M)
+    assert m, "could not find the '## Common skills' Set: line in the spine"
+    names = re.findall(r"`\$([a-z][a-z0-9-]+)`", m.group(1))
+    assert names, "no `$skill` tokens parsed from the spine Common skills Set line"
+    return tuple(names)
+
+
+COMMON_SKILLS = _common_skills()
 
 
 def _skill(pack: str, name: str) -> Path:

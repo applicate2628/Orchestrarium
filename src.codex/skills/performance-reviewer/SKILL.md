@@ -36,7 +36,7 @@ description: "Review performance budgets, latency, throughput, memory, CPU, scal
 
 ## Performance issue registry
 
-When a performance issue is found, record it in the configured bug registry path, if the repository uses one, with fields: title, metric affected (latency / throughput / memory / CPU / cost), budget or SLA violated (if known), reproduction environment, severity, and status (open / in-progress / resolved).
+The performance issue registry format and its status enum are owned by `$performance-engineer` (`work-items/performance/<date>-<slug>.md`, status `open | fixed | wontfix`); this role CITES that contract, it does not redefine it. When confirming a fix, verify the registry entry moved `open -> fixed` (reviewer confirmed AND user approved) or carries a `wontfix` accepted-tradeoff reason.
 
 ## Cross-domain escalation
 

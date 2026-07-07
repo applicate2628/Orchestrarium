@@ -28,7 +28,7 @@ externalOpinionCounts: {}  # allowed: structured lane-count map
 externalCodexWorkdirMode: neutral  # allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project
 externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-externalCodexProfile: gpt-5.5-xhigh  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh; default: gpt-5.5-xhigh
+externalCodexProfile: gpt-5.5-xhigh  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh | gpt-5.3-codex-spark; default: gpt-5.5-xhigh
 externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh
 ```
 

@@ -3,4 +3,4 @@
 # inlined slices were last reviewed for fidelity against. Regenerate with:
 #   python scripts/validate-arch-layering-slices.py --update-stamp
 # ONLY after re-reviewing every role slice against the changed reference.
-c35ff2c717ddf38eb3133b23d843a720b7c4729586a26d83b00e7f9c328021a8
+468215a22917852125f24956f500c18425fa02aa1cd6c7c70f11b249105059d8

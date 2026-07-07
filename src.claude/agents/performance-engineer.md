@@ -41,7 +41,7 @@ When identifying a performance issue, create or update a file in `work-items/per
 ```markdown
 ---
 severity: high | medium | low
-status: open
+status: open | fixed | wontfix   # this role OWNS the perf-registry status enum; reviewers cite it
 found-by: performance-engineer
 context: <work-item slug or "standalone">
 ---
