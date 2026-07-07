@@ -64,6 +64,28 @@ class LocalOnlyTierParityTest(unittest.TestCase):
                     f"{sorted(canonical)} (owner: shared/local-only-tiers.txt)",
                 )
 
+    def test_install_md_prose_lists_the_full_tier_set(self) -> None:
+        """INSTALL.md restates the tier list in human-facing prose (3 bullets).
+        Those prose copies are the same list under the same owner — gate them too
+        so they cannot understate actual install behavior (they said 3 tiers,
+        omitting /.scratch/, until 2026-07-07). Each `ensure ... .gitignore` line
+        must name every canonical tier."""
+        canonical = _canonical_tiers()
+        install_md = (ROOT / "INSTALL.md").read_text(encoding="utf-8")
+        prose_lines = [
+            ln for ln in install_md.splitlines()
+            if "are present in the target repo `.gitignore`" in ln
+        ]
+        self.assertTrue(prose_lines, "no INSTALL.md tier-prose lines found")
+        for ln in prose_lines:
+            named = set(_TIER.findall(ln))
+            with self.subTest(line=ln[:60]):
+                self.assertTrue(
+                    canonical <= named,
+                    f"INSTALL.md tier prose {sorted(named)} is missing "
+                    f"{sorted(canonical - named)} (owner: shared/local-only-tiers.txt)",
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

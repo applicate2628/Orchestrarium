@@ -694,7 +694,7 @@ for dir in "${DIRS[@]}"; do
   # monorepo path never ships those; commands/ is the sole monorepo flow surface).
   # Remove it. Non-namespaced user files are preserved (the loop above only
   # touches `agents-`). The prefix is the ownership marker (repo Key invariant
-  # "Every skill must have the agents- prefix") so there is no manifest to sync.
+  # every agents-* command/flow ships under this prefix) so there is no manifest to sync.
   if [[ "$dir" == "commands" || "$dir" == "skills" ]]; then
     for existing in "$dst"/agents-*; do
       [[ -e "$existing" ]] || continue

@@ -14,10 +14,10 @@ The transform (verified empirically against the published branches, 2026-06-13):
       standalone Claude pack ships both the command and an auto-discoverable skill).
   - CARRY FORWARD from the published branch (origin/<provider>): the standalone-adapted
       README.md, INSTALL.md, and every docs/** the branch already curated that is NOT in
-      DOCS_ALLOW_FROM_MAIN (e.g. the standalone docs/README index, agents-mode-reference,
-      provider-runtime-layouts). These are hand-maintained for a single-provider install
-      and the monorepo copies link to excluded paths (other providers, docs/routing/), so
-      pulling them fresh would break links — carry the branch's link-consistent versions.
+      DOCS_ALLOW_FROM_MAIN (e.g. agents-mode-reference, provider-runtime-layouts). These are
+      hand-maintained for a single-provider install. docs/README.md is the EXCEPTION — it is
+      no longer carried but REGENERATED from the monorepo copy (see _regenerate_docs_readme)
+      so its index and links reflect what the branch actually ships instead of going stale.
   - EXCLUDE everything else (other providers, the merged root AGENTS.md / CLAUDE.md,
       cross-pack-reconciliation.md, install.ps1/sh, RELEASE_NOTES.md, tests/,
       .gitattributes, docs/routing/, docs/superpowers/, and any non-allowlisted main doc).
@@ -68,15 +68,44 @@ def _delink_excluded(content: bytes) -> bytes:
     return _EXCLUDED_LINK_RE.sub(r"\1", content.decode("utf-8")).encode("utf-8")
 
 
-def _regenerate_docs_readme(monorepo_readme: bytes, shipped_docs: set[str]) -> bytes:
-    """Rebuild docs/README.md for a standalone branch from the MONOREPO copy, so
-    the "Current docs in this branch:" list reflects the docs the branch ACTUALLY
-    ships — not a frozen branch copy that silently falls behind (gap 3). A branch
-    excludes some subtrees (docs/routing/, docs/superpowers/), so a bullet whose
-    link target is under an excluded subdir, or names a top-level doc not shipped
-    here, is DROPPED; the remaining prose is delinked of any excluded targets.
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 
-    shipped_docs = the set of top-level doc basenames written under out/docs/."""
+
+def _delink_dead(line: str, out: Path) -> str:
+    """Delink (keep the text, drop the `(target)`) any RELATIVE markdown link
+    whose target does not resolve to a file/dir actually present in the standalone
+    tree `out`. A standalone branch ships only ONE provider's src.<p>/ +
+    references-<p>/ and excludes subtrees (docs/routing/, docs/superpowers/), so a
+    monorepo link into a sibling provider's subtree or an excluded subtree is dead
+    on this branch. Absolute/anchor/external links (http, #, mailto:) are kept."""
+    def repl(m: "re.Match[str]") -> str:
+        text, target = m.group(1), m.group(2)
+        if target.startswith(("http://", "https://", "#", "mailto:")):
+            return m.group(0)
+        # the README lives at out/docs/README.md, so targets resolve relative to out/docs/
+        try:
+            resolved = (out / "docs" / target).resolve()
+            if resolved.exists():
+                return m.group(0)
+        except (OSError, ValueError):
+            pass
+        return text  # dead link -> keep the descriptive text only
+    return _MD_LINK_RE.sub(repl, line)
+
+
+def _regenerate_docs_readme(monorepo_readme: bytes, out: Path, provider: str) -> bytes:
+    """Rebuild docs/README.md for a standalone branch from the MONOREPO copy, so
+    it reflects what the branch ACTUALLY ships — not a frozen branch copy that
+    silently falls behind (gap 3). Two passes:
+      1) the "Current docs in this branch:" list: drop a bullet whose target is an
+         excluded subdir or a top-level doc not shipped under out/docs/;
+      2) EVERY markdown link (whole file): delink any target that does not resolve
+         in the standalone tree `out` (sibling-provider subtrees, excluded subtrees)
+         — this is what kept the old regeneration shipping dead cross-provider
+         links in the top "Use it together with:" section.
+    The intro line is also rewritten from the monorepo phrasing to the standalone
+    pack it actually is."""
+    shipped_docs = {p.name for p in (out / "docs").glob("*.md")} if (out / "docs").is_dir() else set()
     text = monorepo_readme.decode("utf-8")
     kept: list[str] = []
     in_current = False
@@ -89,17 +118,15 @@ def _regenerate_docs_readme(monorepo_readme: bytes, shipped_docs: set[str]) -> b
             in_current = False
         if in_current and line.lstrip().startswith("- ["):
             m = re.search(r"\]\(([^)]+)\)", line)
-            if m:
-                target = m.group(1)
-                # a subdir target (routing/..., superpowers/...) is an excluded
-                # subtree the branch does not ship -> drop the whole bullet;
-                # a top-level doc not shipped here is also dropped.
-                if "/" in target or target not in shipped_docs:
-                    continue
-            kept.append(line)
-        else:
-            kept.append(line)
-    return _delink_excluded("\n".join(kept).encode("utf-8"))
+            if m and ("/" in m.group(1) or m.group(1) not in shipped_docs):
+                continue  # excluded subdir or unshipped top-level doc -> drop bullet
+        kept.append(_delink_dead(line, out))
+    result = "\n".join(kept)
+    result = result.replace(
+        "This directory is the branch-level docs surface for the Orchestrarium monorepo common layer.",
+        f"This directory is the docs surface for the standalone {provider.capitalize()} pack.",
+    )
+    return result.encode("utf-8")
 
 
 # path -> transform applied to the monorepo copy before writing into the standalone tree.
@@ -249,10 +276,8 @@ def extract(provider: str, source_ref: str, branch_ref: str, out: Path) -> dict[
     #    out/docs/ (top-level only — excluded subtrees like docs/routing/ are not
     #    carried, so their bullets are dropped). This replaces the old frozen
     #    branch copy that silently fell behind the monorepo.
-    docs_dir = out / "docs"
-    shipped_docs = {p.name for p in docs_dir.glob("*.md")} if docs_dir.is_dir() else set()
     write_file(out, "docs/README.md",
-               _regenerate_docs_readme(show(source_ref, "docs/README.md"), shipped_docs))
+               _regenerate_docs_readme(show(source_ref, "docs/README.md"), out, provider))
     counts["carried"] += 1
 
     return counts

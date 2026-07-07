@@ -8,8 +8,8 @@ never as generated skills) survived every upgrade. The fix reclaims the reserved
 `agents-` namespace: a target `commands/agents-*.md` or `skills/agents-*/` dir
 not in the current pack is removed; NON-namespaced user files are preserved.
 
-The prefix IS the ownership marker (repo Key invariant "Every skill must have the
-agents- prefix"), so there is no hand-maintained manifest.
+The prefix IS the ownership marker (every agents-* command/flow ships under it — the
+common skills in skills/ are role-named, not agents-*-prefixed), so there is no manifest.
 """
 import shutil
 import subprocess
