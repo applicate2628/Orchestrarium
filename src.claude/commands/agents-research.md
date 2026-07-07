@@ -13,6 +13,8 @@ Apply this command's flow automatically when:
 
 The user does not need to type `/agents-research` for this flow to fire. Apply it transparently and announce the routing decision.
 
+**Do NOT auto-invoke** when the ask is "explain simply" / "на пальцах" / "teach me the concept" with no code-surface investigation needed — that is the `$explain-simply` common-skill's surface; research feeds it facts when both apply.
+
 **Do NOT auto-invoke** if the user also wants to design or implement — that is `/agents-design` (research + architect + planner). If the user said "research X and propose a plan", route to `agents-design.md` instead.
 
 ## Steps

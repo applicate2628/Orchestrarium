@@ -744,7 +744,27 @@ echo ""
 echo "[Skills]"
 for f in $PACK/commands/*.md; do
   name=$(basename "$f" .md)
-  pass "/$name skill exists"
+  case "$name" in
+    agents-*) pass "/$name has the agents- prefix" ;;
+    *) fail "/$name command lacks the agents- prefix (key invariant)" ;;
+  esac
+done
+# SKILL.md frontmatter: fence + name matches dir + non-empty description
+for sd in $PACK/skills/*/; do
+  [[ -f "$sd/SKILL.md" ]] || continue
+  sname=$(basename "$sd")
+  first=$(head -1 "$sd/SKILL.md")
+  fm_name=$(awk '/^---$/{n++; next} n==1 && /^name:/{sub(/^name:[ ]*/,""); print; exit}' "$sd/SKILL.md")
+  fm_desc=$(awk '/^---$/{n++; next} n==1 && /^description:/{sub(/^description:[ ]*/,""); print; exit}' "$sd/SKILL.md")
+  if [[ "$first" != "---" ]]; then
+    fail "skills/$sname/SKILL.md does not start with a frontmatter fence"
+  elif [[ "$fm_name" != "$sname" ]]; then
+    fail "skills/$sname/SKILL.md frontmatter name '$fm_name' != directory '$sname'"
+  elif [[ -z "$fm_desc" ]]; then
+    fail "skills/$sname/SKILL.md has an empty frontmatter description"
+  else
+    pass "skills/$sname frontmatter valid (fence + name + description)"
+  fi
 done
 if [[ -f "$PACK/agents/contracts/policies-catalog.md" ]]; then
   pass "policy catalog exists"

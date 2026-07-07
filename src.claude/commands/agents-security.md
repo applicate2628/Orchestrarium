@@ -45,5 +45,5 @@ The user does not need to type `/agents-security` for this flow to fire. Apply i
 
 - **Every stage MUST be invoked via the Agent tool** with the specified `subagent_type`. Do not role-play specialists inline.
 - Pass the security engineer's threat model to the security reviewer.
-- CRITICAL findings = BLOCKED. No exceptions.
+- A CRITICAL finding always fails the gate: return `REVISE` with the finding marked must-fix-before-merge (`BLOCKED` only when a real external blocker prevents remediation). No exceptions to failing the gate.
 - This is read-only — do not modify any files.

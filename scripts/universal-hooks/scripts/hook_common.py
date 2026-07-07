@@ -42,7 +42,11 @@ def read_stdin_utf8() -> str:
         except Exception:
             return ""
     if isinstance(raw, bytes):
-        return raw.decode("utf-8", errors="replace")
+        # utf-8-sig strips a leading UTF-8 BOM if present (PowerShell can prepend
+        # one when piping stdin to a native command), otherwise decodes as plain
+        # UTF-8; a stray BOM would otherwise make json.loads reject the envelope
+        # and the hook silently no-op on the Windows .ps1 install path.
+        return raw.decode("utf-8-sig", errors="replace")
     return str(raw or "")
 
 

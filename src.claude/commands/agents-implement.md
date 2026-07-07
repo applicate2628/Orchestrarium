@@ -8,7 +8,7 @@ Apply this command's flow automatically when:
 
 - an accepted plan exists in `work-items/active/<slug>/plan.md` and the user asks to proceed, continue, or execute
 - user explicitly says "implement plan X", "execute the plan for Y", "run phase N"
-- user says "continue", "next phase", "go ahead" while a work-item is mid-implementation
+- user says "continue", "next phase", "go ahead" while a work-item is mid-implementation — if the session is FRESH (no in-context chain state), first apply `/agents-resume`'s load-and-validate steps (git-divergence + `Depends-on` checks), then continue
 - user references a specific phase by slug or number
 
 The user does not need to type `/agents-implement` for this flow to fire. Apply it transparently and announce the routing decision in your first response.
