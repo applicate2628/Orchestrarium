@@ -664,6 +664,97 @@ def validate_manual_reference_surfaces(root: Path) -> None:
             )
 
 
+# The externalCodexProfile value NAMESPACE shape (a schema value looks like this).
+# Detection is derived from the SCHEMA, not a hardcoded value list — the specific
+# allowed values (gpt-5.5-fast, ...) are read from the schema at runtime; this
+# pattern only recognizes the token SHAPE so the scanner can find them on a line.
+_CODEX_ENUM_TOKEN = re.compile(r"default|gpt-5\.\d+-[a-z0-9-]+")
+# Enum-LISTING signature: any TWO namespace-shaped tokens adjacent via ` | ` (the
+# enum's `X | Y | Z` form). Robust to a dropped value — a copy missing one value
+# still has other adjacent pairs, so it is still detected (then the exact-set
+# check below flags the drop). Markdown preset-table ROWS are excluded separately
+# (they start with `|`), so a row that scatters the same tokens across cells is
+# not a false positive.
+_CODEX_ENUM_LISTING = re.compile(
+    r"(?:default|gpt-5\.\d+-[a-z0-9-]+)\s*\|\s*(?:default|gpt-5\.\d+-[a-z0-9-]+)"
+)
+_CODEX_ENUM_SCAN_ROOTS = ("docs", "shared", "src.claude", "src.codex", "src.gemini", "src.qwen")
+_CODEX_ENUM_SCAN_TOP = ("README.md", "INSTALL.md")
+_CODEX_ENUM_SCAN_EXTS = (".md", ".json", ".yaml", ".yml", ".toml", ".sh", ".ps1")
+# Changelog / release-note / history stems are EXEMPT: recording a superseded
+# enum ("was default | gpt-5.5-fast | gpt-5.5-xhigh") is the point there, exactly
+# as the C6 stale-relation-residue hook exempts the same stems. A live-surface
+# enum validator must not guard historical prose.
+_CODEX_ENUM_EXEMPT_STEMS = {
+    "release_notes", "release-notes", "changelog", "changes", "history", "news",
+}
+
+
+def validate_codex_profile_enum(root: Path, schema_data: dict[str, Any]) -> None:
+    """Every LIVE surface that ENUMERATES the externalCodexProfile allowed values
+    (an `X | Y | Z` listing) must carry EXACTLY the schema set — the schema
+    (shared/agents-mode.schema.json) is the single owner. Fail-closed on BOTH a
+    missing value (the recurring drift: gpt-5.3-codex-spark was missing from ~9
+    copies until 2026-07-07) AND an extra/renamed value (a schema rename must
+    sweep every copy).
+
+    Design (hardening the first cut after the 2026-07-07 acceptance commission):
+    - detection is DERIVED from the schema value namespace shape, not a hardcoded
+      `fast | xhigh` anchor, so a copy that drops one anchor token is still caught;
+    - surfaces are DISCOVERED by globbing the doc/config trees (a new enumerating
+      file is auto-covered) — but changelog/release-note/history stems are EXEMPT
+      (recording a superseded enum there is legitimate, mirroring the C6 hook);
+    - a markdown PRESET-TABLE row (starts with `|`, scatters the tokens across
+      cells) is skipped, so it is not a false positive;
+    - the check is EXACT set-equality on a listing line, so a removed/renamed
+      schema value fails closed (not merely a subset check)."""
+    allowed: set[str] | None = None
+    for entry in schema_data.get("scalarKeys", []):
+        if isinstance(entry, dict) and entry.get("name") == "externalCodexProfile":
+            allowed = set(entry.get("allowed", []))
+            break
+    if not allowed:
+        raise ContractError("schema has no externalCodexProfile.allowed to validate against")
+
+    files: list[Path] = [root / name for name in _CODEX_ENUM_SCAN_TOP]
+    for sub in _CODEX_ENUM_SCAN_ROOTS:
+        d = root / sub
+        if d.is_dir():
+            files.extend(
+                p for p in d.rglob("*")
+                if p.is_file() and p.suffix in _CODEX_ENUM_SCAN_EXTS
+                and "/.scratch/" not in p.as_posix()
+            )
+
+    for path in files:
+        if path.stem.lower() in _CODEX_ENUM_EXEMPT_STEMS:
+            continue  # changelog / release-note / history — historical prose
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if line.lstrip().startswith("|"):
+                continue  # markdown preset-table row, not an inline enum listing
+            if not _CODEX_ENUM_LISTING.search(line):
+                continue
+            found = set(_CODEX_ENUM_TOKEN.findall(line))
+            if found != allowed:
+                rel = path.relative_to(root).as_posix()
+                missing = sorted(allowed - found)
+                extra = sorted(found - allowed)
+                detail = []
+                if missing:
+                    detail.append(f"missing {missing}")
+                if extra:
+                    detail.append(f"unknown/removed {extra}")
+                raise ContractError(
+                    f"{rel}:{lineno} externalCodexProfile enum listing "
+                    f"{'; '.join(detail)} — must equal the schema set "
+                    f"{sorted(allowed)} (owner: shared/agents-mode.schema.json)"
+                )
+
+
 def validate_schema(schema_data: dict[str, Any], presets_data: dict[str, Any]) -> None:
     production = set(schema_data["productionAutoProviders"])
     examples = set(schema_data["exampleOnlyProviders"])
@@ -744,6 +835,7 @@ def main() -> int:
         validate_generated_docs_sync(root)
         validate_defaults(root, schema_data)
         validate_manual_reference_surfaces(root)
+        validate_codex_profile_enum(root, schema_data)
         validate_available_presets(root, presets_data)
         validate_reference_expansion(root, presets_data)
         validate_raised_count_bullets(root, presets_data, PRESET_DOCS)

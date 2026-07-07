@@ -17,31 +17,18 @@ FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
 
-UNIVERSAL_RUNTIME_SCRIPT_NAMES=(
-  hook_common.py
-  check-bugfix-discipline.py
-  check-bugfix-discipline.sh
-  check-bugfix-discipline.ps1
-  check-passive-polling-stop.py
-  check-passive-polling-stop.sh
-  check-passive-polling-stop.ps1
-  check-work-items-archival-stop.py
-  check-work-items-archival-stop.sh
-  check-work-items-archival-stop.ps1
-  mcp-usage-reminder.sh
-  mcp-usage-reminder.ps1
-  check-publication-safety.sh
-  check-publication-safety.ps1
-)
-
-UNIVERSAL_RUNTIME_HOOK_NAMES=(
-  check-machine-local-path.py
-  check-machine-local-path.sh
-  check-machine-local-path.ps1
-  check-no-trash-in-repo.py
-  check-no-trash-in-repo.sh
-  check-no-trash-in-repo.ps1
-)
+# Universal hook/helper names are DERIVED by globbing the pack-neutral canon dirs
+# (scripts/universal-hooks/{scripts,hooks}/) — never a hardcoded list. A hook
+# added to the canon is auto-installed here; a hardcoded list is exactly what hid
+# check-stale-relation-residue from the install surface until 2026-07-07.
+UNIVERSAL_RUNTIME_SCRIPT_NAMES=()
+for _u in "$UNIVERSAL_HOOK_SCRIPTS_SOURCE"/*.py "$UNIVERSAL_HOOK_SCRIPTS_SOURCE"/*.sh "$UNIVERSAL_HOOK_SCRIPTS_SOURCE"/*.ps1; do
+  [[ -f "$_u" ]] && UNIVERSAL_RUNTIME_SCRIPT_NAMES+=("$(basename "$_u")")
+done
+UNIVERSAL_RUNTIME_HOOK_NAMES=()
+for _u in "$UNIVERSAL_HOOK_HOOKS_SOURCE"/*.py "$UNIVERSAL_HOOK_HOOKS_SOURCE"/*.sh "$UNIVERSAL_HOOK_HOOKS_SOURCE"/*.ps1; do
+  [[ -f "$_u" ]] && UNIVERSAL_RUNTIME_HOOK_NAMES+=("$(basename "$_u")")
+done
 MODE="repo"
 TARGET=""
 
@@ -243,7 +230,7 @@ install_tree() {
 ensure_local_only_gitignore_entries() {
   local project_root="$1"
   local gitignore="$project_root/.gitignore"
-  local entries=("/.reports/" "/.plans/" "/work-items/")
+  local entries=("/.reports/" "/.plans/" "/work-items/" "/.scratch/")
   local missing=()
 
   for entry in "${entries[@]}"; do
