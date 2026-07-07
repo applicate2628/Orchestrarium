@@ -11,7 +11,11 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE="$REPO_DIR/src.claude"
 DEFAULT_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 
-# Directories to install (order doesn't matter)
+# Directories to install (order doesn't matter). `commands/` is the SINGLE
+# monorepo flow surface: each agents-* flow ships as commands/agents-*.md only.
+# The generated skills/agents-*/SKILL.md variants are a standalone-BRANCH
+# packaging artifact (extract-provider-branch.py), not shipped here; the reserved
+# `agents-` namespace reclaim below removes any stale ones from prior installs.
 DIRS=(agents commands skills)
 OPTIONAL_DIRS=(memory)
 FORCE=0
@@ -682,6 +686,29 @@ for dir in "${DIRS[@]}"; do
       echo "  Preserved user file: $dir/$existing_name"
     fi
   done
+
+  # Reclaim the reserved `agents-` pack namespace: a target commands/agents-*.md
+  # file or a skills/agents-*/ dir that is NOT in the current pack is a stale
+  # pack-owned artifact from a prior install (a renamed/removed flow, or a
+  # generated agents-* skill left by an old standalone-branch install — the
+  # monorepo path never ships those; commands/ is the sole monorepo flow surface).
+  # Remove it. Non-namespaced user files are preserved (the loop above only
+  # touches `agents-`). The prefix is the ownership marker (repo Key invariant
+  # "Every skill must have the agents- prefix") so there is no manifest to sync.
+  if [[ "$dir" == "commands" || "$dir" == "skills" ]]; then
+    for existing in "$dst"/agents-*; do
+      [[ -e "$existing" ]] || continue
+      existing_name="$(basename "$existing")"
+      # is this stale name still shipped by the current pack?
+      if [[ -e "$src/$existing_name" ]]; then continue; fi
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "    [dry-run] would reclaim stale pack namespace: $dir/$existing_name"
+      else
+        rm -rf "$existing"
+        echo "  Reclaimed stale pack item: $dir/$existing_name"
+      fi
+    done
+  fi
 done
 
 runtime_ledger_scripts=(

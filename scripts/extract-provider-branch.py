@@ -68,6 +68,40 @@ def _delink_excluded(content: bytes) -> bytes:
     return _EXCLUDED_LINK_RE.sub(r"\1", content.decode("utf-8")).encode("utf-8")
 
 
+def _regenerate_docs_readme(monorepo_readme: bytes, shipped_docs: set[str]) -> bytes:
+    """Rebuild docs/README.md for a standalone branch from the MONOREPO copy, so
+    the "Current docs in this branch:" list reflects the docs the branch ACTUALLY
+    ships — not a frozen branch copy that silently falls behind (gap 3). A branch
+    excludes some subtrees (docs/routing/, docs/superpowers/), so a bullet whose
+    link target is under an excluded subdir, or names a top-level doc not shipped
+    here, is DROPPED; the remaining prose is delinked of any excluded targets.
+
+    shipped_docs = the set of top-level doc basenames written under out/docs/."""
+    text = monorepo_readme.decode("utf-8")
+    kept: list[str] = []
+    in_current = False
+    for line in text.split("\n"):
+        if line.startswith("Current docs in this branch:"):
+            in_current = True
+            kept.append(line)
+            continue
+        if in_current and line.startswith("## "):
+            in_current = False
+        if in_current and line.lstrip().startswith("- ["):
+            m = re.search(r"\]\(([^)]+)\)", line)
+            if m:
+                target = m.group(1)
+                # a subdir target (routing/..., superpowers/...) is an excluded
+                # subtree the branch does not ship -> drop the whole bullet;
+                # a top-level doc not shipped here is also dropped.
+                if "/" in target or target not in shipped_docs:
+                    continue
+            kept.append(line)
+        else:
+            kept.append(line)
+    return _delink_excluded("\n".join(kept).encode("utf-8"))
+
+
 # path -> transform applied to the monorepo copy before writing into the standalone tree.
 DOCS_FROM_MAIN_TRANSFORMED = {
     "docs/agents-mode-reference.md": _delink_excluded,
@@ -195,9 +229,12 @@ def extract(provider: str, source_ref: str, branch_ref: str, out: Path) -> dict[
 
     # 3. carry from the published branch: required standalone files + the branch's
     #    curated docs that are not pulled fresh from main (link-consistent versions).
+    #    docs/README.md is EXCLUDED from the carry — it is regenerated from the
+    #    monorepo copy in step 4 so its "Current docs" index cannot go stale (gap 3).
     carry = list(REQUIRED_CARRY) + [
         p for p in branch_paths
         if p.startswith("docs/")
+        and p != "docs/README.md"
         and p not in DOCS_ALLOW_FROM_MAIN
         and p not in DOCS_FROM_MAIN_TRANSFORMED
     ]
@@ -206,6 +243,17 @@ def extract(provider: str, source_ref: str, branch_ref: str, out: Path) -> dict[
             raise RuntimeError(f"required standalone file missing on {branch_ref}: {rel} (cannot build a complete tree)")
         write_file(out, rel, show(branch_ref, rel))
         counts["carried"] += 1
+
+    # 4. GENERATE docs/README.md from the monorepo copy, rebuilding its
+    #    "Current docs in this branch:" list from the docs actually shipped under
+    #    out/docs/ (top-level only — excluded subtrees like docs/routing/ are not
+    #    carried, so their bullets are dropped). This replaces the old frozen
+    #    branch copy that silently fell behind the monorepo.
+    docs_dir = out / "docs"
+    shipped_docs = {p.name for p in docs_dir.glob("*.md")} if docs_dir.is_dir() else set()
+    write_file(out, "docs/README.md",
+               _regenerate_docs_readme(show(source_ref, "docs/README.md"), shipped_docs))
+    counts["carried"] += 1
 
     return counts
 

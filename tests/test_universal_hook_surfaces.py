@@ -7,31 +7,26 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-RUNTIME_SCRIPT_NAMES = (
-    "hook_common.py",
-    "check-bugfix-discipline.py",
-    "check-bugfix-discipline.sh",
-    "check-bugfix-discipline.ps1",
-    "check-passive-polling-stop.py",
-    "check-passive-polling-stop.sh",
-    "check-passive-polling-stop.ps1",
-    "check-work-items-archival-stop.py",
-    "check-work-items-archival-stop.sh",
-    "check-work-items-archival-stop.ps1",
-    "mcp-usage-reminder.sh",
-    "mcp-usage-reminder.ps1",
-    "check-publication-safety.sh",
-    "check-publication-safety.ps1",
-)
+# The pack-neutral canon dir IS the single owner of "which universal hooks exist"
+# — derive the name lists by GLOB, never a hardcoded tuple. A hardcoded list is
+# exactly what hid check-stale-relation-residue from this gate (it shipped in the
+# packs but was never added to the canon or the tuple), so the list must come
+# from the canon dir itself and a set-equality check must flag a pack hook that
+# has no canon counterpart.
+_CANON = ROOT / "scripts" / "universal-hooks"
+_HOOK_EXTS = (".py", ".sh", ".ps1")
 
-RUNTIME_HOOK_NAMES = (
-    "check-machine-local-path.py",
-    "check-machine-local-path.sh",
-    "check-machine-local-path.ps1",
-    "check-no-trash-in-repo.py",
-    "check-no-trash-in-repo.sh",
-    "check-no-trash-in-repo.ps1",
-)
+
+def _canon_names(subdir: str) -> tuple:
+    d = _CANON / subdir
+    return tuple(sorted(
+        p.name for p in d.iterdir()
+        if p.is_file() and p.suffix in _HOOK_EXTS
+    ))
+
+
+RUNTIME_SCRIPT_NAMES = _canon_names("scripts")
+RUNTIME_HOOK_NAMES = _canon_names("hooks")
 
 
 class UniversalHookSurfaceTest(unittest.TestCase):
@@ -58,6 +53,30 @@ class UniversalHookSurfaceTest(unittest.TestCase):
                 self.assertTrue(
                     filecmp.cmp(universal_dir / name, provider_dir / name, shallow=False),
                     f"{provider_dir / name} drifted from universal hook source",
+                )
+
+    def test_pack_hooks_dir_has_no_hook_missing_from_canon(self) -> None:
+        """Set-equality: every audit-hook family in a pack's hooks/ dir must have
+        a canon counterpart (and vice versa). The pack hooks/ dirs hold exactly
+        the audit-hook set, so canon==pack is the right invariant here (unlike
+        scripts/, where the pack dir is a superset — blocking hooks + helpers —
+        and only canon⊆pack + filecmp applies). This is the check that would have
+        caught check-stale-relation-residue being absent from the canon."""
+        canon = set(RUNTIME_HOOK_NAMES)
+        for pack_hooks in (
+            ROOT / "src.claude" / "agents" / "hooks",
+            ROOT / "src.codex" / "skills" / "lead" / "hooks",
+        ):
+            pack = {
+                p.name for p in pack_hooks.iterdir()
+                if p.is_file() and p.suffix in _HOOK_EXTS
+            }
+            with self.subTest(pack=str(pack_hooks)):
+                self.assertEqual(
+                    canon, pack,
+                    f"hooks/ set mismatch: canon-only={canon - pack}, "
+                    f"pack-only={pack - canon} (a pack hook absent from the "
+                    f"universal canon, or vice versa)",
                 )
 
     def test_gemini_qwen_installers_copy_universal_hook_helpers(self) -> None:

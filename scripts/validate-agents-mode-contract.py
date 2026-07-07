@@ -664,6 +664,68 @@ def validate_manual_reference_surfaces(root: Path) -> None:
             )
 
 
+_CODEX_ENUM_TOKEN = re.compile(r"default|gpt-5\.\d+-[a-z0-9-]+")
+# Enum-listing signature: the allowed values in their own order, adjacent —
+# distinguishes `... | gpt-5.5-fast | gpt-5.5-xhigh | ...` (an allowed-enum) from
+# a preset table row that scatters the same tokens across separate cells.
+_CODEX_ENUM_LISTING = re.compile(r"gpt-5\.5-fast\s*\|\s*gpt-5\.5-xhigh")
+_CODEX_ENUM_SCAN_ROOTS = ("docs", "shared", "src.claude", "src.codex", "src.gemini", "src.qwen")
+_CODEX_ENUM_SCAN_TOP = ("README.md", "INSTALL.md", "RELEASE_NOTES.md")
+_CODEX_ENUM_SCAN_EXTS = (".md", ".json", ".yaml", ".yml", ".toml", ".sh", ".ps1")
+
+
+def validate_codex_profile_enum(root: Path, schema_data: dict[str, Any]) -> None:
+    """Every live surface that ENUMERATES the externalCodexProfile allowed values
+    (a `... | gpt-5.5-fast | ... | gpt-5.5-xhigh | ...` listing) must carry the
+    full schema set — the schema (shared/agents-mode.schema.json) is the single
+    owner. Catches the exact recurring drift: a hand-copied enum silently missing
+    a value (gpt-5.3-codex-spark was missing from ~9 copies until 2026-07-07).
+
+    Surfaces are DISCOVERED by globbing the doc/config trees (not a hardcoded
+    file list — a new file that enumerates the enum is auto-covered). Only lines
+    that are an actual enum LISTING are checked: the allowed values appear as an
+    adjacent `gpt-5.5-fast | gpt-5.5-xhigh` sequence (the enum's own order). A
+    markdown PRESET TABLE row (`| gpt-5.5-xhigh | default | ... | gpt-5.5-fast |`)
+    scatters the same tokens across cells and is NOT adjacent, so it is correctly
+    ignored; a descriptive mention of a single profile is ignored too. The check
+    is subset (every schema value present), so an illustrative extra token in an
+    example does not false-fail."""
+    allowed: set[str] | None = None
+    for entry in schema_data.get("scalarKeys", []):
+        if isinstance(entry, dict) and entry.get("name") == "externalCodexProfile":
+            allowed = set(entry.get("allowed", []))
+            break
+    if not allowed:
+        raise ContractError("schema has no externalCodexProfile.allowed to validate against")
+
+    files: list[Path] = [root / name for name in _CODEX_ENUM_SCAN_TOP]
+    for sub in _CODEX_ENUM_SCAN_ROOTS:
+        d = root / sub
+        if d.is_dir():
+            files.extend(
+                p for p in d.rglob("*")
+                if p.is_file() and p.suffix in _CODEX_ENUM_SCAN_EXTS
+                and "/.scratch/" not in p.as_posix()
+            )
+
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if _CODEX_ENUM_LISTING.search(line):
+                found = set(_CODEX_ENUM_TOKEN.findall(line))
+                missing = allowed - found
+                if missing:
+                    rel = path.relative_to(root).as_posix()
+                    raise ContractError(
+                        f"{rel}:{lineno} externalCodexProfile enum listing is "
+                        f"missing schema value(s) {sorted(missing)} — the schema "
+                        f"(shared/agents-mode.schema.json) is the single owner"
+                    )
+
+
 def validate_schema(schema_data: dict[str, Any], presets_data: dict[str, Any]) -> None:
     production = set(schema_data["productionAutoProviders"])
     examples = set(schema_data["exampleOnlyProviders"])
@@ -744,6 +806,7 @@ def main() -> int:
         validate_generated_docs_sync(root)
         validate_defaults(root, schema_data)
         validate_manual_reference_surfaces(root)
+        validate_codex_profile_enum(root, schema_data)
         validate_available_presets(root, presets_data)
         validate_reference_expansion(root, presets_data)
         validate_raised_count_bullets(root, presets_data, PRESET_DOCS)

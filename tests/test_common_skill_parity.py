@@ -73,3 +73,33 @@ def test_every_common_skill_has_name_and_description_frontmatter():
             assert head.startswith("---\n"), f"{pack}/{name}: missing YAML frontmatter"
             fm = head.split("\n---\n", 1)[0]
             assert "name:" in fm and "description:" in fm, f"{pack}/{name}: frontmatter needs name + description"
+
+
+def test_doc_common_skill_lists_match_the_spine_owner():
+    """Gap 7: README.md and CLAUDE.md restate the common-skill set in prose. The
+    spine `## Common skills` Set line is the single owner (COMMON_SKILLS derives
+    from it). Assert each doc's `$name` list equals the owner's name-set, so a
+    skill added/removed cannot leave a stale doc list (vak was omitted from both
+    until 2026-07-07). The check is the NAME-SET only — per-skill descriptions in
+    README stay editorial prose."""
+    import re
+
+    owner = set(COMMON_SKILLS)
+    # README.md "Currently shipped:" bulleted list of `$name` skills
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    m = re.search(r"Currently shipped:\n(.*?)(?:\n\n|\n#)", readme, re.S)
+    assert m, "README.md has no 'Currently shipped:' common-skill list"
+    readme_names = set(re.findall(r"^- `\$([a-z][a-z0-9-]+)`", m.group(1), re.M))
+    assert readme_names == owner, (
+        f"README common-skill list {sorted(readme_names)} != spine owner "
+        f"{sorted(owner)} (owner: shared/AGENTS.shared.md ## Common skills)"
+    )
+    # CLAUDE.md inline enumeration (the subagent-facing common-skills sentence)
+    claude_md = (ROOT / "src.claude" / "CLAUDE.md").read_text(encoding="utf-8")
+    cm = re.search(r"common-skills \((`\$[a-z0-9-]+`(?:,\s*`\$[a-z0-9-]+`)*)\)", claude_md)
+    assert cm, "src.claude/CLAUDE.md has no inline common-skills enumeration"
+    claude_names = set(re.findall(r"`\$([a-z][a-z0-9-]+)`", cm.group(1)))
+    assert claude_names == owner, (
+        f"CLAUDE.md common-skill list {sorted(claude_names)} != spine owner "
+        f"{sorted(owner)} (owner: shared/AGENTS.shared.md ## Common skills)"
+    )

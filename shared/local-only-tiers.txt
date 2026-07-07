@@ -1,0 +1,11 @@
+# Canonical list of local-only runtime storage tiers (the single owner).
+# Each installer ensures these are present in the target repo's .gitignore, because
+# session logs, plan snapshots, and repo-local task memory are local-only output.
+# Validator-only: tests/test_local_only_gitignore_tiers.py asserts every installer
+# (install-{claude,codex,gemini,qwen}.{sh,ps1}) carries exactly this set. The
+# installers keep the list inline for readability; this file is the drift owner.
+# One tier per line, leading slash form (as written into .gitignore).
+/.reports/
+/.plans/
+/work-items/
+/.scratch/
