@@ -109,7 +109,7 @@ scripts/                 ← platform-specific installers
 ## Key invariants
 
 - Every role in `shared/AGENTS.shared.md` `## Role index` must have a matching `.md` file in `agents/`
-- Every skill must have the `agents-` prefix
+- Every command file has the `agents-` prefix (`commands/agents-*.md` — the reclaim ownership marker); common skills under `skills/` are role-named, not `agents-`-prefixed
 - Every workflow skill must contain "MUST be invoked via the Agent tool"
 - Every code-writing skill must contain "Do NOT commit"
 - Install output totals must match actual pack counts (installers count dynamically; verify after add/remove)

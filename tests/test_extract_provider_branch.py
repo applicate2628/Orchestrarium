@@ -61,7 +61,8 @@ def test_docs_only_allowlisted_pulled_from_main():
     # agents-mode-reference is pulled fresh from main but its one excluded-subtree link
     # (docs/routing/) is unwrapped to plain text by a DOCS_FROM_MAIN_TRANSFORMED transform
     assert inc("docs/agents-mode-reference.md")
-    # docs/README is the standalone single-provider index -> still carried from the branch
+    # docs/README is EXCLUDED from include-from-main; it is regenerated from the
+    # monorepo copy in extract step 4 (_regenerate_docs_readme), not carried
     assert not inc("docs/README.md")
     # external-worker-design is still excluded (it links to routing/ and has no transform)
     assert not inc("docs/external-worker-design.md")

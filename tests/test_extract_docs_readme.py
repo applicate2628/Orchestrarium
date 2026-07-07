@@ -33,6 +33,7 @@ Use it together with:
 - [../src.claude/README.md](../src.claude/README.md) for the Claude source subtree
 - [../src.codex/README.md](../src.codex/README.md) for the Codex source subtree
 - [../references-qwen/README.md](../references-qwen/README.md) for Qwen refs
+- [anchored](agents-mode-reference.md#lanes) into a shipped doc with a fragment
 
 Current docs in this branch:
 
@@ -79,6 +80,11 @@ class RegenerateDocsReadmeTest(unittest.TestCase):
     def test_live_cross_provider_link_is_kept(self) -> None:
         # src.claude/ ships on the claude branch -> link stays a real link
         self.assertIn("[../src.claude/README.md](../src.claude/README.md)", self.text)
+
+    def test_anchored_link_to_shipped_doc_is_kept(self) -> None:
+        # F1 (Fable): a `#fragment` on a link to a doc that SHIPS must not be
+        # false-delinked — the target file exists, only the anchor is appended
+        self.assertIn("[anchored](agents-mode-reference.md#lanes)", self.text)
 
     def test_dead_cross_provider_links_are_delinked(self) -> None:
         # src.codex/ + references-qwen/ do NOT ship on the claude branch -> the

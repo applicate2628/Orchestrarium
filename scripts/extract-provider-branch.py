@@ -82,10 +82,15 @@ def _delink_dead(line: str, out: Path) -> str:
         text, target = m.group(1), m.group(2)
         if target.startswith(("http://", "https://", "#", "mailto:")):
             return m.group(0)
+        # resolve the PATH part only — a `#fragment` / `?query` on a link to a
+        # doc that DOES ship must not be false-delinked (the target file exists,
+        # only the anchor is appended). A pure fragment/query is kept as-is.
+        path_part = target.split("#", 1)[0].split("?", 1)[0]
+        if not path_part:
+            return m.group(0)
         # the README lives at out/docs/README.md, so targets resolve relative to out/docs/
         try:
-            resolved = (out / "docs" / target).resolve()
-            if resolved.exists():
+            if (out / "docs" / path_part).resolve().exists():
                 return m.group(0)
         except (OSError, ValueError):
             pass
