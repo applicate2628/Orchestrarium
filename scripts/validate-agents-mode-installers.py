@@ -84,28 +84,24 @@ INSTALLER_CASES = [
     ),
 ]
 
-UNIVERSAL_HOOK_HELPER_PATHS = (
-    "scripts/hook_common.py",
-    "scripts/check-bugfix-discipline.py",
-    "scripts/check-bugfix-discipline.sh",
-    "scripts/check-bugfix-discipline.ps1",
-    "scripts/check-passive-polling-stop.py",
-    "scripts/check-passive-polling-stop.sh",
-    "scripts/check-passive-polling-stop.ps1",
-    "scripts/check-work-items-archival-stop.py",
-    "scripts/check-work-items-archival-stop.sh",
-    "scripts/check-work-items-archival-stop.ps1",
-    "scripts/mcp-usage-reminder.sh",
-    "scripts/mcp-usage-reminder.ps1",
-    "scripts/check-publication-safety.sh",
-    "scripts/check-publication-safety.ps1",
-    "hooks/check-machine-local-path.py",
-    "hooks/check-machine-local-path.sh",
-    "hooks/check-machine-local-path.ps1",
-    "hooks/check-no-trash-in-repo.py",
-    "hooks/check-no-trash-in-repo.sh",
-    "hooks/check-no-trash-in-repo.ps1",
-)
+_UNIVERSAL_HOOK_EXTS = (".py", ".sh", ".ps1")
+
+
+def universal_hook_helper_paths(root: Path) -> tuple[str, ...]:
+    """The `scripts/<name>` + `hooks/<name>` relative paths the packs must carry,
+    DERIVED by globbing the pack-neutral canon `scripts/universal-hooks/` — never
+    a hardcoded list (a hardcoded list hid check-stale-relation-residue from this
+    gate until 2026-07-07). Adding a hook to the canon auto-covers it here."""
+    canon = root / "scripts" / "universal-hooks"
+    paths: list[str] = []
+    for sub in ("scripts", "hooks"):
+        d = canon / sub
+        if not d.is_dir():
+            continue
+        for p in sorted(d.iterdir()):
+            if p.is_file() and p.suffix in _UNIVERSAL_HOOK_EXTS:
+                paths.append(f"{sub}/{p.name}")
+    return tuple(paths)
 
 
 class InstallerRegressionError(Exception):
@@ -374,7 +370,7 @@ def validate_example_provider_universal_hooks(
         raise InstallerRegressionError(f"{case.name} extension manifest has no name")
 
     extension_root = project_root / f".{case.name}" / "extensions" / extension_name
-    for rel in UNIVERSAL_HOOK_HELPER_PATHS:
+    for rel in universal_hook_helper_paths(root):
         if not (extension_root / rel).is_file():
             raise InstallerRegressionError(
                 f"{case.name} installer did not install universal hook/helper {rel}"
