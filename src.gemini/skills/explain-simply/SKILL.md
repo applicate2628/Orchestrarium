@@ -11,7 +11,7 @@ Teach for this reader, not for an abstract audience. Make the idea usable withou
 
 Use the user's language by default. If the conversation language is Russian, explain in Russian unless the user asks otherwise.
 
-Use this skill for user-facing learning or explanation work. Do not invoke it merely because you, the agent, need to understand something before acting.
+Use this skill for user-facing learning or explanation work. A codebase-investigation question ("how does X work in this repo", "trace Y") routes to the research flow first — this skill is the user-facing presentation layer and may run AFTER the investigation has facts. Do not invoke it merely because you, the agent, need to understand something before acting.
 
 ## Workflow
 
