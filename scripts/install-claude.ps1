@@ -24,6 +24,9 @@ $RepoDir = Split-Path -Parent $ScriptDir
 $Source = Join-Path $RepoDir "src.claude"
 $DefaultAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
 
+# `commands/` is the SINGLE monorepo flow surface: each agents-* flow ships as
+# commands/agents-*.md only; generated skills/agents-*/SKILL.md are a standalone-
+# BRANCH artifact, reclaimed here if left stale by a prior install.
 $Dirs = @("agents", "commands", "skills")
 $OptionalDirs = @("memory")
 $script:PromptMode = $null
@@ -707,6 +710,25 @@ foreach ($dir in $Dirs) {
     foreach ($existing in Get-ChildItem -LiteralPath $dst -File -ErrorAction SilentlyContinue) {
         if ($packItems -notcontains $existing.Name) {
             Write-Host "  Preserved user file: $dir/$($existing.Name)"
+        }
+    }
+
+    # Reclaim the reserved `agents-` pack namespace (parity with install-claude.sh):
+    # a target commands/agents-*.md file or a skills/agents-*/ dir not in the
+    # current pack is a stale pack-owned artifact (renamed/removed flow, or a
+    # generated agents-* skill from an old standalone-branch install — the
+    # monorepo path ships flows only as commands/). Remove it. Non-namespaced
+    # user files are preserved; the prefix is the ownership marker.
+    if ($dir -eq "commands" -or $dir -eq "skills") {
+        foreach ($existing in Get-ChildItem -LiteralPath $dst -Filter "agents-*" -ErrorAction SilentlyContinue) {
+            $srcCounterpart = Join-Path $src $existing.Name
+            if (Test-Path -LiteralPath $srcCounterpart) { continue }
+            if ($DryRun) {
+                Write-Host "    [dry-run] would reclaim stale pack namespace: $dir/$($existing.Name)"
+            } else {
+                Remove-Item -LiteralPath $existing.FullName -Recurse -Force
+                Write-Host "  Reclaimed stale pack item: $dir/$($existing.Name)"
+            }
         }
     }
 }
