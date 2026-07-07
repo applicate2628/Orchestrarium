@@ -18,8 +18,8 @@ name one, that is an `$architect` question, not a license to patch locally.
 1. **N guards of ONE invariant at M heights** — the same value re-checked at several call-path heights
    because the first check was not trusted. Trust is restored by fixing the first check, not by adding
    a second.
-2. **Duplicated validation in producer AND consumer without a process boundary** — inside one process /
-   one artifact, one side owns the validation. A comment justifying the duplicate ("X is WRITE, this is
+2. **Duplicated validation in producer AND consumer within one trust domain** — no untrusted/corruptible
+   boundary crossed (whatever transport sits between them), so one side owns the validation. A comment justifying the duplicate ("X is WRITE, this is
    READ, not redundant") is an admission of two owners, not a resolution.
 3. **A fix that papers over another fix** — a guard whose purpose is to hide the misbehavior of an
    earlier patch. The earlier patch is the defect.
@@ -110,8 +110,8 @@ acceptance pass catches layering the author cannot see.
 
 - **Layering / piling (наслоение)** — accumulating guards/patches for one invariant instead of
   correcting its single owner.
-- **Defense-in-depth** — deliberate duplicate checking, legitimate only across a process/artifact
-  boundary with agreed thresholds.
+- **Defense-in-depth** — deliberate duplicate checking, legitimate only across a TRUST boundary (one
+  the value could cross untrusted or corrupted), with agreed thresholds — not a mere process/network hop.
 - **PILED / JUSTIFIED-DEPTH / CLEAN-SINGLE-OWNER** — anti-layering audit verdicts; PILED blocks push.
 - **Poison value** — an in-band sentinel (e.g. NaN) propagating failure where no status channel exists.
 - **D1 / C1 / C6** — laws of `architecture-layering-hygiene.md`: failure-idiom ownership; single owner
