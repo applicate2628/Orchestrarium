@@ -42,7 +42,7 @@ description: Review an approved implementation phase or repository control-plane
 
 ## Anti-layering audit (multi-fix batch)
 
-For any batch containing 2+ defect fixes: group changes by defect class and verify each class has exactly ONE owner holding the corrected logic — a fix corrects the owner, never piles a neighboring check because the first one wasn't trusted. Duplicated checks are legitimate only across a process/artifact boundary with agreed thresholds. Per-class verdicts: `CLEAN-SINGLE-OWNER` / `JUSTIFIED-DEPTH` (justification recorded) / `PILED` (names the consolidation refactor; maps to `REVISE` and blocks push unless parked as an explicit `WORKAROUND` with a tracked root-cause item). Run this lane on an engine distinct from the batch's author, via the normal routing surface — never a hardcoded model name.
+For any batch containing 2+ defect fixes: group changes by defect class and verify each class has exactly ONE owner holding the corrected logic — a fix corrects the owner, never piles a neighboring check because the first one wasn't trusted. Duplicated checks are legitimate only across a TRUST boundary (untrusted input / third-party / corruptible artifact, not a mere process/network hop) with agreed thresholds; re-applying a trusted producer's result is fine, re-checking it is layering. Per-class verdicts: `CLEAN-SINGLE-OWNER` / `JUSTIFIED-DEPTH` (justification recorded) / `PILED` (names the consolidation refactor; maps to `REVISE` and blocks push unless parked as an explicit `WORKAROUND` with a tracked root-cause item). Run this lane on an engine distinct from the batch's author, via the normal routing surface — never a hardcoded model name.
 
 ## REVISE routing
 
