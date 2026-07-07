@@ -243,7 +243,7 @@ install_tree() {
 ensure_local_only_gitignore_entries() {
   local project_root="$1"
   local gitignore="$project_root/.gitignore"
-  local entries=("/.reports/" "/work-items/")
+  local entries=("/.reports/" "/.plans/" "/work-items/")
   local missing=()
 
   for entry in "${entries[@]}"; do

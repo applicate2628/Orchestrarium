@@ -9,7 +9,7 @@ The project-local config file is:
 - `.agents/.agents-mode.yaml`
 - Legacy `.agents/.agents-mode` is compatibility input only. Resolve Codex overlay state in this read order (highest to lowest precedence, per-key resolution): local `.agents/.agents-mode.yaml`, local legacy `.agents/.agents-mode`, pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), then built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope, do not recreate any legacy file, and do not synthesize a local override on read alone.
 
-Full value-by-value operator semantics live in [../../../docs/agents-mode-reference.md](../../../docs/agents-mode-reference.md).
+Full value-by-value operator semantics live in `docs/agents-mode-reference.md` in the source repository (maintainer reference; not installed at runtime).
 
 Canonical schema:
 
@@ -28,7 +28,7 @@ externalOpinionCounts: {}  # allowed: structured lane-count map
 externalCodexWorkdirMode: neutral  # allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project
 externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-externalCodexProfile: gpt-5.5-xhigh  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh; default: gpt-5.5-xhigh
+externalCodexProfile: gpt-5.5-xhigh  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh | gpt-5.3-codex-spark; default: gpt-5.5-xhigh
 externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh
 ```
 

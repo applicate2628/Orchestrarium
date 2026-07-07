@@ -36,7 +36,7 @@ description: "Define performance budgets, bottlenecks, measurements, constraints
 
 ## Performance issue registry
 
-When a performance issue is found, record it in the configured bug registry path, if the repository uses one, with fields: title, metric affected (latency / throughput / memory / CPU / cost), budget or SLA violated (if known), reproduction environment, severity, and status (open / in-progress / resolved).
+When a performance issue is found, create or update a file in `work-items/performance/<date>-<slug>.md` (the same flat list-item registry shape as `work-items/bugs/`), with frontmatter `severity: high | medium | low`, `status: open`, `found-by: performance-engineer`, `context: <work-item slug or "standalone">`, and body sections: Description (what is slow or over budget), Metric (metric / budget / actual / baseline), Files involved. Status moves `open -> fixed` only after the performance reviewer confirms AND the user approves; `wontfix` records the accepted-tradeoff reason.
 
 ## Architecture layering hygiene (performance)
 

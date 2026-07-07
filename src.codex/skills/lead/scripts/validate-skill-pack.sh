@@ -1070,13 +1070,12 @@ echo "=== Skill metadata budget ==="
 # pre-common-skills UX guideline. Future common skills should still aim for
 # <= 180 chars where the trigger surface is narrow; this cap is the wide-trigger
 # allowance, not a license for verbose role-style descriptions.
-# Bumped 440 -> 460 (2026-05-29) for the mathtype-book-page "Full-Text Coverage
-# Gate" backport from active Codex downstream use: the description gained the
-# "full source-text coverage" trigger and is now 443 chars. Headroom ~17 chars is
-# the ceiling for this one wide-trigger common skill, NOT an invitation to grow
-# other descriptions; narrow-trigger skills still aim for <= 180. The total cap
-# was left at 3700 at that point — consumption ~3689 still fit under it. These
-# rough char counts are documentation only; the live total is reported
+# Bumped 440 -> 460 (2026-05-29) during the long-form era. NOTE (2026-07-07):
+# the codex pack has since moved to SHORT-FORM descriptions (mathtype is now
+# ~96 chars; the long trigger forms live in the claude/gemini/qwen wrappers
+# only), so the 460 cap is generous headroom kept for the historical allowance,
+# not current need. Narrow-trigger skills still aim for <= 180. These rough
+# char counts are documentation only; the live total is reported
 # authoritatively by the "Codex skill description total" pass line below.
 CODEX_SKILL_DESCRIPTION_MAX_CHARS=460
 # Total cap covers roles + utility skills + common skills. Roles alone were

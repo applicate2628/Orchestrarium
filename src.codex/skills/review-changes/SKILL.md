@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: "Review changes for repo impact, dependents, contracts, regressions."
+description: "Review a recent diff/PR for repo-wide impact: unchanged dependents, contracts, regressions."
 ---
 
 # Review Changes
@@ -10,7 +10,7 @@ Run a repository-wide impact review triggered by recent changes. The changed fil
 ## Core stance
 
 - Stay read-only.
-- Use the `review` template semantics from `src.codex/AGENTS.codex.md`: `$analyst` -> QA lane -> reviewer lane.
+- Use the `review` template semantics from the installed `AGENTS.md` (Template routing section): `$analyst` -> QA lane -> reviewer lane.
 - Review the repo in light of the changes, not just the diff lines themselves.
 - Findings come first, ordered by severity.
 - Do NOT commit or modify files.
@@ -34,7 +34,7 @@ Run a repository-wide impact review triggered by recent changes. The changed fil
 - If external review is preferred for an eligible QA-side slot, `$external-reviewer` may stand in for that lane.
 - Goal: verify regression risk, edge cases, test sufficiency, fix completeness, and whether untouched behavior is now inconsistent with the new logic.
 3. Run the reviewer lane.
-- Always invoke `$architecture-reviewer`.
+- Always invoke `$architecture-reviewer`. For a multi-fix batch (2+ defect fixes, or one fix touching a surface already fixed this cycle) its lane MUST include the anti-layering audit on an engine distinct from the batch's author; a `PILED` verdict maps to `REVISE` and blocks push.
 - Add `$security-reviewer` if the change touches auth, trust boundaries, secrets, dangerous configuration, input validation, or vulnerability surfaces.
 - Add `$performance-reviewer` if the change touches hot paths, query plans, rendering loops, budgets, throughput, or latency-sensitive behavior.
 - Add `$ux-reviewer`, `$accessibility-reviewer`, or `$ui-test-engineer` when the affected surface is clearly user-facing and the risk is interaction quality rather than pure logic.

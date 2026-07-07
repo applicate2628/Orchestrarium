@@ -439,7 +439,7 @@ install_item() {
 ensure_local_only_gitignore_entries() {
   local project_root="$1"
   local gitignore="$project_root/.gitignore"
-  local entries=("/.reports/" "/work-items/" "/.scratch/")
+  local entries=("/.reports/" "/.plans/" "/work-items/" "/.scratch/")
   local missing=()
 
   for entry in "${entries[@]}"; do
