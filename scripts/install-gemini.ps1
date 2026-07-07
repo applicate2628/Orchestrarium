@@ -299,7 +299,7 @@ function Ensure-LocalOnlyGitignoreEntries {
     param([string]$ProjectRoot)
 
     $gitignore = Join-Path $ProjectRoot ".gitignore"
-    $entries = @("/.reports/", "/work-items/")
+    $entries = @("/.reports/", "/.plans/", "/work-items/")
     $existingLines = @()
     if (Test-Path -LiteralPath $gitignore) {
         $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
