@@ -18,8 +18,8 @@ name one, that is an `$architect` question, not a license to patch locally.
 1. **N guards of ONE invariant at M heights** — the same value re-checked at several call-path heights
    because the first check was not trusted. Trust is restored by fixing the first check, not by adding
    a second.
-2. **Duplicated validation in producer AND consumer without a process boundary** — inside one process /
-   one artifact, one side owns the validation. A comment justifying the duplicate ("X is WRITE, this is
+2. **Duplicated validation in producer AND consumer within one trust domain** — no untrusted/corruptible
+   boundary crossed (whatever transport sits between them), so one side owns the validation. A comment justifying the duplicate ("X is WRITE, this is
    READ, not redundant") is an admission of two owners, not a resolution.
 3. **A fix that papers over another fix** — a guard whose purpose is to hide the misbehavior of an
    earlier patch. The earlier patch is the defect.
@@ -33,10 +33,23 @@ name one, that is an `$architect` question, not a license to patch locally.
 
 ## The decidable defense-in-depth boundary test
 
-Legitimate defense-in-depth exists ONLY when producer and consumer are different processes or
-communicate through a persisted artifact (e.g. a converter and a solver with a file between them), AND
-the two checks' thresholds are agreed (one constant, one source), AND the commit names the boundary as
-the justification. Inside one process/artifact: one owner, one check.
+The test is TRUST, not transport. Legitimate defense-in-depth exists ONLY when the value could actually
+cross the boundary UNTRUSTED or CORRUPTED — untrusted user input, a third-party system, or a
+persisted/generated artifact a different producer or a hand-edit could have written (e.g. a converter
+and a solver with a file between them) — AND the two checks' thresholds are agreed (one constant, one
+source), AND the commit names the boundary as the justification. A mere process or network hop between
+two of YOUR OWN components is NOT such a boundary: re-checking a trusted internal producer's output
+because you distrust it is red flag #1, whatever transport sits between you.
+
+Distinguish two things the triad keeps separate:
+
+- **Re-applying the owner's result** — calling it, using or enforcing its output downstream — is ALWAYS
+  fine. That is consumption of the decision, not duplication of it.
+- **Re-checking the result** — re-verifying that the owner's output is itself correct, because you do
+  not trust it — is layering (red flag #1), UNLESS the output crossed an untrusted/corruptible boundary
+  above. "Use the result" and "re-verify the result" are different acts; only the first is free.
+
+Inside one trust domain: one owner, one check.
 
 ## Failure idiom per layer
 
@@ -97,8 +110,8 @@ acceptance pass catches layering the author cannot see.
 
 - **Layering / piling (наслоение)** — accumulating guards/patches for one invariant instead of
   correcting its single owner.
-- **Defense-in-depth** — deliberate duplicate checking, legitimate only across a process/artifact
-  boundary with agreed thresholds.
+- **Defense-in-depth** — deliberate duplicate checking, legitimate only across a TRUST boundary (one
+  the value could cross untrusted or corrupted), with agreed thresholds — not a mere process/network hop.
 - **PILED / JUSTIFIED-DEPTH / CLEAN-SINGLE-OWNER** — anti-layering audit verdicts; PILED blocks push.
 - **Poison value** — an in-band sentinel (e.g. NaN) propagating failure where no status channel exists.
 - **D1 / C1 / C6** — laws of `architecture-layering-hygiene.md`: failure-idiom ownership; single owner
