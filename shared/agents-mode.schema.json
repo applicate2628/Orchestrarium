@@ -11,7 +11,7 @@
     },
     {
       "name": "delegationMode",
-      "default": "manual",
+      "default": "auto",
       "allowed": ["manual", "auto", "force"]
     },
     {
