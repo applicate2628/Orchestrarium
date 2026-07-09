@@ -22,7 +22,8 @@ Three wrapper shapes, three contracts:
   * The mcp-usage-reminder SessionStart wrapper is informational and always emits
     its checkpoint text; agents-mode-reminder is CONDITIONAL — it reads the
     effective delegationMode and emits an imperative directive on force/auto but
-    is SILENT on manual (the default). Each has its own contract test below.
+    is SILENT on manual and on the no-file/unresolved state. Each has its own
+    contract test below.
 
   * The publication SCANNER wrapper does not read stdin; it resolves git, locates
     the bundled bash next to that git, cd's to the repo root, and delegates to
@@ -251,6 +252,26 @@ class TestAgentsModeReminderWrapper(unittest.TestCase):
                         self.assertEqual(p.returncode, 0, p.stderr)
                         self.assertEqual(p.stdout.strip(), "",
                                          f"manual must be silent; got {p.stdout!r}")
+
+    def test_no_file_is_silent(self) -> None:
+        # No .agents-mode.yaml anywhere in the read-order (a fresh cwd with no
+        # pack config, and an isolated empty USERPROFILE so no ambient home file
+        # leaks in) must resolve to the `unresolved` sentinel and stay SILENT
+        # (fail-safe), exit 0. A directory where the pack is not installed / the
+        # config was removed must never surface a standing delegation directive.
+        for interp in INTERPRETERS:
+            for wrapper, sub in AGENTS_MODE_REMINDERS:
+                self.assertTrue(wrapper.is_file(), f"missing wrapper: {wrapper}")
+                with tempfile.TemporaryDirectory() as td:
+                    home = Path(td) / "home"
+                    home.mkdir(exist_ok=True)
+                    env = os.environ.copy()
+                    env["USERPROFILE"] = str(home)
+                    with self.subTest(interp=Path(interp).stem, pack=sub, mode="no-file"):
+                        p = _run_ps1(interp, wrapper, cwd=td, env=env)
+                        self.assertEqual(p.returncode, 0, p.stderr)
+                        self.assertEqual(p.stdout.strip(), "",
+                                         f"no-file/unresolved must be silent; got {p.stdout!r}")
 
 
 @unittest.skipIf(not INTERPRETERS or GIT is None, "needs a PowerShell host and git on PATH")

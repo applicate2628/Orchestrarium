@@ -101,8 +101,8 @@ class AgentsModeContractTest(unittest.TestCase):
             ],
             "docs/agents-mode-reference.md": [
                 "Use `scripts/resolve-agents-mode.py --provider <provider> --json`",
-                "| Codex | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh`",
-                "| Claude Code | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh`",
+                "| Codex | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh`",
+                "| Claude Code | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh`",
             ],
         }
         for relative, snippets in expectations.items():

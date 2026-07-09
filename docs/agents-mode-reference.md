@@ -17,7 +17,7 @@ The exemplar shared default lives in `shared/agents-mode.defaults.yaml`. The mac
 
 The shipped shared exemplar is intentionally a quiet baseline for first install:
 - consultant disabled by default
-- delegation manual by default
+- delegation by routing judgment by default
 - parallel routing by judgment by default
 - MCP automatic by default
 - no standing preference for external worker or reviewer lanes
@@ -63,7 +63,7 @@ At init time, the helper may either write the selected preset immediately or ent
 | Key | `default` | `absolute-balance` | `external-aggressive` | `correctness-first` | `power-mode` | `max-speed` |
 |---|---|---|---|---|---|---|
 | `consultantMode` | `disabled` | `internal` | `external` | `external` | `external` | `disabled` |
-| `delegationMode` | `manual` | `auto` | `force` | `force` | `force` | `auto` |
+| `delegationMode` | `auto` | `auto` | `force` | `force` | `force` | `auto` |
 | `parallelMode` | `auto` | `auto` | `force` | `auto` | `force` | `force` |
 | `mcpMode` | `auto` | `auto` | `auto` | `force` | `force` | `auto` |
 | `preferExternalWorker` | `false` | `false` | `true` | `true` | `true` | `false` |
@@ -117,7 +117,7 @@ Notes:
 | `force` | Delegation whenever feasible | Treat delegation as a standing instruction whenever a matching specialist and viable tool path exist. If the tool path is unavailable, say so explicitly instead of pretending the forced delegation happened locally. |
 
 Notes:
-- Claude Code and Codex do NOT parse `.agents-mode.yaml` natively; `delegationMode` is Orchestrator-pack governance. The production installers register an `agents-mode-reminder` `SessionStart` hook that reads the effective value from this read-order and surfaces the active posture into the main conversation at every session start and after every compaction. It emits an imperative directive on `auto`/`force` and is SILENT on `manual`, so the posture is applied without a manual reminder or an `/agents-init-project` run. On Codex the hook must be trusted once via the TUI before it fires (see INSTALL.md).
+- Claude Code and Codex do NOT parse `.agents-mode.yaml` natively; `delegationMode` is Orchestrator-pack governance. The production installers register an `agents-mode-reminder` `SessionStart` hook that reads the effective value from this read-order and surfaces the active posture into the main conversation at every session start and after every compaction. It emits an imperative directive on `auto`/`force` and is SILENT on `manual` and on the no-file/unresolved state (fail-safe). Because the shipped default is now `auto`, a default install surfaces the auto delegation directive automatically, without a manual reminder or an `/agents-init-project` run. On Codex the hook must be trusted once via the TUI before it fires (see INSTALL.md).
 
 ### `parallelMode`
 
@@ -391,10 +391,10 @@ Notes:
 
 | Provider | `consultantMode` | `delegationMode` | `parallelMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `reserveResolver` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalModelMode` | `externalCodexProfile` | `externalClaudeProfile` |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Codex | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh` | `opus-xhigh` unless explicitly overridden |
-| Claude Code | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh` | not part of canonical Claude-line config |
-| Gemini CLI | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | not part of canonical Gemini-line config |
-| Qwen Code | `disabled` | `manual` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | not part of canonical Qwen-line config |
+| Codex | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh` | `opus-xhigh` unless explicitly overridden |
+| Claude Code | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh` | not part of canonical Claude-line config |
+| Gemini CLI | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | not part of canonical Gemini-line config |
+| Qwen Code | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | not part of canonical Qwen-line config |
 
 Structured defaults written alongside the scalar keys:
 

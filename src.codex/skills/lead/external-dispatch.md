@@ -15,7 +15,7 @@ Canonical schema:
 
 ```yaml
 consultantMode: external  # allowed: external | internal | disabled; default: disabled
-delegationMode: manual  # allowed: manual | auto | force; default: manual
+delegationMode: auto  # allowed: manual | auto | force; default: auto
 parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false
@@ -56,7 +56,7 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 - If local `.agents/.agents-mode.yaml` is missing, read local legacy `.agents/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.codex/.agents-mode.yaml`, pack-local global legacy `~/.codex/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`, before applying built-in defaults. Normalize whichever file supplied the effective config in place before trusting the flags.
 - When writing `.agents/.agents-mode.yaml`, keep each key on its own line and add an inline YAML comment that enumerates the allowed values for that key.
 - Writes go to `.agents/.agents-mode.yaml`; preserve unknown keys and the other known keys when updating.
-- If the file is created from scratch, write the full default shape: the requested `consultantMode`, `delegationMode: manual`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `reserveResolver: claude-sonnet`, `externalPriorityProfiles` with the shipped `balanced` and `quality-first` blocks, `externalOpinionCounts` with documented lanes defaulting to `1`, `externalCodexWorkdirMode: neutral`, `externalClaudeWorkdirMode: neutral`, `externalModelMode: runtime-default`, `externalCodexProfile: default`, and `externalClaudeProfile: opus-xhigh` unless the user explicitly requested a different Claude profile.
+- If the file is created from scratch, write the full default shape: the requested `consultantMode`, `delegationMode: auto`, `parallelMode: auto`, `mcpMode: auto`, `preferExternalWorker: false`, `preferExternalReviewer: false`, `externalProvider: auto`, `externalPriorityProfile: balanced`, `reserveResolver: claude-sonnet`, `externalPriorityProfiles` with the shipped `balanced` and `quality-first` blocks, `externalOpinionCounts` with documented lanes defaulting to `1`, `externalCodexWorkdirMode: neutral`, `externalClaudeWorkdirMode: neutral`, `externalModelMode: runtime-default`, `externalCodexProfile: default`, and `externalClaudeProfile: opus-xhigh` unless the user explicitly requested a different Claude profile.
 - Normalization preserves effective known values and unknown keys, fills missing canonical keys with current defaults, removes retired canonical keys, refreshes inline comments plus the shipped profile/count blocks, and restores canonical key order.
 
 ## Routing model

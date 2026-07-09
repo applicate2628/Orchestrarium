@@ -9,18 +9,21 @@
 # developer context; its source matcher includes compact.)
 #
 # CONDITIONAL BY DESIGN: emits an IMPERATIVE directive ONLY when the effective
-# delegationMode is `force` or `auto`; SILENT on `manual` (the default). The
-# silence is load-bearing -- the block appears only when delegation is operative,
-# so its presence is the signal and it does not become wallpaper.
+# delegationMode is `force` or `auto`; SILENT on `manual` and on the no-file/
+# unresolved state (fail-safe). The silence is load-bearing -- the block appears
+# only when delegation is operative, so its presence is the signal and it does not
+# become wallpaper.
 #
 # SELF-CONTAINED first-match read of the documented read-order (the full
 # resolve-agents-mode.py is NOT shipped to targets; force/auto are always
-# file-explicit since the default is manual, so the defaults/normalizer layers are
-# irrelevant here on purpose -- do not "fix" this by dragging in the defaults chain):
+# file-explicit, and no file anywhere means the pack is not installed here / the
+# config was removed, so we do NOT inject a standing directive into an arbitrary
+# directory -- the defaults/normalizer layers stay out of scope on purpose (do not
+# "fix" this by dragging in the defaults chain):
 #   ./.agents/.agents-mode.yaml -> ./.agents/.agents-mode (legacy)
 #   -> ~/.codex/.agents-mode.yaml -> ~/.codex/.agents-mode (legacy)
 #   -> ~/.agents-mode.yaml (shared cross-pack). First file DEFINING delegationMode
-#   wins; none -> manual -> silent.
+#   wins; none -> unresolved -> silent (fail-safe).
 #
 # Fail-open: any error emits nothing and exits 0; never blocks a session.
 set +e
@@ -58,7 +61,7 @@ _read_delegation_mode() {
          | tr 'A-Z' 'a-z')"
     printf '%s' "$v"; return 0
   done
-  printf 'manual'
+  printf 'unresolved'
 }
 
 _mode="$(_read_delegation_mode 2>/dev/null)"
@@ -76,7 +79,7 @@ Effective delegationMode: AUTO. Delegating to $lead or the matching specialist s
 EOF
     ;;
   *)
-    : # manual or unresolved -> silent (presence of the block is the signal)
+    : # manual value, unresolved, or empty -> silent (presence of the block is the signal)
     ;;
 esac
 exit 0

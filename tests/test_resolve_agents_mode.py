@@ -85,7 +85,7 @@ class ResolveAgentsModeTest(unittest.TestCase):
             self.assertEqual(values["externalPriorityProfile"], "quality-first")
             self.assertEqual(sources["externalPriorityProfile"]["rank"], "shared-global")
             self.assertEqual(values["preferExternalReviewer"], "true")
-            self.assertEqual(values["delegationMode"], "manual")
+            self.assertEqual(values["delegationMode"], "auto")
             self.assertEqual(sources["delegationMode"]["rank"], "defaults")
             self.assertEqual(values["externalClaudeProfile"], "opus-xhigh")
 
