@@ -1,22 +1,28 @@
 """Smoke tests for the PowerShell (.ps1) hook + scanner wrappers.
 
 The installer registers a .ps1 entry point as the WINDOWS hook command for the
-five structural/audit hooks (check-bugfix-discipline, check-passive-polling-stop,
-check-work-items-archival-stop, check-machine-local-path, check-no-trash-in-repo),
-the informational mcp-usage-reminder SessionStart hook, and ships a .ps1 for the
-publication scanner — yet NO test executed any .ps1, so a syntax error, a broken
-fail-open path, or a regressed stdin pipe in the Windows entry point would have
-shipped green (every other hook test drives the .py helper via sys.executable,
-never the .ps1 the OS actually runs). These tests close that gap for BOTH the
-Claude (src.claude/agents/{scripts,hooks}/) and Codex
+six structural/audit hooks (check-bugfix-discipline, check-passive-polling-stop,
+check-work-items-archival-stop, check-machine-local-path, check-no-trash-in-repo,
+check-stale-relation-residue), the two informational SessionStart reminders
+(mcp-usage-reminder, agents-mode-reminder), and ships a .ps1 for the publication
+scanner — yet NO test executed any .ps1, so a syntax error, a broken fail-open
+path, or a regressed stdin pipe in the Windows entry point would have shipped
+green (every other hook test drives the .py helper via sys.executable, never the
+.ps1 the OS actually runs). These tests close that gap for BOTH the Claude
+(src.claude/agents/{scripts,hooks}/) and Codex
 (src.codex/skills/lead/{scripts,hooks}/) copies.
 
-Two wrapper shapes, two contracts:
+Three wrapper shapes, three contracts:
 
-  * The five structural/audit HOOK wrappers are thin stdin pipes around their .py helper. Contract:
+  * The six structural/audit HOOK wrappers are thin stdin pipes around their .py helper. Contract:
     FAIL OPEN — on empty stdin AND on malformed JSON they must exit 0 with no
     stdout and no stderr (AUDIT/decision hooks never crash the host; the helper's
     own fail-open swallows bad input). Verified under every available interpreter.
+
+  * The mcp-usage-reminder SessionStart wrapper is informational and always emits
+    its checkpoint text; agents-mode-reminder is CONDITIONAL — it reads the
+    effective delegationMode and emits an imperative directive on force/auto but
+    is SILENT on manual (the default). Each has its own contract test below.
 
   * The publication SCANNER wrapper does not read stdin; it resolves git, locates
     the bundled bash next to that git, cd's to the repo root, and delegates to
@@ -54,24 +60,36 @@ CLAUDE_HOOKS = REPO_ROOT / "src.claude" / "agents" / "hooks"
 CODEX_SCRIPTS = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts"
 CODEX_HOOKS = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 
-# The five stdin-piping structural/audit hook wrappers, in BOTH install trees (10 files).
+# The six stdin-piping structural/audit hook wrappers, in BOTH install trees (12 files).
 HOOK_WRAPPERS = (
     CLAUDE_SCRIPTS / "check-bugfix-discipline.ps1",
     CLAUDE_SCRIPTS / "check-passive-polling-stop.ps1",
     CLAUDE_SCRIPTS / "check-work-items-archival-stop.ps1",
     CLAUDE_HOOKS / "check-machine-local-path.ps1",
     CLAUDE_HOOKS / "check-no-trash-in-repo.ps1",
+    CLAUDE_HOOKS / "check-stale-relation-residue.ps1",
     CODEX_SCRIPTS / "check-bugfix-discipline.ps1",
     CODEX_SCRIPTS / "check-passive-polling-stop.ps1",
     CODEX_SCRIPTS / "check-work-items-archival-stop.ps1",
     CODEX_HOOKS / "check-machine-local-path.ps1",
     CODEX_HOOKS / "check-no-trash-in-repo.ps1",
+    CODEX_HOOKS / "check-stale-relation-residue.ps1",
 )
 
-# The informational SessionStart reminder wrappers, in BOTH install trees (2 files).
+# The always-emitting informational SessionStart reminder (mcp-usage-reminder), in
+# BOTH install trees (2 files). agents-mode-reminder is a SECOND SessionStart
+# reminder but has a CONDITIONAL contract (force/auto emit, manual silent), so it
+# is covered by its own test class below, not this always-emit list.
 REMINDER_WRAPPERS = (
     CLAUDE_SCRIPTS / "mcp-usage-reminder.ps1",
     CODEX_SCRIPTS / "mcp-usage-reminder.ps1",
+)
+
+# The conditional delegation-posture reminder, per pack, with the pack-specific
+# top-level .agents-mode.yaml dir the wrapper reads from cwd.
+AGENTS_MODE_REMINDERS = (
+    (CLAUDE_SCRIPTS / "agents-mode-reminder.ps1", ".claude"),
+    (CODEX_SCRIPTS / "agents-mode-reminder.ps1", ".agents"),
 )
 
 # The publication scanner wrapper, in BOTH install trees (2 files).
@@ -156,7 +174,7 @@ def _bash_locatable_git() -> str | None:
 
 @unittest.skipIf(not INTERPRETERS, "no PowerShell host (pwsh/powershell) on PATH")
 class TestHookWrappersFailOpen(unittest.TestCase):
-    """All five hook wrappers, in both trees, must FAIL OPEN under every available
+    """All six hook wrappers, in both trees, must FAIL OPEN under every available
     PowerShell host: exit 0 with empty stdout+stderr on empty stdin and on
     malformed JSON."""
 
@@ -195,6 +213,44 @@ class TestReminderWrappersEmitContext(unittest.TestCase):
                     self.assertIn("MCP / tools reminder", p.stdout)
                     self.assertIn("tool discovery", p.stdout)
                     self.assertIn("mcpMode: force", p.stdout)
+
+
+@unittest.skipIf(not INTERPRETERS, "no PowerShell host (pwsh/powershell) on PATH")
+class TestAgentsModeReminderWrapper(unittest.TestCase):
+    """The agents-mode-reminder SessionStart wrapper is CONDITIONAL: it reads the
+    effective delegationMode from the pack-specific .agents-mode.yaml read-order
+    (relative to cwd, with an isolated USERPROFILE so no ambient home file leaks
+    in) and must emit an imperative FORCE directive on force, be SILENT on manual,
+    and always exit 0 (fail-open). This locks the parser hardening (case-sensitive
+    key match, whitespace-only comment strip, end-only trim, key-line ownership)
+    into a durable Windows-entry-point regression, per the external review."""
+
+    def test_force_emits_directive_and_manual_is_silent(self) -> None:
+        for interp in INTERPRETERS:
+            for wrapper, sub in AGENTS_MODE_REMINDERS:
+                self.assertTrue(wrapper.is_file(), f"missing wrapper: {wrapper}")
+                with tempfile.TemporaryDirectory() as td:
+                    cfg_dir = Path(td) / sub
+                    cfg_dir.mkdir(parents=True, exist_ok=True)
+                    home = Path(td) / "home"
+                    home.mkdir(exist_ok=True)
+                    cfg = cfg_dir / ".agents-mode.yaml"
+
+                    env = os.environ.copy()
+                    env["USERPROFILE"] = str(home)
+
+                    cfg.write_text("delegationMode: force\n", encoding="utf-8")
+                    with self.subTest(interp=Path(interp).stem, pack=sub, mode="force"):
+                        p = _run_ps1(interp, wrapper, cwd=td, env=env)
+                        self.assertEqual(p.returncode, 0, p.stderr)
+                        self.assertIn("delegationMode: FORCE", p.stdout)
+
+                    cfg.write_text("delegationMode: manual\n", encoding="utf-8")
+                    with self.subTest(interp=Path(interp).stem, pack=sub, mode="manual"):
+                        p = _run_ps1(interp, wrapper, cwd=td, env=env)
+                        self.assertEqual(p.returncode, 0, p.stderr)
+                        self.assertEqual(p.stdout.strip(), "",
+                                         f"manual must be silent; got {p.stdout!r}")
 
 
 @unittest.skipIf(not INTERPRETERS or GIT is None, "needs a PowerShell host and git on PATH")
