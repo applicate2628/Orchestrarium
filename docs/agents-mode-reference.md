@@ -116,6 +116,9 @@ Notes:
 | `auto` | Delegation by routing judgment | Treat ordinary delegation as enabled, but still choose locally vs delegated execution based on routing, scope, and specialist fit. |
 | `force` | Delegation whenever feasible | Treat delegation as a standing instruction whenever a matching specialist and viable tool path exist. If the tool path is unavailable, say so explicitly instead of pretending the forced delegation happened locally. |
 
+Notes:
+- Claude Code and Codex do NOT parse `.agents-mode.yaml` natively; `delegationMode` is Orchestrator-pack governance. The production installers register an `agents-mode-reminder` `SessionStart` hook that reads the effective value from this read-order and surfaces the active posture into the main conversation at every session start and after every compaction. It emits an imperative directive on `auto`/`force` and is SILENT on `manual`, so the posture is applied without a manual reminder or an `/agents-init-project` run. On Codex the hook must be trusted once via the TUI before it fires (see INSTALL.md).
+
 ### `parallelMode`
 
 | Value | Meaning | Expected behavior |
