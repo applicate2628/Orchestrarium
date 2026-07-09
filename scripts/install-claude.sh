@@ -893,6 +893,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
         notrash_script_target="$TARGET/agents/hooks/check-no-trash-in-repo.ps1"
         stale_relation_script_target="$TARGET/agents/hooks/check-stale-relation-residue.ps1"
         reminder_script_target="$TARGET/agents/scripts/mcp-usage-reminder.ps1"
+        agents_mode_reminder_script_target="$TARGET/agents/scripts/agents-mode-reminder.ps1"
         ;;
       *)
         hook_host_os="posix"
@@ -903,6 +904,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
         notrash_script_target="$TARGET/agents/hooks/check-no-trash-in-repo.sh"
         stale_relation_script_target="$TARGET/agents/hooks/check-stale-relation-residue.sh"
         reminder_script_target="$TARGET/agents/scripts/mcp-usage-reminder.sh"
+        agents_mode_reminder_script_target="$TARGET/agents/scripts/agents-mode-reminder.sh"
         ;;
     esac
     echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os)..."
@@ -957,6 +959,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --hook-event SessionStart \
       --script-marker mcp-usage-reminder \
       --script-path "$reminder_script_target"
+    echo "  Installing delegation-posture (agents-mode) SessionStart hook (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --hook-event SessionStart \
+      --script-marker agents-mode-reminder \
+      --script-path "$agents_mode_reminder_script_target"
   fi
 fi
 

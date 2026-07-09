@@ -920,6 +920,7 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         $NoTrashScriptTarget = Join-Path $TargetRoot "agents\hooks\check-no-trash-in-repo.ps1"
         $StaleRelationScriptTarget = Join-Path $TargetRoot "agents\hooks\check-stale-relation-residue.ps1"
         $ReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\mcp-usage-reminder.ps1"
+        $AgentsModeReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\agents-mode-reminder.ps1"
         Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows)..."
         & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-path $BugfixScriptTarget
         if ($LASTEXITCODE -ne 0) {
@@ -958,6 +959,12 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         }
         Write-Host "  Installing MCP-usage-reminder SessionStart hook (host-os=windows)..."
         & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event SessionStart --script-marker mcp-usage-reminder --script-path $ReminderScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing delegation-posture (agents-mode) SessionStart hook (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event SessionStart --script-marker agents-mode-reminder --script-path $AgentsModeReminderScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
