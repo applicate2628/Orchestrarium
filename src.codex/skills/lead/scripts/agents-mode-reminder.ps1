@@ -4,15 +4,18 @@
 # conversation never sees "delegationMode: force" and never applies it.
 #
 # CONDITIONAL BY DESIGN: emits an IMPERATIVE directive ONLY when the effective
-# delegationMode is force or auto; SILENT on manual (the default). The silence is
-# load-bearing -- the block appears only when delegation is operative.
+# delegationMode is force or auto; SILENT on manual and on the no-file/unresolved
+# state (fail-safe). The silence is load-bearing -- the block appears only when
+# delegation is operative.
 #
 # SELF-CONTAINED first-match read of the documented read-order (the full resolver is
-# not shipped to targets; force/auto are always file-explicit since the default is
-# manual, so the defaults/normalizer layers are irrelevant here on purpose):
+# not shipped to targets; force/auto are always file-explicit, and no file anywhere
+# means the pack is not installed here / the config was removed, so we do NOT inject
+# a standing directive into an arbitrary directory -- the defaults/normalizer layers
+# stay out of scope on purpose):
 #   .\.agents\.agents-mode.yaml -> .\.agents\.agents-mode ->
 #   ~\.codex\.agents-mode.yaml -> ~\.codex\.agents-mode -> ~\.agents-mode.yaml
-#   First file DEFINING delegationMode wins; none -> manual -> silent.
+#   First file DEFINING delegationMode wins; none -> unresolved -> silent (fail-safe).
 #
 # Fail-open: any error emits nothing and exits 0.
 $ErrorActionPreference = "SilentlyContinue"
@@ -54,7 +57,7 @@ function Get-DelegationMode {
             return $v
         }
     }
-    return "manual"
+    return "unresolved"
 }
 
 $mode = Get-DelegationMode
@@ -66,5 +69,5 @@ elseif ($mode -eq "auto") {
     Write-Output "[Delegation posture - re-shown at session start and after every compaction]"
     Write-Output "Effective delegationMode: AUTO. Delegating to `$lead or the matching specialist subagent is the DEFAULT for any non-trivial task (multi-step implementation, design, research, review, bug-fix) - do it unless the task is trivial or you record why inline is better. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
 }
-# manual or unresolved -> silent
+# manual value, unresolved, or empty -> silent
 exit 0

@@ -22,7 +22,7 @@
       "whenToUse": "First-time bootstrap; quiet shared baseline with no standing external preference",
       "expansion": {
         "consultantMode": "disabled",
-        "delegationMode": "manual",
+        "delegationMode": "auto",
         "parallelMode": "auto",
         "mcpMode": "auto",
         "preferExternalWorker": "false",
