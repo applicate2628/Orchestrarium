@@ -1017,6 +1017,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.ps1"
       stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.ps1"
       reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.ps1"
+      agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.ps1"
     else
       bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.sh"
       stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.sh"
@@ -1025,6 +1026,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.sh"
       stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.sh"
       reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.sh"
+      agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.sh"
     fi
     echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
     "$python_cmd" "$hook_installer" \
@@ -1078,6 +1080,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --hook-event SessionStart \
       --script-marker mcp-usage-reminder \
       --script-path "$reminder_script_target"
+    echo "  Installing delegation-posture (agents-mode) SessionStart hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --hook-event SessionStart \
+      --script-marker agents-mode-reminder \
+      --script-path "$agents_mode_reminder_script_target"
   fi
 fi
 
