@@ -12,7 +12,7 @@ Supported canonical keys:
 
 ```yaml
 consultantMode: external  # allowed: external | internal | disabled; default: disabled
-delegationMode: manual  # allowed: manual | auto | force; default: manual
+delegationMode: auto  # allowed: manual | auto | force; default: auto
 parallelMode: auto  # allowed: manual | auto | force; default: auto
 mcpMode: auto  # allowed: auto | force; default: auto
 preferExternalWorker: true  # allowed: false | true; default: false

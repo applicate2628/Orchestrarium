@@ -18,7 +18,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | Key | `default` (safe-init) | `absolute-balance` (everyday center) | `external-aggressive` (aggressive external use) | `correctness-first` (no-time-limit correctness) | `power-mode` (hardest-task maximum result) | `max-speed` (speed-first) |
 |---|---|---|---|---|---|---|
 | `consultantMode` | `disabled` | `internal` | `external` | `external` | `external` | `disabled` |
-| `delegationMode` | `manual` | `auto` | `force` | `force` | `force` | `auto` |
+| `delegationMode` | `auto` | `auto` | `force` | `force` | `force` | `auto` |
 | `parallelMode` | `auto` | `auto` | `force` | `auto` | `force` | `force` |
 | `mcpMode` | `auto` | `auto` | `auto` | `force` | `force` | `auto` |
 | `preferExternalWorker` | `false` | `false` | `true` | `true` | `true` | `false` |
@@ -97,7 +97,7 @@ Routing conventions (not persisted as keys):
       - `externalCodexProfile`
     - Use the existing value when present, the preset-expanded value if one was selected, or otherwise default to:
       - `consultantMode: disabled`
-      - `delegationMode: manual`
+      - `delegationMode: auto`
       - `parallelMode: auto`
       - `mcpMode: auto`
       - `preferExternalWorker: false`
@@ -132,7 +132,7 @@ Routing conventions (not persisted as keys):
 
    ```yaml
    consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-   delegationMode: {value}  # allowed: manual | auto | force; default: manual
+   delegationMode: {value}  # allowed: manual | auto | force; default: auto
    parallelMode: {value}  # allowed: manual | auto | force; default: auto
    mcpMode: {value}  # allowed: auto | force; default: auto
    preferExternalWorker: {value}  # allowed: false | true; default: false

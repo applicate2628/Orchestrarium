@@ -89,7 +89,7 @@ The local config file is `.claude/.agents-mode.yaml`. The canonical file may con
 
 ```yaml
 consultantMode: {value}  # allowed: external | internal | disabled; default: disabled
-delegationMode: {value}  # allowed: manual | auto | force; default: manual
+delegationMode: {value}  # allowed: manual | auto | force; default: auto
 parallelMode: {value}  # allowed: manual | auto | force; default: auto
 mcpMode: {value}  # allowed: auto | force; default: auto
 preferExternalWorker: {value}  # allowed: false | true; default: false
