@@ -622,11 +622,11 @@ def validate_manual_reference_surfaces(root: Path) -> None:
         root / "src.qwen" / "skills" / "lead" / "subagent-contracts.md",
     ]
 
-    if "| Gemini CLI | `disabled` | `manual` | `auto`" not in reference:
+    if "| Gemini CLI | `disabled` | `auto` | `auto`" not in reference:
         raise ContractError(
             "agents-mode reference must keep Gemini first-write defaults on shared auto defaults"
         )
-    if "| Qwen Code | `disabled` | `manual` | `auto`" not in reference:
+    if "| Qwen Code | `disabled` | `auto` | `auto`" not in reference:
         raise ContractError(
             "agents-mode reference must keep Qwen first-write defaults on shared auto defaults"
         )
