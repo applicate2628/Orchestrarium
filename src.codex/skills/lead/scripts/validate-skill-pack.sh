@@ -473,6 +473,75 @@ PY
   fi
 }
 
+check_openai_yaml_interface() {
+  local file="$1"
+  local label="$2"
+  if [[ ! -f "$file" ]]; then
+    fail "$label (file missing: $file)"
+    return
+  fi
+
+  local python_cmd=""
+  if command -v python3 >/dev/null 2>&1; then
+    python_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    python_cmd="python"
+  else
+    warn "$label (python unavailable)"
+    return
+  fi
+
+  local output
+  if output="$("$python_cmd" - "$file" <<'PY'
+import pathlib
+import re
+import sys
+
+try:
+    import yaml
+except Exception:
+    yaml = None
+
+path = pathlib.Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+required = ("display_name", "short_description", "default_prompt")
+
+if yaml is not None:
+    try:
+        data = yaml.safe_load(text)
+    except Exception as exc:
+        print(f"{path}: YAML parse error: {exc}")
+        sys.exit(1)
+    if not isinstance(data, dict) or not isinstance(data.get("interface"), dict):
+        print(f"{path}: missing top-level 'interface' mapping")
+        sys.exit(1)
+    iface = data["interface"]
+    missing = [k for k in required if not isinstance(iface.get(k), str) or not iface.get(k).strip()]
+    if missing:
+        print(f"{path}: interface missing/empty required keys: {', '.join(missing)}")
+        sys.exit(1)
+else:
+    # PyYAML unavailable: fall back to a regex structural check rather than
+    # treating existence as sufficient (existence-only was the defect this
+    # check closes).
+    if not re.search(r"^interface:\s*$", text, re.MULTILINE):
+        print(f"{path}: missing top-level 'interface:' key (PyYAML unavailable, regex fallback)")
+        sys.exit(1)
+    missing = [k for k in required if not re.search(rf"^\s+{k}:\s*\S", text, re.MULTILINE)]
+    if missing:
+        print(f"{path}: interface missing/empty required keys (regex fallback): {', '.join(missing)}")
+        sys.exit(1)
+PY
+)"; then
+    pass "$label"
+  else
+    fail "$label"
+    if [[ -n "$output" ]]; then
+      printf '%s\n' "$output" | sed 's/^/       /'
+    fi
+  fi
+}
+
 check_skill_description_budget() {
   local max_per_description="$1"
   local max_total_description="$2"
@@ -716,12 +785,49 @@ for f in \
   "$SKILLS_DIR/second-opinion/SKILL.md" \
   "$SKILLS_DIR/review-loop/SKILL.md" \
   "$SKILLS_DIR/review-loop/agents/openai.yaml" \
+  "$SKILLS_DIR/design-panel/SKILL.md" \
+  "$SKILLS_DIR/design-panel/agents/openai.yaml" \
   "$SCRIPTS_DIR/check-publication-safety.sh" \
   "$SCRIPTS_DIR/check-publication-safety.ps1" \
   "$SCRIPTS_DIR/validate-skill-pack.sh"
 do
   if [[ -f "$f" ]]; then pass "$f"; else fail "$f missing"; fi
 done
+
+echo ""
+echo "=== Design-panel ==="
+
+# Mechanical structure only (per the design-panel methodology's validator/review boundary):
+# whether two framings are substantively independent, and whether the synthesis found every
+# unique contribution, stay review territory.
+for dp_id in DP1 DP2 DP3 DP4 DP5 DP6 DP7 DP8; do
+  check_contains "$SKILLS_DIR/design-panel/SKILL.md" "$dp_id" \
+    "design-panel skill carries invariant marker $dp_id"
+done
+check_contains "$SKILLS_DIR/design-panel/SKILL.md" "INPUT_ONLY" \
+  "design-panel skill carries the INPUT_ONLY candidate disposition marker"
+check_contains "$SKILLS_DIR/design-panel/SKILL.md" "RETURN(lead)" \
+  "design-panel skill carries the RETURN(lead) ledger-gate marker"
+check_contains "$SKILLS_DIR/design-panel/SKILL.md" "synthesis" \
+  "design-panel skill names the synthesis step"
+check_contains "$SKILLS_DIR/design-panel/SKILL.md" "N=2" \
+  "design-panel skill carries the N=2 default quorum marker"
+check_openai_yaml_interface "$SKILLS_DIR/design-panel/agents/openai.yaml" \
+  "design-panel openai.yaml interface block parses with required keys (display_name, short_description, default_prompt)"
+check_contains "$SKILLS_DIR/lead/operating-model.md" "Design-panel and review-loop selection" \
+  "lead operating-model carries the design-panel/review-loop selection block"
+check_h2_section_contains "$SKILLS_DIR/lead/operating-model.md" \
+  "## Design-panel and review-loop selection" \
+  "skills/design-panel/" \
+  "lead operating-model design-panel selection block names the installed binding path"
+check_h2_section_contains "$SKILLS_DIR/lead/operating-model.md" \
+  "## Design-panel and review-loop selection" \
+  "independence at **generation**" \
+  "lead operating-model design-panel selection block states the generation side of the distinction"
+check_h2_section_contains "$SKILLS_DIR/lead/operating-model.md" \
+  "## Design-panel and review-loop selection" \
+  "independence at **verification**" \
+  "lead operating-model design-panel selection block states the verification side of the distinction"
 
 if [[ $DEV_REPO -eq 1 ]]; then
   DOCS_DIR="$REPO_ROOT/docs"
@@ -1094,11 +1200,27 @@ CODEX_SKILL_DESCRIPTION_MAX_CHARS=460
 # Visible decision rather than silent growth; the live total is reported by the
 # "Codex skill description total" pass line.
 CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS=4000
-UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes review-loop)
+UTILITY_SKILLS=(init-project external-brigade second-opinion review-changes review-loop design-panel)
 PACK_BUDGET_SKILLS=("${indexed_roles[@]}" "${UTILITY_SKILLS[@]}" "${indexed_common_skills[@]}")
 mapfile -t PACK_BUDGET_SKILLS < <(printf '%s\n' "${PACK_BUDGET_SKILLS[@]}" | sort -u)
 check_skill_frontmatter_yaml "${PACK_BUDGET_SKILLS[@]}"
 check_skill_description_budget "$CODEX_SKILL_DESCRIPTION_MAX_CHARS" "$CODEX_SKILL_DESCRIPTION_TOTAL_MAX_CHARS" "${PACK_BUDGET_SKILLS[@]}"
+
+echo ""
+echo "=== Design-panel utility-skill registration ==="
+
+# Hard FAIL, not the softer orphan WARNING below: a design-panel entry dropped
+# from UTILITY_SKILLS would otherwise only demote to "orphaned skill directory"
+# (a WARN), silently downgrading a required registration to advisory noise.
+design_panel_registered=0
+for util in "${UTILITY_SKILLS[@]}"; do
+  if [[ "$util" == "design-panel" ]]; then design_panel_registered=1; break; fi
+done
+if [[ $design_panel_registered -eq 1 ]]; then
+  pass "design-panel is registered in UTILITY_SKILLS"
+else
+  fail "design-panel is missing from UTILITY_SKILLS (would otherwise silently downgrade to an orphaned-directory WARNING)"
+fi
 
 echo ""
 echo "=== Orphaned skill directories ==="
