@@ -253,10 +253,17 @@ def seed_codex_agent_overrides(project_root: Path, root: Path) -> None:
     current_explorer = (root / "src.codex" / "agents" / "explorer.toml").read_text(
         encoding="utf-8"
     )
-    (agents_dir / "explorer.toml").write_text(
-        current_explorer.replace('model = "gpt-5.5"', 'model = "gpt-old-default"'),
-        encoding="utf-8",
+    stale_explorer = current_explorer.replace(
+        'model = "gpt-5.6-sol"', 'model = "gpt-old-default"'
     )
+    if stale_explorer == current_explorer:
+        raise InstallerRegressionError(
+            "seed_codex_agent_overrides: the model-string marker used to stage a "
+            "stale explorer.toml was not found in src.codex/agents/explorer.toml "
+            "(a silent no-op here would mean the reinstall-refresh check tests "
+            "nothing) — update the replace() target to the current shipped model"
+        )
+    (agents_dir / "explorer.toml").write_text(stale_explorer, encoding="utf-8")
     (agents_dir / "worker.toml").write_text(
         CUSTOM_CODEX_WORKER_AGENT,
         encoding="utf-8",
@@ -312,9 +319,9 @@ def validate_overlay(
     if counts != expected_counts:
         raise InstallerRegressionError(f"{case.name} opinion counts drifted")
 
-    if scalars.get("externalCodexProfile") != "gpt-5.5-xhigh":
+    if scalars.get("externalCodexProfile") != "gpt-5.6-sol-xhigh":
         raise InstallerRegressionError(
-            f"{case.name} missing shared externalCodexProfile default (gpt-5.5-xhigh)"
+            f"{case.name} missing shared externalCodexProfile default (gpt-5.6-sol-xhigh)"
         )
 
     custom = profiles.get("custom")

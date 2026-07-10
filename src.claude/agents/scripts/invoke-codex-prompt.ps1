@@ -13,7 +13,7 @@
     Get-Content -Raw prompt.md |
       powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-codex-prompt.ps1 advisory-adr
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-codex-prompt.ps1 worker-task --% --prompt-file prompt.md -- --model gpt-5.5
+    powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-codex-prompt.ps1 worker-task --% --prompt-file prompt.md -- --model gpt-5.6-sol
 #>
 param(
   [Parameter(Mandatory = $true, Position = 0)]
@@ -44,10 +44,13 @@ if ([string]::IsNullOrEmpty($TopicSlug) -or
 
 if (-not $CodexFlags -or $CodexFlags.Count -eq 0) {
   # Codex CLI 0.130.0+ uses `codex exec` (non-interactive subcommand); the old
-  # top-level --quiet / --full-auto flags were removed. Defaults below pin only
-  # `model_reasoning_effort=xhigh`; callers should override after the `--` block
-  # if they need a deterministic per-profile invocation including fast_mode.
-  $CodexFlags = @('-c', 'model_reasoning_effort=xhigh')
+  # top-level --quiet / --full-auto flags were removed. A12: every provider-backed
+  # run must carry an explicit model AND effort, never an ambient one — the
+  # default below pins the shipped default profile `gpt-5.6-sol-xhigh`. Callers
+  # needing a different profile (e.g. `--model gpt-5.6-sol -c
+  # model_reasoning_effort=max` or `--model gpt-5.6-luna`) pass the full flag
+  # set after `--`, which always overrides this default.
+  $CodexFlags = @('--model', 'gpt-5.6-sol', '-c', 'model_reasoning_effort=xhigh')
 }
 
 $codexBin = if ($env:CODEX_BIN) { $env:CODEX_BIN } else { 'codex' }

@@ -12,7 +12,7 @@
 #   echo "<prompt body>" | bash .claude/agents/scripts/invoke-codex-prompt.sh <topic-slug> [-- codex-flags...]
 #   bash .claude/agents/scripts/invoke-codex-prompt.sh <topic-slug> --prompt-file <path> [-- codex-flags...]
 #
-# Default codex flags (applied when no `--` block is given): -c model_reasoning_effort=xhigh
+# Default codex flags (applied when no `--` block is given): --model gpt-5.6-sol -c model_reasoning_effort=xhigh
 # (codex CLI 0.130.0+ runs via the `exec` subcommand, not the deprecated top-level --quiet/--full-auto)
 #
 # Environment overrides:
@@ -44,16 +44,17 @@ PROMPT_FILE=""
 # old top-level `--quiet --full-auto` flags. The wrapper invokes `codex exec` and
 # supplies `--skip-git-repo-check` so prompts can be served from any directory.
 #
-# Default flags pin only `model_reasoning_effort=xhigh` and intentionally do NOT
-# touch Codex's stable `fast_mode` feature. To make a deterministic invocation,
-# callers should pass the full per-profile flag set after `--`:
-#   `gpt-5.5-xhigh` (best-effort / consultant lane):
-#     -- -c model_reasoning_effort=xhigh --disable fast_mode
-#   `gpt-5.5-fast` (fast variant):
-#     -- -c model_reasoning_effort=xhigh --enable fast_mode
-#   `default` (inherit externalModelMode):
-#     --                                          (no profile-specific extras)
-CODEX_FLAGS=("-c" "model_reasoning_effort=xhigh")
+# Default flags (A12: every provider-backed run must carry an explicit model AND
+# effort, never an ambient one) pin the shipped default profile `gpt-5.6-sol-xhigh`.
+# Callers needing a different profile pass the full per-profile flag set after `--`:
+#   `gpt-5.6-sol-xhigh` (default / best-effort / consultant lane):
+#     -- --model gpt-5.6-sol -c model_reasoning_effort=xhigh
+#   `gpt-5.6-sol-max` (higher-complexity / hard lanes):
+#     -- --model gpt-5.6-sol -c model_reasoning_effort=max
+#   `gpt-5.6-luna` (fast/volume/cheap tier; a distinct model, not an effort suffix):
+#     -- --model gpt-5.6-luna -c model_reasoning_effort=medium
+# An explicit `--` block always overrides these defaults, including `--model`.
+CODEX_FLAGS=("--model" "gpt-5.6-sol" "-c" "model_reasoning_effort=xhigh")
 SAW_DELIMITER=0
 while [[ $# -gt 0 ]]; do
   case "$1" in

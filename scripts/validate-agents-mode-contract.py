@@ -666,7 +666,7 @@ def validate_manual_reference_surfaces(root: Path) -> None:
 
 # The externalCodexProfile value NAMESPACE shape (a schema value looks like this).
 # Detection is derived from the SCHEMA, not a hardcoded value list — the specific
-# allowed values (gpt-5.5-fast, ...) are read from the schema at runtime; this
+# allowed values (gpt-5.6-luna, ...) are read from the schema at runtime; this
 # pattern only recognizes the token SHAPE so the scanner can find them on a line.
 _CODEX_ENUM_TOKEN = re.compile(r"default|gpt-5\.\d+-[a-z0-9-]+")
 # Enum-LISTING signature: any TWO namespace-shaped tokens adjacent via ` | ` (the
@@ -682,7 +682,7 @@ _CODEX_ENUM_SCAN_ROOTS = ("docs", "shared", "src.claude", "src.codex", "src.gemi
 _CODEX_ENUM_SCAN_TOP = ("README.md", "INSTALL.md")
 _CODEX_ENUM_SCAN_EXTS = (".md", ".json", ".yaml", ".yml", ".toml", ".sh", ".ps1")
 # Changelog / release-note / history stems are EXEMPT: recording a superseded
-# enum ("was default | gpt-5.5-fast | gpt-5.5-xhigh") is the point there, exactly
+# enum ("was default | gpt-5.6-sol-xhigh | gpt-5.6-luna") is the point there, exactly
 # as the C6 stale-relation-residue hook exempts the same stems. A live-surface
 # enum validator must not guard historical prose.
 _CODEX_ENUM_EXEMPT_STEMS = {
