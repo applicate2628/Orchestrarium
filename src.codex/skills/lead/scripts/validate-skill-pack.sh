@@ -1125,7 +1125,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CODEX_REF_DIR/subagent-operating-model.md" 120 \
     "Codex addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "a79853274a07948974f49fe188c6b348f28f2fc427f2e5b35b117120256516b9" \
+    "f6dde04ed866b6c0b9187d8cb3ca34307a6a1b575a6c657096315b9f13631eb4" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
     "9c392ebe8a95921d65d7b16ac567907e557818cfc57b468d9d67680f9a088f19" \
