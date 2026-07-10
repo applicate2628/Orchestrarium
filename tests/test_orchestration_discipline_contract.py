@@ -107,9 +107,14 @@ PINS = [
     ("A13", "Once a provider or subagent run is launched, a later preference change to effort, model, or framing applies to the next dispatch.",
      ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
 
-    # P8 — writer-owner + settled event (architect return + reviewer gate)
+    # P8 — writer-owner + settled event (architect return + reviewer gate).
+    # The Claude pointer targets skills/architect/SKILL.md (not agents/architect.md): the
+    # roles-as-skills curated subset made architect a dual role-skill, and the full role
+    # contract — including this P8 sentence — moved into the skill; agents/architect.md is
+    # now a thin delegate wrapper that loads the skill. This matches the codex pointer shape,
+    # which already targeted skills/architect/SKILL.md.
     ("P8-architect", "the Change-Surface Contract MUST name exactly one writer-owner and one downstream-observable `settled/committed` event. Missing either is `REVISE` at design input.",
-     ["src.claude/agents/architect.md", "src.codex/skills/architect/SKILL.md"]),
+     ["src.claude/skills/architect/SKILL.md", "src.codex/skills/architect/SKILL.md"]),
     ("P8-reviewer", "Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner and a downstream-observable `settled/committed` event, and the implementation preserves both.",
      ["src.claude/agents/architecture-reviewer.md", "src.codex/skills/architecture-reviewer/SKILL.md"]),
 ]

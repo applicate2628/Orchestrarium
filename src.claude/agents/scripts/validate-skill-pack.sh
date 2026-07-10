@@ -775,6 +775,48 @@ if [[ -f "$AGENTS_FILE" ]]; then
 fi
 echo ""
 
+# 2b. Curated role-skill registry (roles-as-skills curated subset, Claude-only).
+# The curated set is exactly {lead, product-manager, analyst, architect, planner}: lead is a
+# skill + fail-closed stub (checked in [Lead identity] above); the other four are duals — a
+# canonical skills/<role>/SKILL.md plus a thin agents/<role>.md delegate wrapper that pins to
+# it via the Skill tool. This block enforces (1) each curated role has both surfaces in the
+# expected shape and (2) a NEGATIVE ALLOWLIST — no role-index role outside the curated set may
+# carry a skills/<role>/SKILL.md, making the curation criterion structural, not just documented.
+echo "[Curated role-skill registry]"
+CURATED_ROLE_SKILLS="lead product-manager analyst architect planner"
+CURATED_DUAL_ROLE_SKILLS="product-manager analyst architect planner"
+
+for role in $CURATED_ROLE_SKILLS; do
+  check_file "$PACK/skills/$role/SKILL.md" "$role has a curated role-skill file"
+done
+
+for role in $CURATED_DUAL_ROLE_SKILLS; do
+  check_contains "$PACK/agents/${role}.md" "invoke the \`Skill\` tool with name \`${role}\` to load the full role contract" \
+    "$role agent wrapper pins to its curated skill via the Skill tool"
+  check_absent "$PACK/agents/${role}.md" "lead-is-a-main-conversation-role" \
+    "$role agent wrapper is not a fail-closed stub (dual role must stay a valid dispatch target)"
+done
+
+if [[ -f "$AGENTS_FILE" ]]; then
+  for role in $roles; do
+    if [[ -f "$PACK/skills/${role}/SKILL.md" ]]; then
+      is_curated=0
+      for c in $CURATED_ROLE_SKILLS; do
+        if [[ "$c" == "$role" ]]; then
+          is_curated=1
+          break
+        fi
+      done
+      if [[ $is_curated -eq 1 ]]; then
+        pass "$role skill surface is in the curated role-skill registry"
+      else
+        fail "$role has skills/$role/SKILL.md but is not in the curated role-skill registry ($CURATED_ROLE_SKILLS) — roles-as-skills allowlist violation"
+      fi
+    fi
+  done
+fi
+echo ""
+
 # 3. Team templates have required fields
 echo "[Team templates]"
 for f in $PACK/agents/team-templates/*.json; do

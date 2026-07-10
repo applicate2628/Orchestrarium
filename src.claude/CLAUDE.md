@@ -182,7 +182,7 @@ If the effective Claude overlay exists but is stale, comment-free, or from an ol
 
 **Claude Code routing rules:**
 
-- Every specialist invocation MUST use the Agent tool with the matching `subagent_type`. Do not simulate roles in the main conversation.
+- Every specialist invocation MUST use the Agent tool with the matching `subagent_type`. Do not simulate roles in the main conversation. **Narrow exception — curated inline role-skills:** exactly five roles carry a canonical contract under `.claude/skills/<role>/SKILL.md` and may be adopted inline instead of dispatched: `lead`, `product-manager`, `analyst`, `architect`, `planner`. Inline adoption applies ONLY when the operator explicitly invokes the named skill (`/lead`, `/product-manager`, `/analyst`, `/architect`, `/planner` or an equivalent explicit `Skill` tool call) — never as a silent default for template/pipeline routing. Inline adoption preserves the current conversation's accumulated context and produces that role's one artifact; it does NOT claim isolation or independence, and it satisfies no independent gate (a reviewer, QA, or consultant verdict). `lead` is a fail-closed stub with no valid dispatch; the other four stay valid fresh-context Agent targets (`subagent_type: product-manager | analyst | architect | planner`) whose wrapper loads the same skill inside an isolated subagent context. `product-manager` carries an additional separation caveat: inline adoption is for quick intake/scope framing only — a formal cross-initiative roadmap decision, or admitting work that will gate other work, still routes to the `product-manager` subagent. Every other role stays Agent-tool-only; this exception is not a general permission to simulate any role inline.
 - If the template says `requiresLead: false`, the main conversation manages the chain directly — invoke specialists via Agent tool in order, pass each accepted artifact to the next.
 - If the template says `requiresLead: true`, the main conversation holds the Lead role and runs the full lead pipeline directly (per the `/lead` skill) — coordinating work-items, risk owners, integration, and gates while dispatching each specialist via the Agent tool. `requiresLead` sets how heavy the orchestration is, not who is lead; Lead is never spawned as a subagent.
 - Independent roles (e.g., security-engineer and performance-engineer) SHOULD be launched in parallel via multiple Agent tool calls in a single message when their scopes do not overlap.
@@ -263,7 +263,7 @@ When the Claude Code superpowers plugin is installed alongside this pack, the tw
 
 ## Role definitions
 
-Role definitions live in `.claude/agents/<role>.md`. Exception: the Lead contract lives in `.claude/skills/lead/SKILL.md` — an in-session role activated as `/lead`, never dispatched; `.claude/agents/lead.md` is its fail-closed dispatch stub.
+Role definitions live in `.claude/agents/<role>.md`. Exception — the curated inline role-skills (see the narrow exception above): `lead`, `product-manager`, `analyst`, `architect`, and `planner` keep their canonical contracts under `.claude/skills/<role>/SKILL.md` instead. `lead`'s `.claude/agents/lead.md` is a fail-closed dispatch stub (an in-session role activated as `/lead`, never dispatched). The other four (`product-manager`, `analyst`, `architect`, `planner`) are duals: `.claude/agents/<role>.md` is a thin fresh-context delegate wrapper whose required first step loads the same-named skill. Every other core role's canonical contract stays in `.claude/agents/<role>.md` as before.
 
 ## Publication safety scan
 
