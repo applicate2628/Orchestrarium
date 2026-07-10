@@ -48,6 +48,8 @@ Look for:
 
 If a UI variant works correctly but another does not, treat them as separate code paths even when they look like they share state — log inside each to confirm rather than assume.
 
+- When N symptoms or failing cases are reported, keep N independent root hypotheses and instrument each case. Collapse them to one common root only when one observed mechanism explains every case; shared timing, location, or correlation is not proof.
+
 ## Rule 3 — Redirect stderr to a scratch file, never lean on console output
 
 Console output is lost between iterations. Redirect to a scratch file under the repo (e.g. `.scratch/<topic>.log`, already covered by repo `.gitignore` conventions). Persistent log files survive app crashes and allow diff between runs.

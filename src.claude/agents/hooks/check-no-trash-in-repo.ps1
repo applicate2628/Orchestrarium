@@ -6,7 +6,8 @@
       powershell -NoProfile -ExecutionPolicy Bypass -File <this-script>
     stdin: PreToolUse JSON envelope from Claude Code or Codex.
     stdout: nothing (AUDIT mode allows).
-    stderr: an audit warning if a personal-workflow dir is created inside a repo.
+    stderr: an audit warning if an unrequested `git worktree add` is run (a single add
+      ending with the exact `# orchestrarium:requested-isolation-worktree` marker is exempt).
     exit: always 0 (fail-open on any internal error; AUDIT mode never blocks).
 
     The Python helper does all the actual logic — this wrapper only pipes stdin

@@ -59,4 +59,5 @@ If the user asked "did we fix everything?", answer that directly before the deta
 - Pass accepted artifacts between stages — analyst findings go to QA, both go to reviewer.
 - If any stage finds a CRITICAL issue, flag it immediately without waiting for later stages.
 - Treat changed files as entry points, not the review boundary.
+- When the user authorizes GitHub review-thread resolution, resolve a thread only after the fix commit is on `HEAD`, cite the confirming `file:line` on that `HEAD`, then query the thread API and verify the bot's current verdict is `PASS`. A UI badge, notification, local diff, or stale prior PASS is insufficient.
 - Do not modify any files — this is read-only.

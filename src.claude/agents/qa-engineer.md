@@ -24,6 +24,9 @@ description: Verify an approved phase against its acceptance criteria and test s
 ## Gate
 
 - Every acceptance criterion is mapped to evidence or an explicit gap.
+- Before any run, write `What would this criterion let pass?` for each acceptance criterion; if it admits the known failure or a degenerate result, rewrite the criterion before testing.
+- Anchor expected behavior to a known-good oracle (a shipped release or independent ground truth), never to a sibling mode or branch that can share the same defect.
+- Assert every required absolute property (for example non-zero variance, exact count/order/value, or a fixed invariant). Relative agreement such as ON≈OFF cannot PASS by itself.
 - Relevant unit, integration, or end-to-end coverage was run or explicitly reported as blocked.
 - Nearby must-not-break surfaces from the approved plan were smoke-checked or explicitly reported as blocked.
 - Agreed basic performance checks or performance smoke evidence are included when the phase can affect user-visible or system-visible performance.

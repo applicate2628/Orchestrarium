@@ -54,6 +54,8 @@ Against false convergence (angles agreeing on a wrong-but-plausible result) and 
 4. **Per-round diff** — record what changed and why (which blocker it answers).
 5. **Verify OUTPUTS, not notifications** — read the captured angle output and confirm a real verdict/findings before counting it.
 6. **Escalate early on a stuck blocker.**
+7. **Failed lane is unverified.** Any expected lane that errors, dies, or hits a time/token/usage limit is UNVERIFIED. Record the failed attempt, re-dispatch that lane, and never infer a clean result from silence. Before convergence, reconcile expected lanes against substantive outputs and recorded failures; every failure must name the successful re-dispatch that supersedes it.
+8. **Fail-closed aggregation.** A missing/null sub-verdict or findings payload is NOT-clean. An aggregation or gate remains `REVISE` and exits non-zero until every expected lane has substantive output and every recorded failure is reconciled.
 
 ## review-loop-state ledger (structural backstop)
 
@@ -62,11 +64,12 @@ A SHIPPED loop in this governed pack runs autonomous-to-convergence (human only 
 - pinned `objective`, `scope`, `runtime_root` (MUST be identical across all rounds of one loop)
 - `round` number (≤ cap)
 - `diff` (what changed since the prior round and why)
-- per verdict angle (`surgical`, `deep`): `verdict` (PASS/REVISE, never bare — cites blockers or rationale) + answers to the three meta-questions (`root_proven`, `scope_unchanged`, `verification_adequate`)
-- scout `findings` + their `reconciliation`
+- per verdict angle (`surgical`, `deep`): a non-empty successful `attempt_id` + `verdict` (PASS/REVISE, never bare — cites blockers or rationale) + answers to the three meta-questions (`root_proven`, `scope_unchanged`, `verification_adequate`)
+- scout: a non-empty successful `attempt_id` + `findings` + their `reconciliation`
+- `lane_failures`: every expected lane that errored/died/hit a limit, each naming the failed `attempt_id`, the `failure` kind (`error | died | limit`), and the successful `redispatched_as` attempt that supersedes it (`lane_failures: []` when none failed)
 - evidence / output-artifact references
 
-A structural validator (`scripts/validate-review-loop-state.* --self-test`, a development/CI tool kept in the repo and NOT installed into the runtime) checks the SCHEMA (anchors present + unchanged, diff present, both verdict angles + scout present, no bare PASS, cap respected). It does NOT and cannot check the semantics (whether the reasoning was sound; that stays review territory). This is the honest boundary: structure is mechanically enforceable, soundness is not.
+A structural validator (`scripts/validate-review-loop-state.* --self-test`, a development/CI tool kept in the repo and NOT installed into the runtime) checks the SCHEMA (anchors present + unchanged, diff present, both verdict angles + scout present with non-empty unique current `attempt_id`s, no bare PASS, cap respected, `lane_failures` well-formed with each failure reconciled to the current successful re-dispatch for that lane), treats a missing/null sub-verdict or findings payload as NOT-clean, and exits non-zero on any violation. It does NOT and cannot check the semantics (whether the reasoning was sound; that stays review territory). This is the honest boundary: structure is mechanically enforceable, soundness is not. The RUNTIME enforcement for a shipped loop is hardening invariants 7-8 above (failed-lane and fail-closed-aggregation discipline the orchestrator applies in-session); when DEVELOPING this pack, run `scripts/validate-review-loop-state.py` on the ledger as a dev/CI backstop.
 
 ### review-loop-state schema (per loop)
 
@@ -78,20 +81,28 @@ rounds:
   - round: 1
     diff: <what changed since the prior round and why; for round 1, "initial artifact">
     surgical:
+      attempt_id: <non-empty successful attempt id>
       verdict: REVISE            # PASS | REVISE, never bare
       blockers: [<blocker with file:line or evidence>, ...]   # or rationale on PASS
       root_proven: <yes | answer>
       scope_unchanged: <yes | answer>
       verification_adequate: <yes | answer>
     deep:
+      attempt_id: <non-empty successful attempt id>
       verdict: REVISE
       blockers: [<blocker>, ...]
       root_proven: <answer>
       scope_unchanged: <answer>
       verification_adequate: <answer>
     scout:
+      attempt_id: <non-empty successful attempt id>
       findings: [<raw finding>, ...]
       reconciliation: [<how each finding was addressed or folded into a verdict>, ...]
+    lane_failures:              # [] when no lane failed
+      - lane: <surgical | deep | scout>
+        attempt_id: <failed attempt id>
+        failure: <error | died | limit>
+        redispatched_as: <successful attempt id for that lane, == that lane's current attempt_id>
     evidence: [<path to captured angle output / trace>, ...]
 ```
 

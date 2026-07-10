@@ -47,6 +47,12 @@ Allowed change surface:
 - <approved files, modules, or seams>
 Must-not-break surfaces:
 - <nearby but unrelated areas that need isolation or smoke coverage>
+Diff-invisible invariants:
+- <behavior or contract that must remain true although the diff may not expose it>
+Named regression guard:
+- <test/probe plus expected result that falsifies preservation>
+Defect-class inventory:
+- <when one instance was cited: every participant to audit—parallel arms, cell/data shapes, return paths, and read-sites; otherwise "not-triggered">
 Constraints:
 - <constraint>
 Expected artifact:
@@ -56,6 +62,10 @@ Acceptance criteria:
 Gate to next stage:
 - <what must be proven>
 ```
+
+Before dispatch, fill `Diff-invisible invariants` and `Named regression guard`; `none` is valid only with a one-line reason. An implementation or review handoff with either field omitted is incomplete.
+
+**Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class, the dispatch prompt MUST direct the recipient to enumerate every participant of that class, classify each one, and fix every confirmed instance. A prompt scoped only to the named line is invalid.
 
 ## Artifact gate
 
