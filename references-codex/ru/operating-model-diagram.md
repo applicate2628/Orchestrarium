@@ -5,6 +5,8 @@
 
 **Platform note:** Orchestrarium targets Codex, а Codex использует sequential skill invocation. В отличие от parallel Agent tool dispatch в Claude Code, Codex обрабатывает один skill за раз. Диаграммы ниже отражают эту sequential execution model.
 
+> **Узел `lead` / `M` / `L` обозначает оркестрирующую роль, которую главная сессия Codex держит с активным skill `$lead`, а НЕ отдельно запускаемого агента.** По стадиям активируются только листовые роли-специалисты; `lead` — это главная сессия, исполняющая оркестрацию.
+
 ## 1. End-to-end Operating Flow
 
 ```mermaid

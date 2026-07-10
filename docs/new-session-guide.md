@@ -38,7 +38,7 @@ Use this guide at the start of a new Orchestrarium maintenance session. Its purp
 | Codex roles and common skills | `src.codex/skills/<name>/SKILL.md` |
 | Codex skill UI metadata | `src.codex/skills/<name>/agents/openai.yaml` |
 | Codex platform addendum and hooks | `src.codex/AGENTS.codex.md`, `src.codex/skills/lead/scripts/`, `src.codex/skills/lead/hooks/` |
-| Claude roles | `src.claude/agents/<role>.md` |
+| Claude roles | `src.claude/agents/<role>.md` (except Lead — `src.claude/skills/lead/SKILL.md`; `agents/lead.md` is a fail-closed stub) |
 | Claude slash commands | `src.claude/commands/agents-*.md` |
 | Claude common skills | `src.claude/skills/<name>/SKILL.md` |
 | Provider-specific addenda | `references-codex/`, `references-claude/`, `references-gemini/`, `references-qwen/` |

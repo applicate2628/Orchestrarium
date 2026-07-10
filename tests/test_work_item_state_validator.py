@@ -37,6 +37,8 @@ def run_contract_check() -> subprocess.CompletedProcess[str]:
 
 
 def valid_status() -> str:
+    # Legacy status shape: older work items carry `orchestrator: main | lead`. Kept as a
+    # labeled legacy fixture; canonical_status() below covers the current field.
     return """---
 template: full-delivery
 orchestrator: lead
@@ -71,6 +73,11 @@ Close the stage after publication gate.
 """
 
 
+def canonical_status() -> str:
+    # Canonical status shape: current field is `orchestration: light | full-lead`.
+    return valid_status().replace("orchestrator: lead", "orchestration: full-lead")
+
+
 def ledger_event(**overrides):
     event = {
         "schemaVersion": 1,
@@ -98,6 +105,18 @@ def ledger_event(**overrides):
 def test_pass_ledger_with_artifact_and_evidence(tmp_path: Path) -> None:
     item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
     write(item / "status.md", valid_status())
+    write(item / "reviews" / "qa.md", "# QA\n\nGate: PASS\n")
+    write(item / "agent-runs.jsonl", json.dumps(ledger_event()) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 0, result.stdout
+    assert "RESULT: PASS" in result.stdout
+
+
+def test_pass_ledger_with_canonical_orchestration_field(tmp_path: Path) -> None:
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", canonical_status())
     write(item / "reviews" / "qa.md", "# QA\n\nGate: PASS\n")
     write(item / "agent-runs.jsonl", json.dumps(ledger_event()) + "\n")
 

@@ -84,13 +84,13 @@ These exist in Codex because it must be self-contained. Claude distributes this 
 | Per-role contracts (PM through Consultant) | subagent-contracts:142–489 | Each in its own `src.claude/agents/<role>.md` |
 | Canonical routing patterns (27 patterns) | operating-model:45–105 | Team templates JSON + decision tree in CLAUDE.md |
 | Stage gates (all roles) | operating-model:107–133 | Distributed across role `.md` files |
-| Lead quick checklist | operating-model:147–171 | `src.claude/agents/lead.md` |
+| Lead quick checklist | operating-model:147–171 | `src.claude/skills/lead/SKILL.md` (`agents/lead.md` is fail-closed only) |
 | Review strategy selection + decision table | operating-model:174–226 | Compact version in operating-model + reviewer roles |
 | Builder and blocker separation | operating-model:232–240 | Implicit in role index + template routing |
 | Delivery loops | operating-model:7–25 | Implicit in template chain definitions |
 | Change classification | operating-model:27–33 | In AGENTS.shared.md engineering hygiene |
 | Fact-first workflow | operating-model:35–42 | In AGENTS.shared.md delegation principles |
-| Re-intake and integration ownership | operating-model:349–354 | In AGENTS.shared.md + lead.md |
+| Re-intake and integration ownership | operating-model:349–354 | In AGENTS.shared.md + `src.claude/skills/lead/SKILL.md` |
 | Change-isolation guidance | operating-model:363–367 | In AGENTS.shared.md engineering hygiene |
 | Governance artifacts list | operating-model:369–395 | In artifact persistence section |
 

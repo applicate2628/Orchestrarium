@@ -3,6 +3,8 @@
 This file provides a visual companion to [subagent-operating-model.md](subagent-operating-model.md).
 Strategy comparison companion: [shared/references/workflow-strategy-comparison.md](../shared/references/workflow-strategy-comparison.md).
 
+> **The `lead` / `M` / `L` node denotes the orchestration role the main conversation holds, not a dispatched subagent.** Only the leaf specialist nodes (analyst, architect, planner, implementers, QA, reviewers) are spawned as subagents; `lead` is the main conversation running that orchestration.
+
 ## 1. End-to-end operating flow
 
 ```mermaid

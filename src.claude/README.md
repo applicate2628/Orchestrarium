@@ -11,7 +11,7 @@ Use it together with:
 Source surface:
 
 - `CLAUDE.md` is the Claude-provider runtime entrypoint in the monorepo source tree
-- `agents/` carries role definitions, contracts, team templates, and supporting scripts, including the Claude API wrapper under `agents/scripts/`
+- `agents/` carries role definitions, contracts, team templates, and supporting scripts, including the Claude API wrapper under `agents/scripts/` — with one exception: the Lead contract lives at `skills/lead/SKILL.md`, and `agents/lead.md` is a fail-closed stub (all other roles live under `agents/`)
 - `commands/` carries Claude-side command helpers maintained in this branch, including the bounded parallel external-helper surface `/agents-external-brigade`
 - `memory/` carries the optional experience-based feedback surface
 

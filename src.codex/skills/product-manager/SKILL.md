@@ -42,7 +42,7 @@ description: "Own roadmap, priority, milestones, and discovery/delivery admissio
 - When admitting work similar to a prior item, consult the OPEN lessons in `work-items/lessons/` (status `open`) so a captured lesson is applied at admission rather than the same mistake repeated. Surface a relevant lesson's `## How to apply` in the roadmap decision package.
 - Set an admission **Priority** on the admitted item — `Priority: high | medium | low` — recorded on the item's `status.md`. Priority is scheduling URGENCY, distinct from defect severity (which is IMPACT): a low-severity bug can still be high-priority. State the priority and its rationale in the roadmap decision package.
 - When an initiative groups work toward a milestone, name the milestone in the roadmap decision package; `$lead` stamps it on the epic (the epic frontmatter already carries `milestone:` — no new field on `status.md`).
-- An item admitted but not yet started goes to the `## Backlog` section of the local `work-items/index.md` (a holding area between admission and active delivery), not straight to Active; `$lead`/main-conv move it Backlog -> Active when work starts.
+- An item admitted but not yet started goes to the `## Backlog` section of the local `work-items/index.md` (a holding area between admission and active delivery), not straight to Active; the main conversation (as Lead) moves it Backlog -> Active when work starts.
 
 ## Research admission filter
 

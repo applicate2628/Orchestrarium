@@ -19,16 +19,16 @@ dependency ready-set is "are its prerequisites done" (`docs/dependencies.md`).
 | Admission filter (Coherence / Improvement-hypothesis / Non-redundancy gates) | `product-manager.md` `## Research admission filter` | product-manager `SKILL.md` `## Research admission filter` |
 | Admission Priority set at admission | `product-manager.md` `## Working rules` | product-manager `SKILL.md` `## Working rules` |
 | Accepted `brief.md` + `status.md` before any delegation | `subagent-contracts.md` `## Artifact gate` | lead `subagent-contracts.md` `## Artifact gate` |
-| Dependency ready-set (no open `Depends-on`) — separate gate, see note above | `lead.md` `## Dependencies` | lead `SKILL.md` `## Dependencies` |
+| Dependency ready-set (no open `Depends-on`) — separate gate, see note above | lead skill (`skills/lead/SKILL.md`; `agents/lead.md` is a fail-closed stub) `## Dependencies` | lead `SKILL.md` `## Dependencies` |
 
 ## Definition of Done
 
 | Term | Owning file + section (Claude) | Owning section (Codex) |
 | --- | --- | --- |
 | Completion-reconciliation discipline (the spine rule) | `shared/AGENTS.shared.md` `Completion reconciliation discipline` | same spine rule (shared `AGENTS.shared.md`) |
-| Pre-close reconcile of brief / status / artifact / checks / open obligations | `lead.md` `## Task-memory rule` (pre-close reconcile) | lead `SKILL.md` `## Task-memory rule` (pre-close reconcile) |
+| Pre-close reconcile of brief / status / artifact / checks / open obligations | lead skill (`skills/lead/SKILL.md`; `agents/lead.md` is a fail-closed stub) `## Task-memory rule` (pre-close reconcile) | lead `SKILL.md` `## Task-memory rule` (pre-close reconcile) |
 | QA gate — every acceptance criterion mapped to evidence | `qa-engineer.md` `## Gate` | qa-engineer `SKILL.md` `## Gate` |
-| `closure.md` written (with `## Retrospective` when proportionate, `Closed:` date) | `lead.md` `## Task-memory rule` (closure.md step) | lead `SKILL.md` `## Task-memory rule` (closure.md step) |
+| `closure.md` written (with `## Retrospective` when proportionate, `Closed:` date) | lead skill (`skills/lead/SKILL.md`; `agents/lead.md` is a fail-closed stub) `## Task-memory rule` (closure.md step) | lead `SKILL.md` `## Task-memory rule` (closure.md step) |
 
 ## Terms and Abbreviations
 

@@ -3,6 +3,8 @@
 Этот файл — визуальное дополнение к [subagent-operating-model.md](subagent-operating-model.md).
 Справочник по стратегиям: [shared/references/ru/workflow-strategy-comparison.md](../../shared/references/ru/workflow-strategy-comparison.md).
 
+> **Узел `lead` / `M` / `L` обозначает оркестрирующую роль, которую держит главная сессия (main conversation), а НЕ отдельно запускаемый субагент.** Как субагенты запускаются только листовые роли-специалисты (analyst, architect, planner, implementers, QA, reviewers); `lead` — это главная сессия, исполняющая оркестрацию.
+
 ## 1. Сквозной operating flow
 
 ```mermaid

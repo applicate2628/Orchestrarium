@@ -36,7 +36,8 @@ description: "Maintain docs, references, plans, reports, canonical alignment, ar
 - Fix downstream drift from an accepted source of truth, but return `BLOCKED` when the source of truth is ambiguous.
 - Keep repository hygiene work separate from feature implementation and build remediation.
 - Keep hygiene-only work lightweight: link fixes, formatting, recovery-entry-point sync, archive moves, and non-semantic wording cleanup do not require the extra governance reviewer gate.
-- Maintain `work-items/lessons/` registry hygiene the same way as the decisions registry: local index sync and writing the stored back-reference id field. This is non-semantic bookkeeping; the lesson status transition (`open | applied | dropped | archived`) is a SEMANTIC act owned by the closing role / `$lead`, so the archivist does NOT decide a lesson status transition.
+- Own the work-item close/state-change MECHANICS contract: archive folder moves, `work-items/index.md` row sync, and active/archive reconciliation after every work-item state change (periodic controls: Index sync; Closure and archive hygiene). The deciding role (main conversation as Lead) owns the lifecycle DECISION and `closure.md` content and may apply these mechanics inline for a routine single-item close; multi-item, drifted, or complex archive/index states route here.
+- Maintain `work-items/lessons/` registry hygiene the same way as the decisions registry: local index sync and writing the stored back-reference id field. This is non-semantic bookkeeping; the lesson status transition (`open | applied | dropped | archived`) is a SEMANTIC act owned by the closing role (the main conversation as Lead, or the capturing reviewer), so the archivist does NOT decide a lesson status transition.
 - Do not self-certify semantic control-plane changes; stop at the stewardship patch and hand the result to the independent reviewer lane.
 
 ## Non-goals

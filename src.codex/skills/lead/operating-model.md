@@ -325,7 +325,7 @@ When `$product-manager` admits a new candidate approach into discovery, the road
 
 ## Isolation rule
 
-Every role invocation MUST use the designated agent invocation mechanism with the matching role. Do not simulate roles in the main conversation or emulate a specialist by "acting as" that role. Independent roles (e.g., security-engineer and performance-engineer) SHOULD be launched in parallel when their scopes do not overlap. Sequential dependencies must wait for the previous role to return its accepted artifact.
+Every role EXCEPT `$lead` MUST use the designated agent invocation mechanism (skill activation) with the matching role; the main session holds the `$lead` orchestration skill in-context and is never activated as a separate subagent. Every OTHER INTERNAL leaf specialist is activated per stage; the provider-backed external adapter routes (`$external-worker` / `$external-reviewer`) launch the selected external provider directly instead. Do not simulate those other roles in the main conversation or emulate a specialist by "acting as" that role. Independent roles (e.g., security-engineer and performance-engineer) SHOULD be launched in parallel when their scopes do not overlap. Sequential dependencies must wait for the previous role to return its accepted artifact.
 
 ## Interaction types
 
@@ -333,7 +333,7 @@ Every role invocation MUST use the designated agent invocation mechanism with th
 |---|---|---|---|
 | `->` | DIRECT | One role hands artifact to the next | Default in chain |
 | `->L->` | LEAD_MED | Lead mediates the handoff | Default for lead-managed |
-| `\|\|` | PARALLEL | Independent roles run concurrently | Lead or main conv |
+| `\|\|` | PARALLEL | Independent roles run concurrently | Main conv (as Lead) |
 | `=>` | CLAIMS | Design makes falsifiable claims for reviewer | Architect → reviewer |
 | `<=` | RETURN | Reviewer routes finding to upstream role | Reviewer → lead |
 | `^` | ESCALATE | Role cannot proceed, escalates to orchestrator | Any role → lead/user |
@@ -384,7 +384,7 @@ Every completed chain producing an accepted artifact MUST persist it before the 
 | Session log | `.reports/YYYY-MM/report(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Brief record of what happened — summary, not a copy of the canonical artifact |
 | Plan log | `.plans/YYYY-MM/plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` | Plan snapshots when a plan is created or materially revised |
 
-Session logging is mandatory for every participant — orchestrator, lead, or specialist role — when the session produced a result, made a routing decision, or completed a review. A session log summarizes what was asked, what was done, key decisions, outcome, participants, and pointers to canonical artifacts. Create `YYYY-MM/` subdirectory if it does not exist. See `AGENTS.md` § "Session logging rule" for the full contract.
+Session logging is mandatory for every participant — the orchestrator (the main conversation, as Lead) or a specialist role — when the session produced a result, made a routing decision, or completed a review. A session log summarizes what was asked, what was done, key decisions, outcome, participants, and pointers to canonical artifacts. Create `YYYY-MM/` subdirectory if it does not exist. See `AGENTS.md` § "Session logging rule" for the full contract.
 
 When NOT to save:
 - Do not persist intermediate REVISE drafts — only the final accepted version.

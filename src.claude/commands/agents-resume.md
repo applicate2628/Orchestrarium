@@ -12,7 +12,7 @@ Resume an interrupted agent chain from its saved state.
    - If no active work-items found, say "Nothing to resume."
 
 2. **Load state.** Read `status.md` from the selected work-item:
-   - Template and orchestrator (main/lead)
+   - Template and orchestration weight (`orchestration: light | full-lead`; legacy `orchestrator:` values read main→light, lead→full-lead — the main conversation holds Lead either way)
    - Current stage and main conv role
    - Completed agents and their results
    - Next action
@@ -25,7 +25,7 @@ Resume an interrupted agent chain from its saved state.
 
 4. **Resume execution.** Pick up from the next action in `status.md`:
    - For `requiresLead: false` templates — main conversation continues the chain from where it stopped
-   - For `requiresLead: true` templates — invoke `$lead` (Agent tool, `subagent_type: lead`) with the full work-item context
+   - For `requiresLead: true` templates — the main conversation holds the Lead role (activate the `/lead` skill) and resumes the full lead pipeline directly with the full work-item context — do not spawn `$lead`
    - Launch the next agent as specified in the next action field
 
 5. **Update status.md** after each stage transition, as usual.

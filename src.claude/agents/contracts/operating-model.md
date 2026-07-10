@@ -4,9 +4,9 @@ Reference for routing, interaction types, periodic controls, and role aliases. R
 
 ## Isolation rule
 
-**Every role invocation MUST use the Agent tool** with the matching `subagent_type`. Do not simulate roles in the main conversation or emulate a specialist by "acting as" that role. Each agent runs in its own isolated context and receives only the artifacts it needs.
+**Every role EXCEPT Lead MUST use the Agent tool** with the matching `subagent_type`. Lead is the ONE role the main conversation runs inline — it holds the Lead role and is never spawned as a subagent; every OTHER INTERNAL leaf specialist is spawned via the Agent tool (the provider-backed external adapter routes — `$external-worker` / `$external-reviewer` — launch the selected external provider directly, per `subagent-contracts.md`). Do not simulate those other roles in the main conversation or emulate a specialist by "acting as" that role. Each spawned agent runs in its own isolated context and receives only the artifacts it needs.
 
-- This applies to both `requiresLead: false` chains (main conversation invokes Agent tool per stage) and `requiresLead: true` chains (lead invokes Agent tool per specialist).
+- This applies to every chain: the main conversation (holding the Lead role) invokes the Agent tool per specialist. `requiresLead` sets orchestration weight, not a different invoker — there is no separate "lead" agent doing the invoking.
 - Independent roles (e.g., `security-engineer` and `performance-engineer`) SHOULD be launched in parallel via multiple Agent tool calls in a single message.
 - Sequential dependencies (e.g., `architect` → `planner`) MUST wait for the previous agent to return its artifact before launching the next.
 
@@ -15,12 +15,12 @@ Reference for routing, interaction types, periodic controls, and role aliases. R
 Team templates in `.claude/agents/team-templates/` define the team composition and execution chain for each task type.
 
 - Templates with `requiresLead: false` — main conversation manages the chain directly, invoking each specialist via Agent tool in stage order and passing accepted artifacts to the next.
-- Templates with `requiresLead: true` — `$lead` (itself invoked via Agent tool) coordinates work-items, risk owners, integration, and gates, invoking each specialist via Agent tool.
+- Templates with `requiresLead: true` — the main conversation holds the Lead role and runs the full lead pipeline (per the `/lead` skill): coordinating work-items, risk owners, integration, and gates, invoking each specialist via the Agent tool. Lead is not itself spawned; `requiresLead` marks heavier orchestration, not a separate invoker.
 - Re-classify immediately if scope widens beyond the current template.
 
 ## Routing principles
 
-When lead coordinates, or when the main conversation needs to decide between roles within a template:
+When the main conversation (holding the Lead role) needs to decide between roles within a template:
 
 1. **Risk owners trigger reviewers**: if a specialist constraint role participated in design, add the corresponding reviewer after QA.
 2. **UX lane**: if user-facing interaction design is needed, add `ux-designer` in design and `ux-reviewer` after QA.
@@ -107,7 +107,7 @@ Eight interaction types classify how roles communicate.
 | Type       | Symbol   | Purpose                                                                |
 |------------|----------|------------------------------------------------------------------------|
 | `DIRECT`   | `->`     | Direct artifact handoff. Default for `requiresLead: false` chains.     |
-| `LEAD_MED` | `->L->`  | Every handoff through lead. Default for `requiresLead: true` chains.   |
+| `LEAD_MED` | `->L->`  | Every handoff through the main conversation's Lead role. Default for `requiresLead: true` chains. |
 | `PARALLEL` | `\|\|`   | Parallel execution; single aggregator point.                           |
 | `CLAIMS`   | `=>`     | Traveling artifact via `constraints/claims.md`.                        |
 | `RETURN`   | `<=`     | Reviewer returns finding to named specialist (structural gaps only).   |
@@ -115,7 +115,7 @@ Eight interaction types classify how roles communicate.
 | `ADVISORY` | `~>`     | Consultant advisory only; never a pipeline gate.                       |
 | `NONE`     | `.`      | No direct interaction.                                                 |
 
-`PARALLEL`, `CLAIMS`, `RETURN`, `ESCALATE` require lead or main conversation authorization.
+`PARALLEL`, `CLAIMS`, `RETURN`, `ESCALATE` require authorization from the main conversation (as Lead).
 
 ## Periodic controls
 
@@ -178,7 +178,7 @@ When a reviewer finds a significant issue outside their domain (e.g., `security-
 
 1. **Tag the finding** in the review report: `[CROSS-DOMAIN: <target-domain>]` (e.g., `[CROSS-DOMAIN: performance]`, `[CROSS-DOMAIN: security]`).
 2. **Do not evaluate severity** outside the reviewer's expertise — state the observation factually and tag it.
-3. **The orchestrator** (main conversation or lead) routes the tagged finding to the appropriate specialist for evaluation.
+3. **The orchestrator** (the main conversation, as Lead) routes the tagged finding to the appropriate specialist for evaluation.
 4. The cross-domain finding does NOT block the current review's gate unless the reviewer cannot complete their own domain assessment without it.
 
 Target-domain mapping: `security` → `$security-engineer` or `$security-reviewer`, `performance` → `$performance-engineer` or `$performance-reviewer`, `architecture` → `$architect` or `$architecture-reviewer`, `accessibility` → `$accessibility-reviewer`, `ux` → `$ux-designer` or `$ux-reviewer`.
@@ -219,7 +219,7 @@ Any REVISE loop (QA, reviewer, or other gate returning REVISE) is capped at **3 
 Before launching agents in parallel:
 
 1. **Confirm non-overlapping change surfaces.** Each parallel agent must have an explicitly disjoint set of files it may modify. If change surfaces overlap, serialize the agents instead.
-2. **Assign an integration owner.** For `requiresLead: true` chains, lead is the integration owner. For `requiresLead: false`, main conversation is.
+2. **Assign an integration owner.** The main conversation (holding the Lead role) is the integration owner for every chain; `requiresLead` only changes how heavy the orchestration around it is.
 3. **After all parallel agents complete**, the integration owner:
    - Checks for semantic conflicts (two agents made assumptions that contradict each other)
    - Checks for unintended interactions (e.g., both agents modified a shared import file that wasn't in either change surface)
@@ -228,7 +228,7 @@ Before launching agents in parallel:
 
 ## Artifact persistence protocol
 
-Every completed chain that produces an accepted artifact MUST persist it before the session ends. The orchestrator (main conversation or lead) owns persistence — do not invoke a separate agent for a single file write.
+Every completed chain that produces an accepted artifact MUST persist it before the session ends. The orchestrator (the main conversation, as Lead) owns persistence — do not invoke a separate agent for a single file write.
 
 ### Three-tier storage
 
@@ -279,5 +279,5 @@ Invoke `$knowledge-archivist` only for complex document operations: reorganizati
 ## Governance sources
 
 - `.claude/CLAUDE.md` is the governance source of truth (auto-loaded into every conversation).
-- `lead.md` is the self-contained lead operating guide (loaded when lead is invoked).
+- `skills/lead/SKILL.md` is the self-contained Lead operating guide — activated in-session (`/lead` or adopted at the routing decision point), never loaded as a spawned subagent; `agents/lead.md` is its fail-closed dispatch stub, kept for pack detection.
 - This file is the on-demand reference for routing, controls, and aliases.

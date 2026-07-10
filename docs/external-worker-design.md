@@ -195,7 +195,7 @@ Full value-by-value operator semantics now live in [`agents-mode-reference.md`](
 
 ### When toggles are ON
 
-The orchestrator (lead or main conversation) **prefers** external roles by default:
+The orchestrator (the main conversation, as Lead) **prefers** external roles by default:
 
 - `consultantMode: external | internal | disabled` — consultant-only behavior
 - `delegationMode: manual | auto | force` — `manual` keeps explicit-request behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation a standing instruction whenever a matching specialist and viable tool path exist

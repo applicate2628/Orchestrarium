@@ -2,7 +2,7 @@
 
 This runbook describes the operator path for tracking real agent work in Orchestrarium task memory.
 
-Use it when a repository keeps active task memory under `work-items/active/<slug>/` and the lead or main session must prove which roles ran, what they accepted, and which gates remain open.
+Use it when a repository keeps active task memory under `work-items/active/<slug>/` and the main session (as Lead) must prove which roles ran, what they accepted, and which gates remain open.
 
 ## Files
 
