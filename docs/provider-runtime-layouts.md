@@ -6,7 +6,7 @@ Production auto-routing in the root integration contract is limited to Codex plu
 
 Do not confuse these runtime surfaces with the monorepo authoring trees such as `src.codex/`, `src.claude/`, `src.gemini/`, or `src.qwen/`.
 
-Architecture note: on the Codex line, the installed `AGENTS.md` is intentionally the compact universal minimum. Detailed installed role contracts and runtime guidance belong in the installed `skills/<role>/SKILL.md` files and the built-in `.codex/agents/*.toml` overrides; shared/provider reference trees are source-maintainer canon, not target-project install payload. Claude already follows the analogous pattern through a short `CLAUDE.md` entrypoint plus `.claude/agents/*.md` role files.
+Architecture note: on the Codex line, the installed `AGENTS.md` is intentionally the compact universal minimum. Detailed installed role contracts and runtime guidance belong in the installed `skills/<role>/SKILL.md` files and the built-in `.codex/agents/*.toml` overrides; shared/provider reference trees are source-maintainer canon, not target-project install payload. Claude already follows the analogous pattern through a short `CLAUDE.md` entrypoint plus `.claude/agents/*.md` role files, with Lead as the deliberate exception: Lead runs inline from `.claude/skills/lead/SKILL.md`, and `.claude/agents/lead.md` is retained only as a fail-closed compatibility stub.
 
 Read the tables with three layers in mind:
 
@@ -55,7 +55,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 
 | Item | Path or shape | Notes |
 | --- | --- | --- |
-| Global context file | `~/.claude/CLAUDE.md` | Official user-level Claude Code instruction file; intentionally short while detailed role behavior lives under `~/.claude/agents/` |
+| Global context file | `~/.claude/CLAUDE.md` | Official user-level Claude Code instruction file; intentionally short while detailed role behavior lives under `~/.claude/agents/`, except Lead — whose contract is `~/.claude/skills/lead/SKILL.md` (`~/.claude/agents/lead.md` is a fail-closed stub) |
 | Global personal skills | `~/.claude/skills/<skill-name>/SKILL.md` | Official preferred user-level extension surface |
 | Global personal subagents | `~/.claude/agents/*.md` | Official user-level custom subagent surface |
 | Global legacy commands | `~/.claude/commands/*.md` | Still supported, but Claude docs now recommend skills as the preferred model |
@@ -65,7 +65,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 
 | Item | Path or shape | Notes |
 | --- | --- | --- |
-| Project context file | `<project>/.claude/CLAUDE.md` or `<project>/CLAUDE.md` | Official project-level Claude instruction entrypoints; keep the entrypoint short and the detailed role files under `.claude/agents/` |
+| Project context file | `<project>/.claude/CLAUDE.md` or `<project>/CLAUDE.md` | Official project-level Claude instruction entrypoints; keep the entrypoint short and the detailed role files under `.claude/agents/`, except Lead — whose contract is `.claude/skills/lead/SKILL.md` (`.claude/agents/lead.md` is a fail-closed stub) |
 | Local personal override | `<project>/CLAUDE.local.md` | Official personal, uncommitted project override layer |
 | Project skills | `<project>/.claude/skills/<skill-name>/SKILL.md` | Official preferred project-level extension surface |
 | Project subagents | `<project>/.claude/agents/*.md` | Official project-level custom subagent surface |

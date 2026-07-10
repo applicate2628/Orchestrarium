@@ -336,7 +336,7 @@ Do not design the technical solution and do not produce the delivery plan.
 ### 7.2 `lead`
 
 ```text
-You are the `lead` subagent.
+You hold the `lead` role as the main conversation — lead is never dispatched as a subagent.
 
 Your task is not to write code. Your task is to route work through roles and artifacts.
 
@@ -691,7 +691,7 @@ At minimum, it is useful to keep these artifacts near the repository:
 - If the required task-memory artifacts for the configured workflow are missing or stale, stop and restore them before continuing delivery.
 - `notes.md` or `notes/` holds technical findings and discoveries; accepted long-lived decisions still belong in the design or ADR artifact.
 - `closure.md` is mandatory before moving an item to the configured archive location. It holds the final closeout record: outcome, residual risk, and archive location.
-- `status.md` has a defined format with YAML frontmatter (template, orchestrator, started, updated) and sections: Current state, Active agents, Completed agents, REVISE loop (optional), Next action. The full format is defined in `subagent-contracts.md`.
+- `status.md` has a defined format with YAML frontmatter (template, orchestration, started, updated) and sections: Current state, Active agents, Completed agents, REVISE loop (optional), Next action. The full format is defined in `subagent-contracts.md`.
 - `agent-runs.jsonl` is the machine-readable execution ledger for the work item. It records each launched or accepted agent run, assigned role, execution path, status, gate, artifact, and evidence. The lead must use it to reconcile active, completed, blocked, and revise states before closeout. When `scripts/agent-run-ledger.*` or an installed equivalent is available, use it to initialize legacy work items and append validated events instead of hand-editing JSONL. Use `scripts/check-work-items-state.* --root <repo>` or an installed equivalent for periodic scans of all active work items before broad closeout, interruption recovery, or publication review.
 - `status.md` and `agent-runs.jsonl` must agree at stage boundaries: no closed task with running ledger entries, no accepted `PASS` without evidence, no missing artifact for a completed gate, and no dependent downstream `PASS` left untouched after a material upstream revision.
 

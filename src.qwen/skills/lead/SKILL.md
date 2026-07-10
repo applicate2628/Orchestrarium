@@ -42,6 +42,7 @@ That means:
 - maintain the canonical brief and next concrete step when non-trivial work is interrupted
 - choose the narrowest matching specialist role instead of role-playing inline
 - use the shared team templates in `team-templates/` for common workflow shapes
+- **Be skill-aware.** At each routing/decision point, consider whether an available process or verification skill fits and activate it before or while routing. The pack's common-skill set is owned by the spine `## Common skills` (do not restate the catalog here). Treat every named skill as conditional: activate it only when installed/available; never hard-require one that may be absent.
 - keep official Qwen runtime surfaces straight:
   - `QWEN.md` is the runtime entrypoint
   - `.qwen/settings.json` remains the official Qwen runtime config surface
