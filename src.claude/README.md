@@ -13,6 +13,7 @@ Source surface:
 - `CLAUDE.md` is the Claude-provider runtime entrypoint in the monorepo source tree
 - `agents/` carries role definitions, contracts, team templates, and supporting scripts, including the Claude API wrapper under `agents/scripts/` — with one exception: the Lead contract lives at `skills/lead/SKILL.md`, and `agents/lead.md` is a fail-closed stub (all other roles live under `agents/`)
 - `commands/` carries Claude-side command helpers maintained in this branch, including the bounded parallel external-helper surface `/agents-external-brigade`
+- `agents/contracts/design-panel.md` + `commands/agents-design-panel.md` carry the design-panel technique — independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; the generation-side analog of `agents/contracts/review-loop.md` + `commands/agents-review-loop.md`
 - `memory/` carries the optional experience-based feedback surface
 
 This subtree is the Claude runtime source owned by the monorepo. Shared governance and shared references stay one level up; only the provider-specific runtime source lives here.

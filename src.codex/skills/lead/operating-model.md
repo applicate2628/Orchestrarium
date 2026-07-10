@@ -217,6 +217,15 @@ Do not:
 - allow scope drift or broad write access by default
 - hand QA a partially integrated multi-phase change without an explicitly named integration owner
 
+## Design-panel and review-loop selection
+
+Two independence techniques exist at different stages; pick the one that matches the stage:
+
+- **Design-panel** (`$design-panel`, skill `skills/design-panel/`) is independence at **generation**: N>=2 independently-framed design lanes on one pinned problem, converged through one mandatory synthesis, BEFORE a single design exists. Use it for the two admitted triggers — a high-surface-count mechanical sweep, or an open architecture choice — not for an ordinary single-architect design.
+- **Review-loop** (`$review-loop`, skill `skills/review-loop/`) is independence at **verification**: multiple scope angles converge on ONE already-written fix-design artifact across autonomous rounds.
+
+Composition is sequential, not competing: design-panel generates and synthesizes once -> `design.md` -> optionally `$review-loop` verifies that one artifact to convergence -> `$planner`. Do not restate either skill's operative rules here; route to the binding.
+
 ## Review strategy selection
 
 The lead chooses the review strategy for each risk domain when invoking an independent reviewer. Two strategies are available. Use the decision table below.

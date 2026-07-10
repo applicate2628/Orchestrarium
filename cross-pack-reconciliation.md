@@ -28,6 +28,7 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 | Artifact persistence | §"Artifact persistence protocol" (L168–211) | §"Artifact persistence protocol" (L329–341) | Claude: detailed 3-tier table + when-to-save rules. Codex: condensed 3-tier table. |
 | Parallel execution | §"Parallel execution protocol" (L157–166) | §"Parallelism guidance" (L356–360) | Claude: 4-step protocol with integration owner. Codex: 3 brief bullets. |
 | External role routing | External role substitution notes in `operating-model.md` | External role substitution notes in `operating-model.md` | Shared semantics: consultant stays advisory-only, worker covers every non-owner non-review lane, reviewer covers `Review + QA`, and team template JSON stays unchanged. |
+| Design-panel and review-loop selection | §"Design-panel and review-loop selection" (before `## How to instruct reviewers`) | §"Design-panel and review-loop selection" (before `## Review strategy selection`) | New block (2026-07-10): names the two admitted design-panel triggers (high-surface sweep / open architecture choice), the generation-vs-verification difference from review-loop, and the binding path. Neither `operating-model.md` referenced review-loop before this change (verified zero-hit); this block introduces both pointers together. Selection/pointer only — does not duplicate either contract's DP1-DP8 / angle rules. |
 
 ## Shared semantic blocks — subagent-contracts.md
 
@@ -67,12 +68,27 @@ These documents should not be copied again into new pack trees. Current example 
 | Subagent operating model core (ru) | `shared/references/ru/subagent-operating-model.md` | Same as above for Russian docs |
 | Repository publication safety | `shared/references/repository-publication-safety.md` | Keep operational commands in root docs and runtime pack docs, not here |
 | Repository publication safety (ru) | `shared/references/ru/repository-publication-safety.md` | Same as above for Russian docs |
+| Design-panel methodology | `shared/references/design-panel-methodology.md` | Keep provider paths and CLI syntax out; those live in the pack bindings below |
+| Design-panel methodology (ru) | `shared/references/ru/design-panel-methodology.md` | Same as above for Russian docs |
 
 Intentional pack-local exceptions:
 
 | Reference | Current home | Why it stays local for now |
 |-------|------|------|
 | Periodic control matrix | `references-codex/periodic-control-matrix.md`, `references-claude/periodic-control-matrix.md` and `ru` variants | Still depends on pack/runtime vocabulary, task-memory layout, and runtime-doc links; move it only after a generic shared skeleton exists |
+
+## Design-panel binding (trunk + Claude + Codex; gemini/qwen deferred)
+
+Shipped 2026-07-10, primary packs only (`src.claude`, `src.codex`); the `src.gemini`/`src.qwen` demo mirror is an explicit deferred follow-on, not shipped in this change.
+
+| Layer | Path | Notes |
+|-------|------|-------|
+| Trunk | `shared/references/design-panel-methodology.md` (+ `ru/` mirror) | Provider-neutral; not installed; owns the stable `DP1`-`DP8` invariant IDs verbatim |
+| Claude binding | `src.claude/agents/contracts/design-panel.md` + `src.claude/commands/agents-design-panel.md` | Self-contained installed contract + thin command; mirrors the `review-loop.md` / `agents-review-loop.md` split |
+| Codex binding | `src.codex/skills/design-panel/SKILL.md` + `src.codex/skills/design-panel/agents/openai.yaml` | Self-contained skill; registered in `UTILITY_SKILLS`; stays under the unchanged Codex metadata cap |
+| Operating-model selection block | See the "Design-panel and review-loop selection" row above | Selection/pointer only in both packs; does not duplicate `DP1`-`DP8` |
+
+`DP1`-`DP8` (pinned input, quorum, independence, candidate-is-input-only, mandatory comparison, sole advance gate, fail closed, one-shot-then-verify) are the conformance anchors: every binding carries the same stable IDs and semantics, with provider-condensed wording allowed (not verbatim prose); the pack validators check marker presence only, never independence or synthesis soundness (review territory).
 
 ## Codex-only sections (no Claude equivalent needed)
 

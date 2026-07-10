@@ -139,6 +139,17 @@ If a repo-local lane policy explicitly asks for consultant input at closeout, it
 
 See [INSTALL.md](INSTALL.md) for quick install, pack-specific install details, dual-platform setup, and post-install customization.
 
+## Orchestration utilities
+
+Two independence techniques ship on the Claude and Codex production lines (currently primary-pack only; the Gemini/Qwen demo mirror is deferred):
+
+| Technique | Stage | Claude | Codex |
+| --- | --- | --- | --- |
+| Review-loop | Independence at **verification** of one already-written artifact, across autonomous rounds | `/agents-review-loop` (`.claude/agents/contracts/review-loop.md`) | `$review-loop` (`skills/review-loop/`) |
+| Design-panel | Independence at **generation**: N independently-framed candidate designs on one pinned problem, converged through one mandatory synthesis, before a single design exists | `/agents-design-panel` (`.claude/agents/contracts/design-panel.md`) | `$design-panel` (`skills/design-panel/`) |
+
+Both are conditional, deliberate-cost techniques with narrow explicit triggers — neither auto-invokes on plain "design" or "review". Composition is sequential: design-panel generates and synthesizes once, then optionally hands its output to review-loop for verification. See `shared/references/design-panel-methodology.md` and `shared/references/review-loop-methodology.md` for the provider-neutral design.
+
 ## Common skills
 
 In addition to roles, the pack ships **common skills** — workflow-focused capabilities that any role or the main conversation can invoke when the skill's description matches the current task. They package reusable methodology, gates, and evidence requirements without owning delivery.

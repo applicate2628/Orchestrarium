@@ -16,6 +16,7 @@ Source surface:
 - `skills/lead/` carries operating-model notes, handoff contracts, and validation/publication-safety scripts
 - `skills/consultant/` and `skills/second-opinion/` carry the advisory and explicit consultant routing surfaces
 - `skills/external-brigade/` carries the bounded parallel external-helper orchestration surface
+- `skills/design-panel/` carries the design-panel technique — independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; the generation-side analog of `skills/review-loop/`
 
 Architecture decision: the installed Codex `AGENTS.md` is intentionally the compact universal minimum, not the place for the full role catalog or long runtime manuals. Keep the universal entrypoint thin and put detailed role contracts in `skills/<role>/SKILL.md`, shared methodology in `../shared/references/`, Codex-specific addenda in `../references-codex/`, and built-in runtime override behavior in `.codex/agents/*.toml`. This mirrors the Claude-side pattern where `CLAUDE.md` stays short and `.claude/agents/*.md` carries the detailed role files.
 

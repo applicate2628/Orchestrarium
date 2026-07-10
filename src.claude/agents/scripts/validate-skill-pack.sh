@@ -481,10 +481,51 @@ for f in "$PACK/CLAUDE.md" "$AGENTS_FILE" "$PACK/agents/lead.md" "$PACK/skills/l
          $PACK/agents/contracts/external-dispatch.md \
          $PACK/agents/contracts/subagent-contracts.md \
          $PACK/agents/contracts/policies-catalog.md \
+         $PACK/agents/contracts/review-loop.md \
+         $PACK/agents/contracts/design-panel.md \
          $PACK/commands/agents-external-brigade.md \
-         $PACK/commands/agents-second-opinion.md; do
+         $PACK/commands/agents-second-opinion.md \
+         $PACK/commands/agents-review-loop.md \
+         $PACK/commands/agents-design-panel.md; do
   if [[ -f "$f" ]]; then pass "$f exists"; else fail "$f missing"; fi
 done
+echo ""
+
+# 1c. Design-panel invariant markers (mechanical structure only; independence/synthesis
+#     soundness stays review territory per the design-panel methodology's validator/review boundary)
+echo "[Design-panel]"
+for dp_id in DP1 DP2 DP3 DP4 DP5 DP6 DP7 DP8; do
+  check_contains "$PACK/agents/contracts/design-panel.md" "$dp_id" \
+    "design-panel contract carries invariant marker $dp_id"
+done
+check_contains "$PACK/agents/contracts/design-panel.md" "INPUT_ONLY" \
+  "design-panel contract carries the INPUT_ONLY candidate disposition marker"
+check_contains "$PACK/agents/contracts/design-panel.md" "RETURN(lead)" \
+  "design-panel contract carries the RETURN(lead) ledger-gate marker"
+check_contains "$PACK/agents/contracts/design-panel.md" "synthesis" \
+  "design-panel contract names the synthesis step"
+check_contains "$PACK/agents/contracts/design-panel.md" "N >= 2" \
+  "design-panel contract carries the N >= 2 quorum marker"
+check_contains "$PACK/commands/agents-design-panel.md" "design-panel.md" \
+  "agents-design-panel command points at the installed contract"
+check_contains "$PACK/CLAUDE.md" "agents-design-panel.md" \
+  "CLAUDE.md dispatch index exposes the design-panel command"
+check_contains "$PACK/commands/agents-help.md" "/agents-design-panel" \
+  "agents-help lists the design-panel command"
+check_contains "$PACK/agents/contracts/operating-model.md" "Design-panel and review-loop selection" \
+  "operating-model carries the design-panel/review-loop selection block"
+check_h2_section_contains "$PACK/agents/contracts/operating-model.md" \
+  "## Design-panel and review-loop selection" \
+  "agents/contracts/design-panel.md" \
+  "operating-model design-panel selection block names the installed binding path"
+check_h2_section_contains "$PACK/agents/contracts/operating-model.md" \
+  "## Design-panel and review-loop selection" \
+  "independence at **generation**" \
+  "operating-model design-panel selection block states the generation side of the distinction"
+check_h2_section_contains "$PACK/agents/contracts/operating-model.md" \
+  "## Design-panel and review-loop selection" \
+  "independence at **verification**" \
+  "operating-model design-panel selection block states the verification side of the distinction"
 echo ""
 
 # 1b. Lead skill is the live Lead contract held BY the main conversation

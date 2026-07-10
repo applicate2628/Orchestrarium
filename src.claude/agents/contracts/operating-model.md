@@ -148,6 +148,15 @@ These pairings are not derivable from classification alone — lead must know th
 | Graphics with hard GPU/frame budgets | `$performance-engineer` | `$graphics-engineer` | `$qa-engineer` + `$performance-reviewer` |
 | Combined critical (max risk) | stack all relevant constraint roles | implementation specialist | `$qa-engineer` + all triggered reviewers |
 
+## Design-panel and review-loop selection
+
+Two independence techniques exist at different stages; pick the one that matches the stage:
+
+- **Design-panel** (`/agents-design-panel`, contract `agents/contracts/design-panel.md`) is independence at **generation**: N≥2 independently-framed design lanes on one pinned problem, converged through one mandatory synthesis, BEFORE a single design exists. Use it for the two admitted triggers — a high-surface-count mechanical sweep, or an open architecture choice — not for an ordinary single-architect design.
+- **Review-loop** (`/agents-review-loop`, contract `agents/contracts/review-loop.md`) is independence at **verification**: multiple scope angles converge on ONE already-written fix-design artifact across autonomous rounds.
+
+Composition is sequential, not competing: design-panel generates and synthesizes once → `design.md` → optionally `/agents-review-loop` verifies that one artifact to convergence → `$planner`. Do not restate either contract's operative rules here; route to the binding.
+
 ## How to instruct reviewers
 
 **Claim-Verify**: pass the claims list from the builder's artifact. Tell the reviewer: *"Verify each claim against the artifact. Also identify any risk surfaces not covered by any claim."*
