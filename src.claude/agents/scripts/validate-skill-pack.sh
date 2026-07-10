@@ -474,7 +474,7 @@ echo ""
 
 # 1. Core files exist
 echo "[Core files]"
-for f in "$PACK/CLAUDE.md" "$AGENTS_FILE" "$PACK/agents/lead.md" "$PACK/agents/consultant.md" \
+for f in "$PACK/CLAUDE.md" "$AGENTS_FILE" "$PACK/agents/lead.md" "$PACK/skills/lead/SKILL.md" "$PACK/agents/consultant.md" \
          "$PACK/agents/external-worker.md" "$PACK/agents/external-reviewer.md" \
          "$PACK/agents/scripts/invoke-claude-api.sh" "$PACK/agents/scripts/invoke-claude-api.ps1" \
          $PACK/agents/contracts/operating-model.md \
@@ -485,6 +485,17 @@ for f in "$PACK/CLAUDE.md" "$AGENTS_FILE" "$PACK/agents/lead.md" "$PACK/agents/c
          $PACK/commands/agents-second-opinion.md; do
   if [[ -f "$f" ]]; then pass "$f exists"; else fail "$f missing"; fi
 done
+echo ""
+
+# 1b. Lead skill is the live Lead contract held BY the main conversation
+#     (agents/lead.md above stays the fail-closed dispatch stub; the /agents-external-brigade
+#     anchor on it is checked further down). The real contract must never be deletable with
+#     validation still green, and it must not be a forked subagent.
+echo "[Lead identity]"
+check_contains "$PACK/skills/lead/SKILL.md" "hold the Lead role AS the main conversation" \
+  "lead skill declares the Lead role is held AS the main conversation"
+check_absent "$PACK/skills/lead/SKILL.md" "context: fork" \
+  "lead skill is not dispatched as a forked subagent (no context: fork)"
 echo ""
 
 if [[ $DEV_REPO -eq 1 ]]; then
@@ -679,7 +690,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   # intentionally tracks shared/references/subagent-operating-model.md after its
   # normalized line-ending transform, not a provider-local addendum.
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "5e6191321fec27bbcef9310565d5116e8f041eda2ab5310bcf2a9d50e1e38fee" \
+    "a79853274a07948974f49fe188c6b348f28f2fc427f2e5b35b117120256516b9" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CLAUDE_REF_DIR/subagent-operating-model.md" \
     "f3b58ded2c928e4ad138e3ff966c75480b2f869c56c02bba8aafb4cbfe622cf6" \

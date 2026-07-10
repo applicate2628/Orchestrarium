@@ -79,7 +79,7 @@ Do not invoke for:
 
 ## Input contract
 
-- The lead or main conversation invokes this role explicitly.
+- The main conversation (as Lead) invokes this role explicitly.
 - Take only the canonical brief or the accepted artifact needed for the question at hand.
 - Treat the task as a request for judgment, tradeoff framing, or risk surfacing rather than delivery ownership.
 

@@ -4,7 +4,7 @@ Handoff templates and response format for lead-to-specialist delegation.
 
 ## Execution mechanism
 
-Every specialist invocation MUST use the **Agent tool** with the matching `subagent_type` parameter, except provider-backed external adapter routes. `$external-worker` and `$external-reviewer` are direct external launch routes, not internal specialist-agent hosts. The handoff template below becomes the agent's `prompt` for ordinary specialists. The orchestrator (main conversation or lead) MUST NOT role-play specialists inline — each role runs in an isolated agent context.
+Every specialist invocation MUST use the **Agent tool** with the matching `subagent_type` parameter, except provider-backed external adapter routes. `$external-worker` and `$external-reviewer` are direct external launch routes, not internal specialist-agent hosts. The handoff template below becomes the agent's `prompt` for ordinary specialists. The orchestrator (the main conversation, as Lead) MUST NOT role-play specialists inline — each role runs in an isolated agent context.
 
 ## External dispatch contract
 
@@ -71,7 +71,7 @@ A lead MUST NOT delegate work until the work-item folder contains a verified `br
 ```markdown
 ---
 template: <template name>
-orchestrator: main | lead
+orchestration: light | full-lead
 started: <YYYY-MM-DD>
 updated: <YYYY-MM-DD HH:MM>
 ---
@@ -85,8 +85,8 @@ updated: <YYYY-MM-DD HH:MM>
 - **Main conv role**: <what main conversation is doing: orchestrating | waiting for agents | reviewing artifact | idle>
 - **Last accepted artifact**: <filename or "none">
 - **Open obligations before closeout**: <none | remaining required work still inside admitted scope>
-- **Epic**: <parent epic slug, or none> — present only when this work-item belongs to an epic; a single bare `Epic: <slug>` line is the join key the epic roll-up reads (see `lead.md` `## Epics`)
-- **Depends-on**: <comma-separated work-item slugs, or none> — other work-items this one needs completed first; a single bare `Depends-on: <slug>, <slug>` line is what the derivation reads. A standing, planned inter-work-item dependency edge (distinct from the runtime `BLOCKED:*` gate verdicts). Targets are work-items only (resolved across `active/` + `archive/`). `/agents-status` derives `blocked-by` (open targets) and the ready-set from these lines (see `lead.md` `## Dependencies`)
+- **Epic**: <parent epic slug, or none> — present only when this work-item belongs to an epic; a single bare `Epic: <slug>` line is the join key the epic roll-up reads (see the lead skill `## Epics`)
+- **Depends-on**: <comma-separated work-item slugs, or none> — other work-items this one needs completed first; a single bare `Depends-on: <slug>, <slug>` line is what the derivation reads. A standing, planned inter-work-item dependency edge (distinct from the runtime `BLOCKED:*` gate verdicts). Targets are work-items only (resolved across `active/` + `archive/`). `/agents-status` derives `blocked-by` (open targets) and the ready-set from these lines (see the lead skill `## Dependencies`)
 - **Priority**: <high | medium | low, or none> — scheduling urgency set by `$product-manager` at admission; distinct from bug/perf SEVERITY (defect impact). A low-severity bug can still be high-priority.
 
 ## Active agents
@@ -115,6 +115,8 @@ updated: <YYYY-MM-DD HH:MM>
 
 <What happens next: which agent to launch, what artifact to review, or what decision to make.>
 ```
+
+Legacy handling: older `status.md` files may carry `orchestrator: main | lead`. Read `main` as `orchestration: light` and `lead` as `orchestration: full-lead`; do not rewrite old files in bulk. The orchestrator is ALWAYS the main conversation (holding the Lead role) — the retired field encoded orchestration weight, not a different owner, which is why it is renamed. New/updated files write `orchestration:`.
 
 The REVISE loop section is optional — include it only when a stage has returned REVISE and the loop is active. Remove it when the loop resolves (PASS or escalation).
 
@@ -185,7 +187,7 @@ If the plan specifies a different test ownership split, follow the plan. This ta
 
 ## Session logging
 
-Every subagent MUST write a session log to `.reports/YYYY-MM/` before returning its final response when the session produced a result, made a routing decision, or completed a review. This rule applies equally to the main conversation and lead — see `AGENTS.md` § "Session logging rule" for the full contract and log format. Create the `YYYY-MM/` subdirectory if it does not exist. Session logs are summaries, not artifact copies.
+Every subagent MUST write a session log to `.reports/YYYY-MM/` before returning its final response when the session produced a result, made a routing decision, or completed a review. This rule applies equally to the main conversation (as Lead) — see `AGENTS.md` § "Session logging rule" for the full contract and log format. Create the `YYYY-MM/` subdirectory if it does not exist. Session logs are summaries, not artifact copies.
 
 ## Structured completion report
 

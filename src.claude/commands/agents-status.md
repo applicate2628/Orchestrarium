@@ -5,7 +5,7 @@ Show a compact status dashboard for the current project.
 ## Steps
 
 1. **Active work-items.** Check if `work-items/active/` exists and contains subdirectories. For each one, read `status.md` and display:
-   - Slug, template, orchestrator (main/lead)
+   - Slug, template, orchestration weight (light/full-lead; legacy `orchestrator:` values read main→light, lead→full-lead)
    - Current stage and main conv role (orchestrating/waiting/reviewing/idle)
    - Active agents (role + status) — if any are running
    - Last completed agent and its result
@@ -44,7 +44,7 @@ Show a compact status dashboard for the current project.
 === Claude Code Pack Status ===
 
 Active chains: <count or "none">
-  <slug> — <template> (orchestrator: <main|lead>) <prio:high|prio:medium|prio:low, or omit if no Priority>
+  <slug> — <template> (orchestration: <light|full-lead>) <prio:high|prio:medium|prio:low, or omit if no Priority>
     Stage: <current> | Main conv: <role>
     Active agents: <role> (running), <role> (running)
     Last completed: <role> → <PASS|REVISE|BLOCKED>

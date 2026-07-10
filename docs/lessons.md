@@ -60,11 +60,11 @@ work-items-archival hook never acts on them.
 ## Lifecycle + roles
 
 - A lesson is **captured** by the role that ran the retrospective — the closing
-  role (`$lead` for lead-chains, main-conv on a `requiresLead:false` close) or a
+  role (the main conversation, as Lead) or a
   reviewer (`$qa-engineer` or another reviewer) when they spot a recurring miss.
 - The **semantic status transitions** (`open -> applied -> archived`, plus `open -> dropped`) are
-  owned by the CLOSING role that captured the lesson (`$lead` for lead-chains,
-  main-conv for `requiresLead:false`), escalating to `$lead`/`$product-manager`
+  owned by the CLOSING role that captured the lesson (the main conversation as
+  Lead), escalating to `$product-manager`
   when applying the lesson admits follow-up work.
 - `$lead` / `$product-manager` **consult** open lessons when admitting or
   planning similar work, so the same mistake is not repeated.
@@ -72,7 +72,7 @@ work-items-archival hook never acts on them.
   stored back-reference id, local index sync) — the same lifecycle/bookkeeping
   split as Epics and Decisions. The archivist does NOT decide a lesson status
   transition.
-- **Stale-open accountability:** `$lead` (main-conv for `requiresLead:false`) is
+- **Stale-open accountability:** The main conversation (as Lead) is
   accountable for resolving an `open` lesson that keeps getting surfaced — drive
   it to `applied` (a named change shipped) or `dropped` (a one-line reason).
   Listing it is visibility, not closure.
@@ -99,8 +99,8 @@ each by id and `## Lesson` first line); on the Codex line (no commands) the lead
 derives the same open-lessons list live by scanning `work-items/lessons/` for
 `status: open`. The operating-model "where to save" surface carries the
 `Lesson -> work-items/lessons/<date>-<slug>.md` row (a table on the Claude line,
-a prose bullet on the Codex line). Full role rules: `lead.md` / the lead skill
-`## Lessons`, `knowledge-archivist.md` / the archivist skill hygiene lane.
+a prose bullet on the Codex line). Full role rules: `skills/lead/SKILL.md` (Claude; `agents/lead.md` is a fail-closed stub) / the lead skill
+(Codex) `## Lessons`, `knowledge-archivist.md` / the archivist skill hygiene lane.
 
 ## Known limitation
 

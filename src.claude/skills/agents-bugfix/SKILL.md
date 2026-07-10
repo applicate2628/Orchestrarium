@@ -30,9 +30,9 @@ The user does not need to type `/agents-bugfix` for this flow to fire. Apply it 
    | Multiple modules, unclear cause, regression | `full-delivery` | architect → planner → implementer or external-worker → QA or external-reviewer → architecture-reviewer or external-reviewer |
    | Auth, credentials, trust boundary involved | `security-sensitive` | security-engineer → implementer or external-worker → QA or external-reviewer → security-reviewer |
    | SLA breach, perf degradation | `performance-sensitive` | performance-engineer → implementer or external-worker → QA or external-reviewer → performance-reviewer |
-   | Multiple risk domains | `combined-critical` | lead coordinates all risk owners |
+   | Multiple risk domains | `combined-critical` | main conv (as Lead) coordinates all risk owners |
 
-3. **Confirm template with user.** Present the analyst's recommendation and ask the user to confirm or override. For `requiresLead: true` templates, invoke `$lead` to coordinate.
+3. **Confirm template with user.** Present the analyst's recommendation and ask the user to confirm or override. For `requiresLead: true` templates, hold the Lead role in the main conversation (activate the `/lead` skill) and run the lead pipeline to coordinate — do not spawn `$lead`.
 
 4. **Run the chain.** Execute the selected template. Each stage via Agent tool with appropriate `subagent_type`.
 

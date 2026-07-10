@@ -8,9 +8,9 @@ type: feedback
 
 **Why (1):** Hallucinated that CLAUDE.md was 100% duplicated by .claude/agents/lead.md, deleted important content based on false assumption, and broke the file.
 
-**Why (2):** Invented `~/.claude/skills/` — a directory path that does not exist. The real location is `~/.claude/agents/`. Made up the path instead of reading the filesystem.
+**Why (2):** Invented `~/.claude/skills/` at a time it did not exist, guessing instead of reading the filesystem; back then roles lived only under `~/.claude/agents/`. The error was guessing the path, not the path itself — `~/.claude/skills/` is now a real installer-managed surface (e.g. `skills/lead/SKILL.md`), so the lesson is to verify a path against the CURRENT filesystem, never to assume `skills/` always or never exists.
 
-**Why (3):** Copied files to `~/.claude/skills/` and `~/.claude/memory/` — neither were real directories, so the copies went to wrong places and the "installed" skills were never actually discoverable.
+**Why (3):** Copied files to `~/.claude/skills/` and `~/.claude/memory/` when neither was a real directory in that setup, so the copies went to wrong places and were never actually discoverable. (Current-state correction: `~/.claude/skills/` is now the installer-managed personal-skills surface and IS discoverable — which is exactly why the rule is to check the current filesystem before assuming a target exists or not.)
 
 **How to apply:**
 
