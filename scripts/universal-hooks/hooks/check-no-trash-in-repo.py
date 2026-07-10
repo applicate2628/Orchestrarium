@@ -14,9 +14,13 @@ matching was the wrong axis. The real reported problem was the agent creating
 stray artifacts — chiefly unrequested worktrees — so this guard keys on the
 OPERATION, not on a name.
 
-SCOPE (MVP, per the stray-artifact design consultation):
-  - `git worktree add` from Bash -> warn. `git worktree list/remove/prune` are
-    harmless and ignored.
+SCOPE (per the parallel-isolation protocol):
+  - `git worktree add` from Bash -> warn, UNLESS the command contains exactly one
+    add and ends with the exact command-local marker
+    `# orchestrarium:requested-isolation-worktree` (a protocol-requested isolation
+    worktree). A missing, near-match, quoted, or not-final marker, or two-or-more
+    adds with one marker, still warns — one marker never suppresses a batch.
+    `git worktree list/remove/prune` are harmless and ignored.
   - Deferred: the Claude `Agent` tool's `isolation: "worktree"` form (needs a real
     PreToolUse envelope to confirm the field shape before matching it).
   - Dropped: "writes outside the repo" (a static allow-list false-positives on
@@ -76,37 +80,48 @@ _GIT_VALUE_OPTS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exe
 # keyword that actually precedes the `git` invocation (`do`/`then`) is here.
 _SHELL_KEYWORDS = {"if", "then", "elif", "else", "while", "until", "do", "!"}
 
+# The exact command-local marker that authorizes ONE requested-isolation worktree
+# per the parallel-isolation protocol (operating-model.md). A command with exactly
+# one `git worktree add` whose text ends with this marker is a protocol-requested
+# isolation worktree and is not warned; anything else (missing/near-match/quoted/
+# not-final marker, or two-or-more adds) still warns. One marker never suppresses a
+# batch of adds.
+REQUESTED_ISOLATION_MARKER = "# orchestrarium:requested-isolation-worktree"
 
-def has_git_worktree_add(command: str) -> bool:
-    """True iff `command` confidently runs `git worktree add`.
 
-    Uses the same shell-aware, command-position approach as the old mkdir parser:
-    tokenize with `shlex` (so quotes are honored and `git` inside a quoted string
-    is not a command), track command position across separators (`;`, `&&`, `||`,
-    `|`, `&`, `(`, `)`), allow an env-assignment prefix (`FOO=bar git ...`), treat
-    leading shell keywords (`if`/`then`/`elif`/`else`/`while`/`until`/`do`/`!`) as
+def count_git_worktree_adds(command: str) -> int:
+    """Count the confidently-parsed `git worktree add` invocations in `command`.
+
+    Uses the same shell-aware, command-position approach as before: tokenize with
+    `shlex` (so quotes are honored and `git` inside a quoted string is not a
+    command), track command position across separators (`;`, `&&`, `||`, `|`, `&`,
+    `(`, `)`), allow an env-assignment prefix (`FOO=bar git ...`), treat leading
+    shell keywords (`if`/`then`/`elif`/`else`/`while`/`until`/`do`/`!`) as
     command-slot-transparent (so `for d in ...; do git worktree add $d; done` and
-    `if ...; then git worktree add x; fi` are caught), and only treat `git` (or
+    `if ...; then git worktree add x; fi` are counted), and only treat `git` (or
     `.../git`) as a command word in command position. After `git`, skip global
     options (and the value of value-taking ones), then require the subcommand to be
-    `worktree` followed by `add`. `git worktree list/remove/prune/...` is ignored.
-    Any tokenizer error fails open (returns False).
+    `worktree` followed by `add`. `git worktree list/remove/prune/...` is not
+    counted. Instead of returning on the first detected add it scans every command
+    segment and returns the TOTAL count, so the caller can distinguish one requested
+    add from a batch. Any tokenizer error fails open (returns 0).
 
     Scope: confidently parses the COMMON forms (`git worktree add ...`,
     `cd x && git worktree add ...`, `FOO=bar git worktree add`, control-flow loops
     and branches). Constructs that hide `git` behind another command word in the
-    command slot are not modelled and simply under-warn: external command-wrappers
+    command slot are not modelled and simply under-count: external command-wrappers
     (`sudo`/`env`/`nice`/`xargs`/`eval`/`bash -c`), command substitution
     (`$(...)`), and a value-taking global option whose value is itself a flag. That
-    under-warn is acceptable for a warn-only AUDIT hook that always fails open and
+    under-count is acceptable for a warn-only AUDIT hook that always fails open and
     never blocks."""
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
         tokens = list(lexer)
     except ValueError:
-        return False  # unbalanced quotes / unparseable -> fail open
+        return 0  # unbalanced quotes / unparseable -> fail open
 
+    count = 0
     expect_command = True   # command position: line start, and after each separator
     in_git = False          # the current command word is `git`
     seen_worktree = False    # the `worktree` subcommand has been seen for this git
@@ -161,9 +176,12 @@ def has_git_worktree_add(command: str) -> bool:
             continue
         # first non-option token after `worktree`
         if tok == "add":
-            return True
-        in_git = False  # `worktree list/remove/prune/...` -> ignore
-    return False
+            count += 1
+        # done with this git invocation (add counted, or list/remove/prune/...);
+        # ignore its remaining operands until the next command separator.
+        in_git = False
+        seen_worktree = False
+    return count
 
 
 def main() -> int:
@@ -177,14 +195,23 @@ def main() -> int:
         return 0
 
     command = tool_input.get("command")
-    if isinstance(command, str) and command and has_git_worktree_add(command):
-        _emit(
-            "[stray-artifact AUDIT] this command creates a git worktree "
-            "(`git worktree add`). A worktree is an unrequested side effect unless "
-            "you were explicitly asked for one — confirm it is intended, and do not "
-            "create worktrees or other throwaway artifacts the user did not request. "
-            "AUDIT mode -- allowing.\n"
-        )
+    if isinstance(command, str) and command:
+        add_count = count_git_worktree_adds(command)
+        # A protocol-requested isolation worktree is exactly one add whose command
+        # ends with the exact marker; anything else (missing/near-match/quoted/
+        # not-final marker, or a batch of adds) still warns.
+        requested = add_count == 1 and command.rstrip().endswith(REQUESTED_ISOLATION_MARKER)
+        if add_count and not requested:
+            _emit(
+                "[stray-artifact AUDIT] this command creates a git worktree "
+                "(`git worktree add`). A worktree is an unrequested side effect unless "
+                "you were explicitly asked for one — confirm it is intended, and do not "
+                "create worktrees or other throwaway artifacts the user did not request. "
+                "A protocol-requested isolation worktree must be a SINGLE `git worktree "
+                "add` whose command ends with the exact marker "
+                "`# orchestrarium:requested-isolation-worktree`, added only after naming "
+                "the lane and isolation reason. AUDIT mode -- allowing.\n"
+            )
         return 0
 
     return 0
