@@ -87,7 +87,7 @@ def ledger_event(**overrides):
         "executionRole": "internal",
         "assignedRole": "qa-engineer",
         "provider": "codex",
-        "model": "gpt-5.5-xhigh",
+        "model": "gpt-5.6-sol-xhigh",
         "status": "completed",
         "gate": "PASS",
         "scope": ["scripts/validate-work-item-state.py"],
