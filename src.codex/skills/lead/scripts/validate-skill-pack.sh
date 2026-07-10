@@ -1019,7 +1019,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CODEX_REF_DIR/subagent-operating-model.md" 120 \
     "Codex addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "5e6191321fec27bbcef9310565d5116e8f041eda2ab5310bcf2a9d50e1e38fee" \
+    "a79853274a07948974f49fe188c6b348f28f2fc427f2e5b35b117120256516b9" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
     "9c392ebe8a95921d65d7b16ac567907e557818cfc57b468d9d67680f9a088f19" \
@@ -1240,6 +1240,10 @@ check_contains "$SKILLS_DIR/external-brigade/SKILL.md" "It does not cap how many
   "external-brigade keeps opinion counts separate from concurrency"
 check_contains "$SKILLS_DIR/lead/SKILL.md" "\$external-brigade" \
   "lead skill mentions the external-brigade utility"
+check_contains "$SKILLS_DIR/lead/SKILL.md" "the main session IS the lead" \
+  "lead skill declares the Lead role is held BY the main session"
+check_absent "$SKILLS_DIR/lead/SKILL.md" "context: fork" \
+  "lead skill is not dispatched as a forked subagent (no context: fork)"
 
 echo ""
 echo "=== Production auto provider canon ==="

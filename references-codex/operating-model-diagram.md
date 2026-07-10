@@ -5,6 +5,8 @@ Strategy comparison companion: [shared/references/workflow-strategy-comparison.m
 
 **Platform note:** Orchestrarium targets Codex, which uses sequential skill invocation. Unlike Claude Code's parallel Agent tool dispatch, Codex processes one skill at a time. Diagrams below reflect this sequential execution model.
 
+> **The `lead` / `M` / `L` node denotes the orchestration role the main Codex session holds with the `$lead` skill active, not a separately activated agent.** Only the leaf specialist roles are activated per stage; `lead` is the main session running that orchestration.
+
 ## 1. End-to-end operating flow
 
 ```mermaid

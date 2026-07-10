@@ -89,8 +89,8 @@ done), the same way it flags an unarchived work-item — subagent-safe (skips on
 `agent_id`) and failing open when `work-items/epics/` is absent. Still
 governance-only: nothing verifies the epic's `## Goal` is actually met (only that
 the children are closed), and a child line written without the documented
-`(active|closed)` marker is ignored by the scan. Full role rules: `lead.md` / the
-lead skill `## Epics`.
+`(active|closed)` marker is ignored by the scan. Full role rules: `skills/lead/SKILL.md` (Claude; `agents/lead.md` is a fail-closed stub) / the
+lead skill (Codex) `## Epics`.
 
 ## Terms and Abbreviations
 

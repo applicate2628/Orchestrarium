@@ -7,6 +7,9 @@ import tempfile
 from pathlib import Path
 
 
+# Legacy status shape: older work items carry `orchestrator: main | lead`. Kept as a
+# labeled legacy fixture (the validator does not rewrite old files). STATUS_TEXT_CANONICAL
+# below covers the current `orchestration: light | full-lead` field so both are exercised.
 STATUS_TEXT = """---
 template: full-delivery
 orchestrator: lead
@@ -39,6 +42,9 @@ updated: 2026-05-03 14:24
 
 Close the stage after publication gate.
 """
+
+# Canonical status shape: current field is `orchestration: light | full-lead`.
+STATUS_TEXT_CANONICAL = STATUS_TEXT.replace("orchestrator: lead", "orchestration: full-lead")
 
 
 def require(condition: bool, message: str) -> None:
@@ -79,11 +85,11 @@ def check_schema(root: Path) -> None:
     require(set(evidence_items.get("required", [])) == {"kind", "ref"}, "schema must require evidence kind/ref")
 
 
-def run_validator_case(root: Path, base: Path, name: str, event: dict[str, object], expect_pass: bool, fragments: tuple[str, ...] = ()) -> None:
+def run_validator_case(root: Path, base: Path, name: str, event: dict[str, object], expect_pass: bool, fragments: tuple[str, ...] = (), status_text: str = STATUS_TEXT) -> None:
     item = base / name
     validator = root / "scripts" / "validate-work-item-state.py"
     (item / "reviews").mkdir(parents=True)
-    (item / "status.md").write_text(STATUS_TEXT, encoding="utf-8")
+    (item / "status.md").write_text(status_text, encoding="utf-8")
     (item / "reviews" / "qa.md").write_text("# QA\n\nGate: PASS\n", encoding="utf-8")
     (item / "agent-runs.jsonl").write_text(json.dumps(event) + "\n", encoding="utf-8")
 
@@ -107,6 +113,14 @@ def check_validator(root: Path) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
         run_validator_case(root, base, "valid", ledger_event(), True)
+        run_validator_case(
+            root,
+            base,
+            "canonical-orchestration",
+            ledger_event(),
+            True,
+            status_text=STATUS_TEXT_CANONICAL,
+        )
         run_validator_case(
             root,
             base,

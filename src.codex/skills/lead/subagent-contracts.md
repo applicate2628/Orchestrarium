@@ -47,7 +47,7 @@ A lead MUST NOT delegate work until the configured task-memory item folder, if t
 ```markdown
 ---
 template: <template name>
-orchestrator: main | lead
+orchestration: light | full-lead
 started: <YYYY-MM-DD>
 updated: <YYYY-MM-DD HH:MM>
 ---
@@ -91,6 +91,8 @@ updated: <YYYY-MM-DD HH:MM>
 
 <What happens next: which role to invoke, what artifact to review, or what decision to make.>
 ```
+
+Legacy handling: older `status.md` files may carry `orchestrator: main | lead`. Read `main` as `orchestration: light` and `lead` as `orchestration: full-lead`; do not rewrite old files in bulk. The orchestrator is ALWAYS the main conversation (holding the Lead role) — the retired field encoded orchestration weight, not a different owner, which is why it is renamed. New/updated files write `orchestration:`.
 
 The REVISE loop section is optional — include it only when a stage has returned REVISE and the loop is active. Remove it when the loop resolves (PASS or escalation).
 
@@ -596,7 +598,7 @@ Invocation note:
 
 ## Session logging
 
-Every role — orchestrator, lead, or specialist — MUST write a session log to `.reports/YYYY-MM/` when the session produced a result, made a routing decision, or completed a review. See `AGENTS.md` § "Session logging rule" for the full contract and log format. Create the `YYYY-MM/` subdirectory if it does not exist. Session logs are summaries, not artifact copies.
+Every role — the orchestrator (the main conversation, as Lead) or a specialist — MUST write a session log to `.reports/YYYY-MM/` when the session produced a result, made a routing decision, or completed a review. See `AGENTS.md` § "Session logging rule" for the full contract and log format. Create the `YYYY-MM/` subdirectory if it does not exist. Session logs are summaries, not artifact copies.
 
 ## Structured completion report
 
