@@ -20,6 +20,7 @@ Display a comprehensive overview of the skill-pack for the user.
 | `/agents-test` | Write or verify tests for specified code |
 | `/agents-research` | Investigate a question (analyst → architect) |
 | `/agents-design` | Full research-to-plan chain (analyst → architect → planner) |
+| `/agents-design-panel` | Design panel: N≥2 independently-framed design lanes + mandatory Lead synthesis (generation-side analog of `/agents-review-loop`) |
 | `/agents-security` | Security review (security-engineer → security-reviewer) |
 | `/agents-second-opinion` | Get a second opinion via consultant (Codex; preserves routing prefs) |
 | `/agents-implement` | Execute an approved plan phase by phase |

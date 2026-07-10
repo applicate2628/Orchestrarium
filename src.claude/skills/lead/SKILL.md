@@ -145,6 +145,7 @@ Lessons learned during delivery (a recurring miss, a wrong assumption, a process
 2. `Design`
    - Roles: `$architect`, `$ux-designer`, `$algorithm-scientist`, `$computational-scientist`, `$security-engineer`, `$performance-engineer`, `$reliability-engineer` as needed
    - Output: one design or specialist-constraint package per role.
+   - Panel-eligible design (high-surface sweep / open architecture choice): convene the design-panel per `agents/contracts/design-panel.md` (`/agents-design-panel`) — N≥2 independently-framed lanes to `design-<lane>.md`, mandatory synthesis to `design.md`; lane outputs are never shippable alone.
 3. `Plan`
    - Role: `$planner`
    - Output: one gated phase plan.

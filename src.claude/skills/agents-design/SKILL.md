@@ -18,6 +18,8 @@ Apply this command's flow automatically when:
 
 The user does not need to type `/agents-design` for this flow to fire. Apply it transparently and announce the routing decision.
 
+Do NOT auto-invoke the heavier `/agents-design-panel` technique from plain "design"/"architecture" requests — that command has its own narrow explicit triggers ("design panel", "дизайн-панель", "two architects"). This command stays the default single-architect design chain.
+
 This is the standard entry point for non-trivial new work that lacks a `work-items/active/<slug>/plan.md`. For unclear creative work, invoke `Skill: superpowers:brainstorming` before Step 2 to clarify intent and direction first; once admitted scope is clear, the analyst/architect/planner chain converts it into a delivery plan.
 
 ## Steps
@@ -26,7 +28,7 @@ This is the standard entry point for non-trivial new work that lacks a `work-ite
 
 2. **Run the full research chain.** Follow the `research` template from CLAUDE.md:
    - **Analyst** (`subagent_type: analyst`): investigate the codebase — locate relevant files, existing patterns, contracts, and constraints. Return a research memo.
-   - **Architect** (`subagent_type: architect`): produce a design from the research — architecture decisions, API contracts, data model changes, tradeoffs, and test strategy.
+   - **Architect** (`subagent_type: architect`): produce a design from the research — architecture decisions, API contracts, data model changes, tradeoffs, and test strategy. For panel-eligible design work (a high-surface-count sweep or an open architecture choice), route this stage through `/agents-design-panel` (`agents/contracts/design-panel.md`) instead of a single architect dispatch.
    - **Planner** (`subagent_type: planner`): break the accepted design into small independent delivery phases with file scope, dependencies, acceptance criteria, and quality gates.
 
 3. **Handle REVISE at each stage:**

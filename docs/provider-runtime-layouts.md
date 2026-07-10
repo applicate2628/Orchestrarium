@@ -32,6 +32,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Installed pack root | `~/.codex/` | Global Codex pack install target |
 | Governance entrypoint | `~/.codex/AGENTS.md` | Installed Codex runtime entrypoint; intentionally the compact universal minimum rather than the full role/runtime manual |
 | Skill tree | `~/.codex/skills/<role>/SKILL.md` | Orchestrarium Codex runtime organizes each role as a skill directory |
+| Design-panel binding | `~/.codex/skills/design-panel/SKILL.md` + `agents/openai.yaml` | Independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; no panel-state validator is installed |
 | Built-in subagent overrides | `~/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Orchestrarium-installed custom agents that override Codex built-ins and pin them to `gpt-5.5` + `xhigh`; stale Orchestrarium-owned templates refresh on reinstall, while real user-customized prompt or structure is preserved |
 | Validation script | `~/.codex/skills/lead/scripts/validate-skill-pack.sh` | Same lead script tree as the repo source |
 | Publication-safety scan | `~/.codex/skills/lead/scripts/check-publication-safety.sh` | PowerShell wrapper exists alongside the shell script |
@@ -44,6 +45,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Installed pack root | `<project>/.agents/skills/` | Role skills are copied here |
 | Governance entrypoint | `<project>/AGENTS.md` | Codex pack section is merged into the project-root `AGENTS.md`; the installed Codex section stays intentionally compact and defers detailed installed role/runtime guidance to the skill tree and `.codex/agents/` overrides |
 | Skill tree | `<project>/.agents/skills/<role>/SKILL.md` | Mirrors the global `skills/` structure |
+| Design-panel binding | `<project>/.agents/skills/design-panel/SKILL.md` + `agents/openai.yaml` | Project-level mirror of the global design-panel binding; no panel-state validator is installed |
 | Built-in subagent overrides | `<project>/.codex/agents/default.toml`, `worker.toml`, `explorer.toml` | Project-level custom agents that override Codex built-ins and pin them to `gpt-5.5` + `xhigh`; seeded on first install, refreshed on reinstall when still an Orchestrarium-owned template, and preserved when genuinely customized |
 | Local config | `<project>/.agents/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `$init-project` reviews or updates it, while legacy sibling `<project>/.agents/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Codex overlay when the local scope is absent. |
 | Validation script | `<project>/.agents/skills/lead/scripts/validate-skill-pack.sh` | Run from the target project root after install |
@@ -58,6 +60,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Global context file | `~/.claude/CLAUDE.md` | Official user-level Claude Code instruction file; intentionally short while detailed role behavior lives under `~/.claude/agents/`, except Lead — whose contract is `~/.claude/skills/lead/SKILL.md` (`~/.claude/agents/lead.md` is a fail-closed stub) |
 | Global personal skills | `~/.claude/skills/<skill-name>/SKILL.md` | Official preferred user-level extension surface |
 | Global personal subagents | `~/.claude/agents/*.md` | Official user-level custom subagent surface |
+| Design-panel binding | `~/.claude/agents/contracts/design-panel.md` + `~/.claude/commands/agents-design-panel.md` | Independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; no panel-state validator is installed |
 | Global legacy commands | `~/.claude/commands/*.md` | Still supported, but Claude docs now recommend skills as the preferred model |
 | Global operator overlay | `~/.claude/.agents-mode.yaml` | Orchestrarium-owned default operator file seeded on first global install and preserved on reinstall; not a Claude-native file from official docs, and legacy sibling `~/.claude/.agents-mode` is compatibility input only |
 
@@ -69,6 +72,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Local personal override | `<project>/CLAUDE.local.md` | Official personal, uncommitted project override layer |
 | Project skills | `<project>/.claude/skills/<skill-name>/SKILL.md` | Official preferred project-level extension surface |
 | Project subagents | `<project>/.claude/agents/*.md` | Official project-level custom subagent surface |
+| Design-panel binding | `<project>/.claude/agents/contracts/design-panel.md` + `<project>/.claude/commands/agents-design-panel.md` | Project-level mirror of the global design-panel binding; no panel-state validator is installed |
 | Legacy commands | `<project>/.claude/commands/*.md` | Still work, but lose precedence to a skill with the same name |
 | Orchestrarium shared governance copy | `<project>/.claude/AGENTS.md` | Repo-local overlay copied by Orchestrarium install scripts; not a Claude-native runtime requirement |
 | Orchestrarium local config | `<project>/.claude/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `/agents-init-project` reviews or updates it, while legacy sibling `<project>/.claude/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Claude overlay when the local scope is absent. |

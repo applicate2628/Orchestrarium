@@ -210,6 +210,7 @@ The pack ships entry-point slash commands in `.claude/commands/` (`/agents-bugfi
 | --- | --- |
 | Bug report, error trace, "fix this", "broken", "не работает", regression, registry bug slug | `.claude/commands/agents-bugfix.md` |
 | New feature without accepted plan: "build X", "add Y", "design Z", unclear creative work | `.claude/commands/agents-design.md` |
+| N independently-framed design lanes on one pinned problem + mandatory synthesis: "design panel", "дизайн-панель", "two architects" (NOT plain "design") | `.claude/commands/agents-design-panel.md` |
 | Accepted plan in `work-items/active/`, user says "proceed", "continue", "next phase" | `.claude/commands/agents-implement.md` |
 | Investigation question, "how does X work", ADR exploration, code-surface understanding | `.claude/commands/agents-research.md` |
 | Review of completed work, pre-merge gate, post-implementation validation | `.claude/commands/agents-review.md` |
