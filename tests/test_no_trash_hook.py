@@ -1,14 +1,16 @@
 """Regression tests for the stray-artifact PreToolUse hook (AUDIT mode).
 
 The hook lives in `check-no-trash-in-repo.py` (filename retained for install-marker
-continuity; a rename to check-stray-artifact is a tracked follow-up). It warns ONLY
-on a confident `git worktree add` Bash command — the unrequested-worktree side
-effect. `git worktree list/remove/prune`, `git add` (not `git worktree add`), other
-git commands, `git` inside a quoted string, non-git commands, and file writes never
-warn. AUDIT mode: always exit 0; a hit warns to stderr. The earlier name-based
-no-trash detection it replaced was useless — the agent never created dirs named
-`kosyaks`/`mistake-log` (those are the user's vocabulary, not agent output), so it
-never fired. Tested against BOTH the Claude and Codex hook copies.
+continuity; a rename to check-stray-artifact is a tracked follow-up). It warns on a
+confident `git worktree add` Bash command — the unrequested-worktree side effect —
+EXCEPT one add whose command ends with the exact command-local marker
+`# orchestrarium:requested-isolation-worktree` (a protocol-requested isolation
+worktree per the parallel-isolation protocol). A missing/near-match/quoted/not-final
+marker, or two-or-more adds with one marker, still warns — one marker never
+suppresses a batch. `git worktree list/remove/prune`, `git add` (not `git worktree
+add`), other git commands, `git` inside a quoted string, non-git commands, and file
+writes never warn. AUDIT mode: always exit 0; a hit warns to stderr. Tested against
+BOTH the Claude and Codex hook copies.
 """
 
 from __future__ import annotations
@@ -131,6 +133,72 @@ class TestStrayArtifactHook(unittest.TestCase):
                 p = run_hook(script, None, raw=json.dumps({"cwd": "/tmp"}))
                 self.assertEqual(p.returncode, 0)
                 self.assertEqual(p.stderr.strip(), "")
+
+
+class TestRequestedIsolationMarker(unittest.TestCase):
+    """A2 marker discriminator: exactly one `git worktree add` whose command ends
+    with the exact `# orchestrarium:requested-isolation-worktree` marker is a
+    protocol-requested isolation worktree and is NOT warned; every other shape
+    (missing/near-match/quoted/not-final marker, or a batch of adds) still warns."""
+
+    MARKER = "# orchestrarium:requested-isolation-worktree"
+
+    def assert_outcome(self, tool_input: object, should_warn: bool, raw: str | None = None) -> None:
+        for script in HOOKS:
+            with self.subTest(script=script.parent.parent.name):
+                p = run_hook(script, tool_input, raw)
+                self.assertEqual(p.returncode, 0, p.stderr)  # AUDIT never blocks
+                self.assertEqual(bool(p.stderr.strip()), should_warn, f"stderr={p.stderr!r}")
+
+    # --- silent: exactly one add + exact end-of-command marker ---
+    def test_single_add_with_exact_marker_no_warn(self) -> None:
+        self.assert_outcome(
+            {"command": f"git worktree add .scratch/worktrees/lane-a {self.MARKER}"}, False
+        )
+
+    def test_single_add_with_marker_cd_chained_no_warn(self) -> None:
+        self.assert_outcome(
+            {"command": f"cd repo && git worktree add ../wt {self.MARKER}"}, False
+        )
+
+    def test_single_add_with_marker_trailing_whitespace_no_warn(self) -> None:
+        # `command.rstrip()` tolerates trailing whitespace before the check.
+        self.assert_outcome(
+            {"command": f"git worktree add ../wt {self.MARKER}   \n"}, False
+        )
+
+    # --- WARN: marker present but not the exact requested shape ---
+    def test_add_without_marker_warns(self) -> None:
+        # (already covered by the bare case, restated for the matrix)
+        self.assert_outcome({"command": "git worktree add ../wt"}, True)
+
+    def test_add_with_near_match_marker_warns(self) -> None:
+        # one character short of the exact marker
+        self.assert_outcome(
+            {"command": "git worktree add ../wt # orchestrarium:requested-isolation-worktre"}, True
+        )
+
+    def test_add_with_marker_in_quoted_arg_warns(self) -> None:
+        # marker inside a quoted argument is not the end-of-command marker
+        self.assert_outcome(
+            {"command": f'git worktree add ../wt "{self.MARKER}"'}, True
+        )
+
+    def test_add_with_marker_not_final_warns(self) -> None:
+        # marker followed by another command -> not at absolute command end
+        self.assert_outcome(
+            {"command": f"git worktree add ../wt {self.MARKER} && echo done"}, True
+        )
+
+    def test_two_adds_one_marker_warns(self) -> None:
+        # one marker never suppresses a batch of adds
+        self.assert_outcome(
+            {"command": f"git worktree add ../a && git worktree add ../b {self.MARKER}"}, True
+        )
+
+    def test_marker_alone_without_add_no_warn(self) -> None:
+        # a non-add command that merely ends with the marker is not a worktree add
+        self.assert_outcome({"command": f"echo hi {self.MARKER}"}, False)
 
 
 if __name__ == "__main__":

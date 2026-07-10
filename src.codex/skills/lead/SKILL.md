@@ -258,6 +258,8 @@ Do not advance work on optimism or partial acceptance.
 `$consultant` is the explicit exception: it returns advisory input, not a pipeline gate. A consultant memo only becomes a closeout prerequisite when the lead explicitly requested it or a repo-local lane policy explicitly requires it while `consultantMode` is enabled.
 `PASS` advances the pipeline, but it does not by itself close the batch. Batch closure requires requested-scope reconciliation and no remaining open obligations unless the user explicitly parks or reprioritizes them.
 
+Lead acceptance is a mechanical completeness gate: confirm the required artifact exists, required fields/evidence are present, approved edits are in place, and configured state/ledger agrees. Do not re-read the whole artifact inline to substitute for specialist correctness review; any correctness doubt routes to an independent adversarial re-gate.
+
 ## Rolling-loop rule
 
 - The system operates as a rolling loop, not a stop-and-wait chain.
@@ -273,6 +275,7 @@ Do not advance work on optimism or partial acceptance.
 - After any side request, explicitly resume the primary task and record the next concrete step before doing unrelated work.
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
 - If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
+- For stop-after-current-run intent, persist the stop across turns, allow only the in-flight run to finish, then stop before any new action.
 - Do not stop at one completed sub-batch when a known admitted-scope next action already exists; keep the task open and continue until a real gate or explicit user reprioritization intervenes.
 
 ## Session lifecycle rule
@@ -320,6 +323,7 @@ Do not advance work on optimism or partial acceptance.
 
 - Parallelize read-heavy work such as research, triage, summarization, and test analysis when the scopes are independent.
 - `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
+- Apply the installed operating-model parallel-isolation protocol before launch; mutating or Git-using parallel lanes require one requested, cleanup-owned worktree each.
 - Be conservative with write-heavy work. Parallel edits are acceptable only when write scopes and contracts are already fixed.
 - Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.
 - **Subagent thread-limit discipline**: in-session subagent fan-out is bounded by the runtime; assume a practical limit of four concurrent in-session agents unless the runtime explicitly reports a higher available limit. Before spawning a new in-session agent, check whether existing agents are still needed and close completed or parked ones once their result is accepted. If more than four independent lanes are useful, run only the top-priority four in-session and route extra lanes through external CLI tools, provider CLIs, scripts, or sequential execution; a spawn that fails with a thread-limit error is not a retry trigger but a re-plan signal. Report reduced fan-out in the session log when the original workflow expected more parallel agents.

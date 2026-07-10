@@ -31,6 +31,7 @@ description: "Gate an approved phase or control-plane change: maintainability, c
 - A local feature or governance patch does not drag unrelated modules or policies into the diff without a design-backed reason.
 - A cross-cutting / long-lived decision asserted in the design without a `work-items/decisions/` registry id is a blocking `REVISE`.
 - The change does not pass with unexplained architectural drift, contradictory control-plane behavior, or avoidable debt growth.
+- Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner and a downstream-observable `settled/committed` event, and the implementation preserves both.
 
 ## Working rules
 

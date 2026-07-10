@@ -224,6 +224,8 @@ Do not advance work on optimism or partial acceptance.
 `$consultant` is the explicit exception: it returns advisory input, not a pipeline gate. A consultant memo only becomes a closeout prerequisite when it was explicitly requested by the lead or repo-local policy while `consultantMode` is enabled.
 `PASS` advances the pipeline, but it does not by itself close the batch. Batch closure requires requested-scope reconciliation and no remaining open obligations unless the user explicitly parks or reprioritizes them.
 
+Lead acceptance is a mechanical completeness gate: confirm the required artifact exists, required fields/evidence are present, approved edits are in place, and configured state/ledger agrees. Do not re-read the whole artifact inline to substitute for specialist correctness review; any correctness doubt routes to an independent adversarial re-gate.
+
 ## Flow rules
 
 The rolling loop (`PASS` advances, `REVISE` stays in-role, `BLOCKED` waits), the resume-the-primary-task-after-a-side-request and restore-after-compaction discipline, and "a passed sub-batch is not goal completion — continue to the next admitted action" are inherited from the spine's `Core delegation principles`; the lead-specific flow on top:
@@ -240,6 +242,7 @@ The rolling loop (`PASS` advances, `REVISE` stays in-role, `BLOCKED` waits), the
 - **Change isolation**: prefer additive change through approved seams. If a local feature requires cross-cutting edits, route back to `$architect` or `$architecture-reviewer`.
 - **Parallelism**: parallelize read-heavy work (research, triage) when scopes are independent. Write-heavy work needs explicit ownership boundaries.
 - **Parallelism mode**: `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
+- Apply the installed operating-model parallel-isolation protocol before launch; mutating or Git-using parallel lanes require one requested, cleanup-owned worktree each.
 - **Subagent thread-limit discipline**: in-session subagent fan-out is bounded by the runtime; assume a practical limit of four concurrent in-session agents unless the runtime explicitly reports a higher available limit. Before spawning a new in-session agent, check whether existing agents are still needed and close completed or parked ones once their result is accepted. If more than four independent lanes are useful, run only the top-priority four in-session and route extra lanes through external CLI tools, provider CLIs, scripts, or sequential execution; a spawn that fails with a thread-limit error is not a retry trigger but a re-plan signal. Report reduced fan-out in the session log when the original workflow expected more parallel agents.
 - **Parallel external reuse**: same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.
 - **Capability gaps**: if approved work cannot be routed cleanly, escalate one recommendation: use installed specialist, define repo-local specialist, create new skill, or escalate hiring need.
@@ -274,6 +277,7 @@ Periodic controls (drift detection between gates) are in [operating-model.md](..
 - When interrupting non-trivial work, record a durable resume point: current stage, last accepted artifact, next concrete step, and open obligations before switching away.
 - After context compaction or resume from a summary, restore the active task, next unchecked step, and open evidence gates before acting; continue from that point unless the user or persisted status says the task is parked, blocked, or complete.
 - If the user corrects the session with `stop closeout`, `завязывай с closeout`, `работай`, `дальше`, `go`, `продолжай`, `по плану`, or an equivalent continue-working signal, take the next concrete action in the active task immediately instead of only acknowledging the correction.
+- For stop-after-current-run intent, persist the stop across turns, allow only the in-flight run to finish, then stop before any new action.
 - Before marking a batch or final answer complete, reconcile the current result against the original request, accepted scope, required checks, canonical-source updates, and any open obligations.
 - Do not treat a partial sub-batch as completion when a known required next action still exists inside the admitted scope.
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.

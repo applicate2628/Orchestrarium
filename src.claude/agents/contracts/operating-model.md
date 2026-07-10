@@ -72,6 +72,8 @@ Claude-line keeps one shared local config file at `.claude/.agents-mode.yaml`.
 - Parallel external routing is not capped at one instance per helper or provider. If multiple admitted artifacts or disjoint slices honestly need the same provider, the orchestrator may launch repeated same-provider external helpers concurrently.
 - Treat same-lane multi-opinion collection and general external fan-out as different mechanisms: `externalOpinionCounts` governs distinct opinions for one lane, while brigade-style fan-out covers multiple independent lanes or slices on top of the general `parallelMode` rule.
 - If native internal slot limits would otherwise block additional independent eligible lanes, prefer available external adapters instead of silently serializing or dropping them.
+- Once a provider or subagent run is launched, a later preference change to effort, model, or framing applies to the next dispatch. Do not stop and replace the in-flight run: spent reasoning is sunk and redispatch adds cost. Stop only when the run is orphaned, no longer needed, or its prompt is broken/wrong.
+- Choose effort before launch from task complexity and the lane's mandated floor; do not reflexively escalate to `max`/`xhigh` where no floor requires it.
 
 ## Batch-close consultant check
 
@@ -126,7 +128,7 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Work-items completeness | `$lead` | Session start | Create missing artifacts or park item |
 | Freshness audit | `$lead` | Resume / session start | Update `status.md` or park/archive |
 | Artifact completeness | `$knowledge-archivist` | Stage change | Restore artifact or route back upstream |
-| Index sync | `$knowledge-archivist` | Resume, archive, completion | Update index |
+| Index sync | `$knowledge-archivist` | Every active-item state change (create, resume, stage transition, park, close, archive) | Update the recovery index in the same transition |
 | Risk-routing audit | `$lead` | Weekly or scope change | Reclassify and add missing lanes |
 | Repo consistency | `$knowledge-archivist` | Weekly | Open bounded hygiene follow-up |
 | Publication-safety spot check | `$lead` | Weekly or before publication | Redact or move to `/.scratch/` |
@@ -225,15 +227,16 @@ Any REVISE loop (QA, reviewer, or other gate returning REVISE) is capped at **3 
 
 ## Parallel execution protocol
 
-Before launching agents in parallel:
+Before launching work in parallel:
 
-1. **Confirm non-overlapping change surfaces.** Each parallel agent must have an explicitly disjoint set of files it may modify. If change surfaces overlap, serialize the agents instead.
-2. **Assign an integration owner.** The main conversation (holding the Lead role) is the integration owner for every chain; `requiresLead` only changes how heavy the orchestration around it is.
-3. **After all parallel agents complete**, the integration owner:
+1. **Classify repository interaction.** A parallel lane that may mutate the working tree or invoke Git MUST run in its own isolated worktree. Only strictly read-only audits that do not invoke Git may share the current tree. If isolation is unavailable, serialize; disjoint file lists alone do not isolate the Git index, HEAD, or generated/build state.
+2. **Declare each requested isolation worktree.** Create one worktree per lane with one `git worktree add` command ending in the exact command-local marker `# orchestrarium:requested-isolation-worktree`. Use that marker only after naming the lane and isolation reason in assistant prose. One marker authorizes one detected add in that command; it is not permission for another worktree.
+3. **Assign integration and cleanup owners.** The main conversation owns integration. After acceptance, cancellation, failure, or timeout, it verifies the resolved target path, reconciles retained changes, removes only that lane's worktree, and prunes safely; it never removes a user-owned worktree.
+4. **After all parallel agents complete**, the integration owner:
    - Checks for semantic conflicts (two agents made assumptions that contradict each other)
    - Checks for unintended interactions (e.g., both agents modified a shared import file that wasn't in either change surface)
    - If conflicts exist, resolve before advancing to the next stage
-4. **If a parallel agent returns REVISE or BLOCKED**, handle it independently — other parallel agents are not affected unless the finding impacts their change surface.
+5. **If a parallel agent returns REVISE or BLOCKED**, handle it independently — other parallel agents are not affected unless the finding impacts their change surface.
 
 ## Artifact persistence protocol
 

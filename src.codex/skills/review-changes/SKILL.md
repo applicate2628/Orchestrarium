@@ -74,3 +74,4 @@ If the user asked "did we fix everything?", answer that directly before the deta
 - Treat changed files as entry points, not as the review boundary.
 - If a critical issue appears early, surface it immediately.
 - If the impact surface is too large for a trustworthy single pass, say so and recommend splitting the review into smaller scopes.
+- When the user authorizes GitHub review-thread resolution, resolve a thread only after the fix commit is on `HEAD`, cite the confirming `file:line` on that `HEAD`, then query the thread API and verify the bot's current verdict is `PASS`. A UI badge, notification, local diff, or stale prior PASS is insufficient.

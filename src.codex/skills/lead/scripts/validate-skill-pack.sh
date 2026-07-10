@@ -1290,6 +1290,32 @@ check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "scripts/validate-work-i
   "subagent-contracts point to the work-item state validator"
 check_contains "$SKILLS_DIR/lead/subagent-contracts.md" "scripts/check-work-items-state.* --root" \
   "subagent-contracts point to the periodic work-item state checker"
+
+# --- orchestration-discipline-gaps normative-sentence pins ---
+# Standalone provider branches run THIS validator, not tests/, so a mirror/regression
+# here would go uncaught. Substrings mirror tests/test_orchestration_discipline_contract.py.
+check_contains "$SKILLS_DIR/bug-hunting/SKILL.md" \
+  "**Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, STOP all edits." \
+  "bug-hunting skill carries the P4 second-cross-break stop rule"
+check_contains "$SKILLS_DIR/lead/hooks/check-no-trash-in-repo.py" \
+  'REQUESTED_ISOLATION_MARKER = "# orchestrarium:requested-isolation-worktree"' \
+  "no-trash-in-repo hook carries the A2 requested-isolation-worktree marker constant"
+check_contains "$SKILLS_DIR/review-loop/SKILL.md" \
+  "**Failed lane is unverified.** Any expected lane that errors, dies, or hits a time/token/usage limit is UNVERIFIED." \
+  "review-loop skill carries the A5b failed-lane-is-unverified invariant"
+check_contains "$SKILLS_DIR/review-loop/SKILL.md" \
+  "**Fail-closed aggregation.** A missing/null sub-verdict or findings payload is NOT-clean." \
+  "review-loop skill carries the A5b fail-closed-aggregation invariant"
+check_contains "$SKILLS_DIR/lead/subagent-contracts.md" \
+  "**Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class" \
+  "subagent-contracts carry the A8 class-completeness trigger"
+check_contains "$SKILLS_DIR/lead/external-dispatch.md" \
+  "Every provider-backed run MUST carry the resolved model/profile and effort as explicit launch flags in that invocation, even when they equal configured defaults; never rely on provider config defaults." \
+  "external-dispatch carries the A12 explicit model/effort launch rule"
+check_contains "$SKILLS_DIR/lead/operating-model.md" \
+  "active-item state change (create, resume, stage transition, park, close, archive)" \
+  "operating-model carries the A3 index-sync every-state-change trigger"
+
 check_contains "$SKILLS_DIR/init-project/SKILL.md" "normalize it to the current canonical format before presenting or trusting the current values." \
   "init-project normalizes existing agents-mode before reading values"
 check_contains "$SKILLS_DIR/init-project/SKILL.md" "Any read of \`.agents/.agents-mode.yaml\` that drives a decision should normalize the file to the current canonical format before trusting the flags." \
