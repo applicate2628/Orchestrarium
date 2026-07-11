@@ -1,9 +1,10 @@
 """Smoke tests for the PowerShell (.ps1) hook + scanner wrappers.
 
 The installer registers a .ps1 entry point as the WINDOWS hook command for the
-six structural/audit hooks (check-bugfix-discipline, check-passive-polling-stop,
-check-work-items-archival-stop, check-machine-local-path, check-no-trash-in-repo,
-check-stale-relation-residue), the two informational SessionStart reminders
+seven structural/audit hooks (check-bugfix-discipline, check-git-push-gate,
+check-passive-polling-stop, check-work-items-archival-stop,
+check-machine-local-path, check-no-trash-in-repo, check-stale-relation-residue),
+the two informational SessionStart reminders
 (mcp-usage-reminder, agents-mode-reminder), and ships a .ps1 for the publication
 scanner — yet NO test executed any .ps1, so a syntax error, a broken fail-open
 path, or a regressed stdin pipe in the Windows entry point would have shipped
@@ -14,7 +15,7 @@ green (every other hook test drives the .py helper via sys.executable, never the
 
 Three wrapper shapes, three contracts:
 
-  * The six structural/audit HOOK wrappers are thin stdin pipes around their .py helper. Contract:
+  * The seven structural/audit HOOK wrappers are thin stdin pipes around their .py helper. Contract:
     FAIL OPEN — on empty stdin AND on malformed JSON they must exit 0 with no
     stdout and no stderr (AUDIT/decision hooks never crash the host; the helper's
     own fail-open swallows bad input). Verified under every available interpreter.
@@ -61,15 +62,17 @@ CLAUDE_HOOKS = REPO_ROOT / "src.claude" / "agents" / "hooks"
 CODEX_SCRIPTS = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts"
 CODEX_HOOKS = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 
-# The six stdin-piping structural/audit hook wrappers, in BOTH install trees (12 files).
+# The seven stdin-piping structural/audit hook wrappers, in BOTH install trees (14 files).
 HOOK_WRAPPERS = (
     CLAUDE_SCRIPTS / "check-bugfix-discipline.ps1",
+    CLAUDE_SCRIPTS / "check-git-push-gate.ps1",
     CLAUDE_SCRIPTS / "check-passive-polling-stop.ps1",
     CLAUDE_SCRIPTS / "check-work-items-archival-stop.ps1",
     CLAUDE_HOOKS / "check-machine-local-path.ps1",
     CLAUDE_HOOKS / "check-no-trash-in-repo.ps1",
     CLAUDE_HOOKS / "check-stale-relation-residue.ps1",
     CODEX_SCRIPTS / "check-bugfix-discipline.ps1",
+    CODEX_SCRIPTS / "check-git-push-gate.ps1",
     CODEX_SCRIPTS / "check-passive-polling-stop.ps1",
     CODEX_SCRIPTS / "check-work-items-archival-stop.ps1",
     CODEX_HOOKS / "check-machine-local-path.ps1",
@@ -175,7 +178,7 @@ def _bash_locatable_git() -> str | None:
 
 @unittest.skipIf(not INTERPRETERS, "no PowerShell host (pwsh/powershell) on PATH")
 class TestHookWrappersFailOpen(unittest.TestCase):
-    """All six hook wrappers, in both trees, must FAIL OPEN under every available
+    """All seven hook wrappers, in both trees, must FAIL OPEN under every available
     PowerShell host: exit 0 with empty stdout+stderr on empty stdin and on
     malformed JSON."""
 

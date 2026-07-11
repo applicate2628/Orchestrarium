@@ -91,6 +91,110 @@ class ResolveAgentsModeTest(unittest.TestCase):
 
             self.assertFalse((project / ".agents" / ".agents-mode.yaml.generated").exists())
 
+    def test_project_local_wrapper_resolver_is_flagged_project_unconfirmed(self) -> None:
+        """F9: a repo-supplied executable-bearing reserveResolver must not be silently trusted."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            project = base / "project"
+            home = base / "home"
+            project.mkdir()
+            home.mkdir()
+
+            self._write(
+                home / ".claude" / ".agents-mode.yaml",
+                """
+                reserveResolver: claude-sonnet
+                """,
+            )
+            self._write(
+                project / ".claude" / ".agents-mode.yaml",
+                """
+                consultantMode: external
+                reserveResolver: wrapper:tools/evil.sh
+                """,
+            )
+
+            resolved = self._resolve("claude", project, home)
+
+            self.assertEqual(resolved["values"]["reserveResolver"], "wrapper:tools/evil.sh")
+            self.assertEqual(resolved["sources"]["reserveResolver"]["rank"], "local")
+            self.assertEqual(resolved["reserveResolverTrust"], "project-UNCONFIRMED")
+
+    def test_user_global_wrapper_resolver_stays_trusted(self) -> None:
+        """F9: an executable-bearing resolver defined at a user-global layer is honored."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            project = base / "project"
+            home = base / "home"
+            project.mkdir()
+            home.mkdir()
+
+            self._write(
+                home / ".claude" / ".agents-mode.yaml",
+                """
+                reserveResolver: wrapper:reserve-review
+                """,
+            )
+
+            resolved = self._resolve("claude", project, home)
+
+            self.assertEqual(resolved["values"]["reserveResolver"], "wrapper:reserve-review")
+            self.assertEqual(resolved["sources"]["reserveResolver"]["rank"], "global")
+            self.assertEqual(resolved["reserveResolverTrust"], "user-global")
+
+    def test_project_local_wrapper_matching_user_global_value_is_confirmed(self) -> None:
+        """F9: a project-local executable value identical to a user-global one is the durable
+        first-use approval record, so it resolves trusted."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            project = base / "project"
+            home = base / "home"
+            project.mkdir()
+            home.mkdir()
+
+            self._write(
+                home / ".agents-mode.yaml",
+                """
+                reserveResolver: wrapper:tools/reserve-review.ps1
+                """,
+            )
+            self._write(
+                project / ".claude" / ".agents-mode.yaml",
+                """
+                reserveResolver: wrapper:tools/reserve-review.ps1
+                """,
+            )
+
+            resolved = self._resolve("claude", project, home)
+
+            self.assertEqual(resolved["sources"]["reserveResolver"]["rank"], "local")
+            self.assertEqual(resolved["reserveResolverTrust"], "user-global")
+
+    def test_non_executable_reserve_resolver_needs_no_trust_gate(self) -> None:
+        """F9: symbolic resolver values (claude-sonnet/claude-wrapper/disabled) carry no
+        arbitrary executable, so the trust gate does not fire even from a project layer."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            project = base / "project"
+            home = base / "home"
+            project.mkdir()
+            home.mkdir()
+
+            self._write(
+                project / ".claude" / ".agents-mode.yaml",
+                """
+                reserveResolver: claude-sonnet
+                """,
+            )
+
+            resolved = self._resolve("claude", project, home)
+
+            self.assertEqual(resolved["sources"]["reserveResolver"]["rank"], "local")
+            self.assertEqual(resolved["reserveResolverTrust"], "not-executable")
+
+            defaults_only = self._resolve("claude", base / "project", home)
+            self.assertEqual(defaults_only["reserveResolverTrust"], "not-executable")
+
     def test_example_providers_use_shared_global_as_demo_fallback_without_becoming_auto_production(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
