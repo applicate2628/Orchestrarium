@@ -1749,11 +1749,12 @@ agents_line_count="$(count_codex_pack_lines "$AGENTS_FILE")"
 # ([acknowledge-open-work-items]) -- contributing their bullets, removal
 # commands, and entry-point list items. 2026-06-19 added the stale-relation-residue
 # PreToolUse audit and the mcp-usage-reminder SessionStart reminder; 2026-07-09
-# added the agents-mode-reminder SessionStart reminder -- now EIGHT hook entries
-# (two Stop, three PreToolUse audit, one PreToolUse bugfix, two SessionStart
-# reminders). The assembled pack section stays well under the
-# 420 ceiling (measured in the low 340s in source-repo assembly; the runtime
-# check below prints the exact count). Previous bumps: 360 -> 380 (2026-05-17, Bootstrap two trigger
+# added the agents-mode-reminder SessionStart reminder; 2026-07-11 added the
+# blocking git-push publication-gate PreToolUse hook -- now NINE hook entries
+# (two Stop, three PreToolUse audit, two blocking PreToolUse (bugfix +
+# git-push-gate), two SessionStart reminders). The assembled pack section stays
+# under the 420 ceiling (measured in the low 340s before the git-push-gate
+# addition, ~+4 lines after it; the runtime check below prints the exact count). Previous bumps: 360 -> 380 (2026-05-17, Bootstrap two trigger
 # moments); 340 -> 360 (2026-05-16, no-kostyl step 4.5); 300 -> 340
 # (Bootstrap itself). Visible decision rather than silent budget growth.
 if [[ "$agents_line_count" -le 420 ]]; then

@@ -921,6 +921,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       MINGW*|MSYS*|CYGWIN*)
         hook_host_os="windows"
         bugfix_script_target="$TARGET/agents/scripts/check-bugfix-discipline.ps1"
+        git_push_gate_script_target="$TARGET/agents/scripts/check-git-push-gate.ps1"
         stop_script_target="$TARGET/agents/scripts/check-passive-polling-stop.ps1"
         wi_archival_script_target="$TARGET/agents/scripts/check-work-items-archival-stop.ps1"
         machine_path_script_target="$TARGET/agents/hooks/check-machine-local-path.ps1"
@@ -932,6 +933,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       *)
         hook_host_os="posix"
         bugfix_script_target="$TARGET/agents/scripts/check-bugfix-discipline.sh"
+        git_push_gate_script_target="$TARGET/agents/scripts/check-git-push-gate.sh"
         stop_script_target="$TARGET/agents/scripts/check-passive-polling-stop.sh"
         wi_archival_script_target="$TARGET/agents/scripts/check-work-items-archival-stop.sh"
         machine_path_script_target="$TARGET/agents/hooks/check-machine-local-path.sh"
@@ -947,6 +949,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --platform claude \
       --host-os "$hook_host_os" \
       --script-path "$bugfix_script_target"
+    echo "  Installing git-push publication-gate PreToolUse hook (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --script-marker check-git-push-gate \
+      --tool-matcher "Bash" \
+      --script-path "$git_push_gate_script_target"
     echo "  Installing passive-polling Stop hook (host-os=$hook_host_os)..."
     "$python_cmd" "$hook_installer" \
       --target "$settings_target" \

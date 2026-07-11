@@ -1011,6 +1011,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
     hooks_target="$TARGET/hooks.json"
     if [ "$hook_host_os" = "windows" ]; then
       bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.ps1"
+      git_push_gate_script_target="$AGENTS_ROOT/skills/lead/scripts/check-git-push-gate.ps1"
       stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.ps1"
       wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.ps1"
       machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.ps1"
@@ -1020,6 +1021,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.ps1"
     else
       bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.sh"
+      git_push_gate_script_target="$AGENTS_ROOT/skills/lead/scripts/check-git-push-gate.sh"
       stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.sh"
       wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.sh"
       machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.sh"
@@ -1034,6 +1036,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --platform codex \
       --host-os "$hook_host_os" \
       --script-path "$bugfix_script_target"
+    echo "  Installing git-push publication-gate PreToolUse hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-marker check-git-push-gate \
+      --tool-matcher "Bash" \
+      --script-path "$git_push_gate_script_target"
     echo "  Installing passive-polling Stop hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
     "$python_cmd" "$hook_installer" \
       --target "$hooks_target" \
