@@ -11,22 +11,24 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 
 ~70% of the diff is intentional platform-specific packaging. This manifest tracks only the ~30% that expresses **shared semantics** and must stay aligned.
 
+**Anchor convention.** Rows anchor to exact `##`/`###` heading texts (`§"Heading"`), never line numbers — headings survived every rewrite of these four files intact; line numbers died with the first edit above them. Renaming an anchored heading REQUIRES updating its manifest row in the same change. Raw line-number pointers are banned in this manifest.
+
 ## Shared semantic blocks — operating-model.md
 
 | Block | Claude (`src.claude/agents/contracts/operating-model.md`) | Codex (`src.codex/skills/lead/operating-model.md`) | Notes |
 |-------|----------------------------------------------------------|-----------------------------------------------------|-------|
-| Isolation rule | §"Isolation rule" (L6–11) | §"Isolation rule" (L277–279) | Claude mentions Agent tool explicitly; Codex says "designated agent invocation mechanism" |
-| Research admission filter | §"Research admission filter" (L31–43) | §"Research admission filter" (L262–275) | Identical semantics, identical 8-item list + 3 gate owners |
-| Interaction types | §"Interaction types" table (L47–60) | §"Interaction types" table (L282–292) | Same 8 types; Claude has prose descriptions, Codex has compact table |
-| Cross-domain escalation | §"Cross-domain escalation protocol" (L114–123) | §"Cross-domain escalation protocol" (L294–301) | Identical 4-step protocol; Claude adds target-domain mapping table |
-| Adjacent-issue protocol | §"Adjacent-issue protocol" (L127–132) | §"Adjacent-issue protocol" (L303–310) | Identical semantics; Codex says "configured bug registry path" vs Claude's `work-items/bugs/` |
-| Artifact invalidation | §"Artifact invalidation protocol" (L135–143) | §"Artifact invalidation protocol" (L314–319) | Claude has 3 detailed steps; Codex condensed to 3 points. Same dependency chain. |
-| REVISE iteration cap | §"REVISE iteration cap" (L144–154) | §"REVISE iteration cap procedure" (L322–327) | Identical cap (3), identical escalation procedure |
-| Periodic controls | §"Periodic controls" table (L62–78) | §"Periodic controls" (L243–248) | Claude has full 11-row control matrix; Codex defers to repo-defined matrix |
-| How to instruct reviewers | §"How to instruct reviewers" (L93–96) | §"Review strategy selection" (L174–226) | Claude: 2 compact paragraphs. Codex: full strategy A/B with decision table. Semantics identical. |
-| Common alias map | §"Common alias map" (L98–112) | §"Common alias map" (L397–410) | Identical mappings, different formatting |
-| Artifact persistence | §"Artifact persistence protocol" (L168–211) | §"Artifact persistence protocol" (L329–341) | Claude: detailed 3-tier table + when-to-save rules. Codex: condensed 3-tier table. |
-| Parallel execution | §"Parallel execution protocol" (L157–166) | §"Parallelism guidance" (L356–360) | Claude: 4-step protocol with integration owner. Codex: 3 brief bullets. |
+| Isolation rule | §"Isolation rule" | §"Isolation rule" | Claude mentions Agent tool explicitly; Codex says "designated agent invocation mechanism" |
+| Research admission filter | §"Research admission filter" | §"Research admission filter" | Identical semantics, identical 8-item list + 3 gate owners |
+| Interaction types | §"Interaction types" table | §"Interaction types" table | Same 8 types; Claude has prose descriptions, Codex has compact table |
+| Cross-domain escalation | §"Cross-domain escalation protocol" | §"Cross-domain escalation protocol" | Identical 4-step protocol; Claude adds target-domain mapping table |
+| Adjacent-issue protocol | §"Adjacent-issue protocol" | §"Adjacent-issue protocol" | Identical semantics; Codex says "configured bug registry path" vs Claude's `work-items/bugs/` |
+| Artifact invalidation | §"Artifact invalidation protocol" | §"Artifact invalidation protocol" | Claude has 3 detailed steps; Codex condensed to 3 points. Same dependency chain. |
+| REVISE iteration cap | §"REVISE iteration cap" | §"REVISE iteration cap procedure" | Identical cap (3), identical escalation procedure |
+| Periodic controls | §"Periodic controls" table | §"Periodic controls" | Claude has full 11-row control matrix; Codex defers to repo-defined matrix |
+| How to instruct reviewers | §"How to instruct reviewers" | §"Review strategy selection" | Claude: 2 compact paragraphs. Codex: full strategy A/B with decision table. Semantics identical. |
+| Common alias map | §"Common alias map" | §"Common alias map" | Identical mappings, different formatting |
+| Artifact persistence | §"Artifact persistence protocol" | §"Artifact persistence protocol" | Claude: detailed 3-tier table + when-to-save rules. Codex: condensed 3-tier table. |
+| Parallel execution | §"Parallel execution protocol" | §"Parallelism guidance" | Claude: 4-step protocol with integration owner. Codex: 3 brief bullets. |
 | External role routing | External role substitution notes in `operating-model.md` | External role substitution notes in `operating-model.md` | Shared semantics: consultant stays advisory-only, worker covers every non-owner non-review lane, reviewer covers `Review + QA`, and team template JSON stays unchanged. |
 | Design-panel and review-loop selection | §"Design-panel and review-loop selection" (before `## How to instruct reviewers`) | §"Design-panel and review-loop selection" (before `## Review strategy selection`) | New block (2026-07-10): names the two admitted design-panel triggers (high-surface sweep / open architecture choice), the generation-vs-verification difference from review-loop, and the binding path. Neither `operating-model.md` referenced review-loop before this change (verified zero-hit); this block introduces both pointers together. Selection/pointer only — does not duplicate either contract's DP1-DP8 / angle rules. |
 
@@ -34,15 +36,15 @@ Codex loads skills statically → contract docs must be self-contained lead guid
 
 | Block | Claude (`src.claude/agents/contracts/subagent-contracts.md`) | Codex (`src.codex/skills/lead/subagent-contracts.md`) | Notes |
 |-------|-------------------------------------------------------------|-------------------------------------------------------|-------|
-| Handoff template | §"Handoff template" (L11–34) | §"Shared handoff template" (L7–34) | Identical structure; Codex has extra placeholder lines |
-| Artifact gate | §"Artifact gate" (L38–43) | §"Artifact gate" (L37–43) | Identical rules; Codex adds "if the repository uses one" qualifier |
-| status.md format | L47–88 | L46–88 | Identical format. Only diff: Codex says "role to invoke" vs Claude's "agent to launch" |
-| Response format | §"Response format" (L92–103) | §"Shared response format" (L90–115) | Same 5-line format. Codex adds fact-first note and consultant exception inline |
-| BLOCKED classification | §"BLOCKED classification" (L105–113) | §"BLOCKED classification" (L101–107) | Identical 2-class table. Codex: "configured bug registry path" vs Claude: `work-items/bugs/` |
-| Interaction rules | §"Interaction rules" (L115–121) | §"Interaction rules" (L492–499) | Same 5 rules; minor wording adaptation |
-| Test ownership boundary | §"Test ownership boundary" (L123–132) | — | **Claude only.** Codex has no equivalent. |
-| Structured completion report | §"Structured completion report" (L134–143) | §"Structured completion report" (L501–510) | Identical 4-item format |
-| Gate questions | §"Gate questions" (L148–155) | §"Gate questions" (L516–522) | Identical 7 questions |
+| Handoff template | §"Handoff template" | §"Shared handoff template" | Identical structure; Codex has extra placeholder lines |
+| Artifact gate | §"Artifact gate" | §"Artifact gate — no delegation without brief" | Identical rules; Codex adds "if the repository uses one" qualifier |
+| status.md format | §"status.md format" | §"status.md format" | Identical format. Only diff: Codex says "role to invoke" vs Claude's "agent to launch" |
+| Response format | §"Response format" | §"Shared response format" | Same 5-line format. Codex adds fact-first note and consultant exception inline |
+| BLOCKED classification | §"BLOCKED classification" | §"BLOCKED classification" | Identical 2-class table. Codex: "configured bug registry path" vs Claude: `work-items/bugs/` |
+| Interaction rules | §"Interaction rules" | §"Interaction rules" | Same 5 rules; minor wording adaptation |
+| Test ownership boundary | §"Test ownership boundary" | — | **Claude only.** Codex has no equivalent. |
+| Structured completion report | §"Structured completion report" | §"Structured completion report" | Identical 4-item format |
+| Gate questions | §"Gate questions" | §"Gate questions" | Identical 7 questions |
 | External role contracts | External role summaries + dispatch references in `subagent-contracts.md` | External role sections in `subagent-contracts.md` | Shared semantics: assigned internal role is provenance, not a restriction on universality; roles do not self-fallback to internal specialists; orchestrator may reroute after the external role is disabled. |
 
 ## Shared semantic blocks — external dispatch
@@ -94,30 +96,30 @@ Shipped 2026-07-10, primary packs only (`src.claude`, `src.codex`); the `src.gem
 
 These exist in Codex because it must be self-contained. Claude distributes this content into individual role `.md` files.
 
-| Codex section | Lines | Claude equivalent location |
-|---------------|-------|---------------------------|
-| Role map | subagent-contracts:117–141 | Distributed across `src.claude/agents/*.md` |
-| Per-role contracts (PM through Consultant) | subagent-contracts:142–489 | Each in its own `src.claude/agents/<role>.md` |
-| Canonical routing patterns (27 patterns) | operating-model:45–105 | Team templates JSON + decision tree in CLAUDE.md |
-| Stage gates (all roles) | operating-model:107–133 | Distributed across role `.md` files |
-| Lead quick checklist | operating-model:147–171 | `src.claude/skills/lead/SKILL.md` (`agents/lead.md` is fail-closed only) |
-| Review strategy selection + decision table | operating-model:174–226 | Compact version in operating-model + reviewer roles |
-| Builder and blocker separation | operating-model:232–240 | Implicit in role index + template routing |
-| Delivery loops | operating-model:7–25 | Implicit in template chain definitions |
-| Change classification | operating-model:27–33 | In AGENTS.shared.md engineering hygiene |
-| Fact-first workflow | operating-model:35–42 | In AGENTS.shared.md delegation principles |
-| Re-intake and integration ownership | operating-model:349–354 | In AGENTS.shared.md + `src.claude/skills/lead/SKILL.md` |
-| Change-isolation guidance | operating-model:363–367 | In AGENTS.shared.md engineering hygiene |
-| Governance artifacts list | operating-model:369–395 | In artifact persistence section |
+| Codex section | Anchor (codex file) | Claude equivalent location |
+|---------------|---------------------|---------------------------|
+| Role map | subagent-contracts §"Role map" | Distributed across `src.claude/agents/*.md` |
+| Per-role contracts (PM through Consultant) | subagent-contracts §"Product Manager" … §"Consultant" (consecutive role sections) | Each in its own `src.claude/agents/<role>.md` |
+| Canonical routing patterns (27 patterns) | operating-model §"Canonical routing patterns" | Team templates JSON + decision tree in CLAUDE.md |
+| Stage gates (all roles) | operating-model §"Stage gates" | Distributed across role `.md` files |
+| Lead quick checklist | operating-model §"Lead quick checklist" | `src.claude/skills/lead/SKILL.md` (`agents/lead.md` is fail-closed only) |
+| Review strategy selection + decision table | operating-model §"Review strategy selection" | Compact version in operating-model + reviewer roles |
+| Builder and blocker separation | operating-model §"Builder and blocker separation" | Implicit in role index + template routing |
+| Delivery loops | operating-model §"Delivery loops" | Implicit in template chain definitions |
+| Change classification | operating-model §"Change classification" | In AGENTS.shared.md engineering hygiene |
+| Fact-first workflow | operating-model §"Fact-first workflow" | In AGENTS.shared.md delegation principles |
+| Re-intake and integration ownership | operating-model §"Re-intake and integration ownership" | In AGENTS.shared.md + `src.claude/skills/lead/SKILL.md` |
+| Change-isolation guidance | operating-model §"Change-isolation guidance" | In AGENTS.shared.md engineering hygiene |
+| Governance artifacts list | operating-model §"Governance artifacts to keep near the code" | In artifact persistence section |
 
 ## Claude-only sections (no Codex equivalent needed)
 
-| Claude section | Lines | Why Claude-only |
-|----------------|-------|-----------------|
-| Template-based routing | operating-model:14–19 | Codex has no JSON team-template mechanism |
-| Non-obvious routing pairs table | operating-model:82–91 | Codex inlines routing patterns instead |
-| Test ownership boundary | subagent-contracts:123–132 | Could be added to Codex — see open item below |
-| Detailed parallel execution protocol | operating-model:157–166 | Claude supports true parallel Agent tool calls |
+| Claude section | Anchor (claude file) | Why Claude-only |
+|----------------|----------------------|-----------------|
+| Template-based routing | operating-model §"Template-based routing" | Codex has no JSON team-template mechanism |
+| Non-obvious routing pairs table | operating-model §"Non-obvious routing pairs" | Codex inlines routing patterns instead |
+| Test ownership boundary | subagent-contracts §"Test ownership boundary" | Could be added to Codex — see open item below |
+| Detailed parallel execution protocol | operating-model §"Parallel execution protocol" | Claude supports true parallel Agent tool calls |
 
 ## Sync procedure
 
@@ -125,7 +127,7 @@ When changing a shared semantic block:
 
 1. Edit the block in the source pack
 2. Find the matching row in this manifest
-3. Open the other pack's file at the listed location
+3. Open the other pack's file at the anchored heading
 4. Apply the semantic change, adapting platform-specific language:
    - Claude: "Agent tool", "subagent_type", `.claude/agents/`, `work-items/bugs/`
    - Codex: "designated agent invocation mechanism", "role", `$CODEX_HOME/skills/`, "configured bug registry path"

@@ -204,8 +204,6 @@ def _is_relevant_tool_call(tool_name: str, tool_input: object) -> bool:
         return True
     if name in READ_TOOL_NAMES and READ_PROBE_PATH_REGEX.search(input_text):
         return True
-    if name.endswith("output") and name in OUTPUT_TOOL_NAMES:
-        return True
     if name.endswith("read") and READ_PROBE_PATH_REGEX.search(input_text):
         return True
     if (name.endswith("bash") or name.endswith("powershell")) and SHELL_PROBE_REGEX.search(combined):

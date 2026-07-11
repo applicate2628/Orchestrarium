@@ -16,7 +16,6 @@ CODEX_PACK_END_MARKER='<!-- END ORCHESTRARIUM CODEX PACK -->'
 
 # Directories to install (order doesn't matter)
 DIRS=(skills)
-OPTIONAL_DIRS=()
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0

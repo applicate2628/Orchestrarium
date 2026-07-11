@@ -17,7 +17,6 @@ DEFAULT_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 # packaging artifact (extract-provider-branch.py), not shipped here; the reserved
 # `agents-` namespace reclaim below removes any stale ones from prior installs.
 DIRS=(agents commands skills)
-OPTIONAL_DIRS=(memory)
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
@@ -775,22 +774,6 @@ for script_name in "${runtime_ledger_scripts[@]}"; do
     echo "    [dry-run] would copy $script_source -> $script_target"
   else
     cp "$script_source" "$script_target"
-  fi
-done
-
-# Optional dirs: copy if not present, don't overwrite
-for dir in "${OPTIONAL_DIRS[@]}"; do
-  src="$SOURCE/$dir"
-  dst="$TARGET/$dir"
-  if [[ -d "$dst" ]]; then
-    echo "  Keeping existing $dir/ (optional, not overwritten)"
-  elif [[ -d "$src" ]]; then
-    echo "  Installing $dir/ (optional)..."
-    if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would copy $src -> $dst"
-    else
-      cp -r "$src" "$dst"
-    fi
   fi
 done
 
