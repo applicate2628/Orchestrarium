@@ -118,6 +118,7 @@ Notes:
 - Project-level Claude installs create or update `.claude/AGENTS.md` and `.claude/CLAUDE.md`.
 - Claude keeps `.claude/CLAUDE.md` short. Leaf role instructions remain under `.claude/agents/*.md`, while Lead is the explicit exception: `.claude/skills/lead/SKILL.md` loads inline as `/lead` and `.claude/agents/lead.md` is a fail-closed compatibility stub.
 - Project-level installs ensure `/.reports/`, `/.plans/`, `/work-items/`, and `/.scratch/` are present in the target repo `.gitignore` if they are missing, because session logs, plan snapshots, and repo-local task memory are local-only runtime output.
+- Project-level Claude installs additionally ensure the pack credential file `/.claude/SECRET.md` (the `invoke-claude-api` wrapper's repo-local lookup candidate) is ignored in the target repo `.gitignore`; independently, the publication-safety scanner blocks any staged `SECRET.md` filename unconditionally and matches `sk-ant-` / `ANTHROPIC_*KEY|TOKEN` assignment content.
 - Claude memory is shipped in `src.claude/memory/` and preserved across reinstalls by the existing installer behavior.
 - User-side Claude imports such as `@memory/...` are preserved across reinstalls when they live in the installed `.claude/CLAUDE.md` import block alongside `@AGENTS.md`.
 - The canonical Claude-line operator file is `.claude/.agents-mode.yaml` for project installs and `~/.claude/.agents-mode.yaml` for global installs.

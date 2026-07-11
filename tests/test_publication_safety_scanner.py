@@ -18,6 +18,10 @@ Coverage:
   - fallback (no-Python / allowlist-owner-unreachable): refined-ERE branch still
     BLOCKs real paths + secrets and still PASSes true placeholders, emitting the
     degraded-mode notice.
+  - Wave A audit pins: Anthropic credential-material content rows (synthetic
+    token, env-key assignment) BLOCK while a prose prefix mention PASSes; the
+    credential FILENAME blocks in every casing; and the scanner's own source
+    passes only under its own filename (self-exemption keyed, no general hole).
 
 MF6 (gate safety): this test file is itself scanned by the publication gate, so
 it must contain NO machine-local-path literal that the scanner would flag. Every
@@ -147,6 +151,10 @@ def block_rows() -> dict[str, str]:
         "b23_unc_host": _join(BS, BS, "host", BS, USERS, BS, REAL),
         "b24_unc_share": _join(BS, BS, "srv", BS, "share", BS, USERS, BS, REAL),
         "b25_unc_deep_share": _join(BS, BS, "srv", BS, "share", BS, "sub", BS, USERS, BS, REAL),
+        # NEW (Wave A audit): Anthropic credential-material content patterns
+        # (assembled per MF6 so no trippable token literal sits in this source).
+        "b26_sk_ant_token": _join("sk-", "ant-", "a" * 20),
+        "b27_anthropic_key_assignment": _join("ANTHROPIC_", "API_", "KEY", "=", "x" * 8),
     }
 
 
@@ -189,6 +197,12 @@ def pass_rows() -> dict[str, str]:
         # commit ADDING these rows would otherwise self-trip the scanner with.
         "p29_json_escaped_literal": _join('"', WIN, BS, BS, USERS, BS, BS, "test", '"'),
         "p30_unc_doc_ellipsis_literal": _join(BS, BS, "host", BS, USERS, BS, "..."),
+        # NEW (Wave A audit): a PROSE mention of the credential-token prefixes
+        # (no actual token value, no assignment) must stay publishable.
+        "p31_credential_prefix_prose": _join(
+            "docs discuss the sk-", "ant- token prefix and the ANTHROPIC_",
+            " env prefix without any concrete value",
+        ),
     }
 
 
@@ -252,28 +266,48 @@ class TestPublicationSafetyScanner(unittest.TestCase):
             with self.subTest(scanner=scanner.parent.parent.name):
                 self.assertEqual(self._run_cached(scanner, "PUBLIC_VALUE=1", filename=".env"), 1)
 
+    def test_secret_md_filename_blocks_in_any_casing_even_without_secret_content(self) -> None:
+        # The credential-filename block is format-independent AND
+        # case-insensitive: Windows (the pack's primary platform) has a
+        # case-insensitive filesystem, so every casing of the staged
+        # credential filename must block identically, innocuous content
+        # included. (Filename assembled per MF6.)
+        for scanner in SCANNERS:
+            for filename in ("SECRET" + ".md", "secret" + ".md", "Secret" + ".md"):
+                with self.subTest(scanner=scanner.parent.parent.name, filename=filename):
+                    self.assertEqual(
+                        self._run_cached(scanner, "innocuous release checklist notes", filename=filename),
+                        1,
+                        f"staged {filename!r} must BLOCK (exit 1) regardless of content",
+                    )
+
     def test_scanner_file_itself_is_scanned_for_real_secret_content(self) -> None:
+        # MF6 note: the local variable is deliberately named `leak` -- naming
+        # it after the marker it holds would form an assignment line that is
+        # itself a scanner trip when THIS file is staged.
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
-                secret = "pass" + "word" + ": hunter2"
+                leak = "pass" + "word" + ": hunter2"
                 self.assertEqual(
                     self._run_cached(
                         scanner,
-                        f"nonpath_patterns=(\\n  {secret!r}\\n)",
+                        f"nonpath_patterns=(\\n  {leak!r}\\n)",
                         filename="scripts/check-publication-safety.sh",
                     ),
                     1,
                 )
 
     def test_scanner_file_allows_exact_intentional_regex_catalog_lines(self) -> None:
+        # Catalog entries assembled per MF6: the marker phrases must never sit
+        # contiguously in this tracked source, only in the staged fixture.
         catalog = "\n".join(
             [
                 "nonpath_patterns=(",
-                "  'BEGIN RSA PRIVATE KEY'",
-                "  'BEGIN OPENSSH PRIVATE KEY'",
-                "  'BEGIN PRIVATE KEY'",
-                "  'private_key'",
-                "  'secret_key'",
+                _join("  'BEGIN RSA PRIVATE", " KEY'"),
+                _join("  'BEGIN OPENSSH PRIVATE", " KEY'"),
+                _join("  'BEGIN PRIVATE", " KEY'"),
+                _join("  'private", "_key'"),
+                _join("  'secret", "_key'"),
                 ")",
             ]
         )
@@ -289,16 +323,37 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                 )
 
     def test_scanner_file_blocks_catalog_line_with_secret_comment(self) -> None:
-        secret = "pass" + "word" + ": hunter2"
+        leak = "pass" + "word" + ": hunter2"
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
                 self.assertEqual(
                     self._run_cached(
                         scanner,
-                        f"  'secret_key' # {secret}",
+                        _join("  'secret", "_key' # ", leak),
                         filename="scripts/check-publication-safety.sh",
                     ),
                     1,
+                )
+
+    def test_scanner_own_source_passes_only_under_its_own_filename(self) -> None:
+        # Gate self-block regression (Wave A audit): the REAL scanner source
+        # must pass staged under its own filename (its pattern-catalog entries
+        # and marker-bearing comments are its own intentional content), while
+        # the SAME content staged under any other filename must still BLOCK --
+        # the self-exemption is keyed to the scanner's filename and is not a
+        # general hole.
+        content = CODEX_SCANNER.read_text(encoding="utf-8")
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                self.assertEqual(
+                    self._run_cached(scanner, content, filename="scripts/check-publication-safety.sh"),
+                    0,
+                    "scanner source under its own name must PASS (no gate self-block)",
+                )
+                self.assertEqual(
+                    self._run_cached(scanner, content, filename="scripts/some-other-script.sh"),
+                    1,
+                    "scanner source under any other name must still BLOCK",
                 )
 
 

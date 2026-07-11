@@ -385,6 +385,45 @@ function Ensure-LocalOnlyGitignoreEntries {
     }
 }
 
+function Ensure-CredentialGitignoreEntry {
+    # The pack's own credential file (.claude/SECRET.md -- the invoke-claude-api
+    # wrapper's repo-local lookup candidate) must never be trackable in a project
+    # install. Kept separate from the local-only tier array above: that array is
+    # the cross-installer tier set owned by shared/local-only-tiers.txt, while
+    # this is a Claude-pack-specific credential path.
+    param([string]$ProjectRoot)
+
+    $gitignore = Join-Path $ProjectRoot ".gitignore"
+    $secretEntry = "/.claude/SECRET.md"
+    $alternate = $secretEntry.TrimStart("/")
+    $existingLines = @()
+    if (Test-Path -LiteralPath $gitignore) {
+        $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
+    }
+
+    if ($existingLines -contains $secretEntry -or $existingLines -contains $alternate) {
+        Write-Host "  .gitignore: credential entry already present"
+        return
+    }
+
+    Write-Host "  Ensuring .gitignore ignores the pack credential file $secretEntry..."
+    if ($DryRun) {
+        if (Test-Path -LiteralPath $gitignore) {
+            Write-Host "    [dry-run] would append '$secretEntry' to $gitignore"
+        } else {
+            Write-Host "    [dry-run] would create $gitignore with '$secretEntry'"
+        }
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $gitignore)) {
+        Set-Content -LiteralPath $gitignore -Value $secretEntry
+        return
+    }
+
+    Add-Content -LiteralPath $gitignore -Value "`r`n$secretEntry"
+}
+
 function Remove-DanglingLink {
     param(
         [string]$Path,
@@ -882,6 +921,7 @@ if (Test-Path $srcAgents) {
 
 if ($Mode -ne "global") {
     Ensure-LocalOnlyGitignoreEntries -ProjectRoot $ProjectRoot
+    Ensure-CredentialGitignoreEntry -ProjectRoot $ProjectRoot
 }
 
 Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"

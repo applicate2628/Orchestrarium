@@ -30,6 +30,8 @@ If a hypothesis-driven fix does not visibly remove the symptom, do not try anoth
 
 Concrete trigger: "still happening" / "ничего не поменялось" → next action is **diagnostic output**, not another speculative edit.
 
+- **Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, STOP all edits. Before any further edit, run a read-only multi-angle structural diagnosis covering (1) the owning invariant and call/data flow, (2) sibling modes/surfaces, and (3) timing/lifecycle/shared-state interactions; identify which prior edit changed the real symptom and verify the structural cause.
+
 ## Rule 2 — Pick the smallest signal that distinguishes live hypotheses
 
 Pick a handful of orthogonal events and log them with a single line each, prefixed by timestamp + short tag + the state values that matter (`inFlight`, `attached`, `bounds`, `session`, etc.). One line per event, fixed shape, parseable by eye. Do not dump a wall of structured data — you will be reading dozens of these in sequence to spot the timing gap.

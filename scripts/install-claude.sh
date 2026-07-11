@@ -480,6 +480,39 @@ ensure_local_only_gitignore_entries() {
   fi
 }
 
+ensure_credential_gitignore_entry() {
+  # The pack's own credential file (.claude/SECRET.md — the invoke-claude-api
+  # wrapper's repo-local lookup candidate) must never be trackable in a project
+  # install. Kept separate from the local-only tier array above: that array is
+  # the cross-installer tier set owned by shared/local-only-tiers.txt, while
+  # this is a Claude-pack-specific credential path.
+  local project_root="$1"
+  local gitignore="$project_root/.gitignore"
+  local secret_entry="/.claude/SECRET.md"
+  local alternate="${secret_entry#/}"
+
+  if [[ -f "$gitignore" ]] && { grep -Fxq "$secret_entry" "$gitignore" || grep -Fxq "$alternate" "$gitignore"; }; then
+    echo "  .gitignore: credential entry already present"
+    return
+  fi
+
+  echo "  Ensuring .gitignore ignores the pack credential file $secret_entry..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if [[ -f "$gitignore" ]]; then
+      echo "    [dry-run] would append '$secret_entry' to $gitignore"
+    else
+      echo "    [dry-run] would create $gitignore with '$secret_entry'"
+    fi
+    return
+  fi
+
+  if [[ ! -f "$gitignore" ]]; then
+    printf '%s\n' "$secret_entry" > "$gitignore"
+  else
+    printf '\n%s\n' "$secret_entry" >> "$gitignore"
+  fi
+}
+
 remove_dangling_symlink() {
   local path="$1"
   local label="$2"
@@ -846,6 +879,7 @@ fi
 
 if [ "$MODE" != "global" ]; then
   ensure_local_only_gitignore_entries "$PROJECT_ROOT"
+  ensure_credential_gitignore_entry "$PROJECT_ROOT"
 fi
 
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
