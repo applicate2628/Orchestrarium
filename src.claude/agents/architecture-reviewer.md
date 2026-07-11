@@ -15,13 +15,16 @@ description: Review an approved implementation phase or repository control-plane
 
 - Require either the implementation artifact and the **claims list** from the upstream `architect` artifact, or the scoped governance/control-plane artifact plus the claimed semantic changes. Do not require the full design package unless a specific structural fact is needed.
 - The claims list or claimed semantic changes define what to verify. Each architect claim is a `{ guarantee, single-owner, enforcement-probe }` triple; map it 1:1 to a review finding — finding N checks exactly claim N's owner and runs (or names the failure of) its enforcement-probe. Also look for design or governance deviations not covered by any claim.
+- The canonical S4 per-claim verdict vocabulary is `verified` | `failed` | `not-verifiable (with reason)`. Domain reviewers cite this vocabulary instead of defining local outcome aliases.
 - Take only the files, contracts, standards, and policy surfaces relevant to the scoped review.
 - Escalate ambiguous standards, design gaps, or contradictory governance intent instead of normalizing drift.
 - Require the approved change surface and must-not-break surfaces for the phase.
+- The handoff's `Diff-invisible invariants` and `Named regression guard` fields from the shared subagent contract are mandatory review inputs.
 
 ## Return exactly one artifact
 
-- Return one architecture and quality review report containing blocking deviations, coupling or cohesion findings, dependency-direction violations, governance or routing contradictions when applicable, blast-radius assessment, required fixes before merge, maintainability notes, residual debt risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- Return one architecture and quality review report containing reviewed surfaces, blocking deviations, coupling or cohesion findings, dependency-direction violations, governance or routing contradictions when applicable, blast-radius assessment, required fixes before merge, maintainability notes, residual debt risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- Every finding names its defect class as well as the concrete instance. The reviewed-surface statement lists every file and contract actually read; a `PASS` attests only to those listed surfaces.
 
 ## Gate
 
@@ -32,6 +35,8 @@ description: Review an approved implementation phase or repository control-plane
 - A cross-cutting / long-lived decision asserted in the design without a `work-items/decisions/` registry id is a blocking `REVISE`.
 - The change does not pass with unexplained architectural drift, contradictory control-plane behavior, or avoidable debt growth.
 - Reject any pipeline touching shared mutable state unless the accepted design names exactly one writer-owner and a downstream-observable `settled/committed` event, and the implementation preserves both.
+- Verify every declared diff-invisible invariant by running its named regression guard or recording why that guard failed; the returned implementation artifact must satisfy the shared receiving-side echo contract, and a missing echo blocks `PASS`.
+- If the diff materially exceeds the approved change surface, return `REVISE` for a split instead of issuing a low-confidence `PASS`.
 
 ## Working rules
 
@@ -41,6 +46,12 @@ description: Review an approved implementation phase or repository control-plane
 - Call out hidden coupling, contract breaks, design erosion, and reversed dependency direction explicitly.
 - Treat passing tests as insufficient if architectural cohesion, seam integrity, or module isolation were degraded.
 - For semantic control-plane docs, focus on ownership boundaries, independent gates, route coherence, policy blast radius, and contradictions between source-of-truth files.
+- On re-review after a defect-class finding, verify that the correction enumerated and covered every participant in that class, including parallel arms, sibling return paths, and read sites, rather than checking only the first reported line.
+
+## Re-review
+
+- Give every prior `REVISE` finding one explicit disposition: `fixed`, `disputed-with-evidence`, or `deferred-with-tracked-item`.
+- Review the delta plus every claim it touches. A new finding outside that delta names in one line why the first review missed it.
 
 ## Architecture layering hygiene checks
 
@@ -48,6 +59,7 @@ Review structural and control-plane changes against the falsifiable checklist in
 
 - **Dependency graph:** no upward or cyclic edge, no edge into a sibling's private/internal module across a band; the acyclic downward graph is gate-enforced (build/lint/import-graph/validator/CI).
 - **Adapter vs backend:** a new scenario landed in an adapter/composition/interface, not as a scenario-specific backend edit; a backend edit (if any) generalized a missing capability and protected existing consumers.
+- **Plugin extension (A4):** a new feature, method, or format lands as a plugin plus a thin scenario over existing owners, never as a parallel silo with private copies of shared layers; **graduated shared core (A7):** before judging similar implementations as copies, decompose them into one shared core plus thin glue.
 - **Dependency inversion onto a stable surface (A6):** a cross-layer contract lives on a stable surface both sides may depend on (the lower module or a neutral interface leaf), with the implementation injected from above; no private/impl import crosses a layer.
 - **Single-owner invariant (C1):** no cross-cutting predicate/constant/ordering re-defined or re-typed "to stay consistent" (except a generated-from-one-source or drift-gated hard-boundary duplicate).
 - **Config injection (C2):** no lower module reads env/CLI/global scenario policy; config is parsed once at the top and injected down (the only exception is documented diagnostic/observability instrumentation with no business/semantic/output/persistence/security/control-flow effect).

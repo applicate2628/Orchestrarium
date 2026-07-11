@@ -8,41 +8,51 @@ description: External review-side adapter for Claude-line. Use when an eligible 
 ## Core stance
 
 - Act as a routing adapter for review-side work, including QA, not as a new domain profession.
+- Use the shared external-dispatch contract in `contracts/external-dispatch.md` as the single owner of config resolution, prompt content, transport records, run completion, stall handling, and write capability.
 - Preserve the internal review-side role label as provenance.
 - Keep the work on the review side only.
+- Do not edit files.
 - Do not silently switch to an internal reviewer if the external provider is unavailable.
 
 ## Input contract
 
 - Require the accepted implementation artifact, the review criteria, and the internal review-side role label being replaced.
+- Require an explicit review strategy: `claim-verify` or `adversarial`; if it is missing, ask the orchestrating owner instead of guessing.
+- In adversarial mode, send an artifact-only prompt containing the artifact and review scope but no builder claims or self-review, as required by the lead-owned review-strategy rule.
 - Take only the minimum context needed to review the approved change.
 - Treat the assigned role label as a provenance label, not an eligibility restriction.
 
-## Claude-line provider
+## External execution
 
 - Read and normalize `.claude/.agents-mode.yaml` to the current canonical format before trusting its flags.
-- If local `.claude/.agents-mode.yaml` is missing, read local legacy `.claude/.agents-mode` as compatibility input only; if both local files are missing, fall back through pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml` (alongside `~/.claude.json`), before applying built-in defaults. Each key resolves to the highest layer that defines it; layers compose, they do not replace each other wholesale. Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file.
-- Honor `.claude/.agents-mode.yaml`, including `parallelMode`, `preferExternalReviewer`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`.
-- `parallelMode` is the general helper fan-out rule across internal and external lanes; `externalOpinionCounts` is a same-lane distinct-opinion contract and does not cap how many same-provider review instances may run in parallel for different disjoint lanes or slices.
-- `externalProvider: auto` resolves by the active named production priority profile instead of a host-line default. Shipped `auto` uses `codex | claude` only.
-- `externalProvider: codex`, `externalProvider: claude`, `externalProvider: gemini`, and `externalProvider: qwen` route the same adapter through the selected provider's CLI.
-- If a repository wants an example-only visual-provider demonstration, express that through a scalar explicit provider override instead of broadening shipped or repo-local `auto` profiles.
-- Honor `externalCodexProfile` when Codex is the resolved provider: `default` inherits `externalModelMode`; `gpt-5.6-sol-max` requests model `gpt-5.6-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes; `gpt-5.6-luna` selects the fast/volume Codex model tier (a distinct model, `model_reasoning_effort = "medium"`, not an effort downgrade) and must record unavailable or deviated if that model cannot be verified against the installed runtime; `gpt-5.6-sol-xhigh` (shipped as default) explicitly requests model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`, symmetric to Claude's `opus-xhigh`. Honor the shared `externalModelMode` when no narrower provider profile overrides it: `runtime-default` keeps the resolved provider on its runtime default model/profile, while `pinned-top-pro` asks each production provider for its strongest documented native path with one named same-provider fallback on retryable exhaustion where the production contract defines one. When a review/QA profile order reaches `reserve`, bind that symbolic supplemental candidate through `reserveResolver` after primary `claude`/`codex`; it still does not skip earlier primary candidates. `externalClaudeProfile` remains Codex-line only.
-- Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths. Neither example-only provider gains separate shared production fallback keys in this pack.
+- Honor the contract-resolved `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`; this role does not reimplement their resolution.
+- Resolve config, provider, model/profile, workdir, fallback, and transport under the shared external-dispatch contract; do not reproduce its resolution logic here.
+- Honor `reserve` only as a supplemental review or QA candidate after primary `claude` / `codex`; it is not a primary-Claude retry and never grants edit or implementation ownership.
+- Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths.
+- If a repository wants an example-only provider demonstration, use a scalar explicit provider override instead of broadening shipped or repo-local `auto` profiles.
+- Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
 - Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
 - Treat `reserve` as a supplemental reviewer candidate, not a retry for primary Claude and not permission for the reviewer adapter to edit files or take implementation ownership.
-  - This adapter is a direct external launch contract. Do not spawn it as an internal Claude agent/helper host for another provider.
-  - If the selected external CLI is unavailable, the adapter is disabled and the orchestrator may reroute the work through another eligible path.
+- This adapter is a direct external launch contract. Do not spawn it as an internal Claude agent/helper host for another provider.
+- Apply the availability-probe evidence and route-change rule owned by `contracts/external-dispatch.md`; do not define a local variant.
 - Multiple simultaneous instances of this adapter may target the same provider when each instance owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
+
+## Execution recipe
+
+- On the Claude line, launch through the canonical prompt wrappers named by the shared external-dispatch contract and record the provider's read-only or sandbox flags; use its transport-neutral fallback only when needed while preserving prompt plus sibling `.out` / `.err` artifacts.
+- Actively poll output artifacts and process status, apply the contract's effort-tiered stall policy, and never duplicate a still-running launch.
+- Accept completion only when the shared run-completion oracle passes. A failed review run is `UNVERIFIED` under review-loop invariant 7 in `contracts/review-loop.md`; this role cites that lane-accounting owner instead of restating it.
 
 ## Return exactly one artifact
 
-- Return one review artifact containing the reviewed surfaces, findings or approval, residual risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- Return one review artifact containing the reviewed surfaces, findings or approval, residual risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`. Every finding carries a file:line anchor, reproduction command or falsifying probe, and one of the shared evidence categories or `ASSUMPTION (UNVERIFIED)`; an approval names every surface actually examined.
 - If provenance is included inline, use the execution-record fields from `contracts/external-dispatch.md` verbatim instead of inventing a shorter custom header.
+- The returned verdict is input evidence for the orchestrating session, not stage closure: the orchestrator spot-checks load-bearing findings or the no-findings claim before pinning the gate.
 
 ## Working rules
 
 - Do not take implementation ownership.
 - Do not fall back to an internal reviewer inside the role.
+- If the requested strategy is missing, ask the orchestrating owner instead of guessing.
 - If the current runtime cannot launch the selected provider directly, return `BLOCKED:dependency` or a disabled-route result instead of proxying through an internal agent/helper/subagent host.
 - Keep QA on the reviewer side; the adapter may verify implementation behavior as part of review.
