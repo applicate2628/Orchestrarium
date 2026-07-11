@@ -469,6 +469,42 @@ check_normalized_sha256() {
   fi
 }
 
+skill_body_sha256() {
+  # SHA-256 of a SKILL.md BODY: everything after the closing '---' of the leading
+  # YAML frontmatter, CRLF-normalized — the same extraction as
+  # tests/test_common_skill_parity.py::_body. The frontmatter (name/description)
+  # is provider-tailored by design; only the body is the cross-pack invariant.
+  local file="$1" tmp body_hash
+  tmp="$(mktemp)" || return 1
+  sed 's/\r$//' "$file" \
+    | awk 'NR==1 && /^[ \t]*---[ \t]*$/ {fm=1; next} fm==1 {if (/^[ \t]*---[ \t]*$/) fm=2; next} {print}' \
+    > "$tmp"
+  if ! body_hash="$(normalized_sha256 "$tmp")"; then
+    rm -f "$tmp"
+    return 1
+  fi
+  rm -f "$tmp"
+  printf '%s\n' "$body_hash"
+}
+
+check_common_skill_body_pin() {
+  local name="$1" expected="$2" file="$3"
+  local actual
+  if [[ ! -f "$file" ]]; then
+    fail "common-skill $name body-parity pin (file missing: $file)"
+    return
+  fi
+  if ! actual="$(skill_body_sha256 "$file")"; then
+    fail "common-skill $name body-parity pin (no SHA-256 tool available)"
+    return
+  fi
+  if [[ "$actual" == "$expected" ]]; then
+    pass "common-skill $name body matches the pinned canonical cross-pack body"
+  else
+    fail "common-skill $name body drifted from the pinned canonical cross-pack body (expected $expected, actual $actual — a deliberate body change must land in ALL FOUR packs plus both validators' COMMON_SKILL_BODY_PINS)"
+  fi
+}
+
 echo "=== Claude Code pack validation ==="
 echo ""
 
@@ -770,6 +806,50 @@ if [[ -f "$AGENTS_FILE" ]]; then
       pass "$name is a delegate-style common-skill wrapper"
     elif ! echo "$roles" | grep -qx "$name"; then
       warn "$name has agent file but not in AGENTS.md role index"
+    fi
+  done
+fi
+echo ""
+
+# 2a. Common-skill BODY parity pins (branch-local backstop).
+# The cross-pack invariant (skill BODY byte-identical across all 4 packs) is owned
+# by tests/test_common_skill_parity.py, but tests/ never ships on a standalone
+# provider branch — a branch runs ONLY this validator, so without a pin here a
+# body drift ships silently (the exact regression class that was live at HEAD
+# until the 2026-07-11 Wave-A reconciliation). Hashes pinned 2026-07-11 against
+# the reconciled bodies, same normalized-fingerprint pattern as the
+# subagent-operating-model pins above. Refresh after a DELIBERATE body change
+# (landed in all 4 packs together):
+#   sed 's/\r$//' src.claude/skills/<name>/SKILL.md \
+#     | awk 'NR==1 && /^[ \t]*---[ \t]*$/ {fm=1; next} fm==1 {if (/^[ \t]*---[ \t]*$/) fm=2; next} {print}' \
+#     | sha256sum
+# and update BOTH validators' COMMON_SKILL_BODY_PINS in the same commit.
+echo "[Common-skill body parity]"
+COMMON_SKILL_BODY_PINS=(
+  "analyzing-video-bugs=cf78ec0176f1726891045a2c2626363377994f34f081f9a9ad0ffbdb60740e91"
+  "bug-hunting=56c6ed8a5a590559bdf29409102b2b8b654bf73c7be2b4ef23c4d2c74e019232"
+  "explain-simply=f0f0e4dd1bed68aa8114adf6059fea32fedbee8fd06bf8bb12042dcd07ebb408"
+  "mathtype-book-page=e0d3fa5233eaa5d59ba0c8b90b45ffb0aa2dd51e6a8a8a00659dd8bddd626323"
+  "vak-dissertation-review=01a081d65ed99e732c7b55220655514cf085a0f398639ec8fbedf95572999adf"
+  "windows-gui-manual-testing=9276127c126d78aef6978670def2d2cd912392c0071f5c65558aa06be7634dc3"
+)
+for pin in "${COMMON_SKILL_BODY_PINS[@]}"; do
+  pin_name="${pin%%=*}"
+  pin_hash="${pin#*=}"
+  check_common_skill_body_pin "$pin_name" "$pin_hash" "$PACK/skills/$pin_name/SKILL.md"
+done
+# Completeness tooth: every common skill the spine's owner line declares must be
+# pinned — a NEW common skill cannot ship body-unpinned on a standalone branch.
+if [[ -f "$AGENTS_FILE" ]]; then
+  for skill in $common_skills; do
+    pin_found=0
+    for pin in "${COMMON_SKILL_BODY_PINS[@]}"; do
+      if [[ "${pin%%=*}" == "$skill" ]]; then pin_found=1; break; fi
+    done
+    if [[ $pin_found -eq 1 ]]; then
+      pass "common-skill $skill has a body-parity pin"
+    else
+      fail "common-skill $skill has no body-parity pin (add it to COMMON_SKILL_BODY_PINS in both validators)"
     fi
   done
 fi

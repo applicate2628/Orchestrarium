@@ -206,6 +206,46 @@ def test_rollup_surfaces_malformed_ledger_lines(tmp_path: Path):
     assert "total runs: 1" in result.stdout  # the one valid event is still counted
 
 
+# --- F25: one main-conversation identity on the wire --------------------------
+
+def test_append_rejects_legacy_execution_role_lead(tmp_path: Path):
+    # NEW writes must use "main": the retired main|lead duality survives only as
+    # the validator's READ-mapping for pre-existing ledgers, never on a new line.
+    item = prepare_valid_work_item(tmp_path)
+    result = run_ledger(
+        item, "append",
+        "--run-id", "legacy-write-001",
+        "--role", "lead", "--execution-role", "lead",
+        "--status", "completed", "--gate", "PASS",
+        "--scope", "scripts/agent-run-ledger.py", "--artifact", "reviews/qa.md",
+        "--evidence", "command:pytest",
+        "--started-at", "2026-07-11T10:00:00Z", "--updated-at", "2026-07-11T10:05:00Z",
+    )
+    assert result.returncode == 1
+    assert "retired legacy value" in result.stderr
+    assert "'main'" in result.stderr
+    assert not (item / "agent-runs.jsonl").exists()
+
+
+def test_rollup_maps_legacy_lead_into_main_bucket(tmp_path: Path):
+    # ONE owner rolls up into ONE audit bucket even when old ledger lines still
+    # carry the legacy "lead" value (read-mapping lead -> main).
+    item = prepare_valid_work_item(tmp_path)
+    legacy = {
+        "schemaVersion": 1, "runId": "legacy-lead-0001", "workItem": "ledger-helper",
+        "role": "lead", "executionRole": "lead", "status": "completed", "gate": "none",
+        "scope": ["status.md"], "startedAt": "2026-05-03T10:00:00Z", "updatedAt": "2026-05-03T10:05:00Z",
+    }
+    current = dict(legacy, runId="current-main-0001", executionRole="main")
+    (item / "agent-runs.jsonl").write_text(
+        json.dumps(legacy) + "\n" + json.dumps(current) + "\n", encoding="utf-8"
+    )
+    result = run_rollup_root(tmp_path, "--json")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data["byExecutionRole"] == {"main": 2}
+
+
 def test_init_requires_work_item_guard():
     result = subprocess.run([sys.executable, str(LEDGER), "init"], text=True, capture_output=True)
     assert result.returncode == 1

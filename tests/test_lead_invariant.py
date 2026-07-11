@@ -15,6 +15,8 @@ either
 
 WRONG (this test fails on it):
   - "`$lead`/main-conv move it", "the lead or main session", "main session or lead"
+  - the same split with an and/both/vs joiner: "`$lead` and main-conv",
+    "both the lead and the main session", "lead vs main conversation"
   - "closing role / `$lead`", "orchestrator: lead" as a LIVE field
   - "subagent_type: lead" as a live dispatch, "You are the `lead` subagent",
     "spawn/dispatch/invoke `$lead`", "`$lead` ... spawned/dispatched"
@@ -26,10 +28,16 @@ FINE (allow-listed — this test must stay green on it):
   - explicitly LABELED legacy notes with a read-mapping ("legacy", "renamed",
     "older `status.md` ...")
   - the fail-closed refusal stub's own negation/refusal lines
-    ("is never spawned", "is not a dispatch target", "fail-closed", "refuses", ...)
+    ("is never spawned", "is not a dispatch target", "fail-closed", ...)
 
-Scope: src.claude, src.codex, shared, docs. NOT work-items / .scratch / changelogs /
-dated-plan snapshots (those legitimately record superseded relations).
+The allow-list is CATEGORY-SCOPED (see _ALLOW_GROUP_EXCUSES): a generic label word
+("legacy", "retired", "refuses", ...) may excuse a duality/field hit on its line but
+can NEVER neutralize a dispatch:* hit — "spawn a `$lead` subagent to migrate the
+legacy status files" is a real dispatch reintroduction, not a labeled legacy note.
+
+Scope: src.claude, src.codex, src.gemini, src.qwen, shared, docs. NOT work-items /
+.scratch / changelogs / dated-plan snapshots (those legitimately record superseded
+relations).
 """
 
 from __future__ import annotations
@@ -42,7 +50,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Shipped-pack trees only. work-items/, .scratch/, changelogs, and dated-plan
 # snapshots are excluded (see _is_excluded) because recording a superseded
 # relation there is legitimate provenance, not a live split.
-SCAN_DIRS = ("src.claude", "src.codex", "shared", "docs")
+SCAN_DIRS = ("src.claude", "src.codex", "src.gemini", "src.qwen", "shared", "docs")
 
 TEXT_SUFFIXES = {".md", ".sh", ".ps1", ".py", ".yaml", ".yml", ".toml", ".json", ".txt"}
 
@@ -82,7 +90,12 @@ FORBIDDEN = [
     ("dispatch:you-are-lead-subagent", re.compile(r"you are the\s+`?lead`?\s+subagent", re.IGNORECASE)),
     (
         "dispatch:verb-lead",
-        re.compile(r"\b(?:dispatch|spawn|launch|invoke)(?:ed|s|ing)?\s+(?:a\s+|an\s+|the\s+)?`?\$lead\b", re.IGNORECASE),
+        # "both"/"either" cover the joiner form "spawn both `$lead` and X" (F26):
+        # dispatching $lead alongside a real subagent is still a dispatch of $lead.
+        re.compile(
+            r"\b(?:dispatch|spawn|launch|invoke)(?:ed|s|ing)?\s+(?:(?:both|either)\s+)?(?:a\s+|an\s+|the\s+)?`?\$lead\b",
+            re.IGNORECASE,
+        ),
     ),
     (
         "dispatch:lead-spawned",
@@ -100,45 +113,70 @@ FORBIDDEN = [
     ("duality:lead-or-main", re.compile(r"\blead\s+or\s+main\b", re.IGNORECASE)),
     ("duality:main-or-lead", re.compile(r"\bmain[- ]?(?:conv\w*|session)\s+or\s+`?\$?lead\b", re.IGNORECASE)),
     ("duality:role-slash-lead", re.compile(r"\brole\s*/\s*`?\$?lead\b", re.IGNORECASE)),
+    # (b) the same split with an and/both/vs joiner ("/" and "or" rephrased). The
+    # "both the lead and the main session" form is covered by lead-and-main (the
+    # "lead and (the) main" core is a substring of the both-form). Joiners are
+    # matched with \s+ only — a HYPHENATED "lead-vs-main" is meta-prose ABOUT the
+    # retired split (e.g. a doc describing this very guard), not a split assertion.
+    ("duality:lead-and-main", re.compile(r"\blead`?\s+and\s+(?:the\s+)?`?\*?main\b", re.IGNORECASE)),
+    ("duality:main-and-lead", re.compile(r"\bmain[- ]?(?:conv\w*|session)\s+and\s+(?:the\s+)?`?\$?lead\b", re.IGNORECASE)),
+    ("duality:lead-vs-main", re.compile(r"\blead`?\s+vs\.?\s+(?:the\s+)?`?\$?main\b", re.IGNORECASE)),
+    ("duality:main-vs-lead", re.compile(r"\bmain[- ]?(?:conv\w*|session)?\s+vs\.?\s+(?:the\s+)?`?\$?lead\b", re.IGNORECASE)),
     # (b) the retired duality-encoding frontmatter field
     ("field:orchestrator-value", re.compile(r"orchestrator:\s*(?:main|lead)\b", re.IGNORECASE)),
     ("field:template-orchestrator", re.compile(r"template,\s*orchestrator\b", re.IGNORECASE)),
 ]
 
 # --- ALLOWLIST ----------------------------------------------------------------
-# A line matching ANY of these is a legitimate FINE form and is exempt. Kept
-# deliberately SPECIFIC (never a bare `\blead\b`) so an allow-list phrase cannot
-# smuggle a real split past on the same line.
+# Each entry is (group, regex). A match no longer skips ALL forbidden checks on the
+# line: it only excuses the forbidden CATEGORIES its group maps to in
+# _ALLOW_GROUP_EXCUSES below. This is the F27 fix — the previous flat any-match let
+# one incidental generic word ("legacy", "retired", "refuses") neutralize a REAL
+# dispatch-of-lead reintroduction on the same line, contradicting this list's own
+# stated design property. Entries stay SPECIFIC where they excuse dispatch hits
+# (never a bare `\blead\b`, never a bare generic label word).
 ALLOWLIST = [
     # unified-owner: $lead is the ROLE the main conversation holds (never two owners)
-    re.compile(r"main conversation \(as lead\)", re.IGNORECASE),
-    re.compile(r"main conversation,? as lead", re.IGNORECASE),
-    re.compile(r"main conv \(as lead\)", re.IGNORECASE),
-    re.compile(r"main session \(as lead\)", re.IGNORECASE),
-    re.compile(r"main (?:codex )?session is the lead", re.IGNORECASE),
-    re.compile(r"the main conversation holds", re.IGNORECASE),
-    re.compile(r"main conversation'?s? orchestration role", re.IGNORECASE),
-    re.compile(r"orchestration role the main conversation holds", re.IGNORECASE),
-    re.compile(r"hold(?:ing|s)?\s+(?:the\s+)?(?:lead\s+role|`?\$?lead`?)", re.IGNORECASE),
-    # explicitly LABELED legacy / rename notes with a read-mapping
-    re.compile(r"\blegacy\b", re.IGNORECASE),
-    re.compile(r"\brenamed\b", re.IGNORECASE),
-    re.compile(r"\bretired\b", re.IGNORECASE),
-    re.compile(r"older\s+`?status\.md", re.IGNORECASE),
-    # fail-closed refusal stub / canonical-skill negation lines
-    re.compile(r"never\s+(?:itself\s+)?(?:be\s+)?spawn", re.IGNORECASE),
-    re.compile(r"never\s+spawns\s+a\s+separate", re.IGNORECASE),
-    re.compile(r"is never spawned", re.IGNORECASE),
-    re.compile(r"\bnot\s+spawn", re.IGNORECASE),  # "do not spawn `$lead`" is the correct instruction
-    re.compile(r"not\s+(?:a\s+)?(?:dispatch|subagent)", re.IGNORECASE),
-    re.compile(r"never\s+(?:be\s+)?a\s+dispatch", re.IGNORECASE),
-    re.compile(r"not a subagent you spawn", re.IGNORECASE),
-    re.compile(r"fail-?closed", re.IGNORECASE),
-    re.compile(r"fails\s+closed", re.IGNORECASE),
-    re.compile(r"refus(?:e|es|al|ed)", re.IGNORECASE),
-    re.compile(r"stale route", re.IGNORECASE),
-    re.compile(r"throwaway lead", re.IGNORECASE),
+    ("unified-owner", re.compile(r"main conversation \(as lead\)", re.IGNORECASE)),
+    ("unified-owner", re.compile(r"main conversation,? as lead", re.IGNORECASE)),
+    ("unified-owner", re.compile(r"main conv \(as lead\)", re.IGNORECASE)),
+    ("unified-owner", re.compile(r"main session \(as lead\)", re.IGNORECASE)),
+    ("unified-owner", re.compile(r"main (?:codex )?session is the lead", re.IGNORECASE)),
+    ("unified-owner", re.compile(r"the main conversation holds", re.IGNORECASE)),
+    ("unified-owner", re.compile(r"main conversation'?s? orchestration role", re.IGNORECASE)),
+    ("unified-owner", re.compile(r"orchestration role the main conversation holds", re.IGNORECASE)),
+    ("unified-owner", re.compile(r"hold(?:ing|s)?\s+(?:the\s+)?(?:lead\s+role|`?\$?lead`?)", re.IGNORECASE)),
+    # explicitly LABELED legacy / rename notes with a read-mapping. GENERIC words:
+    # they may excuse a duality/field mention on the labeled line, NEVER a dispatch.
+    ("legacy-label", re.compile(r"\blegacy\b", re.IGNORECASE)),
+    ("legacy-label", re.compile(r"\brenamed\b", re.IGNORECASE)),
+    ("legacy-label", re.compile(r"\bretired\b", re.IGNORECASE)),
+    ("legacy-label", re.compile(r"older\s+`?status\.md", re.IGNORECASE)),
+    ("legacy-label", re.compile(r"refus(?:e|es|al|ed)", re.IGNORECASE)),
+    # fail-closed refusal stub / canonical-skill negation lines: SPECIFIC phrases
+    # (a negated dispatch is the correct instruction, so these may excuse dispatch)
+    ("refusal-negation", re.compile(r"never\s+(?:itself\s+)?(?:be\s+)?spawn", re.IGNORECASE)),
+    ("refusal-negation", re.compile(r"never\s+spawns\s+a\s+separate", re.IGNORECASE)),
+    ("refusal-negation", re.compile(r"is never spawned", re.IGNORECASE)),
+    ("refusal-negation", re.compile(r"\bnot\s+spawn", re.IGNORECASE)),  # "do not spawn `$lead`" is the correct instruction
+    ("refusal-negation", re.compile(r"not\s+(?:a\s+)?(?:dispatch|subagent)", re.IGNORECASE)),
+    ("refusal-negation", re.compile(r"never\s+(?:be\s+)?a\s+dispatch", re.IGNORECASE)),
+    ("refusal-negation", re.compile(r"not a subagent you spawn", re.IGNORECASE)),
+    ("refusal-negation", re.compile(r"fail-?closed", re.IGNORECASE)),
+    ("refusal-negation", re.compile(r"fails\s+closed", re.IGNORECASE)),
+    ("refusal-negation", re.compile(r"stale route", re.IGNORECASE)),
+    ("refusal-negation", re.compile(r"throwaway lead", re.IGNORECASE)),
 ]
+
+# Which forbidden CATEGORIES (the prefix before ':' in a FORBIDDEN name) each
+# allow-list group may excuse. No group except the specific refusal/negation
+# phrases may excuse a dispatch:* hit — that category is the guard's primary
+# target and a bare label word must never smuggle a spawn-$lead past it (F27).
+_ALLOW_GROUP_EXCUSES = {
+    "unified-owner": frozenset({"duality", "field"}),
+    "legacy-label": frozenset({"duality", "field"}),
+    "refusal-negation": frozenset({"dispatch", "duality", "field"}),
+}
 
 
 def _iter_files():
@@ -156,6 +194,25 @@ def _iter_files():
             yield path
 
 
+def _line_verdict(line: str):
+    """Return the forbidden-pattern name a line would trip, or None if clean/excused.
+
+    Single owner of the verdict logic (the scan and the teeth tests both call it).
+    An allow-list match excuses only the categories its group maps to in
+    _ALLOW_GROUP_EXCUSES — a dispatch:* hit survives every generic label word.
+    """
+    excused: set[str] = set()
+    for group, allow in ALLOWLIST:
+        if allow.search(line):
+            excused |= _ALLOW_GROUP_EXCUSES[group]
+    for name, pat in FORBIDDEN:
+        if name.split(":", 1)[0] in excused:
+            continue
+        if pat.search(line):
+            return name
+    return None
+
+
 def _scan():
     violations = []
     for path in _iter_files():
@@ -164,23 +221,11 @@ def _scan():
         except (UnicodeDecodeError, OSError):
             text = path.read_text(encoding="utf-8", errors="replace")
         for lineno, line in enumerate(text.splitlines(), start=1):
-            if any(allow.search(line) for allow in ALLOWLIST):
-                continue
-            for name, pat in FORBIDDEN:
-                if pat.search(line):
-                    rel = path.relative_to(ROOT).as_posix()
-                    violations.append((rel, lineno, name, line.strip()))
+            name = _line_verdict(line)
+            if name is not None:
+                rel = path.relative_to(ROOT).as_posix()
+                violations.append((rel, lineno, name, line.strip()))
     return violations
-
-
-def _line_verdict(line: str):
-    """Return the forbidden-pattern name a line would trip, or None if clean/allow-listed."""
-    if any(allow.search(line) for allow in ALLOWLIST):
-        return None
-    for name, pat in FORBIDDEN:
-        if pat.search(line):
-            return name
-    return None
 
 
 def test_no_lead_vs_main_conversation_split():
@@ -214,6 +259,20 @@ _KNOWN_SPLIT_FORMS = [
     "spawn a `$lead` subagent to coordinate the work",
     "run either the main session or `$lead` for this chain",
     "pick main-conv / `$lead` as the closing owner",
+    # F26: the same split with the '/'-or-'or' joiner rephrased as and/both/vs —
+    # a trivially rephrased reintroduction must not slip past the joiner list
+    "`$lead` and main-conv move it Backlog -> Active when work starts.",
+    "both the lead and the main session must prove which roles ran",
+    "the main session and `$lead` co-own the closure step",
+    "lead vs main conversation ownership is decided per item",
+    # F27: real dispatch reintroductions carrying an incidental generic allow-list
+    # word — the word may label a legacy note, it must never excuse a dispatch
+    "spawn a `$lead` subagent to migrate the legacy status files",
+    "dispatch `$lead` when the retired flow is requested",
+    "invoke `$lead` if the user refuses the quick-fix template",
+    # F26: dispatch of $lead ALONGSIDE a real subagent (both/either joiner)
+    "spawn both $lead and the analyst",
+    "spawn either `$lead` or the analyst for this chain",
 ]
 
 # These FINE forms must stay clean — the allow-list must not be so tight that it
@@ -230,6 +289,9 @@ _KNOWN_FINE_FORMS = [
     "Legacy handling: older `status.md` files may carry `orchestrator: main | lead`; it is renamed.",
     "the main conversation holds the Lead role (activate the `/lead` skill); do not spawn `$lead`",
     "`$lead` / `$product-manager` consult open lessons when admitting similar work",
+    # a refusal-stub line: the SPECIFIC negation phrase ("fails closed") may still
+    # excuse the dispatch mention even though the generic "refused" alone may not
+    "spawning `$lead` is refused: the stub fails closed and points to `/lead`",
 ]
 
 

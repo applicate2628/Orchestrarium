@@ -133,6 +133,34 @@ def test_schema_contract_check_exercises_validator_negative_cases() -> None:
     assert "RESULT: PASS" in result.stdout
 
 
+def test_legacy_execution_role_lead_still_reads(tmp_path: Path) -> None:
+    # F25 legacy READ-mapping: a ledger written before the main|lead collapse may
+    # carry executionRole "lead"; it validates (reads as "main" — same owner).
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", valid_status())
+    write(item / "reviews" / "qa.md", "# QA\n\nGate: PASS\n")
+    write(item / "agent-runs.jsonl", json.dumps(ledger_event(executionRole="lead")) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 0, result.stdout
+    assert "RESULT: PASS" in result.stdout
+
+
+def test_unknown_execution_role_fails(tmp_path: Path) -> None:
+    # ...but the legacy mapping is not an escape hatch: a value outside the
+    # canonical enum and the legacy map still fails.
+    item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
+    write(item / "status.md", valid_status())
+    write(item / "reviews" / "qa.md", "# QA\n\nGate: PASS\n")
+    write(item / "agent-runs.jsonl", json.dumps(ledger_event(executionRole="foo")) + "\n")
+
+    result = run_validator(item)
+
+    assert result.returncode == 1
+    assert "invalid executionRole" in result.stdout
+
+
 def test_pass_without_evidence_fails(tmp_path: Path) -> None:
     item = tmp_path / "work-items" / "active" / "agent-execution-tracking"
     write(item / "status.md", valid_status())
