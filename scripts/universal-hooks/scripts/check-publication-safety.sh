@@ -61,6 +61,8 @@ nonpath_patterns=(
   'AKIA[0-9A-Z]{16}'
   'ghp_[A-Za-z0-9]{36}'
   'sk-[A-Za-z0-9]{20,}'
+  'sk-ant-[A-Za-z0-9_-]{20,}'
+  'ANTHROPIC_[A-Z_]*(KEY|TOKEN)[^[:alnum:]_]?[[:space:]]*[:=]'
   'Bearer[[:space:]]+[A-Za-z0-9._~+/=-]+'
   '[Pp]assword[[:space:]]*[:=]'
   '[Ss]ecret[[:space:]]*[:=]'
@@ -135,16 +137,35 @@ for scan_file in "${scan_files[@]}"; do
     echo "$scan_file: blocked filename .env (staged secret/config file)" >&2
     path_name_block=1
   fi
+  # The pack's own credential file (.claude/SECRET.md or any SECRET.md) must
+  # never be staged, regardless of content format -- this filename block is the
+  # format-independent primary defense; the sk-ant-/ANTHROPIC_ content patterns
+  # above are the secondary net. The name compare is CASE-INSENSITIVE: Windows,
+  # the pack's primary platform, has a case-insensitive filesystem, so a staged
+  # secret.md / Secret.md is the same credential file and must block identically.
+  name_upper="$(printf '%s' "$base_name" | tr '[:lower:]' '[:upper:]')"
+  if [[ "$name_upper" == "SECRET.MD" ]]; then
+    echo "$scan_file: blocked filename $base_name (staged credential file; keep it untracked)" >&2
+    path_name_block=1
+  fi
 done
 
+# Self-exemption for the scanner's OWN staged copy only -- callers key it to
+# the check-publication-safety.sh filename, so it can never exempt any other
+# staged file. The scanner file IS the pattern catalog, so exactly two of its
+# own line shapes are intentional marker-bearing content: (1) a pattern-array
+# entry, i.e. a line that is ENTIRELY one single-quoted literal, and (2) a
+# full-line comment (scanner documentation naming the markers it blocks).
+# Anything else in the scanner file still blocks -- a catalog line with a
+# trailing payload, or code carrying a real value, is not exempt.
 is_intentional_scanner_regex_line() {
   local trimmed="${1#"${1%%[![:space:]]*}"}"
   trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
-  [[ "$trimmed" == "'BEGIN RSA PRIVATE KEY'" ]] ||
-    [[ "$trimmed" == "'BEGIN OPENSSH PRIVATE KEY'" ]] ||
-    [[ "$trimmed" == "'BEGIN PRIVATE KEY'" ]] ||
-    [[ "$trimmed" == "'private_key'" ]] ||
-    [[ "$trimmed" == "'secret_key'" ]]
+  local q="'"
+  if [[ ${#trimmed} -ge 2 && "$trimmed" == "$q"*"$q" && "${trimmed:1:${#trimmed}-2}" != *"$q"* ]]; then
+    return 0
+  fi
+  [[ "$trimmed" == "#"* ]]
 }
 
 # Build the non-path git grep command (unconditional block source).
@@ -262,6 +283,26 @@ def _expand_path_mode(paths):
             yield p
 
 
+SCANNER_BASENAME = "check-publication-safety.sh"
+
+
+def _is_intentional_scanner_line(line):
+    # Mirror of the shell-side self-exemption, applied ONLY to a file whose
+    # basename is the scanner's own (checked by the caller): a pattern-array
+    # entry (a line that is entirely one single-quoted literal) or a full-line
+    # comment. Every other file gets no exemption, so a leaked machine-local
+    # path in any non-scanner file still blocks.
+    trimmed = line.strip()
+    if trimmed.startswith("#"):
+        return True
+    return (
+        len(trimmed) >= 2
+        and trimmed.startswith("'")
+        and trimmed.endswith("'")
+        and "'" not in trimmed[1:-1]
+    )
+
+
 def main(argv):
     if len(argv) < 2:
         sys.stderr.write("pubsafe path filter: missing reference module / mode\n")
@@ -277,6 +318,7 @@ def main(argv):
     files = list(raw_files) if mode == "tracked" else list(_expand_path_mode(raw_files))
     blocking = 0
     for path in files:
+        is_scanner_file = os.path.basename(path) == SCANNER_BASENAME
         content = _staged_content(path) if mode == "tracked" else _disk_content(path)
         if content is None:
             sys.stderr.write(
@@ -285,6 +327,8 @@ def main(argv):
             blocking += 1
             continue
         for lineno, line in enumerate(content.splitlines(), start=1):
+            if is_scanner_file and _is_intentional_scanner_line(line):
+                continue
             hits = find_machine_paths(line)
             if hits:
                 blocking += 1
