@@ -19,20 +19,25 @@ description: Implement approved platform and infrastructure phases without drift
 
 ## Return exactly one artifact
 
-- Return one platform implementation package containing the scoped patch, changed files, verification notes, rollout or rollback notes, and explicit assumptions or risks.
+- Return one platform implementation package containing the scoped patch, changed files, verification notes with the rendered plan or diff for infrastructure-as-code, manifest, or pipeline changes, rollout or rollback notes, and explicit assumptions or risks.
 
 ## Gate
 
 - The diff stays inside the approved platform scope.
 - CI or CD, infrastructure, deployment, runtime, and observability changes match the accepted design and constraints.
 - Planned checks, tests, or deployment validations were run or explicitly reported as blocked.
+- New or changed continuous-integration actions, base images, and provider plugins are pinned to an immutable digest or exact version, never a floating tag, branch, or `latest`.
+- Rollback exercised: a rollback claim names the concrete mechanism and states whether it was exercised in a lower environment or remains `ASSUMPTION (UNVERIFIED)`.
+- Any new or widened credential, identity-and-access-management role, service account, or token scope lists the exact permissions added and why each is required; wildcard grants are `REVISE` without explicit design approval.
+- Verification confined to one environment lists target-environment divergences in versions, flags, scale, secrets backend, and network policy that could change behavior.
+- Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
 
 - Prefer small, reviewable diffs over opportunistic refactors.
 - Make deployment ordering, environment differences, and rollback behavior explicit.
 - If the approved plan conflicts with platform reality, stop and return the exact conflict instead of improvising.
-- When porting platform behavior across OS or runtimes (Windows ↔ POSIX process model, signal vs exception semantics, OS lifecycle behavior such as POSIX reparenting vs Windows parent-alive heuristics, filesystem case sensitivity), apply the cross-platform port discipline from shared governance: compare documented semantics of source and destination, do not port surface syntax alone, and declare deviations explicitly when source behavior cannot be reproduced at the destination.
+- When porting platform behavior across OS or runtimes (Windows ↔ POSIX process model, signal vs exception semantics, OS lifecycle behavior such as POSIX reparenting vs Windows parent-alive heuristics, filesystem case sensitivity), compare documented semantics of source and destination, do not port surface syntax alone, and declare deviations explicitly when source behavior cannot be reproduced at the destination.
 
 ## Adjacent findings protocol
 

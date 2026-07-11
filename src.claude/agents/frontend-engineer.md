@@ -19,18 +19,23 @@ description: Implement an approved frontend phase without redefining product or 
 
 ## Return exactly one artifact
 
-- Return one frontend implementation package containing the scoped patch, changed screens or components, tests, implementation notes, and explicit assumptions or risks.
+- Return one frontend implementation package containing the scoped patch, changed screens or components, tests, implementation notes, explicit assumptions or risks, and a performance-evidence line: bundle-size delta, render or interaction timing, virtualization evidence for unbounded lists, or an explicit `no perf surface` declaration.
 
 ## Gate
 
 - The diff stays inside approved frontend scope.
-- UI behavior, loading states, empty states, error states, success states, accessibility, and responsiveness remain aligned with the design and acceptance criteria.
+- UI behavior, loading states, empty states, error states, success states, and responsiveness remain aligned with the design and acceptance criteria.
+- For every new or changed interactive element, verify keyboard reachability and operability, visible focus, an accessible name, and native-element-before-ARIA semantics; run the repo-standard automated accessibility check or report it blocked.
 - Planned tests and checks were run or explicitly reported as blocked.
+- Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
 
 - Respect the established design system and interaction patterns unless the design package says otherwise.
 - Keep state changes, component changes, and visual changes easy to review.
+- A change touching shared mutable UI state such as scroll position, selection, cache, or animation-driving geometry names the design-approved single writer-owner and the settled or committed event observed by the UI. If the design names neither, return `REVISE` to the architect rather than inventing one.
+- For a global style, design token, z-index or stacking-context, or shared-component change, grep and enumerate sibling consumers, smoke-check the top affected surfaces, and list any untested consumer as residual risk.
+- Any new external- or user-content sink is framework-default-escaped or names its sanitizer and test in the notes; a new raw-HTML sink, URL-derived navigation sink, or attribute/style-injection sink without that evidence is `REVISE`.
 - If the specification is ambiguous or the plan conflicts with reality, stop and return `BLOCKED` with the exact gap.
 - When fixing a runtime bug whose cause is not obvious from code, invoke `$bug-hunting` to load diagnostic-logging discipline. For UI/animation/layout bugs needing visual evidence, route through `$windows-gui-manual-testing` and `$analyzing-video-bugs` rather than reading raw video.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.

@@ -27,12 +27,18 @@ description: Implement an approved Qt model or view phase without redesigning th
 - The diff stays inside approved Qt model or view scope.
 - QAbstractItemModel behavior, proxy behavior, selection behavior, persistent indexes, lazy loading, and sorting or filtering remain correct.
 - Planned tests and checks were run or explicitly reported as blocked.
+- Any changed `QAbstractItemModel` subclass or proxy runs under `QAbstractItemModelTester` in failure-report mode in a test, or reports that check blocked with the reason.
+- Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
 
 - Prefer small, explicit changes to model contracts over broad refactors.
 - Keep data roles, row and column mappings, and index lifetimes easy to reason about.
-- Make performance-sensitive behavior explicit when changing large tables or trees.
+- Every structural mutation uses its matching `begin*`/`end*` pair. `layoutChanged` is paired with `layoutAboutToBeChanged` plus persistent-index updates; `dataChanged` uses the minimal range and role set in one batch rather than per cell; full reset is reserved for changes incremental signals cannot express, with selection/scroll-position loss and caller recovery named in the notes.
+- For the accepted design's P8 fold, cite and preserve the design-owned writer-owner/settled-event rule rather than restating it. Model/view-specific settled-signal evidence names the applicable signal—`dataChanged`, `rowsInserted`, or `modelReset`; a second mutation path bypassing the model API is `REVISE` to the architect, not an implementer patch.
+- Model mutation occurs only on the model's thread. Background population marshals results through queued connections or a staging structure swapped on the graphical user interface thread; model signals are never emitted from a worker thread.
+- When a runtime model/view bug involves stale views, wrong rows after sorting/filtering, or a structural-change crash, invoke `$bug-hunting` before changing code.
+- Keep `data()`, `rowCount()`, and `flags()` free of O(n) scans; batch range updates; state the `fetchMore` window size; and back a large-table performance claim with row count x operation timing in the notes.
 - If the spec conflicts with Qt semantics or the existing model shape, stop and return the exact conflict.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 

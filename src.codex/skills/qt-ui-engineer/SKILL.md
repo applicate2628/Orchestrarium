@@ -19,14 +19,17 @@ description: "Implement Qt Widgets UI: dialogs, signals, focus, theme, high-DPI.
 
 ## Return exactly one artifact
 
-- Return one Qt UI implementation package containing the scoped patch, changed widgets or dialogs, implementation notes, and explicit assumptions or risks.
+- Return one Qt UI implementation package containing the scoped patch, changed widgets or dialogs, tests or an explicit handoff note to `$ui-test-engineer` naming what needs independent verification, implementation notes, and explicit assumptions or risks.
 
 ## Gate
 
 - The diff stays inside approved Qt UI scope.
-- Signals and slots, state handling, focus, keyboard behavior, and widget lifecycle follow the accepted interaction requirements.
-- Theme and high-DPI adjustments are applied only when explicitly approved in the plan.
+- Signals and slots, state handling, and widget lifecycle follow the accepted interaction requirements. All `QWidget`/`QObject` UI mutation occurs on the GUI thread only; cross-thread work marshals through queued signals or `QMetaObject::invokeMethod`. Every new `QObject` names its parent or explicit deletion path; `QObject` deletion uses `deleteLater()` invoked on the object's owning thread; never `delete` a `QObject` with pending events or from a foreign thread; and every new `connect()` uses a context-object/parent-tied lifetime or names its disconnect path.
+- For changed containers, Tab order is explicitly set or verified; every new interactive control is keyboard-reachable and operable; new shortcuts are checked against the existing `QAction`/`QShortcut` table; and focus returns to a named widget after a modal dialog closes.
+- Theme and high-DPI adjustments are applied only when explicitly approved in the plan. Approved work verifies a matrix covering 100% and 150% or 200% scale plus light/dark or every supported themed palette, and lists the checked cells in the notes.
 - Planned checks were run or explicitly reported as blocked.
+- Any appearance or layout change must capture and directly inspect a rendered screenshot through `$windows-gui-manual-testing`, with the inspected artifact path recorded in the implementation notes before return.
+- Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
 

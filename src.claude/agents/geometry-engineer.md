@@ -24,14 +24,20 @@ description: Implement an approved geometry or spatial-computation phase without
 ## Gate
 
 - The diff stays inside approved geometry scope.
-- Coordinate-space usage, handedness, units, tolerances, degeneracy handling, and edge-case behavior remain aligned with the accepted plan.
+- Every new or changed public geometry interface states coordinate space, handedness, units, and winding convention at the signature or contract documentation.
 - Planned tests and checks were run or explicitly reported as blocked.
+- Degenerate-input test matrix: exercise each relevant class—empty input, one point, duplicate/coincident points, collinear/coplanar sets, zero-length/zero-area elements, needle/sliver triangles, and self-intersection—and require a defined result or typed failure; list untested classes as explicit gaps.
+- After topology mutations, run required watertightness/manifoldness, winding/orientation, Euler-characteristic sanity, and no-`NaN`/`Inf` coordinate checks, or state why each is inapplicable.
+- Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
 
 - Prefer explicit treatment of tolerances, degeneracies, and coordinate conventions over implicit behavior.
+- For every touched predicate or construction, classify it as exact arithmetic or epsilon tolerance; for tolerance-based work name the value, units, and accepted-policy source. An inline ad-hoc tolerance without provenance fails the gate.
+- Outputs are independent of container iteration order and parallel scheduling, or name a canonical tie-break ordering; order-sensitive operations run a two-run same-output check.
 - Keep geometry contracts and error cases easy to reason about.
 - Escalate model or architecture conflicts instead of widening the phase locally.
+- For runtime geometry bugs such as a wrong intersection, flipped normal, or containment failure, invoke `$bug-hunting` and capture the exact points or mesh as a minimal reproducer artifact under `.scratch/` before editing a predicate.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Meshing boundary

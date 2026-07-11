@@ -42,6 +42,20 @@ PINS = [
     ("P2P5-absolute", "Relative agreement such as ON≈OFF cannot PASS by itself.",
      ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
 
+    # Batch 3 acceptance — role floors augment retained/canonical obligations.
+    ("B1-S1-input", "inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`",
+     ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
+    ("B1-S1-class-audit", "when the dispatch cited a defect class, the verification report classifies every enumerated participant as `fixed` or `not-affected`.",
+     ["src.claude/agents/qa-engineer.md", "src.codex/skills/qa-engineer/SKILL.md"]),
+    ("B2-qt-delete-later", "`QObject` deletion uses `deleteLater()` invoked on the object's owning thread; never `delete` a `QObject` with pending events or from a foreign thread",
+     ["src.claude/agents/qt-ui-engineer.md", "src.codex/skills/qt-ui-engineer/SKILL.md"]),
+    ("B3-model-view-settled-signals", "Model/view-specific settled-signal evidence names the applicable signal—`dataChanged`, `rowsInserted`, or `modelReset`",
+     ["src.claude/agents/model-view-engineer.md", "src.codex/skills/model-view-engineer/SKILL.md"]),
+    ("B4-geometry-retained-rule", "Prefer explicit treatment of tolerances, degeneracies, and coordinate conventions over implicit behavior.",
+     ["src.claude/agents/geometry-engineer.md", "src.codex/skills/geometry-engineer/SKILL.md"]),
+    ("B5-visualization-retained-frame", "Make units, color-scale choices, coordinate transforms, and aggregation assumptions explicit.",
+     ["src.claude/agents/visualization-engineer.md", "src.codex/skills/visualization-engineer/SKILL.md"]),
+
     # A2 — parallel-isolation protocol + marker (both operating-models)
     ("A2-declare", "**Declare each requested isolation worktree.**",
      ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),

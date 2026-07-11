@@ -13,13 +13,13 @@ description: "Verify phases with tests, regressions, edge cases, QA verdicts."
 
 ## Input contract
 
-- Require the accepted plan for the phase, the implementation artifact being tested, and any relevant specialist constraints.
+- Require the accepted plan for the phase, the implementation artifact being tested, any relevant specialist constraints, and the inputs required by the canonical S1 `Receiving-side echo` in `subagent-contracts.md`; return a handoff that does not satisfy that contract as incomplete.
 - Take only the acceptance criteria, test strategy, allowed change surface, must-not-break surfaces, and verification scope needed for the phase.
 - Limit writes to tests, fixtures, harnesses, and QA-only helpers unless explicitly approved otherwise.
 
 ## Return exactly one artifact
 
-- Return one verification report containing executed checks, added or updated tests when needed, defects, regressions or edge cases found, basic performance acceptance status, residual risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- Return one verification report containing each executed check as verbatim command, passed/failed/skipped/xfail counts, wall time, and a `.scratch/` raw-output path; added or updated tests when needed; defects, regressions, or edge cases found; basic performance acceptance status; residual risk; and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
 
 ## Gate
 
@@ -28,14 +28,20 @@ description: "Verify phases with tests, regressions, edge cases, QA verdicts."
 - Anchor expected behavior to a known-good oracle (a shipped release or independent ground truth), never to a sibling mode or branch that can share the same defect.
 - Assert every required absolute property (for example non-zero variance, exact count/order/value, or a fixed invariant). Relative agreement such as ON≈OFF cannot PASS by itself.
 - Relevant unit, integration, or end-to-end coverage was run or explicitly reported as blocked.
+- A timed-out, hung, crashed, or partially-run suite is `UNVERIFIED` for every unrun test. Shard or `-k`-filter around the blocker and run the remainder to completion, or list each excluded test explicitly as `UNVERIFIED`; never report an incomplete suite as a pass or environment note.
 - Nearby must-not-break surfaces from the approved plan were smoke-checked or explicitly reported as blocked.
 - Agreed basic performance checks or performance smoke evidence are included when the phase can affect user-visible or system-visible performance.
 - Deeper bottleneck analysis is escalated to `performance-engineer`, not invented inside QA.
+- Apply the canonical S1 `Receiving-side echo` owned by `subagent-contracts.md`; when the dispatch cited a defect class, the verification report classifies every enumerated participant as `fixed` or `not-affected`.
+- Each executed check has command, result counts, wall time, and preserved raw output; prose that coverage ran without counts does not satisfy the gate.
 
 ## Working rules
 
 - Prefer reproducible findings over vague quality feedback.
 - Add or update tests when the phase lacks the planned coverage.
+- Every QA-authored test for a defect or criterion cites a run that fails against pre-fix behavior through a revert, stub, or preserved pre-fix run. A test born green is not regression coverage.
+- New or updated tests pin random seed, timezone, locale, clock, filesystem ordering, and parallel scheduling, or state why each ambient input is inapplicable.
+- Re-run-to-green is never pass evidence. A flaky failure on a must-not-break surface blocks until its race window is engineered deterministically, and the report shows the skip/xfail delta from the pre-change baseline; a new skip or xfail is a finding.
 - Treat regressions in nominally unrelated but plan-adjacent surfaces as first-class findings, not incidental noise.
 - Return `BLOCKED` when required performance evidence is missing for a performance-sensitive phase.
 - For systematic runtime-bug investigation during QA, invoke `$bug-hunting` to load diagnostic-logging discipline. Route video evidence through `$windows-gui-manual-testing` (parent workflow) and `$analyzing-video-bugs` (frame extraction) rather than reading raw video files.
@@ -68,11 +74,16 @@ Residual (honest): governance-enforced only — no hook validates that a `duplic
 
 ## Test failure classification
 
-| Class | Meaning | Owner action |
-|---|---|---|
-| `regression` | Previously passing behavior now fails | Implementer fixes; QA re-verifies |
-| `contract-change` | Test expectation is outdated because the contract changed intentionally | Implementer who changed the behavior updates the tests |
-| `test-rot` | Test was always wrong or is testing an irrelevant invariant | QA updates or removes the test |
+When existing tests fail after implementation changes, classify each failure:
+
+| Classification | Meaning | Action |
+| --- | --- | --- |
+| **regression** | Code broke existing behavior that should be preserved | Return `REVISE` — implementer fixes code |
+| **contract-change** | Implementation intentionally changed behavior, tests reflect the old contract | Return `REVISE` — the **same implementer** who changed the behavior updates the tests (QA does NOT fix these) |
+| **test-rot** | Test was always wrong, irrelevant, or testing an implementation detail rather than behavior | File a low-severity bug in `work-items/bugs/`, continue — do not block the phase |
+| **flaky** | The same test fails and passes across identical re-runs | Quarantine only with a bug-registry entry recording the observed seed, ordering, timing, and parallelism asymmetry; block must-not-break coverage until deterministic |
+
+Include the classification in the verification report for each failing test. For `contract-change`: do NOT attempt to fix tests yourself — return `REVISE` so the implementer can update them under the new contract.
 
 ## Architecture layering hygiene (test ownership)
 

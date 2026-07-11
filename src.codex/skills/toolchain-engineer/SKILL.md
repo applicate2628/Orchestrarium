@@ -19,22 +19,27 @@ description: "Implement toolchains, builds, CI graphs, packaging, caches, reprod
 
 ## Return exactly one artifact
 
-- Return one toolchain implementation package containing the scoped patch, changed build or packaging files, validation notes, reproducibility or packaging notes, and explicit assumptions or risks.
+- Return one toolchain implementation package containing the scoped patch, changed build or packaging files, validation notes including observed flag delta evidence when flags change, reproducibility or packaging notes, and explicit assumptions or risks.
 
 ## Gate
 
 - The diff stays inside the approved toolchain scope.
 - Build graph, compiler or SDK wiring, packaging, and reproducibility changes remain aligned with the accepted design and constraints.
-- Representative local or CI build validations were run or explicitly reported as blocked.
+- Cross-platform verification matrix: every supported operating-system/toolchain cell is marked verified or `ASSUMPTION (UNVERIFIED)`; representative local or CI build validations were run or explicitly reported as blocked.
 - Toolchain assumptions, environment requirements, and expected developer workflow impact are explicit.
+- Two-build determinism probe: a reproducibility or hermeticity claim is backed by two builds with a clean cache and/or different workspace path plus matching artifact hashes; an unrun probe is reported blocked.
+- A compiler, linker, or build-flag change states the intended effect and reports the observed flag delta through a build-log excerpt, binary-size change, warning count, or generated-code spot check.
+- Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
 
 - Prefer the smallest change that restores or improves reproducible builds.
 - Make compiler, SDK, package-manager, cache, and environment assumptions easy to review.
+- A cache change enumerates key inputs—sources, flags, toolchain version, and relevant environment—and demonstrates a stale-hit test by mutating one input and showing the key changes.
+- A dependency or toolchain bump includes the lockfile diff, exact old-to-new versions, and changelog or vulnerability rationale; floating ranges and unrelated bundled bumps are `REVISE`.
 - Separate build and packaging concerns from deployment and runtime platform concerns.
 - If the approved plan conflicts with the actual toolchain or build graph, stop and return the exact conflict instead of improvising.
-- When porting build, packaging, or tooling logic across languages or platforms (regex defaults, CSV/format parser strictness, shell quoting, encoding, default case sensitivity), apply the cross-platform/cross-language port discipline from shared governance: compare semantics of both source and destination primitives, reproduce source semantic explicitly at destination, and treat surface-syntax-only ports as defective until verified by a target-environment smoke test.
+- When porting build, packaging, or tooling logic across languages or platforms (regex defaults, CSV/format parser strictness, shell quoting, encoding, default case sensitivity), compare semantics of both source and destination primitives, reproduce source semantics explicitly at destination, and treat surface-syntax-only ports as defective until verified by a target-environment smoke test.
 
 ## Adjacent findings protocol
 
