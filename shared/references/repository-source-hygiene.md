@@ -23,7 +23,7 @@ Platform variants (`.sh`/`.ps1`/`.py`) of the same command with the same contrac
 
 `shared/AGENTS.shared.md` `Directory-level entity separation` requires directories to organize around one primary entity type. The Orchestrarium monorepo has **three deliberately co-located directories** that serve a documented design constraint and are exempt from the per-entity-type split:
 
-- `src.claude/agents/scripts/` — Claude pack: co-locates blocking-enforcement hooks (`check-bugfix-discipline.*`, `check-passive-polling-stop.*`, `check-work-items-archival-stop.*`, plus the shared `hook_common.py`), SessionStart context hooks (`mcp-usage-reminder.*`, `agents-mode-reminder.*`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), and pack validators (`validate-skill-pack.*`).
+- `src.claude/agents/scripts/` — Claude pack: co-locates blocking-enforcement hooks (`check-bugfix-discipline.*`, `check-git-push-gate.*`, `check-passive-polling-stop.*`, `check-work-items-archival-stop.*`, plus the shared `hook_common.py`), SessionStart context hooks (`mcp-usage-reminder.*`, `agents-mode-reminder.*`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), and pack validators (`validate-skill-pack.*`).
 
 - `src.codex/skills/lead/scripts/` — Codex pack: same entity-type co-location pattern (minus the prompt-invocation wrappers, which are Claude-side only).
 

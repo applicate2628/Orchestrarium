@@ -23,7 +23,7 @@ Platform variants (`.sh`/`.ps1`/`.py`) той же команды с тем же
 
 `shared/AGENTS.shared.md` `Directory-level entity separation` требует чтобы directories организовывались вокруг одного primary entity type. Orchestrarium monorepo имеет **три намеренно co-located директории**, которые служат documented design constraint и exempt от per-entity-type split:
 
-- `src.claude/agents/scripts/` — Claude pack: co-locates runtime hooks (`check-bugfix-discipline.*`, `check-passive-polling-stop.*`, `hook_common.py`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), и pack validators (`validate-skill-pack.*`).
+- `src.claude/agents/scripts/` — Claude pack: co-locates blocking-enforcement hooks (`check-bugfix-discipline.*`, `check-git-push-gate.*`, `check-passive-polling-stop.*`, `check-work-items-archival-stop.*`, плюс общий `hook_common.py`), SessionStart context hooks (`mcp-usage-reminder.*`, `agents-mode-reminder.*`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), и pack validators (`validate-skill-pack.*`).
 
 - `src.codex/skills/lead/scripts/` — Codex pack: тот же entity-type co-location pattern (минус prompt-invocation wrappers, которые Claude-side only).
 
@@ -37,12 +37,12 @@ Platform variants (`.sh`/`.ps1`/`.py`) той же команды с тем же
 
 Cost-vs-benefit принудительного refactor'а на каждый existing operator install не оправдывает gain от cleaner per-entity-type filesystem layout, потому что existing naming convention (`check-*` / `invoke-*` / `validate-*` / `install-*` / etc.) уже даёт per-entity-type discoverability.
 
-**Exception grandfathered, не extensible.** Новые entity types добавленные в будущем ДОЛЖНЫ следовать shared rule:
+**Exception grandfathered для wrappers, validators и installers — и AMENDED для hooks** (решение `work-items/decisions/2026-07-11-hook-placement-gate-semantics.md`). Размещение hook'ов следует **gate semantics**, а не generic new-entity-type правилу:
 
-- Новый hook → typed subdirectory под `agents/hooks/` или `skills/lead/hooks/` (создавать subdirectory если её ещё нет), НЕ в co-located legacy dir.
+- **Warn-only audit hook** (contract: читает `tool_input` своего вызова, пишет stderr warning, ВСЕГДА allows, fails open) → typed `agents/hooks/` / `skills/lead/hooks/` dir, byte-identical своему canon-источнику `scripts/universal-hooks/hooks/` (set-equality-гейт `tests/test_universal_hook_surfaces.py`).
+- **Blocking-enforcement hook** (PreToolUse `permissionDecision: deny` / Stop `decision: block` payloads) или **SessionStart context hook** → co-located `agents/scripts/` / codex `scripts/` dir рядом с `hook_common.py`. Универсальный — byte-identical canon-источнику `scripts/universal-hooks/scripts/`; provider-specialized (per-provider config paths или directive wording, напр. `agents-mode-reminder.*`) НЕ имеет canon-копии и вместо этого ДЕКЛАРИРУЕТСЯ, с обоснованием, в per-pack allowlist гейта (`PACK_ONLY_SCRIPTS` в `tests/test_universal_hook_surfaces.py`). Незадекларированный scripts/-hook фейлит гейт.
 - Новый wrapper → typed subdirectory под `agents/wrappers/`, НЕ рядом с co-located legacy dir.
 - Новый validator → typed subdirectory под `validators/`, НЕ в root `scripts/` если его lifecycle отличается от existing co-located items.
-- Etc.
 
 В случае сомнения, оценивать по Rule 1 classification test (owner/lifecycle + I/O contract). Наличие трёх legacy co-located директорий не constitutes permission добавить четвёртую или grow existing three.
 
@@ -57,9 +57,9 @@ Cost-vs-benefit принудительного refactor'а на каждый exi
 - Actor/lifecycle: Stop event runtime hook, fired by Claude/Codex CLI's PreToolUse/Stop hook surface.
 - I/O contract: reads PreToolUse Stop envelope from stdin; writes `{"decision":"block","reason":"..."}` to stdout или exits 0.
 
-Это matches existing hook entity type (тот же owner: runtime hook system; тот же contract: stdin JSON envelope → stdout deny payload). **Per the grandfathered exception**, новый hook принадлежит в новой typed subdirectory `agents/hooks/` (создаваемой для этого first new-entity-type hook'а), НЕ в legacy `agents/scripts/` co-located dir.
+Это matches existing hook entity family (тот же owner: runtime hook system; тот же contract: stdin JSON envelope → stdout block payload). **Per the amended placement law**, dir решают gate semantics: этот hook БЛОКИРУЕТ (эмитит `{"decision":"block"}`) — значит принадлежит co-located `agents/scripts/` / `skills/lead/scripts/` dir рядом с `hook_common.py`, с byte-identical canon-копией в `scripts/universal-hooks/scripts/` (parity-тест подхватывает автоматически — списки имён glob-derived из canon dir).
 
-Если бы grandfathered exception не существовал, новый hook принадлежал бы в том же месте, где он сейчас (typed subdir). Exception merely formalizes что **existing** files остаются где они, **new** files следуют правилу.
+Будь тот же hook warn-only аудитом (stderr warning, always allow) — он принадлежал бы typed `agents/hooks/` / `skills/lead/hooks/` dir с canon-копией в `scripts/universal-hooks/hooks/`. А будь он provider-specialized (разные config paths или directive text per provider, как `agents-mode-reminder.*`) — шипился бы per-pack в `scripts/` БЕЗ canon-копии и с обоснованной записью в `PACK_ONLY_SCRIPTS` allowlist гейта.
 
 ### Rule 2 — Trash hygiene and archival
 
@@ -82,7 +82,7 @@ Subject to `Worktree safety`: не удалять или двигать v1 files
 ## Термины и сокращения
 
 - **Entity type**: вид работы, который делает source file, classified by actor/lifecycle плюс input/output contract.
-- **Grandfathered exception**: documented co-located directory, существующая для deliberate design constraint, exempt от per-entity-type split для existing contents но не extensible к new contents.
+- **Grandfathered exception**: documented co-located directory, существующая для deliberate design constraint, exempt от per-entity-type split; для hooks регистр размещения — gate-semantics закон выше, для остальных entity types exception закрыт для new contents.
 - **Worktree safety**: существующее правило против модификации файлов вне admitted change surface (`shared/AGENTS.shared.md` `### Operational and environment safety`).
 - **Classification test**: two-signal placement check (actor/lifecycle + I/O contract) применённый перед added or moving any source file.
 - **Repo-local concretization**: per-repo extension of shared rule, declared в `AGENTS.md` / `CLAUDE.md` или в repo-specific shared reference как этот документ.
