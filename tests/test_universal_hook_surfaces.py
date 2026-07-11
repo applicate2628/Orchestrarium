@@ -28,6 +28,32 @@ def _canon_names(subdir: str) -> tuple:
 RUNTIME_SCRIPT_NAMES = _canon_names("scripts")
 RUNTIME_HOOK_NAMES = _canon_names("hooks")
 
+# scripts/-dir members that intentionally have NO byte-identical canon
+# counterpart. Every entry needs a justification comment; anything in a pack
+# scripts/ dir that is neither canon nor declared here FAILS the set-equality
+# test below. (This is the seam the amended hook-placement law names:
+# shared/references/repository-source-hygiene.md, decision
+# 2026-07-11-hook-placement-gate-semantics.)
+PACK_ONLY_SCRIPTS = {
+    "src.claude/agents/scripts": frozenset({
+        # Provider-specialized SessionStart context hook: walks the CLAUDE-line
+        # .agents-mode.yaml read-order (./.claude/, ~/.claude/) and speaks
+        # Agent-tool dispatch idiom; the codex twin walks ./.agents/ + ~/.codex/
+        # and speaks role/skill-activation idiom — intentionally different.
+        "agents-mode-reminder.sh", "agents-mode-reminder.ps1",
+        # Claude-line provider transport wrappers (no codex/canon analog).
+        "invoke-claude-api.sh", "invoke-claude-api.ps1",
+        "invoke-claude-prompt.sh", "invoke-claude-prompt.ps1",
+        "invoke-codex-prompt.sh", "invoke-codex-prompt.ps1",
+        # Per-pack validator (content differs per pack by design).
+        "validate-skill-pack.sh", "validate-skill-pack.ps1",
+    }),
+    "src.codex/skills/lead/scripts": frozenset({
+        "agents-mode-reminder.sh", "agents-mode-reminder.ps1",  # see above
+        "validate-skill-pack.sh", "validate-skill-pack.ps1",
+    }),
+}
+
 
 class UniversalHookSurfaceTest(unittest.TestCase):
     def test_pack_neutral_hook_sources_exist_and_match_production_packs(self) -> None:
@@ -58,9 +84,9 @@ class UniversalHookSurfaceTest(unittest.TestCase):
     def test_pack_hooks_dir_has_no_hook_missing_from_canon(self) -> None:
         """Set-equality: every audit-hook family in a pack's hooks/ dir must have
         a canon counterpart (and vice versa). The pack hooks/ dirs hold exactly
-        the audit-hook set, so canon==pack is the right invariant here (unlike
-        scripts/, where the pack dir is a superset — blocking hooks + helpers —
-        and only canon⊆pack + filecmp applies). This is the check that would have
+        the audit-hook set, so canon==pack is the right invariant here
+        (scripts/ has its own set-equality below: canon ∪ declared
+        `PACK_ONLY_SCRIPTS`). This is the check that would have
         caught check-stale-relation-residue being absent from the canon."""
         canon = set(RUNTIME_HOOK_NAMES)
         for pack_hooks in (
@@ -77,6 +103,27 @@ class UniversalHookSurfaceTest(unittest.TestCase):
                     f"hooks/ set mismatch: canon-only={canon - pack}, "
                     f"pack-only={pack - canon} (a pack hook absent from the "
                     f"universal canon, or vice versa)",
+                )
+
+    def test_pack_scripts_dir_is_canon_plus_declared_pack_only(self) -> None:
+        """Set-equality for scripts/: pack == canon ∪ declared pack-only set.
+        Catches BOTH a hook parked in scripts/ with no canon counterpart and
+        no declaration (the exact class that let agents-mode-reminder ship in
+        both packs while invisible to this gate) AND a declared name that
+        disappeared from a pack."""
+        canon = set(RUNTIME_SCRIPT_NAMES)
+        for rel, extra in PACK_ONLY_SCRIPTS.items():
+            pack_dir = ROOT / Path(rel)
+            pack = {
+                p.name for p in pack_dir.iterdir()
+                if p.is_file() and p.suffix in _HOOK_EXTS
+            }
+            with self.subTest(pack=rel):
+                self.assertEqual(
+                    canon | set(extra), pack,
+                    f"scripts/ set mismatch: undeclared pack-only="
+                    f"{pack - canon - set(extra)}, missing-from-pack="
+                    f"{(canon | set(extra)) - pack}",
                 )
 
     def test_gemini_qwen_installers_copy_universal_hook_helpers(self) -> None:

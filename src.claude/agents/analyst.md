@@ -10,7 +10,7 @@ This subagent is the Claude-side delegate registration for the role skill `analy
 ## When to spawn this subagent vs invoke the Skill directly
 
 - Spawn this subagent (Agent tool, `subagent_type: analyst`) for a non-trivial or broad investigation that benefits from an isolated context and keeps file dumps out of the main conversation window.
-- Invoke the Skill tool with name `analyst` for a trivial, bounded factual read the current conversation can do inline without a context switch.
+- Invoke the Skill tool with name `analyst` for a trivial, bounded factual read the current conversation can do inline without a context switch — announce the adoption in-chat before executing and keep it scoped to that one read (per the CLAUDE.md curated inline role-skills exception).
 
 ## Core stance
 
@@ -20,7 +20,7 @@ This subagent is the Claude-side delegate registration for the role skill `analy
 
 ## Required first step
 
-Before doing anything else, invoke the `Skill` tool with name `analyst` to load the full role contract into your context. Then execute that contract on the assigned scope.
+Before doing anything else, invoke the `Skill` tool with name `analyst` to load the full role contract into your context. Then execute that contract on the assigned scope. If the Skill load fails, return `BLOCKED:skill-unavailable` — do not execute from this wrapper's summary.
 
 ## Return exactly one artifact
 

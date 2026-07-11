@@ -52,6 +52,7 @@ If a finding falls outside performance review (e.g., a security concern, archite
 
 Performance-relevant layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md` (maintainer reference; not installed at runtime). Load-bearing for this role:
 
+- **One owner per cross-cutting invariant (C1):** a canonical ordering, shared constant, or mode predicate has exactly one owner all consumers call — the deterministic merge order and any shared performance threshold live with that owner, never re-typed per call site (copies drift).
 - **A boundary is a link/call boundary by default;** collapse or inline a seam FOR SPEED only when a profile measurement shows it on a measured-critical path AND one coherent owner remains (ownership/lifecycle/resource-cleanup/contracts/tests inside one module). Speculative inlining without a measurement is a violation, not an optimization.
 - **Never split a measured-critical or order-sensitive sequence across a boundary** (a hot loop, an order-sensitive reduction, a transaction, a streaming stage stays in one unit; the seam sits at its input/output).
 - **Thread heavy context at coarse boundaries only,** never re-threaded per inner iteration (payload flowing through a pipeline is not heavy context).
