@@ -78,6 +78,7 @@ The canonical brief should capture:
 - Record the durable resume point in `status.md`: current stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.
 - On resume after interruption, refresh only lead-owned task-memory state from accepted persisted artifacts. Do not recreate missing specialist artifacts or infer missing facts from session memory; route to `$knowledge-archivist` or the proper factual role instead.
 - `closure.md` is mandatory before moving an item to `work-items/archive/<YYYY-MM>/<date>-<slug>/` (month-bucketed, matching the existing archive layout and the main-conversation close step in `CLAUDE.md`). It holds the final closeout record: outcome, residual risk, and archive location, and MUST carry a `Closed: <YYYY-MM-DD>` line. It MAY include a `## Retrospective` (`What went well` / `What didn't` / `Lessons` — each keep-worthy lesson filed in the lessons registry by id). Proportionality (anti-ceremony): the retrospective is EXPECTED for substantial or troubled items (multi-phase, a regression, a wrong-assumption rework) and OPTIONAL for trivial ones — the close step stays mandatory, the retro within it is proportionate. Residual (honest): governance-enforced only — no hook verifies a troubled close got a retrospective. On archive, also move the item's row in `work-items/index.md` from Active to Archived so the index never points at an archived item still under `active/`. The archive folder move, the index-row sync, and active/archive reconciliation are the `$knowledge-archivist` lane's mechanics contract (periodic controls: Index sync; Closure and archive hygiene), owed after every work-item state change; Lead DECIDES the lifecycle transition and owns `closure.md` CONTENT, applies the mechanics inline for a routine single-item close, and routes multi-item, drifted, or complex archive/index states to `$knowledge-archivist` instead of hand-fixing them.
+- In `closure.md`, reconcile the delivered outcome against the roadmap decision package's target success signals; when no measurement is available, record `outcome-unmeasured: <reason>`.
 - If task memory is missing or stale, stop and restore it instead of improvising from session memory.
 - Before marking a batch closed, reconcile `brief.md`, `status.md`, the latest accepted artifact, required checks, canonical-source updates, and any open obligations. If admitted-scope work remains, keep the item active instead of closing it.
 
@@ -178,6 +179,8 @@ For clearly local `additive` work, the lead may use a fast lane: record the clas
 Use the handoff template and response format in [subagent-contracts.md](../../agents/contracts/subagent-contracts.md). If any field is missing, tighten the task before delegating.
 
 - **No delegation without verified brief**: do not dispatch any specialist role until `brief.md` and `status.md` exist and are current.
+- **Evidence discipline required**: the handoff must include the template's `Evidence discipline` field with the four accepted evidence categories, `ASSUMPTION (UNVERIFIED)` fallback, and banned correctness-drivers; a handoff without it is incomplete.
+- **Tool surface named**: `Allowed tools` must affirmatively name the repo-relevant MCP servers and skills for the lane, or state `runtime default surface`; a generic tool list that does neither is incomplete.
 
 ## Delegation-first rule
 
@@ -225,6 +228,7 @@ Do not advance work on optimism or partial acceptance.
 `PASS` advances the pipeline, but it does not by itself close the batch. Batch closure requires requested-scope reconciliation and no remaining open obligations unless the user explicitly parks or reprioritizes them.
 
 Lead acceptance is a mechanical completeness gate: confirm the required artifact exists, required fields/evidence are present, approved edits are in place, and configured state/ledger agrees. Do not re-read the whole artifact inline to substitute for specialist correctness review; any correctness doubt routes to an independent adversarial re-gate.
+When an accepted artifact asserts a root cause, a fix verification, or `diagnosis confirmed`, mechanical acceptance additionally requires a cited runtime-captured observation (command output, log line, or reproduction number); prose-only confirmation is `REVISE`, and the lead never pins a second-hand verdict as `CONFIRMED`.
 
 ## Flow rules
 
@@ -240,11 +244,13 @@ The rolling loop (`PASS` advances, `REVISE` stays in-role, `BLOCKED` waits), the
 - **Integration ownership**: if work spans multiple implementation phases or specialists, assign one integration owner before QA. That owner assembles one coherent artifact and checks cross-phase compatibility.
 - **Risk owners**: assign explicit owners for risks that can independently fail the result. Keep builder and reviewer roles separate. A role that defines constraints does not approve its own work.
 - **Change isolation**: prefer additive change through approved seams. If a local feature requires cross-cutting edits, route back to `$architect` or `$architecture-reviewer`.
-- **Parallelism**: parallelize read-heavy work (research, triage) when scopes are independent. Write-heavy work needs explicit ownership boundaries.
+- **Parallelism**: parallelize read-heavy work (research, triage) when scopes are independent. Be conservative with write-heavy work. Parallel edits are acceptable only when write scopes and contracts are already fixed.
 - **Parallelism mode**: `parallelMode: manual` keeps ordinary fan-out explicit-only, `auto` leaves safe parallelism enabled by routing judgment, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified.
 - Apply the installed operating-model parallel-isolation protocol before launch; mutating or Git-using parallel lanes require one requested, cleanup-owned worktree each.
+- If merge or coordination cost is likely to exceed the benefit, do not parallelize.
 - **Subagent thread-limit discipline**: in-session subagent fan-out is bounded by the runtime; assume a practical limit of four concurrent in-session agents unless the runtime explicitly reports a higher available limit. Before spawning a new in-session agent, check whether existing agents are still needed and close completed or parked ones once their result is accepted. If more than four independent lanes are useful, run only the top-priority four in-session and route extra lanes through external CLI tools, provider CLIs, scripts, or sequential execution; a spawn that fails with a thread-limit error is not a retry trigger but a re-plan signal. Report reduced fan-out in the session log when the original workflow expected more parallel agents.
 - **Parallel external reuse**: same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.
+- **Dispatch economics**: before every provider or subagent dispatch, select the model/profile and effort tier and record a one-line complexity rationale in the `status.md` Active agents `Model/effort` column. Once a run is launched, it keeps that effort; preference changes apply only to the next dispatch — never swap an in-flight run.
 - **Capability gaps**: if approved work cannot be routed cleanly, escalate one recommendation: use installed specialist, define repo-local specialist, create new skill, or escalate hiring need.
 - **Governance**: when an accepted upstream artifact is materially revised, mark dependent downstream artifacts for re-review. Require human/CI gates when team policy demands them.
 

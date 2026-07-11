@@ -81,6 +81,7 @@ The canonical brief should capture:
 - On resume after interruption, refresh only lead-owned task-memory state from accepted persisted artifacts. Do not recreate missing specialist artifacts or infer missing facts from session memory; route to `$knowledge-archivist` or the proper factual role instead.
 - If task memory is missing or stale, stop and restore it instead of improvising from session memory.
 - `closure.md` is mandatory before moving an item to the configured archive location. It holds the final closeout record: outcome, residual risk, and archive location, and MUST carry a `Closed: <YYYY-MM-DD>` line. It MAY include a `## Retrospective` (`What went well` / `What didn't` / `Lessons` — each keep-worthy lesson filed in the lessons registry by id). Proportionality (anti-ceremony): the retrospective is EXPECTED for substantial or troubled items (multi-phase, a regression, a wrong-assumption rework) and OPTIONAL for trivial ones — the close step stays mandatory, the retro within it is proportionate. Residual (honest): governance-enforced only — no hook verifies a troubled close got a retrospective. On archive, also update the recovery entry point so it never points at an archived item still listed as active (move the item's row from Active to Archived). The archive move, index-row sync, and active/archive reconciliation are the `$knowledge-archivist` lane's mechanics contract, owed after every work-item state change; Lead DECIDES the transition and owns `closure.md` content, applies the mechanics inline for a routine single-item close, and routes multi-item or drifted states to `$knowledge-archivist`.
+- In `closure.md`, reconcile the delivered outcome against the roadmap decision package's target success signals; when no measurement is available, record `outcome-unmeasured: <reason>`.
 - Before marking a batch closed, reconcile `brief.md`, `status.md`, the latest accepted artifact, required checks, canonical-source updates, and any open obligations. If admitted-scope work remains, keep the item active instead of closing it.
 
 ## Epics (grouping multiple work-items)
@@ -197,6 +198,9 @@ If any field is missing, tighten the task before delegating it.
 
 Use the templates in [subagent-contracts.md](subagent-contracts.md) for concrete handoffs and response format.
 
+- **Evidence discipline required**: the handoff must include the template's `Evidence discipline` field with the four accepted evidence categories, `ASSUMPTION (UNVERIFIED)` fallback, and banned correctness-drivers; a handoff without it is incomplete.
+- **Tool surface named**: `Allowed tools` must affirmatively name the repo-relevant MCP servers and skills for the lane, or state `runtime default surface`; a generic tool list that does neither is incomplete.
+
 ## Delegation-first rule
 
 - If a task requires substantive research, design, planning, implementation, or review work and there is a matching specialist role, delegate it.
@@ -259,6 +263,7 @@ Do not advance work on optimism or partial acceptance.
 `PASS` advances the pipeline, but it does not by itself close the batch. Batch closure requires requested-scope reconciliation and no remaining open obligations unless the user explicitly parks or reprioritizes them.
 
 Lead acceptance is a mechanical completeness gate: confirm the required artifact exists, required fields/evidence are present, approved edits are in place, and configured state/ledger agrees. Do not re-read the whole artifact inline to substitute for specialist correctness review; any correctness doubt routes to an independent adversarial re-gate.
+When an accepted artifact asserts a root cause, a fix verification, or `diagnosis confirmed`, mechanical acceptance additionally requires a cited runtime-captured observation (command output, log line, or reproduction number); prose-only confirmation is `REVISE`, and the lead never pins a second-hand verdict as `CONFIRMED`.
 
 ## Rolling-loop rule
 
@@ -328,6 +333,7 @@ Lead acceptance is a mechanical completeness gate: confirm the required artifact
 - Same-provider external helper reuse is allowed when each parallel external item owns a different admitted artifact or disjoint slice; `externalOpinionCounts` still governs distinct-provider requirements for one lane on top of the general `parallelMode` rule.
 - **Subagent thread-limit discipline**: in-session subagent fan-out is bounded by the runtime; assume a practical limit of four concurrent in-session agents unless the runtime explicitly reports a higher available limit. Before spawning a new in-session agent, check whether existing agents are still needed and close completed or parked ones once their result is accepted. If more than four independent lanes are useful, run only the top-priority four in-session and route extra lanes through external CLI tools, provider CLIs, scripts, or sequential execution; a spawn that fails with a thread-limit error is not a retry trigger but a re-plan signal. Report reduced fan-out in the session log when the original workflow expected more parallel agents.
 - If merge or coordination cost is likely to exceed the benefit, do not parallelize.
+- **Dispatch economics**: before every provider or subagent dispatch, select the model/profile and effort tier and record a one-line complexity rationale in the `status.md` Active agents `Model/effort` column. Once a run is launched, it keeps that effort; preference changes apply only to the next dispatch — never swap an in-flight run.
 
 ## Governance rule
 

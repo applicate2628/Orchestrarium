@@ -15,9 +15,9 @@ description: Provide an independent advisory memo for the lead without becoming 
 >    - `internal`: proceed to formulate an internal advisory memo directly (skip steps 3-5). Steps 3-5 and the end-of-response violation clause do **not** apply in this mode; the memo is authored from your own reasoning by design. Continue to step 6 with "internal advisory" as the source.
 >    - `external`: continue to steps 3-6 below; the violation clause at the end of this block applies.
 > 3. (external mode) Identify the selected external provider for the current lane (e.g. Codex for an advisory.design-adr lane under `quality-first`). **Verification is a real tool call, not a text claim.** Run `command -v <provider>` (POSIX/Git Bash) or `Get-Command <provider>` (PowerShell) via the Bash/PowerShell tool and capture the output. Treat any reasoning that does not include such a tool call as unverified — the provider's unavailability is then a claim with no evidence, not a fact. **The absence of a repo-specific wrapper script (`.claude/agents/scripts/invoke-<provider>*.sh`) is never sufficient to conclude the provider is unavailable**: wrappers are convenience surfaces, not authentication gates; the canonical availability check is whether the binary resolves on PATH. If the binary is genuinely not callable, return an unavailable memo and surface the gap; do not silently switch providers and do not author the opinion yourself.
-> 4. (external mode) Write the full advisory prompt body to `.scratch/<provider>-prompts/<topic>.md`. Argv to the provider stays for launcher flags only. This rule is binding for every consultant invocation — see the shared `External CLI prompt delivery` governance.
+> 4. (external mode) Write the full advisory prompt body to `.scratch/<provider>-prompts/<topic>.md`. Argv to the provider stays for launcher flags only. When the question is "which option", present the options symmetrically and omit the orchestrator's current preference or draft conclusion unless the request is explicitly to critique a chosen option; record the prompt form as `blind-options` or `critique-of-choice`. Require one single-turn, self-contained response between `BEGIN_REVIEW` / `END_REVIEW` markers, with all required sections and no deferred handoff, plan, or "what next?" ending. This rule is binding for every consultant invocation — see the shared `External CLI prompt delivery` governance.
 > 5. (external mode) Shell out to the selected provider via the prompt-orchestration wrapper (`.claude/agents/scripts/invoke-codex-prompt.sh` for Codex, `.claude/agents/scripts/invoke-claude-prompt.sh` for routine Claude, `.claude/agents/scripts/invoke-claude-api.sh` only when `reserveResolver` resolved to `claude-wrapper`). The wrapper enforces file-based prompt delivery and writes prompt/stdout/stderr to `.scratch/<provider>-prompts/`. Wait the appropriate time for the selected model/profile (5–15 minutes for ordinary advisory; up to 45–60 minutes for Claude opus/max deep review). Do not abandon the run on the first short timeout; check stdout/stderr files and process status first.
-> 6. Only after the provider returns (in external mode) or after you have completed your internal reasoning (in internal mode) may you formulate the consultant memo. In external mode the memo summarizes the external response and applies your own framing; it does not substitute your own opinion for the external one. In internal mode the memo is authored from your own reasoning and is explicitly labeled as `internal advisory` at the top.
+> 6. Only after the provider returns (in external mode) or after you have completed your internal reasoning (in internal mode) may you formulate the consultant memo. In external mode, first verify that captured stdout contains the `BEGIN_REVIEW` / `END_REVIEW` markers and every required section; a stub, handoff-only capture, or bare verdict is `REVISE`, not a memo. Return an unavailable memo only when the provider is genuinely unavailable and no provider result was captured. The memo summarizes the external response and applies your own framing; it does not substitute your own opinion for the external one. In internal mode the memo is authored from your own reasoning and is explicitly labeled as `internal advisory` at the top.
 >
 > **Violation clause (external mode only):** if `consultantMode == external` and you reach the end of your response while step 5 was never actually executed via a tool call (Bash/PowerShell shell-out), you have violated the role. Abort the response, return an unavailable memo with the explicit reason "external provider call was not actually executed", and surface the gap to the user. This clause does NOT fire for `internal` mode — internal advisory by design has no external shell-out — nor for `disabled` mode where the response stopped at step 2.
 >
@@ -39,11 +39,11 @@ description: Provide an independent advisory memo for the lead without becoming 
 
 ## Invocation by mode (the rule below is EXTERNAL-only)
 
-`consultantMode` has a switch: **`external` (the default)**, `internal`, and `disabled`. The
+`consultantMode` has a switch: **`external`**, `internal`, and `disabled`. The
 runtime-launch / not-a-background-subagent rule applies ONLY to `external` mode; `internal` mode is
 unconstrained by it.
 
-- **`external` mode (the default) — a runtime-launched CLI, NOT a background subagent.** The consultant
+- **`external` mode — a runtime-launched CLI, NOT a background subagent.** The consultant
   IS a direct external-CLI launch that the ORCHESTRATING RUNTIME owns: the runtime starts the CLI, receives
   its completion notification, and reads the output. It must NOT be dispatched as a background
   `Agent(subagent_type: consultant)` / `run_in_background` subagent — background-completion notifications
@@ -112,7 +112,7 @@ For the full `value | meaning` tables, see `docs/agents-mode-reference.md` in th
 
 ## Return exactly one artifact
 
-- Return one advisory memo covering recommended direction, alternatives considered, major tradeoffs, key risks, assumptions, and confidence level.
+- Return one advisory memo covering recommended direction, alternatives considered, major tradeoffs, and key risks. Every recommendation carries `Would-flip-if: <concrete observation that reverses it>`, and every load-bearing unverified claim is labeled `ASSUMPTION (UNVERIFIED)` with the step that resolves it.
 - Every consultant memo must include a provenance header:
   - **Execution role:** `consultant`
   - **Assigned / replaced internal role:** `none`
@@ -121,6 +121,8 @@ For the full `value | meaning` tables, see `docs/agents-mode-reference.md` in th
   - **Requested consultant mode:** <external | internal | disabled>
   - **Actual execution path:** <internal consultant | external CLI (provider name) | role-play (violation)>
   - **Model / profile used:** <actual profile or model when known | runtime default | unspecified by runtime>
+  - **Prompt form:** <blind-options | critique-of-choice | not-applicable: reason>
+  - **Inputs consumed:** <artifacts/files used, such as canonical brief, design decision id, or diff range>
   - **Deviation reason:** <none | external unavailable: [reason]>
 - Every consultant memo must end with an explicit continuation section:
   - **Continuation prompt:** one ready-to-send second prompt that can be used verbatim to continue the work.
@@ -206,6 +208,7 @@ If Gemini or Qwen is selected explicitly, keep it explicit and example-only.
 - Use the native CLI surface without inventing separate shared production fallback keys in this pack.
 - Do not silently downgrade from a selected example-only path back to Codex or Claude.
 - Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
+- **Never invoke a non-interactive Claude review with `--permission-mode plan`.** Plan mode makes Claude research and then present a plan for approval (ExitPlanMode) instead of emitting the verdict; under `claude -p` there is no approver, so the captured stdout is only the final handoff / "waiting for your direction" turn and the actual review never lands in the file. Use `--permission-mode bypassPermissions` exactly as the examples above show; if you want a read-only reviewer, constrain it with `--tools "Read,Grep,Glob"`, not with plan mode. The mode is not a safety lever here — the tool set and the prompt are.
 
 ### No implicit fallback
 

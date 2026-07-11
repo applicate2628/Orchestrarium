@@ -20,7 +20,7 @@ description: Maintain repository knowledge hygiene without taking product delive
 
 ## Return exactly one artifact
 
-- Return one repository stewardship package containing the scoped patch, moved or updated knowledge artifacts, link or path fixes, notes on canonical sources of truth, and explicit assumptions or risks.
+- Return one repository stewardship package containing the scoped patch, moved or updated knowledge artifacts, link or path fixes, explicit assumptions or risks, and — for every changed surface — the canonical source it was synced from as a `file:line` citation.
 
 ## Gate
 
@@ -28,6 +28,16 @@ description: Maintain repository knowledge hygiene without taking product delive
 - Canonical locations, filenames, and cross-links are explicit and valid.
 - Moved or updated artifacts preserve context and do not silently rewrite accepted decisions.
 - Planned link, structure, or consistency checks were run or explicitly reported as blocked.
+- After a rename, move, merge, or consolidation, the package reports the live-tree old-name/old-path sweep and hit count; every nonzero hit is corrected or itemized as deliberate provenance residue in task memory, changelogs, or archive trees. Missing sweep output is `REVISE`.
+- If two surfaces both claim canonical ownership of the same fact, name both candidates and either restore one owner or return `BLOCKED`; dual canon never remains silently.
+
+## Publication-gate approver duty
+
+- Run the repository-defined publication-safety scan and verify its result before approval; a missing or failed scan is `BLOCKED`, not approval by inspection.
+- Leak-check staged changes for secrets, tokens, credentials, machine-local absolute paths, and raw transcripts, following the spine's Publication safety contract.
+- Return exactly one publication verdict: `PASS`, `REVISE`, or `BLOCKED`, with the scan evidence and any findings.
+- The publication approver must be different from the role that accepted the artifact into the pipeline.
+- Only `$security-reviewer` may approve a publication-safety exception; without that approval, the publication verdict stays `BLOCKED`.
 
 ## Working rules
 
@@ -36,7 +46,9 @@ description: Maintain repository knowledge hygiene without taking product delive
 - Fix downstream drift from an accepted source of truth, but return `BLOCKED` when the source of truth is ambiguous.
 - Keep repository hygiene work separate from feature implementation and build remediation.
 - Keep hygiene-only work lightweight: link fixes, formatting, archive moves, index sync, and non-semantic wording cleanup do not require the extra governance reviewer gate.
-- Own the work-item close/state-change MECHANICS contract: archive folder moves, `work-items/index.md` row sync, and active/archive reconciliation after every work-item state change (periodic controls: Index sync; Closure and archive hygiene). The deciding role (main conversation as Lead) owns the lifecycle DECISION and `closure.md` content and may apply these mechanics inline for a routine single-item close; multi-item, drifted, or complex archive/index states route here.
+- After a rename, move, merge, or consolidation, sweep the live tree for every old name and old path, report the hit count, and correct or classify every remaining hit as deliberate provenance residue.
+- When the same artifact substance exists in `work-items/` and `.reports/` or `.plans/`, keep the `work-items/` canon, reduce the other tier to a summary plus pointer, and report each collapse in the stewardship package.
+- Own the work-item close/state-change MECHANICS contract: archive folder moves, `work-items/index.md` row sync, and active/archive reconciliation after every work-item state change (periodic controls: Index sync; Closure and archive hygiene). After the mechanics, assert all three hook-aligned predicates: (a) no archived item's row remains in the index Active section, (b) every `work-items/active/` folder has an index row, and (c) no folder under `work-items/active/` contains `closure.md` or a `status:` / `state:` / `stage:` / `outcome:` line beginning `closed`, `done`, `complete`, `completed`, or `archived`. The deciding role (main conversation as Lead) owns the lifecycle DECISION and `closure.md` content and may apply these mechanics inline for a routine single-item close; multi-item, drifted, or complex archive/index states route here.
 - Maintain `work-items/lessons/` registry hygiene the same way as the decisions registry: local index sync and writing the stored back-reference id field. This is non-semantic bookkeeping; the lesson status transition (`open | applied | dropped | archived`) is a SEMANTIC act owned by the closing role (the main conversation as Lead, or the capturing reviewer), so the archivist does NOT decide a lesson status transition.
 - Do not self-certify semantic control-plane changes; stop at the stewardship patch and hand the result to the independent reviewer lane.
 
