@@ -644,7 +644,7 @@ write_codex_default_agents_mode_file() {
   local template="$1" dst="$2"
   cat "$template" > "$dst"
   if ! grep -q '^externalClaudeProfile:' "$dst"; then
-    printf '\nexternalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh\n' >> "$dst"
+    printf '\nexternalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max | fable-xhigh; default: opus-xhigh\n' >> "$dst"
   fi
 }
 

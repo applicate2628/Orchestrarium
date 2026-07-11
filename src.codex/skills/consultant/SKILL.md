@@ -166,6 +166,7 @@ If `.agents/.agents-mode.yaml` selects Claude and contains `externalClaudeProfil
 - `sonnet-high` → `--model sonnet --effort high`
 - `opus-xhigh` → `--model opus --effort xhigh` (shipped default)
 - `opus-max` → `--model opus --effort max` (max-depth escalation; caller discretion for especially hard tasks)
+- `fable-xhigh` → `--model fable --effort xhigh` (current Claude flagship-family best-effort tier; the `fable` flagship alias as of 2026-07)
 - key missing → use the current default Claude CLI invocation for this pack unless `externalModelMode: pinned-top-pro` requests the stronger Claude path
 
 Honor `externalCodexProfile` and `externalModelMode` before provider-specific transport selection:
