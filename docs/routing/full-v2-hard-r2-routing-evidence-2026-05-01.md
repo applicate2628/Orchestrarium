@@ -1,6 +1,15 @@
 Date: 2026-05-01
 Owner: `$knowledge-archivist`
-Status: `PASS / ARCHITECTURE-REVIEWED`
+Status: `PASS / ARCHITECTURE-REVIEWED` on the 2026-05-01 model families · current-family currency: `ASSUMPTION (UNVERIFIED — lane priorities carried over from the gpt-5.5/opus-4.7 release, pending re-benchmark)`
+
+> **Model-currency invalidation (2026-07-11).** The models benchmarked below are retired: the
+> Codex side migrated `gpt-5.5`/`gpt-5.3` to the `gpt-5.6-sol`/`gpt-5.6-luna` family, and the
+> Claude side's current flagship alias is `fable` (as of 2026-07), not the `opus 4.7max`-era row.
+> Per the standing rule in both external-dispatch contracts, a model-family migration invalidates
+> the routing-evidence `PASS`: every lane priority derived from these tables is carried over as
+> `ASSUMPTION (UNVERIFIED)` until the RF12 benchmark is re-run — or the lane orders are explicitly
+> re-affirmed — on the current model families. The frozen tables below remain valid as the
+> historical record of the 2026-05-01 release; they no longer certify current-family routing.
 
 ## Purpose
 

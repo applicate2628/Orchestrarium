@@ -156,7 +156,7 @@ Routing conventions (not persisted as keys):
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
    externalCodexProfile: {value}  # allowed: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-luna; default: gpt-5.6-sol-xhigh
-   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh
+   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-xhigh | opus-max | fable-xhigh; default: opus-xhigh
    ```
 
 8. **Write `## Project policies` to `AGENTS.md`.**

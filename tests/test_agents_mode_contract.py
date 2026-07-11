@@ -136,7 +136,7 @@ class AgentsModeContractTest(unittest.TestCase):
             codex_init = tmp_root / "src.codex" / "skills" / "init-project" / "SKILL.md"
             text = codex_init.read_text(encoding="utf-8")
             text = text.replace(
-                "   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh",
+                "   externalClaudeProfile: {value}  # allowed: sonnet-high | opus-xhigh | opus-max | fable-xhigh; default: opus-xhigh",
                 "   externalFastProfile: {value}  # invalid drift from Codex-only scalar",
                 1,
             )

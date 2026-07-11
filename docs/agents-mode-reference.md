@@ -384,10 +384,12 @@ Guardrails:
 | `sonnet-high` | Balanced Codex-to-Claude external profile | `--model sonnet --effort high` |
 | `opus-xhigh` | Shipped-default Codex-to-Claude external profile (xhigh effort) | `--model opus --effort xhigh` |
 | `opus-max` | Maximum-depth escalation for especially hard tasks at caller discretion | `--model opus --effort max` |
+| `fable-xhigh` | Current Claude flagship-family best-effort profile | `--model fable --effort xhigh` |
 
 Notes:
 - This key is Codex-line only.
 - If it appears in Claude-line legacy state, ignore it and do not carry it into canonical Claude-line `agents-mode`.
+- `fable-xhigh` names the `fable` flagship alias as of 2026-07. That is recorded from the installed model list, not a verified capability ranking — the Claude CLI lists models but does not rank them. A later flagship-family change updates this value in `shared/agents-mode.schema.json` first; the enum-copy drift guard then flags every stale copy.
 
 ## First-write defaults
 

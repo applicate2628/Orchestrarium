@@ -46,7 +46,13 @@ if ([string]::IsNullOrEmpty($TopicSlug) -or
 }
 
 if (-not $ClaudeFlags -or $ClaudeFlags.Count -eq 0) {
-  $ClaudeFlags = @('-p', '--output-format', 'text')  # current claude CLI removed top-level --quiet
+  # A12: every provider-backed run must carry an explicit model AND effort, never
+  # an ambient one — the default below pins the shipped default profile `opus-xhigh`
+  # (same fix as the sibling invoke-codex-prompt.ps1). Callers needing a different
+  # profile (e.g. `--model opus --effort max` or `--model sonnet --effort high`)
+  # pass the full flag set after `--`, which always overrides this default.
+  # (current claude CLI removed top-level --quiet; -p/--print is non-interactive)
+  $ClaudeFlags = @('-p', '--output-format', 'text', '--model', 'opus', '--effort', 'xhigh')
 }
 
 $claudeBin = if ($env:CLAUDE_BIN) { $env:CLAUDE_BIN } else { 'claude' }

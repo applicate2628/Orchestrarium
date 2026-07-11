@@ -25,7 +25,7 @@ Do NOT auto-invoke for trivial changes (one-line typo, doc edit, single-file ref
 
 4. **Dispatch the three scope angles in parallel.** Per the contract's Claude dispatch mapping, via the Agent tool with `run_in_background: true`:
    - **Surgical verdict** → `subagent_type: external-reviewer` (routes to the external provider).
-   - **Deep verdict** → `subagent_type: architecture-reviewer`, `model: opus` (direct strategic verdict — NOT `consultant`).
+   - **Deep verdict** → `subagent_type: architecture-reviewer`, `model: fable` (the flagship alias as of 2026-07; direct strategic verdict — NOT `consultant`).
    - **Mechanical scout** → `subagent_type: analyst`, `model: sonnet` (factual `file:line`, NO verdict — it feeds the verdicts).
    Carry the ORIGINAL pinned objective verbatim into every angle. Collection is split by lane: same-vendor Agent subagents fire a reliable notification (wait for it); an external-provider shell-out lane (its notification is not always delivered) is verified by actively reading its captured `.out`/`.err` + process status. Read each angle's captured OUTPUT (not its notification) before counting it.
 
@@ -46,5 +46,5 @@ See also `/agents-design-panel` — the generation-side analog: it independently
 - This is an operator command, not a new specialist role; the angles are dispatched via the Agent tool.
 - The methodology lives in `.claude/agents/contracts/review-loop.md`; this command points at it and must not restate it.
 - The mechanical scout is `analyst` and casts no verdict; never route it to `qa-engineer`.
-- The deep angle is a direct-verdict `architecture-reviewer` at `model: opus`; it is intentionally NOT `consultant` (external-mode consultant shells out — the role-confusion). `consultant.md` stays untouched.
+- The deep angle is a direct-verdict `architecture-reviewer` at `model: fable` (the flagship alias as of 2026-07); it is intentionally NOT `consultant` (external-mode consultant shells out — the role-confusion). `consultant.md` stays untouched.
 - Do NOT commit, push, or install from this command. The converged design and any implementation stop at the human's commit gate.

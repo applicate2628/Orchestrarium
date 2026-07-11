@@ -29,7 +29,7 @@ externalCodexWorkdirMode: neutral  # allowed: neutral | project
 externalClaudeWorkdirMode: neutral  # allowed: neutral | project
 externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro; default: runtime-default
 externalCodexProfile: gpt-5.6-sol-xhigh  # allowed: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-luna; default: gpt-5.6-sol-xhigh
-externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh
+externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max | fable-xhigh; default: opus-xhigh
 ```
 
 - `consultantMode` controls `$consultant` behavior.
@@ -50,7 +50,7 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 - `reserve` is a symbolic supplemental read-only candidate that may appear only in advisory and review profile orders after primary `claude`/`codex`. It is independent of the primary `claude` candidate, not a scalar provider key, not a primary-provider retry, and not an implementation or editing fallback. The concrete resolver comes from `reserveResolver` and must be recorded in the execution artifact.
 - Treat named fallback paths as alternate limit or budget pools only when runtime observation shows they exhaust independently. That is repo-local operator policy, not an official provider guarantee.
 - Every provider-backed run MUST carry the resolved model/profile and effort as explicit launch flags in that invocation, even when they equal configured defaults; never rely on provider config defaults. Resolve `runtime-default` to the installed runtime's observed supported model/effort before launch, or report the route unavailable if it cannot be made explicit. Record the exact flags in the execution artifact.
-- `externalClaudeProfile` is Codex-line only and selects or overrides the Claude CLI execution profile when `externalProvider` resolves to Claude. Supported values: `sonnet-high` (`--model sonnet --effort high`), `opus-xhigh` (`--model opus --effort xhigh`, the shipped default), and `opus-max` (`--model opus --effort max`, max-depth escalation at caller discretion for especially hard tasks).
+- `externalClaudeProfile` is Codex-line only and selects or overrides the Claude CLI execution profile when `externalProvider` resolves to Claude. Supported values: `sonnet-high` (`--model sonnet --effort high`), `opus-xhigh` (`--model opus --effort xhigh`, the shipped default), `opus-max` (`--model opus --effort max`, max-depth escalation at caller discretion for especially hard tasks), and `fable-xhigh` (`--model fable --effort xhigh`, the current Claude flagship-family best-effort tier — the `fable` flagship alias as of 2026-07, recorded from the installed model list, not a verified capability ranking).
 - The preference flags are independent.
 - Any write to this file must preserve unknown keys and the other known keys.
 - Any read of this file for routing must normalize the effective Codex overlay file to the current canonical format before trusting its flags. Comment-free or older-layout files are valid input, not valid output.
@@ -183,7 +183,8 @@ Rules:
 Rules:
 
 - `auto` resolves against this matrix, not against the host-pack name.
-- This matrix follows the `full-v2-hard-r2` release-backed `12 + 1` routing read. The `L00 owner/control` line is not encoded here because owner roles have no generic external adapter.
+- This matrix follows the `full-v2-hard-r2` release-backed `12 + 1` routing read. The `L00 owner/control` line is not encoded here because owner roles have no generic external adapter. Currency: `ASSUMPTION (UNVERIFIED — lane priorities carried over from the gpt-5.5/opus-4.7 release, pending re-benchmark)`; the benchmarked models are retired and the lane orders have not been re-validated on the current families.
+- Model-family migration invalidates routing evidence (standing rule): whenever a migration of `externalCodexProfile` or `externalClaudeProfile` retires, renames, or replaces the model family behind any routed lane, the routing-evidence `PASS` is invalidated in the same change — the shipped lane priorities become `ASSUMPTION (UNVERIFIED)`, carried over from the last benchmarked release, until the routing evidence is re-benchmarked or explicitly re-affirmed on the current model families. This is the routing-evidence form of the material-upstream-revision rule: a materially revised accepted upstream artifact marks its dependent downstream artifacts for re-review.
 - Repo-local heuristics may refine the lane choice, but they must not invent a different provider universe.
 - Ordinary `auto` must not resolve to the same provider as the current host line.
 
