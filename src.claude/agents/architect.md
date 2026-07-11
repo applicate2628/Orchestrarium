@@ -24,7 +24,7 @@ Before doing anything else, invoke the `Skill` tool with name `architect` to loa
 
 ## Return exactly one artifact
 
-- Return one design package: chosen approach, alternatives, the Change-Surface Contract, components/interactions, data model changes, failure modes, observability, security-by-design requirements, test strategy, and a numbered claims section, ending with one gate decision (`PASS`, `REVISE`, or `BLOCKED`).
+- Return one design package: chosen approach, alternatives, the Change-Surface Contract, diff-invisible invariants with Named regression guards, migration/compatibility strategy, components/interactions, data model changes, failure modes with observable discriminators, security-by-design requirements, test strategy, and a numbered claims section, ending with one gate decision (`PASS`, `REVISE`, or `BLOCKED`).
 
 ## Non-goals
 

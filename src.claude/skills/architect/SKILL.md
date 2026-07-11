@@ -26,19 +26,24 @@ Adopting this role inline approves nothing — the `architecture-reviewer` indep
 - Require an accepted research memo as the source of truth.
 - Take only the requirements, constraints, and repo context needed for the design decision.
 - Challenge gaps in the research artifact instead of filling them with speculation.
+- Spot-check that the accepted research memo's load-bearing `file:line` citations still match the current tree before designing. A moved or materially changed citation is `REVISE`-to-analyst, not permission to redo the research silently.
 - Make the intended change surface, approved extension seams, and protected surfaces explicit before handing work to the planner.
 
 ## Return exactly one artifact
 
-- Return one design package containing the chosen approach, one to three realistic alternatives with tradeoffs, boundaries of change, approved extension seams, dependency direction, stable internal and external contracts, components and interactions, data model changes, failure modes, observability expectations, security-by-design requirements, and test strategy.
+- Return one design package containing the chosen approach, one to three realistic alternatives with tradeoffs, boundaries of change, approved extension seams, dependency direction, stable internal and external contracts, components and interactions, data model changes, failure modes paired with observable discriminators, observability expectations, security-by-design requirements, and test strategy.
 - Include a required named **Change-Surface Contract** sub-field — `{ intended change surface, approved extension seam(s), protected / must-not-touch surfaces, declared blast radius }` — as a named field (not prose). You OWN this seam / blast-radius decision; the planner and implementers CONSUME it and may flag a conflict (`REVISE`-to-architect) but MAY NOT redefine it.
-- Include a numbered **claims section**: falsifiable guarantees this design makes, each claim a fixed three-field shape — `{ guarantee, single-owner, enforcement-probe }` (what is guaranteed, the single owner that holds it, the falsifying probe — a `file:line`, command, test id, or gate). Example: "1. `{ guarantee: Module A is not modified — all changes attach at seam S; single-owner: seam S; enforcement-probe: grep shows no diff in module A }`. 2. Interface I remains stable. 3. No new shared dependencies are introduced." This list is the primary input to `architecture-reviewer`, which maps each claim 1:1 to a review finding.
+- Include a numbered **claims section**: falsifiable guarantees this design makes, each claim a fixed three-field shape — `{ guarantee, single-owner, enforcement-probe }` (what is guaranteed, the single owner that holds it, the falsifying probe — a `file:line`, command, test id, or gate). Example: "1. `{ guarantee: Module A is not modified — all changes attach at seam S; single-owner: seam S; enforcement-probe: grep shows no diff in module A }`. 2. `{ guarantee: Interface I remains stable; single-owner: interface I contract owner; enforcement-probe: compatibility test for every existing consumer passes }`. 3. `{ guarantee: No new shared dependencies are introduced; single-owner: dependency manifest; enforcement-probe: dependency-graph diff contains no added edge }`." This list is the primary input to `architecture-reviewer`, which maps each claim 1:1 to a review finding.
 - For every pipeline touching shared mutable state (for example scroll, geometry, or cache), the Change-Surface Contract MUST name exactly one writer-owner and one downstream-observable `settled/committed` event. Missing either is `REVISE` at design input.
+- Include a named **Diff-invisible invariants** list: pre-existing behavioral couplings endangered by the declared change surface (timing, ordering, lifecycle, shared state, or render/layout passes), each with a **Named regression guard** containing an executable test or probe and its expected result. `none` is valid only with a one-line reason.
+- When the design changes an external contract or persisted schema/state, name the migration strategy, including expand-contract phasing, the backward-compatibility window, and rollback of already-migrated state. Otherwise state `no contract/persisted-state change`; silence while a contract changes is `REVISE`.
+- For every named failure mode, name the observable signal — log or event id, metric, or status code — that distinguishes it from neighboring failure modes. A failure mode without an observable discriminator is `REVISE`.
 
 ## Gate
 
 - The design is traceable to accepted research facts and constraints.
 - Alternatives, interfaces, extension seams, dependency direction, expected blast radius, failure modes, observability, and test strategy are explicit.
+- Contract and persisted-state migration impact is explicit, and every failure mode has an observable discriminator.
 - Every cross-cutting / long-lived decision in the claims section carries a `work-items/decisions/` id (you author it as `status: proposed`); a local single-work-item decision stays inline in `design.md`.
 - No implementation code is included.
 - End with one explicit gate decision: `PASS`, `REVISE`, or `BLOCKED`.
@@ -47,7 +52,7 @@ Adopting this role inline approves nothing — the `architecture-reviewer` indep
 
 - Prefer the smallest durable design that satisfies the validated requirements.
 - Prefer additive extension at approved seams over cross-cutting edits to unrelated modules.
-- Document rejected options when they materially affect future work.
+- Document rejected options when they materially affect future work. Each rejected alternative names its decisive rejection driver and traces it to a research-memo fact or named constraint; an unverifiable driver is `ASSUMPTION (UNVERIFIED)` with the probe that would resolve it.
 - When the design makes a cross-cutting or long-lived architecture decision (one that outlives this work-item or constrains others), file it in the `work-items/decisions/` registry as `status: proposed` (lead skill `skills/lead/SKILL.md` `## Decisions`) and REFERENCE it by id from this design package, rather than burying it in a `design.md` that will be archived with the item. Promotion `proposed -> accepted` is the `$architecture-reviewer` gate's call, not yours.
 - Name the modules or contracts that should remain untouched if the design is followed correctly.
 - Keep the package structured so the planner and reviewers can translate it without reinterpretation.
