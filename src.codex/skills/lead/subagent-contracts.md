@@ -10,9 +10,9 @@ Goal:
 Approved inputs:
 - <accepted artifact or fact>
 - <accepted artifact or fact>
-Allowed tools:
-- <allowed tool>
-- <allowed tool>
+Allowed tools (affirmatively name repo-relevant MCP servers/skills, or state "runtime default surface"):
+- <allowed tool, MCP server, skill, or "runtime default surface">
+- <allowed tool, MCP server, or skill>
 Scope:
 - <allowed area>
 Out of scope:
@@ -25,6 +25,8 @@ Diff-invisible invariants:
 - <behavior or contract that must remain true although the diff may not expose it>
 Named regression guard:
 - <test/probe plus expected result that falsifies preservation>
+Evidence discipline:
+- <cite each decision-driving claim with an in-repo file:line, installed-dependency surface check, versioned official docs/upstream source URL, or target-environment smoke test preserved under .scratch/; otherwise label it ASSUMPTION (UNVERIFIED) with the resolving step; never use "should work", "should be fine", "probably", "likely", "I think", "based on training data", "in general", or "this pattern usually works" as a correctness-driver>
 Defect-class inventory:
 - <when one instance was cited: every participant to audit—parallel arms, cell/data shapes, return paths, and read-sites; otherwise "not-triggered">
 Constraints:
@@ -40,6 +42,8 @@ Gate to next stage:
 ```
 
 Before dispatch, fill `Diff-invisible invariants` and `Named regression guard`; `none` is valid only with a one-line reason. An implementation or review handoff with either field omitted is incomplete.
+
+Receiving-side echo: the returned artifact MUST (a) report the Named regression guard's actual result (expected vs observed), (b) answer each Diff-invisible invariant as verified or ASSUMPTION (UNVERIFIED), (c) when the dispatch cited a defect class, include the class audit — every enumerated participant classified fixed / not-affected. An artifact missing the echo fails the mechanical acceptance gate.
 
 **Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class, the dispatch prompt MUST direct the recipient to enumerate every participant of that class, classify each one, and fix every confirmed instance. A prompt scoped only to the named line is invalid.
 
@@ -77,9 +81,9 @@ updated: <YYYY-MM-DD HH:MM>
 
 ## Active agents
 
-| Agent | Role | Status | Launched |
-| --- | --- | --- | --- |
-| <description> | <role> | running | <HH:MM> |
+| Agent | Role | Model/effort | Status | Launched |
+| --- | --- | --- | --- | --- |
+| <description> | <role> | <model/profile + effort — one-line complexity rationale> | running | <HH:MM> |
 
 ## Completed agents
 

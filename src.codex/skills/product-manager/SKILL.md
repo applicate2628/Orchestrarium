@@ -5,6 +5,10 @@ description: "Own roadmap, priority, milestones, and discovery/delivery admissio
 
 # Product Manager
 
+## Admission independence in Codex
+
+Codex role skills run in the current session and do not create an isolated admission authority. For a gating admission — an epic, a dependency-creating item, or a cross-initiative call — persist the roadmap decision package as a distinct gated artifact BEFORE any delivery action in the same session. Route genuinely contested cross-initiative priority to the human instead of letting the executing session self-admit it.
+
 ## Core stance
 
 - Own the roadmap lane, not architecture or implementation.
@@ -21,7 +25,7 @@ description: "Own roadmap, priority, milestones, and discovery/delivery admissio
 
 ## Return exactly one artifact
 
-- Return one roadmap decision package containing the prioritized item or initiative, intended outcome, business or user rationale, sequencing rationale, dependency notes, target success signals, bounded scope, explicit non-goals, and the recommended admission decision for discovery or delivery.
+- Return one roadmap decision package containing the prioritized item or initiative, intended outcome, business or user rationale, sequencing rationale, dependency notes, target success signals stated as `baseline -> target -> measurement source -> check moment`, bounded scope, explicit non-goals, and the recommended admission decision for discovery or delivery.
 
 ## Gate
 
@@ -29,6 +33,8 @@ description: "Own roadmap, priority, milestones, and discovery/delivery admissio
 - The package is concrete enough for `$lead`, `$product-analyst`, or `$analyst` to pick up the next stage.
 - No architecture, delivery plan, or implementation ownership is embedded in the roadmap decision.
 - Evidence, assumptions, and judgment calls are clearly separated.
+- Each demand-side claim in the business or user rationale cites the accepted `$product-analyst` artifact or the user's words verbatim, or is labeled `ASSUMPTION (UNVERIFIED)` with the step that resolves it.
+- Every target success signal names its baseline, target, measurement source, and check moment so closure can reconcile the delivered outcome or record `outcome-unmeasured: <reason>`.
 - End with one explicit gate decision: `PASS`, `REVISE`, or `BLOCKED`.
 
 ## Working rules
@@ -40,7 +46,8 @@ description: "Own roadmap, priority, milestones, and discovery/delivery admissio
 - An **epic** — an initiative grouping several work-items toward one goal or milestone — is admitted here like any item, and the Coherence gate (below) IS the epic test: it must name the shared goal, contract, or mechanism that makes its members one unit. When a roadmap decision package names multiple related work-items, a shared milestone, or one mechanism split across several items, either admit an epic or include `No-epic rationale: <why these remain standalone>`. Produce the epic's goal, milestone, and bounded scope in the roadmap decision package; `$lead` materializes it as `work-items/epics/<date>-<slug>.md` and links the member work-items. Keep epic scope bounded so member work-items do not creep without re-admission.
 - When the roadmap decision package's dependency notes or sequencing constraints name a cross-work-item prerequisite (item B needs item A first), say so explicitly so `$lead` records it as a `Depends-on:` edge on the admitted item (lead skill `## Dependencies`). This turns prose "sequence after X" into a standing, derivable blocker rather than a one-off note.
 - When admitting work similar to a prior item, consult the OPEN lessons in `work-items/lessons/` (status `open`) so a captured lesson is applied at admission rather than the same mistake repeated. Surface a relevant lesson's `## How to apply` in the roadmap decision package.
-- Set an admission **Priority** on the admitted item — `Priority: high | medium | low` — recorded on the item's `status.md`. Priority is scheduling URGENCY, distinct from defect severity (which is IMPACT): a low-severity bug can still be high-priority. State the priority and its rationale in the roadmap decision package.
+- Set an admission **Priority** on the admitted item — `Priority: high | medium | low` — recorded on the item's `status.md`. Priority is scheduling URGENCY, distinct from defect severity (which is IMPACT): a low-severity bug can still be high-priority. The rationale must name at least one concrete backlog or active peer the item outranks and why; when there is no competing item, state `no-contention: backlog empty`. An absolute priority adjective alone fails the gate.
+- Every admitted item carries `Kill / re-intake trigger: <concrete observation>` naming what would invalidate the improvement hypothesis and force re-intake.
 - When an initiative groups work toward a milestone, name the milestone in the roadmap decision package; `$lead` stamps it on the epic (the epic frontmatter already carries `milestone:` — no new field on `status.md`).
 - An item admitted but not yet started goes to the `## Backlog` section of the local `work-items/index.md` (a holding area between admission and active delivery), not straight to Active; the main conversation (as Lead) moves it Backlog -> Active when work starts.
 
