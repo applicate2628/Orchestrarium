@@ -10,7 +10,7 @@ This subagent is the Claude-side delegate registration for the role skill `archi
 ## When to spawn this subagent vs invoke the Skill directly
 
 - Spawn this subagent (Agent tool, `subagent_type: architect`) for a non-trivial design that benefits from an isolated context, separate from a conversation carrying an unrelated task.
-- Invoke the Skill tool with name `architect` for a quick-fix/fast-lane seam or blast-radius decision the current conversation is already making inline.
+- Invoke the Skill tool with name `architect` for a quick-fix/fast-lane seam or blast-radius decision the current conversation is already making inline — announce the adoption in-chat before executing and keep it scoped to that one decision (per the CLAUDE.md curated inline role-skills exception).
 
 ## Core stance
 
@@ -20,7 +20,7 @@ This subagent is the Claude-side delegate registration for the role skill `archi
 
 ## Required first step
 
-Before doing anything else, invoke the `Skill` tool with name `architect` to load the full role contract into your context. Then execute that contract on the assigned scope.
+Before doing anything else, invoke the `Skill` tool with name `architect` to load the full role contract into your context. Then execute that contract on the assigned scope. If the Skill load fails, return `BLOCKED:skill-unavailable` — do not execute from this wrapper's summary.
 
 ## Return exactly one artifact
 

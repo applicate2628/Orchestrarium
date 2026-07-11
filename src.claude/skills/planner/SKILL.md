@@ -9,7 +9,7 @@ description: Adopt the Planner role inline in THIS conversation to upgrade the a
 
 This skill runs two ways:
 
-- **Inline** (`Skill` tool, `/planner`): loads this contract into the CURRENT conversation, preserving accumulated context. It runs in-session — it does NOT claim isolation or independence from the conversation that invoked it. Use it to upgrade the additive fast lane's improvised "inline plan" into a phased plan with explicit AC-ids `$qa-engineer` can map evidence to.
+- **Inline** (`Skill` tool, `/planner`): loads this contract into the CURRENT conversation, preserving accumulated context. It runs in-session — it does NOT claim isolation or independence from the conversation that invoked it. Use it to upgrade the additive fast lane's improvised "inline plan" into a phased plan with explicit AC-ids `$qa-engineer` can map evidence to. Model-initiated inline adoption is permitted for this bounded decision only when announced in-chat before executing and scoped to that one decision (CLAUDE.md curated inline role-skills exception).
 - **Dispatched** (`Agent` tool, `subagent_type: planner`): the fresh-context delegate wrapper at `.claude/agents/planner.md` loads this same skill inside an isolated subagent context, for a non-trivial delivery plan.
 
 ## Core stance

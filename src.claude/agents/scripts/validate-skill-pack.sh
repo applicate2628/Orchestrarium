@@ -897,6 +897,39 @@ if [[ -f "$AGENTS_FILE" ]]; then
 fi
 echo ""
 
+# 2c. Layering-law ID resolution (audit F29): role files cite layering-law IDs
+# (A6, C1, C2, ...) defined only in the NON-installed maintainer reference
+# (shared/references/architecture-layering-hygiene.md). Every law ID a role
+# file uses must resolve to a SAME-FILE bold-labeled definition — the
+# security-engineer.md "**... (C1):**" pattern — so a dispatched agent can
+# bind every ID it is told to name in findings. Scope: top-level agents/*.md
+# plus the curated role-skills; common skills are excluded by construction.
+# The definition regex is BOTH-sides bold-bounded: a one-sided variant would
+# false-match prose after a closed bold span (e.g. "(A6-shaped)" in D2 bodies).
+# The "(\)| )" alternation accepts both "(C1):" labels and "(D3 — facet)"
+# labels; M is deliberately excluded from the ID class (always its own label).
+echo "[Layering-law ID resolution]"
+LAW_ID_FILES=""
+for f in "$PACK"/agents/*.md; do
+  [[ -f "$f" ]] && LAW_ID_FILES="$LAW_ID_FILES $f"
+done
+for r in $CURATED_ROLE_SKILLS; do
+  [[ -f "$PACK/skills/$r/SKILL.md" ]] && LAW_ID_FILES="$LAW_ID_FILES $PACK/skills/$r/SKILL.md"
+done
+for f in $LAW_ID_FILES; do
+  ids=$(grep -oE '\b(A[1-9]|B[1-3]|C[1-6]|D[1-5])\b' "$f" | sort -u || true)
+  unresolved=""
+  for id in $ids; do
+    grep -qE "\*\*[^*]*\($id(\)| )[^*]*\*\*" "$f" || unresolved="$unresolved $id"
+  done
+  if [[ -n "$unresolved" ]]; then
+    fail "$(basename "$f"): law ID(s)$unresolved used but no same-file labeled definition (**... (ID):** bullet)"
+  else
+    pass "$(basename "$f"): all layering-law IDs resolve in-file"
+  fi
+done
+echo ""
+
 # 3. Team templates have required fields
 echo "[Team templates]"
 for f in $PACK/agents/team-templates/*.json; do

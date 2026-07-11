@@ -28,7 +28,6 @@ $DefaultAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
 # commands/agents-*.md only; generated skills/agents-*/SKILL.md are a standalone-
 # BRANCH artifact, reclaimed here if left stale by a prior install.
 $Dirs = @("agents", "commands", "skills")
-$OptionalDirs = @("memory")
 $script:PromptMode = $null
 
 function Test-Interactive {
@@ -803,22 +802,6 @@ foreach ($scriptName in $RuntimeLedgerScripts) {
         Copy-Item -LiteralPath $scriptSource -Destination $scriptTarget -Force
     } else {
         Write-Host "    [dry-run] would copy $scriptSource -> $scriptTarget"
-    }
-}
-
-# Optional dirs: copy if not present, don't overwrite
-foreach ($dir in $OptionalDirs) {
-    $src = Join-Path $Source $dir
-    $dst = Join-Path $TargetRoot $dir
-    if (Test-Path $dst) {
-        Write-Host "  Keeping existing $dir\ (optional, not overwritten)"
-    } elseif (Test-Path $src) {
-        Write-Host "  Installing $dir\ (optional)..."
-        if (-not $DryRun) {
-            Copy-Item -Recurse -Force $src $dst
-        } else {
-            Write-Host "    [dry-run] would copy $src -> $dst"
-        }
     }
 }
 

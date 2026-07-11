@@ -9,7 +9,7 @@ description: Adopt the Analyst role inline in THIS conversation for a trivial, b
 
 This skill runs two ways:
 
-- **Inline** (`Skill` tool, `/analyst`): loads this contract into the CURRENT conversation, preserving accumulated context. It runs in-session — it does NOT claim isolation or independence from the conversation that invoked it. Use it for a trivial, bounded factual read where a fresh context is economy, not integrity.
+- **Inline** (`Skill` tool, `/analyst`): loads this contract into the CURRENT conversation, preserving accumulated context. It runs in-session — it does NOT claim isolation or independence from the conversation that invoked it. Use it for a trivial, bounded factual read where a fresh context is economy, not integrity. Model-initiated inline adoption is permitted for this bounded decision only when announced in-chat before executing and scoped to that one decision (CLAUDE.md curated inline role-skills exception).
 - **Dispatched** (`Agent` tool, `subagent_type: analyst`): the fresh-context delegate wrapper at `.claude/agents/analyst.md` loads this same skill inside an isolated subagent context, for a non-trivial or broad investigation.
 
 Adopting this role inline reviews or verifies nothing — it produces a research memo like any dispatch; independent gates (`$architecture-reviewer`, `$qa-engineer`, and the rest) remain separate dispatches regardless of invocation mode.
