@@ -1306,7 +1306,7 @@ COMMON_SKILL_BODY_PINS=(
   "explain-simply=f0f0e4dd1bed68aa8114adf6059fea32fedbee8fd06bf8bb12042dcd07ebb408"
   "mathtype-book-page=e0d3fa5233eaa5d59ba0c8b90b45ffb0aa2dd51e6a8a8a00659dd8bddd626323"
   "vak-dissertation-review=01a081d65ed99e732c7b55220655514cf085a0f398639ec8fbedf95572999adf"
-  "windows-gui-manual-testing=9276127c126d78aef6978670def2d2cd912392c0071f5c65558aa06be7634dc3"
+  "windows-gui-manual-testing=b3a029e6784d1d9e37f789b8b512f31f5e5c2161ca6807dc8a140854042ae6c8"
 )
 for pin in "${COMMON_SKILL_BODY_PINS[@]}"; do
   pin_name="${pin%%=*}"

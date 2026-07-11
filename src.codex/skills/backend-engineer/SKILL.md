@@ -19,13 +19,17 @@ description: "Implement backend APIs, domain logic, persistence, integrations."
 
 ## Return exactly one artifact
 
-- Return one backend implementation package containing the scoped patch, changed files, tests, implementation notes, and explicit assumptions or risks.
+- Return one backend implementation package containing the scoped patch, changed files, tests, implementation notes, explicit assumptions or risks, and for every added or changed API surface a wire-level before/after covering success and error status codes, field additions/removals/renames, pagination or ordering semantics, and named consumers affected.
 
 ## Gate
 
 - The diff stays inside approved file and responsibility boundaries.
 - Backend contracts, invariants, and error handling remain aligned with the accepted design and constraints.
 - Planned tests and checks were run or explicitly reported as blocked.
+- Every new or modified outbound HTTP, database, queue, cache, or RPC call site has an explicit timeout, a bounded-backoff retry decision or explicit no-retry decision, and a failure mapping to the caller's contract; a library-default infinite timeout is a gate finding.
+- Every new or changed endpoint or handler includes an Authorization statement naming the enforced authorization rule, or states `public by design` and cites the approving artifact; a route with neither is `REVISE`.
+- Every new query or object-relational-mapping path states expected cardinality and its index or query-plan expectation. An N+1 remote-call loop or unbounded result set without `LIMIT`/pagination is fixed or explicitly justified in the notes.
+- Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
 
@@ -33,7 +37,7 @@ description: "Implement backend APIs, domain logic, persistence, integrations."
 - Keep API, storage, and integration changes explicit.
 - If the design or plan conflicts with reality, stop and return the exact conflict instead of patching around it.
 - When fixing a runtime bug whose cause is not obvious from code inspection, invoke `$bug-hunting` to load diagnostic-logging discipline — log first, never patch on unverified theory, never re-roll on guesses.
-- When porting backend logic between languages or libraries (regex case sensitivity, locale handling, JSON tag conventions, error semantics, encoding defaults), apply the cross-platform/cross-language port discipline from shared governance: compare documented semantics of source and destination primitives, do not assume surface syntax preserves behavior, and verify with a target-environment smoke test before claiming the port works.
+- When porting backend logic between languages or libraries (regex case sensitivity, locale handling, JSON tag conventions, error semantics, encoding defaults), compare documented semantics of source and destination primitives, do not assume surface syntax preserves behavior, and verify with a target-environment smoke test before claiming the port works.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 
 ## Adjacent findings protocol

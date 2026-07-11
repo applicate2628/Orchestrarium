@@ -19,20 +19,27 @@ description: "Verify Qt UI: interactions, focus, high-DPI, themes, screenshots."
 
 ## Return exactly one artifact
 
-- Return one Qt UI verification report containing checked surfaces, reproduced states, visual or screenshot evidence when available, defects or regressions found, residual risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- Return one Qt UI verification report containing checked surfaces, a per-state evidence matrix, the exercised scale-factor x theme x window-state cells, visual or screenshot evidence, defects or regressions found, residual risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
 
 ## Gate
 
-- The checked UI behaves correctly across the requested states, including keyboard navigation, focus visibility, high-DPI scaling, and theme-specific rendering when applicable.
-- Visual or screenshot evidence is included when the phase affects appearance or layout.
+- The report lists every requested state as `state -> probe -> expected -> observed -> evidence path`; a state without observed evidence, including states remaining after a crashed or aborted interaction run, is explicitly `UNVERIFIED`.
+- For every state, write `What would this check let pass?` and anchor visual expectations to a known-good oracle such as a shipped-build screenshot or specification render, never a sibling theme or widget that can share the defect.
+- Full Tab traversal visits every interactive control and returns to its start without a focus trap; focus indication is visible at each keyboard stop; Escape/Enter honor dialog cancel/default semantics; and focus lands on a named sensible control after dialog open and after each tested transition.
+- Visual evidence is directly inspected, uses the `$windows-gui-manual-testing` full-window crop anchor when presented as full-window evidence, and names the settledness condition waited on before capture; fixed-sleep capture is a finding.
 - Blocking regressions are called out explicitly and tied to the observed Qt surface.
 
 ## Working rules
 
 - Prefer reproducible UI evidence over subjective polish comments.
 - Check the narrow Qt surface under review rather than the whole application.
+- Exercise and report the scale-factor x theme x window-state matrix, marking unexercised cells `UNVERIFIED`. Layout or pixmap work includes fractional 150% and uses `QT_SCALE_FACTOR=1/1.5/2` plus `QT_ENABLE_HIGHDPI_SCALING` as portable reproduction levers.
 - Escalate broad usability or accessibility concerns to `$ux-reviewer` or `$accessibility-reviewer` instead of expanding scope.
 - Route visual evidence collection through `$windows-gui-manual-testing` for the broader workflow (theme/state context, screen capture when no recording exists, structural-vs-cosmetic classification) and through `$analyzing-video-bugs` for systematic frame extraction whenever video is involved.
+
+## Bug registry
+
+On `REVISE` or `BLOCKED`, file each finding in `work-items/bugs/<date>-<slug>.md` using the qa-engineer-owned format with `found-by: ui-test-engineer` before returning the verdict. Lead with the control path, theme, DPI, window state, reproduction, and evidence path or frame numbers.
 
 ## Non-goals
 

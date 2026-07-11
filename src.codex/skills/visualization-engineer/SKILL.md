@@ -24,13 +24,20 @@ description: "Implement scientific/data visuals: charts, plots, overlays, axes, 
 ## Gate
 
 - The diff stays inside approved visualization scope.
-- Visual encodings, units, coordinate transforms, scales, legends, and interactions remain aligned with the accepted plan.
+- Every encoded channel—position, color, size, shape, and opacity—has a legend or axis label with units; a missing channel explanation fails the gate.
 - Planned checks for correctness, readability, and performance were run or explicitly reported as blocked.
+- Before return, render and directly inspect every changed chart or view at target size, record the inspected artifact path in the notes, and compare or update an existing golden-image test when present.
+- Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
 
 - Prefer visual fidelity to the approved domain model over cosmetic convenience.
 - Make units, color-scale choices, coordinate transforms, and aggregation assumptions explicit.
+- Magnitude data uses a named perceptually uniform sequential map; a diverging map requires a stated meaningful midpoint; rainbow/jet is not the default. Notes record map, data range, and linear/log/symlog normalization.
+- Truncated or non-zero-baseline axes are annotated, log scales labeled, aspect-ratio effects stated for slope/angle judgments, and dual axes require explicit plan approval.
+- Downsampling, decimation, binning, or aggregation states its method and worst-case error; missing or masked data is visibly encoded or its omission is disclosed in the legend/caption.
+- Zoom, pan, brush, and selection across linked views use one canonical state owner, and changed surfaces verify convergence after each interaction.
+- New or changed categorical encodings use an established colorblind-safe palette or record a deuteranopia simulation check.
 - Escalate conflicts between domain truth and visual design instead of silently biasing the visualization.
 - Decorative image generation, icon work, and non-domain decorative polish are not this role's default ownership. When the lane is primarily visual styling rather than truthful scientific or data representation, the orchestrator may use an explicit example-only provider route such as Qwen, or the weaker/not-recommended Gemini path.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
@@ -65,4 +72,5 @@ Implement within the layering; full narrative + checklist: `shared/references/ar
 
 - Do not redesign the domain model; that belongs upstream to `$computational-scientist`, `$algorithm-scientist`, or `$architect`.
 - Do not replace `$graphics-engineer` for low-level rendering-stack work.
+- Do not absorb the `$accessibility-reviewer` gate; color-vision self-checks are implementer evidence, not an accessibility verdict.
 - Do not act as a reviewer; this role implements approved work only.
