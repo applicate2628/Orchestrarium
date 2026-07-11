@@ -17,7 +17,8 @@
 #   echo "<prompt body>" | bash .claude/agents/scripts/invoke-claude-prompt.sh <topic-slug> [-- claude-flags...]
 #   bash .claude/agents/scripts/invoke-claude-prompt.sh <topic-slug> --prompt-file <path> [-- claude-flags...]
 #
-# Default claude flags (applied when no `--` block is given): -p --output-format text
+# Default claude flags (applied when no `--` block is given):
+#   -p --output-format text --model opus --effort xhigh
 # (the current claude CLI removed the top-level `--quiet` flag; `-p`/`--print` is the non-interactive mode)
 #
 # Environment overrides:
@@ -45,7 +46,20 @@ EOF
 
 TOPIC=""
 PROMPT_FILE=""
-CLAUDE_FLAGS=("-p" "--output-format" "text")
+# Default flags (A12: every provider-backed run must carry an explicit model AND
+# effort, never an ambient one) pin the shipped default profile `opus-xhigh` —
+# the same fix already applied to the sibling invoke-codex-prompt.sh; without
+# `--model`/`--effort` the run rides whatever ambient model the operator's
+# Claude config selects, silently breaching the consultant xhigh floor.
+# Callers needing a different profile pass the full per-profile flag set after `--`:
+#   `opus-xhigh` (default / best-effort / consultant lane):
+#     -- -p --output-format text --model opus --effort xhigh
+#   `opus-max` (max-depth escalation for especially hard tasks):
+#     -- -p --output-format text --model opus --effort max
+#   `sonnet-high` (balanced/lighter tier):
+#     -- -p --output-format text --model sonnet --effort high
+# An explicit `--` block always overrides these defaults, including `--model`.
+CLAUDE_FLAGS=("-p" "--output-format" "text" "--model" "opus" "--effort" "xhigh")
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)

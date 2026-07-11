@@ -664,43 +664,92 @@ def validate_manual_reference_surfaces(root: Path) -> None:
             )
 
 
-# The externalCodexProfile value NAMESPACE shape (a schema value looks like this).
-# Detection is derived from the SCHEMA, not a hardcoded value list — the specific
-# allowed values (gpt-5.6-luna, ...) are read from the schema at runtime; this
-# pattern only recognizes the token SHAPE so the scanner can find them on a line.
-_CODEX_ENUM_TOKEN = re.compile(r"default|gpt-5\.\d+-[a-z0-9-]+")
-# Enum-LISTING signature: any TWO namespace-shaped tokens adjacent via ` | ` (the
-# enum's `X | Y | Z` form). Robust to a dropped value — a copy missing one value
-# still has other adjacent pairs, so it is still detected (then the exact-set
-# check below flags the drop). Markdown preset-table ROWS are excluded separately
-# (they start with `|`), so a row that scatters the same tokens across cells is
-# not a false positive.
-_CODEX_ENUM_LISTING = re.compile(
-    r"(?:default|gpt-5\.\d+-[a-z0-9-]+)\s*\|\s*(?:default|gpt-5\.\d+-[a-z0-9-]+)"
-)
-_CODEX_ENUM_SCAN_ROOTS = ("docs", "shared", "src.claude", "src.codex", "src.gemini", "src.qwen")
-_CODEX_ENUM_SCAN_TOP = ("README.md", "INSTALL.md")
-_CODEX_ENUM_SCAN_EXTS = (".md", ".json", ".yaml", ".yml", ".toml", ".sh", ".ps1")
+# Enum-copy drift guards. The externalCodexProfile guard exists because model-enum
+# copies drift (the recurring drift: gpt-5.3-codex-spark was missing from ~9 copies
+# until 2026-07-07); the externalClaudeProfile sibling exists because the same
+# drift class recurred Claude-side with zero guard (the Claude vocabulary sat
+# frozen at the opus/sonnet family through three Codex migrations). Detection is
+# derived from the SCHEMA at runtime — BOTH the value list AND the token SHAPE.
+# The first cut hardcoded the `gpt-5.\d+-` namespace, so the guard would have
+# silently no-oped at exactly the moment a family rename swept the copies; the
+# shape is now generalized from whatever values the schema carries.
+_ENUM_SCAN_ROOTS = ("docs", "shared", "src.claude", "src.codex", "src.gemini", "src.qwen")
+_ENUM_SCAN_TOP = ("README.md", "INSTALL.md")
+_ENUM_SCAN_EXTS = (".md", ".json", ".yaml", ".yml", ".toml", ".sh", ".ps1")
 # Changelog / release-note / history stems are EXEMPT: recording a superseded
 # enum ("was default | gpt-5.6-sol-xhigh | gpt-5.6-luna") is the point there, exactly
 # as the C6 stale-relation-residue hook exempts the same stems. A live-surface
 # enum validator must not guard historical prose.
-_CODEX_ENUM_EXEMPT_STEMS = {
+_ENUM_EXEMPT_STEMS = {
     "release_notes", "release-notes", "changelog", "changes", "history", "news",
 }
 
 
-def validate_codex_profile_enum(root: Path, schema_data: dict[str, Any]) -> None:
-    """Every LIVE surface that ENUMERATES the externalCodexProfile allowed values
+def _schema_allowed_values(schema_data: dict[str, Any], key_name: str) -> set[str]:
+    for entry in schema_data.get("scalarKeys", []):
+        if isinstance(entry, dict) and entry.get("name") == key_name:
+            allowed = set(entry.get("allowed", []))
+            if allowed:
+                return allowed
+            break
+    raise ContractError(f"schema has no {key_name}.allowed to validate against")
+
+
+def _enum_token_regex(allowed: set[str]) -> str:
+    """Token-shape regex text DERIVED from the schema values, never hardcoded.
+
+    Two alternation tiers:
+    - each allowed value verbatim (covers shape-less values such as `default`);
+    - a generalized family shape per hyphenated value: the leading name segment
+      is kept, the version/tier tail is generalized (`gpt-5.6-sol-xhigh` ->
+      `gpt-<segments>`, `opus-xhigh` -> `opus-<segments>`), so a STALE copy from
+      an earlier generation of the same family (e.g. `gpt-5.5-fast` during a
+      gpt-5.6 migration) is still recognized as an enum token and fails the
+      exact-set check instead of escaping detection entirely.
+    A future family jump re-derives the shape from the new schema values, so the
+    guard cannot silently no-op the way the hardcoded `gpt-5.\\d+-` namespace
+    would have. Both tiers are boundary-guarded so prose like `runtime-default`
+    or `claude-sonnet` never yields a spurious token.
+    """
+    segment = r"[a-z0-9]+(?:\.[0-9]+)*"
+    literals: set[str] = set()
+    shapes: set[str] = set()
+    for value in allowed:
+        literals.add(re.escape(value))
+        family = re.match(r"^([a-z]+)-", value)
+        if family:
+            shapes.add(rf"{re.escape(family.group(1))}(?:-{segment})+")
+    parts = sorted(shapes) + sorted(literals, key=len, reverse=True)
+    return rf"(?<![A-Za-z0-9-])(?:{'|'.join(parts)})(?![A-Za-z0-9])"
+
+
+def _iter_enum_scan_files(root: Path) -> list[Path]:
+    files: list[Path] = [root / name for name in _ENUM_SCAN_TOP]
+    for sub in _ENUM_SCAN_ROOTS:
+        d = root / sub
+        if d.is_dir():
+            files.extend(
+                p for p in d.rglob("*")
+                if p.is_file() and p.suffix in _ENUM_SCAN_EXTS
+                and "/.scratch/" not in p.as_posix()
+            )
+    return files
+
+
+def _validate_profile_enum_copies(
+    root: Path,
+    schema_data: dict[str, Any],
+    key_name: str,
+) -> None:
+    """Every LIVE surface that ENUMERATES the profile-enum allowed values
     (an `X | Y | Z` listing) must carry EXACTLY the schema set — the schema
     (shared/agents-mode.schema.json) is the single owner. Fail-closed on BOTH a
-    missing value (the recurring drift: gpt-5.3-codex-spark was missing from ~9
-    copies until 2026-07-07) AND an extra/renamed value (a schema rename must
-    sweep every copy).
+    missing value AND an extra/renamed value (a schema rename must sweep every
+    copy).
 
     Design (hardening the first cut after the 2026-07-07 acceptance commission):
-    - detection is DERIVED from the schema value namespace shape, not a hardcoded
-      `fast | xhigh` anchor, so a copy that drops one anchor token is still caught;
+    - detection is DERIVED from the schema values — value list AND token shape —
+      so neither a dropped anchor token nor a family rename can defeat the scan;
     - surfaces are DISCOVERED by globbing the doc/config trees (a new enumerating
       file is auto-covered) — but changelog/release-note/history stems are EXEMPT
       (recording a superseded enum there is legitimate, mirroring the C6 hook);
@@ -708,26 +757,13 @@ def validate_codex_profile_enum(root: Path, schema_data: dict[str, Any]) -> None
       cells) is skipped, so it is not a false positive;
     - the check is EXACT set-equality on a listing line, so a removed/renamed
       schema value fails closed (not merely a subset check)."""
-    allowed: set[str] | None = None
-    for entry in schema_data.get("scalarKeys", []):
-        if isinstance(entry, dict) and entry.get("name") == "externalCodexProfile":
-            allowed = set(entry.get("allowed", []))
-            break
-    if not allowed:
-        raise ContractError("schema has no externalCodexProfile.allowed to validate against")
+    allowed = _schema_allowed_values(schema_data, key_name)
+    token_regex = _enum_token_regex(allowed)
+    token_re = re.compile(token_regex)
+    listing_re = re.compile(rf"(?:{token_regex})\s*\|\s*(?:{token_regex})")
 
-    files: list[Path] = [root / name for name in _CODEX_ENUM_SCAN_TOP]
-    for sub in _CODEX_ENUM_SCAN_ROOTS:
-        d = root / sub
-        if d.is_dir():
-            files.extend(
-                p for p in d.rglob("*")
-                if p.is_file() and p.suffix in _CODEX_ENUM_SCAN_EXTS
-                and "/.scratch/" not in p.as_posix()
-            )
-
-    for path in files:
-        if path.stem.lower() in _CODEX_ENUM_EXEMPT_STEMS:
+    for path in _iter_enum_scan_files(root):
+        if path.stem.lower() in _ENUM_EXEMPT_STEMS:
             continue  # changelog / release-note / history — historical prose
         try:
             text = path.read_text(encoding="utf-8")
@@ -736,9 +772,9 @@ def validate_codex_profile_enum(root: Path, schema_data: dict[str, Any]) -> None
         for lineno, line in enumerate(text.splitlines(), 1):
             if line.lstrip().startswith("|"):
                 continue  # markdown preset-table row, not an inline enum listing
-            if not _CODEX_ENUM_LISTING.search(line):
+            if not listing_re.search(line):
                 continue
-            found = set(_CODEX_ENUM_TOKEN.findall(line))
+            found = set(token_re.findall(line))
             if found != allowed:
                 rel = path.relative_to(root).as_posix()
                 missing = sorted(allowed - found)
@@ -749,10 +785,23 @@ def validate_codex_profile_enum(root: Path, schema_data: dict[str, Any]) -> None
                 if extra:
                     detail.append(f"unknown/removed {extra}")
                 raise ContractError(
-                    f"{rel}:{lineno} externalCodexProfile enum listing "
+                    f"{rel}:{lineno} {key_name} enum listing "
                     f"{'; '.join(detail)} — must equal the schema set "
                     f"{sorted(allowed)} (owner: shared/agents-mode.schema.json)"
                 )
+
+
+def validate_codex_profile_enum(root: Path, schema_data: dict[str, Any]) -> None:
+    """externalCodexProfile enum-copy drift guard (see _validate_profile_enum_copies)."""
+    _validate_profile_enum_copies(root, schema_data, "externalCodexProfile")
+
+
+def validate_claude_profile_enum(root: Path, schema_data: dict[str, Any]) -> None:
+    """externalClaudeProfile enum-copy drift guard — the Claude mirror of the
+    Codex guard (see _validate_profile_enum_copies). Added when the Claude
+    vocabulary migrated to the fable family: the Codex enum went through three
+    migrations under a guard while the Claude enum copies had none."""
+    _validate_profile_enum_copies(root, schema_data, "externalClaudeProfile")
 
 
 def validate_schema(schema_data: dict[str, Any], presets_data: dict[str, Any]) -> None:
@@ -836,6 +885,7 @@ def main() -> int:
         validate_defaults(root, schema_data)
         validate_manual_reference_surfaces(root)
         validate_codex_profile_enum(root, schema_data)
+        validate_claude_profile_enum(root, schema_data)
         validate_available_presets(root, presets_data)
         validate_reference_expansion(root, presets_data)
         validate_raised_count_bullets(root, presets_data, PRESET_DOCS)

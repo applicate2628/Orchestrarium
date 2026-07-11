@@ -72,7 +72,7 @@
     {
       "name": "externalClaudeProfile",
       "default": "opus-xhigh",
-      "allowed": ["sonnet-high", "opus-xhigh", "opus-max"],
+      "allowed": ["sonnet-high", "opus-xhigh", "opus-max", "fable-xhigh"],
       "providers": ["codex"]
     }
   ],

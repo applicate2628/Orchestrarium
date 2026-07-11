@@ -25,7 +25,7 @@ Each angle is dispatched DIRECTLY by the orchestrator and returns its own result
 | Angle | `subagent_type` | Model / tier | Why this role |
 | --- | --- | --- | --- |
 | **Surgical verdict** | `external-reviewer` | resolved external provider (Codex, per the active `externalPriorityProfile`) | routes the surgical-correctness verdict through the external provider that sees bugs with surgical precision; provenance keeps the replaced review-side role label |
-| **Deep verdict** | `architecture-reviewer` | `model: opus` | the most capable deep-reasoning tier owns blast-radius / framing / "is this the right shape"; returns its strategic verdict DIRECTLY |
+| **Deep verdict** | `architecture-reviewer` | `model: fable` | the flagship deep-reasoning tier (the `fable` flagship alias as of 2026-07, recorded from the model list — not a verified ranking) owns blast-radius / framing / "is this the right shape"; returns its strategic verdict DIRECTLY |
 | **Mechanical scout** | `analyst` | `model: sonnet` | a fast factual `file:line` role for fully-specified scans; it FEEDS the verdicts and casts NO verdict |
 
 **Anti-consolidation note (REQUIRED):** the strategic/deep angle is a direct-verdict reviewer; it is intentionally NOT `subagent_type: consultant` — consultant's external-mode shells out (the role-confusion that returns "standing by for the external provider" instead of a verdict); `consultant.md` stays untouched.

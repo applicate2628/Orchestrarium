@@ -529,7 +529,7 @@ function Write-CodexDefaultAgentsModeFile {
         if (-not $content.EndsWith("`n")) {
             $content += "`n"
         }
-        $content += "externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh`n"
+        $content += "externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max | fable-xhigh; default: opus-xhigh`n"
     }
     Set-Content -LiteralPath $TargetFile -Value $content -NoNewline
 }

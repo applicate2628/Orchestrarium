@@ -190,7 +190,7 @@ The wrapper has no SECRET.md, no env injection, and no auth-mode switching — c
 If the advisory profile resolves to primary Claude, run the plain Claude CLI path:
 
 ```bash
-claude -p --output-format text < "$PROMPT_FILE"
+claude -p --output-format text --model opus --effort xhigh < "$PROMPT_FILE"
 ```
 
 - If the plain Claude CLI path fails, do not silently convert that same primary `claude` run to the wrapper.
