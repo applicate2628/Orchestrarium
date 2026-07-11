@@ -970,6 +970,7 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         # and the installer cannot trust them programmatically.
         $HooksTarget = Join-Path $TargetRoot "hooks.json"
         $BugfixScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-bugfix-discipline.ps1"
+        $GitPushGateScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-git-push-gate.ps1"
         $StopScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-passive-polling-stop.ps1"
         $WiArchivalScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-work-items-archival-stop.ps1"
         $MachinePathScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-machine-local-path.ps1"
@@ -979,6 +980,12 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         $AgentsModeReminderScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\agents-mode-reminder.ps1"
         Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
         & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-path $BugfixScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing git-push publication-gate PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-git-push-gate --tool-matcher "Bash" --script-path $GitPushGateScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE

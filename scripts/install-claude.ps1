@@ -954,6 +954,7 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         # PowerShell installer always emits Windows-native exec form referencing
         # the .ps1 hook script. Bash form is reserved for the .sh installer.
         $BugfixScriptTarget = Join-Path $TargetRoot "agents\scripts\check-bugfix-discipline.ps1"
+        $GitPushGateScriptTarget = Join-Path $TargetRoot "agents\scripts\check-git-push-gate.ps1"
         $StopScriptTarget = Join-Path $TargetRoot "agents\scripts\check-passive-polling-stop.ps1"
         $WiArchivalScriptTarget = Join-Path $TargetRoot "agents\scripts\check-work-items-archival-stop.ps1"
         $MachinePathScriptTarget = Join-Path $TargetRoot "agents\hooks\check-machine-local-path.ps1"
@@ -963,6 +964,12 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         $AgentsModeReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\agents-mode-reminder.ps1"
         Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows)..."
         & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-path $BugfixScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing git-push publication-gate PreToolUse hook (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-git-push-gate --tool-matcher "Bash" --script-path $GitPushGateScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
