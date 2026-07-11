@@ -25,6 +25,7 @@ Before doing anything else, invoke the `Skill` tool with name `windows-gui-manua
 ## Return exactly one artifact
 
 - Return one visual findings package containing: tested control path, environment (theme, DPI, window state), evidence type (screenshot, video frame sequence), concrete observations (what moved, clipped, duplicated, repainted late), structural vs cosmetic classification, theme-specificity, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- On `REVISE` or `BLOCKED`, persist each finding using the qa-engineer-owned format with `found-by: windows-gui-manual-testing` before returning the package; include enough repro, control-path, theme, and DPI context to re-derive volatile `.scratch/` evidence.
 
 ## Non-goals
 

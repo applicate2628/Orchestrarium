@@ -19,18 +19,25 @@ description: Implement an approved data phase without changing upstream architec
 
 ## Return exactly one artifact
 
-- Return one data implementation package containing the scoped code or SQL changes, changed files, verification notes, deployment ordering notes, and explicit assumptions or risks.
+- Return one data implementation package containing the scoped code or SQL changes, changed files, verification notes with observed reconciliation numbers for every backfill or recompute, deployment ordering notes, and explicit assumptions or risks.
 
 ## Gate
 
 - The diff stays inside approved data scope.
 - Schema, migration, backfill, rollback, and data-quality implications are explicit when relevant.
 - Planned tests, validations, and checks were run or explicitly reported as blocked.
+- Idempotent-rerun proof: every pipeline or job change states partition-overwrite, append, or `MERGE`-on-keys semantics and names or runs a double-execution test proving identical results; a blind appender without a deduplication or idempotency key is a gate finding.
+- A serving-table schema change follows `expand -> backfill -> cutover -> contract`; single-step destructive `DROP`, `RENAME`, or type-narrowing data-definition language requires explicit plan approval, and migration notes state large-table lock or rewrite impact.
+- A backfill or recompute reports observed reconciliation numbers from row counts, checksums, or full/sampled aggregate parity; `backfill completed` without numbers fails the gate.
+- Apply the `Receiving-side echo` owned by `subagent-contracts.md`; an implementation package missing that echo fails this gate.
 
 ## Working rules
 
 - Make data contract changes explicit and easy to review.
 - Call out operational impacts such as backfills, recomputes, deployment ordering, or recovery steps.
+- Any ingestion or incremental-processing change states its watermark, late-arrival, and duplicate policy; `assume clean input` is `ASSUMPTION (UNVERIFIED)` with the resolving probe.
+- When a pipeline runtime bug's cause is not obvious, including silent nulls, skew, bad partitions, or wrong joins, invoke `$bug-hunting` before patching.
+- Any added column or output declares whether it carries personal or sensitive data and names the masking and retention rule, or states `none by inspection`.
 - If the plan conflicts with the real data shape or platform limits, stop and return the exact conflict.
 - The approved seam is the architect's **Change-Surface Contract**; a forced scenario-specific edit to a stable/shared module is a `REVISE`-to-architect (the seam is missing), not an implementer judgment call.
 

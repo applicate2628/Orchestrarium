@@ -32,7 +32,7 @@ Record the environment before drawing conclusions:
 
 - app/build being tested
 - theme or style mode (`system`, custom, CAD, dark/light)
-- DPI or display scaling if known
+- actual per-monitor scale from `GetDpiForWindow`, plus the target process's DPI-awareness mode from `GetProcessDpiAwareness` or `DPI_AWARENESS_CONTEXT`
 - window size and whether the panel is docked, floating, or maximally narrowed
 - exact control path, for example `Analysis -> Data -> Resampling -> Mode`
 
@@ -47,7 +47,7 @@ Use the lightest artifact that can prove the problem:
 - short video: popup jerk, animation glitch, text reflow, control motion under the mouse
 - exported frame sequence: detailed timing analysis when one bad intermediate frame matters
 
-If the user gives a local image path, inspect it with `view_image`.
+If the user gives a local image path, Read the frame image (Read tool on Claude Code; view_image on Codex).
 
 If the user gives a local video path, extract frames first, then inspect representative frames instead of guessing from the video description.
 
@@ -56,20 +56,20 @@ If the user gives a local video path, extract frames first, then inspect represe
 When the bug is animation-, timing-, or sequence-dependent, video evidence is required. The video may come from one of two sources:
 
 1. **The user records and shares the file themselves.** Skip directly to frame analysis via `$analyzing-video-bugs` using the provided path.
-2. **The agent captures the video itself** when no recording exists. Use ffmpeg's `gdigrab` on Windows:
+2. **The agent captures the video itself** when no recording exists. Probe the installed ffmpeg build first with `ffmpeg -hide_banner -filters | Select-String ddagrab` (or `grep ddagrab`). Prefer the Desktop Duplication / Direct3D 11 `ddagrab` filter when present for hardware-composited Direct3D, OpenGL, WebView2, and Qt Rendering Hardware Interface surfaces; use the installed build's documented `ddagrab` input syntax. Keep `gdigrab` as the fallback and for window-title or region convenience.
 
    ```powershell
    # Full desktop, 30 fps, 10 seconds, H.264 mp4
-   ffmpeg -f gdigrab -framerate 30 -i desktop -t 10 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
+   ffmpeg -f gdigrab -draw_mouse 1 -framerate 30 -i desktop -t 10 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
 
    # One-frame artifacts: use 60 fps and keep the clip short
-   ffmpeg -f gdigrab -framerate 60 -i desktop -t 9 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
+   ffmpeg -f gdigrab -draw_mouse 1 -framerate 60 -i desktop -t 9 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
 
    # Specific window by title (window must be visible and named):
-   ffmpeg -f gdigrab -framerate 30 -i title="ExactWindowTitle" -t 10 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
+   ffmpeg -f gdigrab -draw_mouse 0 -framerate 30 -i title="ExactWindowTitle" -t 10 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
 
    # Region of screen:
-   ffmpeg -f gdigrab -framerate 30 -offset_x 100 -offset_y 100 -video_size 1280x720 -i desktop -t 10 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
+   ffmpeg -f gdigrab -draw_mouse 0 -framerate 30 -offset_x 100 -offset_y 100 -video_size 1280x720 -i desktop -t 10 -c:v libx264 -preset ultrafast -pix_fmt yuv420p .scratch/capture.mp4
    ```
 
    Correct full-window capture recipe:
@@ -78,7 +78,7 @@ When the bug is animation-, timing-, or sequence-dependent, video evidence is re
    2. If any side of the window rect is outside the visible virtual screen, restore/move/resize the window into a known visible rectangle before recording.
    3. Normalize capture width and height to even values for H.264.
    4. Capture one still frame with the exact intended `-offset_x`, `-offset_y`, and `-video_size`.
-   5. Inspect that frame with `view_image`. Confirm the entire app surface is present from left edge to right edge and from title bar to bottom edge. For normal overlapped windows, the top-right close button must be visible; if the close button is missing, the crop is wrong and cannot be used as full-window evidence.
+   5. Read the frame image (Read tool on Claude Code; view_image on Codex). Confirm the entire app surface is present from left edge to right edge and from title bar to bottom edge. For normal overlapped windows, the top-right close button must be visible; if the close button is missing, the crop is wrong and cannot be used as full-window evidence.
    6. Only after the check frame passes, drive the repro and record the video. If the check frame is clipped, discard the setup and correct the rectangle first.
 
    UI Automation preflight:
@@ -90,6 +90,7 @@ When the bug is animation-, timing-, or sequence-dependent, video evidence is re
    - Do not blame a console/log window that is behind or below the app unless the verification frame actually shows it covering the target window. Crop the app window, not the nearby tooling.
 
    Notes:
+   - Choose `-draw_mouse 0` or `1` deliberately and record the choice. Hover-state evidence may need the cursor position, but the cursor can also occlude the control under test.
    - Start the target app first, position and size it as needed, then start the capture command.
    - Before any cropped window or region capture, prove that the requested capture rectangle contains the whole visual surface under test. If `GetWindowRect` extends off the visible desktop, or if the right/bottom side of the app is outside the monitor, first move/resize/maximize the window fully into the visible desktop or capture the full desktop instead. Do not treat a partial crop as evidence for full-window behavior.
    - Most UI bugs reproduce in 5–15 seconds; do not record long sessions when a short repro is enough.
@@ -149,21 +150,29 @@ For theme-dependent bugs, check at least:
 
 If the project has an additional theme family such as CAD, check that too. A fix that only improves one theme but leaves another on a different popup path is incomplete.
 
+For before/after or cross-theme no-change claims, use the pixel-diff method in step 8; side-by-side inspection alone cannot support a no-visual-regression `PASS`.
+
 ### 7. Report findings cleanly
 
-Report findings as concrete UI observations, not guesses:
+Return one findings package with the tested control path; environment (app/build, theme, actual DPI and DPI-awareness mode, window state); evidence type; concrete observations; structural-vs-cosmetic classification; theme-specificity; residual risk; and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`. Report findings as concrete UI observations, not guesses:
 
 - what control was tested
 - what frame/state is wrong
 - what moved, clipped, duplicated, or repainted late
 - whether the bug is theme-specific
 - whether the issue is structural (`popup path`, `relayout`, `text wrap`, `stale style path`) or merely visual
+- the evidence file path plus frame number or timestamp for every observation, not only intermediate-frame findings
+- whether blur or fractional-scale behavior comes from Desktop Window Manager bitmap stretching of a DPI-unaware/system-aware process (an app-manifest finding) or from the paint path
 
 Prefer short cause statements like:
 
 - `Popup opens in two geometry stages.`
 - `Summary label changes height when the combo opens, moving the next control.`
 - `System theme is still using the custom combo popup path.`
+
+#### 7.1 Persist non-passing findings
+
+On `REVISE` or `BLOCKED`, file each finding in `work-items/bugs/<date>-<slug>.md` using the qa-engineer-owned format with `found-by: windows-gui-manual-testing` before returning the verdict. Cite volatile machine-local evidence by `.scratch/` path and frame timestamp, but make the bug's repro steps, control path, theme, actual DPI, DPI-awareness mode, and window state sufficient to re-derive that evidence.
 
 ### 8. Re-test after a fix
 
@@ -180,9 +189,11 @@ For dropdown fixes, always verify both:
 - first open after window creation/theme switch
 - reopen after one successful interaction
 
+For still-image before/after, theme, or no-change claims, produce a machine diff such as `magick compare -metric AE before.png after.png diff.png` or an ffmpeg difference blend. Mask only named legitimately volatile regions such as clocks, carets, or cursors, and report the changed-pixel count and affected regions. An eyeball-only comparison cannot establish a no-visual-regression `PASS`.
+
 ## Guardrails
 
 - Do not call a UI issue “fixed” from code inspection alone when visual evidence is available.
 - Do not hide structural GUI problems with cosmetic text tweaks unless the user explicitly asks for a stopgap.
 - Do not rely on a single screenshot for animation bugs when a short video or frame sequence exists.
-- When a visual issue depends on an intermediate frame, say that explicitly and keep the frame numbers or timestamps in the notes.
+- When a visual issue depends on an intermediate frame, say that explicitly and keep the evidence path plus frame numbers or timestamps in the notes.
