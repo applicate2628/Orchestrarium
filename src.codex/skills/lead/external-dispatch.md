@@ -79,6 +79,7 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 - From PowerShell, use `.claude/agents/scripts/invoke-claude-api.ps1` only when it is the approved resolver for a resolved `reserve` advisory/review candidate and pass forwarded Claude flags after `--%`. From Bash or Git Bash, use `.claude/agents/scripts/invoke-claude-api.sh`, and set `CLAUDE_BIN` explicitly when the active shell PATH differs from the PowerShell PATH.
 - On Windows, keep the ordinary external launch path unchanged and try the native Windows shell first. If that native shell path fails because of shell bootstrap, execution-policy, or environment-policy problems, retry once through Git-for-Windows Bash / MSYS when available. Do not use the WSL `bash.exe` stub as a fallback, and do not reinterpret ordinary provider auth, quota, or model failures as shell-fallback triggers.
 - External CLI launches that carry a substantive task prompt must use file-based prompt delivery: write the prompt to a temporary prompt file and feed it through the provider's stdin or supported file-input mechanism. Keep command-line arguments limited to launcher flags, model/profile options, and file paths; inline prompt argv is allowed only for tiny smoke checks or a documented provider limitation, and record that deviation in the execution artifact.
+- The Codex pack ships no primary-run prompt wrappers; use a transport-neutral chain that persists the prompt, records an availability probe and explicit launch flags, and captures sibling `.out` / `.err` artifacts. Shipping mirror wrappers is a separate decision, not an inline substitute here.
 - For wide release or parity audits, split the admitted scope by repo, file set, or lane instead of launching one mega neutral-dir prompt across the whole pack family.
 - When the resolved provider is Claude and `externalClaudeProfile` is present, honor that profile instead of the shared model policy.
 - Provider-backed consultant execution in `external` mode plus `$external-worker` and `$external-reviewer` must use direct external launch from the orchestrating runtime or an approved transport wrapper script. Do not proxy them through an internal agent/helper/subagent host.
@@ -91,6 +92,38 @@ externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-ma
 - If the active priority profile requests multiple opinions for a lane, collect them fail-closed: partial collection is evidence, not success, and the lane stays blocked until the requested opinion count is satisfied.
 - If internal native slot limits would otherwise block more independent eligible lanes, prefer available external adapters instead of silently serializing or dropping those lanes.
 - When multiple independent external lanes should launch together, prefer the pack-local `external-brigade` surface so the lead records one bounded brigade plan instead of scattering ad hoc parallel helper launches.
+
+## Prompt-content contract
+
+The prompt file is the only governance an external Command-Line Interface (CLI) inherits. Before launch it must:
+
+- Include the complete handoff template verbatim from the owning `subagent-contracts.md`, including its mandatory pre-dispatch fill rule and defect-class completeness trigger; this contract cites that owner and does not reproduce its field list.
+- State the assigned role's gate vocabulary and one-artifact requirement.
+- Include a provenance-header echo instruction using this contract's header fields.
+- Include the evidence-citation discipline verbatim from the owning `Evidence discipline:` handoff field; this contract does not create a second copy.
+- For an adversarial review strategy, use an artifact-only prompt: include the artifact and review scope, but exclude builder claims and self-review.
+
+## Run-completion oracle
+
+- A provider run is complete only when its exit code is recorded, its `.out` artifact exists and is non-empty with the requested artifact shape (provenance header plus gate line), and its `.err` artifact is free of authentication, quota, usage-limit, and mid-stream-truncation markers.
+- A failed oracle check makes the run `UNVERIFIED`: re-dispatch it or return `BLOCKED:dependency`. Never summarize a truncated or partial `.out` into an artifact or render it as `PASS`.
+
+## Stall and timeout policy
+
+| Effort tier and lane | Earliest valid stall window |
+| --- | --- |
+| Ordinary advisory | 5-15 minutes |
+| `xhigh` / `max` worker or review | 45-60 minutes |
+
+- Actively poll the `.out` / `.err` artifacts and process status. A stall declaration before the applicable window without process evidence violates this contract.
+- If the shell times out, do not relaunch: identify the running process first and stop it only if it is orphaned or no longer needed.
+- A run declared stalled is `UNVERIFIED`; any re-dispatch cites the failed attempt and never duplicates a still-running process.
+
+## Write capability by lane type
+
+- Review, Quality Assurance (QA), and advisory lanes launch with the provider's read-only or sandboxed mode wherever the resolved CLI supports one, and record those permission flags in `Launch flags`.
+- A worker lane producing edits from a neutral workdir returns a reviewable edit payload as either a unified diff or a full-file set with repo-relative target paths; the worker artifact names which payload format it used.
+- In-place worker editing requires project workdir mode plus the marker-declared isolation worktree defined by decision `2026-07-10-worktree-isolation-canonical-path`; never grant a worker write access to the user's dirty primary tree.
 - User override is available in both directions regardless of toggle state.
 - Any eligible internal implementer role may be replaced by the best-fit external worker adapter.
 - Any eligible reviewer or QA role may be replaced by the best-fit external reviewer adapter.
@@ -200,10 +233,13 @@ Every external or consultant memo/report should record one explicit execution re
 - `Requested consultant mode: <external | internal | disabled>` when consultant routing is relevant; otherwise `not-applicable`
 - `Actual execution path: <internal consultant | external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role disabled>`
 - `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
+- `Launch flags: <exact argv model / effort / sandbox flags>`
+- `Run record: <started and finished timestamps or duration; prompt / .out / .err paths>`
 - `Deviation reason: <none | external unavailable: [reason] | explicit override>`
 
 Rules:
 
+- Before declaring a route unavailable, run `command -v` or `Get-Command` for the resolved CLI in the current session and record the availability-probe output in the execution artifact; a route change requires the probe result plus a populated `Deviation reason`. A missing wrapper, older failed run, or empty `.out` is indirect evidence and does not prove unavailability.
 - Keep `Execution role` and `Assigned / replaced internal role` on separate lines. Do not merge them into one ambiguous label.
 - `Requested provider: internal` means no explicit external provider was requested by the caller and routing/default resolution picked the provider. It must not be rendered as `auto` in the artifact.
 - `internal consultant` is valid only for the consultant role when `consultantMode: internal`.
