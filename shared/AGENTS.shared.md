@@ -1,7 +1,7 @@
 # Shared Governance
 This file contains platform-neutral governance rules shared across skill packs. Install scripts merge it with the platform-specific file into a single `AGENTS.md`.
 
-Rule elaboration, examples, recovery procedures, and the glossary live in `shared/references/spine/` in the source repo (NOT installed to targets; read on demand); the compact rules below are self-sufficient.
+Rule elaboration and the glossary live under `shared/references/` (maintainer reference; NOT installed to targets); the compact rules below are self-sufficient.
 
 ## Role index
 - Roadmap and orchestration: `$product-manager`, `$lead`, `$consultant`, `$knowledge-archivist`.
@@ -46,7 +46,7 @@ Three storage tiers: `work-items/` — canonical artifacts (briefs, status, rese
 - keep `$external-worker` out of review/QA/owner orchestration and `$external-reviewer` out of worker execution/owner orchestration; prefer external adapters over silent serialization or dropping when native slots would block independent eligible lanes; independent adapters may run in parallel (same provider concurrently for different admitted scopes); `externalOpinionCounts` stays separate from general external fan-out, and bounded parallel helper sets may use the pack-local external-brigade surface
 - honor provider-specific addenda exactly; do not infer generic fallback, retry, or worker-side routing from a wrapper's existence; a selected external role does not silently fall back to an internal specialist if the external CLI is unavailable
 - provider-backed `$consultant` (external mode), `$external-worker`, and `$external-reviewer` must use direct external launch from the orchestrating runtime or an approved transport wrapper script, not an internal agent/helper/subagent host layer
-- external CLI launches carrying a substantive task prompt must use file-based prompt delivery: write the prompt to a temporary file fed via provider stdin or file-input, keep argv to launcher flags / model-profile options / file paths, and save stdout and stderr to explicit files (record any inline-prompt exception). Use the Claude pack wrappers (`invoke-codex-prompt.sh`/`.ps1`, `invoke-claude-prompt.sh`/`.ps1`) as the canonical path, the inline chain as fallback; `invoke-claude-api.sh`/`.ps1` is a separate secret-backed transport for `reserveResolver: claude-wrapper`, not interchangeable
+- external CLI launches carrying a substantive task prompt must use file-based prompt delivery: write the prompt to a temporary file fed via provider stdin or file-input, keep argv to launcher flags / model-profile options / file paths, and save stdout and stderr to explicit files (record any inline-prompt exception). Pack-shipped prompt wrappers are the canonical path where present; else the inline chain
 - wait long enough for the selected model/profile — do not swap an unfinished provider run for a weaker shortcut unless the user approves; for Claude `opus`/`max`/deep-review assume runtime may exceed 30 minutes — use a 45-60 minute timeout or a polled background process. On shell timeout do not start a duplicate — find the running process; stop it only if orphaned or no longer needed
 - keep `security-engineer` separate from `security-reviewer`, dedicated performance optimization separate from the QA gate, and require human review before `git push`, release, or equivalent publication
 Do not assign a single subagent to "build the whole feature." If the user explicitly delegates a narrower role, honor it instead of routing through `$lead`:
@@ -69,7 +69,7 @@ Apply these rules in this order when they pull in different directions:
 
 If conflict remains after that ordering, do not silently weaken the higher-priority rule; take the smaller reversible action or escalate explicitly.
 
-Working definitions (`owning boundary`, `external contract`, `repo-standard checks`, `smallest safe reversible subset`, `ambient input`) are defined in `shared/references/spine/governance-glossary.md`.
+Working definitions — owning boundary: the module/interface/approved seam owning the behavior; external contract: any outside-observable promise (API/config/schema/events/CLI); repo-standard checks: repo-defined validation entry points; smallest safe reversible subset: narrowest work-advancing change locking in nothing unresolved; ambient input: the Determinism card's list.
 
 ### Scope and ownership discipline
 - **Anti-hardcoding:** do not hardcode machine-/user-/repo-layout-/environment-specific, secret, or policy-owned values when accepted constants, config, parameters, env vars, or discovery produce the same result. True invariants, protocol constants, and small algorithm-local literals are fine; if hardcoding is unavoidable, surface the tradeoff first.
@@ -144,4 +144,4 @@ Repo-local governance or build docs should define the concrete forms of these sh
 
 ## Terms and Abbreviations
 
-Domain terms, abbreviations, role names, status labels (`PASS`, `REVISE`, `BLOCKED`, `ASSUMPTION (UNVERIFIED)`, `WORKAROUND`), and provider names used across this spine and its references: `shared/references/spine/governance-glossary.md`.
+Domain terms, abbreviations, role names, status labels (`PASS`, `REVISE`, `BLOCKED`, `ASSUMPTION (UNVERIFIED)`, `WORKAROUND`), and provider names used across this spine: `shared/references/spine/governance-glossary.md`.

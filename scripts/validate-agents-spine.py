@@ -11,7 +11,7 @@ loses it. Reference docs confirm: @import does not reduce context; on-demand
 reference files do.
 
 This validator fails closed if:
-  (a) the spine exceeds SIZE_CAP chars (the size goal), OR
+  (a) the spine exceeds SIZE_CAP in code points or UTF-8 bytes (the size goal), OR
   (b) any required protection token is missing from the spine -- i.e. a cut
       silently dropped a rule's operational teeth (banned-phrase list, trigger,
       gate name, required probe, safety clause, status label).
@@ -44,9 +44,10 @@ from pathlib import Path
 MERGED_INTO_SPINE = {"Results-table provenance discipline"}
 
 # Claude Code warns when an always-loaded context file exceeds 40,000 chars.
-# SIZE_CAP is the spine ceiling the validator enforces: 39,900 keeps a 100-char
-# guard band below the warning for char-count measurement differences between
-# this len()-based check and Claude's own measure. The guard band is thin
+# SIZE_CAP is the spine ceiling the validator enforces: 39,900 keeps a 100-unit
+# guard band below the warning; measured as max(code points, UTF-8 bytes)
+# because Claude's own counting unit is unverified and the spine's non-ASCII
+# content makes bytes the binding measure. The guard band is thin
 # because lose-nothing restores (the review loop required several enforceable
 # specifics to stay in the spine, not just in extracts) raised the floor to
 # ~39,800; the dense operational content cannot drop further without removing
@@ -89,24 +90,32 @@ BANNED_REASONING_PHRASES = [
 ]
 
 BANNED_CORRECTNESS_DRIVERS = [
-    "should work",
     "should be fine",
-    "probably",
     "I think",
     "this pattern usually works",
-    # Backtick-delimited on purpose: the bare forms "likely" and "in general" are
-    # substrings of the pinned reasoning phrases "most likely means" and
-    # "in general X means Y", so a bare-token pin would already be satisfied by
-    # those and would NOT protect the standalone correctness-driver occurrence in
-    # the Evidence-citation card. The backtick form is unique to that card.
+    # Backtick-delimited on purpose: the bare forms "likely", "in general",
+    # "probably", and "should work" also occur in OTHER spine cards ("most
+    # likely means" / "in general X means Y" in the banned-reasoning list;
+    # "other modes probably do not hit it" in the General-case card;
+    # '"should work" and stale results' in Evidence-based completion), so a
+    # bare-token pin is satisfied by those and does NOT protect the standalone
+    # correctness-driver occurrence in the Evidence-citation card. The
+    # backtick form is unique to that card.
     "`likely`",
     "`in general`",
+    "`probably`",
+    "`should work`",
 ]
 
 BUG_TRIGGER_SIGNALS = [
     "does not work",
     "не работает",
-    "regression",
+    # Anchored on the Pre-fix diagnostic gate's own trigger enumeration: bare
+    # "regression" occurs in 4 other spine lines (Regression hygiene,
+    # Indirect-regression discipline, Guard precondition discipline,
+    # Race-window assertion discipline), so a bare pin cannot protect the
+    # gate's trigger list. This exact phrase is unique to the Pre-fix card.
+    'error, regression, "does not work"',
     "runtime failure",
 ]
 
@@ -205,6 +214,39 @@ REUSE_BEFORE_HAND_ROLLING_TEETH = [
     "record rejected options",
 ]
 
+# Per-card teeth for high-value disciplines whose only manifest pin was the
+# bold card NAME (the discipline-parity check requires just "**{name}"), so a
+# card could be reduced to its name plus one vague sentence with all checks
+# green. Same pattern as GENERAL_CASE_TEETH: exact substrings of the card body.
+WIRE_SHAPE_TEETH = [
+    "read the producer's actual serialization rules",
+    "inspect one real sample",
+    "Go structs without tags serialize PascalCase",
+    "Read the producer once, then write the consumer",
+]
+
+DESTRUCTIVE_POLARITY_TEETH = [
+    "encode destructive intent as the positive case",
+    "zero/absent value is the safe path",
+    "Inverted-polarity names",
+]
+
+GUARD_PRECONDITION_TEETH = [
+    "verify its own inputs satisfy its assumptions",
+    "missing, zero, empty, parse-fallback, both-sides-equal-by-default",
+    "fail closed on each",
+    "synthetically-degraded inputs",
+    "never silently weaken the invariant",
+]
+
+EVIDENCE_COMPLETION_TEETH = [
+    "no done-claim without fresh execution evidence",
+    "implemented, not yet verified",
+    "exit-code-zero from async work is not success evidence",
+    "weaker-than-requested verification is a defect",
+    "NOT-clean (fail-closed)",
+]
+
 MANIFEST: dict[str, list[str]] = {
     "banned reasoning phrases": BANNED_REASONING_PHRASES,
     "banned correctness drivers": BANNED_CORRECTNESS_DRIVERS,
@@ -217,6 +259,10 @@ MANIFEST: dict[str, list[str]] = {
     "review-restored teeth": REVIEW_RESTORED_TEETH,
     "general-case teeth": GENERAL_CASE_TEETH,
     "reuse-before-hand-rolling teeth": REUSE_BEFORE_HAND_ROLLING_TEETH,
+    "wire-shape teeth": WIRE_SHAPE_TEETH,
+    "destructive-polarity teeth": DESTRUCTIVE_POLARITY_TEETH,
+    "guard-precondition teeth": GUARD_PRECONDITION_TEETH,
+    "evidence-completion teeth": EVIDENCE_COMPLETION_TEETH,
 }
 
 
@@ -229,14 +275,22 @@ def validate(spine_path: Path, size_cap: int = SIZE_CAP) -> tuple[bool, list[str
         return False, [f"FAIL: spine file not found: {spine_path}"]
 
     text = spine_path.read_text(encoding="utf-8")
-    size = len(text)
+    chars = len(text)
+    utf8_bytes = len(text.encode("utf-8"))
+    # Claude Code's 40,000 warning unit is not empirically pinned (bytes vs
+    # code points). max() is conservative under either unit, so the cap holds
+    # regardless; the spine's non-ASCII chars (em-dashes, arrows, Cyrillic)
+    # make UTF-8 bytes the larger, binding measure.
+    size = max(chars, utf8_bytes)
 
     if size <= size_cap:
-        messages.append(f"PASS: spine size {size} <= {size_cap} chars")
+        messages.append(
+            f"PASS: spine size {size} <= {size_cap} (code points {chars}, UTF-8 bytes {utf8_bytes})"
+        )
     else:
         ok = False
         messages.append(
-            f"FAIL: spine size {size} > {size_cap} chars (shed {size - size_cap} more)"
+            f"FAIL: spine size {size} > {size_cap} (code points {chars}, UTF-8 bytes {utf8_bytes}; shed {size - size_cap} more)"
         )
 
     total_missing = 0
@@ -253,7 +307,10 @@ def validate(spine_path: Path, size_cap: int = SIZE_CAP) -> tuple[bool, list[str
 
     # Pointer-resolution check: every shared/references/...md path named in the
     # spine must exist on disk (catches a moved/renamed extract leaving a dead
-    # pointer). repo_root is the directory that contains shared/.
+    # pointer). repo_root is the directory that contains shared/. NOTE: this
+    # resolves against the SOURCE repo only — installed targets ship no
+    # shared/references/, which is why the spine's line-4 disclaimer must
+    # honestly cover every such pointer as maintainer-reference-only.
     repo_root = spine_path.resolve().parent.parent
     pointers = sorted(set(re.findall(r"shared/references/[A-Za-z0-9_./-]+\.md", text)))
     dead = [p for p in pointers if not (repo_root / p).is_file()]
@@ -305,7 +362,7 @@ def main(argv: list[str] | None = None) -> int:
         "--size-cap",
         type=int,
         default=SIZE_CAP,
-        help=f"Max chars for the spine (default: {SIZE_CAP}).",
+        help=f"Max spine size, applied to max(code points, UTF-8 bytes) (default: {SIZE_CAP}).",
     )
     args = parser.parse_args(argv)
 
