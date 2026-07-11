@@ -76,7 +76,21 @@ def ensure_status_sections(item: Path, args: argparse.Namespace) -> None:
         status_path.write_text(text, encoding="utf-8")
 
 
+# Legacy executionRole values are READ-mapped by the validator (old ledgers keep
+# validating) but must never be WRITTEN into a new event — the retired
+# main|lead duality would otherwise resurface on the wire. Mirrors
+# scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES.
+LEGACY_EXECUTION_ROLES = {"lead": "main"}
+
+
 def build_event(args: argparse.Namespace) -> dict[str, Any]:
+    if args.execution_role in LEGACY_EXECUTION_ROLES:
+        canonical = LEGACY_EXECUTION_ROLES[args.execution_role]
+        raise ValueError(
+            f"--execution-role {args.execution_role!r} is a retired legacy value; "
+            f"new events must use {canonical!r} (the one main-conversation identity — "
+            "orchestration weight belongs in status.md 'orchestration:', not here)"
+        )
     started_at = args.started_at or utc_timestamp()
     updated_at = args.updated_at or started_at
     event: dict[str, Any] = {
@@ -234,6 +248,10 @@ def command_rollup(args: argparse.Namespace) -> int:
                 ("status", by_status),
             ):
                 key = str(event.get(field, "<none>"))
+                if field == "executionRole":
+                    # legacy read-mapping (lead -> main): ONE owner must roll up
+                    # into ONE audit bucket even across pre-rename ledger lines
+                    key = LEGACY_EXECUTION_ROLES.get(key, key)
                 bucket[key] = bucket.get(key, 0) + 1
             evidence = event.get("evidence")
             if isinstance(evidence, list) and evidence:
