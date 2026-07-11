@@ -20,23 +20,26 @@ description: "Plan accepted design into phases, scope, dependencies, checks, gat
 
 ## Return exactly one artifact
 
-- Return one delivery plan that defines ordered phases, file or module scope per phase, allowed change surface, must-not-break surfaces, dependencies, execution order, acceptance criteria, required tests, lint or static-analysis checks, benchmark or performance checks when needed, key risks, rollback or safe fallback notes, and the recommended next role sequence.
+- Return one delivery plan that defines ordered phases, file or module scope per phase, allowed change surface, must-not-break surfaces, dependencies, execution order, acceptance criteria, exact repo-standard test/lint/build commands and expected PASS evidence, benchmark or performance commands when needed, key risks, per-phase revert independence or atomic revert-group, rollback notes for reversible phases and safe-fallback notes for phases that cannot safely be reverted, and the recommended next role sequence.
+- For each phase, copy the endangered **Diff-invisible invariants** and their **Named regression guards** from the architect's design package. `none` is valid only with a one-line reason; the planner distributes these fields and does not invent them.
 
 ## Gate
 
 - Each phase is small enough to implement and review independently.
-- File scope, allowed change surface, nearby smoke coverage, tests, checks, and acceptance criteria are explicit for every phase.
+- File scope, allowed change surface, nearby smoke coverage, exact executable verification commands, expected fresh-output evidence, and acceptance criteria are explicit for every phase. `run tests` without a named repo-standard entry point is `REVISE`.
 - Parallel phases are used only where contracts and write boundaries are already fixed.
+- A plan with two or more parallel or differently-owned implementation phases includes a named integration phase with its owner and end-to-end verification across the split scopes, or a one-line justification for its absence.
 - The plan contains no implementation code.
 - End with one explicit gate decision: `PASS`, `REVISE`, or `BLOCKED`.
 
 ## Working rules
 
-- Prefer phases that can be committed, reviewed, and rolled back cleanly.
+- Prefer phases that can be committed, reviewed, and rolled back cleanly. Per phase, state whether reverting its commits is standalone or name the atomic revert-group; a phase whose persisted-state or migration output is consumed later cannot claim standalone revert.
 - Prefer phases that isolate change behind existing or explicitly approved seams.
 - Minimize write conflicts and cross-phase ambiguity.
 - If a phase cannot fit inside the architect's Change-Surface Contract (it requires unrelated module edits, shared abstraction churn, dependency-direction changes, or a touch of a protected surface), ESCALATE it as a `REVISE`-to-architect instead of normalizing the expanded surface in the plan.
 - Give each acceptance criterion a stable per-phase id (`AC1`, `AC2`, ...) so `$qa-engineer` can map evidence back to it ("AC3 verified / AC5 failed"). AC-IDs are append-only per phase within a plan revision — never renumber an existing criterion; a removed criterion's id is retired, not reused.
+- Write each acceptance criterion as an absolute, observable assertion with an exact value, count, order, or invariant. Ask `what would this criterion let pass?` for every criterion; if empty output, a no-op, or both modes being equally broken would satisfy it, rewrite it before returning the plan.
 - Call out phases that require specialist review before implementation or merge.
 - Split shared or core module changes into explicit enabling phases with tighter review instead of hiding them inside feature work.
 - When planning a non-foundation feature, require the design to specify a stable feature identifier, owner, default state, and a single settings/capability registry entry that gates the feature, and to verify both the enabled and disabled paths (including absence of side effects in the disabled path — no UI, hotkey, command-palette entry, background watcher, network request, or persistence write reaches the feature when its gate is off).

@@ -29,11 +29,13 @@ Adopting this role inline reviews or verifies nothing — it produces a research
 
 ## Return exactly one artifact
 
-- Return one factual research memo covering relevant files and symbols, current data or control flows, observed contracts, similar existing implementations, current tests or coverage clues, confirmed constraints, change risks, unresolved questions, and file references with line numbers.
+- Return one factual research memo with these named sections: **Files & symbols**, **Flows**, **Contracts**, **Tests & coverage**, **Similar implementations**, **Constraints**, **Change risks**, **Unresolved questions**, **Research admission gates**, and **Adjacent findings**. Cite file references with line numbers under each relevant section, and include a **Searched and excluded** subsection naming surfaces checked and found irrelevant.
+- Label every load-bearing memo claim with its verification type: `runtime-verified` (command or test output captured this session), `static-read` (`file:line` evidence only), or `ASSUMPTION (UNVERIFIED)` plus the resolving probe. For a control-flow or data-flow claim crossing a dynamic-dispatch boundary (callback, signal/slot, event bus, dependency injection, or virtual call), name the runtime trace, log, or test that confirmed the edge; otherwise mark it `static-inference` and `ASSUMPTION (UNVERIFIED)`, and name the runtime trace, log, or test that would confirm it.
 
 ## Gate
 
 - The memo is evidence-backed and internally consistent.
+- Every load-bearing claim carries its verification type and resolving probe when unverified.
 - No recommendations, plans, or code changes are included.
 - The next role can proceed without reopening broad repository discovery.
 - End with one explicit gate decision: `PASS`, `REVISE`, or `BLOCKED`.
@@ -43,6 +45,9 @@ Adopting this role inline reviews or verifies nothing — it produces a research
 - Report what the system does now, not what it should do.
 - If evidence is missing, say it is unknown instead of inferring.
 - Prefer concise facts over speculative narration.
+- When the investigation covers N reported symptoms or failing behaviors, carry N independent mechanism hypotheses. Collapse them to one common root only when one `runtime-verified` observed mechanism explains every case; shared timing, location, or correlation is not proof.
+- Check `git log` and `git blame` on the focal files for prior attempts, reverts, and fix-over-fix churn on the same surface. Report any churn as a named change risk with commit ids.
+- Stop widening the investigation after two consecutive widening steps change no memo conclusion, and record that saturation stop point in the memo.
 
 ## Research admission gates
 

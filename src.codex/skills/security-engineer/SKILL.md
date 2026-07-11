@@ -19,12 +19,12 @@ description: "Define threats, trust boundaries, controls, safe defaults, must-fi
 
 ## Return exactly one artifact
 
-- Return one security design package containing the threat model, trust boundaries, required controls, implementation constraints, must-fix items, abuse cases, verification expectations, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
-- Include a numbered **claims section**: falsifiable guarantees this artifact makes. Example: "1. Auth is checked at boundary Y before any write operation. 2. Secret Z is never serialized or logged." This list is the primary input to `security-reviewer` — do not summarize or omit claims to keep the section short.
+- Return one security design package containing the threat model, trust boundaries, required controls, implementation constraints, must-fix items ranked `high` / `medium` / `low` by attacker effort × blast radius, abuse cases, verification expectations, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`. A remediable finding of any severity requires `REVISE`; reserve `BLOCKED` for unavailable threat context or another external prerequisite.
+- Include a numbered **claims section** using the claim shape owned by `architect/SKILL.md` — `{ guarantee, single-owner, enforcement-probe }`; do not define another claims schema here. Example: "1. `{ guarantee: Auth is checked at boundary Y before any write; single-owner: boundary Y authorization owner; enforcement-probe: abuse test sends an unauthenticated write and expects denial }`. 2. `{ guarantee: Secret Z is never serialized or logged; single-owner: secret Z serialization boundary; enforcement-probe: grep plus log-capture test finds no secret Z value }`." Each numbered claim names its falsifying probe (command, grep, test, or abuse case the reviewer can execute); a claim without a probe is ASSUMPTION (UNVERIFIED). This list is the primary input to `security-reviewer` — do not summarize or omit claims to keep the section short.
 
 ## Gate
 
-- Threat model, trust boundaries, and required controls are explicit.
+- Threat model, trust boundaries, and required controls are explicit. Each trust boundary names the attacker position (`unauthenticated remote`, `authenticated tenant`, `insider`, `compromised dependency`, or `CI pipeline`), assets reachable across it, and entry points crossing it; a boundary without an attacker model is `REVISE`.
 - Must-fix constraints are clear enough for planning and implementation.
 - The result is sufficient for later `security-reviewer` review.
 
@@ -33,6 +33,9 @@ description: "Define threats, trust boundaries, controls, safe defaults, must-fi
 - Keep scope narrow and evidence-based.
 - Call out unsafe defaults, missing checks, and privileged flows explicitly.
 - Distinguish confirmed exposure from suspected risk that still needs proof.
+- When scope adds or updates a dependency or touches build/CI, state the dependency-trust decision — version pinning, integrity hash, and provenance/source — plus every CI secret-exposure path.
+- When untrusted content enters a large language model or agent context, or the system exposes tool invocation, include prompt-injection and tool-misuse abuse cases and name the mediation control: provenance separation, tool allowlist, human gate, or output validation. Missing this threat class is `REVISE`.
+- For every secret in scope, complete four boxes: storage owner, injection path, log/serialization exclusion check, and rotation/revocation owner. Any missing box is an unsafe-default finding.
 
 ## Architecture layering hygiene (security)
 

@@ -19,12 +19,14 @@ description: "Frame algorithms: invariants, assumptions, complexity, stability, 
 
 ## Return exactly one artifact
 
-- Return one algorithm note containing the formal problem statement, recommended approach, realistic alternatives with tradeoffs, complexity analysis, invariants and assumptions, stability concerns, edge-case test recommendations, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- Return one algorithm note containing the formal problem statement, recommended approach, realistic alternatives with tradeoffs, complexity analysis, invariants and assumptions, stability concerns, and a correctness-oracle plan: a brute-force reference implementation for small `n` plus property or metamorphic invariants (such as permutation invariance, idempotence, monotonicity, or round-trip behavior), with the input class each covers. Edge-case recommendations without an executable oracle are `REVISE`.
+- Enumerate the required behavior for relevant degenerate inputs: empty, singleton, all-equal, duplicate-heavy, already-sorted, reverse-sorted, overflow-scale, and `NaN`/`Inf` where floating point applies.
+- Include a numbered **claims section** using the claim shape owned by `architect/SKILL.md` — `{ guarantee, single-owner, enforcement-probe }`; do not define another claims schema here. Example: "1. `{ guarantee: The int64 reduction is exactly associative; single-owner: reduction contract owner; enforcement-probe: property test compares every partitioning against the serial oracle }`. 2. `{ guarantee: Worst-case $O(n \log n)$ holds for every input of size $n$ under comparator X; single-owner: algorithm complexity contract; enforcement-probe: the named Complexity proof derivation expands the recurrence for every branch and proves the bound }`." Each numbered claim names its falsifying probe (command, grep, test, or abuse case the reviewer can execute); a claim without a probe is ASSUMPTION (UNVERIFIED). State asymptotic and empirical complexity claims separately: an asymptotic guarantee requires an argument or derivation plus its named proof-checking surface; a finite-scale empirical claim states its exact tested input range and distribution, operation-count or latency threshold, and benchmark command. A finite benchmark never proves an asymptotic guarantee.
 
 ## Gate
 
 - The formulation is precise enough to implement or prove against.
-- Key assumptions, limits, edge cases, and failure modes are explicit.
+- Key assumptions, limits, edge cases, and failure modes are explicit. Every complexity claim states the target input scale and distribution (including adversarial versus expected case) and justifies the choice at that scale with constant-factor and memory/cache effects; a scale-free claim is `REVISE`.
 - No implementation code is included.
 
 ## Working rules
@@ -32,6 +34,8 @@ description: "Frame algorithms: invariants, assumptions, complexity, stability, 
 - State what is being optimized, constrained, and proven.
 - Compare viable approaches through formal tradeoffs rather than intuition alone.
 - Call out where asymptotic, numerical, or probabilistic reasoning changes the choice.
+- For every floating-point comparison or tolerance, state its type (`absolute` / `relative` / `ULP`) and value. Call out catastrophic-cancellation and summation-order hazards where near-equal magnitudes are subtracted or accumulated; a bare epsilon is a defect.
+- For every randomized or probabilistic claim, state its failure probability or confidence bound and the seed-and-trial policy that verifies it, including Monte Carlo trial count or the tail bound used.
 
 ## Architecture layering hygiene
 

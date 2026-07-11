@@ -19,18 +19,23 @@ description: Define reliability constraints for a change before planning or impl
 
 ## Return exactly one artifact
 
-- Return one reliability design package containing target SLOs, critical failure modes, resilience requirements, degradation behavior, retry and idempotency rules, observability expectations, rollout and rollback safety notes, recovery readiness requirements, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- Return one reliability design package containing target service-level objectives (SLOs), critical failure modes, resilience requirements, degradation behavior, retry and idempotency rules, observability expectations, rollout and rollback safety notes, recovery readiness requirements, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- For each SLO, name the service-level indicator definition, measurement point (client, server, or load balancer), window, threshold, and error-budget consequence at burn; an SLO without a measurement point is `REVISE`.
+- For every rollout stage, name its abort signal (metric, threshold, and observation window) and the staging run or drill that exercised rollback. An unexercised rollback is `ASSUMPTION (UNVERIFIED)`.
+- Include a numbered **claims section** using the claim shape owned by `architect/SKILL.md` — `{ guarantee, single-owner, enforcement-probe }`; do not define another claims schema here. Example: "1. `{ guarantee: Service degrades to read-only within 30 s of dependency X loss; single-owner: dependency X degradation controller; enforcement-probe: dependency-blackhole test observes read-only state within 30 s }`. 2. `{ guarantee: Retry of operation Y is idempotent under duplicate delivery; single-owner: operation Y idempotency owner; enforcement-probe: duplicate-delivery test commits one effect }`." Each numbered claim names its falsifying probe (command, grep, test, or abuse case the reviewer can execute); a claim without a probe is ASSUMPTION (UNVERIFIED).
 
 ## Gate
 
 - Reliability constraints are explicit, testable, and usable by the planner.
 - Failure modes, degradation strategy, and recovery expectations are concrete enough for implementation and review.
-- Unowned operational assumptions are surfaced rather than left implicit.
+- Every critical failure mode names its detection signal (metric, log, or alert), expected detection latency, and page/no-page decision; a missing detection signal is an unowned operational assumption.
+- Mark each critical failure mode `verified-by-injection` (chaos probe, kill test, or dependency blackhole) or `analysis-only`; justify `analysis-only` for the top failure mode in one line.
 
 ## Working rules
 
 - Prefer explicit thresholds, ownership boundaries, and incident-readiness expectations.
 - Focus on safe failure, recovery, and observability under partial or total dependency loss.
+- For every retried mutation, state the idempotency mechanism (key, dedupe, or naturally idempotent operation), maximum attempts, backoff with jitter, and the downstream-observable `settled/committed` event the retry observes. Cite and preserve the writer-owner/event pair owned by the architect's P8 rule; a retried non-idempotent mutation without a guard is a finding.
 - Do not turn reliability work into feature design or implementation.
 
 ## Architecture layering hygiene (stability)

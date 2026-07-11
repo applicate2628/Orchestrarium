@@ -19,18 +19,21 @@ description: "Frame physics/numerics: equations, units, discretization, solvers,
 
 ## Return exactly one artifact
 
-- Return one computational model package containing the formal model or governing equations, state definitions, assumptions and units, discretization or solver strategy, stability or convergence considerations, error sources, validation criteria, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
+- Return one computational model package containing the formal model or governing equations, state definitions, assumptions and units, discretization or solver strategy, stability or convergence considerations, and a separate verification-and-validation pair: code verification by a manufactured solution or grid-refinement convergence study (theoretical order `p` plus tolerance for observed order), and solution validation against a named experiment or benchmark with an acceptance metric. Declare either side absent with a reason.
+- Include an error-budget decomposition that separates model error, discretization error, and round-off or solver-tolerance error; state which dominates and the acceptance tolerance for each source.
+- Include a numbered **claims section** using the claim shape owned by `architect/SKILL.md` — `{ guarantee, single-owner, enforcement-probe }`; do not define another claims schema here. Example: "1. `{ guarantee: Observed convergence order is at least 1.9 on the manufactured solution at the three finest grids; single-owner: discretization verification owner; enforcement-probe: grid-refinement command reports order >= 1.9 }`. 2. `{ guarantee: Mass drift stays below 1e-12 per step in double precision; single-owner: discrete conservation owner; enforcement-probe: conservation test reports per-step drift < 1e-12 }`." Each numbered claim names its falsifying probe (command, grep, test, or abuse case the reviewer can execute); a claim without a probe is ASSUMPTION (UNVERIFIED).
 
 ## Gate
 
 - The scientific or numerical formulation is precise enough to implement or validate against.
-- Governing assumptions, units, tolerances, and failure modes are explicit.
-- Discretization, solver, stability, convergence, or error considerations are explicit when relevant.
+- Governing assumptions, tolerances, and failure modes are explicit.
+- The package contains a symbol table with units for every variable, and every governing equation is checked dimensionally consistent or fully nondimensionalized with named characteristic scales; a unit-less symbol in a governing equation is `REVISE`.
+- When an explicit time-stepping scheme is chosen, state its stability-constraint formula in problem parameters. When stiffness is plausible, justify the explicit/implicit choice against a stiffness estimate.
 - No implementation code is included.
 
 ## Working rules
 
-- State what is being modeled, approximated, conserved, or optimized.
+- State what is being modeled, approximated, conserved, or optimized. Every quantity claimed conserved names its discrete-level check, drift per step or total drift over the run, and tolerance; an assertion without that check is `ASSUMPTION (UNVERIFIED)`.
 - Prefer explicit assumptions and validation criteria over intuition or domain folklore.
 - Separate modeling decisions from pure algorithm-structure decisions when both are present.
 - Escalate discrete algorithm design back to `$algorithm-scientist` when the main question is not scientific modeling or numerics.
