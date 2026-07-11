@@ -24,48 +24,32 @@ description: "Run eligible worker roles via external provider; keep provenance."
 
 ## External execution
 
-- Read the effective Codex overlay first.
-- Resolve in this order: local `.agents/.agents-mode.yaml`, local legacy `.agents/.agents-mode`, global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`.
-- Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file or synthesize a local override on read alone.
-- `externalProvider: auto` resolves by the active production priority profile and opinion-count policy, then applies explicit-only self-provider exclusion and CLI availability. Shipped `auto` profiles use `codex | claude` only.
-- `externalProvider: codex` routes the same adapter through Codex CLI instead.
-- `externalProvider: claude` routes the same adapter through Claude CLI instead.
-- `externalProvider: gemini` routes the same adapter through Gemini CLI instead.
-- `externalProvider: qwen` routes the same adapter through Qwen Code instead.
-- Check the selected provider first:
-  - Codex path: `codex`
-  - Claude path: `claude`, `claude.exe`, or `claude.cmd`
-  - Gemini path: `gemini`
-  - Qwen path: `qwen`
-- Honor `externalClaudeProfile` only when the selected provider is Claude. On the Codex line, this is a narrower override than the shared `externalModelMode`: `sonnet-high` maps to `--model sonnet --effort high`; `opus-xhigh` (the shipped default) maps to `--model opus --effort xhigh`; `opus-max` maps to `--model opus --effort max` (max-depth escalation for especially hard tasks at caller discretion); `fable-xhigh` maps to `--model fable --effort xhigh` (current Claude flagship-family best-effort tier; the `fable` flagship alias as of 2026-07).
-- Honor `parallelMode`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts` when `externalProvider: auto` is in effect. Multi-opinion lanes collect fail-closed rather than silently dropping shortfalls, and example-only providers stay out of shipped `auto` profiles.
-- `parallelMode` is the general helper fan-out rule across internal and external lanes; `externalOpinionCounts` governs distinct-provider opinions for one lane and does not cap how many same-provider worker instances may run in parallel for different disjoint lanes or slices.
-- Honor `externalCodexProfile` when the selected provider is Codex: `default` inherits `externalModelMode`; `gpt-5.6-sol-max` requests model `gpt-5.6-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes; `gpt-5.6-luna` selects the fast/volume Codex model tier (a distinct model, `model_reasoning_effort = "medium"`, not an effort downgrade) and must record unavailable or deviated if that model cannot be verified against the installed runtime; `gpt-5.6-sol-xhigh` (shipped as default) explicitly requests model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`, symmetric to Claude's `opus-xhigh`.
-- Honor `externalModelMode` before provider-specific model fallbacks when no narrower provider profile overrides it: `runtime-default` keeps the selected provider on its runtime default model/profile; `pinned-top-pro` uses the strongest documented production-provider model/profile and allows one named same-provider fallback on retryable provider exhaustion where the production contract defines one.
+- Read and normalize `.agents/.agents-mode.yaml` to the current canonical format before trusting its flags.
+- Honor the contract-resolved `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`; this role does not reimplement their resolution.
+- Resolve config, provider, model/profile, workdir, fallback, and transport under the shared external-dispatch contract; do not reproduce its resolution logic here.
 - Do not honor `reserve` for worker-side lanes. It is a supplemental read-only candidate only in `advisory.*` and `review.*` profile orders after primary `claude`/`codex`, and `reserveResolver` must not turn it into a worker transport, primary-Claude retry, or implementation/editing fallback.
-- Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths. Neither example-only provider gains separate shared production fallback keys in this pack.
+- Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths.
+- If a repository wants an example-only provider demonstration, use a scalar explicit provider override instead of broadening shipped or repo-local `auto` profiles.
+- Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
 - Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
 - If the selected Claude CLI path fails for a worker artifact, do not convert that same primary `claude` run to the secret-backed wrapper. Treat Claude as unavailable or reroute honestly.
-- If the provider is missing, unauthenticated, or errors after the allowed primary provider path, stop and return `BLOCKED:dependency` with the reason.
-- Where Codex is the selected provider, do not treat `gpt-5.6-luna` as the ordinary cheaper mode. It remains a bounded mechanical overflow path for fully autonomous low-reasoning work only.
 - This adapter is a direct external launch contract. Do not spawn it as an internal specialist or helper; the orchestrator must launch the selected external provider directly or fail closed.
 - A spawned internal subagent is still internal even if the prompt tells it to use Gemini Pro, Claude, or Codex. That is a routing violation, not a valid external-worker execution path.
 - Do not silently fall back to an internal implementer or to `$consultant`.
-- If the provider is unavailable, the role is disabled and the orchestrator may reroute to another eligible internal specialist.
+- Apply the availability-probe evidence and route-change rule owned by `../lead/external-dispatch.md`; do not define a local variant.
 - Multiple simultaneous instances of this adapter may target the same provider when each instance owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
+
+## Execution recipe
+
+- The Codex pack ships no primary-run prompt wrappers; use the transport-neutral probe, persisted prompt, sibling `.out` / `.err` capture, and explicit-flag chain owned by the shared external-dispatch contract.
+- Actively poll output artifacts and process status, apply the contract's effort-tiered stall policy, and never duplicate a still-running launch.
+- Accept completion only when the shared run-completion oracle passes; a failed oracle is `UNVERIFIED`, not a worker artifact.
 
 ## Return exactly one artifact
 
 - Return one external worker artifact containing the role-appropriate output, any changed files when code or docs were edited, relevant checks or verification evidence when they exist, explicit assumptions or risks, and a provenance header.
-
-Provenance header:
-- `Execution role: external-worker`
-- `Assigned / replaced internal role: <eligible internal worker role>`
-- `Requested provider: <internal | codex | claude | gemini | qwen>`
-- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>`
-- `Actual execution path: <external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role disabled>`
-- `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
-- `Deviation reason: <none | external unavailable: [reason] | explicit override>`
+- When a neutral-workdir run produced edits, return a reviewable edit payload and name whether it is a unified diff or a full-file set with repo-relative target paths; in-place editing follows the contract's isolation-worktree binding.
+- For the provenance header, use the canonical execution record in `../lead/external-dispatch.md` verbatim instead of defining local fields.
 
 ## Gate
 

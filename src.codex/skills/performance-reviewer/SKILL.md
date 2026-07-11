@@ -15,12 +15,13 @@ description: "Review performance budgets, latency, throughput, memory, CPU, scal
 
 - Require the implementation artifact and the **claims list** from the upstream `performance-engineer` artifact. Do not require the full performance package — if specific benchmark data is needed, request it explicitly.
 - The claims list defines what to verify. Also look for performance risks not covered by any claim.
+- Apply architecture-reviewer's 1:1 claim-to-verdict pattern and the S4 per-claim verdict vocabulary owned by architecture-reviewer to every numbered performance claim; a silently skipped claim blocks `PASS`.
 - Take only the workloads, environments, budgets, and metrics relevant to the scoped risk.
 - Default to read-only review unless remediation work is explicitly requested elsewhere.
 
 ## Return exactly one artifact
 
-- Return one performance review report containing methodology review, blocking regressions, required fixes before merge or release, residual risks, and an explicit gate decision.
+- Return one performance review report containing one verdict row per numbered upstream claim, methodology review, blocking regressions, required fixes before merge or release, residual risks, and an explicit gate decision.
 
 ## Gate
 
@@ -28,15 +29,27 @@ description: "Review performance budgets, latency, throughput, memory, CPU, scal
 - There are no blocking regressions in the agreed metrics, or the report clearly returns `REVISE` or `BLOCKED`.
 - The report states whether the evidence is sufficient for merge or release.
 
+## Evidence validity
+
+- A latency claim reports p50 and p95 percentiles at minimum; a mean alone cannot pass a latency budget.
+- Report run count and dispersion, separate warm-up from steady state, and measure the baseline in the same environment at an adjacent commit.
+- A single-run number or cross-environment comparison is `ASSUMPTION (UNVERIFIED)` evidence and cannot support `PASS`.
+
 ## Working rules
 
 - Validate that benchmarks, load tests, or profiling evidence match the real risk surface.
+- Reject benchmarks whose work the compiler or runtime can eliminate, whose input shape or size is not representative of the budgeted workload, or whose latency-under-load measurement suffers coordinated omission because the load generator stalls and hides queue delay.
+- Every accepted benchmark names its workload, input shape, and environment.
+- A claimed number is verified only by reproducing it or inspecting a preserved run artifact containing the command line, environment, and raw output under `.scratch/`; a bare number in prose is `ASSUMPTION (UNVERIFIED)` and cannot support a budgeted `PASS`.
 - Call out environment limits and measurement blind spots explicitly.
 - If the phase needs new tuning work, send it back through `performance-engineer`.
 
 ## Performance issue registry
 
-The performance issue registry format and its status enum are owned by `$performance-engineer` (`work-items/performance/<date>-<slug>.md`, status `open | fixed | wontfix`); this role CITES that contract, it does not redefine it. When confirming a fix, verify the registry entry moved `open -> fixed` (reviewer confirmed AND user approved) or carries a `wontfix` accepted-tradeoff reason.
+The performance issue registry format and its status enum are owned by `performance-engineer` (`work-items/performance/<date>-<slug>.md`, status `open | fixed | wontfix`); this role cites that contract instead of redefining it.
+
+- When the gate decision is `REVISE` or `BLOCKED`, create or update the issue with `found-by: performance-reviewer` before returning the verdict.
+- When confirming a fix, verify the registry entry moved `open -> fixed` only after reviewer confirmation and user approval, or carries a `wontfix` accepted-tradeoff reason.
 
 ## Cross-domain escalation
 

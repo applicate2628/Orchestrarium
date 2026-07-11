@@ -18,53 +18,38 @@ description: "Run eligible review/QA via external provider; keep provenance."
 
 - Require the accepted implementation artifact to review.
 - Require the internal reviewer or QA role label being replaced for provenance.
-- Require an explicit review strategy: `claim-verify` or `adversarial`.
+- Require an explicit review strategy: `claim-verify` or `adversarial`; if it is missing, ask the orchestrating owner instead of guessing.
+- In adversarial mode, send an artifact-only prompt containing the artifact and review scope but no builder claims or self-review, as required by the lead-owned review-strategy rule.
 - Take only the minimal accepted artifact needed for the review.
 - Treat any eligible reviewer or QA role as replaceable by the external adapter.
 
 ## External execution
 
-- Read the effective Codex overlay first.
-- Resolve in this order: local `.agents/.agents-mode.yaml`, local legacy `.agents/.agents-mode`, global `~/.codex/.agents-mode.yaml`, then global legacy `~/.codex/.agents-mode`.
-- Normalize whichever file supplied the effective config into the canonical `.yaml` path in the same scope and do not recreate any legacy file or synthesize a local override on read alone.
-- `externalProvider: auto` resolves by the active production priority profile and opinion-count policy, then applies explicit-only self-provider exclusion and CLI availability. Shipped `auto` profiles use `codex | claude` only.
-- `externalProvider: codex` routes the same adapter through Codex CLI instead.
-- `externalProvider: claude` routes the same adapter through Claude CLI instead.
-- `externalProvider: gemini` routes the same adapter through Gemini CLI instead.
-- `externalProvider: qwen` routes the same adapter through Qwen Code instead.
-- Check the selected provider first:
-  - Codex path: `codex`
-  - Claude path: `claude`, `claude.exe`, or `claude.cmd`
-  - Gemini path: `gemini`
-  - Qwen path: `qwen`
-- Honor `externalClaudeProfile` only when the selected provider is Claude. On the Codex line, this is a narrower override than the shared `externalModelMode`: `sonnet-high` maps to `--model sonnet --effort high`; `opus-xhigh` (the shipped default) maps to `--model opus --effort xhigh`; `opus-max` maps to `--model opus --effort max` (max-depth escalation for especially hard tasks at caller discretion); `fable-xhigh` maps to `--model fable --effort xhigh` (current Claude flagship-family best-effort tier; the `fable` flagship alias as of 2026-07).
-- Honor `parallelMode`, `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts` when `externalProvider: auto` is in effect. Multi-opinion lanes collect fail-closed rather than silently dropping shortfalls, and example-only providers stay out of shipped `auto` profiles.
-- `parallelMode` is the general helper fan-out rule across internal and external lanes; `externalOpinionCounts` governs distinct-provider opinions for one lane and does not cap how many same-provider review instances may run in parallel for different disjoint lanes or slices.
-- Honor `externalCodexProfile` when the selected provider is Codex: `default` inherits `externalModelMode`; `gpt-5.6-sol-max` requests model `gpt-5.6-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes; `gpt-5.6-luna` selects the fast/volume Codex model tier (a distinct model, `model_reasoning_effort = "medium"`, not an effort downgrade) and must record unavailable or deviated if that model cannot be verified against the installed runtime; `gpt-5.6-sol-xhigh` (shipped as default) explicitly requests model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`, symmetric to Claude's `opus-xhigh`.
-- Honor `externalModelMode` before provider-specific model fallbacks when no narrower provider profile overrides it: `runtime-default` keeps the selected provider on its runtime default model/profile; `pinned-top-pro` uses the strongest documented production-provider model/profile and allows one named same-provider fallback on retryable provider exhaustion where the production contract defines one.
-- Honor `reserve` only as the supplemental reviewer/QA profile candidate when a `review.*` order reaches it after primary `claude`/`codex`. It is symbolic, uses `reserveResolver` to select the concrete read-only resolver, is not a retry for primary Claude, and does not let the reviewer adapter edit files or take implementation ownership.
-- Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths. Neither example-only provider gains separate shared production fallback keys in this pack.
+- Read and normalize `.agents/.agents-mode.yaml` to the current canonical format before trusting its flags.
+- Honor the contract-resolved `externalPriorityProfile`, `reserveResolver`, `externalPriorityProfiles`, and `externalOpinionCounts`; this role does not reimplement their resolution.
+- Resolve config, provider, model/profile, workdir, fallback, and transport under the shared external-dispatch contract; do not reproduce its resolution logic here.
+- Honor `reserve` only as a supplemental review or QA candidate after primary `claude` / `codex`; it is not a primary-Claude retry and never grants edit or implementation ownership.
+- Explicit Gemini and Qwen routes remain manual `WEAK MODEL / NOT RECOMMENDED` example-only paths.
+- If a repository wants an example-only provider demonstration, use a scalar explicit provider override instead of broadening shipped or repo-local `auto` profiles.
+- Never select `gpt-5.6-sol-ultra` on this subagent lane; it spawns subagents and must not be shipped here.
 - Use file-based prompt delivery for substantive task prompts: write the prompt to a temporary prompt file and feed it through stdin or the provider's supported file-input mechanism; direct prompt argv is only for tiny smoke checks or documented provider limitations.
 - If the selected primary Claude CLI path fails, do not silently convert that same run to the wrapper. A review lane may later collect `reserve` as a separate profile candidate when enabled; otherwise stop with the provider reason.
-- If the provider is missing, unauthenticated, or errors after the allowed resolved provider path, stop and return `BLOCKED:dependency` with the reason.
-- Where Codex is the selected provider, do not treat `gpt-5.6-luna` as the ordinary cheaper mode. It remains a bounded mechanical overflow path for fully autonomous low-reasoning work only.
 - This adapter is a direct external launch contract. Do not spawn it as an internal specialist or helper; the orchestrator must launch the selected external provider directly or fail closed.
 - Do not silently fall back to an internal reviewer or to `$consultant`.
-- If the provider is unavailable, the role is disabled and the orchestrator may reroute to another eligible internal specialist.
+- Apply the availability-probe evidence and route-change rule owned by `../lead/external-dispatch.md`; do not define a local variant.
 - Multiple simultaneous instances of this adapter may target the same provider when each instance owns a different admitted artifact or disjoint slice and the provider runtime supports concurrent non-interactive execution.
+
+## Execution recipe
+
+- The Codex pack ships no primary-run prompt wrappers; use the transport-neutral probe, persisted prompt, sibling `.out` / `.err` capture, exact launch flags, and provider read-only or sandbox mode owned by the shared external-dispatch contract.
+- Actively poll output artifacts and process status, apply the contract's effort-tiered stall policy, and never duplicate a still-running launch.
+- Accept completion only when the shared run-completion oracle passes. A failed review run is `UNVERIFIED` under review-loop invariant 7 in `../lead/review-loop.md`; this role cites that lane-accounting owner instead of restating it.
 
 ## Return exactly one artifact
 
-- Return one external review report containing findings, risk surfaces, the gate decision, and a provenance header.
-
-Provenance header:
-- `Execution role: external-reviewer`
-- `Assigned / replaced internal role: <eligible internal reviewer or QA role>`
-- `Requested provider: <internal | codex | claude | gemini | qwen>`
-- `Resolved provider: <Codex CLI | Claude CLI | Gemini CLI | Qwen Code | none>`
-- `Actual execution path: <external CLI (Codex CLI) | external CLI (Claude CLI) | external CLI (Gemini CLI) | external CLI (Qwen Code) | role disabled>`
-- `Model / profile used: <actual profile or model when known | runtime default | unspecified by runtime>`
-- `Deviation reason: <none | external unavailable: [reason] | explicit override>`
+- Return one external review report containing findings, risk surfaces, the gate decision, and a provenance header. Every finding carries a file:line anchor, reproduction command or falsifying probe, and one of the shared evidence categories or `ASSUMPTION (UNVERIFIED)`; an approval names every surface actually examined.
+- The returned verdict is input evidence for the orchestrating session, not stage closure: the orchestrator spot-checks load-bearing findings or the no-findings claim before pinning the gate.
+- For the provenance header, use the canonical execution record in `../lead/external-dispatch.md` verbatim instead of defining local fields.
 
 ## Gate
 
