@@ -58,6 +58,8 @@ python scripts/agent-run-ledger.py --work-item work-items/active/<slug> append \
 
 The append command validates the work item after writing the event. If the new event makes the ledger invalid, the helper rolls `agent-runs.jsonl` back.
 
+`--execution-role` takes one of the canonical values from `shared/schemas/agent-runs.schema.json`: `main` (the main conversation — the ONE main-conversation identity; it also holds the Lead role, and orchestration weight lives in the `status.md` `orchestration: light | full-lead` field, never in this value), `internal`, `consultant`, `external-worker`, `external-reviewer`, or `external-brigade`. Ledgers written before 2026-07-11 may carry the legacy value `lead`; validators and rollups read it as `main` (same owner), but a new append with `lead` is rejected — write `main`.
+
 ## Validate One Work Item
 
 Run this before stage closeout or archive movement.
@@ -136,6 +138,7 @@ Use the installed equivalent when the source checkout is not available in the ta
 - `BLOCKED`: gate state for a real external blocker or missing prerequisite.
 - `check-work-items-state.*`: helper script family that checks every active work item under a repository root.
 - `Codex`: OpenAI Codex runtime and production provider line.
+- `executionRole`: ledger field naming the actual executor of an event: `main` (the one main-conversation identity), `internal`, `consultant`, `external-worker`, `external-reviewer`, or `external-brigade`; the pre-2026-07-11 legacy value `lead` reads as `main`.
 - `gate`: acceptance result recorded for a scoped artifact, commonly `PASS`, `REVISE`, `BLOCKED`, or `none`.
 - `JSONL`: JSON Lines; one JSON object per line, used here for append-only ledger events.
 - `PASS`: gate state meaning a scoped artifact passed the relevant checks.
