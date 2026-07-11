@@ -1328,6 +1328,41 @@ for cs in "${indexed_common_skills[@]}"; do
 done
 
 echo ""
+echo "=== Layering-law ID resolution ==="
+
+# (audit F29): role files cite layering-law IDs (A6, C1, C2, ...) defined only
+# in the NON-installed maintainer reference
+# (shared/references/architecture-layering-hygiene.md). Every law ID a role
+# file uses must resolve to a SAME-FILE bold-labeled definition — the
+# security-engineer "**... (C1):**" pattern — so a dispatched agent can bind
+# every ID it is told to name in findings. Common skills are exempt, derived
+# from COMMON_SKILL_BODY_PINS (single owner, no second list): mathtype-book-page
+# uses A1/A4 as PAPER SIZES, not law IDs.
+# The definition regex is BOTH-sides bold-bounded: a one-sided variant would
+# false-match prose after a closed bold span (e.g. "(A6-shaped)" in D2 bodies).
+# The "(\)| )" alternation accepts both "(C1):" labels and "(D3 — facet)"
+# labels; M is deliberately excluded from the ID class (always its own label).
+for f in "$SKILLS_DIR"/*/SKILL.md; do
+  [[ -f "$f" ]] || continue
+  skill_name="$(basename "$(dirname "$f")")"
+  is_common=0
+  for pin in "${COMMON_SKILL_BODY_PINS[@]}"; do
+    if [[ "${pin%%=*}" == "$skill_name" ]]; then is_common=1; break; fi
+  done
+  [[ $is_common -eq 1 ]] && continue
+  ids=$(grep -oE '\b(A[1-9]|B[1-3]|C[1-6]|D[1-5])\b' "$f" | sort -u || true)
+  unresolved=""
+  for id in $ids; do
+    grep -qE "\*\*[^*]*\($id(\)| )[^*]*\*\*" "$f" || unresolved="$unresolved $id"
+  done
+  if [[ -n "$unresolved" ]]; then
+    fail "$skill_name/SKILL.md: law ID(s)$unresolved used but no same-file labeled definition (**... (ID):** bullet)"
+  else
+    pass "$skill_name/SKILL.md: all layering-law IDs resolve in-file"
+  fi
+done
+
+echo ""
 echo "=== Scripts ==="
 
 for script in "$SCRIPTS_DIR"/*.sh; do

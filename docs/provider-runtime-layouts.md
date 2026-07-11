@@ -6,7 +6,7 @@ Production auto-routing in the root integration contract is limited to Codex plu
 
 Do not confuse these runtime surfaces with the monorepo authoring trees such as `src.codex/`, `src.claude/`, `src.gemini/`, or `src.qwen/`.
 
-Architecture note: on the Codex line, the installed `AGENTS.md` is intentionally the compact universal minimum. Detailed installed role contracts and runtime guidance belong in the installed `skills/<role>/SKILL.md` files and the built-in `.codex/agents/*.toml` overrides; shared/provider reference trees are source-maintainer canon, not target-project install payload. Claude already follows the analogous pattern through a short `CLAUDE.md` entrypoint plus `.claude/agents/*.md` role files, with Lead as the deliberate exception: Lead runs inline from `.claude/skills/lead/SKILL.md`, and `.claude/agents/lead.md` is retained only as a fail-closed compatibility stub.
+Architecture note: on the Codex line, the installed `AGENTS.md` is intentionally the compact universal minimum. Detailed installed role contracts and runtime guidance belong in the installed `skills/<role>/SKILL.md` files and the built-in `.codex/agents/*.toml` overrides; shared/provider reference trees are source-maintainer canon, not target-project install payload. Claude already follows the analogous pattern through a short `CLAUDE.md` entrypoint plus `.claude/agents/*.md` role files, with the five curated role-skills as the deliberate exception: `lead`, `product-manager`, `analyst`, `architect`, and `planner` keep their canonical contracts under `.claude/skills/<role>/SKILL.md` — Lead runs inline (`.claude/agents/lead.md` is retained only as a fail-closed compatibility stub) and the other four keep thin `.claude/agents/<role>.md` delegate wrappers that load the same-named skill.
 
 Read the tables with three layers in mind:
 
@@ -57,7 +57,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 
 | Item | Path or shape | Notes |
 | --- | --- | --- |
-| Global context file | `~/.claude/CLAUDE.md` | Official user-level Claude Code instruction file; intentionally short while detailed role behavior lives under `~/.claude/agents/`, except Lead — whose contract is `~/.claude/skills/lead/SKILL.md` (`~/.claude/agents/lead.md` is a fail-closed stub) |
+| Global context file | `~/.claude/CLAUDE.md` | Official user-level Claude Code instruction file; intentionally short while detailed role behavior lives under `~/.claude/agents/`, except the five curated role-skills (`lead`, `product-manager`, `analyst`, `architect`, `planner`) — contracts under `~/.claude/skills/<role>/SKILL.md` (`~/.claude/agents/lead.md` is a fail-closed stub; the other four keep thin delegate wrappers under `~/.claude/agents/`) |
 | Global personal skills | `~/.claude/skills/<skill-name>/SKILL.md` | Official preferred user-level extension surface |
 | Global personal subagents | `~/.claude/agents/*.md` | Official user-level custom subagent surface |
 | Design-panel binding | `~/.claude/agents/contracts/design-panel.md` + `~/.claude/commands/agents-design-panel.md` | Independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; no panel-state validator is installed |
@@ -68,7 +68,7 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 
 | Item | Path or shape | Notes |
 | --- | --- | --- |
-| Project context file | `<project>/.claude/CLAUDE.md` or `<project>/CLAUDE.md` | Official project-level Claude instruction entrypoints; keep the entrypoint short and the detailed role files under `.claude/agents/`, except Lead — whose contract is `.claude/skills/lead/SKILL.md` (`.claude/agents/lead.md` is a fail-closed stub) |
+| Project context file | `<project>/.claude/CLAUDE.md` or `<project>/CLAUDE.md` | Official project-level Claude instruction entrypoints; keep the entrypoint short and the detailed role files under `.claude/agents/`, except the five curated role-skills (`lead`, `product-manager`, `analyst`, `architect`, `planner`) — contracts under `.claude/skills/<role>/SKILL.md` (`.claude/agents/lead.md` is a fail-closed stub; the other four keep thin delegate wrappers under `.claude/agents/`) |
 | Local personal override | `<project>/CLAUDE.local.md` | Official personal, uncommitted project override layer |
 | Project skills | `<project>/.claude/skills/<skill-name>/SKILL.md` | Official preferred project-level extension surface |
 | Project subagents | `<project>/.claude/agents/*.md` | Official project-level custom subagent surface |
@@ -76,7 +76,6 @@ Do not collapse those layers into one claim. When a row is Orchestrarium-owned r
 | Legacy commands | `<project>/.claude/commands/*.md` | Still work, but lose precedence to a skill with the same name |
 | Orchestrarium shared governance copy | `<project>/.claude/AGENTS.md` | Repo-local overlay copied by Orchestrarium install scripts; not a Claude-native runtime requirement |
 | Orchestrarium local config | `<project>/.claude/.agents-mode.yaml` | Canonical Orchestrarium local state file; local install seeds the default and `/agents-init-project` reviews or updates it, while legacy sibling `<project>/.claude/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Claude overlay when the local scope is absent. |
-| Pack memory | `<project>/.claude/memory/` | Repo-local installed memory payload for the Orchestrarium Claude pack |
 
 ## Gemini CLI (Example Integration)
 
@@ -131,7 +130,7 @@ Qwen is maintained in this monorepo as a native explicit example integration cla
 | Global settings | `~/.qwen/settings.json` | Qwen-native runtime configuration surface; Orchestrarium does not own this file |
 | Global operator overlay | `~/.qwen/.agents-mode.yaml` | Orchestrarium-owned shared-routing overlay seeded on first global install and preserved on reinstall; legacy sibling `~/.qwen/.agents-mode` is compatibility input only |
 | Global extensions | `~/.qwen/extensions/<extension>/` | Runtime location where Orchestrarium materializes `orchestrarium-qwen` on global Qwen install |
-| Extension manifest | `qwen-extension.json` inside an extension | Orchestrarium Qwen extension manifest source; carries context file, skills, agents, and commands fields for the example payload |
+| Extension manifest | `qwen-extension.json` inside an extension | Orchestrarium Qwen extension manifest source; carries context file, skills, commands, and MCP-server fields for the example payload (roles are skills-only) |
 
 ### Local
 
@@ -146,7 +145,6 @@ Qwen is maintained in this monorepo as a native explicit example integration cla
 | Workspace settings | `<project>/.qwen/settings.json` | Qwen-native project runtime configuration surface; Orchestrarium does not own this file |
 | Orchestrarium operator overlay | `<project>/.qwen/.agents-mode.yaml` | Repo-local shared routing overlay for consultant, delegation, MCP, external-provider preferences, named priority profiles, and opinion counts; local install seeds the default and Qwen init helpers review or update it when project-specific choices are needed. Legacy sibling `<project>/.qwen/.agents-mode` remains compatibility input only. Decision-driving reads use this local scope first, then fall back to the global Qwen overlay when the local scope is absent. |
 | Extension-provided skills | installed extension content | Orchestrarium example payload installed under the extension root |
-| Extension-provided agents | installed extension content | Orchestrarium example specialist-agent payload installed under the extension root |
 | Extension-provided commands | installed extension content | Orchestrarium example custom-command payload installed under the extension root |
 | Conflict-avoidance note | user/workspace tiers vs extension | The Qwen installer keeps the pack in the extension tier and leaves top-level user/workspace tiers for explicit overrides, mirroring the Gemini example-line isolation model |
 

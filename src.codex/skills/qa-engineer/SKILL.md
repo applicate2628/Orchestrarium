@@ -42,7 +42,7 @@ description: "Verify phases with tests, regressions, edge cases, QA verdicts."
 
 ## Bug registry
 
-When the gate decision is REVISE or BLOCKED, record the defect in a flat file `work-items/bugs/<date>-<slug>.md` (or the configured bug registry path) before returning the verdict. The canonical format is the bug-style list-item frontmatter (`- key:` bullets, NO `---` YAML fences — the same shape on disk and in `docs/decisions.md`), with the title carried by a `# Bug:` H1 and a free-form body:
+When the gate decision is REVISE or BLOCKED, record the defect in a flat file `work-items/bugs/<date>-<slug>.md` (or the configured bug registry path) before returning the verdict. The canonical format is the bug-style list-item frontmatter (`- key:` bullets, NO `---` YAML fences — the same shape on disk and in `docs/decisions.md`, a maintainer reference not installed at runtime), with the title carried by a `# Bug:` H1 and a free-form body:
 
 ```markdown
 # Bug: <short description>
@@ -79,6 +79,7 @@ Residual (honest): governance-enforced only — no hook validates that a `duplic
 Test-architecture layering; full narrative + checklist: `shared/references/architecture-layering-hygiene.md` (maintainer reference; not installed at runtime). Load-bearing for this role:
 
 - **Shared test support is a single-owner, test-only module** parameterized over the production contract (an interface, not a concrete impl), isolated from production targets, and never homed inside one implementation's tests. Removing or demoting an implementation must be a PURE DELETE with zero edits to other implementations' tests; if a test-support file is imported by implementation B's tests while living under implementation A, it is mis-homed.
+- **One owner per cross-cutting invariant (C1):** a canonical ordering, shared constant, or flag meaning has exactly one owner all consumers call; tests assert against the owner's definition (the C1-canonical merge order, const C1 registries), never a re-typed copy.
 - **Failure is a typed returned value (D1) — verification facet:** assert the reusable module/leaf RETURNS a typed failure (severity + stable failure-id + cause chain), not that it terminates the process; a test that has to trap an exit/abort to pass is catching a D1 violation. Also assert idiom uniformity: two failure idioms for one failure class within one layer is a finding.
 - **Reproducibility is a publication-safe run manifest (D3):** every result-producing/golden/validation/release run emits a machine-readable manifest of run provenance — toolchain + flags, PINNED dependency versions (exact version/hash, never a moving tag/branch/latest), platform identity, determinism/FP mode, seed, parallel config + reduction partitioning, input hashes, an allowlist-built config snapshot, contract/schema versions, strategy/algorithm; missing/divergent/silently-incomplete fails packaging (declared-absent passes). Broader than C1 output equivalence; the snapshot is default-closed allowlist + a two-detector path/credential value-scan, never a raw env dump.
 - **Resource lifetime is owned and cleaned on every exit path (D4) — verification facet:** assert teardown covers cancellation and timeout (not just success/failure), and lint that no reusable-module leaf holds mutable process-global state (only const registries / documented immutables).
