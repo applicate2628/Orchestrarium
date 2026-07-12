@@ -22,6 +22,16 @@ SPINE = "shared/AGENTS.shared.md"
 # --- per-gap normative substrings and the owner files that MUST contain them ---
 # (gap-id, substring, [owner files])
 PINS = [
+    # Repository-orientation Bootstrap checkpoint — both installed provider roots.
+    ("orientation-a0", "**(a0) Pre-action orientation trigger**",
+     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+    ("orientation-step0", "0. **Repository orientation.**",
+     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+    ("orientation-record", "REPOSITORY ORIENTATION: scope=<repo-relative path>; status=<live|mutable|frozen|archived|deprecated|superseded|conflict>; workflow=<repo-relative entry point(s)>; protected=<repo-relative path(s)|none>; evidence=<path:line[,path:line...]>",
+     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+    ("orientation-violation", "Treating missing or conflicting orientation as permission to proceed.",
+     ["src.claude/CLAUDE.md", "src.codex/AGENTS.codex.md"]),
+
     # P4 — spine stop-rule (Fable probe text) + operational bullet (Sol text)
     ("P4-spine", "Stop-rule: a SECOND fix in one session that breaks a previously-working neighbor", [SPINE]),
     ("P4-op", "**Second-cross-break stop:** If a second fix in the same session breaks a previously working neighbor, STOP all edits.",

@@ -247,6 +247,12 @@ EVIDENCE_COMPLETION_TEETH = [
     "NOT-clean (fail-closed)",
 ]
 
+REPOSITORY_ORIENTATION_TEETH = [
+    "Repository orientation",
+    "Names, counts, recency, and layout are not liveness evidence",
+    "missing/conflicting status blocks side effects",
+]
+
 MANIFEST: dict[str, list[str]] = {
     "banned reasoning phrases": BANNED_REASONING_PHRASES,
     "banned correctness drivers": BANNED_CORRECTNESS_DRIVERS,
@@ -263,6 +269,7 @@ MANIFEST: dict[str, list[str]] = {
     "destructive-polarity teeth": DESTRUCTIVE_POLARITY_TEETH,
     "guard-precondition teeth": GUARD_PRECONDITION_TEETH,
     "evidence-completion teeth": EVIDENCE_COMPLETION_TEETH,
+    "repository-orientation teeth": REPOSITORY_ORIENTATION_TEETH,
 }
 
 

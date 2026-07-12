@@ -1,9 +1,10 @@
 """Smoke tests for the PowerShell (.ps1) hook + scanner wrappers.
 
 The installer registers a .ps1 entry point as the WINDOWS hook command for the
-seven structural/audit hooks (check-bugfix-discipline, check-git-push-gate,
-check-passive-polling-stop, check-work-items-archival-stop,
-check-machine-local-path, check-no-trash-in-repo, check-stale-relation-residue),
+ eight structural/audit hooks (check-bugfix-discipline, check-git-push-gate,
+ check-passive-polling-stop, check-work-items-archival-stop,
+check-machine-local-path, check-no-trash-in-repo, check-stale-relation-residue,
+check-repository-orientation),
 the two informational SessionStart reminders
 (mcp-usage-reminder, agents-mode-reminder), and ships a .ps1 for the publication
 scanner — yet NO test executed any .ps1, so a syntax error, a broken fail-open
@@ -15,7 +16,7 @@ green (every other hook test drives the .py helper via sys.executable, never the
 
 Three wrapper shapes, three contracts:
 
-  * The seven structural/audit HOOK wrappers are thin stdin pipes around their .py helper. Contract:
+  * The eight structural/audit HOOK wrappers are thin stdin pipes around their .py helper. Contract:
     FAIL OPEN — on empty stdin AND on malformed JSON they must exit 0 with no
     stdout and no stderr (AUDIT/decision hooks never crash the host; the helper's
     own fail-open swallows bad input). Verified under every available interpreter.
@@ -62,7 +63,7 @@ CLAUDE_HOOKS = REPO_ROOT / "src.claude" / "agents" / "hooks"
 CODEX_SCRIPTS = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts"
 CODEX_HOOKS = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 
-# The seven stdin-piping structural/audit hook wrappers, in BOTH install trees (14 files).
+# The eight stdin-piping structural/audit hook wrappers, in BOTH install trees (16 files).
 HOOK_WRAPPERS = (
     CLAUDE_SCRIPTS / "check-bugfix-discipline.ps1",
     CLAUDE_SCRIPTS / "check-git-push-gate.ps1",
@@ -71,6 +72,7 @@ HOOK_WRAPPERS = (
     CLAUDE_HOOKS / "check-machine-local-path.ps1",
     CLAUDE_HOOKS / "check-no-trash-in-repo.ps1",
     CLAUDE_HOOKS / "check-stale-relation-residue.ps1",
+    CLAUDE_HOOKS / "check-repository-orientation.ps1",
     CODEX_SCRIPTS / "check-bugfix-discipline.ps1",
     CODEX_SCRIPTS / "check-git-push-gate.ps1",
     CODEX_SCRIPTS / "check-passive-polling-stop.ps1",
@@ -78,6 +80,7 @@ HOOK_WRAPPERS = (
     CODEX_HOOKS / "check-machine-local-path.ps1",
     CODEX_HOOKS / "check-no-trash-in-repo.ps1",
     CODEX_HOOKS / "check-stale-relation-residue.ps1",
+    CODEX_HOOKS / "check-repository-orientation.ps1",
 )
 
 # The always-emitting informational SessionStart reminder (mcp-usage-reminder), in

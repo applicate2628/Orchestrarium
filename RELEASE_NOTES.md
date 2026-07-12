@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-07-13
+
+### Added
+
+- **Repository orientation is now a mandatory pre-side-effect gate across the installed Claude Code and Codex packs.** The always-loaded shared spine requires a cited task-scoped record of repository status, canonical workflow, and protected surfaces before the first run, build, or mutation in an unfamiliar scope; names, file counts, recency, and layout are explicitly rejected as liveness evidence, and missing or conflicting authority blocks side effects pending owner or user resolution. Both provider Bootstrap sections operationalize the same `REPOSITORY ORIENTATION:` record as step 0. A new universal warn-only PreToolUse audit, shipped byte-identically in both production packs and auto-registered by the production installers, checks risky edits and repository-local run/build/test commands for a valid assistant-authored record, skips discovery and local artifact writes, and adds a high-confidence warning for archive/deprecated/superseded/frozen path segments. The hook deliberately never scans repository prose or infers canon from deprecation words; it always allows and fails open, so the text rule remains the authority. **Who this affects:** agents must prove they are operating on the live, mutable, repository-owned surface before execution, while operators retain non-blocking telemetry and existing hook opt-out behavior.
+
 ## 2026-07-11
 
 ### Added

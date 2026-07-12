@@ -23,3 +23,5 @@ Use together with:
 - [../src.claude/README.md](../src.claude/README.md) for the Claude source tree
 
 Provider-backed external CLI prompt delivery inherits the shared file-based prompt rule; use the Claude dispatch docs for the exact Claude-line runtime contract.
+
+Repository-orientation semantics are shared in `shared/AGENTS.shared.md` and expanded in `shared/references/spine/repository-orientation-and-mechanism-inventory.md`. The Claude Code-specific Bootstrap step 0, warn-only hook contract, installer behavior, and matcher details live in `src.claude/CLAUDE.md`.

@@ -51,6 +51,8 @@ Installed Codex now follows the same compact-entrypoint pattern that Claude alre
 
 Maintainer note: this repository is the installer/source monorepo, not automatically a repo-local Codex install target. When working inside `Orchestrarium/`, it is valid to rely on the global Codex install under `~/.codex/`. A missing local `.agents/` tree in this monorepo does not by itself mean the Codex runtime is misconfigured; create `.agents/` here only by running the installers intentionally.
 
+Installed governance now requires a cited repository-orientation record before the first run, build, or mutation in an unfamiliar repository or subtree. The record names scope, live/archive status, canonical workflow, protected surfaces, and `file:line` evidence; names, file counts, recency, and layout never prove liveness. The production Claude Code and Codex installers also register a warn-only, fail-open process audit that detects a skipped or conflicting record without scanning repository prose or inferring canon from deprecation words.
+
 Cross-provider execution is available through two routing adapters:
 
 - `$external-worker` is the external execution adapter for eligible worker-side roles.

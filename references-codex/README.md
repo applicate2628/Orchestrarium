@@ -25,3 +25,5 @@ Use together with:
 Provider-backed external CLI prompt delivery inherits the shared file-based prompt rule; use the Codex dispatch docs for the exact Codex-line runtime contract.
 
 Codex skill frontmatter descriptions are startup metadata, not the full role contract. Keep detailed trigger logic and gate rules in each `SKILL.md` body; the Codex validator enforces the compact metadata budget so installed skill catalogs do not overflow the startup skill-description context.
+
+Repository-orientation semantics are shared in `shared/AGENTS.shared.md` and expanded in `shared/references/spine/repository-orientation-and-mechanism-inventory.md`. The Codex-specific Bootstrap step 0, warn-only hook contract, installer/trust behavior, and matcher details live in `src.codex/AGENTS.codex.md`.

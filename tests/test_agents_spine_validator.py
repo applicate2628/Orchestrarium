@@ -56,6 +56,16 @@ def test_spine_validator_fails_on_tiny_size_cap() -> None:
     assert "FAIL: spine size" in p.stdout, p.stdout
 
 
+def test_manifest_pins_repository_orientation_teeth() -> None:
+    validator_source = VALIDATOR.read_text(encoding="utf-8")
+    for token in (
+        "Repository orientation",
+        "Names, counts, recency, and layout are not liveness evidence",
+        "missing/conflicting status blocks side effects",
+    ):
+        assert token in validator_source, f"validator manifest does not pin {token!r}"
+
+
 if __name__ == "__main__":
     import unittest
     # allow `python tests/test_agents_spine_validator.py` as a quick manual run
