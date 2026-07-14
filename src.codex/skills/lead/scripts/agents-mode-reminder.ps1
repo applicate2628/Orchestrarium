@@ -21,6 +21,20 @@
 $ErrorActionPreference = "SilentlyContinue"
 try { [Console]::OutputEncoding = [System.Text.Encoding]::UTF8 } catch {}
 
+function Write-SessionStartContext {
+    param([string]$AdditionalContext)
+    try {
+        $payload = [ordered]@{
+            hookSpecificOutput = [ordered]@{
+                hookEventName = "SessionStart"
+                additionalContext = $AdditionalContext
+            }
+        }
+        $json = $payload | ConvertTo-Json -Compress -Depth 4 -ErrorAction Stop
+        if ($json) { [Console]::Out.WriteLine($json) }
+    } catch {}
+}
+
 function Get-DelegationMode {
     # $homeDir, NOT $home: $home is a read-only PowerShell automatic variable
     # (names are case-insensitive), so assigning $home is silently suppressed
@@ -62,12 +76,14 @@ function Get-DelegationMode {
 
 $mode = Get-DelegationMode
 if ($mode -eq "force") {
-    Write-Output "[Delegation posture - re-shown at session start and after every compaction]"
-    Write-Output "Effective delegationMode: FORCE. STANDING INSTRUCTION, not advisory: at the FIRST decision point of any non-trivial task (multi-step implementation, design, research, review, bug-fix), STOP - hold the `$lead orchestration role in THIS session, classify the task, pick the team template, and activate the matching specialist role/skill per stage (`$lead is the role you hold, not a subagent you spawn). Doing substantial work inline when a matching specialist and a viable tool path exist violates the active posture. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
+    $context = "[Delegation posture - re-shown at session start and after every compaction]`n" +
+        "Effective delegationMode: FORCE. STANDING INSTRUCTION, not advisory: at the FIRST decision point of any non-trivial task (multi-step implementation, design, research, review, bug-fix), STOP - hold the `$lead orchestration role in THIS session, classify the task, pick the team template, and activate the matching specialist role/skill per stage (`$lead is the role you hold, not a subagent you spawn). Doing substantial work inline when a matching specialist and a viable tool path exist violates the active posture. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
+    Write-SessionStartContext -AdditionalContext $context
 }
 elseif ($mode -eq "auto") {
-    Write-Output "[Delegation posture - re-shown at session start and after every compaction]"
-    Write-Output "Effective delegationMode: AUTO. Holding the `$lead orchestration role in THIS session and activating the matching specialist role/skill per stage is the DEFAULT for any non-trivial task (multi-step implementation, design, research, review, bug-fix) - do it unless the task is trivial or you record why inline is better. `$lead is the role you hold, not a subagent you spawn. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
+    $context = "[Delegation posture - re-shown at session start and after every compaction]`n" +
+        "Effective delegationMode: AUTO. Holding the `$lead orchestration role in THIS session and activating the matching specialist role/skill per stage is the DEFAULT for any non-trivial task (multi-step implementation, design, research, review, bug-fix) - do it unless the task is trivial or you record why inline is better. `$lead is the role you hold, not a subagent you spawn. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
+    Write-SessionStartContext -AdditionalContext $context
 }
 # manual value, unresolved, or empty -> silent
 exit 0
