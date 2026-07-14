@@ -162,6 +162,22 @@ class TestMissingManifestTokenFailsClosed(unittest.TestCase):
             self.assertIn("banned reasoning phrases", joined, joined)
             self.assertIn("gate / discipline names", joined, joined)
 
+    def test_each_performance_profile_tooth_fails_via_cli(self) -> None:
+        mod = _load_validator()
+        for index, token in enumerate(mod.PERFORMANCE_PROFILE_TEETH, start=1):
+            with self.subTest(tooth=token):
+                with tempfile.TemporaryDirectory() as td:
+                    spine = _copy_spine_tree(Path(td))
+                    text = spine.read_text(encoding="utf-8")
+                    self.assertIn(token, text)
+                    spine.write_text(
+                        text.replace(token, f"XX{index}", 1),
+                        encoding="utf-8",
+                    )
+                    result = _run_cli(spine)
+                    self.assertEqual(result.returncode, 1, result.stdout)
+                    self.assertIn("[performance-profile teeth]", result.stdout)
+
 
 class TestDeadReferencePointerFailsClosed(unittest.TestCase):
     """Branch (2): if the spine names a shared/references/...md pointer that no

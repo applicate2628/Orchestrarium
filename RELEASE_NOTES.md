@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-07-14
+
+### Changed
+
+- **Reported runtime-performance symptoms now require a live profile of the exact reported scenario before audit-driven design or fixes.** The always-loaded Pre-fix gate treats unprofiled code audits and stale performance reports—including hedged "candidates to measure" findings—as advisory hypotheses rather than roots or fix gates, rejects proxy scenarios, and requires usage-based redesigns to combine profile evidence with an explicit domain or usage observation. Performance Engineer and Performance Reviewer contracts across all four provider packs consume the same preserved profile, re-profile only when it is absent or mismatched, and distinguish correctable missing evidence from verified external blockers. The Codex Lead operating model applies this precondition to every relevant route without changing role order, while prospective performance modeling without a reported runtime symptom remains allowed. The spine validator now pins and negative-tests all three enforcement teeth. **Who this affects:** orchestrators and performance roles must profile the user's actual slowdown first and may not build or block a fix on code reasoning alone.
+
 ## 2026-07-13
 
 ### Added

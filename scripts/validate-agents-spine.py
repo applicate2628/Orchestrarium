@@ -253,6 +253,12 @@ REPOSITORY_ORIENTATION_TEETH = [
     "missing/conflicting status blocks side effects",
 ]
 
+PERFORMANCE_PROFILE_TEETH = [
+    "For a reported runtime-performance symptom, the FIRST mandatory action is to live-profile its reported scenario (not a proxy)",
+    "Unprofiled code/stale-report findings, even hedged, are advisory hypotheses",
+    "Usage redesign needs that profile plus domain/usage evidence code alone lacks",
+]
+
 MANIFEST: dict[str, list[str]] = {
     "banned reasoning phrases": BANNED_REASONING_PHRASES,
     "banned correctness drivers": BANNED_CORRECTNESS_DRIVERS,
@@ -270,6 +276,7 @@ MANIFEST: dict[str, list[str]] = {
     "guard-precondition teeth": GUARD_PRECONDITION_TEETH,
     "evidence-completion teeth": EVIDENCE_COMPLETION_TEETH,
     "repository-orientation teeth": REPOSITORY_ORIENTATION_TEETH,
+    "performance-profile teeth": PERFORMANCE_PROFILE_TEETH,
 }
 
 

@@ -38,6 +38,7 @@ description: Perform an independent performance gate for an approved phase and r
 ## Working rules
 
 - Validate that benchmarks, load tests, or profiling evidence match the real risk surface.
+- For a reported runtime-performance symptom, require evidence that a live profile of the reported scenario—not a proxy—preceded code-audit-driven design or fix. Without it, code-audit or stale-report findings, including "candidates to measure" or "not confirmed" hedges, are advisory hypotheses: they cannot establish a root or support approval, rejection, or scoping of a fix. Return `REVISE` to `performance-engineer` when profile evidence is missing or insufficient; if live profiling is unavailable because of a verified external blocker, return `BLOCKED` with the blocker and missing probe. A usage-based redesign also requires explicit domain/usage evidence, not code analysis alone.
 - Reject benchmarks whose work the compiler or runtime can eliminate, whose input shape or size is not representative of the budgeted workload, or whose latency-under-load measurement suffers coordinated omission because the load generator stalls and hides queue delay.
 - Every accepted benchmark names its workload, input shape, and environment.
 - A claimed number is verified only by reproducing it or inspecting a preserved run artifact containing the command line, environment, and raw output under `.scratch/`; a bare number in prose is `ASSUMPTION (UNVERIFIED)` and cannot support a budgeted `PASS`.

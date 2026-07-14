@@ -105,6 +105,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
   `lead -> knowledge-archivist -> lead`
 - Repository control-plane semantic change prepared by `knowledge-archivist`:
   `lead -> knowledge-archivist -> architecture-reviewer -> lead`
+- Before any route handles a reported runtime-performance symptom, the main conversation must ensure the route's FIRST evidence action captures and preserves one live profile of the exact reported scenario (not a proxy) before any audit becomes design input; downstream roles consume that profile, while unprofiled audit/model findings stay advisory and cannot gate a fix. Role order is otherwise unchanged.
 - Performance-sensitive work:
   `lead -> analyst -> architect -> performance-engineer -> planner -> implementation -> qa-engineer -> lead`
 - Reliability-sensitive work:
