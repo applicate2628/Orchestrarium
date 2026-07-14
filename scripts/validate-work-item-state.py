@@ -8,7 +8,15 @@ from pathlib import Path
 
 STATUS_VALUES = {"planned", "running", "completed", "revise", "blocked", "cancelled"}
 GATE_VALUES = {"PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "advisory", "none"}
-EXECUTION_ROLES = {"main", "lead", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade"}
+# Canonical executionRole values (mirrors shared/schemas/agent-runs.schema.json).
+# There is exactly ONE main-conversation identity: "main". The main conversation
+# also holds the Lead role — orchestration weight is the status.md
+# `orchestration: light | full-lead` field, never a second executionRole value.
+EXECUTION_ROLES = {"main", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade"}
+# Legacy READ-mapping: ledgers written before 2026-07-11 may carry "lead" as the
+# executionRole; it reads as "main" (same owner). Read-side acceptance only —
+# NEW writes must use "main" (scripts/agent-run-ledger.py rejects legacy values).
+LEGACY_EXECUTION_ROLES = {"lead": "main"}
 EVIDENCE_KINDS = {"command", "artifact", "visual", "review", "manual-check", "log"}
 RETURN_GATE_RE = re.compile(r"^RETURN\([a-z][a-z-]*\)$")
 MIN_LENGTHS = {
@@ -144,7 +152,10 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
     gate = event.get("gate")
     if not isinstance(gate, str) or (gate not in GATE_VALUES and not RETURN_GATE_RE.fullmatch(gate)):
         fail(errors, f"{run_id}: invalid gate {event.get('gate')!r}")
-    if event.get("executionRole") not in EXECUTION_ROLES:
+    execution_role = event.get("executionRole")
+    if execution_role in LEGACY_EXECUTION_ROLES:
+        execution_role = LEGACY_EXECUTION_ROLES[execution_role]  # legacy read-mapping (lead -> main)
+    if execution_role not in EXECUTION_ROLES:
         fail(errors, f"{run_id}: invalid executionRole {event.get('executionRole')!r}")
     if not isinstance(event.get("scope"), list) or not event.get("scope"):
         fail(errors, f"{run_id}: scope must be a non-empty list")

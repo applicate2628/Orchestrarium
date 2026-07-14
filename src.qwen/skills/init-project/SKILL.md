@@ -46,7 +46,7 @@ Presets are init-time shortcuts only. They expand into canonical `agents-mode` k
 | `externalCodexWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalClaudeWorkdirMode` | `neutral` | `neutral` | `neutral` | `neutral` | `neutral` | `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
-| `externalCodexProfile` | `gpt-5.5-xhigh` | `default` | `default` | `gpt-5.5-xhigh` | `gpt-5.5-xhigh` | `gpt-5.5-fast` |
+| `externalCodexProfile` | `gpt-5.6-sol-xhigh` | `default` | `default` | `gpt-5.6-sol-xhigh` | `gpt-5.6-sol-xhigh` | `gpt-5.6-luna` |
 
 `correctness-first` and `power-mode` lane-specific opinion counts:
 - `advisory.repo-understanding: 2`
@@ -193,7 +193,7 @@ Routing conventions (not persisted as keys):
    externalCodexWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalClaudeWorkdirMode: {value}  # allowed: neutral | project; default: neutral
    externalModelMode: {value}  # allowed: runtime-default | pinned-top-pro; default: runtime-default
-   externalCodexProfile: {value}  # allowed: default | gpt-5.5-fast | gpt-5.5-xhigh | gpt-5.3-codex-spark; default: gpt-5.5-xhigh
+   externalCodexProfile: {value}  # allowed: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-luna; default: gpt-5.6-sol-xhigh
    ```
 
 8. **Confirm completion.**

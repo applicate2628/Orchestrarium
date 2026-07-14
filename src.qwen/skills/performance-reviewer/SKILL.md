@@ -31,6 +31,7 @@ description: Perform an independent performance gate for an approved phase and r
 ## Working rules
 
 - Validate that benchmarks, load tests, or profiling evidence match the real risk surface.
+- For a reported runtime-performance symptom, require evidence that a live profile of the reported scenario—not a proxy—preceded code-audit-driven design or fix. Without it, code-audit or stale-report findings, including "candidates to measure" or "not confirmed" hedges, are advisory hypotheses: they cannot establish a root or support approval, rejection, or scoping of a fix. Return `REVISE` to `performance-engineer` when profile evidence is missing or insufficient; if live profiling is unavailable because of a verified external blocker, return `BLOCKED` with the blocker and missing probe. A usage-based redesign also requires explicit domain/usage evidence, not code analysis alone.
 - Call out environment limits and measurement blind spots explicitly.
 - If the phase needs new tuning work, send it back through `performance-engineer`.
 

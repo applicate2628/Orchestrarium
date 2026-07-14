@@ -70,7 +70,17 @@ REFERENCE_REL = "shared/references/architecture-layering-hygiene.md"
 STAMP_REL = "scripts/arch-layering-slices.stamp"
 
 
+# Roles whose Architecture layering hygiene slice canonically lives under skills/<role>/SKILL.md on
+# the Claude line too, not agents/<role>.md. These are the "dual" role-skills from the roles-as-skills
+# curated subset (agents/<role>.md is a thin delegate wrapper): the slice moved with the rest of the
+# role contract when the role became skill-canonical, matching how codex_path() below already targets
+# skills/<role>/SKILL.md for every role.
+CLAUDE_SKILL_CANONICAL_ROLES = {"architect"}
+
+
 def claude_path(root: Path, role: str) -> Path:
+    if role in CLAUDE_SKILL_CANONICAL_ROLES:
+        return root / "src.claude" / "skills" / role / "SKILL.md"
     return root / "src.claude" / "agents" / f"{role}.md"
 
 

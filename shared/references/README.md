@@ -29,6 +29,8 @@ Shared-core documents may still keep provider-local addenda when the shared blue
 
 Russian translations live under `shared/references/ru/` for shared documents that are mirrored for Russian-language operators.
 
+Two design-only trunks own independence techniques at different stages: `review-loop-methodology.md` (independence at verification — multiple angles converge on one already-written artifact) and `design-panel-methodology.md` (independence at generation — N independently-framed candidate designs on one pinned problem, converged through one mandatory synthesis, before a single design exists). Installed operative bindings currently exist for the Claude and Codex PRODUCTION packs; `design-panel-methodology.md`'s Gemini/Qwen demo-pack mirror is an explicit, tracked DEFERRED follow-on, not yet shipped (see `work-items/bugs/2026-07-10-review-loop-pack-integration-gaps.md` for the related pre-existing review-loop demo-pack gap). Neither trunk carries exact provider paths or CLI syntax; those live in the corresponding pack binding.
+
 Intentional pack-local exceptions:
 - `periodic-control-matrix` stays pack-local because it still embeds provider/runtime vocabulary, task-memory layout, and runtime-doc links rather than a generic shared skeleton.
 

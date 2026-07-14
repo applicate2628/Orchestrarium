@@ -84,6 +84,17 @@ def check_schema(root: Path) -> None:
     require(evidence_items.get("additionalProperties") is False, "schema must reject extra evidence fields")
     require(set(evidence_items.get("required", [])) == {"kind", "ref"}, "schema must require evidence kind/ref")
 
+    # Exactly ONE main-conversation identity on the wire: "main". The retired
+    # orchestrator main|lead duality must not resurface as two owner-shaped enum
+    # values (one owner split across two rollup audit buckets); "lead" survives
+    # only as the validator's documented legacy READ-mapping, never in the enum.
+    execution_roles = set(props["executionRole"].get("enum", []))
+    require(
+        "main" in execution_roles and "lead" not in execution_roles,
+        "schema must model exactly one main-conversation identity ('main' in the "
+        "executionRole enum, 'lead' absent — legacy 'lead' reads map to 'main')",
+    )
+
 
 def run_validator_case(root: Path, base: Path, name: str, event: dict[str, object], expect_pass: bool, fragments: tuple[str, ...] = (), status_text: str = STATUS_TEXT) -> None:
     item = base / name
@@ -120,6 +131,33 @@ def check_validator(root: Path) -> None:
             ledger_event(),
             True,
             status_text=STATUS_TEXT_CANONICAL,
+        )
+        # Legacy read-mapping: a pre-2026-07-11 ledger line with executionRole
+        # "lead" still validates (it reads as "main" — same owner, one identity).
+        run_validator_case(
+            root,
+            base,
+            "legacy-execution-role-lead-reads",
+            ledger_event(executionRole="lead"),
+            True,
+        )
+        # ...but the mapping is not a general escape hatch: a value outside the
+        # canonical enum and the legacy map still fails.
+        run_validator_case(
+            root,
+            base,
+            "unknown-execution-role-fails",
+            ledger_event(executionRole="foo"),
+            False,
+            ("invalid executionRole",),
+        )
+        # And the canonical single main-conversation identity validates.
+        run_validator_case(
+            root,
+            base,
+            "main-execution-role",
+            ledger_event(executionRole="main"),
+            True,
         )
         run_validator_case(
             root,

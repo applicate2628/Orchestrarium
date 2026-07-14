@@ -23,7 +23,7 @@ Platform variants (`.sh`/`.ps1`/`.py`) of the same command with the same contrac
 
 `shared/AGENTS.shared.md` `Directory-level entity separation` requires directories to organize around one primary entity type. The Orchestrarium monorepo has **three deliberately co-located directories** that serve a documented design constraint and are exempt from the per-entity-type split:
 
-- `src.claude/agents/scripts/` — Claude pack: co-locates runtime hooks (`check-bugfix-discipline.*`, `check-passive-polling-stop.*`, `hook_common.py`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), and pack validators (`validate-skill-pack.*`).
+- `src.claude/agents/scripts/` — Claude pack: co-locates blocking-enforcement hooks (`check-bugfix-discipline.*`, `check-git-push-gate.*`, `check-passive-polling-stop.*`, `check-work-items-archival-stop.*`, plus the shared `hook_common.py`), SessionStart context hooks (`mcp-usage-reminder.*`, `agents-mode-reminder.*`), provider invocation wrappers (`invoke-claude-api.*`, `invoke-claude-prompt.*`, `invoke-codex-prompt.*`), publication gates (`check-publication-safety.*`), and pack validators (`validate-skill-pack.*`).
 
 - `src.codex/skills/lead/scripts/` — Codex pack: same entity-type co-location pattern (minus the prompt-invocation wrappers, which are Claude-side only).
 
@@ -37,14 +37,14 @@ Platform variants (`.sh`/`.ps1`/`.py`) of the same command with the same contrac
 
 The cost-vs-benefit of forcing this refactor on every existing operator install does not justify the gain from cleaner per-entity-type filesystem layout, because the existing naming convention (`check-*` / `invoke-*` / `validate-*` / `install-*` / etc.) already provides per-entity-type discoverability.
 
-**The exception is grandfathered, not extensible.** New entity types added in the future MUST follow the shared rule:
+**The exception is grandfathered for wrappers, validators, and installers — and AMENDED for hooks** (decision `work-items/decisions/2026-07-11-hook-placement-gate-semantics.md`). Hook placement follows **gate semantics**, not the generic new-entity-type rule:
 
-- A new hook → typed subdirectory under `agents/hooks/` or `skills/lead/hooks/` (creating the subdirectory if it does not yet exist), NOT into the co-located legacy dir.
+- A **warn-only audit hook** (contract: reads its own call's `tool_input`, writes a stderr warning, ALWAYS allows, fails open) → the typed `agents/hooks/` / `skills/lead/hooks/` dir, byte-identical to its `scripts/universal-hooks/hooks/` canon source (set-equality-gated by `tests/test_universal_hook_surfaces.py`).
+- A **blocking-enforcement hook** (PreToolUse `permissionDecision: deny` / Stop `decision: block` payloads) or a **SessionStart context hook** → the co-located `agents/scripts/` / `skills/lead/hooks/`-sibling `scripts/` dir beside `hook_common.py`. A universal one is byte-identical to its `scripts/universal-hooks/scripts/` canon source; a provider-specialized one (per-provider config paths or directive wording, e.g. `agents-mode-reminder.*`) carries NO canon copy and is instead DECLARED, with a justification, in the gate's per-pack allowlist (`PACK_ONLY_SCRIPTS` in `tests/test_universal_hook_surfaces.py`). An undeclared scripts/-dir hook fails the gate.
 - A new wrapper → typed subdirectory under `agents/wrappers/`, NOT alongside the co-located legacy dir.
 - A new validator → typed subdirectory under `validators/`, NOT into root `scripts/` if its lifecycle differs from existing co-located items.
-- Etc.
 
-When in doubt, evaluate per the Rule 1 classification test (owner/lifecycle + I/O contract). The presence of three legacy co-located directories does not constitute permission to add a fourth or to grow the existing three.
+Rationale for the hook amendment: proximity to `hook_common.py` is a placement convention, not an import necessity — the audit hooks in `agents/hooks/` import `hook_common` across directories via an explicit `sys.path` shim. The axis that actually held in practice is gate semantics: `agents/hooks/` is the coherent warn-only-audit family (one identical I/O contract), while blocking and session-context hooks share the envelope-consuming runtime family in `agents/scripts/`. When in doubt, evaluate per the Rule 1 classification test (owner/lifecycle + I/O contract). The presence of these co-located directories is NOT permission to add a fourth co-located dir, nor to grow them with entity types other than the hook classes named above.
 
 ## Per-rule worked examples
 
@@ -57,9 +57,9 @@ A future maintainer wants to add `check-active-probe-discipline.{py,sh,ps1}` (ca
 - Actor/lifecycle: Stop event runtime hook, fired by Claude/Codex CLI's PreToolUse/Stop hook surface.
 - I/O contract: reads PreToolUse Stop envelope from stdin; writes `{"decision":"block","reason":"..."}` to stdout or exits 0.
 
-This matches the existing hook entity type (same owner: runtime hook system; same contract: stdin JSON envelope → stdout deny payload). **Per the grandfathered exception**, the new hook belongs in a new typed subdirectory `agents/hooks/` (creating it for this first new-entity-type hook), NOT in the legacy `agents/scripts/` co-located dir.
+This matches the existing hook entity family (same owner: runtime hook system; same contract: stdin JSON envelope → stdout block payload). **Per the amended placement law**, gate semantics decide the dir: this hook BLOCKS (emits `{"decision":"block"}`), so it belongs in the co-located `agents/scripts/` / `skills/lead/scripts/` dir beside `hook_common.py`, with a byte-identical canon copy added to `scripts/universal-hooks/scripts/` (the parity test picks it up automatically — the name lists are glob-derived from the canon dir).
 
-If the grandfathered exception did not exist, the new hook would belong in the same place it does now (typed subdir). The exception merely formalizes that **existing** files stay where they are; **new** files follow the rule.
+Had the same hook been a warn-only audit instead (stderr warning, always allow), it would belong in the typed `agents/hooks/` / `skills/lead/hooks/` dir with its canon copy in `scripts/universal-hooks/hooks/`. And had it been provider-specialized (different config paths or directive text per provider, like `agents-mode-reminder.*`), it would ship per-pack in `scripts/` with NO canon copy and a justified entry in the gate's `PACK_ONLY_SCRIPTS` allowlist.
 
 ### Rule 2 — Trash hygiene and archival
 
@@ -82,7 +82,7 @@ Subject to `Worktree safety`: do not delete or move v1 files that aren't part of
 ## Terms and Abbreviations
 
 - **Entity type**: the kind of work a source file does, classified by actor/lifecycle plus input/output contract.
-- **Grandfathered exception**: a documented co-located directory that exists for a deliberate design constraint, exempt from the per-entity-type split for existing contents but not extensible to new contents.
+- **Grandfathered exception**: a documented co-located directory that exists for a deliberate design constraint, exempt from the per-entity-type split; for hooks the placement register is the gate-semantics law above, for other entity types the exception is closed to new contents.
 - **Worktree safety**: the existing rule against modifying files outside the admitted change surface (`shared/AGENTS.shared.md` `### Operational and environment safety`).
 - **Classification test**: the two-signal placement check (actor/lifecycle + I/O contract) applied before adding or moving any source file.
 - **Repo-local concretization**: per-repo extension of a shared rule, declared in `AGENTS.md` / `CLAUDE.md` or in a repo-specific shared reference like this document.
