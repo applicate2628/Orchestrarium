@@ -5,8 +5,8 @@
 # Orchestrator-pack governance value the host never parses on its own, so without
 # this hook the main conversation never sees "delegationMode: force" and never
 # applies it. This hook makes the operative delegation posture visible every
-# session/compaction. (Codex: plain stdout on a SessionStart hook is added as
-# developer context; its source matcher includes compact.)
+# session/compaction. The structured SessionStart JSON below adds the directive
+# as developer context; the Codex source matcher includes compact.
 #
 # CONDITIONAL BY DESIGN: emits an IMPERATIVE directive ONLY when the effective
 # delegationMode is `force` or `auto`; SILENT on `manual` and on the no-file/
@@ -68,14 +68,12 @@ _mode="$(_read_delegation_mode 2>/dev/null)"
 case "$_mode" in
   force)
     cat <<'EOF'
-[Delegation posture - re-shown at session start and after every compaction]
-Effective delegationMode: FORCE. STANDING INSTRUCTION, not advisory: at the FIRST decision point of any non-trivial task (multi-step implementation, design, research, review, bug-fix), STOP - hold the $lead orchestration role in THIS session, classify the task, pick the team template, and activate the matching specialist role/skill per stage ($lead is the role you hold, not a subagent you spawn). Doing substantial work inline when a matching specialist and a viable tool path exist violates the active posture. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION.
+{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"[Delegation posture - re-shown at session start and after every compaction]\nEffective delegationMode: FORCE. STANDING INSTRUCTION, not advisory: at the FIRST decision point of any non-trivial task (multi-step implementation, design, research, review, bug-fix), STOP - hold the $lead orchestration role in THIS session, classify the task, pick the team template, and activate the matching specialist role/skill per stage ($lead is the role you hold, not a subagent you spawn). Doing substantial work inline when a matching specialist and a viable tool path exist violates the active posture. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."}}
 EOF
     ;;
   auto)
     cat <<'EOF'
-[Delegation posture - re-shown at session start and after every compaction]
-Effective delegationMode: AUTO. Holding the $lead orchestration role in THIS session and activating the matching specialist role/skill per stage is the DEFAULT for any non-trivial task (multi-step implementation, design, research, review, bug-fix) - do it unless the task is trivial or you record why inline is better. $lead is the role you hold, not a subagent you spawn. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION.
+{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"[Delegation posture - re-shown at session start and after every compaction]\nEffective delegationMode: AUTO. Holding the $lead orchestration role in THIS session and activating the matching specialist role/skill per stage is the DEFAULT for any non-trivial task (multi-step implementation, design, research, review, bug-fix) - do it unless the task is trivial or you record why inline is better. $lead is the role you hold, not a subagent you spawn. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."}}
 EOF
     ;;
   *)
