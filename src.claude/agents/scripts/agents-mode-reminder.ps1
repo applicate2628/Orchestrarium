@@ -63,12 +63,20 @@ function Get-DelegationMode {
 
 $mode = Get-DelegationMode
 if ($mode -eq "force") {
-    Write-Output "[Delegation posture - re-shown at session start and after every compaction]"
-    Write-Output "Effective delegationMode: FORCE. STANDING INSTRUCTION, not advisory: at the FIRST decision point of any non-trivial task (multi-step implementation, design, research, review, bug-fix), STOP - hold the `$lead orchestration role in THIS conversation, classify the task, pick the team template, and route it via the Agent tool to the matching specialist subagents (`$lead is the role you hold, not a subagent you spawn). Doing substantial work inline when a matching specialist and a viable tool path exist violates the active posture. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
+    # @'...'@ single-quoted here-string: $lead stays LITERAL (no backtick needed);
+    # ConvertTo-Json escapes the payload so the SessionStart contract gets valid JSON.
+    $ctx = @'
+[Delegation posture - re-shown at session start and after every compaction]
+Effective delegationMode: FORCE. STANDING INSTRUCTION, not advisory: at the FIRST decision point of any non-trivial task (multi-step implementation, design, research, review, bug-fix), STOP - hold the $lead orchestration role in THIS conversation, classify the task, pick the team template, and route it via the Agent tool to the matching specialist subagents ($lead is the role you hold, not a subagent you spawn). Doing substantial work inline when a matching specialist and a viable tool path exist violates the active posture. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION.
+'@
+    [Console]::Out.WriteLine(([ordered]@{ hookSpecificOutput = [ordered]@{ hookEventName = "SessionStart"; additionalContext = $ctx } } | ConvertTo-Json -Compress -Depth 4))
 }
 elseif ($mode -eq "auto") {
-    Write-Output "[Delegation posture - re-shown at session start and after every compaction]"
-    Write-Output "Effective delegationMode: AUTO. Holding the `$lead orchestration role in THIS conversation and delegating to the matching specialist subagents via the Agent tool is the DEFAULT for any non-trivial task (multi-step implementation, design, research, review, bug-fix) - do it unless the task is trivial or you record why inline is better. `$lead is the role you hold, not a subagent you spawn. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
+    $ctx = @'
+[Delegation posture - re-shown at session start and after every compaction]
+Effective delegationMode: AUTO. Holding the $lead orchestration role in THIS conversation and delegating to the matching specialist subagents via the Agent tool is the DEFAULT for any non-trivial task (multi-step implementation, design, research, review, bug-fix) - do it unless the task is trivial or you record why inline is better. $lead is the role you hold, not a subagent you spawn. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION.
+'@
+    [Console]::Out.WriteLine(([ordered]@{ hookSpecificOutput = [ordered]@{ hookEventName = "SessionStart"; additionalContext = $ctx } } | ConvertTo-Json -Compress -Depth 4))
 }
 # manual value, unresolved, or empty -> silent
 exit 0
