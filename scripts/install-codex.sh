@@ -1016,6 +1016,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.ps1"
       notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.ps1"
       stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.ps1"
+      repository_orientation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-repository-orientation.ps1"
       reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.ps1"
       agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.ps1"
     else
@@ -1026,6 +1027,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.sh"
       notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.sh"
       stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.sh"
+      repository_orientation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-repository-orientation.sh"
       reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.sh"
       agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.sh"
     fi
@@ -1081,6 +1083,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --host-os "$hook_host_os" \
       --script-marker check-stale-relation-residue \
       --script-path "$stale_relation_script_target"
+    echo "  Installing repository-orientation PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-marker check-repository-orientation \
+      --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|shell_command|exec_command" \
+      --script-path "$repository_orientation_script_target"
     echo "  Installing MCP-usage-reminder SessionStart hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
     "$python_cmd" "$hook_installer" \
       --target "$hooks_target" \

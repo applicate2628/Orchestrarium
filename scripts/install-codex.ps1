@@ -976,6 +976,7 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         $MachinePathScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-machine-local-path.ps1"
         $NoTrashScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-no-trash-in-repo.ps1"
         $StaleRelationScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-stale-relation-residue.ps1"
+        $RepositoryOrientationScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-repository-orientation.ps1"
         $ReminderScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\mcp-usage-reminder.ps1"
         $AgentsModeReminderScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\agents-mode-reminder.ps1"
         Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
@@ -1016,6 +1017,12 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         }
         Write-Host "  Installing stale-relation-residue PreToolUse hook [AUDIT] (host-os=windows; trust step manual via codex TUI)..."
         & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-stale-relation-residue --script-path $StaleRelationScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing repository-orientation PreToolUse hook [AUDIT] (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-repository-orientation --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|shell_command|exec_command" --script-path $RepositoryOrientationScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
