@@ -1,6 +1,6 @@
 ---
 name: architecture-reviewer
-description: Review an approved implementation phase or repository control-plane change for maintainability, readability, architecture fit, and governance coherence. Use when Qwen Code needs an independent quality gate on complexity, cognitive load, contract compliance, standards alignment, technical-debt risk, or semantic control-plane drift before the change advances.
+description: "Architecture reviewer: gate cohesion and maintainability."
 ---
 
 # Architecture Reviewer

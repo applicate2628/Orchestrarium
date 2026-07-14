@@ -1,6 +1,6 @@
 ---
 name: graphics-engineer
-description: Implement an approved 2D or 3D graphics phase without redefining rendering architecture. Use when Claude Code needs rendering pipelines, scene updates, GPU or shader integration, asset or material flow, camera behavior, frame lifecycle, or visual-performance work that already has accepted research, design, constraints, and plan artifacts.
+description: "Graphics engineer: implement rendering and shaders."
 ---
 
 # Graphics Engineer

@@ -1,6 +1,6 @@
 ---
 name: external-brigade
-description: Launch and aggregate a bounded brigade of parallel external helpers when multiple independent external lanes or slices should run together.
+description: "External brigade: launch bounded parallel helper lanes."
 ---
 
 # External Brigade

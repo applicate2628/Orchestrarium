@@ -1,6 +1,6 @@
 ---
 name: performance-engineer
-description: Define performance budgets, measurement strategy, bottleneck models, and performance constraints for performance-sensitive work. Use when Qwen Code needs latency, throughput, memory, CPU, I/O, query plan, rendering, build-time, runtime, scalability, or cost analysis before planning or before a critical release gate.
+description: "Performance engineer: define budgets and measurements."
 ---
 
 # Performance Engineer

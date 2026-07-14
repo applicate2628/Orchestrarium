@@ -1,6 +1,6 @@
 ---
 name: ux-designer
-description: "Design user flows, state behavior, hierarchy, usability criteria."
+description: "UX designer: define flows, states, and usability criteria."
 ---
 
 # UX Designer

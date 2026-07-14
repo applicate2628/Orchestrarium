@@ -1,6 +1,6 @@
 ---
 name: frontend-engineer
-description: Implement an approved frontend phase without redefining product or architecture decisions. Use when Qwen Code needs client-side, UI, styling, accessibility, or browser integration changes that already have accepted research, design, specialist constraints, and plan artifacts.
+description: "Frontend engineer: implement approved web UI phases."
 ---
 
 # Frontend Engineer

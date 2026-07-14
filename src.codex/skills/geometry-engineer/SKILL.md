@@ -1,6 +1,6 @@
 ---
 name: geometry-engineer
-description: "Implement geometry: transforms, intersections, meshing, indexing, predicates."
+description: "Geometry engineer: implement spatial algorithms."
 ---
 
 # Geometry Engineer

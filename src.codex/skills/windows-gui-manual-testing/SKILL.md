@@ -1,6 +1,6 @@
 ---
 name: windows-gui-manual-testing
-description: Verify Windows desktop GUI (Qt/Avalonia/WinUI/WebView) with screenshots, video, or live inspection.
+description: "Windows GUI testing: verify desktop UI with visual evidence."
 ---
 
 # Windows GUI Manual Testing

@@ -1,6 +1,6 @@
 ---
 name: bug-hunting
-description: Investigate runtime bugs with diagnostic logging before any fix.
+description: "Bug hunting: diagnose runtime defects before fixes."
 ---
 
 # Bug Hunting

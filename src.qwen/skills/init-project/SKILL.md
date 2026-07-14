@@ -1,8 +1,6 @@
 ---
 name: init-project
-description: >
-  Review or update Orchestrarium's installed shared-routing overlay for Qwen
-  after the official Qwen /init step has created or refreshed QWEN.md.
+description: "Project init: configure AGENTS.md and agent mode."
 ---
 
 # Init Project

@@ -1,6 +1,6 @@
 ---
 name: product-manager
-description: "Own roadmap, priority, milestones, and discovery/delivery admission."
+description: "Product manager: own roadmap priority and admission."
 ---
 
 # Product Manager

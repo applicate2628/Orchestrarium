@@ -1,6 +1,6 @@
 ---
 name: second-opinion
-description: Get an independent second opinion via the consultant role, or manage the Qwen-line consultant toggle state.
+description: "Second opinion: request consultant advice or set its mode."
 ---
 
 # Second Opinion

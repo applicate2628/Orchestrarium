@@ -1,6 +1,6 @@
 ---
 name: external-worker
-description: External worker-side adapter for Claude-line. Use when an eligible non-owner, non-review role should execute through the selected external provider instead of a local specialist.
+description: "External worker: run eligible worker roles externally."
 ---
 
 # External Worker

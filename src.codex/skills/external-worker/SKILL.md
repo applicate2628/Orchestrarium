@@ -1,6 +1,6 @@
 ---
 name: external-worker
-description: "Run eligible worker roles via external provider; keep provenance."
+description: "External worker: run eligible worker roles externally."
 ---
 
 # External Worker

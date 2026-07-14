@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: "Review auth, secrets, dependencies, data exposure, vulnerabilities."
+description: "Security reviewer: gate auth, secrets, and exposure."
 ---
 
 # Security Reviewer

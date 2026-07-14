@@ -1,6 +1,6 @@
 ---
 name: ux-reviewer
-description: "Review usability, interaction clarity, accessibility, comprehension, flow."
+description: "UX reviewer: gate usability and interaction clarity."
 ---
 
 # UX Reviewer

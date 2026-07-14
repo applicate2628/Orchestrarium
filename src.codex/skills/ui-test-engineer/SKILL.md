@@ -1,6 +1,6 @@
 ---
 name: ui-test-engineer
-description: "Verify Qt UI: interactions, focus, high-DPI, themes, screenshots."
+description: "UI test engineer: verify Qt interactions and rendering."
 ---
 
 # UI Test Engineer

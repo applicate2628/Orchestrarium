@@ -1,6 +1,6 @@
 ---
 name: external-reviewer
-description: External review-side adapter for Claude-line. Use when an eligible review or QA role should execute through the selected external provider instead of a local specialist.
+description: "External reviewer: run eligible review or QA externally."
 ---
 
 # External Reviewer

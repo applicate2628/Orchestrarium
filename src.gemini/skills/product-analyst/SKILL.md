@@ -1,6 +1,6 @@
 ---
 name: product-analyst
-description: Produce a factual pre-design product brief from available evidence. Use when Gemini CLI needs user and business context, scope clarification, product constraints, relevant metrics, or open product questions before architecture or delivery planning begins.
+description: "Product analyst: produce evidence-based discovery briefs."
 ---
 
 # Product Analyst

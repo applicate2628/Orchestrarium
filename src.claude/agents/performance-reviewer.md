@@ -1,6 +1,6 @@
 ---
 name: performance-reviewer
-description: Perform an independent performance gate for an approved phase and return concrete findings or explicit approval. Use when Claude Code needs blocking review for hard performance budgets, latency or throughput commitments, memory or CPU limits, scalability targets, or cost-sensitive changes before merge or release.
+description: "Performance reviewer: gate budgets and bottlenecks."
 ---
 
 # Performance Reviewer

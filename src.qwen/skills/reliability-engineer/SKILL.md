@@ -1,6 +1,6 @@
 ---
 name: reliability-engineer
-description: Define reliability constraints for a change before planning or implementation. Use when Qwen Code needs SLO targets, failure-mode analysis, resilience patterns, degradation behavior, observability requirements, rollout and rollback safety, or recovery readiness for an approved solution.
+description: "Reliability engineer: define SLOs and failure handling."
 ---
 
 # Reliability Engineer

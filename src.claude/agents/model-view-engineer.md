@@ -1,6 +1,6 @@
 ---
 name: model-view-engineer
-description: Implement an approved Qt model or view phase without redesigning the UI or data layer. Use when Claude Code needs QAbstractItemModel, proxy models, delegates, selection, tree/table/list views, lazy loading, sorting or filtering, persistent indexes, or view-performance and correctness changes that already have accepted research, design, constraints, and plan artifacts.
+description: "Model/view engineer: implement Qt models and delegates."
 ---
 
 # Model-View Engineer

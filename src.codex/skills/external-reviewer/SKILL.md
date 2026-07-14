@@ -1,6 +1,6 @@
 ---
 name: external-reviewer
-description: "Run eligible review/QA via external provider; keep provenance."
+description: "External reviewer: run eligible review or QA externally."
 ---
 
 # External Reviewer

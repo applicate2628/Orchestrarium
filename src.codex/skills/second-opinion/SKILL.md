@@ -1,6 +1,6 @@
 ---
 name: second-opinion
-description: "Command wrapper: one consultant opinion on a decision, or the consultant mode toggle."
+description: "Second opinion: request consultant advice or set its mode."
 ---
 
 # Second Opinion

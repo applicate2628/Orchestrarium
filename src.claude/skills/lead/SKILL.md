@@ -1,6 +1,6 @@
 ---
 name: lead
-description: "Adopt the Lead orchestration role in THIS conversation (never spawned as a subagent) — classify approved work, route it to leaf specialist subagents via the Agent tool, gate artifacts, own work-items recovery and integration. Use when a team template marks requiresLead true, when the operator invokes /lead, or when resuming a lead-managed work-item."
+description: "Lead: coordinate approved delivery, artifacts, and gates."
 ---
 
 # Lead

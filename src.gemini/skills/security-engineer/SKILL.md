@@ -1,6 +1,6 @@
 ---
 name: security-engineer
-description: Define secure design constraints and threat-aware implementation requirements for an approved solution. Use when Gemini CLI needs threat modeling, trust-boundary analysis, required security controls, secure defaults, or must-fix security constraints before planning or implementation.
+description: "Security engineer: define threats and required controls."
 ---
 
 # Security Engineer

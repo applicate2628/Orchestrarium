@@ -1,6 +1,6 @@
 ---
 name: external-worker
-description: Execute approved worker-side role work through an external provider when the routing decision selects the external adapter for an eligible non-owner, non-review role. Use when Gemini CLI needs a universal worker-side adapter with fail-fast handling and no role-internal fallback.
+description: "External worker: run eligible worker roles externally."
 ---
 
 # External Worker

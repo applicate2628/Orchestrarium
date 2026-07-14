@@ -1,6 +1,6 @@
 ---
 name: vak-dissertation-review
-description: Review a Russian dissertation (диссертация) and its autoreferat (автореферат) for a кандидат/доктор наук defense — нормоконтроль, научная новизна, ВАК-соответствие, заимствования, ссылки, публикации ВАК, степень разработанности. Use when the user names диссертация, автореферат, рецензия, замечания, нормоконтроль, защита, ВАК, диссовет, or asks to review an academic work for a Russian scientific degree.
+description: "VAK dissertation review: audit dissertation and autoreferat."
 ---
 
 # Рецензирование диссертации и автореферата (ВАК)

@@ -1,6 +1,6 @@
 ---
 name: analyst
-description: Investigate a repository in read-only mode and return a factual research memo with file and line references. Use when Claude Code needs to locate relevant files, symbols, data flows, contracts, tests, similar implementations, or change risks before design or implementation. Do not use for recommendations, plans, or code changes. For inline adoption without a fresh context, invoke the Skill tool with the same name instead.
+description: "Analyst: map repository evidence, contracts, and risks."
 ---
 
 # Analyst (delegate wrapper)

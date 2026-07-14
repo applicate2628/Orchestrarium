@@ -1,6 +1,6 @@
 ---
 name: windows-gui-manual-testing
-description: Use when Gemini needs evidence-backed manual visual verification of Windows desktop GUI before/after a fix across Qt, Avalonia, WinUI/WPF, WebView/native-child, or other Windows surfaces via screenshots, video frames, or live inspection.
+description: "Windows GUI testing: verify desktop UI with visual evidence."
 ---
 
 # Windows GUI Manual Testing

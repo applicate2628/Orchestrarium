@@ -1,6 +1,6 @@
 ---
 name: geometry-engineer
-description: Implement an approved geometry or spatial-computation phase without redefining the scientific model or system architecture. Use when Claude Code needs coordinate transforms, intersections, meshing, tessellation, spatial indexing, collision or containment logic, curve or surface operations, or robust geometric predicates that already have accepted research, design, constraints, and plan artifacts.
+description: "Geometry engineer: implement spatial algorithms."
 ---
 
 # Geometry Engineer

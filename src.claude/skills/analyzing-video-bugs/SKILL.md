@@ -1,6 +1,6 @@
 ---
 name: analyzing-video-bugs
-description: Extract frames from a UI/animation/layout bug video with ffmpeg, locate transitions, and read selected frames. Use for any video file the agent must inspect visually (bug repros, UI recordings); for static screenshots use Read directly.
+description: "Video bug analysis: inspect UI recordings frame by frame."
 ---
 
 # Analyzing video bugs

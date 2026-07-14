@@ -1,6 +1,6 @@
 ---
 name: architect
-description: Adopt the Architect role inline in THIS conversation for a quick-fix/fast-lane seam or blast-radius decision. Produce a design package from accepted research without writing implementation code. Preserves current conversation context; does not claim isolation or independence. For a non-trivial design in an isolated context, use the Agent tool with subagent_type: architect instead.
+description: "Architect: design architecture and contracts from research."
 ---
 
 # Architect

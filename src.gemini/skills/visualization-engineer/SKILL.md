@@ -1,6 +1,6 @@
 ---
 name: visualization-engineer
-description: Implement an approved scientific or data-visualization phase without redefining the domain model or rendering stack. Use when Gemini CLI needs charts, plots, overlays, scientific 2D or 3D views, exploration interactions, color mapping, legends, axes, coordinate transforms, or visualization state that already has accepted research, design, constraints, and plan artifacts.
+description: "Visualization engineer: implement scientific/data visuals."
 ---
 
 # Visualization Engineer

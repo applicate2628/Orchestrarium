@@ -1,6 +1,6 @@
 ---
 name: lead
-description: "Coordinate approved delivery across stages, artifacts, gates, recovery, risks."
+description: "Lead: coordinate approved delivery, artifacts, and gates."
 ---
 
 # Lead

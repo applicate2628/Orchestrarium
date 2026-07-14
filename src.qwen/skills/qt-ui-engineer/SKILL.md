@@ -1,6 +1,6 @@
 ---
 name: qt-ui-engineer
-description: Implement an approved Qt desktop UI phase for Widgets-based screens, dialogs, signals and slots, focus, keyboard behavior, and plan-approved theme or high-DPI handling. Use when Qwen Code needs Qt desktop UI work that already has accepted research, design, constraints, and plan artifacts.
+description: "Qt UI engineer: implement approved Widgets UI phases."
 ---
 
 # Qt UI Engineer

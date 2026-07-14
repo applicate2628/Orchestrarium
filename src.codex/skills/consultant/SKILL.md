@@ -1,6 +1,6 @@
 ---
 name: consultant
-description: "Advise on tradeoffs, ambiguity, cross-cutting concerns; never approve gates."
+description: "Consultant: advise on tradeoffs without approving gates."
 ---
 
 # Consultant

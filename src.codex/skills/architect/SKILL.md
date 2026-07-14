@@ -1,6 +1,6 @@
 ---
 name: architect
-description: "Design from accepted research: architecture, APIs, data, security, tests."
+description: "Architect: design architecture and contracts from research."
 ---
 
 # Architect

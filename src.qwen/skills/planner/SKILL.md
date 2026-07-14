@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Break an accepted design into small independent delivery phases with explicit file scope, dependencies, acceptance criteria, tests, checks, and quality gates. Use when Qwen Code needs a commit-ready implementation plan before any coding starts.
+description: "Planner: phase accepted designs with checks and gates."
 ---
 
 # Planner

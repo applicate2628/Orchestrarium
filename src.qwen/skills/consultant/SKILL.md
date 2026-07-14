@@ -1,6 +1,6 @@
 ---
 name: consultant
-description: Provide an independent advisory memo for the lead without becoming a reviewer, approver, or delivery owner. Use when Qwen Code needs a non-blocking second opinion on tradeoffs, ambiguity, or cross-cutting concerns before choosing a route.
+description: "Consultant: advise on tradeoffs without approving gates."
 ---
 
 # Consultant

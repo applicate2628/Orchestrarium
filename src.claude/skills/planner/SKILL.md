@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Adopt the Planner role inline in THIS conversation to upgrade the additive fast lane's inline plan into a phased delivery plan. Break an accepted design into small independent delivery phases with explicit file scope, dependencies, acceptance criteria, tests, checks, and quality gates. Preserves current conversation context; does not claim isolation or independence. For a non-trivial plan in an isolated context, use the Agent tool with subagent_type: planner instead.
+description: "Planner: phase accepted designs with checks and gates."
 ---
 
 # Planner

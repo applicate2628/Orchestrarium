@@ -1,6 +1,6 @@
 ---
 name: toolchain-engineer
-description: "Implement toolchains, builds, CI graphs, packaging, caches, reproducibility."
+description: "Toolchain engineer: implement builds and packaging."
 ---
 
 # Toolchain Engineer
