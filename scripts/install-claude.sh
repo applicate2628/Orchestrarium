@@ -17,7 +17,6 @@ DEFAULT_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 # packaging artifact (extract-provider-branch.py), not shipped here; the reserved
 # `agents-` namespace reclaim below removes any stale ones from prior installs.
 DIRS=(agents commands skills)
-OPTIONAL_DIRS=(memory)
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
@@ -480,6 +479,39 @@ ensure_local_only_gitignore_entries() {
   fi
 }
 
+ensure_credential_gitignore_entry() {
+  # The pack's own credential file (.claude/SECRET.md — the invoke-claude-api
+  # wrapper's repo-local lookup candidate) must never be trackable in a project
+  # install. Kept separate from the local-only tier array above: that array is
+  # the cross-installer tier set owned by shared/local-only-tiers.txt, while
+  # this is a Claude-pack-specific credential path.
+  local project_root="$1"
+  local gitignore="$project_root/.gitignore"
+  local secret_entry="/.claude/SECRET.md"
+  local alternate="${secret_entry#/}"
+
+  if [[ -f "$gitignore" ]] && { grep -Fxq "$secret_entry" "$gitignore" || grep -Fxq "$alternate" "$gitignore"; }; then
+    echo "  .gitignore: credential entry already present"
+    return
+  fi
+
+  echo "  Ensuring .gitignore ignores the pack credential file $secret_entry..."
+  if [ "$DRY_RUN" -eq 1 ]; then
+    if [[ -f "$gitignore" ]]; then
+      echo "    [dry-run] would append '$secret_entry' to $gitignore"
+    else
+      echo "    [dry-run] would create $gitignore with '$secret_entry'"
+    fi
+    return
+  fi
+
+  if [[ ! -f "$gitignore" ]]; then
+    printf '%s\n' "$secret_entry" > "$gitignore"
+  else
+    printf '\n%s\n' "$secret_entry" >> "$gitignore"
+  fi
+}
+
 remove_dangling_symlink() {
   local path="$1"
   local label="$2"
@@ -745,22 +777,6 @@ for script_name in "${runtime_ledger_scripts[@]}"; do
   fi
 done
 
-# Optional dirs: copy if not present, don't overwrite
-for dir in "${OPTIONAL_DIRS[@]}"; do
-  src="$SOURCE/$dir"
-  dst="$TARGET/$dir"
-  if [[ -d "$dst" ]]; then
-    echo "  Keeping existing $dir/ (optional, not overwritten)"
-  elif [[ -d "$src" ]]; then
-    echo "  Installing $dir/ (optional)..."
-    if [ "$DRY_RUN" -eq 1 ]; then
-      echo "    [dry-run] would copy $src -> $dst"
-    else
-      cp -r "$src" "$dst"
-    fi
-  fi
-done
-
 # CLAUDE.md: merge or create
 src_md="$SOURCE/CLAUDE.md"
 dst_md="$TARGET/CLAUDE.md"
@@ -846,6 +862,7 @@ fi
 
 if [ "$MODE" != "global" ]; then
   ensure_local_only_gitignore_entries "$PROJECT_ROOT"
+  ensure_credential_gitignore_entry "$PROJECT_ROOT"
 fi
 
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
@@ -887,22 +904,26 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       MINGW*|MSYS*|CYGWIN*)
         hook_host_os="windows"
         bugfix_script_target="$TARGET/agents/scripts/check-bugfix-discipline.ps1"
+        git_push_gate_script_target="$TARGET/agents/scripts/check-git-push-gate.ps1"
         stop_script_target="$TARGET/agents/scripts/check-passive-polling-stop.ps1"
         wi_archival_script_target="$TARGET/agents/scripts/check-work-items-archival-stop.ps1"
         machine_path_script_target="$TARGET/agents/hooks/check-machine-local-path.ps1"
         notrash_script_target="$TARGET/agents/hooks/check-no-trash-in-repo.ps1"
         stale_relation_script_target="$TARGET/agents/hooks/check-stale-relation-residue.ps1"
+        repository_orientation_script_target="$TARGET/agents/hooks/check-repository-orientation.ps1"
         reminder_script_target="$TARGET/agents/scripts/mcp-usage-reminder.ps1"
         agents_mode_reminder_script_target="$TARGET/agents/scripts/agents-mode-reminder.ps1"
         ;;
       *)
         hook_host_os="posix"
         bugfix_script_target="$TARGET/agents/scripts/check-bugfix-discipline.sh"
+        git_push_gate_script_target="$TARGET/agents/scripts/check-git-push-gate.sh"
         stop_script_target="$TARGET/agents/scripts/check-passive-polling-stop.sh"
         wi_archival_script_target="$TARGET/agents/scripts/check-work-items-archival-stop.sh"
         machine_path_script_target="$TARGET/agents/hooks/check-machine-local-path.sh"
         notrash_script_target="$TARGET/agents/hooks/check-no-trash-in-repo.sh"
         stale_relation_script_target="$TARGET/agents/hooks/check-stale-relation-residue.sh"
+        repository_orientation_script_target="$TARGET/agents/hooks/check-repository-orientation.sh"
         reminder_script_target="$TARGET/agents/scripts/mcp-usage-reminder.sh"
         agents_mode_reminder_script_target="$TARGET/agents/scripts/agents-mode-reminder.sh"
         ;;
@@ -913,6 +934,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --platform claude \
       --host-os "$hook_host_os" \
       --script-path "$bugfix_script_target"
+    echo "  Installing git-push publication-gate PreToolUse hook (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --script-marker check-git-push-gate \
+      --tool-matcher "Bash" \
+      --script-path "$git_push_gate_script_target"
     echo "  Installing passive-polling Stop hook (host-os=$hook_host_os)..."
     "$python_cmd" "$hook_installer" \
       --target "$settings_target" \
@@ -951,6 +980,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --host-os "$hook_host_os" \
       --script-marker check-stale-relation-residue \
       --script-path "$stale_relation_script_target"
+    echo "  Installing repository-orientation PreToolUse hook [AUDIT] (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --script-marker check-repository-orientation \
+      --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|shell_command|exec_command" \
+      --script-path "$repository_orientation_script_target"
     echo "  Installing MCP-usage-reminder SessionStart hook (host-os=$hook_host_os)..."
     "$python_cmd" "$hook_installer" \
       --target "$settings_target" \

@@ -16,7 +16,6 @@ CODEX_PACK_END_MARKER='<!-- END ORCHESTRARIUM CODEX PACK -->'
 
 # Directories to install (order doesn't matter)
 DIRS=(skills)
-OPTIONAL_DIRS=()
 FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
@@ -644,7 +643,7 @@ write_codex_default_agents_mode_file() {
   local template="$1" dst="$2"
   cat "$template" > "$dst"
   if ! grep -q '^externalClaudeProfile:' "$dst"; then
-    printf '\nexternalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh\n' >> "$dst"
+    printf '\nexternalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max | fable-xhigh; default: opus-xhigh\n' >> "$dst"
   fi
 }
 
@@ -1011,20 +1010,24 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
     hooks_target="$TARGET/hooks.json"
     if [ "$hook_host_os" = "windows" ]; then
       bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.ps1"
+      git_push_gate_script_target="$AGENTS_ROOT/skills/lead/scripts/check-git-push-gate.ps1"
       stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.ps1"
       wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.ps1"
       machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.ps1"
       notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.ps1"
       stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.ps1"
+      repository_orientation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-repository-orientation.ps1"
       reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.ps1"
       agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.ps1"
     else
       bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.sh"
+      git_push_gate_script_target="$AGENTS_ROOT/skills/lead/scripts/check-git-push-gate.sh"
       stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.sh"
       wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.sh"
       machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.sh"
       notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.sh"
       stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.sh"
+      repository_orientation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-repository-orientation.sh"
       reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.sh"
       agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.sh"
     fi
@@ -1034,6 +1037,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --platform codex \
       --host-os "$hook_host_os" \
       --script-path "$bugfix_script_target"
+    echo "  Installing git-push publication-gate PreToolUse hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-marker check-git-push-gate \
+      --tool-matcher "Bash" \
+      --script-path "$git_push_gate_script_target"
     echo "  Installing passive-polling Stop hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
     "$python_cmd" "$hook_installer" \
       --target "$hooks_target" \
@@ -1072,6 +1083,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --host-os "$hook_host_os" \
       --script-marker check-stale-relation-residue \
       --script-path "$stale_relation_script_target"
+    echo "  Installing repository-orientation PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-marker check-repository-orientation \
+      --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|shell_command|exec_command" \
+      --script-path "$repository_orientation_script_target"
     echo "  Installing MCP-usage-reminder SessionStart hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
     "$python_cmd" "$hook_installer" \
       --target "$hooks_target" \

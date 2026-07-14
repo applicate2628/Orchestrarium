@@ -22,7 +22,8 @@
     "workItem": { "type": "string", "minLength": 1 },
     "role": { "type": "string", "minLength": 1 },
     "executionRole": {
-      "enum": ["main", "lead", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade"]
+      "enum": ["main", "internal", "consultant", "external-worker", "external-reviewer", "external-brigade"],
+      "$comment": "Exactly ONE main-conversation identity: 'main' (the main conversation, which also holds the Lead role — orchestration weight lives in status.md 'orchestration: light|full-lead', never here). Ledgers written before 2026-07-11 may carry the legacy value 'lead'; readers map it to 'main' (see scripts/validate-work-item-state.py LEGACY_EXECUTION_ROLES). New writes must use 'main'."
     },
     "assignedRole": { "type": "string" },
     "provider": { "type": "string" },

@@ -28,7 +28,6 @@ $DefaultAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
 # commands/agents-*.md only; generated skills/agents-*/SKILL.md are a standalone-
 # BRANCH artifact, reclaimed here if left stale by a prior install.
 $Dirs = @("agents", "commands", "skills")
-$OptionalDirs = @("memory")
 $script:PromptMode = $null
 
 function Test-Interactive {
@@ -383,6 +382,45 @@ function Ensure-LocalOnlyGitignoreEntries {
     foreach ($entry in $missing) {
         Add-Content -LiteralPath $gitignore -Value "`r`n$entry"
     }
+}
+
+function Ensure-CredentialGitignoreEntry {
+    # The pack's own credential file (.claude/SECRET.md -- the invoke-claude-api
+    # wrapper's repo-local lookup candidate) must never be trackable in a project
+    # install. Kept separate from the local-only tier array above: that array is
+    # the cross-installer tier set owned by shared/local-only-tiers.txt, while
+    # this is a Claude-pack-specific credential path.
+    param([string]$ProjectRoot)
+
+    $gitignore = Join-Path $ProjectRoot ".gitignore"
+    $secretEntry = "/.claude/SECRET.md"
+    $alternate = $secretEntry.TrimStart("/")
+    $existingLines = @()
+    if (Test-Path -LiteralPath $gitignore) {
+        $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
+    }
+
+    if ($existingLines -contains $secretEntry -or $existingLines -contains $alternate) {
+        Write-Host "  .gitignore: credential entry already present"
+        return
+    }
+
+    Write-Host "  Ensuring .gitignore ignores the pack credential file $secretEntry..."
+    if ($DryRun) {
+        if (Test-Path -LiteralPath $gitignore) {
+            Write-Host "    [dry-run] would append '$secretEntry' to $gitignore"
+        } else {
+            Write-Host "    [dry-run] would create $gitignore with '$secretEntry'"
+        }
+        return
+    }
+
+    if (-not (Test-Path -LiteralPath $gitignore)) {
+        Set-Content -LiteralPath $gitignore -Value $secretEntry
+        return
+    }
+
+    Add-Content -LiteralPath $gitignore -Value "`r`n$secretEntry"
 }
 
 function Remove-DanglingLink {
@@ -767,22 +805,6 @@ foreach ($scriptName in $RuntimeLedgerScripts) {
     }
 }
 
-# Optional dirs: copy if not present, don't overwrite
-foreach ($dir in $OptionalDirs) {
-    $src = Join-Path $Source $dir
-    $dst = Join-Path $TargetRoot $dir
-    if (Test-Path $dst) {
-        Write-Host "  Keeping existing $dir\ (optional, not overwritten)"
-    } elseif (Test-Path $src) {
-        Write-Host "  Installing $dir\ (optional)..."
-        if (-not $DryRun) {
-            Copy-Item -Recurse -Force $src $dst
-        } else {
-            Write-Host "    [dry-run] would copy $src -> $dst"
-        }
-    }
-}
-
 # CLAUDE.md merge
 $srcMd = Join-Path $Source "CLAUDE.md"
 $dstMd = Join-Path $TargetRoot "CLAUDE.md"
@@ -882,6 +904,7 @@ if (Test-Path $srcAgents) {
 
 if ($Mode -ne "global") {
     Ensure-LocalOnlyGitignoreEntries -ProjectRoot $ProjectRoot
+    Ensure-CredentialGitignoreEntry -ProjectRoot $ProjectRoot
 }
 
 Migrate-LegacyAgentsModeFile -LegacyFile $LegacyAgentsModeTarget -TargetFile $AgentsModeTarget -Label ".agents-mode.yaml"
@@ -914,15 +937,23 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         # PowerShell installer always emits Windows-native exec form referencing
         # the .ps1 hook script. Bash form is reserved for the .sh installer.
         $BugfixScriptTarget = Join-Path $TargetRoot "agents\scripts\check-bugfix-discipline.ps1"
+        $GitPushGateScriptTarget = Join-Path $TargetRoot "agents\scripts\check-git-push-gate.ps1"
         $StopScriptTarget = Join-Path $TargetRoot "agents\scripts\check-passive-polling-stop.ps1"
         $WiArchivalScriptTarget = Join-Path $TargetRoot "agents\scripts\check-work-items-archival-stop.ps1"
         $MachinePathScriptTarget = Join-Path $TargetRoot "agents\hooks\check-machine-local-path.ps1"
         $NoTrashScriptTarget = Join-Path $TargetRoot "agents\hooks\check-no-trash-in-repo.ps1"
         $StaleRelationScriptTarget = Join-Path $TargetRoot "agents\hooks\check-stale-relation-residue.ps1"
+        $RepositoryOrientationScriptTarget = Join-Path $TargetRoot "agents\hooks\check-repository-orientation.ps1"
         $ReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\mcp-usage-reminder.ps1"
         $AgentsModeReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\agents-mode-reminder.ps1"
         Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows)..."
         & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-path $BugfixScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing git-push publication-gate PreToolUse hook (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-git-push-gate --tool-matcher "Bash" --script-path $GitPushGateScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
@@ -953,6 +984,12 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         }
         Write-Host "  Installing stale-relation-residue PreToolUse hook [AUDIT] (host-os=windows)..."
         & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-stale-relation-residue --script-path $StaleRelationScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing repository-orientation PreToolUse hook [AUDIT] (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-repository-orientation --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|shell_command|exec_command" --script-path $RepositoryOrientationScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE

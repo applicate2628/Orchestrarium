@@ -529,7 +529,7 @@ function Write-CodexDefaultAgentsModeFile {
         if (-not $content.EndsWith("`n")) {
             $content += "`n"
         }
-        $content += "externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max; default: opus-xhigh`n"
+        $content += "externalClaudeProfile: opus-xhigh  # allowed: sonnet-high | opus-xhigh | opus-max | fable-xhigh; default: opus-xhigh`n"
     }
     Set-Content -LiteralPath $TargetFile -Value $content -NoNewline
 }
@@ -970,15 +970,23 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         # and the installer cannot trust them programmatically.
         $HooksTarget = Join-Path $TargetRoot "hooks.json"
         $BugfixScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-bugfix-discipline.ps1"
+        $GitPushGateScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-git-push-gate.ps1"
         $StopScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-passive-polling-stop.ps1"
         $WiArchivalScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-work-items-archival-stop.ps1"
         $MachinePathScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-machine-local-path.ps1"
         $NoTrashScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-no-trash-in-repo.ps1"
         $StaleRelationScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-stale-relation-residue.ps1"
+        $RepositoryOrientationScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-repository-orientation.ps1"
         $ReminderScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\mcp-usage-reminder.ps1"
         $AgentsModeReminderScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\agents-mode-reminder.ps1"
         Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
         & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-path $BugfixScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing git-push publication-gate PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-git-push-gate --tool-matcher "Bash" --script-path $GitPushGateScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
@@ -1009,6 +1017,12 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         }
         Write-Host "  Installing stale-relation-residue PreToolUse hook [AUDIT] (host-os=windows; trust step manual via codex TUI)..."
         & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-stale-relation-residue --script-path $StaleRelationScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing repository-orientation PreToolUse hook [AUDIT] (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-repository-orientation --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|shell_command|exec_command" --script-path $RepositoryOrientationScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE

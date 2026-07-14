@@ -74,7 +74,7 @@ At init time, the helper may either write the selected preset immediately or ent
 | `externalOpinionCounts` | all `1` | all `1` | all `1` | advisory+review `2`, others `1` | advisory+review `2`, others `1` | all `1` |
 | workdir modes | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `neutral` | all `project` |
 | `externalModelMode` | `runtime-default` | `runtime-default` | `runtime-default` | `pinned-top-pro` | `pinned-top-pro` | `runtime-default` |
-| `externalCodexProfile` | `gpt-5.5-xhigh` | `default` | `default` | `gpt-5.5-xhigh` | `gpt-5.5-xhigh` | `gpt-5.5-fast` |
+| `externalCodexProfile` | `gpt-5.6-sol-xhigh` | `default` | `default` | `gpt-5.6-sol-xhigh` | `gpt-5.6-sol-xhigh` | `gpt-5.6-luna` |
 | `externalClaudeProfile` (Codex-line only) | `opus-xhigh` | `sonnet-high` | `sonnet-high` | `opus-max` | `opus-max` | `sonnet-high` |
 
 `correctness-first` and `power-mode` lane-specific opinion counts:
@@ -199,6 +199,7 @@ Notes:
 Notes:
 - `reserveResolver` is not a provider selector. `externalProvider` still controls primary provider-backed execution, and `reserve` remains only a supplemental advisory/review candidate in profile orders.
 - `wrapper:<command>` accepts a command name such as `reserve-review` or a repo-relative path such as `tools/reserve-review.ps1` or `.claude/agents/scripts/invoke-claude-api.ps1`. Avoid workstation-specific absolute paths in shared or tracked configuration.
+- **Layer-provenance trust gate (binding).** `wrapper:<command>` is executable-bearing: it names code the agent then runs, and the highest-precedence project-local `.agents-mode.yaml` can arrive inside a cloned repository — an untrusted source. An executable-bearing value is honored without further confirmation only when a user-global layer (`~/.claude/.agents-mode.yaml` / `~/.codex/.agents-mode.yaml`, their legacy siblings, or the shared `~/.agents-mode.yaml`) defines it or defines the identical value. `scripts/resolve-agents-mode.py` emits the machine-readable flag `reserveResolverTrust`: `user-global` (defined or identically confirmed at a user-global layer — honored), `project-UNCONFIRMED` (supplied only by a project-local layer — MUST NOT launch before explicit first-use user confirmation, e.g. `AskUserQuestion` on the Claude line), or `not-executable` (symbolic values such as `claude-sonnet`, `claude-wrapper`, `disabled` — no gate applies). Record a first-use approval durably by writing the approved value into a user-global layer; that write is what flips subsequent resolutions to `user-global`. An "approved" wrapper anywhere in this pack's guidance means exactly this mechanism — defined or confirmed at a user-global layer, never a repo-supplied value alone.
 - The wrapper must support file-based prompt delivery through stdin or a supported file input. Inline substantive prompts in argv remain disallowed except for tiny smoke checks or documented provider limitations.
 - The resolved wrapper stays read-only/advisory-review only. It must not perform implementation, file edits, code generation, publication, or other mutating work.
 - Legacy `claude-secret` profile entries normalize to `reserve`; legacy `externalClaudeApiMode: disabled` normalizes to `reserveResolver: disabled`.
@@ -305,27 +306,28 @@ Notes:
 - This is the shared cross-provider model-selection policy. It applies only after provider resolution.
 - `runtime-default` is the first-write default where this key exists.
 - `pinned-top-pro` means:
-- Codex: model `gpt-5.5` with `model_reasoning_effort = "xhigh"` supplied through a supported Codex config/profile path; for direct `codex exec` launches, use `--model gpt-5.5 -c model_reasoning_effort="xhigh"` or a profile that sets the same key. Only explicitly configured repo-local fully autonomous low-reasoning worker lanes may retry once on `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path.
+- Codex: model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` supplied through a supported Codex config/profile path; for direct `codex exec` launches, use `--model gpt-5.6-sol -c model_reasoning_effort="xhigh"` or a profile that sets the same key. Only explicitly configured repo-local fully autonomous low-reasoning worker lanes may retry once on `gpt-5.6-luna` after usage-limit or quota exhaustion on the primary path.
 - Claude: `opus-max` for the primary `claude` candidate. `reserve` is not a fallback from that candidate; it is a separate symbolic advisory/review candidate that the profile order may reach after primary `claude` and `codex`.
 - Supplemental candidates apply only where their lane policy allows them. `reserve` is advisory/review-only and does not affect primary Claude model/profile selection.
 - Codex-line `externalClaudeProfile`, when explicitly set, remains a narrower override for Claude model/profile selection than the shared `externalModelMode`.
-- Do not silently downgrade below `gpt-5.3-codex-spark` on the Codex line.
+- Do not silently downgrade below `gpt-5.6-luna` on the Codex line.
 - Repo-local policy treats these named fallback paths as alternate limit or budget pools when runtime observation shows that they exhaust independently. They are not quality-equivalent substitutes for the primary path.
-- Treat `gpt-5.3-codex-spark` as a bounded mechanical overflow path only. Reserve it for strictly scoped, low-reasoning, autonomous work instead of using it as the ordinary cheaper mode for broad reasoning or cleanup.
+- Treat `gpt-5.6-luna` as a bounded mechanical overflow path only. Reserve it for strictly scoped, low-reasoning, autonomous work instead of using it as the ordinary cheaper mode for broad reasoning or cleanup.
 - Treat `reserve` differently from provider fallback pools: it is a separate advisory/review candidate, not a primary-Claude retry path and not a worker, implementation, editing, or publication path.
 
 ### `externalCodexProfile`
 
 | Value | Meaning | Effective Codex behavior |
 |---|---|---|
-| `default` | Inherit the shared model policy | When the resolved provider is Codex, apply `externalModelMode` unchanged. This is the shipped preset value, including for `externalProvider: auto`, so auto routing does not secretly enable fast mode. |
-| `gpt-5.5-fast` | Explicit Codex fast model-tier request (model variant only; reasoning_effort still stays `xhigh`) | When the resolved provider is Codex, request the runtime's matching `gpt-5.5` fast model tier or flag if the installed Codex runtime supports it. The "fast" dimension here is the model variant, not the reasoning effort — effort is not downgraded. If the runtime cannot prove that model tier is available, record the route as unavailable or deviated instead of silently fabricating an equivalent. |
+| `default` | Inherit the shared model policy | When the resolved provider is Codex, apply `externalModelMode` unchanged. This is the shipped preset value, including for `externalProvider: auto`, so auto routing does not secretly enable a narrower profile. |
+| `gpt-5.6-sol-max` | Explicit higher-effort Codex request for higher-complexity/hard lanes | When the resolved provider is Codex, request model `gpt-5.6-sol` with `model_reasoning_effort = "max"`. This is NOT `gpt-5.6-sol-ultra` — `ultra` spawns subagents itself and must never be shipped on a subagent lane. |
+| `gpt-5.6-luna` | Explicit Codex fast/volume-tier request (a distinct model, not an effort suffix on `gpt-5.6-sol`) | When the resolved provider is Codex, request model `gpt-5.6-luna` with `model_reasoning_effort = "medium"` (its family default) or flag if the installed Codex runtime supports it. If the runtime cannot prove that model is available, record the route as unavailable or deviated instead of silently fabricating an equivalent. |
 
 Notes:
 - This is a shared `agents-mode` key because any host line may route an external lane to Codex.
 - The key applies only after provider resolution. It has no effect when the resolved provider is Claude, Gemini, Qwen, or `reserve`.
-- `default` is intentionally different from `gpt-5.5-fast`: it preserves the current `externalModelMode` behavior and keeps shipped profiles stable.
-- Treat `gpt-5.5-fast` as a repo-local profile label that still requires installed-runtime verification before claiming an actual provider-native fast model tier was used. The label's "fast" dimension is model variant only; it does not change `model_reasoning_effort` (which still stays `xhigh` on this profile), and it is not an effort downgrade of `gpt-5.5-xhigh`.
+- `default` is intentionally different from `gpt-5.6-sol-max` and `gpt-5.6-luna`: it preserves the current `externalModelMode` behavior and keeps shipped profiles stable.
+- Treat `gpt-5.6-luna` as a repo-local profile label that still requires installed-runtime verification before claiming an actual provider-native fast/volume model was used. Its output requires MANDATORY verification by a heavier tier before any commit/push, and it is not a replacement for `gpt-5.6-sol-xhigh`.
 
 ## External role eligibility
 
@@ -351,7 +353,7 @@ Guardrails:
 - `reserve` is valid only in `advisory.*` and `review.*` profile orders.
 - `reserve` must not appear in worker, implementation, file-editing, installer, publication, or repository-hygiene lanes.
 - `reserve` does not replace primary `claude` or `codex`; it is a separate candidate reached by profile order.
-- The concrete reserve resolver comes from `reserveResolver`. It may point to a secret-backed Claude wrapper, a smaller production model, a local model, or another approved read-only source, but the execution record must name the actual resolved path.
+- The concrete reserve resolver comes from `reserveResolver`. It may point to a secret-backed Claude wrapper, a smaller production model, a local model, or another approved read-only source — where "approved" means the layer-provenance trust gate in the `reserveResolver` section: defined or identically confirmed at a user-global config layer, never a repo-supplied value alone — and the execution record must name the actual resolved path.
 - Normalization maps legacy `claude-secret` profile entries to `reserve` and moves `reserve` to the last eligible position after primary `claude`/`codex` entries.
 - Legacy `externalClaudeApiMode` is normalization-only compatibility. `disabled` strips `reserve` from normalized profile orders to preserve the old no-secret-candidate intent; `auto` and `force` collapse to the profile-based `reserve` model. New canonical files should omit the scalar key and use profile orders to express `reserve`.
 
@@ -360,8 +362,9 @@ Guardrails:
 | Situation | Rule |
 |---|---|
 | `externalCodexProfile: default` and Codex is the chosen provider | Inherit `externalModelMode`; under `runtime-default`, do not pin a model, and under `pinned-top-pro`, use the documented top Codex path. |
-| `externalCodexProfile: gpt-5.5-fast` and Codex is the chosen provider | Request the installed runtime's `gpt-5.5` fast model tier if supported (model variant only — reasoning_effort still stays `xhigh`, this is not an effort downgrade of `gpt-5.5-xhigh`). If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
-| `externalModelMode: pinned-top-pro` and Codex is the chosen provider | Try model `gpt-5.5` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path first. Only on an explicitly configured repo-local fully autonomous low-reasoning worker lane may Codex retry once with `gpt-5.3-codex-spark` after usage-limit or quota exhaustion on the primary path. Other lanes must disclose Codex unavailability instead of downgrading. |
+| `externalCodexProfile: gpt-5.6-sol-max` and Codex is the chosen provider | Request model `gpt-5.6-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes. If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
+| `externalCodexProfile: gpt-5.6-luna` and Codex is the chosen provider | Request the installed runtime's `gpt-5.6-luna` fast/volume model if supported (a distinct model, not an effort suffix on `gpt-5.6-sol`; `model_reasoning_effort = "medium"`, its family default). If unsupported or ambiguous, disclose the shortfall in the execution record instead of silently falling back to an unrelated profile. |
+| `externalModelMode: pinned-top-pro` and Codex is the chosen provider | Try model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` through a supported Codex config/profile path first. Only on an explicitly configured repo-local fully autonomous low-reasoning worker lane may Codex retry once with `gpt-5.6-luna` after usage-limit or quota exhaustion on the primary path. Other lanes must disclose Codex unavailability instead of downgrading. |
 | Explicit Gemini example route | Gemini is outside production `auto` routing and is classified as `WEAK MODEL / NOT RECOMMENDED`; any direct Gemini command is a manual example or compatibility run, not a pinned production model policy. |
 | `externalModelMode: pinned-top-pro` and Claude is the chosen provider | Try primary `claude` on `opus-max`. Do not retry primary Claude through the secret-backed wrapper. Advisory/review lanes may later collect the separate `reserve` candidate if their profile order and opinion count reach it. |
 | Claude CLI is the chosen provider and is already authenticated | Use the plain Claude CLI path first. |
@@ -382,17 +385,19 @@ Guardrails:
 | `sonnet-high` | Balanced Codex-to-Claude external profile | `--model sonnet --effort high` |
 | `opus-xhigh` | Shipped-default Codex-to-Claude external profile (xhigh effort) | `--model opus --effort xhigh` |
 | `opus-max` | Maximum-depth escalation for especially hard tasks at caller discretion | `--model opus --effort max` |
+| `fable-xhigh` | Current Claude flagship-family best-effort profile | `--model fable --effort xhigh` |
 
 Notes:
 - This key is Codex-line only.
 - If it appears in Claude-line legacy state, ignore it and do not carry it into canonical Claude-line `agents-mode`.
+- `fable-xhigh` names the `fable` flagship alias as of 2026-07. That is recorded from the installed model list, not a verified capability ranking — the Claude CLI lists models but does not rank them. A later flagship-family change updates this value in `shared/agents-mode.schema.json` first; the enum-copy drift guard then flags every stale copy.
 
 ## First-write defaults
 
 | Provider | `consultantMode` | `delegationMode` | `parallelMode` | `mcpMode` | `preferExternalWorker` | `preferExternalReviewer` | `externalProvider` | `reserveResolver` | `externalCodexWorkdirMode` | `externalClaudeWorkdirMode` | `externalModelMode` | `externalCodexProfile` | `externalClaudeProfile` |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| Codex | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh` | `opus-xhigh` unless explicitly overridden |
-| Claude Code | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.5-xhigh` | not part of canonical Claude-line config |
+| Codex | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.6-sol-xhigh` | `opus-xhigh` unless explicitly overridden |
+| Claude Code | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `gpt-5.6-sol-xhigh` | not part of canonical Claude-line config |
 | Gemini CLI | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | not part of canonical Gemini-line config |
 | Qwen Code | `disabled` | `auto` | `auto` | `auto` | `false` | `false` | `auto` | `claude-sonnet` | `neutral` | `neutral` | `runtime-default` | `default` | not part of canonical Qwen-line config |
 
@@ -453,7 +458,7 @@ When a non-trivial task is interrupted, record a durable resume point: current s
 | External CLI prompt delivery | Substantive task prompts are file-based by default: create a temporary prompt file and feed it through stdin or a provider-supported file-input mechanism instead of putting the full prompt in argv. |
 | External workdir mode | `externalCodexWorkdirMode` and `externalClaudeWorkdirMode` choose whether each production external provider runs in a fresh neutral empty directory or in the current project/worktree. The ordinary default is `neutral`. |
 | Shared external model policy | `externalModelMode: runtime-default` keeps provider runtime model selection; `pinned-top-pro` pins the strongest documented model/profile for the resolved provider and allows one named same-provider fallback on retryable provider exhaustion. |
-| Codex external profile | `externalCodexProfile: default` inherits the shared model policy when Codex is the resolved provider; `gpt-5.5-fast` selects the fast Codex model tier (model variant only — reasoning_effort still stays `xhigh`, not an effort downgrade) and must be verified against the installed Codex runtime; `gpt-5.5-xhigh` (shipped as default) pins model `gpt-5.5` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`, symmetric to Claude's `opus-xhigh`. |
+| Codex external profile | `externalCodexProfile: default` inherits the shared model policy when Codex is the resolved provider; `gpt-5.6-sol-max` requests model `gpt-5.6-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes; `gpt-5.6-luna` selects the fast/volume Codex model tier (a distinct model, `model_reasoning_effort = "medium"`, not an effort suffix) and must be verified against the installed Codex runtime; `gpt-5.6-sol-xhigh` (shipped as default) pins model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`, symmetric to Claude's `opus-xhigh`. |
 | Gemini example status | Gemini is `WEAK MODEL / NOT RECOMMENDED`; use explicit `externalProvider: gemini` only for manual example or compatibility demonstrations, never for shipped `auto` routing. |
 | Qwen example status | Qwen is a native example integration peer classified as `WEAK MODEL / NOT RECOMMENDED`; use explicit `externalProvider: qwen` only for manual example or compatibility demonstrations, never for shipped `auto` routing. |
 | Reserve candidate | `reserve` is the advisory/review-only supplemental candidate after primary `claude` and `codex`. It is symbolic, bound by `reserveResolver`, independent of primary providers, and must not be used for worker or mutating work. |
