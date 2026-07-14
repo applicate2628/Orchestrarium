@@ -1,6 +1,6 @@
 ---
 name: qa-engineer
-description: Verify an approved phase against its acceptance criteria and test strategy. Use when Qwen Code needs unit, integration, or end-to-end test coverage, regression checks, edge-case analysis, basic performance checks, and a clear go or no-go QA verdict before the phase advances.
+description: "QA engineer: verify phases and issue test verdicts."
 ---
 
 # QA Engineer

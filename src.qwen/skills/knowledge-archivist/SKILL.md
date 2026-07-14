@@ -1,6 +1,6 @@
 ---
 name: knowledge-archivist
-description: Maintain repository knowledge hygiene without taking product delivery ownership. Use when Qwen Code needs documentation updates, plan or report curation, ADR or reference maintenance, repository structure cleanup, canonical-source alignment, or archival consistency for accepted artifacts and decisions.
+description: "Knowledge archivist: align canonical docs and archives."
 ---
 
 # Knowledge Archivist

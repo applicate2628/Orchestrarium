@@ -1,6 +1,6 @@
 ---
 name: architect
-description: Produce a design package from accepted research without writing implementation code. Use when Qwen Code needs architecture decisions, ADR-style tradeoffs, diagrams, API contracts, data model changes, security-by-design constraints, observability requirements, or test strategy derived from an evidence-backed research artifact.
+description: "Architect: design architecture and contracts from research."
 ---
 
 # Architect

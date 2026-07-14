@@ -1,6 +1,6 @@
 ---
 name: ux-reviewer
-description: Perform an independent UX gate for approved user-facing changes. Use when Qwen Code needs blocking review for usability, interaction clarity, accessibility, content comprehension, or flow integrity before merge or release.
+description: "UX reviewer: gate usability and interaction clarity."
 ---
 
 # UX Reviewer
