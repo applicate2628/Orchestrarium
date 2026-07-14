@@ -1,6 +1,6 @@
 ---
 name: visualization-engineer
-description: "Implement scientific/data visuals: charts, plots, overlays, axes, legends."
+description: "Visualization engineer: implement scientific/data visuals."
 ---
 
 # Visualization Engineer

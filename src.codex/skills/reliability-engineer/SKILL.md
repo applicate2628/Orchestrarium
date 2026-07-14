@@ -1,6 +1,6 @@
 ---
 name: reliability-engineer
-description: "Define SLOs, failure modes, resilience, observability, rollout, rollback."
+description: "Reliability engineer: define SLOs and failure handling."
 ---
 
 # Reliability Engineer

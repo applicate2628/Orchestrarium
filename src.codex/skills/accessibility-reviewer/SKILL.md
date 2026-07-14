@@ -1,6 +1,6 @@
 ---
 name: accessibility-reviewer
-description: "Review keyboard, focus, semantics, contrast, and assistive tech."
+description: "Accessibility reviewer: gate keyboard and assistive access."
 ---
 
 # Accessibility Reviewer

@@ -1,6 +1,6 @@
 ---
 name: backend-engineer
-description: "Implement backend APIs, domain logic, persistence, integrations."
+description: "Backend engineer: implement approved server-side phases."
 ---
 
 # Backend Engineer

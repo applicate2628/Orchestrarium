@@ -1,6 +1,6 @@
 ---
 name: architecture-reviewer
-description: "Gate an approved phase or control-plane change: maintainability, cohesion, complexity, drift."
+description: "Architecture reviewer: gate cohesion and maintainability."
 ---
 
 # Architecture Reviewer

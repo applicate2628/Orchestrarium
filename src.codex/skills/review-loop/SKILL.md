@@ -1,6 +1,6 @@
 ---
 name: review-loop
-description: "Run the autonomous parallel-review-loop on a fix-design artifact."
+description: "Review loop: run parallel reviews on a fix design."
 ---
 
 # Review Loop

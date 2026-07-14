@@ -1,6 +1,6 @@
 ---
 name: explain-simply
-description: Explain concepts, code, decisions, or docs simply in the user's language.
+description: "Explain simply: teach concepts in the user's language."
 ---
 
 # Explain Simply

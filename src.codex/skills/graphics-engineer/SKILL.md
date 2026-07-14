@@ -1,6 +1,6 @@
 ---
 name: graphics-engineer
-description: "Implement 2D/3D graphics: rendering, shaders, scenes, materials, cameras."
+description: "Graphics engineer: implement rendering and shaders."
 ---
 
 # Graphics Engineer

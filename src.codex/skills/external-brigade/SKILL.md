@@ -1,6 +1,6 @@
 ---
 name: external-brigade
-description: "Launch bounded parallel external helper lanes."
+description: "External brigade: launch bounded parallel helper lanes."
 ---
 
 # External Brigade

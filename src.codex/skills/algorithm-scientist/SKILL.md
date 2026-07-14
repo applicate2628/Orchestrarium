@@ -1,6 +1,6 @@
 ---
 name: algorithm-scientist
-description: "Frame algorithms: invariants, assumptions, complexity, stability, correctness."
+description: "Algorithm scientist: frame invariants and correctness."
 ---
 
 # Algorithm Scientist

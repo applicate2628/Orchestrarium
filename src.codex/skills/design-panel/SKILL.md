@@ -1,6 +1,6 @@
 ---
 name: design-panel
-description: "Run N independent design lanes on one pinned problem, then synthesize."
+description: "Design panel: compare independent designs for one problem."
 ---
 
 # Design Panel

@@ -1,6 +1,6 @@
 ---
 name: platform-engineer
-description: "Implement CI/CD, deployment config, runtime wiring, IaC, observability."
+description: "Platform engineer: implement CI, deployment, and runtime."
 ---
 
 # Platform Engineer

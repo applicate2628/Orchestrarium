@@ -1,6 +1,6 @@
 ---
 name: mathtype-book-page
-description: Format/review translated technical-book DOCX pages with MathType formulas and PDF visual checks.
+description: "MathType book page: format DOCX math and verify PDF."
 ---
 
 # MathType Book Page

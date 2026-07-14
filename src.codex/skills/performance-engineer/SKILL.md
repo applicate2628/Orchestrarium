@@ -1,6 +1,6 @@
 ---
 name: performance-engineer
-description: "Define performance budgets, bottlenecks, measurements, constraints."
+description: "Performance engineer: define budgets and measurements."
 ---
 
 # Performance Engineer

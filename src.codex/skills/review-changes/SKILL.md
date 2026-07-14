@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: "Review a recent diff/PR for repo-wide impact: unchanged dependents, contracts, regressions."
+description: "Change reviewer: assess diff impact across the repository."
 ---
 
 # Review Changes

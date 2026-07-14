@@ -1,6 +1,6 @@
 ---
 name: product-analyst
-description: "Produce discovery briefs: users, constraints, metrics, scope, evidence."
+description: "Product analyst: produce evidence-based discovery briefs."
 ---
 
 # Product Analyst

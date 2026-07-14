@@ -1,6 +1,6 @@
 ---
 name: analyst
-description: "Investigate repo evidence read-only: files, symbols, flows, contracts, risks."
+description: "Analyst: map repository evidence, contracts, and risks."
 ---
 
 # Analyst

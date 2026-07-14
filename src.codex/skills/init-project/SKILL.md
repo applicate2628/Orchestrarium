@@ -1,6 +1,6 @@
 ---
 name: init-project
-description: "Configure AGENTS.md policies and .agents-mode.yaml."
+description: "Project init: configure AGENTS.md and agent mode."
 ---
 
 # Init Project

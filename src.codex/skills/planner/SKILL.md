@@ -1,6 +1,6 @@
 ---
 name: planner
-description: "Plan accepted design into phases, scope, dependencies, checks, gates."
+description: "Planner: phase accepted designs with checks and gates."
 ---
 
 # Planner

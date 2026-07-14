@@ -1,6 +1,6 @@
 ---
 name: qa-engineer
-description: "Verify phases with tests, regressions, edge cases, QA verdicts."
+description: "QA engineer: verify phases and issue test verdicts."
 ---
 
 # QA Engineer
