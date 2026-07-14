@@ -1,6 +1,6 @@
 ---
 name: ux-designer
-description: Own pre-implementation UX design for approved user-facing work without taking roadmap, architecture, or implementation ownership. Use when Gemini CLI needs interaction flows, screen structure, state behavior, content hierarchy, usability constraints, or UX acceptance guidance before planning and implementation begin.
+description: "UX designer: define flows, states, and usability criteria."
 ---
 
 # UX Designer

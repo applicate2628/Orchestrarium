@@ -1,6 +1,6 @@
 ---
 name: external-reviewer
-description: Review approved Gemini work through an external provider when the routing decision selects the external adapter for an eligible reviewer or QA role. Use when Gemini CLI needs a universal review or QA adapter with fail-fast handling and no role-internal fallback.
+description: "External reviewer: run eligible review or QA externally."
 ---
 
 # External Reviewer

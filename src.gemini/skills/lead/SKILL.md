@@ -1,6 +1,6 @@
 ---
 name: lead
-description: Coordinate Gemini-line work through the same shared role vocabulary used by the Codex and Claude packs. Use when Gemini CLI needs an orchestration owner for research, design, planning, implementation, QA, and review without collapsing specialist roles into the main conversation.
+description: "Lead: coordinate approved delivery, artifacts, and gates."
 ---
 
 # Lead
