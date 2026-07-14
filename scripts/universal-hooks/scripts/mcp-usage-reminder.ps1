@@ -1,7 +1,7 @@
 # SessionStart hook -- re-injects an MCP / tools usage reminder into the model's context
 # at every session start AND after every compaction. Registered with NO matcher, so it
-# fires on every SessionStart source (startup / resume / clear / compact). Plain stdout is
-# added as model context on both Claude Code and Codex.
+# fires on every SessionStart source (startup / resume / clear / compact). Structured
+# SessionStart JSON adds the reminder as model context on both Claude Code and Codex.
 #
 # Generic ON PURPOSE: it names NO specific MCP server (a hardcoded machine-local list would
 # be wrong to ship). The agent discovers the actual connected servers via tool discovery.
@@ -19,5 +19,14 @@ This STILL APPLIES AFTER COMPACTION - do not forget MCP just because the context
 SUBAGENTS: dispatched agents inherit the runtime tool surface. In the dispatch prompt, explicitly allow relevant MCP discovery/use within the assigned role, scope, and safety limits; do not accidentally hide MCP availability, but keep any deliberate tool limits honest.
 '@
 
-Write-Output $reminder
+try {
+    $payload = [ordered]@{
+        hookSpecificOutput = [ordered]@{
+            hookEventName = "SessionStart"
+            additionalContext = $reminder
+        }
+    }
+    $json = $payload | ConvertTo-Json -Compress -Depth 4 -ErrorAction Stop
+    if ($json) { [Console]::Out.WriteLine($json) }
+} catch {}
 exit 0

@@ -31,3 +31,4 @@
 
 # Windows PowerShell module cache (pwsh hooks running with cwd=repo write it here)
 /Microsoft/
+graphify-out/
