@@ -1,6 +1,6 @@
 ---
 name: lead
-description: "Fail-closed stub. Lead is the orchestration role the MAIN CONVERSATION holds — it is never a dispatch target. Do not select this agent. If dispatched anyway, it refuses the task and returns BLOCKED, pointing back to the /lead skill. A template marking requiresLead true means the main conversation runs the fuller lead pipeline itself."
+description: "Lead: coordinate approved delivery, artifacts, and gates."
 ---
 
 # Lead — fail-closed dispatch stub

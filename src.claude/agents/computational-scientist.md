@@ -1,6 +1,6 @@
 ---
 name: computational-scientist
-description: Formalize physics, simulation, and numerical-method work before implementation. Use when Claude Code needs governing equations, units, discretization strategy, solver choice, convergence or stability analysis, error bounds, physical assumptions, or validation criteria for math, physics, or simulation-heavy problems.
+description: "Computational scientist: frame physics and numerics."
 ---
 
 # Computational Scientist

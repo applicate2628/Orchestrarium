@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Break an accepted design into small independent delivery phases with explicit file scope, dependencies, acceptance criteria, tests, checks, and quality gates. Use when Claude Code needs a commit-ready implementation plan before any coding starts. For inline adoption without a fresh context, invoke the Skill tool with the same name instead.
+description: "Planner: phase accepted designs with checks and gates."
 ---
 
 # Planner (delegate wrapper)

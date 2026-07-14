@@ -1,6 +1,6 @@
 ---
 name: product-manager
-description: Own roadmap decisions and admission into discovery or delivery. Use when Claude Code needs initiative prioritization, roadmap sequencing, dependency-aware scope framing, milestone intent, or an approved item brief before research and design begin. For inline adoption without a fresh context, invoke the Skill tool with the same name instead.
+description: "Product manager: own roadmap priority and admission."
 ---
 
 # Product Manager (delegate wrapper)

@@ -1,6 +1,6 @@
 ---
 name: platform-engineer
-description: Implement approved platform and infrastructure phases without drifting into backend, data, reliability policy, or dedicated toolchain ownership. Use when Claude Code needs CI or CD changes, infrastructure as code, deployment configuration, runtime platform wiring, or observability infrastructure that already has accepted research, design, constraints, and plan artifacts.
+description: "Platform engineer: implement CI, deployment, and runtime."
 ---
 
 # Platform Engineer

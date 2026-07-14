@@ -1,6 +1,6 @@
 ---
 name: analyst
-description: Adopt the Analyst role inline in THIS conversation for a trivial, bounded factual repository read. Investigate read-only and return a factual research memo with file and line references. Preserves current conversation context; does not claim isolation or independence. For a non-trivial or broad investigation, use the Agent tool with subagent_type: analyst instead.
+description: "Analyst: map repository evidence, contracts, and risks."
 ---
 
 # Analyst
