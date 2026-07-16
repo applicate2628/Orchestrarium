@@ -2,8 +2,10 @@
 import argparse
 import importlib.util
 import json
+import os
 import re
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -93,8 +95,23 @@ def build_event(args: argparse.Namespace) -> dict[str, Any]:
         )
     started_at = args.started_at or utc_timestamp()
     updated_at = args.updated_at or started_at
+    # schemaVersion 2 when any v2 closure/lifecycle field is present; 1 otherwise
+    # (the validator rejects v2 fields on v1 events, and strict open-REVISE scoping
+    # keys on schemaVersion 2 — see decision 2026-07-16-review-verdict-closure).
+    v2 = any(
+        value is not None
+        for value in (
+            getattr(args, "event_kind", None),
+            getattr(args, "launch_run_id", None),
+            getattr(args, "closes", None),
+            getattr(args, "artifact_revision", None),
+            getattr(args, "lane", None),
+            getattr(args, "effort", None),
+            getattr(args, "finding_class", None),
+        )
+    )
     event: dict[str, Any] = {
-        "schemaVersion": 1,
+        "schemaVersion": 2 if v2 else 1,
         "runId": args.run_id or default_run_id(args.role),
         "workItem": args.work_item_name or args.work_item.name,
         "role": args.role,
@@ -113,6 +130,14 @@ def build_event(args: argparse.Namespace) -> dict[str, Any]:
         "promptFile": args.prompt_file,
         "artifact": args.artifact,
         "notes": args.notes,
+        # v2 closure/lifecycle fields
+        "eventKind": getattr(args, "event_kind", None),
+        "launchRunId": getattr(args, "launch_run_id", None),
+        "closesRunIds": getattr(args, "closes", None),
+        "artifactRevision": getattr(args, "artifact_revision", None),
+        "lane": getattr(args, "lane", None),
+        "effort": getattr(args, "effort", None),
+        "findingClass": getattr(args, "finding_class", None),
     }
     for key, value in optional_fields.items():
         if value is not None:
@@ -195,19 +220,56 @@ def command_append(args: argparse.Namespace) -> int:
         return 1
 
     ledger_path = item / "agent-runs.jsonl"
-    previous = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else None
-    prefix = "" if not previous or previous.endswith("\n") else "\n"
-    line = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
-    ledger_path.write_text(f"{previous or ''}{prefix}{line}\n", encoding="utf-8")
-
-    validator = load_validator()
-    errors = validator.validate_work_item(item)
-    if errors:
-        restore_ledger(ledger_path, previous)
-        for error in errors:
-            print(f"FAIL: {error}", file=sys.stderr)
-        print(f"RESULT: FAIL ({len(errors)} errors)", file=sys.stderr)
+    # Kill-safe old-or-new transaction (decision 2026-07-16-review-verdict-closure):
+    # lock -> read -> merge -> write TEMP (same dir) -> validate the CANDIDATE ->
+    # os.replace -> unlock. NO automatic stale-lock takeover (the ABA reclamation
+    # race is unfixable without fencing): on timeout we fail closed with a manual
+    # recovery diagnostic. Power-loss durability is explicitly NOT claimed.
+    lock_path = item / "agent-runs.jsonl.lock"
+    lock_fd = None
+    for _attempt in range(50):  # ~5s bounded retry
+        try:
+            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(lock_fd, f"pid={os.getpid()} at={utc_timestamp()}\n".encode())
+            break
+        except FileExistsError:
+            time.sleep(0.1)
+    if lock_fd is None:
+        holder = ""
+        try:
+            holder = lock_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            pass
+        print(
+            f"FAIL: ledger locked ({lock_path}; holder: {holder or 'unknown'}). "
+            "No automatic takeover — verify the holder pid is dead, remove the lock file, retry.",
+            file=sys.stderr,
+        )
         return 1
+
+    try:
+        previous = ledger_path.read_text(encoding="utf-8") if ledger_path.exists() else ""
+        prefix = "" if not previous or previous.endswith("\n") else "\n"
+        line = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+        candidate = ledger_path.with_suffix(".jsonl.tmp")
+        with candidate.open("w", encoding="utf-8", newline="") as fh:
+            fh.write(f"{previous}{prefix}{line}\n")
+            fh.flush()
+
+        validator = load_validator()
+        # strict_revise=False: the helper RECORDS events (including REVISE verdicts
+        # themselves); closure strictness is the checker's and the gates' job.
+        errors = validator.validate_work_item(item, ledger_path=candidate, strict_revise=False)
+        if errors:
+            candidate.unlink(missing_ok=True)
+            for error in errors:
+                print(f"FAIL: {error}", file=sys.stderr)
+            print(f"RESULT: FAIL ({len(errors)} errors)", file=sys.stderr)
+            return 1
+        os.replace(candidate, ledger_path)
+    finally:
+        os.close(lock_fd)
+        lock_path.unlink(missing_ok=True)
 
     print(f"RESULT: PASS append ({ledger_path})")
     return 0
@@ -320,6 +382,14 @@ def build_parser() -> argparse.ArgumentParser:
     append.add_argument("--started-at", help="ISO-like start timestamp. Defaults to current UTC.")
     append.add_argument("--updated-at", help="ISO-like update timestamp. Defaults to started-at.")
     append.add_argument("--notes", help="Short operational note.")
+    # v2 closure/lifecycle fields (decision 2026-07-16-review-verdict-closure, minimal slice)
+    append.add_argument("--event-kind", choices=["launch", "terminal", "standalone"], help="v2 lifecycle discriminator.")
+    append.add_argument("--launch-run-id", help="On a terminal event: the runId of the launch it settles.")
+    append.add_argument("--closes", action="append", help="runId of an earlier REVISE this PASS/WAIVED:user event discharges. Repeatable.")
+    append.add_argument("--artifact-revision", help="Revision of the reviewed artifact at review time (git sha or content digest).")
+    append.add_argument("--lane", help="Review angle label (e.g. architecture-adversarial).")
+    append.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"], help="Typed declared reasoning-effort tier.")
+    append.add_argument("--finding-class", choices=["publication-safety", "security", "correctness", "performance", "other"], help="REVISE finding classification (publication-safety/security are non-user-waivable).")
     append.set_defaults(func=command_append)
 
     rollup = subparsers.add_parser("rollup", help="Aggregate ledger events (one work-item via --work-item, or all active via --root)")
