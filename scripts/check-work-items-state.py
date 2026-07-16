@@ -237,7 +237,7 @@ def command_check(args: argparse.Namespace) -> int:
     global_notes = epic_adoption_notes(items, active_dir)
 
     for item in items:
-        errors = validator.validate_work_item(item)
+        errors = validator.validate_work_item(item, strict_revise=not args.no_strict_revise)
         errors.extend(stale_running_errors(item, now, stale_after))
         # Informational notes (aging, blocked-by) are NOT failures: a blocked or
         # aging active item is expected state, not a defect, so they never flip
@@ -281,6 +281,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report running events older than this many hours. Use 0 to disable stale checks.",
     )
     parser.add_argument("--now", help="UTC-ish timestamp for deterministic stale checks. Defaults to current UTC.")
+    parser.add_argument(
+        "--no-strict-revise",
+        action="store_true",
+        help="Do not FAIL on open v2 REVISE obligations (triage sessions only; the default is strict per decision 2026-07-16-review-verdict-closure).",
+    )
     parser.add_argument(
         "--max-age-days",
         type=float,

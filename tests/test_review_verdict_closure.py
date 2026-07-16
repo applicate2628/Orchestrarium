@@ -1,0 +1,270 @@
+"""REVISE-closure discipline (decision 2026-07-16-review-verdict-closure, minimal slice).
+
+Falsifiers accumulated across the 12-round design loop. The centerpiece is the REPLAY test:
+this session's real precedent (reviewer returned REVISE; author fixed findings; mechanical
+validator went green; author closed the gate himself) must FAIL mechanically until a valid
+re-verification closer is appended.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+_SPEC = importlib.util.spec_from_file_location(
+    "validate_work_item_state", ROOT / "scripts" / "validate-work-item-state.py"
+)
+vws = importlib.util.module_from_spec(_SPEC)
+sys.modules["validate_work_item_state"] = vws
+_SPEC.loader.exec_module(vws)
+
+STATUS_MD = """# Status
+
+## Current state
+open
+
+## Active agents
+- none
+
+## Completed agents
+- none
+
+## Next action
+n/a
+"""
+
+
+def _event(run_id: str, **over) -> dict:
+    base = {
+        "schemaVersion": 2,
+        "runId": run_id,
+        "workItem": "fixture-item",
+        "role": "architecture-reviewer",
+        "executionRole": "external-reviewer",
+        "status": "completed",
+        "gate": "none",
+        "scope": ["fixture"],
+        "startedAt": "2026-07-16T10:00:00Z",
+        "updatedAt": "2026-07-16T10:00:00Z",
+    }
+    base.update(over)
+    return base
+
+
+class ClosureFixture(unittest.TestCase):
+    def _write(self, events: list[dict]) -> Path:
+        import json
+
+        td = Path(tempfile.mkdtemp())
+        (td / "status.md").write_text(STATUS_MD, encoding="utf-8")
+        # PASS-gate events require their artifact to exist inside the work item.
+        (td / "design.md").write_text("fixture artifact\n", encoding="utf-8")
+        (td / "a.md").write_text("fixture artifact\n", encoding="utf-8")
+        with (td / "agent-runs.jsonl").open("w", encoding="utf-8") as fh:
+            for e in events:
+                fh.write(json.dumps(e) + "\n")
+        return td
+
+    def _validate(self, events: list[dict], strict: bool = True) -> list[str]:
+        item = self._write(events)
+        return vws.validate_work_item(item, strict_revise=strict)
+
+    # ---------- THE REPLAY (acceptance case 3) ----------
+
+    def test_replay_precedent_fails_until_valid_closer(self) -> None:
+        revise = _event(
+            "run-00000001-revise",
+            gate="REVISE",
+            status="revise",
+            artifact="design.md",
+            lane="architecture-deep",
+            effort="xhigh",
+            provider="codex",
+            findingClass="correctness",
+        )
+        # Author fixed the findings; the mechanical validator is green; a validator-run
+        # PASS event WITHOUT a closure relation must NOT discharge the obligation.
+        validator_green = _event(
+            "run-00000002-qagreen",
+            gate="PASS",
+            role="qa-engineer",
+            executionRole="internal",
+            artifact="agent-runs.jsonl",
+            evidence=[{"kind": "command", "ref": "validate-skill-pack.sh = PASS"}],
+        )
+        errors = self._validate([revise, validator_green])
+        self.assertTrue(any("open REVISE obligation" in e for e in errors), errors)
+
+        # A QA PASS naming the runId still fails: even with matching artifact/lane it has
+        # no authority over the architecture angle (C3). (With a mismatched artifact it
+        # fails even earlier on the artifact rule — also verified, defense in depth.)
+        qa_close = dict(
+            validator_green,
+            runId="run-00000003-qaclose",
+            closesRunIds=["run-00000001-revise"],
+            artifact="design.md",
+            lane="architecture-deep",
+        )
+        errors = self._validate([revise, qa_close])
+        self.assertTrue(any("(C3)" in e and "authority" in e for e in errors), errors)
+        qa_wrong_artifact = dict(qa_close, runId="run-00000003b-wrongart", artifact="agent-runs.jsonl")
+        errors = self._validate([revise, qa_wrong_artifact])
+        self.assertTrue(any("artifact" in e and "(C3)" in e for e in errors), errors)
+
+        # The SAME angle re-verifying with an explicit closure relation discharges it.
+        real_close = _event(
+            "run-00000004-reclose",
+            gate="PASS",
+            artifact="design.md",
+            lane="architecture-deep",
+            effort="xhigh",
+            provider="codex",
+            closesRunIds=["run-00000001-revise"],
+            evidence=[{"kind": "review", "ref": ".scratch/codex-prompts/re-review.out"}],
+        )
+        errors = self._validate([revise, real_close])
+        self.assertEqual(errors, [], errors)
+
+    # ---------- closure relation rules ----------
+
+    def test_c1_forward_reference_fails(self) -> None:
+        closer = _event(
+            "run-00000010-closer",
+            gate="PASS",
+            artifact="design.md",
+            closesRunIds=["run-00000011-later"],
+            evidence=[{"kind": "review", "ref": "x"}],
+        )
+        revise = _event("run-00000011-later", gate="REVISE", status="revise", artifact="design.md")
+        errors = self._validate([closer, revise])
+        self.assertTrue(any("(C1)" in e for e in errors), errors)
+
+    def test_c2_non_revise_target_fails(self) -> None:
+        plain = _event("run-00000020-plain", gate="advisory")
+        closer = _event(
+            "run-00000021-closer",
+            gate="PASS",
+            artifact="design.md",
+            closesRunIds=["run-00000020-plain"],
+            evidence=[{"kind": "review", "ref": "x"}],
+        )
+        errors = self._validate([plain, closer])
+        self.assertTrue(any("(C2)" in e for e in errors), errors)
+
+    def test_c2_double_discharge_fails(self) -> None:
+        revise = _event("run-00000030-revise", gate="REVISE", status="revise", artifact="a.md")
+        c1 = _event(
+            "run-00000031-c1", gate="PASS", artifact="a.md",
+            closesRunIds=["run-00000030-revise"], evidence=[{"kind": "review", "ref": "x"}],
+        )
+        c2 = _event(
+            "run-00000032-c2", gate="PASS", artifact="a.md",
+            closesRunIds=["run-00000030-revise"], evidence=[{"kind": "review", "ref": "x"}],
+        )
+        errors = self._validate([revise, c1, c2])
+        self.assertTrue(any("already discharged" in e for e in errors), errors)
+
+    def test_c3_artifact_and_lane_mismatch_fail(self) -> None:
+        revise = _event(
+            "run-00000040-revise", gate="REVISE", status="revise",
+            artifact="a.md", lane="architecture-deep",
+        )
+        wrong_artifact = _event(
+            "run-00000041-wart", gate="PASS", artifact="b.md", lane="architecture-deep",
+            closesRunIds=["run-00000040-revise"], evidence=[{"kind": "review", "ref": "x"}],
+        )
+        errors = self._validate([revise, wrong_artifact])
+        self.assertTrue(any("artifact" in e and "(C3)" in e for e in errors), errors)
+
+        wrong_lane = _event(
+            "run-00000042-wlane", gate="PASS", artifact="a.md", lane="security-adversarial",
+            closesRunIds=["run-00000040-revise"], evidence=[{"kind": "review", "ref": "x"}],
+        )
+        errors = self._validate([revise, wrong_lane])
+        self.assertTrue(any("lane" in e and "(C3)" in e for e in errors), errors)
+
+    def test_c3_same_provider_lower_effort_fails(self) -> None:
+        revise = _event(
+            "run-00000050-revise", gate="REVISE", status="revise",
+            artifact="a.md", effort="xhigh", provider="codex",
+        )
+        weak = _event(
+            "run-00000051-weak", gate="PASS", artifact="a.md", effort="high", provider="codex",
+            closesRunIds=["run-00000050-revise"], evidence=[{"kind": "review", "ref": "x"}],
+        )
+        errors = self._validate([revise, weak])
+        self.assertTrue(any("effort" in e and "(C3" in e for e in errors), errors)
+
+    # ---------- typed waiver ----------
+
+    def test_waiver_shape_and_protected_boundary(self) -> None:
+        revise = _event(
+            "run-00000060-revise", gate="REVISE", status="revise",
+            artifact="a.md", findingClass="publication-safety",
+        )
+        waiver = _event(
+            "run-00000061-waiver", gate="WAIVED:user", status="completed",
+            closesRunIds=["run-00000060-revise"],
+            evidence=[{"kind": "manual-check", "ref": "operator said: ship with known issue"}],
+        )
+        errors = self._validate([revise, waiver])
+        self.assertTrue(any("(C5)" in e for e in errors), errors)  # protected class -> non-waivable
+
+        ordinary = dict(revise, runId="run-00000062-rev2", findingClass="correctness")
+        waiver2 = dict(waiver, runId="run-00000063-waiv2", closesRunIds=["run-00000062-rev2"])
+        errors = self._validate([ordinary, waiver2])
+        self.assertEqual(errors, [], errors)  # legitimate operator waiver needs no reviewer role
+
+        bad_status = dict(waiver2, runId="run-00000064-bad", status="cancelled")
+        errors = self._validate([ordinary, bad_status])
+        self.assertTrue(any("WAIVED:user requires completed status" in e for e in errors), errors)
+
+        no_evidence = dict(waiver2, runId="run-00000065-noev")
+        no_evidence.pop("evidence")
+        errors = self._validate([ordinary, no_evidence])
+        self.assertTrue(any("manual-check" in e for e in errors), errors)
+
+    # ---------- lifecycle ----------
+
+    def test_lifecycle_terminal_rules(self) -> None:
+        launch = _event("run-00000070-launch", eventKind="launch", status="running")
+        term = _event(
+            "run-00000071-term", eventKind="terminal", launchRunId="run-00000070-launch",
+            status="blocked", gate="none",
+        )
+        errors = self._validate([launch, term], strict=False)
+        self.assertEqual(errors, [], errors)
+
+        dangling = dict(term, runId="run-00000072-dang", launchRunId="run-00000099-nope")
+        errors = self._validate([launch, dangling], strict=False)
+        self.assertTrue(any("does not reference an earlier event" in e for e in errors), errors)
+
+        dup = dict(term, runId="run-00000073-dup")
+        errors = self._validate([launch, term, dup], strict=False)
+        self.assertTrue(any("duplicate terminal" in e for e in errors), errors)
+
+        no_launch_field = _event("run-00000074-nolaunch", eventKind="terminal", status="blocked")
+        errors = self._validate([no_launch_field], strict=False)
+        self.assertTrue(any("requires launchRunId" in e for e in errors), errors)
+
+    # ---------- schema epoch ----------
+
+    def test_v2_fields_on_v1_event_fail(self) -> None:
+        v1 = _event("run-00000080-v1", schemaVersion=1, lane="architecture-deep")
+        errors = self._validate([v1], strict=False)
+        self.assertTrue(any("requires schemaVersion 2" in e for e in errors), errors)
+
+    def test_v1_revise_does_not_trip_strict_mode(self) -> None:
+        # Pre-existing v1 ledgers migrate by hand (fable minimal-slice gate); strict
+        # open-REVISE applies to v2 events only.
+        v1_revise = _event("run-00000090-v1rev", schemaVersion=1, gate="REVISE", status="revise")
+        errors = self._validate([v1_revise], strict=True)
+        self.assertEqual(errors, [], errors)
+
+
+if __name__ == "__main__":
+    unittest.main()
