@@ -94,10 +94,13 @@ REMINDER_WRAPPERS = (
 )
 
 # The conditional delegation-posture reminder, per pack, with the pack-specific
-# top-level .agents-mode.yaml dir the wrapper reads from cwd.
+# top-level .agents-mode.yaml dir the wrapper reads from cwd. Both packs emit the
+# SessionStart JSON envelope since the claude alignment (5f9d5907); the expected
+# directive text stays pack-specific (conversation/Agent-tool vs session/role-skill,
+# and the pack-correct external-dispatch contract path).
 AGENTS_MODE_REMINDERS = (
-    (CLAUDE_SCRIPTS / "agents-mode-reminder.ps1", ".claude", False),
-    (CODEX_SCRIPTS / "agents-mode-reminder.ps1", ".agents", True),
+    (CLAUDE_SCRIPTS / "agents-mode-reminder.ps1", ".claude", "claude"),
+    (CODEX_SCRIPTS / "agents-mode-reminder.ps1", ".agents", "codex"),
 )
 
 MCP_REMINDER_CONTEXT = "\n".join((
@@ -115,11 +118,23 @@ DELEGATION_HEADING = (
 )
 CODEX_DELEGATION_CONTEXTS = {
     "force": DELEGATION_HEADING + "\n" + (
-        "Effective delegationMode: FORCE. STANDING INSTRUCTION, not advisory: at the FIRST decision point of any non-trivial task (multi-step implementation, design, research, review, bug-fix), STOP - hold the $lead orchestration role in THIS session, classify the task, pick the team template, and activate the matching specialist role/skill per stage ($lead is the role you hold, not a subagent you spawn). Doing substantial work inline when a matching specialist and a viable tool path exist violates the active posture. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
+        "Effective delegationMode: FORCE. STANDING INSTRUCTION, not advisory: at the FIRST decision point of any non-trivial task (multi-step implementation, design, research, review, bug-fix), STOP - hold the $lead orchestration role in THIS session, classify the task, pick the team template, and activate the matching specialist role/skill per stage ($lead is the role you hold, not a subagent you spawn). Doing substantial work inline when a matching specialist and a viable tool path exist violates the active posture. When you launch any external provider (consultant / Codex / Claude) as $lead, take the launch flags from skills/lead/external-dispatch.md - file-based prompt, explicit model+effort, run-completion oracle, stall policy - never improvise them from memory. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
     ),
     "auto": DELEGATION_HEADING + "\n" + (
-        "Effective delegationMode: AUTO. Holding the $lead orchestration role in THIS session and activating the matching specialist role/skill per stage is the DEFAULT for any non-trivial task (multi-step implementation, design, research, review, bug-fix) - do it unless the task is trivial or you record why inline is better. $lead is the role you hold, not a subagent you spawn. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
+        "Effective delegationMode: AUTO. Holding the $lead orchestration role in THIS session and activating the matching specialist role/skill per stage is the DEFAULT for any non-trivial task (multi-step implementation, design, research, review, bug-fix) - do it unless the task is trivial or you record why inline is better. $lead is the role you hold, not a subagent you spawn. When you launch any external provider (consultant / Codex / Claude) as $lead, take the launch flags from skills/lead/external-dispatch.md - file-based prompt, explicit model+effort, run-completion oracle, stall policy - never improvise them from memory. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
     ),
+}
+CLAUDE_DELEGATION_CONTEXTS = {
+    "force": DELEGATION_HEADING + "\n" + (
+        "Effective delegationMode: FORCE. STANDING INSTRUCTION, not advisory: at the FIRST decision point of any non-trivial task (multi-step implementation, design, research, review, bug-fix), STOP - hold the $lead orchestration role in THIS conversation, classify the task, pick the team template, and route it via the Agent tool to the matching specialist subagents ($lead is the role you hold, not a subagent you spawn). Doing substantial work inline when a matching specialist and a viable tool path exist violates the active posture. When you launch any external provider (consultant / Codex / Claude) as $lead, take the launch flags from contracts/external-dispatch.md - file-based prompt, explicit model+effort, run-completion oracle, stall policy - never improvise them from memory. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
+    ),
+    "auto": DELEGATION_HEADING + "\n" + (
+        "Effective delegationMode: AUTO. Holding the $lead orchestration role in THIS conversation and delegating to the matching specialist subagents via the Agent tool is the DEFAULT for any non-trivial task (multi-step implementation, design, research, review, bug-fix) - do it unless the task is trivial or you record why inline is better. $lead is the role you hold, not a subagent you spawn. When you launch any external provider (consultant / Codex / Claude) as $lead, take the launch flags from contracts/external-dispatch.md - file-based prompt, explicit model+effort, run-completion oracle, stall policy - never improvise them from memory. Maintain work-items/ recovery state for multi-stage chains. This STILL APPLIES AFTER COMPACTION."
+    ),
+}
+DELEGATION_CONTEXTS_BY_PACK = {
+    "codex": CODEX_DELEGATION_CONTEXTS,
+    "claude": CLAUDE_DELEGATION_CONTEXTS,
 }
 
 # The publication scanner wrapper, in BOTH install trees (2 files).
@@ -269,7 +284,7 @@ class TestAgentsModeReminderWrapper(unittest.TestCase):
 
     def test_force_and_auto_emit_directive_json_and_manual_is_silent(self) -> None:
         for interp in INTERPRETERS:
-            for wrapper, sub, emits_json in AGENTS_MODE_REMINDERS:
+            for wrapper, sub, pack_key in AGENTS_MODE_REMINDERS:
                 self.assertTrue(wrapper.is_file(), f"missing wrapper: {wrapper}")
                 with tempfile.TemporaryDirectory() as td:
                     cfg_dir = Path(td) / sub
@@ -286,12 +301,12 @@ class TestAgentsModeReminderWrapper(unittest.TestCase):
                         with self.subTest(interp=Path(interp).stem, pack=sub, mode=mode):
                             p = _run_ps1(interp, wrapper, cwd=td, env=env)
                             self.assertEqual(p.returncode, 0, p.stderr)
-                            context = (_decode_sessionstart_context(p.stdout)
-                                       if emits_json else p.stdout.strip())
+                            context = _decode_sessionstart_context(p.stdout)
                             self.assertEqual(context.splitlines()[0], DELEGATION_HEADING)
                             self.assertIn(f"delegationMode: {mode.upper()}", context)
-                            if emits_json:
-                                self.assertEqual(context, CODEX_DELEGATION_CONTEXTS[mode])
+                            self.assertEqual(
+                                context, DELEGATION_CONTEXTS_BY_PACK[pack_key][mode]
+                            )
 
                     cfg.write_text("delegationMode: manual\n", encoding="utf-8")
                     with self.subTest(interp=Path(interp).stem, pack=sub, mode="manual"):
