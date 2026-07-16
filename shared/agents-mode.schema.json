@@ -67,7 +67,7 @@
     {
       "name": "externalCodexProfile",
       "default": "gpt-5.6-sol-xhigh",
-      "allowed": ["default", "gpt-5.6-sol-xhigh", "gpt-5.6-sol-max", "gpt-5.6-luna"]
+      "allowed": ["default", "gpt-5.6-sol-xhigh", "gpt-5.6-sol-max", "gpt-5.6-terra"]
     },
     {
       "name": "externalClaudeProfile",
