@@ -62,3 +62,18 @@ A structural validator checks the SCHEMA (anchors present + unchanged, diff pres
 - **anti-drift**: the per-round check that the revised artifact still serves the original pinned objective.
 - **convergence**: both verdict angles PASS and all scout findings reconciled.
 - **ledger / review-loop-state**: the per-round persisted record that gives the autonomous loop an auditable structural backstop.
+
+## Verdict closure is universal (decision 2026-07-16-review-verdict-closure)
+
+The closure rule binds ANY commissioned review or audit — this loop, an ad-hoc council, an external
+adapter audit, a design review — whether or not this methodology was invoked: **a returned `REVISE`
+closes only on a re-verification `PASS` from that angle or a recorded equivalent; author belief or a
+green mechanical validator never closes it** (the always-on spine carries this clause). Typed
+dispositions are the only alternatives: `WAIVED:user` (user-authorized, evidence-carried; never legal
+against publication-safety/security findings) and the `$security-reviewer` exception. For TRACKED
+work-items the relation is mechanical: the dispatch records launch+terminal events (wrapper
+`--ledger`), the closer names the exact `closesRunIds`, and `check-work-items-state` fails on open
+obligations. Replacement-reviewer equivalence must preserve: the review scope, independence from the
+author, the same evidence target/version, and an equal-or-stronger declared tier — recorded in
+structured fields, not prose. Reviews outside any work-item remain governed by the spine clause alone
+(declared residual).

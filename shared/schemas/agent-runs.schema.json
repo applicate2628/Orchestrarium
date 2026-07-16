@@ -17,7 +17,10 @@
     "updatedAt"
   ],
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": {
+      "enum": [1, 2],
+      "$comment": "v2 (2026-07-16, decision 2026-07-16-review-verdict-closure) adds the REVISE-closure relation fields below. v1 events remain valid; closure semantics are evaluated over the typed v2 fields. This is the MINIMAL slice (fable step-back gate): anchor/migration machinery, reconcilesRunIds, blobDigest, protectedLane, reviewScope are DEFERRED until an observed incident or telemetry funds them."
+    },
     "runId": { "type": "string", "minLength": 8 },
     "workItem": { "type": "string", "minLength": 1 },
     "role": { "type": "string", "minLength": 1 },
@@ -31,9 +34,43 @@
     "status": { "enum": ["planned", "running", "completed", "revise", "blocked", "cancelled"] },
     "gate": {
       "oneOf": [
-        { "enum": ["PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "advisory", "none"] },
+        { "enum": ["PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "advisory", "none", "WAIVED:user"] },
         { "type": "string", "pattern": "^RETURN\\([a-z][a-z-]*\\)$" }
-      ]
+      ],
+      "$comment": "WAIVED:user (v2): typed user-authorized terminal disposition for open REVISE obligations — requires status 'completed', non-empty closesRunIds, and a manual-check evidence entry carrying the user's explicit authorization; never legal against a protected findingClass (publication-safety/security), whose only non-PASS discharge authority is the $security-reviewer (see the decision record)."
+    },
+    "eventKind": {
+      "enum": ["launch", "terminal", "standalone"],
+      "$comment": "v2 lifecycle discriminator: 'launch' = a dispatch record (external run started); 'terminal' = its settlement (requires launchRunId); 'standalone' = an event that is not part of a launch/terminal pair (verdicts recorded directly, planning notes)."
+    },
+    "launchRunId": {
+      "type": "string",
+      "minLength": 8,
+      "$comment": "On a terminal event: the runId of the launch event it settles."
+    },
+    "closesRunIds": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 8 },
+      "$comment": "The normalized REVISE-closure relation (decision item 2): the exact runIds of earlier gate:REVISE events this PASS/WAIVED:user event discharges. Closure is NEVER derived from role/scope/artifact string matching."
+    },
+    "artifactRevision": {
+      "type": "string",
+      "minLength": 4,
+      "$comment": "Revision of the reviewed artifact at review time (plain string in the minimal slice: a git sha or content digest; mechanical git-object/blob verification is deferred)."
+    },
+    "lane": {
+      "type": "string",
+      "minLength": 1,
+      "$comment": "Review angle label (e.g. 'architecture-adversarial'). Closure requires lane equality when both sides carry it; new review events SHOULD carry it."
+    },
+    "effort": {
+      "enum": ["low", "medium", "high", "xhigh", "max"],
+      "$comment": "Typed declared reasoning-effort tier. When both a REVISE and its closer declare effort and share a provider, the closer's tier must be >= the target's."
+    },
+    "findingClass": {
+      "enum": ["publication-safety", "security", "correctness", "performance", "other"],
+      "$comment": "Classification of a REVISE finding. publication-safety and security are NON-USER-WAIVABLE: WAIVED:user against them is invalid (spine: only $security-reviewer approves a publication-safety exception)."
     },
     "scope": {
       "type": "array",
