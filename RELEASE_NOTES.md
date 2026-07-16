@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-07-16
+
+### Changed
+
+- **`externalCodexProfile`'s alternate Codex tier migrated from the volume model `gpt-5.6-luna` to the balanced model `gpt-5.6-terra`; `gpt-5.6-luna` is dropped from the enum.** The `gpt-5.6` Codex family is three-tier — `gpt-5.6-sol` (flagship) / `gpt-5.6-terra` (balanced) / `gpt-5.6-luna` (volume). The schema `externalCodexProfile.allowed` list previously offered the volume tier as the cheaper alternate profile; it now offers the balanced tier (`gpt-5.6-terra`, `model_reasoning_effort = "high"`) instead. terra is a genuine cheaper-and-faster-than-`gpt-5.6-sol-xhigh` reasoning lane (a distinct model, not an effort suffix on sol) that stays review-gated like any external lane — not a volume/overflow tier, so the previous luna-specific "bounded mechanical overflow / fast-volume / mandatory heavier-tier verification / Sonnet-equivalent" framing is replaced accordingly across the schema, defaults, presets, the four provider packs, docs, and the contract test. The `max-speed` preset, which pinned the volume tier, now pins `gpt-5.6-terra` — the lightest remaining Codex profile. **Routing evidence:** per the standing model-family-migration rule in both external-dispatch contracts, this Codex-family change keeps the shipped lane priorities `ASSUMPTION (UNVERIFIED)` pending re-benchmark, and a dated invalidation note was added to the 2026-05-01 routing-evidence document. **Who this affects:** operators who select the cheaper Codex profile now get the balanced reasoning model instead of the volume model; any repo-local `.agents-mode.yaml` still naming `gpt-5.6-luna` as a live value should update it to `gpt-5.6-terra`. **Preserved:** `default`, `gpt-5.6-sol-xhigh` (the shipped default), and `gpt-5.6-sol-max` are unchanged; the fallback-eligibility policy (only an explicitly configured fully-autonomous low-reasoning worker lane may auto-downgrade to the cheaper tier after usage-limit or quota exhaustion) is unchanged — only its target model is now terra.
+
 ## 2026-07-14
 
 ### Changed

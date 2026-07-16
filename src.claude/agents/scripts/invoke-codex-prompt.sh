@@ -51,8 +51,8 @@ PROMPT_FILE=""
 #     -- --model gpt-5.6-sol -c model_reasoning_effort=xhigh
 #   `gpt-5.6-sol-max` (higher-complexity / hard lanes):
 #     -- --model gpt-5.6-sol -c model_reasoning_effort=max
-#   `gpt-5.6-luna` (fast/volume/cheap tier; a distinct model, not an effort suffix):
-#     -- --model gpt-5.6-luna -c model_reasoning_effort=medium
+#   `gpt-5.6-terra` (balanced/cheap tier; a distinct model, not an effort suffix):
+#     -- --model gpt-5.6-terra -c model_reasoning_effort=high
 # An explicit `--` block always overrides these defaults, including `--model`.
 CODEX_FLAGS=("--model" "gpt-5.6-sol" "-c" "model_reasoning_effort=xhigh")
 SAW_DELIMITER=0

@@ -32,19 +32,19 @@ class AgentsModeContractTest(unittest.TestCase):
 
         # Shipped default is the best-effort profile (symmetric to externalClaudeProfile: opus-xhigh).
         self.assertEqual(codex_profile["default"], "gpt-5.6-sol-xhigh")
-        # gpt-5.5 -> gpt-5.6-sol/luna migration: gpt-5.5-fast and gpt-5.3-codex-spark
-        # were both retired in favor of the single gpt-5.6-luna fast/volume tier, and
-        # gpt-5.6-sol-max was added for higher-complexity/hard lanes. Keep this list in
+        # gpt-5.5 -> gpt-5.6-sol family migration retired gpt-5.5-fast and gpt-5.3-codex-spark;
+        # gpt-5.6-sol-max was added for higher-complexity/hard lanes, and the alternate cheaper
+        # profile is gpt-5.6-terra (the balanced mid-tier, a distinct model). Keep this list in
         # sync with shared/agents-mode.schema.json externalCodexProfile.allowed.
         self.assertEqual(
             codex_profile["allowed"],
-            ["default", "gpt-5.6-sol-xhigh", "gpt-5.6-sol-max", "gpt-5.6-luna"],
+            ["default", "gpt-5.6-sol-xhigh", "gpt-5.6-sol-max", "gpt-5.6-terra"],
         )
         self.assertNotIn("providers", codex_profile)
 
         # Per-preset assignments must correspond to each preset's intent:
         #   best-effort presets → gpt-5.6-sol-xhigh
-        #   speed preset → gpt-5.6-luna
+        #   speed preset → gpt-5.6-terra (lightest remaining Codex profile; volume tier retired)
         #   balanced everyday presets → default (inherit externalModelMode)
         expected_per_preset = {
             "default": "gpt-5.6-sol-xhigh",
@@ -52,7 +52,7 @@ class AgentsModeContractTest(unittest.TestCase):
             "external-aggressive": "default",
             "correctness-first": "gpt-5.6-sol-xhigh",
             "power-mode": "gpt-5.6-sol-xhigh",
-            "max-speed": "gpt-5.6-luna",
+            "max-speed": "gpt-5.6-terra",
         }
         for preset in presets["presetOrder"]:
             with self.subTest(preset=preset):

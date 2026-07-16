@@ -11,6 +11,12 @@ Status: `PASS / ARCHITECTURE-REVIEWED` on the 2026-05-01 model families · curre
 > re-affirmed — on the current model families. The frozen tables below remain valid as the
 > historical record of the 2026-05-01 release; they no longer certify current-family routing.
 
+> **Model-currency invalidation (2026-07-15).** The `externalCodexProfile` alternate Codex tier was
+> migrated from the volume model `gpt-5.6-luna` to the balanced model `gpt-5.6-terra` (luna dropped
+> from the enum). Per the same standing rule in the external-dispatch contracts, this Codex
+> model-family change keeps the routing-evidence `PASS` at `ASSUMPTION (UNVERIFIED)` on the current
+> families until the RF12 benchmark is re-run or the lane orders are explicitly re-affirmed.
+
 ## Purpose
 
 This note translates the admitted benchmark release

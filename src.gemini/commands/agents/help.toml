@@ -19,8 +19,8 @@ Summarize:
 - that shipped `externalProvider: auto` routing uses `codex | claude` only and keeps Gemini/Qwen out of production profiles
 - that explicit `externalProvider: gemini` or `externalProvider: qwen` remains a manual `WEAK MODEL / NOT RECOMMENDED` example or compatibility path only
 - how the shared `externalModelMode` distinguishes runtime-default provider selection from pinned top-model execution on the production provider paths
-- how `externalCodexProfile: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-luna` controls Codex-specific profile choice after provider resolution
-- `gpt-5.6-sol-xhigh` pins model gpt-5.6-sol with reasoning_effort "xhigh"; `gpt-5.6-sol-max` pins model gpt-5.6-sol with reasoning_effort "max" for higher-complexity/hard lanes; `gpt-5.6-luna` is the bounded mechanical-overflow path, a distinct fast/volume model with reasoning_effort "medium"
+- how `externalCodexProfile: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra` controls Codex-specific profile choice after provider resolution
+- `gpt-5.6-sol-xhigh` pins model gpt-5.6-sol with reasoning_effort "xhigh"; `gpt-5.6-sol-max` pins model gpt-5.6-sol with reasoning_effort "max" for higher-complexity/hard lanes; `gpt-5.6-terra` is the balanced mid-tier, a distinct model with reasoning_effort "high"
 - how `reserve` works as an advisory/review-only symbolic candidate
 - the role of Gemini CLI /init, .gemini/settings.json, and .gemini/.agents-mode.yaml
 - the local command namespace
