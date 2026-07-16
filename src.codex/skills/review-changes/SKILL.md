@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: "Change reviewer: assess diff impact across the repository."
+description: "Diff/PR/commit-range impact review beyond changed lines."
 ---
 
 # Review Changes

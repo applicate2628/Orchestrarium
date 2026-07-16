@@ -1,6 +1,6 @@
 ---
 name: architecture-reviewer
-description: "Architecture reviewer: gate cohesion and maintainability."
+description: "Architecture/maintainability gate: coupling, cohesion, layering, debt."
 ---
 
 # Architecture Reviewer

@@ -1,6 +1,6 @@
 ---
 name: visualization-engineer
-description: "Visualization engineer: implement scientific/data visuals."
+description: "Scientific/data charts and visuals: axes, legends, scales, color."
 ---
 
 # Visualization Engineer

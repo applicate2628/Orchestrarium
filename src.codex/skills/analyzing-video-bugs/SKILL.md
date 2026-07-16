@@ -1,6 +1,6 @@
 ---
 name: analyzing-video-bugs
-description: "Video bug analysis: inspect UI recordings frame by frame."
+description: "Video bug: extract frames from UI/animation recordings."
 ---
 
 # Analyzing video bugs

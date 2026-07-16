@@ -1,6 +1,6 @@
 ---
 name: external-reviewer
-description: "External reviewer: run eligible review or QA externally."
+description: "Review or QA run on external CLI provider; read-only."
 ---
 
 # External Reviewer

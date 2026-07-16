@@ -1,6 +1,6 @@
 ---
 name: external-brigade
-description: "External brigade: launch bounded parallel helper lanes."
+description: "External helper fan-out: bounded parallel batch of runs."
 ---
 
 # External Brigade

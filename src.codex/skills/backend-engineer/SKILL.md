@@ -1,6 +1,6 @@
 ---
 name: backend-engineer
-description: "Backend engineer: implement approved server-side phases."
+description: "Backend APIs, HTTP/RPC, databases, queues, caches, handlers."
 ---
 
 # Backend Engineer

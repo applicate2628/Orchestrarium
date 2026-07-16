@@ -1,6 +1,6 @@
 ---
 name: toolchain-engineer
-description: "Toolchain engineer: implement builds and packaging."
+description: "Build graph, packaging, compiler/SDK flags, cache."
 ---
 
 # Toolchain Engineer

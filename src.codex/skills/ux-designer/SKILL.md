@@ -1,6 +1,6 @@
 ---
 name: ux-designer
-description: "UX designer: define flows, states, and usability criteria."
+description: "User flows, screen states: empty, loading, error, usability."
 ---
 
 # UX Designer

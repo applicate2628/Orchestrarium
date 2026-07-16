@@ -1,6 +1,6 @@
 ---
 name: security-engineer
-description: "Security engineer: define threats and required controls."
+description: "Threat model, trust boundaries, auth, secrets, required controls."
 ---
 
 # Security Engineer

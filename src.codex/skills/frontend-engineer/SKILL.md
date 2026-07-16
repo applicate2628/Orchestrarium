@@ -1,6 +1,6 @@
 ---
 name: frontend-engineer
-description: "Frontend engineer: implement approved web UI phases."
+description: "Web UI implementation: screens, components, states, responsiveness."
 ---
 
 # Frontend Engineer

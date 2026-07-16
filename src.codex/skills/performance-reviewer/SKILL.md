@@ -1,6 +1,6 @@
 ---
 name: performance-reviewer
-description: "Performance reviewer: gate budgets and bottlenecks."
+description: "Performance gate: latency, throughput, memory, CPU, benchmarks, budgets."
 ---
 
 # Performance Reviewer

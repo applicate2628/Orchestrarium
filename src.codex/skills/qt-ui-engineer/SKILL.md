@@ -1,6 +1,6 @@
 ---
 name: qt-ui-engineer
-description: "Qt UI engineer: implement approved Widgets UI phases."
+description: "Qt Widgets desktop UI: dialogs, signals/slots, DPI."
 ---
 
 # Qt UI Engineer

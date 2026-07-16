@@ -1,6 +1,6 @@
 ---
 name: design-panel
-description: "Design panel: compare independent designs for one problem."
+description: "Compare independent candidate designs, synthesize one."
 ---
 
 # Design Panel

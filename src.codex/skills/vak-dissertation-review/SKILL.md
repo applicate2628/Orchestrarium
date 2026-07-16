@@ -1,6 +1,6 @@
 ---
 name: vak-dissertation-review
-description: "VAK dissertation review: audit dissertation and autoreferat."
+description: "Диссертация, автореферат, рецензия, нормоконтроль, ВАК; VAK dissertation review."
 ---
 
 # Рецензирование диссертации и автореферата (ВАК)
