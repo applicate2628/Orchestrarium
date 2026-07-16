@@ -48,7 +48,7 @@ if (-not $CodexFlags -or $CodexFlags.Count -eq 0) {
   # run must carry an explicit model AND effort, never an ambient one — the
   # default below pins the shipped default profile `gpt-5.6-sol-xhigh`. Callers
   # needing a different profile (e.g. `--model gpt-5.6-sol -c
-  # model_reasoning_effort=max` or `--model gpt-5.6-luna`) pass the full flag
+  # model_reasoning_effort=max` or `--model gpt-5.6-terra -c model_reasoning_effort=high`) pass the full flag
   # set after `--`, which always overrides this default.
   $CodexFlags = @('--model', 'gpt-5.6-sol', '-c', 'model_reasoning_effort=xhigh')
 }
