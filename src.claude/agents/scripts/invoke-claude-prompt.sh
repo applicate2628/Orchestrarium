@@ -190,7 +190,10 @@ set -e
 # Shared completion oracle: verdict accepted ONLY on exit 0 + clean .err + non-empty
 # .out + FINAL non-blank line exactly `GATE: PASS|REVISE`; else blocked/none.
 if [[ -n "$LEDGER_ITEM" ]]; then
-  FINAL_LINE="$(grep -v '^[[:space:]]*$' "$OUT_PATH" 2>/dev/null | tail -1 | tr -d '\r')"
+  # `|| true`: on an EMPTY .out grep exits 1 and `pipefail` would abort the wrapper
+  # here — before the blocked terminal is recorded — leaving an unsettled launch
+  # (live incident 2026-07-16: codex usage-limit runs died exactly this way).
+  FINAL_LINE="$(grep -v '^[[:space:]]*$' "$OUT_PATH" 2>/dev/null | tail -1 | tr -d '\r' || true)"
   ERR_MARKERS="$(grep -cE '^(ERROR|FATAL|API Error): ' "$ERR_PATH" 2>/dev/null || true)"
   TERM_STATUS="blocked"; TERM_GATE="none"; TERM_NOTE="oracle: "
   if [[ $EXIT_CODE -ne 0 ]]; then
