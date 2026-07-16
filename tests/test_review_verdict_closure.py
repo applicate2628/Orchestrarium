@@ -307,6 +307,18 @@ class ClosureFixture(unittest.TestCase):
         errors = self._validate([revise, unbound])
         self.assertTrue(any("target-bound" in e for e in errors), errors)
 
+    def test_waiver_evidence_prefix_collision_fails(self) -> None:
+        # Sol impl-gate r2: evidence naming run-X-extra must not authorize run-X.
+        revise = _event("run-00000160-target", gate="REVISE", status="revise",
+                        artifact="a.md", findingClass="correctness")
+        prefixy = _event(
+            "run-00000161-prefix", gate="WAIVED:user", status="completed",
+            closesRunIds=["run-00000160-target"],
+            evidence=[{"kind": "manual-check", "ref": "operator waives run-00000160-target-extra only"}],
+        )
+        errors = self._validate([revise, prefixy])
+        self.assertTrue(any("target-bound" in e for e in errors), errors)
+
     def test_advisory_roles_cannot_close(self) -> None:
         # consultant is advisory-only (governance); brigade is a dispatch surface.
         revise = _event("run-00000140-revise", gate="REVISE", status="revise", artifact="a.md")

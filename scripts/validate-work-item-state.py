@@ -258,8 +258,13 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
             # target-bound evidence; unrelated authorization text is not authority).
             closes = event.get("closesRunIds") if isinstance(event.get("closesRunIds"), list) else []
             for target_id in closes:
-                if isinstance(target_id, str) and target_id not in manual_refs:
-                    fail(errors, f"{run_id}: WAIVED:user manual-check evidence does not name target {target_id} — authorization must be target-bound")
+                if not isinstance(target_id, str):
+                    continue
+                # Exact token identity, not substring: 'run-x-extra' in the evidence
+                # must NOT authorize target 'run-x' (Sol impl-gate r2 prefix collision).
+                token_re = re.compile(rf"(?<![\w.-]){re.escape(target_id)}(?![\w.-])")
+                if not token_re.search(manual_refs):
+                    fail(errors, f"{run_id}: WAIVED:user manual-check evidence does not name target {target_id} exactly — authorization must be target-bound")
 
 
 def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str, int] | None = None) -> tuple[list[dict], list[dict]]:
