@@ -263,7 +263,7 @@ class ClosureFixture(unittest.TestCase):
             closesRunIds=["run-00000100-revise"], evidence=[{"kind": "review", "ref": "x"}],
         )
         errors = self._validate([revise, author_close])
-        self.assertTrue(any("author-side" in e and "(C3)" in e for e in errors), errors)
+        self.assertTrue(any("reviewer-side" in e and "(C3)" in e for e in errors), errors)
 
     def test_effort_omission_is_not_a_bypass(self) -> None:
         revise = _event(
@@ -293,6 +293,21 @@ class ClosureFixture(unittest.TestCase):
         self.assertTrue(any("unsettled launch" in e for e in errors), errors)
         errors = self._validate([launch], strict=False)
         self.assertEqual(errors, [], errors)
+
+    def test_advisory_roles_cannot_close(self) -> None:
+        # consultant is advisory-only (governance); brigade is a dispatch surface.
+        revise = _event("run-00000140-revise", gate="REVISE", status="revise", artifact="a.md")
+        for exec_role in ("consultant", "external-brigade", "main"):
+            closer = _event(
+                f"run-00000141-{exec_role[:6]}", gate="PASS", artifact="a.md",
+                executionRole=exec_role,
+                closesRunIds=["run-00000140-revise"], evidence=[{"kind": "review", "ref": "x"}],
+            )
+            errors = self._validate([revise, closer])
+            self.assertTrue(
+                any("reviewer-side" in e and "(C3)" in e for e in errors),
+                (exec_role, errors),
+            )
 
     # ---------- schema epoch ----------
 

@@ -333,8 +333,10 @@ def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str,
                 closer_exec = event.get("executionRole")
                 if closer_exec in LEGACY_EXECUTION_ROLES:
                     closer_exec = LEGACY_EXECUTION_ROLES[closer_exec]
-                if closer_exec not in {"external-reviewer", "internal", "consultant", "external-brigade"}:
-                    fail(errors, f"{rid}: closer executionRole {event.get('executionRole')!r} is author-side — a closer must be reviewer-side (C3)")
+                # Reviewer-side ONLY (design; governance: consultant is advisory-only and
+                # never a gate authority; brigade is a dispatch surface, not a verdict role).
+                if closer_exec not in {"external-reviewer", "internal"}:
+                    fail(errors, f"{rid}: closer executionRole {event.get('executionRole')!r} cannot discharge a review verdict — reviewer-side (external-reviewer|internal) only (C3)")
                     bump("C3-executionrole-fail")
                     continue
                 t_art, c_art = target.get("artifact"), event.get("artifact")
