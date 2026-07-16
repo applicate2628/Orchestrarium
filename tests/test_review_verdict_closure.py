@@ -209,7 +209,7 @@ class ClosureFixture(unittest.TestCase):
         waiver = _event(
             "run-00000061-waiver", gate="WAIVED:user", status="completed",
             closesRunIds=["run-00000060-revise"],
-            evidence=[{"kind": "manual-check", "ref": "operator said: ship with known issue"}],
+            evidence=[{"kind": "manual-check", "ref": "operator said: ship run-00000060-revise and run-00000062-rev2 with known issue"}],
         )
         errors = self._validate([revise, waiver])
         self.assertTrue(any("(C5)" in e for e in errors), errors)  # protected class -> non-waivable
@@ -293,6 +293,19 @@ class ClosureFixture(unittest.TestCase):
         self.assertTrue(any("unsettled launch" in e for e in errors), errors)
         errors = self._validate([launch], strict=False)
         self.assertEqual(errors, [], errors)
+
+    def test_waiver_evidence_must_name_targets(self) -> None:
+        # Sol impl-gate: unrelated authorization text is not authority — the
+        # manual-check ref must NAME the exact runIds it waives.
+        revise = _event("run-00000150-revise", gate="REVISE", status="revise",
+                        artifact="a.md", findingClass="correctness")
+        unbound = _event(
+            "run-00000151-unbound", gate="WAIVED:user", status="completed",
+            closesRunIds=["run-00000150-revise"],
+            evidence=[{"kind": "manual-check", "ref": "unrelated checklist completed"}],
+        )
+        errors = self._validate([revise, unbound])
+        self.assertTrue(any("target-bound" in e for e in errors), errors)
 
     def test_advisory_roles_cannot_close(self) -> None:
         # consultant is advisory-only (governance); brigade is a dispatch surface.

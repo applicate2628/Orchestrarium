@@ -270,10 +270,19 @@ def command_check(args: argparse.Namespace) -> int:
         for ledger in sorted(archive_dir.rglob("agent-runs.jsonl")):
             arch_errors: list[str] = []
             events = validator.load_jsonl(ledger, arch_errors)
-            open_revise, _open_launches = validator.validate_closure(events, [], telemetry)
-            if open_revise:
+            # Canonical per-event validation, scoped to schemaVersion-2 events (the
+            # epoch principle keeps legacy v1 archives quiet) — an archived INVALID
+            # closer/waiver must not silently launder an obligation (Sol impl gate).
+            seen: set[str] = set()
+            for event in events:
+                if event.get("schemaVersion") == 2:
+                    validator.validate_event(event, ledger.parent, seen, arch_errors)
+            open_revise, _open_launches = validator.validate_closure(events, arch_errors, telemetry)
+            if open_revise or arch_errors:
                 failed += 1
                 print(f"FAIL {ledger.parent.name} (ARCHIVED):")
+                for error in arch_errors:
+                    print(f"  - {error}")
                 for event in open_revise:
                     print(
                         f"  - open REVISE obligation survived archival: {event.get('runId')} "

@@ -248,7 +248,7 @@ if ($Ledger) {
   }
   $errMarkers = 0
   if ((Test-Path -LiteralPath $errPath -PathType Leaf) -and (Get-Item -LiteralPath $errPath).Length -gt 0) {
-    $errMarkers = @(Select-String -LiteralPath $errPath -Pattern '^(ERROR|FATAL|API Error): ' -AllMatches).Count
+    $errMarkers = @(Select-String -LiteralPath $errPath -Pattern '^(ERROR|FATAL|API Error): ' -CaseSensitive -AllMatches).Count
   }
   $termStatus = 'blocked'; $termGate = 'none'; $termNote = 'oracle: '
   if ($exitCode -ne 0) { $termNote += "nonzero exit ($exitCode)" }

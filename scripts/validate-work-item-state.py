@@ -247,11 +247,22 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
         if "closesRunIds" not in event:
             fail(errors, f"{run_id}: WAIVED:user requires closesRunIds")
         entries = event.get("evidence") if isinstance(event.get("evidence"), list) else []
-        if not any(isinstance(e, dict) and e.get("kind") == "manual-check" for e in entries):
+        manual_refs = " ".join(
+            e.get("ref", "") for e in entries
+            if isinstance(e, dict) and e.get("kind") == "manual-check" and isinstance(e.get("ref"), str)
+        )
+        if not manual_refs:
             fail(errors, f"{run_id}: WAIVED:user requires a manual-check evidence entry with the user's authorization")
+        else:
+            # The authorization must NAME the exact obligations it waives (design:
+            # target-bound evidence; unrelated authorization text is not authority).
+            closes = event.get("closesRunIds") if isinstance(event.get("closesRunIds"), list) else []
+            for target_id in closes:
+                if isinstance(target_id, str) and target_id not in manual_refs:
+                    fail(errors, f"{run_id}: WAIVED:user manual-check evidence does not name target {target_id} — authorization must be target-bound")
 
 
-def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str, int] | None = None) -> list[dict]:
+def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str, int] | None = None) -> tuple[list[dict], list[dict]]:
     """Ledger-level REVISE-closure validation (decision 2026-07-16-review-verdict-closure,
     minimal slice). Returns (open_v2_revise_events, open_launch_events) — obligations never discharged/settled events (never discharged by a valid
     closer). Closure is derived ONLY from the closesRunIds relation — never from
