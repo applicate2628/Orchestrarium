@@ -40,6 +40,10 @@ EOF
 
 TOPIC=""
 PROMPT_FILE=""
+LEDGER_ITEM=""
+LEDGER_ROLE="architecture-reviewer"
+LEDGER_LANE=""
+LEDGER_ARTIFACT=""
 # Codex CLI 0.130.0+ uses `codex exec` (non-interactive subcommand) instead of the
 # old top-level `--quiet --full-auto` flags. The wrapper invokes `codex exec` and
 # supplies `--skip-git-repo-check` so prompts can be served from any directory.
@@ -64,6 +68,25 @@ while [[ $# -gt 0 ]]; do
       ;;
     --prompt-file)
       PROMPT_FILE="$2"
+      shift 2
+      ;;
+    --ledger)
+      # Work-item dir: the dispatch PRODUCES its ledger events (decision
+      # 2026-07-16-review-verdict-closure) — a launch event before the run and a
+      # terminal event after it, parsed by the shared completion oracle below.
+      LEDGER_ITEM="$2"
+      shift 2
+      ;;
+    --ledger-role)
+      LEDGER_ROLE="$2"
+      shift 2
+      ;;
+    --ledger-lane)
+      LEDGER_LANE="$2"
+      shift 2
+      ;;
+    --ledger-artifact)
+      LEDGER_ARTIFACT="$2"
       shift 2
       ;;
     --)
@@ -121,10 +144,67 @@ else
   cat > "$PROMPT_PATH"
 fi
 
+# --ledger: record the LAUNCH event before the run (dispatch produces the record).
+LAUNCH_RUN_ID=""
+LEDGER_HELPER=""
+if [[ -n "$LEDGER_ITEM" ]]; then
+  for cand in "scripts/agent-run-ledger.py" "$(dirname "$0")/../../../scripts/agent-run-ledger.py"; do
+    [[ -f "$cand" ]] && LEDGER_HELPER="$cand" && break
+  done
+  if [[ -z "$LEDGER_HELPER" ]]; then
+    echo "FAIL: --ledger given but scripts/agent-run-ledger.py not found" >&2
+    exit 1
+  fi
+  LAUNCH_RUN_ID="$(date -u +%Y%m%dT%H%M%S)Z-launch-${SLUG}"
+  ledger_args=(--work-item "$LEDGER_ITEM" append --run-id "$LAUNCH_RUN_ID" \
+    --role "$LEDGER_ROLE" --execution-role external-reviewer --provider codex \
+    --status running --gate none --scope "external run: ${SLUG}" \
+    --event-kind launch --prompt-file "$PROMPT_PATH" \
+    --notes "wrapper-dispatched; terminal event follows the completion oracle")
+  [[ -n "$LEDGER_LANE" ]] && ledger_args+=(--lane "$LEDGER_LANE")
+  [[ -n "$LEDGER_ARTIFACT" ]] && ledger_args+=(--artifact "$LEDGER_ARTIFACT")
+  if ! python "$LEDGER_HELPER" "${ledger_args[@]}" >/dev/null; then
+    echo "FAIL: could not record launch event in $LEDGER_ITEM" >&2
+    exit 1
+  fi
+fi
+
 set +e
 "$CODEX_CMD" exec --skip-git-repo-check "${CODEX_FLAGS[@]}" < "$PROMPT_PATH" 1> "$OUT_PATH" 2> "$ERR_PATH"
 EXIT_CODE=$?
 set -e
+
+# Shared completion oracle (decision 2026-07-16-review-verdict-closure): a verdict is
+# accepted ONLY when exit code == 0 AND .err carries no auth/quota/truncation markers
+# AND .out is non-empty AND its FINAL non-blank line is exactly `GATE: PASS|REVISE`.
+# Earlier GATE: mentions in prose are ignored by definition. Anything else -> blocked.
+if [[ -n "$LEDGER_ITEM" ]]; then
+  FINAL_LINE="$(grep -v '^[[:space:]]*$' "$OUT_PATH" 2>/dev/null | tail -1 | tr -d '\r')"
+  ERR_MARKERS="$(grep -icE 'usage limit|quota|at capacity|authentication error|stream (error|disconnect)' "$ERR_PATH" 2>/dev/null || true)"
+  TERM_STATUS="blocked"; TERM_GATE="none"; TERM_NOTE="oracle: "
+  if [[ $EXIT_CODE -ne 0 ]]; then
+    TERM_NOTE+="nonzero exit ($EXIT_CODE)"
+  elif [[ ! -s "$OUT_PATH" ]]; then
+    TERM_NOTE+="empty .out"
+  elif [[ "${ERR_MARKERS:-0}" != "0" ]]; then
+    TERM_NOTE+="err markers present ($ERR_MARKERS)"
+  elif [[ "$FINAL_LINE" == "GATE: PASS" ]]; then
+    TERM_STATUS="completed"; TERM_GATE="PASS"; TERM_NOTE+="final-line GATE: PASS"
+  elif [[ "$FINAL_LINE" == "GATE: REVISE" ]]; then
+    TERM_STATUS="revise"; TERM_GATE="REVISE"; TERM_NOTE+="final-line GATE: REVISE"
+  else
+    TERM_NOTE+="final line is not an anchored GATE verdict"
+  fi
+  term_args=(--work-item "$LEDGER_ITEM" append \
+    --role "$LEDGER_ROLE" --execution-role external-reviewer --provider codex \
+    --status "$TERM_STATUS" --gate "$TERM_GATE" --scope "external run: ${SLUG}" \
+    --event-kind terminal --launch-run-id "$LAUNCH_RUN_ID" \
+    --evidence "review:${OUT_PATH}" --notes "$TERM_NOTE")
+  [[ -n "$LEDGER_LANE" ]] && term_args+=(--lane "$LEDGER_LANE")
+  [[ -n "$LEDGER_ARTIFACT" ]] && term_args+=(--artifact "$LEDGER_ARTIFACT")
+  python "$LEDGER_HELPER" "${term_args[@]}" >/dev/null \
+    || echo "WARN: could not record terminal event in $LEDGER_ITEM" >&2
+fi
 
 echo "$PROMPT_PATH"
 echo "$OUT_PATH"
