@@ -21,6 +21,14 @@ param(
 
   [string]$PromptFile,
 
+  # Work-item dir: the dispatch PRODUCES its ledger events (decision
+  # 2026-07-16-review-verdict-closure) — a launch event before the run and a
+  # terminal event settled by the shared completion oracle after it.
+  [string]$Ledger,
+  [string]$LedgerRole = 'architecture-reviewer',
+  [string]$LedgerLane,
+  [string]$LedgerArtifact,
+
   [Parameter(ValueFromRemainingArguments = $true)]
   [string[]]$CodexFlags
 )
@@ -164,6 +172,32 @@ $ErrorActionPreference = 'Continue'
 # cover this read so a corrupted prompt file fails loud, not silent.
 $promptBody = [System.IO.File]::ReadAllText($promptPath, [System.Text.UTF8Encoding]::new($false))
 
+# --Ledger: record the LAUNCH event before the run (fail closed on failure).
+$launchRunId = ''
+$ledgerHelper = ''
+if ($Ledger) {
+  foreach ($cand in @('scripts/agent-run-ledger.py', (Join-Path $PSScriptRoot '..\..\..\scripts\agent-run-ledger.py'))) {
+    if (Test-Path -LiteralPath $cand -PathType Leaf) { $ledgerHelper = $cand; break }
+  }
+  if (-not $ledgerHelper) {
+    Write-Error "FAIL: -Ledger given but scripts/agent-run-ledger.py not found"
+    exit 1
+  }
+  $launchRunId = "{0:yyyyMMddTHHmmss}Z-launch-{1}" -f [DateTime]::UtcNow, $slug
+  $ledgerArgs = @('--work-item', $Ledger, 'append', '--run-id', $launchRunId,
+    '--role', $LedgerRole, '--execution-role', 'external-reviewer', '--provider', 'codex',
+    '--status', 'running', '--gate', 'none', '--scope', "external run: $slug",
+    '--event-kind', 'launch', '--prompt-file', $promptPath,
+    '--notes', 'wrapper-dispatched; terminal event follows the completion oracle')
+  if ($LedgerLane) { $ledgerArgs += @('--lane', $LedgerLane) }
+  if ($LedgerArtifact) { $ledgerArgs += @('--artifact', $LedgerArtifact) }
+  & python $ledgerHelper @ledgerArgs | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Error "FAIL: could not record launch event in $Ledger"
+    exit 1
+  }
+}
+
 try {
   # Invoke codex via PowerShell native call operator. `&` handles shim resolution
   # (`.exe`, `.cmd`, `.ps1`) on both PS 5.1 + PS 7+ — unlike `[Process]::Start` with
@@ -196,6 +230,38 @@ foreach ($capturedPath in @($outPath, $errPath)) {
       [System.IO.File]::WriteAllText($capturedPath, $captured, [System.Text.UTF8Encoding]::new($false))
     }
   }
+}
+
+# Shared completion oracle (decision 2026-07-16-review-verdict-closure): a verdict is
+# accepted ONLY when exit==0 AND .err has no auth/quota/capacity/truncation markers AND
+# .out is non-empty AND its FINAL non-blank line is exactly 'GATE: PASS|REVISE'. Earlier
+# prose mentions are ignored by definition. Anything else -> blocked/none with reason.
+if ($Ledger) {
+  $finalLine = ''
+  if ((Test-Path -LiteralPath $outPath -PathType Leaf) -and (Get-Item -LiteralPath $outPath).Length -gt 0) {
+    $lines = Get-Content -LiteralPath $outPath | Where-Object { $_.Trim() -ne '' }
+    if ($lines) { $finalLine = ($lines | Select-Object -Last 1).Trim() }
+  }
+  $errMarkers = 0
+  if ((Test-Path -LiteralPath $errPath -PathType Leaf) -and (Get-Item -LiteralPath $errPath).Length -gt 0) {
+    $errMarkers = @(Select-String -LiteralPath $errPath -Pattern 'usage limit|quota|at capacity|authentication error|stream (error|disconnect)' -AllMatches).Count
+  }
+  $termStatus = 'blocked'; $termGate = 'none'; $termNote = 'oracle: '
+  if ($exitCode -ne 0) { $termNote += "nonzero exit ($exitCode)" }
+  elseif (-not (Test-Path -LiteralPath $outPath -PathType Leaf) -or (Get-Item -LiteralPath $outPath).Length -eq 0) { $termNote += 'empty .out' }
+  elseif ($errMarkers -gt 0) { $termNote += "err markers present ($errMarkers)" }
+  elseif ($finalLine -ceq 'GATE: PASS') { $termStatus = 'completed'; $termGate = 'PASS'; $termNote += 'final-line GATE: PASS' }
+  elseif ($finalLine -ceq 'GATE: REVISE') { $termStatus = 'revise'; $termGate = 'REVISE'; $termNote += 'final-line GATE: REVISE' }
+  else { $termNote += 'final line is not an anchored GATE verdict' }
+  $termArgs = @('--work-item', $Ledger, 'append',
+    '--role', $LedgerRole, '--execution-role', 'external-reviewer', '--provider', 'codex',
+    '--status', $termStatus, '--gate', $termGate, '--scope', "external run: $slug",
+    '--event-kind', 'terminal', '--launch-run-id', $launchRunId,
+    '--evidence', "review:$outPath", '--notes', $termNote)
+  if ($LedgerLane) { $termArgs += @('--lane', $LedgerLane) }
+  if ($LedgerArtifact) { $termArgs += @('--artifact', $LedgerArtifact) }
+  & python $ledgerHelper @termArgs | Out-Null
+  if ($LASTEXITCODE -ne 0) { Write-Warning "could not record terminal event in $Ledger" }
 }
 
 Write-Output $promptPath
