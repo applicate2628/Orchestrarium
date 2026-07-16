@@ -1,6 +1,6 @@
 ---
 name: algorithm-scientist
-description: "Algorithm scientist: frame invariants and correctness."
+description: "Algorithm design and correctness: complexity, invariants, edge cases."
 ---
 
 # Algorithm Scientist

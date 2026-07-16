@@ -1,6 +1,6 @@
 ---
 name: model-view-engineer
-description: "Model/view engineer: implement Qt models and delegates."
+description: "Qt QAbstractItemModel, proxies, delegates, views: dataChanged, sorting, filtering."
 ---
 
 # Model-View Engineer

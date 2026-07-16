@@ -1,6 +1,6 @@
 ---
 name: architect
-description: "Architect: design architecture and contracts from research."
+description: "Architecture design: contracts, seams, tradeoffs, risks."
 ---
 
 # Architect

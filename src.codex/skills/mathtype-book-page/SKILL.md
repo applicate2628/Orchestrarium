@@ -1,6 +1,6 @@
 ---
 name: mathtype-book-page
-description: "MathType book page: format DOCX math and verify PDF."
+description: "DOCX formulas, equations, PDF proofread, typography."
 ---
 
 # MathType Book Page

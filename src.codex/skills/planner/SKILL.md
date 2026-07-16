@@ -1,6 +1,6 @@
 ---
 name: planner
-description: "Planner: phase accepted designs with checks and gates."
+description: "Ordered phases, acceptance criteria, rollback notes."
 ---
 
 # Planner

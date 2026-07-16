@@ -1,6 +1,6 @@
 ---
 name: performance-engineer
-description: "Performance engineer: define budgets and measurements."
+description: "Latency, throughput, memory, slow: profiling, benchmarks, budgets."
 ---
 
 # Performance Engineer

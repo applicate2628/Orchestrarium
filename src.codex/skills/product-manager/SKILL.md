@@ -1,6 +1,6 @@
 ---
 name: product-manager
-description: "Product manager: own roadmap priority and admission."
+description: "Roadmap priority, backlog admission, epics, scope."
 ---
 
 # Product Manager

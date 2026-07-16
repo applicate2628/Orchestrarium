@@ -1,6 +1,6 @@
 ---
 name: data-engineer
-description: "Data engineer: implement approved data and pipeline phases."
+description: "Schema, migration, backfill, ETL/SQL pipelines, watermarks."
 ---
 
 # Data Engineer

@@ -1,6 +1,6 @@
 ---
 name: geometry-engineer
-description: "Geometry engineer: implement spatial algorithms."
+description: "Geometry kernels: transforms, predicates, meshes, topology, tolerances."
 ---
 
 # Geometry Engineer

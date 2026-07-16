@@ -1,6 +1,6 @@
 ---
 name: security-reviewer
-description: "Security reviewer: gate auth, secrets, and exposure."
+description: "Auth, secrets, injection, exposure: merge gate."
 ---
 
 # Security Reviewer

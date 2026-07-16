@@ -1,6 +1,6 @@
 ---
 name: computational-scientist
-description: "Computational scientist: frame physics and numerics."
+description: "Physics, numerics, simulation: solver, discretization, stability, convergence, units."
 ---
 
 # Computational Scientist

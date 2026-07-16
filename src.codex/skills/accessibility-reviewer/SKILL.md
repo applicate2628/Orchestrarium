@@ -1,6 +1,6 @@
 ---
 name: accessibility-reviewer
-description: "Accessibility reviewer: gate keyboard and assistive access."
+description: "Keyboard, focus, screen-reader, contrast, WCAG A/AA."
 ---
 
 # Accessibility Reviewer

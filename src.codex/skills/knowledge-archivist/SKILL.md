@@ -1,6 +1,6 @@
 ---
 name: knowledge-archivist
-description: "Knowledge archivist: align canonical docs and archives."
+description: "Canonical docs, links, work-items index, archive moves, leak checks."
 ---
 
 # Knowledge Archivist
