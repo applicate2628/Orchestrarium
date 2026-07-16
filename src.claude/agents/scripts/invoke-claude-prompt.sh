@@ -190,7 +190,7 @@ set -e
 # Shared completion oracle: verdict accepted ONLY on exit 0 + clean .err + non-empty
 # .out + FINAL non-blank line exactly `GATE: PASS|REVISE`; else blocked/none.
 if [[ -n "$LEDGER_ITEM" ]]; then
-  FINAL_LINE="$(grep -v '^[[:space:]]*$' "$OUT_PATH" 2>/dev/null | tail -1 | tr -d '')"
+  FINAL_LINE="$(grep -v '^[[:space:]]*$' "$OUT_PATH" 2>/dev/null | tail -1 | tr -d '\r')"
   ERR_MARKERS="$(grep -cE '^(ERROR|FATAL|API Error): ' "$ERR_PATH" 2>/dev/null || true)"
   TERM_STATUS="blocked"; TERM_GATE="none"; TERM_NOTE="oracle: "
   if [[ $EXIT_CODE -ne 0 ]]; then

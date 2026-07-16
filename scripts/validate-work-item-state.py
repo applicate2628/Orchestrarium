@@ -253,7 +253,7 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
 
 def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str, int] | None = None) -> list[dict]:
     """Ledger-level REVISE-closure validation (decision 2026-07-16-review-verdict-closure,
-    minimal slice). Returns the list of OPEN v2 REVISE events (never discharged by a valid
+    minimal slice). Returns (open_v2_revise_events, open_launch_events) — obligations never discharged/settled events (never discharged by a valid
     closer). Closure is derived ONLY from the closesRunIds relation — never from
     role/scope/artifact string matching (proven unstable by live replay in the design loop).
     """
@@ -390,7 +390,7 @@ def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str,
         and event.get("gate") == "REVISE"
         and event.get("runId") not in discharged
     ]
-    tel["open-revise"] = len(open_revise)
+    tel["open-revise"] = tel.get("open-revise", 0) + len(open_revise)
     # Unsettled launches (no terminal) are strict-mode blockers too: a lost terminal
     # must not make a possibly-REVISE run invisible to the push gate.
     open_launches = [
@@ -399,7 +399,7 @@ def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str,
         and isinstance(event.get("runId"), str)
         and event["runId"] not in terminals_by_launch
     ]
-    tel["open-launches"] = len(open_launches)
+    tel["open-launches"] = tel.get("open-launches", 0) + len(open_launches)
     return open_revise, open_launches
 
 

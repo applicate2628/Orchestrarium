@@ -224,9 +224,9 @@ def command_check(args: argparse.Namespace) -> int:
     root = args.root.resolve()
     active_dir = (root / args.active_dir).resolve()
     items = iter_work_items(active_dir)
-    if not items:
-        print(f"RESULT: PASS (no active work-items: {active_dir})")
-        return 0
+    # NOTE: no early return on empty active/ — the archive laundering scan below must
+    # run regardless (fable impl-gate r2 F1: archiving the LAST active item is the
+    # natural laundering terminal state and used to bypass the scan entirely).
 
     validator = load_validator()
     now = parse_time(args.now) if args.now else datetime.now(UTC)
@@ -267,7 +267,7 @@ def command_check(args: argparse.Namespace) -> int:
     # REVISE-1): an archived item's ledger is still scanned for open v2 REVISEs.
     # v2-scoping keeps historical v1 archives quiet.
     if not args.no_strict_revise:
-        for ledger in sorted(archive_dir.glob("*/*/agent-runs.jsonl")):
+        for ledger in sorted(archive_dir.rglob("agent-runs.jsonl")):
             arch_errors: list[str] = []
             events = validator.load_jsonl(ledger, arch_errors)
             open_revise, _open_launches = validator.validate_closure(events, [], telemetry)
@@ -288,6 +288,9 @@ def command_check(args: argparse.Namespace) -> int:
         print(f"RESULT: FAIL ({failed} failures across active+archived work-items)")
         return 1
 
+    if not items:
+        print(f"RESULT: PASS (no active work-items: {active_dir}; archive scan clean)")
+        return 0
     print(f"RESULT: PASS ({len(items)} active work-items)")
     return 0
 
