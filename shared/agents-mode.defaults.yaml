@@ -64,7 +64,8 @@ externalModelMode: runtime-default  # allowed: runtime-default | pinned-top-pro;
 # externalCodexProfile notes: matches Claude opus-xhigh as the shipped best-effort default; `default` inherits externalModelMode;
 # `gpt-5.6-sol-xhigh` pins model = gpt-5.6-sol, reasoning_effort = xhigh; `gpt-5.6-sol-max` pins model = gpt-5.6-sol, reasoning_effort = max,
 # for higher-complexity/hard lanes (NOT gpt-5.6-sol-ultra — ultra spawns subagents itself and must never be shipped on a subagent lane);
-# `gpt-5.6-luna` pins model = gpt-5.6-luna, reasoning_effort = medium (its family default) and is the fast/volume/cheap tier, replacing both
-# the former gpt-5.5-fast profile and the former gpt-5.3-codex-spark variant — output requires MANDATORY verification by a heavier tier
-# before any commit/push (luna is not a replacement for the sol tier, it is the Codex-side equivalent of Sonnet relative to Opus)
-externalCodexProfile: gpt-5.6-sol-xhigh  # allowed: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-luna; default: gpt-5.6-sol-xhigh
+# `gpt-5.6-terra` pins model = gpt-5.6-terra, reasoning_effort = high and is the balanced mid-tier — a distinct model
+# (not an effort suffix on gpt-5.6-sol), a genuine cheaper-and-faster-than-gpt-5.6-sol-xhigh reasoning lane, materially
+# more capable than a volume tier. Verify against the installed runtime before reporting it as used; its output stays
+# review-gated like any external lane (it is a real second-choice reasoning model, not a bounded mechanical-overflow path)
+externalCodexProfile: gpt-5.6-sol-xhigh  # allowed: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra; default: gpt-5.6-sol-xhigh
