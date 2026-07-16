@@ -145,7 +145,7 @@
         "externalCodexWorkdirMode": "project",
         "externalClaudeWorkdirMode": "project",
         "externalModelMode": "runtime-default",
-        "externalCodexProfile": "gpt-5.6-luna",
+        "externalCodexProfile": "gpt-5.6-terra",
         "externalClaudeProfile": "sonnet-high"
       }
     }
