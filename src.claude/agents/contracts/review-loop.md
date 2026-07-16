@@ -122,3 +122,17 @@ See also `/agents-design-panel` (`agents/contracts/design-panel.md`) — the gen
 - **ADR**: Architecture Decision Record, a written record of a significant design decision and its rationale.
 - **CLI**: Command-Line Interface, a terminal command surface such as `claude` or `codex`.
 - **PASS / REVISE / BLOCKED**: gate verdicts — accept, return for bounded correction, or stop on a real external blocker.
+
+## Verdict closure (binding form of decision 2026-07-16-review-verdict-closure)
+
+- Every dispatched angle on a TRACKED work-item records its ledger events: pass `--ledger <work-item>`
+  (plus `--ledger-role/--ledger-lane/--ledger-artifact`) to `invoke-codex-prompt.sh/.ps1` /
+  `invoke-claude-prompt.sh/.ps1` — the wrapper records the launch and settles the terminal via the
+  shared completion oracle (final non-blank `.out` line must be exactly `GATE: PASS|REVISE`; exit 0;
+  clean `.err`; else blocked).
+- **Loop-to-PASS is the gate, not a preference:** a lane's `REVISE` closes only when THAT lane (or a
+  recorded equivalent, structured fields) re-verifies `PASS` naming the exact `closesRunIds`. Author
+  belief, applied fixes, or a green mechanical validator never close it; `check-work-items-state`
+  FAILs on open obligations by default and the root publication gate blocks on them.
+- Typed dispositions only: `WAIVED:user` with the user's authorization as manual-check evidence
+  (never against publication-safety/security findings); the `$security-reviewer` exception for those.

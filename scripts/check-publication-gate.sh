@@ -46,6 +46,18 @@ cd "$repo_root"
 
 bash src.codex/skills/lead/scripts/check-publication-safety.sh
 
+# Review-verdict closure gate (decision 2026-07-16-review-verdict-closure item 3):
+# an open v2 REVISE obligation blocks publication — it closes only on a
+# re-verification PASS (closesRunIds) or a typed disposition, never on author
+# belief or a green mechanical validator. Placed BEFORE every early-success path
+# on purpose; repos without work-items/ are untouched by the existence guard.
+if [[ -d "work-items/active" ]]; then
+  if ! python scripts/check-work-items-state.py --root . >/dev/null 2>&1; then
+    echo "FAIL: work-items state check failed (open REVISE obligation or invalid ledger) — run: python scripts/check-work-items-state.py" >&2
+    exit 1
+  fi
+fi
+
 staged_paths=()
 while IFS= read -r -d '' staged_path; do
   staged_paths+=("$staged_path")
