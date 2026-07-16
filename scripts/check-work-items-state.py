@@ -224,9 +224,9 @@ def command_check(args: argparse.Namespace) -> int:
     root = args.root.resolve()
     active_dir = (root / args.active_dir).resolve()
     items = iter_work_items(active_dir)
-    if not items:
-        print(f"RESULT: PASS (no active work-items: {active_dir})")
-        return 0
+    # NOTE: no early return on empty active/ — the archive laundering scan below must
+    # run regardless (fable impl-gate r2 F1: archiving the LAST active item is the
+    # natural laundering terminal state and used to bypass the scan entirely).
 
     validator = load_validator()
     now = parse_time(args.now) if args.now else datetime.now(UTC)
@@ -236,8 +236,13 @@ def command_check(args: argparse.Namespace) -> int:
     failed = 0
     global_notes = epic_adoption_notes(items, active_dir)
 
+    telemetry: dict[str, int] = {}
     for item in items:
-        errors = validator.validate_work_item(item)
+        errors = validator.validate_work_item(
+            item,
+            strict_revise=not args.no_strict_revise,
+            telemetry=telemetry,
+        )
         errors.extend(stale_running_errors(item, now, stale_after))
         # Informational notes (aging, blocked-by) are NOT failures: a blocked or
         # aging active item is expected state, not a defect, so they never flip
@@ -258,10 +263,43 @@ def command_check(args: argparse.Namespace) -> int:
     for note in global_notes:
         print(f"info: {note}")
 
+    # Archival must not launder open obligations (decision item 3; fable impl gate
+    # REVISE-1): an archived item's ledger is still scanned for open v2 REVISEs.
+    # v2-scoping keeps historical v1 archives quiet.
+    if not args.no_strict_revise:
+        for ledger in sorted(archive_dir.rglob("agent-runs.jsonl")):
+            arch_errors: list[str] = []
+            events = validator.load_jsonl(ledger, arch_errors)
+            # Canonical per-event validation, scoped to schemaVersion-2 events (the
+            # epoch principle keeps legacy v1 archives quiet) — an archived INVALID
+            # closer/waiver must not silently launder an obligation (Sol impl gate).
+            seen: set[str] = set()
+            for event in events:
+                if event.get("schemaVersion") == 2:
+                    validator.validate_event(event, ledger.parent, seen, arch_errors)
+            open_revise, _open_launches = validator.validate_closure(events, arch_errors, telemetry)
+            if open_revise or arch_errors:
+                failed += 1
+                print(f"FAIL {ledger.parent.name} (ARCHIVED):")
+                for error in arch_errors:
+                    print(f"  - {error}")
+                for event in open_revise:
+                    print(
+                        f"  - open REVISE obligation survived archival: {event.get('runId')} "
+                        f"(lane={event.get('lane')!r}) — archival does not discharge a review verdict"
+                    )
+
+    if args.telemetry and telemetry:
+        counters = ", ".join(f"{k}={v}" for k, v in sorted(telemetry.items()))
+        print(f"TELEMETRY: {counters}")
+
     if failed:
-        print(f"RESULT: FAIL ({failed}/{len(items)} active work-items failed)")
+        print(f"RESULT: FAIL ({failed} failures across active+archived work-items)")
         return 1
 
+    if not items:
+        print(f"RESULT: PASS (no active work-items: {active_dir}; archive scan clean)")
+        return 0
     print(f"RESULT: PASS ({len(items)} active work-items)")
     return 0
 
@@ -281,6 +319,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report running events older than this many hours. Use 0 to disable stale checks.",
     )
     parser.add_argument("--now", help="UTC-ish timestamp for deterministic stale checks. Defaults to current UTC.")
+    parser.add_argument("--telemetry", action="store_true", help="Print closure rule-fire counters (incl. deferred-rule audit counters).")
+    parser.add_argument(
+        "--no-strict-revise",
+        action="store_true",
+        help="Do not FAIL on open v2 REVISE obligations (triage sessions only; the default is strict per decision 2026-07-16-review-verdict-closure).",
+    )
     parser.add_argument(
         "--max-age-days",
         type=float,
