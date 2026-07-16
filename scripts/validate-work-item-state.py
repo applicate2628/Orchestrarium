@@ -321,12 +321,22 @@ def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str,
                 bump("C2-duplicate-discharge")
                 continue
             # C5 hard boundary: protected finding classes are non-user-waivable.
-            if gate == "WAIVED:user" and target.get("findingClass") in PROTECTED_CLASSES:
-                fail(errors, f"{rid}: WAIVED:user cannot discharge protected finding {target_id} ({target.get('findingClass')}) — $security-reviewer authority only (C5)")
+            if gate == "WAIVED:user" and target.get("findingClass") not in (FINDING_CLASSES - PROTECTED_CLASSES):
+                # Fail closed two ways: a PROTECTED class is non-user-waivable, and an
+                # UNCLASSIFIED (or unknown) finding is treated as protected — omission
+                # must never be the cheaper path around the boundary.
+                fail(errors, f"{rid}: WAIVED:user cannot discharge finding {target_id} (findingClass={target.get('findingClass')!r}: protected or unclassified) — $security-reviewer authority only (C5)")
                 bump("C5-protected-waiver-fail")
                 continue
             # C3 (PASS closers): identity + authority + strength against the target.
             if gate == "PASS":
+                closer_exec = event.get("executionRole")
+                if closer_exec in LEGACY_EXECUTION_ROLES:
+                    closer_exec = LEGACY_EXECUTION_ROLES[closer_exec]
+                if closer_exec not in {"external-reviewer", "internal", "consultant", "external-brigade"}:
+                    fail(errors, f"{rid}: closer executionRole {event.get('executionRole')!r} is author-side — a closer must be reviewer-side (C3)")
+                    bump("C3-executionrole-fail")
+                    continue
                 t_art, c_art = target.get("artifact"), event.get("artifact")
                 if isinstance(t_art, str) and t_art.strip():
                     if not isinstance(c_art, str) or c_art != t_art:
@@ -344,16 +354,28 @@ def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str,
                     fail(errors, f"{rid}: closer lacks authority over {target_id} (role/assignedRole != {t_role!r}) (C3)")
                     bump("C3-authority-fail")
                     continue
+                # Audit counters for the DEFERRED cathedral (fable impl gate): observe,
+                # without enforcing, how often the deferred rules would have mattered.
+                if target.get("provider") != event.get("provider"):
+                    bump("audit-cross-provider-closure")
+                t_rev, c_rev = target.get("artifactRevision"), event.get("artifactRevision")
+                if isinstance(t_rev, str) and isinstance(c_rev, str) and t_rev != c_rev:
+                    bump("audit-artifact-revision-drift")
                 t_eff, c_eff = target.get("effort"), event.get("effort")
-                if (
-                    t_eff in EFFORT_ORDER
-                    and c_eff in EFFORT_ORDER
-                    and target.get("provider") == event.get("provider")
-                    and EFFORT_ORDER.index(c_eff) < EFFORT_ORDER.index(t_eff)
-                ):
-                    fail(errors, f"{rid}: closer effort {c_eff} < target effort {t_eff} (C3 same-provider tier)")
-                    bump("C3-effort-fail")
-                    continue
+                if t_eff in EFFORT_ORDER:
+                    # Totality (fail closed): a target that declares its tier cannot be
+                    # closed by an undeclared-tier closer — omission is not a bypass.
+                    if c_eff not in EFFORT_ORDER:
+                        fail(errors, f"{rid}: target declares effort {t_eff} but closer omits effort (C3 totality)")
+                        bump("C3-effort-omitted-fail")
+                        continue
+                    if (
+                        target.get("provider") == event.get("provider")
+                        and EFFORT_ORDER.index(c_eff) < EFFORT_ORDER.index(t_eff)
+                    ):
+                        fail(errors, f"{rid}: closer effort {c_eff} < target effort {t_eff} (C3 same-provider tier)")
+                        bump("C3-effort-fail")
+                        continue
             discharged[target_id] = rid if isinstance(rid, str) else "<invalid>"
             bump("closure-accepted")
 
@@ -367,7 +389,16 @@ def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str,
         and event.get("runId") not in discharged
     ]
     tel["open-revise"] = len(open_revise)
-    return open_revise
+    # Unsettled launches (no terminal) are strict-mode blockers too: a lost terminal
+    # must not make a possibly-REVISE run invisible to the push gate.
+    open_launches = [
+        event for event in events
+        if event.get("eventKind") == "launch"
+        and isinstance(event.get("runId"), str)
+        and event["runId"] not in terminals_by_launch
+    ]
+    tel["open-launches"] = len(open_launches)
+    return open_revise, open_launches
 
 
 def validate_status(item: Path, events: list[dict], errors: list[str]) -> None:
@@ -401,8 +432,14 @@ def validate_work_item(
     seen: set[str] = set()
     for event in events:
         validate_event(event, item, seen, errors)
-    open_revise = validate_closure(events, errors, telemetry)
+    open_revise, open_launches = validate_closure(events, errors, telemetry)
     if strict_revise:
+        for event in open_launches:
+            fail(
+                errors,
+                f"unsettled launch: {event.get('runId')} (lane={event.get('lane')!r}) — no terminal "
+                f"event; a lost verdict must not be invisible to the gate (re-settle or cancel it)",
+            )
         for event in open_revise:
             fail(
                 errors,

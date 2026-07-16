@@ -236,8 +236,13 @@ def command_check(args: argparse.Namespace) -> int:
     failed = 0
     global_notes = epic_adoption_notes(items, active_dir)
 
+    telemetry: dict[str, int] = {}
     for item in items:
-        errors = validator.validate_work_item(item, strict_revise=not args.no_strict_revise)
+        errors = validator.validate_work_item(
+            item,
+            strict_revise=not args.no_strict_revise,
+            telemetry=telemetry,
+        )
         errors.extend(stale_running_errors(item, now, stale_after))
         # Informational notes (aging, blocked-by) are NOT failures: a blocked or
         # aging active item is expected state, not a defect, so they never flip
@@ -258,8 +263,29 @@ def command_check(args: argparse.Namespace) -> int:
     for note in global_notes:
         print(f"info: {note}")
 
+    # Archival must not launder open obligations (decision item 3; fable impl gate
+    # REVISE-1): an archived item's ledger is still scanned for open v2 REVISEs.
+    # v2-scoping keeps historical v1 archives quiet.
+    if not args.no_strict_revise:
+        for ledger in sorted(archive_dir.glob("*/*/agent-runs.jsonl")):
+            arch_errors: list[str] = []
+            events = validator.load_jsonl(ledger, arch_errors)
+            open_revise, _open_launches = validator.validate_closure(events, [], telemetry)
+            if open_revise:
+                failed += 1
+                print(f"FAIL {ledger.parent.name} (ARCHIVED):")
+                for event in open_revise:
+                    print(
+                        f"  - open REVISE obligation survived archival: {event.get('runId')} "
+                        f"(lane={event.get('lane')!r}) — archival does not discharge a review verdict"
+                    )
+
+    if args.telemetry and telemetry:
+        counters = ", ".join(f"{k}={v}" for k, v in sorted(telemetry.items()))
+        print(f"TELEMETRY: {counters}")
+
     if failed:
-        print(f"RESULT: FAIL ({failed}/{len(items)} active work-items failed)")
+        print(f"RESULT: FAIL ({failed} failures across active+archived work-items)")
         return 1
 
     print(f"RESULT: PASS ({len(items)} active work-items)")
@@ -281,6 +307,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Report running events older than this many hours. Use 0 to disable stale checks.",
     )
     parser.add_argument("--now", help="UTC-ish timestamp for deterministic stale checks. Defaults to current UTC.")
+    parser.add_argument("--telemetry", action="store_true", help="Print closure rule-fire counters (incl. deferred-rule audit counters).")
     parser.add_argument(
         "--no-strict-revise",
         action="store_true",

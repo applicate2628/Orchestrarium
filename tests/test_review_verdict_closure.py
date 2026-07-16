@@ -251,6 +251,49 @@ class ClosureFixture(unittest.TestCase):
         errors = self._validate([no_launch_field], strict=False)
         self.assertTrue(any("requires launchRunId" in e for e in errors), errors)
 
+    # ---------- Terra impl-review falsifiers (round: implementation diff) ----------
+
+    def test_author_side_closer_fails(self) -> None:
+        # The founding failure mode itself: the AUTHOR (executionRole main) closing
+        # a reviewer's REVISE. C3 requires a reviewer-side closer.
+        revise = _event("run-00000100-revise", gate="REVISE", status="revise", artifact="a.md")
+        author_close = _event(
+            "run-00000101-author", gate="PASS", artifact="a.md",
+            executionRole="main",
+            closesRunIds=["run-00000100-revise"], evidence=[{"kind": "review", "ref": "x"}],
+        )
+        errors = self._validate([revise, author_close])
+        self.assertTrue(any("author-side" in e and "(C3)" in e for e in errors), errors)
+
+    def test_effort_omission_is_not_a_bypass(self) -> None:
+        revise = _event(
+            "run-00000110-revise", gate="REVISE", status="revise",
+            artifact="a.md", effort="xhigh", provider="codex",
+        )
+        no_effort = _event(
+            "run-00000111-noeff", gate="PASS", artifact="a.md", provider="codex",
+            closesRunIds=["run-00000110-revise"], evidence=[{"kind": "review", "ref": "x"}],
+        )
+        errors = self._validate([revise, no_effort])
+        self.assertTrue(any("omits effort" in e for e in errors), errors)
+
+    def test_unclassified_finding_is_not_user_waivable(self) -> None:
+        revise = _event("run-00000120-revise", gate="REVISE", status="revise", artifact="a.md")
+        waiver = _event(
+            "run-00000121-waiver", gate="WAIVED:user", status="completed",
+            closesRunIds=["run-00000120-revise"],
+            evidence=[{"kind": "manual-check", "ref": "operator authorized"}],
+        )
+        errors = self._validate([revise, waiver])
+        self.assertTrue(any("unclassified" in e and "(C5)" in e for e in errors), errors)
+
+    def test_unsettled_launch_blocks_strict_mode(self) -> None:
+        launch = _event("run-00000130-launch", eventKind="launch", status="running")
+        errors = self._validate([launch], strict=True)
+        self.assertTrue(any("unsettled launch" in e for e in errors), errors)
+        errors = self._validate([launch], strict=False)
+        self.assertEqual(errors, [], errors)
+
     # ---------- schema epoch ----------
 
     def test_v2_fields_on_v1_event_fail(self) -> None:

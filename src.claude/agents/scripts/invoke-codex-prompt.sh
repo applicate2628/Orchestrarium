@@ -44,6 +44,7 @@ LEDGER_ITEM=""
 LEDGER_ROLE="architecture-reviewer"
 LEDGER_LANE=""
 LEDGER_ARTIFACT=""
+LEDGER_CLOSES=()
 # Codex CLI 0.130.0+ uses `codex exec` (non-interactive subcommand) instead of the
 # old top-level `--quiet --full-auto` flags. The wrapper invokes `codex exec` and
 # supplies `--skip-git-repo-check` so prompts can be served from any directory.
@@ -87,6 +88,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ledger-artifact)
       LEDGER_ARTIFACT="$2"
+      shift 2
+      ;;
+    --ledger-closes)
+      # runId of an earlier REVISE this run re-verifies: a PASS terminal will carry
+      # closesRunIds and discharge the obligation mechanically. Repeatable.
+      LEDGER_CLOSES+=("$2")
       shift 2
       ;;
     --)
@@ -156,6 +163,10 @@ if [[ -n "$LEDGER_ITEM" ]]; then
     exit 1
   fi
   LAUNCH_RUN_ID="$(date -u +%Y%m%dT%H%M%S)Z-launch-${SLUG}"
+  LEDGER_EFFORT=""
+  if [[ "${CODEX_FLAGS[*]}" =~ model_reasoning_effort=\"?(low|medium|high|xhigh|max) ]]; then
+    LEDGER_EFFORT="${BASH_REMATCH[1]}"
+  fi
   ledger_args=(--work-item "$LEDGER_ITEM" append --run-id "$LAUNCH_RUN_ID" \
     --role "$LEDGER_ROLE" --execution-role external-reviewer --provider codex \
     --status running --gate none --scope "external run: ${SLUG}" \
@@ -163,6 +174,7 @@ if [[ -n "$LEDGER_ITEM" ]]; then
     --notes "wrapper-dispatched; terminal event follows the completion oracle")
   [[ -n "$LEDGER_LANE" ]] && ledger_args+=(--lane "$LEDGER_LANE")
   [[ -n "$LEDGER_ARTIFACT" ]] && ledger_args+=(--artifact "$LEDGER_ARTIFACT")
+  [[ -n "$LEDGER_EFFORT" ]] && ledger_args+=(--effort "$LEDGER_EFFORT")
   if ! python "$LEDGER_HELPER" "${ledger_args[@]}" >/dev/null; then
     echo "FAIL: could not record launch event in $LEDGER_ITEM" >&2
     exit 1
@@ -180,7 +192,7 @@ set -e
 # Earlier GATE: mentions in prose are ignored by definition. Anything else -> blocked.
 if [[ -n "$LEDGER_ITEM" ]]; then
   FINAL_LINE="$(grep -v '^[[:space:]]*$' "$OUT_PATH" 2>/dev/null | tail -1 | tr -d '\r')"
-  ERR_MARKERS="$(grep -icE 'usage limit|quota|at capacity|authentication error|stream (error|disconnect)' "$ERR_PATH" 2>/dev/null || true)"
+  ERR_MARKERS="$(grep -cE '^(ERROR|FATAL|API Error): ' "$ERR_PATH" 2>/dev/null || true)"
   TERM_STATUS="blocked"; TERM_GATE="none"; TERM_NOTE="oracle: "
   if [[ $EXIT_CODE -ne 0 ]]; then
     TERM_NOTE+="nonzero exit ($EXIT_CODE)"
@@ -202,6 +214,10 @@ if [[ -n "$LEDGER_ITEM" ]]; then
     --evidence "review:${OUT_PATH}" --notes "$TERM_NOTE")
   [[ -n "$LEDGER_LANE" ]] && term_args+=(--lane "$LEDGER_LANE")
   [[ -n "$LEDGER_ARTIFACT" ]] && term_args+=(--artifact "$LEDGER_ARTIFACT")
+  [[ -n "$LEDGER_EFFORT" ]] && term_args+=(--effort "$LEDGER_EFFORT")
+  if [[ "$TERM_GATE" == "PASS" && ${#LEDGER_CLOSES[@]} -gt 0 ]]; then
+    for c in "${LEDGER_CLOSES[@]}"; do term_args+=(--closes "$c"); done
+  fi
   python "$LEDGER_HELPER" "${term_args[@]}" >/dev/null \
     || echo "WARN: could not record terminal event in $LEDGER_ITEM" >&2
 fi

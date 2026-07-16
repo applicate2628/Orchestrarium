@@ -50,6 +50,7 @@ LEDGER_ITEM=""
 LEDGER_ROLE="architecture-reviewer"
 LEDGER_LANE=""
 LEDGER_ARTIFACT=""
+LEDGER_CLOSES=()
 # Default flags (A12: every provider-backed run must carry an explicit model AND
 # effort, never an ambient one) pin the shipped default profile `opus-xhigh` —
 # the same fix already applied to the sibling invoke-codex-prompt.sh; without
@@ -91,6 +92,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --ledger-artifact)
       LEDGER_ARTIFACT="$2"
+      shift 2
+      ;;
+    --ledger-closes)
+      # runId of an earlier REVISE this run re-verifies: a PASS terminal will carry
+      # closesRunIds and discharge the obligation mechanically. Repeatable.
+      LEDGER_CLOSES+=("$2")
       shift 2
       ;;
     --)
@@ -159,9 +166,16 @@ if [[ -n "$LEDGER_ITEM" ]]; then
     exit 1
   fi
   LAUNCH_RUN_ID="$(date -u +%Y%m%dT%H%M%S)Z-launch-${SLUG}"
+  LEDGER_EFFORT=""
+  for ((i=0; i<${#CLAUDE_FLAGS[@]}; i++)); do
+    if [[ "${CLAUDE_FLAGS[$i]}" == "--effort" && -n "${CLAUDE_FLAGS[$((i+1))]:-}" ]]; then
+      LEDGER_EFFORT="${CLAUDE_FLAGS[$((i+1))]}"
+    fi
+  done
   ledger_args=(--work-item "$LEDGER_ITEM" append --run-id "$LAUNCH_RUN_ID"     --role "$LEDGER_ROLE" --execution-role external-reviewer --provider claude     --status running --gate none --scope "external run: ${SLUG}"     --event-kind launch --prompt-file "$PROMPT_PATH"     --notes "wrapper-dispatched; terminal event follows the completion oracle")
   [[ -n "$LEDGER_LANE" ]] && ledger_args+=(--lane "$LEDGER_LANE")
   [[ -n "$LEDGER_ARTIFACT" ]] && ledger_args+=(--artifact "$LEDGER_ARTIFACT")
+  [[ -n "$LEDGER_EFFORT" ]] && ledger_args+=(--effort "$LEDGER_EFFORT")
   if ! python "$LEDGER_HELPER" "${ledger_args[@]}" >/dev/null; then
     echo "FAIL: could not record launch event in $LEDGER_ITEM" >&2
     exit 1
@@ -177,7 +191,7 @@ set -e
 # .out + FINAL non-blank line exactly `GATE: PASS|REVISE`; else blocked/none.
 if [[ -n "$LEDGER_ITEM" ]]; then
   FINAL_LINE="$(grep -v '^[[:space:]]*$' "$OUT_PATH" 2>/dev/null | tail -1 | tr -d '')"
-  ERR_MARKERS="$(grep -icE 'usage limit|quota|at capacity|authentication error|stream (error|disconnect)' "$ERR_PATH" 2>/dev/null || true)"
+  ERR_MARKERS="$(grep -cE '^(ERROR|FATAL|API Error): ' "$ERR_PATH" 2>/dev/null || true)"
   TERM_STATUS="blocked"; TERM_GATE="none"; TERM_NOTE="oracle: "
   if [[ $EXIT_CODE -ne 0 ]]; then
     TERM_NOTE+="nonzero exit ($EXIT_CODE)"
@@ -195,6 +209,10 @@ if [[ -n "$LEDGER_ITEM" ]]; then
   term_args=(--work-item "$LEDGER_ITEM" append     --role "$LEDGER_ROLE" --execution-role external-reviewer --provider claude     --status "$TERM_STATUS" --gate "$TERM_GATE" --scope "external run: ${SLUG}"     --event-kind terminal --launch-run-id "$LAUNCH_RUN_ID"     --evidence "review:${OUT_PATH}" --notes "$TERM_NOTE")
   [[ -n "$LEDGER_LANE" ]] && term_args+=(--lane "$LEDGER_LANE")
   [[ -n "$LEDGER_ARTIFACT" ]] && term_args+=(--artifact "$LEDGER_ARTIFACT")
+  [[ -n "$LEDGER_EFFORT" ]] && term_args+=(--effort "$LEDGER_EFFORT")
+  if [[ "$TERM_GATE" == "PASS" && ${#LEDGER_CLOSES[@]} -gt 0 ]]; then
+    for c in "${LEDGER_CLOSES[@]}"; do term_args+=(--closes "$c"); done
+  fi
   python "$LEDGER_HELPER" "${term_args[@]}" >/dev/null     || echo "WARN: could not record terminal event in $LEDGER_ITEM" >&2
 fi
 

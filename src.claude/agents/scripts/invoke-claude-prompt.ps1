@@ -31,6 +31,7 @@ param(
   [string]$LedgerRole = 'architecture-reviewer',
   [string]$LedgerLane,
   [string]$LedgerArtifact,
+  [string[]]$LedgerCloses,
 
   [Parameter(ValueFromRemainingArguments = $true)]
   [string[]]$ClaudeFlags
@@ -184,6 +185,8 @@ if ($Ledger) {
     exit 1
   }
   $launchRunId = "{0:yyyyMMddTHHmmss}Z-launch-{1}" -f [DateTime]::UtcNow, $slug
+  $ledgerEffort = ''
+  if (($ClaudeFlags -join ' ') -match '(model_reasoning_effort=|--effort +)"?(low|medium|high|xhigh|max)') { $ledgerEffort = $Matches[2] }
   $ledgerArgs = @('--work-item', $Ledger, 'append', '--run-id', $launchRunId,
     '--role', $LedgerRole, '--execution-role', 'external-reviewer', '--provider', 'claude',
     '--status', 'running', '--gate', 'none', '--scope', "external run: $slug",
@@ -191,6 +194,7 @@ if ($Ledger) {
     '--notes', 'wrapper-dispatched; terminal event follows the completion oracle')
   if ($LedgerLane) { $ledgerArgs += @('--lane', $LedgerLane) }
   if ($LedgerArtifact) { $ledgerArgs += @('--artifact', $LedgerArtifact) }
+  if ($ledgerEffort) { $ledgerArgs += @('--effort', $ledgerEffort) }
   & python $ledgerHelper @ledgerArgs | Out-Null
   if ($LASTEXITCODE -ne 0) {
     Write-Error "FAIL: could not record launch event in $Ledger"
@@ -238,11 +242,11 @@ if ($Ledger) {
   $finalLine = ''
   if ((Test-Path -LiteralPath $outPath -PathType Leaf) -and (Get-Item -LiteralPath $outPath).Length -gt 0) {
     $lines = Get-Content -LiteralPath $outPath | Where-Object { $_.Trim() -ne '' }
-    if ($lines) { $finalLine = ($lines | Select-Object -Last 1).Trim() }
+    if ($lines) { $finalLine = ($lines | Select-Object -Last 1) -replace "`r$", '' }
   }
   $errMarkers = 0
   if ((Test-Path -LiteralPath $errPath -PathType Leaf) -and (Get-Item -LiteralPath $errPath).Length -gt 0) {
-    $errMarkers = @(Select-String -LiteralPath $errPath -Pattern 'usage limit|quota|at capacity|authentication error|stream (error|disconnect)' -AllMatches).Count
+    $errMarkers = @(Select-String -LiteralPath $errPath -Pattern '^(ERROR|FATAL|API Error): ' -AllMatches).Count
   }
   $termStatus = 'blocked'; $termGate = 'none'; $termNote = 'oracle: '
   if ($exitCode -ne 0) { $termNote += "nonzero exit ($exitCode)" }
@@ -258,6 +262,10 @@ if ($Ledger) {
     '--evidence', "review:$outPath", '--notes', $termNote)
   if ($LedgerLane) { $termArgs += @('--lane', $LedgerLane) }
   if ($LedgerArtifact) { $termArgs += @('--artifact', $LedgerArtifact) }
+  if ($ledgerEffort) { $termArgs += @('--effort', $ledgerEffort) }
+  if ($termGate -eq 'PASS' -and $LedgerCloses) {
+    foreach ($c in $LedgerCloses) { $termArgs += @('--closes', $c) }
+  }
   & python $ledgerHelper @termArgs | Out-Null
   if ($LASTEXITCODE -ne 0) { Write-Warning "could not record terminal event in $Ledger" }
 }
