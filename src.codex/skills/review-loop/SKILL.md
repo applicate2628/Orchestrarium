@@ -86,3 +86,18 @@ A shipped loop MUST persist a per-round `review-loop-state` record under `.scrat
 - **ADR**: Architecture Decision Record, a written record of a significant design decision and its rationale.
 - **CLI**: Command-Line Interface, a terminal command surface such as `codex` or `claude`.
 - **PASS / REVISE / BLOCKED**: gate verdicts — accept, return for bounded correction, or stop on a real external blocker.
+
+## Verdict closure (binding form of decision 2026-07-16-review-verdict-closure)
+
+- Every dispatched angle on a TRACKED work-item records its ledger events: launch + terminal. There
+  are no shipped Codex-pack wrappers, so record them explicitly with two commands around the run:
+  `python scripts/agent-run-ledger.py --work-item <item> append --event-kind launch --status running
+  --gate none --role <angle-role> --lane <lane> ...` before, and the terminal (`--event-kind terminal
+  --launch-run-id <id>`, gate parsed from the artifact's final `GATE:` line per the completion
+  oracle) after.
+- **Loop-to-PASS is the gate, not a preference:** a lane's `REVISE` closes only when THAT lane (or a
+  recorded equivalent, structured fields) re-verifies `PASS` naming the exact `closesRunIds`. Author
+  belief, applied fixes, or a green mechanical validator never close it; `check-work-items-state`
+  FAILs on open obligations by default and the root publication gate blocks on them.
+- Typed dispositions only: `WAIVED:user` with the user's authorization as manual-check evidence
+  (never against publication-safety/security findings); the `$security-reviewer` exception for those.
