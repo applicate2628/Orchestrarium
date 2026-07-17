@@ -14,7 +14,7 @@ INSTALLERS = (
     ROOT / "scripts" / "install-codex.sh",
     ROOT / "scripts" / "install-codex.ps1",
 )
-MATCHER = "Edit|Write|NotebookEdit|apply_patch|Bash|shell_command|exec_command"
+MATCHER = "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command"
 
 
 def logical_lines(text: str) -> list[str]:

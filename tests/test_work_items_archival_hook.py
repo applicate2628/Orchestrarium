@@ -89,6 +89,44 @@ class TestWorkItemsArchivalHook(unittest.TestCase):
         repo = make_repo("itemC2", {"status.md": "Outcome: archived\n"})
         self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=True)
 
+    def test_canonical_primary_task_status_bolded_key_blocks(self) -> None:
+        # MAJOR regression: the CANONICAL status.md marker per
+        # subagent-contracts.md is "- **Primary task status**: closed" (a
+        # bullet-dash prefix, bolded key, and a "Primary task " modifier before
+        # "status") -- the old regex required the key to be exactly
+        # state/status/stage/outcome with no leading bullet dash and no
+        # "Primary task " prefix, so this canonical, real-world form was a
+        # FALSE NEGATIVE (a real orphan the hook would never catch).
+        repo = make_repo("itemCanon", {"status.md": "## Current state\n\n- **Primary task status**: closed\n"})
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=True)
+
+    def test_canonical_primary_task_status_active_does_not_block(self) -> None:
+        repo = make_repo("itemCanonActive", {"status.md": "## Current state\n\n- **Primary task status**: active\n"})
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
+    def test_outcome_complete_when_criterion_does_not_block(self) -> None:
+        # FP regression (review MAJOR): 'Outcome: complete WHEN all tests pass'
+        # is a completion CRITERION, not a whole-item-done declaration.
+        repo = make_repo("itemCrit", {"status.md": "State: active\n\nOutcome: complete when all tests pass\n"})
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
+    def test_outcome_complete_russian_kogda_criterion_does_not_block(self) -> None:
+        repo = make_repo("itemCritRu", {"status.md": "State: active\n\nOutcome: done когда все тесты пройдут\n"})
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
+    def test_outcome_bold_emphasis_complete_when_criterion_does_not_block(self) -> None:
+        # 2nd-round FP regression: markdown emphasis around the done word
+        # ('**complete**') blocked the [ \t]-only exclusion from reaching
+        # "when", so this criterion still false-fired the orphan block.
+        repo = make_repo("itemCritBold", {"status.md": "State: active\n\nOutcome: **complete** when the deploy finishes\n"})
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
+    def test_outcome_comma_complete_when_criterion_does_not_block(self) -> None:
+        # 2nd-round FP regression: a comma between the done word and "when"
+        # also blocked the [ \t]-only exclusion.
+        repo = make_repo("itemCritComma", {"status.md": "State: active\n\nOutcome: complete, when this ships\n"})
+        self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
     # --- false-positive guards: ALLOW -----------------------------------------
 
     def test_active_item_does_not_block(self) -> None:
@@ -193,6 +231,36 @@ class TestWorkItemsArchivalHook(unittest.TestCase):
                 self.assertTrue(blocks(p), p.stdout)
                 self.assertIn("done1", p.stdout)
                 self.assertIn("done2", p.stdout)
+
+    # --- repo-boundary regression (MAJOR): nested-projects operator layout ----
+
+    def test_repo_boundary_stops_before_parent_orphan(self) -> None:
+        # This operator nests projects (Orchestrator/Orchestrarium,
+        # Orchestrator/benchmarks): an orphan sitting in a PARENT directory's
+        # work-items/active/ (a different, unrelated project) must not block
+        # every session in every child repo. The walk must stop at the first
+        # ancestor containing .git rather than climbing indefinitely.
+        root = tempfile.mkdtemp(prefix="wi-archival-boundary-")
+        parent_orphan = Path(root) / "work-items" / "active" / "parent-orphan"
+        parent_orphan.mkdir(parents=True, exist_ok=True)
+        (parent_orphan / "closure.md").write_text("outcome: PASS", encoding="utf-8")
+        repo = Path(root) / "myrepo"
+        (repo / ".git").mkdir(parents=True, exist_ok=True)  # repo root marker; no work-items/active of its own
+        self.assert_outcome({"cwd": str(repo), "last_assistant_message": "done"}, should_block=False)
+
+    def test_finds_active_dir_through_subdirectory_within_repo(self) -> None:
+        # A cwd nested several levels inside the repo must still find
+        # work-items/active/ living at the repo root (the common case) --
+        # confirms the boundary fix did not regress the normal walk-up.
+        root = tempfile.mkdtemp(prefix="wi-archival-subdir-")
+        repo = Path(root) / "myrepo"
+        (repo / ".git").mkdir(parents=True, exist_ok=True)
+        active = repo / "work-items" / "active" / "itemX"
+        active.mkdir(parents=True, exist_ok=True)
+        (active / "closure.md").write_text("x", encoding="utf-8")
+        subdir = repo / "src" / "nested"
+        subdir.mkdir(parents=True, exist_ok=True)
+        self.assert_outcome({"cwd": str(subdir), "last_assistant_message": "done"}, should_block=True)
 
 
 def make_epic_repo(

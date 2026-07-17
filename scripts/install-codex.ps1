@@ -977,9 +977,11 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         $NoTrashScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-no-trash-in-repo.ps1"
         $StaleRelationScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-stale-relation-residue.ps1"
         $RepositoryOrientationScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-repository-orientation.ps1"
+        $McpMomentumScriptTarget = Join-Path $AgentsRoot "skills\lead\hooks\check-mcp-momentum.ps1"
         $ReminderScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\mcp-usage-reminder.ps1"
         $AgentsModeReminderScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\agents-mode-reminder.ps1"
         $ScratchValuablesScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\check-scratch-valuables.ps1"
+        $TurnAnchorReminderScriptTarget = Join-Path $AgentsRoot "skills\lead\scripts\turn-anchor-reminder.ps1"
         Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
         & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-path $BugfixScriptTarget
         if ($LASTEXITCODE -ne 0) {
@@ -987,7 +989,7 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
             exit $LASTEXITCODE
         }
         Write-Host "  Installing git-push publication-gate PreToolUse hook (host-os=windows; trust step manual via codex TUI)..."
-        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-git-push-gate --tool-matcher "Bash" --script-path $GitPushGateScriptTarget
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-git-push-gate --tool-matcher "Bash|PowerShell" --script-path $GitPushGateScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
@@ -1011,7 +1013,7 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
             exit $LASTEXITCODE
         }
         Write-Host "  Installing no-trash-in-repo PreToolUse hook [AUDIT] (host-os=windows; trust step manual via codex TUI)..."
-        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-no-trash-in-repo --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash" --script-path $NoTrashScriptTarget
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-no-trash-in-repo --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell" --script-path $NoTrashScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
@@ -1023,7 +1025,13 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
             exit $LASTEXITCODE
         }
         Write-Host "  Installing repository-orientation PreToolUse hook [AUDIT] (host-os=windows; trust step manual via codex TUI)..."
-        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-repository-orientation --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|shell_command|exec_command" --script-path $RepositoryOrientationScriptTarget
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-repository-orientation --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command" --script-path $RepositoryOrientationScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing mcp-momentum PreToolUse hook [AUDIT] (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --script-marker check-mcp-momentum --tool-matcher "Grep|Bash" --script-path $McpMomentumScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
@@ -1042,6 +1050,12 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         }
         Write-Host "  Installing scratch-valuables watchdog SessionStart hook (host-os=windows; trust step manual via codex TUI)..."
         & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --hook-event SessionStart --script-marker check-scratch-valuables --script-path $ScratchValuablesScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing turn-anchor-reminder UserPromptSubmit hook (host-os=windows; trust step manual via codex TUI)..."
+        & $PythonCmd $HookInstaller --target $HooksTarget --platform codex --host-os windows --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path $TurnAnchorReminderScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE

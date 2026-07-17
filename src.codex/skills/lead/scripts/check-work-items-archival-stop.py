@@ -49,12 +49,25 @@ OVERRIDE_MARKER_REGEX = re.compile(r"\[acknowledge-open-work-items\]", re.IGNORE
 # Anchoring to the state-key line (not a free substring anywhere in the file) is
 # deliberate and FP-critical: chatty active-item prose like 'nothing pending on
 # our side' or 'phase 1 shipped + pushed' must NOT be read as a whole-item-done
-# declaration. Tolerates a leading blockquote '>' and bold '*' wrappers (so
-# '> **CURRENT STATE: DONE**' matches); the trailing (?![\w-]) stops
-# 'closed-loop' / 'completed-by' style hyphenated continuations.
+# declaration. Tolerates a leading blockquote '>', a bullet marker ('-'/'*'/'+'),
+# and bold '*' wrappers (so '> **CURRENT STATE: DONE**' AND the CANONICAL
+# status.md marker from subagent-contracts.md, '- **Primary task status**:
+# closed', both match); an optional 'current '/'primary task ' modifier before
+# the bare key word covers both forms. The trailing (?![\w-]) stops
+# 'closed-loop' / 'completed-by' style hyphenated continuations, and the
+# trailing negative lookahead excludes a done word that is actually a
+# completion CRITERION ('Outcome: complete WHEN all tests pass' is a condition,
+# not a whole-item-done declaration) rather than a state. That exclusion tolerates
+# closing markdown emphasis ('*'/'**'/'_') and light punctuation (','/'—'/'-')
+# between the done word and the conditional keyword -- '[ \t]' alone missed
+# 'Outcome: **complete** when ...' and 'Outcome: complete, when ...', which
+# still false-fired the orphan block (review-found FP). Bounded to a few
+# optional single characters via [ \t]/[*_]{0,2}/[,—-]?, so it can never bleed
+# across a newline into an unrelated later clause.
 DONE_STATE_LINE_REGEX = re.compile(
-    r"(?im)^\s*>?\s*\*{0,3}\s*(?:current\s+)?(?:state|status|stage|outcome)"
+    r"(?im)^\s*>?\s*(?:[-*+]\s+)?\*{0,3}\s*(?:current\s+|primary\s+task\s+)?(?:state|status|stage|outcome)"
     r"\s*\*{0,3}\s*:\s*\*{0,3}\s*(?:closed|done|complete|completed|archived)(?![\w-])"
+    r"(?![ \t]*[*_]{0,2}[ \t]*[,—-]?[ \t]*(?:when|if|means|когда|если|означает)\b)"
 )
 
 # How far up from the session cwd to search for a work-items/active directory.
@@ -70,10 +83,22 @@ def _is_truthy(value: object) -> bool:
 
 
 def _find_active_dir(start: Path) -> Path | None:
-    """Walk up from the session cwd to the nearest work-items/active directory.
+    """Walk up from the session cwd to the nearest work-items/active directory,
+    stopping at the first ancestor that is itself a repository root (contains
+    .git).
 
-    Returns None when no such directory exists in any ancestor (e.g. a session
-    for a project that does not use Orchestrarium task memory) -> fail open."""
+    This operator nests projects (Orchestrator/Orchestrarium,
+    Orchestrator/benchmarks, ...). Without a repo boundary, an orphan sitting in
+    a PARENT directory's work-items/active/ (a different, unrelated project)
+    would block every session in every child project once the walk climbed past
+    the child repo's own root. Checking the candidate directory BEFORE the
+    boundary check means the common case (work-items/active/ living beside .git
+    at the repo root) still resolves in one step, whether cwd IS the repo root
+    or a subdirectory several levels below it.
+
+    Returns None when no work-items/active directory exists within the current
+    repository (or at all, for a session outside any git-tracked project, or
+    one that does not use Orchestrarium task memory) -> fail open."""
     try:
         cur = start.resolve()
     except Exception:
@@ -85,6 +110,12 @@ def _find_active_dir(start: Path) -> Path | None:
                 return candidate
         except Exception:
             return None
+        try:
+            is_repo_root = (cur / ".git").exists()
+        except Exception:
+            is_repo_root = False
+        if is_repo_root:
+            break  # do not walk past this repository's own root
         if cur.parent == cur:
             break
         cur = cur.parent

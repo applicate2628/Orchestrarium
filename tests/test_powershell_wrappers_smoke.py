@@ -1,10 +1,10 @@
 """Smoke tests for the PowerShell (.ps1) hook + scanner wrappers.
 
 The installer registers a .ps1 entry point as the WINDOWS hook command for the
- eight structural/audit hooks (check-bugfix-discipline, check-git-push-gate,
+ nine structural/audit hooks (check-bugfix-discipline, check-git-push-gate,
  check-passive-polling-stop, check-work-items-archival-stop,
 check-machine-local-path, check-no-trash-in-repo, check-stale-relation-residue,
-check-repository-orientation),
+check-repository-orientation, check-mcp-momentum),
 the two informational SessionStart reminders
 (mcp-usage-reminder, agents-mode-reminder), and ships a .ps1 for the publication
 scanner — yet NO test executed any .ps1, so a syntax error, a broken fail-open
@@ -16,7 +16,7 @@ green (every other hook test drives the .py helper via sys.executable, never the
 
 Three wrapper shapes, three contracts:
 
-  * The eight structural/audit HOOK wrappers are thin stdin pipes around their .py helper. Contract:
+  * The nine structural/audit HOOK wrappers are thin stdin pipes around their .py helper. Contract:
     FAIL OPEN — on empty stdin AND on malformed JSON they must exit 0 with no
     stdout and no stderr (AUDIT/decision hooks never crash the host; the helper's
     own fail-open swallows bad input). Verified under every available interpreter.
@@ -64,7 +64,7 @@ CLAUDE_HOOKS = REPO_ROOT / "src.claude" / "agents" / "hooks"
 CODEX_SCRIPTS = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts"
 CODEX_HOOKS = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
 
-# The eight stdin-piping structural/audit hook wrappers, in BOTH install trees (16 files).
+# The nine stdin-piping structural/audit hook wrappers, in BOTH install trees (18 files).
 HOOK_WRAPPERS = (
     CLAUDE_SCRIPTS / "check-bugfix-discipline.ps1",
     CLAUDE_SCRIPTS / "check-git-push-gate.ps1",
@@ -74,6 +74,7 @@ HOOK_WRAPPERS = (
     CLAUDE_HOOKS / "check-no-trash-in-repo.ps1",
     CLAUDE_HOOKS / "check-stale-relation-residue.ps1",
     CLAUDE_HOOKS / "check-repository-orientation.ps1",
+    CLAUDE_HOOKS / "check-mcp-momentum.ps1",
     CODEX_SCRIPTS / "check-bugfix-discipline.ps1",
     CODEX_SCRIPTS / "check-git-push-gate.ps1",
     CODEX_SCRIPTS / "check-passive-polling-stop.ps1",
@@ -82,6 +83,7 @@ HOOK_WRAPPERS = (
     CODEX_HOOKS / "check-no-trash-in-repo.ps1",
     CODEX_HOOKS / "check-stale-relation-residue.ps1",
     CODEX_HOOKS / "check-repository-orientation.ps1",
+    CODEX_HOOKS / "check-mcp-momentum.ps1",
 )
 
 # The always-emitting informational SessionStart reminder (mcp-usage-reminder), in
@@ -266,6 +268,53 @@ class TestHookWrappersFailOpen(unittest.TestCase):
         self._assert_fail_open(MALFORMED_JSON)
 
 
+# Fragment-assembled so this tracked source carries no literal machine-path
+# token (mirrors the gate-safe fixture pattern in test_machine_local_path_hook.py).
+_MLP_USERS_FRAGMENT = "Use" + "rs"
+
+# The three AUDIT hooks (machine-local-path, no-trash-in-repo, stale-relation-residue)
+# live in the typed hooks/ dir, each with an envelope that reliably trips a HIT.
+AUDIT_HOOK_HIT_CASES = (
+    ("check-machine-local-path.ps1", {"tool_input": {
+        "file_path": "README.md", "content": f"see C:/{_MLP_USERS_FRAGMENT}/realuser/.claude/x",
+    }}),
+    ("check-no-trash-in-repo.ps1", {"tool_input": {"command": "git worktree add ../wt"}}),
+    ("check-stale-relation-residue.ps1", {"tool_input": {
+        "file_path": "docs/live-doc.md", "content": "this helper is a deprecated alias for the new one",
+    }}),
+)
+
+
+@unittest.skipIf(not INTERPRETERS, "no PowerShell host (pwsh/powershell) on PATH")
+class TestAuditHookWrappersExitOneOnHit(unittest.TestCase):
+    """BLOCKER regression: the three AUDIT hook wrappers used to hard-code
+    `exit 0` unconditionally at the end of the script, discarding whatever exit
+    code the Python helper actually returned. Per the hooks reference, exit 0's
+    stderr is written only to the debug log and is invisible in the transcript,
+    so every AUDIT warning these hooks emit was invisible outside `--debug` --
+    the false-positive-rate measurement this posture exists to enable could
+    never happen. The wrapper must now propagate the helper's exit code: 1 on a
+    hit (a non-blocking "<hook name> hook error" transcript notice), never 2
+    (that would block). Fail-open (missing python/helper -> exit 0) stays
+    covered by TestHookWrappersFailOpen above; this class is the mirror
+    positive-hit case, driven through the ACTUAL .ps1 entry point (a .py-only
+    test would not have caught the wrapper hard-coding exit 0)."""
+
+    def test_wrapper_exits_one_and_warns_on_a_real_hit(self) -> None:
+        for interp in INTERPRETERS:
+            for name, envelope in AUDIT_HOOK_HIT_CASES:
+                for wrapper in (CLAUDE_HOOKS / name, CODEX_HOOKS / name):
+                    self.assertTrue(wrapper.is_file(), f"missing wrapper: {wrapper}")
+                    with self.subTest(interp=Path(interp).stem, wrapper=str(wrapper.relative_to(REPO_ROOT))):
+                        p = _run_ps1(interp, wrapper, stdin=json.dumps(envelope, ensure_ascii=False))
+                        self.assertEqual(
+                            p.returncode, 1,
+                            f"expected exit 1 (non-blocking notice) on a hit; "
+                            f"stdout={p.stdout!r} stderr={p.stderr!r}",
+                        )
+                        self.assertNotEqual(p.stderr.strip(), "", "expected a warning on stderr")
+
+
 @unittest.skipIf(not INTERPRETERS, "no PowerShell host (pwsh/powershell) on PATH")
 class TestReminderWrappersEmitContext(unittest.TestCase):
     """The MCP reminder is informational, not stdin-driven. It must execute and
@@ -420,6 +469,11 @@ class TestScannerWrapperNoCrash(unittest.TestCase):
     ParserError / CommandNotFound is a wrapper bug."""
 
     def _clean_repo(self, td: str) -> None:
+        # The class-level skipIf guarantees GIT is not None whenever this runs;
+        # the assert narrows the type for pyright the same way _bash_locatable_git()
+        # callers already do below, rather than leaving `GIT: str | None` unguarded
+        # in a subprocess.run() arg list.
+        assert GIT is not None
         subprocess.run([GIT, "init", "-q", td], check=True, capture_output=True)
         subprocess.run([GIT, "-C", td, "config", "user.email", "t@t"], check=True, capture_output=True)
         subprocess.run([GIT, "-C", td, "config", "user.name", "t"], check=True, capture_output=True)
@@ -463,6 +517,9 @@ class TestScannerWrapperDelegatesWhenBashAvailable(unittest.TestCase):
         return env
 
     def _staged_repo(self, td: str, files: dict[str, str]) -> None:
+        # See TestScannerWrapperNoCrash._clean_repo: the class-level skipIf
+        # guarantees GIT is not None whenever this runs.
+        assert GIT is not None
         subprocess.run([GIT, "init", "-q", td], check=True, capture_output=True)
         subprocess.run([GIT, "-C", td, "config", "user.email", "t@t"], check=True, capture_output=True)
         subprocess.run([GIT, "-C", td, "config", "user.name", "t"], check=True, capture_output=True)

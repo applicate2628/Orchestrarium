@@ -7,7 +7,12 @@
 # stdout: nothing (AUDIT mode allows; promotion to deny is a separate step).
 # stderr: an audit warning if an unrequested `git worktree add` is run (a single add
 #   ending with the exact `# orchestrarium:requested-isolation-worktree` marker is exempt).
-# exit: always 0 (fail-open on any internal error; AUDIT mode never blocks).
+# exit: propagates the Python helper's exit code -- 1 on a hit (a non-blocking
+#       "<hook name> hook error" transcript notice so the warning is actually
+#       visible; exit 0's stderr is debug-log-only per the hooks reference), 0
+#       otherwise. NEVER 2 (that would block); AUDIT mode never blocks the tool
+#       call regardless of exit code. Wrapper-side errors (missing python or
+#       helper) still fail open to exit 0.
 #
 # All the actual logic lives in the .py sibling. If no Python interpreter is
 # available or the helper fails for any reason, we exit 0 (fail-open).
@@ -31,4 +36,4 @@ if [ ! -f "$helper" ]; then
 fi
 
 "$python_bin" "$helper"
-exit 0
+exit $?

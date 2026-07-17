@@ -24,8 +24,15 @@ WARN, NEVER BLOCK. The STALE-vs-LIVE discriminator is review-bound (C6 itself
 says so): a LIVE relation — a real dependency, a deliberate split, a current
 `X vs Y` comparison/measurement — is legitimate and uses some of the same
 words. A blocking gate would false-positive on legitimate current prose, so
-this guard only surfaces CANDIDATES for a human to judge. Promotion to a
-blocking `deny` is a separate, reviewed step once the false-positive rate is
+this guard only surfaces CANDIDATES for a human to judge, via exit 1 (never 2,
+which would block) on a hit. Per Claude Code's hooks reference, exit 0's stderr
+is written only to the debug log and is invisible in the transcript; any other
+non-zero, non-2 exit code is a non-blocking error that shows a "<hook name>
+hook error" notice plus the first stderr line in the transcript, and execution
+continues exactly as it does on exit 0. Exit 1 on a hit (0 otherwise) is what
+makes this guard's warning visible enough to actually measure the
+false-positive rate this posture exists to measure. Promotion to a blocking
+`deny` (exit 2) is a separate, reviewed step once the false-positive rate is
 measured over real repos (mirrors the machine-local-path / no-trash audits).
 
 EXEMPT targets (where a stale-relation phrase IS legitimate provenance — the
@@ -235,8 +242,12 @@ def main() -> int:
             "misregistration) erase it; if it asserts a LIVE fact (a real dependency, a "
             "current comparison) keep it. AUDIT mode -- allowing this write.)\n"
         )
-    # AUDIT mode: always allow. (Promotion to a blocking deny is a separate
-    # reviewed step once the false-positive rate is measured.)
+        # Exit 1 (never 2): a non-blocking "<hook name> hook error" transcript
+        # notice with the first stderr line, so the warning is actually visible
+        # -- exit 0 here is invisible outside --debug.
+        return 1
+    # AUDIT mode: always allow the write. (Promotion to a blocking deny -- exit
+    # 2 -- is a separate reviewed step once the false-positive rate is measured.)
     return 0
 
 

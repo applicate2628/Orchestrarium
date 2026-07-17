@@ -5,9 +5,14 @@
 #   bash <this-script>
 # stdin: PreToolUse JSON envelope from Claude Code or Codex.
 # stdout: nothing (AUDIT mode allows; promotion to deny is a separate step).
-# stderr: an audit warning if a machine-local path is written to a tracked file.
-# exit: always 0 (fail-open on any internal error so legitimate work is never
-#       blocked; AUDIT mode never blocks regardless).
+# stderr: an audit nudge when this looks like a code-navigation search and a
+#   code-intelligence MCP is configured.
+# exit: propagates the Python helper's exit code -- 1 on a nudge (a non-blocking
+#       "<hook name> hook error" transcript notice so the nudge is actually
+#       visible; exit 0's stderr is debug-log-only per the hooks reference), 0
+#       otherwise. NEVER 2 (that would block); AUDIT mode never blocks the tool
+#       call regardless of exit code. Wrapper-side errors (missing python or
+#       helper) still fail open to 0.
 #
 # All the actual logic lives in the .py sibling. If no Python interpreter is
 # available or the helper fails for any reason, we exit 0 (fail-open).
@@ -31,4 +36,4 @@ if [ ! -f "$helper" ]; then
 fi
 
 "$python_bin" "$helper"
-exit 0
+exit $?

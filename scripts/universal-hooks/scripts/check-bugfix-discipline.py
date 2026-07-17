@@ -111,9 +111,25 @@ OVERRIDE_MARKER_REGEX = re.compile(
     re.IGNORECASE,
 )
 
+# Credible source/doc/config file extensions for a BARE (no path separator)
+# file:line citation -- see BUGFIX_SIGNAL_REGEX below. Kept narrow and
+# alphabetic-only so an arbitrary alphabetic token (a URL's host label, a
+# "vX.Y"-style version tag) cannot masquerade as a real extension.
+_SRC_FILE_EXT = (
+    r"py|pyi|js|mjs|cjs|jsx|ts|tsx|go|rs|c|h|cc|cxx|cpp|hpp|hh|java|kt|kts|"
+    r"rb|php|cs|swift|sh|bash|ps1|psm1|sql|md|rst|txt|json|ya?ml|toml|ini|"
+    r"cfg|xml|html?|css|scss|less|vue|svelte|lua|pl|pm|scala|clj|cljs|ex|"
+    r"exs|erl|hs|dart|proto"
+)
+
 # Bugfix-discipline signals in the current turn — any of these present means
-# the model engaged with the diagnostic flow.
-BUGFIX_SIGNAL_REGEX = re.compile(
+# the model engaged with the diagnostic flow. Includes a file:line citation
+# (e.g. "foo.c:88", "src/auth/login.py:123") because the plain-language Bootstrap
+# flow explicitly counts "a file:line citation" as a discipline signal (see the
+# module docstring, step 5) -- a diligent model that names the exact symptom
+# location without invoking /agents-bugfix or using the other keyword vocabulary
+# was previously DENIED despite having engaged real diagnostic discipline.
+BUGFIX_SIGNAL_PATTERN = (
     r"(?ix)"
     r"agents-bugfix|"
     r"/agents-bugfix\b|"
@@ -124,8 +140,22 @@ BUGFIX_SIGNAL_REGEX = re.compile(
     r"VERIFIED\s*:|"
     r"ASSUMPTION\s*\(UNVERIFIED\)|"
     r"Pre-fix\s+diagnostic\s+gate|"
-    r"Bootstrap"
+    r"Bootstrap|"
+    # file:line citation. Two shapes, both required to reject a URL host:port
+    # or a "vX.Y:Z"-style label while still catching a real source-file
+    # citation (review-found FP: a looser single-shape pattern also matched
+    # "api.example.com:443" and "v1.beta:2" as if they were file:line citations):
+    #   (a) PATH-QUALIFIED: a '/' or '\' path separator appears before the
+    #       extension -- any letter-led extension counts, because a real path
+    #       separator is strong evidence of a file reference (a bare
+    #       domain:port never has a separator before its colon).
+    r"[\w.\\/-]*[\\/][\w.\\/-]*\.[A-Za-z]\w{0,15}:\d+|"
+    #   (b) BARE basename: no path separator at all -- the extension must be
+    #       one of the credible extensions above, not an arbitrary alphabetic
+    #       token.
+    r"\b[\w-]+\.(?:" + _SRC_FILE_EXT + r")\b:\d+"
 )
+BUGFIX_SIGNAL_REGEX = re.compile(BUGFIX_SIGNAL_PATTERN)
 
 # Narrow: an actual /agents-bugfix INVOCATION counts as discipline even with no
 # prose. Kept separate from BUGFIX_SIGNAL_REGEX and matched ONLY against the

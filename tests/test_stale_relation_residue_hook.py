@@ -51,7 +51,10 @@ class StaleRelationResidueHookBase(unittest.TestCase):
         for script in RESIDUE_SCRIPTS:
             with self.subTest(script=script.parent.parent.name):
                 p = run_hook(script, {"tool_input": tool_input})
-                self.assertEqual(p.returncode, 0, p.stderr)  # audit mode never blocks
+                # AUDIT never BLOCKS (never exit 2), but a hit exits 1 -- a non-blocking
+                # "<hook name> hook error" transcript notice -- so the warning is
+                # actually visible (exit 0's stderr is debug-log-only, see hooks docs).
+                self.assertEqual(p.returncode, 1 if flagged else 0, p.stderr)
                 self.assertEqual(bool(p.stderr.strip()), flagged, f"stderr={p.stderr!r}")
 
     def assert_content_flagged(self, content: str, flagged: bool, target: str = "docs/live-doc.md") -> None:
@@ -112,7 +115,7 @@ class TestResiduePhraseMatrix(StaleRelationResidueHookBase):
                     script,
                     {"tool_input": {"file_path": "docs/live-doc.md", "content": "старое → новое alias останется"}},
                 )
-                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(p.returncode, 1, p.stderr)  # a hit exits 1, never 2
                 self.assertTrue(p.stderr.strip(), "expected a warning")
                 self.assertIn("новое", p.stderr)
 

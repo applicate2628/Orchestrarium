@@ -42,7 +42,10 @@ class TestStrayArtifactHook(unittest.TestCase):
         for script in HOOKS:
             with self.subTest(script=script.parent.parent.name):
                 p = run_hook(script, tool_input, raw)
-                self.assertEqual(p.returncode, 0, p.stderr)  # AUDIT never blocks
+                # AUDIT never BLOCKS (never exit 2), but a hit exits 1 -- a non-blocking
+                # "<hook name> hook error" transcript notice -- so the warning is
+                # actually visible (exit 0's stderr is debug-log-only, see hooks docs).
+                self.assertEqual(p.returncode, 1 if should_warn else 0, p.stderr)
                 self.assertEqual(bool(p.stderr.strip()), should_warn, f"stderr={p.stderr!r}")
 
     # --- WARN: confident `git worktree add` ---
@@ -147,7 +150,10 @@ class TestRequestedIsolationMarker(unittest.TestCase):
         for script in HOOKS:
             with self.subTest(script=script.parent.parent.name):
                 p = run_hook(script, tool_input, raw)
-                self.assertEqual(p.returncode, 0, p.stderr)  # AUDIT never blocks
+                # AUDIT never BLOCKS (never exit 2), but a hit exits 1 -- a non-blocking
+                # "<hook name> hook error" transcript notice -- so the warning is
+                # actually visible (exit 0's stderr is debug-log-only, see hooks docs).
+                self.assertEqual(p.returncode, 1 if should_warn else 0, p.stderr)
                 self.assertEqual(bool(p.stderr.strip()), should_warn, f"stderr={p.stderr!r}")
 
     # --- silent: exactly one add + exact end-of-command marker ---

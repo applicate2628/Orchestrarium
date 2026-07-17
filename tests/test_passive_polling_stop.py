@@ -30,6 +30,13 @@ def tool_entry(name: str, tool_input: object) -> dict[str, object]:
     }
 
 
+def tool_result_entry(text: str) -> dict[str, object]:
+    # Claude Code records tool OUTPUT under role=user (`{"type":"user",...}`).
+    # This is the entry shape that used to break the "current turn" boundary
+    # (see test_probe_followed_by_a_real_tool_result_still_allows_stop below).
+    return {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": text}]}}
+
+
 def write_transcript(entries: list[dict[str, object]], directory: Path) -> Path:
     path = directory / "transcript.jsonl"
     path.write_text(
@@ -136,6 +143,25 @@ class TestPassivePollingStop(unittest.TestCase):
         )
         self.assert_allowed(result)
 
+    def test_probe_followed_by_a_real_tool_result_still_allows_stop(self) -> None:
+        # BLOCKER regression: `slice_current_turn`'s boundary used to be ANY
+        # role=user entry, including a tool_result (Claude Code records tool
+        # OUTPUT under role=user). In a real tool-using turn a probe's own
+        # tool_result sits AFTER the probe call, so the boundary landed on that
+        # trailing tool_result and the "current turn" collapsed to nothing after
+        # it -- silently discarding the probe call itself. Every prior test in
+        # this file omitted the tool_result entry, which is exactly what masked
+        # this: the probe-allowance was DEAD in any real tool-using turn.
+        result = self.run_hook(
+            message="Waiting for review",
+            transcript_entries=[
+                entry("user", "status?"),
+                tool_entry("Bash", {"command": "gh pr view 209 --json reviewDecision"}),
+                tool_result_entry("reviewDecision: null"),
+            ],
+        )
+        self.assert_allowed(result)
+
     def test_strong_phrase_with_irrelevant_bash_noop_blocks_stop(self) -> None:
         result = self.run_hook(
             message="Жду ответа бота",
@@ -181,6 +207,46 @@ class TestPassivePollingStop(unittest.TestCase):
     def test_user_handoff_russian_allows_stop(self) -> None:
         result = self.run_hook(
             message="жду твоего подтверждения",
+            transcript_entries=[entry("user", "status?")],
+        )
+        self.assert_allowed(result)
+
+    def test_user_handoff_waiting_for_your_review_allows_stop(self) -> None:
+        # LOWER/OPTIONAL widening: "waiting for your review" is a legitimate
+        # human handoff, distinct from "waiting for [bot/CI] review".
+        result = self.run_hook(
+            message="waiting for your review",
+            transcript_entries=[entry("user", "status?")],
+        )
+        self.assert_allowed(result)
+
+    def test_bare_waiting_for_review_without_your_still_blocks_without_probe(self) -> None:
+        # The widening must stay scoped to "waiting for YOUR review" -- a bare
+        # "waiting for review" (no "your") is exactly the ambiguous CI/bot-review
+        # phrasing the guard exists to catch and must still block without a probe.
+        result = self.run_hook(
+            message="waiting for review approval",
+            transcript_entries=[entry("user", "status?")],
+        )
+        self.assert_blocked(result)
+
+    def test_user_handoff_russian_ukazaniy_allows_stop(self) -> None:
+        result = self.run_hook(
+            message="жду указаний",
+            transcript_entries=[entry("user", "status?")],
+        )
+        self.assert_allowed(result)
+
+    def test_user_handoff_russian_komandy_allows_stop(self) -> None:
+        result = self.run_hook(
+            message="жду команды",
+            transcript_entries=[entry("user", "status?")],
+        )
+        self.assert_allowed(result)
+
+    def test_user_handoff_russian_otmashki_allows_stop(self) -> None:
+        result = self.run_hook(
+            message="жду отмашки",
             transcript_entries=[entry("user", "status?")],
         )
         self.assert_allowed(result)

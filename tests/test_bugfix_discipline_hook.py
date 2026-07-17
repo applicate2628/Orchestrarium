@@ -137,6 +137,61 @@ class TestBugfixDisciplineGenuineUser(unittest.TestCase):
         entries += [tool_result(f"step {i} output, all fine") for i in range(8)]
         self.assert_outcome(entries, should_deny=True)
 
+    def test_file_line_citation_counts_as_discipline_signal(self) -> None:
+        # MAJOR regression: the module docstring (step 5) promises "a file:line
+        # citation counts as a discipline signal" for the plain-language Bootstrap
+        # flow, but BUGFIX_SIGNAL_REGEX had no file:line alternative -- a diligent
+        # model naming the exact symptom location was DENIED despite engaging real
+        # diagnostic discipline.
+        self.assert_outcome(
+            [user("the login page is broken, fix it"),
+             assistant("Off-by-one at src/auth/login.c:88, fixing.")],
+            should_deny=False,
+        )
+
+    def test_windows_backslash_file_line_citation_counts(self) -> None:
+        self.assert_outcome(
+            [user("the parser is broken, fix it"),
+             assistant(r"Root cause is in src\parser\lexer.py:245, patching now.")],
+            should_deny=False,
+        )
+
+    def test_url_host_port_does_not_count_as_file_line(self) -> None:
+        # 2nd-round FP regression: a URL host:port has the same dot-then-colon-
+        # then-digits shape as a file:line citation but is not one -- must not
+        # count as discipline engaged.
+        self.assert_outcome(
+            [user("the build is broken, fix it"),
+             assistant("The request goes to api.example.com:443 and times out.")],
+            should_deny=True,
+        )
+
+    def test_bare_host_port_without_subdomain_does_not_count_as_file_line(self) -> None:
+        self.assert_outcome(
+            [user("the build is broken, fix it"),
+             assistant("Connecting to example.com:8080 fails intermittently.")],
+            should_deny=True,
+        )
+
+    def test_version_label_does_not_count_as_file_line(self) -> None:
+        self.assert_outcome(
+            [user("the build is broken, fix it"),
+             assistant("This only reproduces on v1.beta:2 of the client.")],
+            should_deny=True,
+        )
+
+    def test_bare_numeric_ratio_does_not_count_as_file_line(self) -> None:
+        # FP guard on the new file:line alternative: "3.5:1" has the same
+        # dot-then-colon-then-digits shape as a file:line citation but is not
+        # one -- a bare numeric ratio in prose must not count as discipline
+        # engaged, or the guard would be silently weakened for any turn whose
+        # assistant reply happens to mention a ratio/score.
+        self.assert_outcome(
+            [user("the build is broken, fix it"),
+             assistant("The failure ratio is about 3.5:1 across the last few runs.")],
+            should_deny=True,
+        )
+
     def test_discipline_engaged_allows(self) -> None:
         self.assert_outcome(
             [user("the build is broken, fix it"),

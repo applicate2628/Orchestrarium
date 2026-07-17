@@ -1017,9 +1017,11 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.ps1"
       stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.ps1"
       repository_orientation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-repository-orientation.ps1"
+      mcp_momentum_script_target="$AGENTS_ROOT/skills/lead/hooks/check-mcp-momentum.ps1"
       reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.ps1"
       agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.ps1"
       scratch_valuables_script_target="$AGENTS_ROOT/skills/lead/scripts/check-scratch-valuables.ps1"
+      turn_anchor_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/turn-anchor-reminder.ps1"
     else
       bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.sh"
       git_push_gate_script_target="$AGENTS_ROOT/skills/lead/scripts/check-git-push-gate.sh"
@@ -1029,9 +1031,11 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.sh"
       stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.sh"
       repository_orientation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-repository-orientation.sh"
+      mcp_momentum_script_target="$AGENTS_ROOT/skills/lead/hooks/check-mcp-momentum.sh"
       reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.sh"
       agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.sh"
       scratch_valuables_script_target="$AGENTS_ROOT/skills/lead/scripts/check-scratch-valuables.sh"
+      turn_anchor_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/turn-anchor-reminder.sh"
     fi
     echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
     "$python_cmd" "$hook_installer" \
@@ -1045,7 +1049,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --platform codex \
       --host-os "$hook_host_os" \
       --script-marker check-git-push-gate \
-      --tool-matcher "Bash" \
+      --tool-matcher "Bash|PowerShell" \
       --script-path "$git_push_gate_script_target"
     echo "  Installing passive-polling Stop hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
     "$python_cmd" "$hook_installer" \
@@ -1076,7 +1080,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --platform codex \
       --host-os "$hook_host_os" \
       --script-marker check-no-trash-in-repo \
-      --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash" \
+      --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell" \
       --script-path "$notrash_script_target"
     echo "  Installing stale-relation-residue PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
     "$python_cmd" "$hook_installer" \
@@ -1091,8 +1095,16 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --platform codex \
       --host-os "$hook_host_os" \
       --script-marker check-repository-orientation \
-      --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|shell_command|exec_command" \
+      --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command" \
       --script-path "$repository_orientation_script_target"
+    echo "  Installing mcp-momentum PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --script-marker check-mcp-momentum \
+      --tool-matcher "Grep|Bash" \
+      --script-path "$mcp_momentum_script_target"
     echo "  Installing MCP-usage-reminder SessionStart hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
     "$python_cmd" "$hook_installer" \
       --target "$hooks_target" \
@@ -1117,6 +1129,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --hook-event SessionStart \
       --script-marker check-scratch-valuables \
       --script-path "$scratch_valuables_script_target"
+    echo "  Installing turn-anchor-reminder UserPromptSubmit hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --hook-event UserPromptSubmit \
+      --script-marker turn-anchor-reminder \
+      --script-path "$turn_anchor_reminder_script_target"
   fi
 fi
 

@@ -28,9 +28,16 @@ SCOPE (per the parallel-isolation protocol):
     "arbitrary in-repo trash" (no reliable non-name signal — that stays governance,
     i.e. "all scratch goes to .scratch/", not a hook).
 
-AUDIT mode: on a hit, warn to stderr and ALLOW (exit 0). Never blocks — a worktree
-can be legitimately requested, and the hook cannot read intent. Fails open on any
-internal error (return 0).
+AUDIT mode: on a hit, warn to stderr and ALLOW the command -- but exit 1 (never
+2, which would block) so the warning actually surfaces. Per Claude Code's hooks
+reference, exit 0's stderr is written only to the debug log and is invisible in
+the transcript; any other non-zero, non-2 exit code is a non-blocking error that
+shows a "<hook name> hook error" notice plus the first stderr line in the
+transcript, and execution continues exactly as it does on exit 0. Exit 1 on a
+hit (0 otherwise) is what makes the AUDIT warning visible enough to actually
+measure the false-positive rate this posture exists to measure. Never blocks —
+a worktree can be legitimately requested, and the hook cannot read intent.
+Fails open on any internal error (return 0).
 
 NOTE: the filename/install-marker `check-no-trash-in-repo` is retained for
 install-entry continuity (avoids a settings.json/hooks.json migration in this
@@ -212,6 +219,10 @@ def main() -> int:
                 "`# orchestrarium:requested-isolation-worktree`, added only after naming "
                 "the lane and isolation reason. AUDIT mode -- allowing.\n"
             )
+            # Exit 1 (never 2): a non-blocking "<hook name> hook error" transcript
+            # notice with the first stderr line, so the warning is actually
+            # visible -- exit 0 here is invisible outside --debug.
+            return 1
         return 0
 
     return 0

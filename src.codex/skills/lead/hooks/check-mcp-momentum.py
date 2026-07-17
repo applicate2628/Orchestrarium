@@ -30,10 +30,18 @@ a "find all literals" validator):
   * only when a code-intelligence MCP is actually configured for this user — an
     unconditional nudge would be a lie on a machine without one.
 
-AUDIT mode: warn on stderr, ALWAYS allow (exit 0). The pack's promotion discipline
-is dry-run first, measure the false-positive rate, then decide block-vs-warn. Three
-blocking-hook false positives were paid for by the operator in a single session; a
-nudge that cannot block cannot repeat that.
+AUDIT mode: warn on stderr and ALLOW the tool call -- but exit 1 (never 2, which
+would block) on a nudge, so the warning actually surfaces. Per Claude Code's
+hooks reference, exit 0's stderr is written only to the debug log and is
+invisible in the transcript; any other non-zero, non-2 exit code is a
+non-blocking error that shows a "<hook name> hook error" notice plus the first
+stderr line in the transcript, and execution continues exactly as it does on
+exit 0. The pack's promotion discipline is dry-run first, measure the
+false-positive rate, then decide block-vs-warn -- exit 0 on every outcome would
+make that measurement impossible, the same defect the sibling machine-local-path
+/ no-trash-in-repo / stale-relation-residue audits had. Three blocking-hook
+false positives were paid for by the operator in a single session; a nudge that
+cannot block (never exit 2) cannot repeat that.
 
 Fail-open everywhere on internal error (return 0).
 """
@@ -85,12 +93,21 @@ def _configured_code_intel_servers() -> list[str]:
     """Names of code-intelligence MCP servers this user actually has configured.
 
     Reads the user's own config; a hardcoded server list would be wrong to ship
-    (the same reason `mcp-usage-reminder` names no server).
+    (the same reason `mcp-usage-reminder` names no server). Probes BOTH
+    platforms' global config locations this hook is installed into: Claude
+    Code's `~/.claude.json` / `~/.claude/settings.json` (`mcpServers` JSON
+    object) and Codex CLI's `~/.codex/config.toml` (`[mcp_servers.<name>]`
+    TOML tables, per https://learn.chatgpt.com/codex/extend/mcp) -- so this
+    hook is not silently inert on the Codex pack it also ships into. TOML
+    parsing needs `tomllib` (Python 3.11+, stdlib); an older interpreter just
+    skips the Codex probe rather than crashing, matching the fail-open
+    posture of the JSON probe above it.
     """
     found: list[str] = []
+    home = Path(os.path.expanduser("~"))
     for candidate in (
-        Path(os.path.expanduser("~")) / ".claude.json",
-        Path(os.path.expanduser("~")) / ".claude" / "settings.json",
+        home / ".claude.json",
+        home / ".claude" / "settings.json",
     ):
         try:
             data = json.loads(candidate.read_text(encoding="utf-8"))
@@ -102,6 +119,25 @@ def _configured_code_intel_servers() -> list[str]:
                 low = str(name).casefold()
                 if any(hint in low for hint in CODE_INTEL_HINTS):
                     found.append(str(name))
+
+    try:
+        import tomllib
+    except Exception:
+        tomllib = None  # Python < 3.11: skip the Codex probe, do not crash
+    if tomllib is not None:
+        try:
+            with (home / ".codex" / "config.toml").open("rb") as fh:
+                codex_data = tomllib.load(fh)
+        except Exception:
+            codex_data = None
+        if isinstance(codex_data, dict):
+            codex_servers = codex_data.get("mcp_servers")
+            if isinstance(codex_servers, dict):
+                for name in codex_servers:
+                    low = str(name).casefold()
+                    if any(hint in low for hint in CODE_INTEL_HINTS):
+                        found.append(str(name))
+
     return sorted(set(found))
 
 
@@ -168,6 +204,10 @@ def main() -> int:
             "  (Fired at the tool choice on purpose: the once-per-session reminder "
             "loses to the momentum of your last fifty calls. AUDIT mode -- allowing.)\n"
         )
+        # Exit 1 (never 2): a non-blocking "<hook name> hook error" transcript
+        # notice with the first stderr line, so the nudge is actually visible
+        # -- exit 0 here is invisible outside --debug.
+        return 1
     except Exception:
         return 0
     return 0

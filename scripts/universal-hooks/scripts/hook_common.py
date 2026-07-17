@@ -88,16 +88,23 @@ def read_transcript_tail(transcript_path: str, n: int = 100) -> list[dict]:
 
 
 def slice_current_turn(entries: list[dict]) -> tuple[dict | None, list[dict]]:
-    """Return the last user entry and entries after it."""
-    last_user_entry = None
-    after_user_entries: list[dict] = []
-    for entry in reversed(entries):
-        if is_user_message(entry):
-            last_user_entry = entry
-            break
-        after_user_entries.append(entry)
-    after_user_entries.reverse()
-    return last_user_entry, after_user_entries
+    """Return the last GENUINE user-typed entry and the entries after it.
+
+    Delegates to `last_genuine_user_message` so the boundary skips tool_result
+    entries and harness injections (compact-summary / isMeta), matching every
+    other transcript-slicing caller in this module.
+
+    A prior version used `is_user_message` directly as the boundary predicate.
+    In Claude Code a tool_result is ALSO recorded as `{"type":"user",...}`, so
+    in any tool-using turn the boundary landed on the trailing tool_result
+    instead of the human's real last message -- the "current turn" collapsed to
+    just the entries after that tool_result, silently discarding every actual
+    tool call the turn made before it. That defeated any caller trying to find
+    a probe/action within "the current turn" (confirmed: the passive-polling
+    Stop guard's probe-allowance never saw a real tool_result in its own test
+    suite, which is exactly what masked this)."""
+    result = last_genuine_user_message(entries)
+    return result[0], result[2]
 
 
 def extract_text(entry: object) -> str:

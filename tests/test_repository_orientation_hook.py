@@ -146,7 +146,11 @@ class RepositoryOrientationHookTests(unittest.TestCase):
         for script in HOOKS:
             with self.subTest(script=script):
                 result = run_hook(script, self.repo, entries, **kwargs)
-                self.assertEqual(result.returncode, 0, result.stderr)
+                # AUDIT never BLOCKS (never exit 2), but a hit exits 1 -- a
+                # non-blocking "<hook name> hook error" transcript notice --
+                # so the warning is actually visible (exit 0's stderr is
+                # debug-log-only, see the hooks reference).
+                self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertEqual(result.stdout, "")
                 self.assertIn(WARNING, result.stderr)
 
@@ -218,7 +222,8 @@ class RepositoryOrientationHookTests(unittest.TestCase):
                     entries,
                     tool_input={"file_path": str(archived)},
                 )
-                self.assertEqual(result.returncode, 0)
+                # A hit (even the stale-target-only warning) exits 1, never 2.
+                self.assertEqual(result.returncode, 1)
                 self.assertIn(STALE_WARNING, result.stderr)
 
     def test_archived_path_is_silent_with_matching_status_and_user_approved_scope(self) -> None:

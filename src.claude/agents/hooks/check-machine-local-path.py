@@ -13,9 +13,16 @@ them legitimately as examples:
   - `%USERPROFILE%`, `${CLAUDE_PROJECT_DIR}`, `$HOME`
   - common example usernames: `you`, `user`, `username`, `name`, `test`, `example`
 
-AUDIT mode (current posture): on a hit, print a warning to stderr and ALLOW
-(exit 0). This lets the false-positive rate be measured over real repos before
-the hook is promoted to a blocking `deny`. Promotion to block is a separate,
+AUDIT mode (current posture): on a hit, print a warning to stderr and ALLOW the
+tool call -- but exit 1 (never 2, which would block) so the warning actually
+surfaces. Per Claude Code's hooks reference, exit 0's stderr is written only to
+the debug log and is invisible in the transcript; any other non-zero, non-2
+exit code is a non-blocking error that shows a "<hook name> hook error" notice
+plus the first stderr line in the transcript, and execution continues exactly
+as it does on exit 0. Exit 1 on a hit (0 on a clean write) is what makes the
+AUDIT warning visible enough to actually measure the false-positive rate this
+posture exists to measure; exit 0 on every outcome made every hit here
+invisible to everyone. Promotion to a blocking `deny` (exit 2) is a separate,
 reviewed step once the allowlist is proven tight (per the reviewed Phase-0.2
 plan: dry-run/audit first, measure FP, then decide block-vs-warn).
 
@@ -200,8 +207,13 @@ def main() -> int:
             "such as <repo>, %USERPROFILE%, or ${CLAUDE_PROJECT_DIR}, or keep the "
             "exact path only under .scratch/. AUDIT mode -- allowing this write.)\n"
         )
-    # AUDIT mode: always allow. (Promotion to PreToolUse deny is a separate
-    # reviewed step once the false-positive rate is measured.)
+        # Exit 1 (never 2): a non-blocking "<hook name> hook error" transcript
+        # notice with the first stderr line, so the warning is actually visible
+        # -- exit 0 here is invisible outside --debug (see module docstring).
+        return 1
+    # AUDIT mode: always allow the write. (Promotion to a blocking PreToolUse
+    # deny -- exit 2 -- is a separate reviewed step once the false-positive
+    # rate is measured.)
     return 0
 
 

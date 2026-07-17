@@ -73,7 +73,11 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
 
     def assert_nudges(self, envelope: dict, should_nudge: bool) -> None:
         result = self._run(envelope)
-        self.assertEqual(result.returncode, 0, "AUDIT hook must always exit 0")
+        # AUDIT hook never BLOCKS (never exit 2), but a nudge exits 1 -- a
+        # non-blocking "<hook name> hook error" transcript notice -- so the
+        # nudge is actually visible (exit 0's stderr is debug-log-only, see
+        # the hooks reference); silence still exits 0.
+        self.assertEqual(result.returncode, 1 if should_nudge else 0, result.stderr)
         fired = "mcp-momentum" in result.stderr
         self.assertEqual(fired, should_nudge, result.stderr or "(no stderr)")
 
@@ -127,6 +131,62 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
             input="not json at all", capture_output=True, text=True, encoding="utf-8", env=self._env,
         )
         self.assertEqual(result.returncode, 0)
+
+    # --- Codex-awareness (2nd-round fix): the hook must not be silently inert
+    # on the Codex pack it also ships into. Codex stores MCP config in
+    # ~/.codex/config.toml under [mcp_servers.<name>] TOML tables (verified:
+    # https://learn.chatgpt.com/codex/extend/mcp), not Claude's ~/.claude.json.
+    # Codex's shell tool_name is "Bash" too (verified via the Codex hooks
+    # reference), so these drive the already-working Bash branch.
+
+    def test_codex_config_toml_mcp_server_nudges(self) -> None:
+        home = tempfile.mkdtemp()
+        codex_dir = Path(home) / ".codex"
+        codex_dir.mkdir()
+        (codex_dir / "config.toml").write_text(
+            '[mcp_servers.codegraph]\ncommand = "codegraph-server"\n',
+            encoding="utf-8",
+        )
+        env = dict(os.environ); env["HOME"] = home; env["USERPROFILE"] = home
+        result = subprocess.run(
+            [sys.executable, str(MCP_HOOK)],
+            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "grep -rn 'class Foo' src/ --include=*.py"}}),
+            capture_output=True, text=True, encoding="utf-8", env=env,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("mcp-momentum", result.stderr)
+        self.assertIn("codegraph", result.stderr)
+
+    def test_codex_config_toml_without_code_intel_server_stays_silent(self) -> None:
+        home = tempfile.mkdtemp()
+        codex_dir = Path(home) / ".codex"
+        codex_dir.mkdir()
+        (codex_dir / "config.toml").write_text(
+            '[mcp_servers.time]\ncommand = "time-server"\n',
+            encoding="utf-8",
+        )
+        env = dict(os.environ); env["HOME"] = home; env["USERPROFILE"] = home
+        result = subprocess.run(
+            [sys.executable, str(MCP_HOOK)],
+            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "grep -rn 'class Foo' src/ --include=*.py"}}),
+            capture_output=True, text=True, encoding="utf-8", env=env,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertNotIn("mcp-momentum", result.stderr)
+
+    def test_malformed_codex_config_toml_fails_open(self) -> None:
+        home = tempfile.mkdtemp()
+        codex_dir = Path(home) / ".codex"
+        codex_dir.mkdir()
+        (codex_dir / "config.toml").write_text("not valid toml [[[", encoding="utf-8")
+        env = dict(os.environ); env["HOME"] = home; env["USERPROFILE"] = home
+        result = subprocess.run(
+            [sys.executable, str(MCP_HOOK)],
+            input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "grep -rn 'class Foo' src/ --include=*.py"}}),
+            capture_output=True, text=True, encoding="utf-8", env=env,
+        )
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, "")
 
 
 class TestTurnAnchorEmitsValidContext(unittest.TestCase):
