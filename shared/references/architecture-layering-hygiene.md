@@ -401,8 +401,18 @@ a regression in any is a blocking finding:
   import-graph / CI gate.
 - **No lower-layer ambient reads** (C2) — probe: `grep getenv` / cmdline in lower modules returns no
   undocumented hit.
-- **One owner per cross-cutting invariant** (C1) — probe: grep the operation/constant; one definition,
-  others call it.
+- **One owner per cross-cutting invariant** (C1) — probe: START from an in-scope decision or
+  invariant, never from syntax. Name the policy owner who would legitimately change the value, the
+  change that would trigger it, the consumers or boundary representations that MUST co-vary, and the
+  one place they would look; ONLY then grep for definitions and read sites — one definition, others
+  call it. A world fact, protocol constant, or algorithm-local literal fails the trigger or the
+  co-variation test and is excluded (that exemption is deliberate; a literal is a discovery seed,
+  never a finding). Without co-variation it is not C1 at all — a lone hardcoded policy value may
+  still breach anti-hardcoding, and keeping those classes apart is what stops this probe becoming a
+  literal hunt. Aim it at VALUES explicitly, not only at predicates and orderings: a real audit ran
+  this lens, found "one conceptual decision has four independent owners", and never asked who owns
+  the number — the letter below already said "a shared constant … a calibration table" and was not
+  applied.
 - **No untracked duplicate representations** (A7, C1) — probe: duplicates only behind a codegen source
   or a drift gate.
 - **Entry points hold no second-consumer decision** (A5) — probe: each decision in an app/tool has no
