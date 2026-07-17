@@ -22,6 +22,11 @@ MCP_SCRIPTS = (
 CODEX_AGENTS_MODE = (
     ROOT / "src.codex" / "skills" / "lead" / "scripts" / "agents-mode-reminder.sh"
 )
+SCRATCH_VALUABLES_SCRIPTS = (
+    ROOT / "scripts" / "universal-hooks" / "scripts" / "check-scratch-valuables.sh",
+    ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-scratch-valuables.sh",
+    ROOT / "src.claude" / "agents" / "scripts" / "check-scratch-valuables.sh",
+)
 
 MCP_CONTEXT = "\n".join((
     "[MCP / tools reminder - re-shown at session start and after every compaction]",
@@ -47,12 +52,14 @@ DELEGATION_CONTEXTS = {
 
 
 def _run(script: Path, *, cwd: Path | None = None,
-         env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+         env: dict[str, str] | None = None,
+         input: str | None = None) -> subprocess.CompletedProcess[str]:
     assert BASH is not None
     return subprocess.run(
         [BASH, str(script)],
         cwd=cwd,
         env=env,
+        input=input,
         capture_output=True,
         text=True,
     )
@@ -168,6 +175,64 @@ class SessionStartReminderOutputTest(unittest.TestCase):
             self.assertEqual(
                 _decode_context(fallback.stdout), DELEGATION_CONTEXTS["force"]
             )
+
+
+@unittest.skipIf(BASH is None, "bash is not available")
+class ScratchValuablesReminderOutputTest(unittest.TestCase):
+    """The scratch-valuables watchdog is CONDITIONAL (silent when `.scratch/`
+    has nothing to flag, emits a hookSpecificOutput block when it does), and
+    reads `cwd` from the stdin JSON envelope rather than the process cwd. A
+    bare `git init` (no commits) makes the git-uniqueness predicate
+    deterministic regardless of the test host's ambient state: an empty
+    object database reports every blob as missing, so any non-junk,
+    non-empty file is a candidate independent of its age."""
+
+    def _init_git_repo(self, root: Path) -> None:
+        subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+
+    def test_emits_context_when_a_unique_valuable_is_present(self) -> None:
+        for script in SCRATCH_VALUABLES_SCRIPTS:
+            with self.subTest(script=str(script.relative_to(ROOT))), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                self._init_git_repo(root)
+                scratch = root / ".scratch"
+                scratch.mkdir()
+                (scratch / "unique.md").write_text(
+                    "genuinely unique content, never committed", encoding="utf-8"
+                )
+                envelope = json.dumps({"cwd": str(root)})
+
+                result = _run(script, input=envelope)
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                context = _decode_context(result.stdout)
+                self.assertIn("scratch watchdog", context)
+                self.assertIn("unique.md", context)
+
+    def test_silent_when_scratch_has_no_candidates(self) -> None:
+        for script in SCRATCH_VALUABLES_SCRIPTS:
+            with self.subTest(script=str(script.relative_to(ROOT))), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                (root / ".scratch").mkdir()
+                envelope = json.dumps({"cwd": str(root)})
+
+                result = _run(script, input=envelope)
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(result.stderr, "")
+
+    def test_silent_when_no_scratch_dir_exists(self) -> None:
+        for script in SCRATCH_VALUABLES_SCRIPTS:
+            with self.subTest(script=str(script.relative_to(ROOT))), tempfile.TemporaryDirectory() as td:
+                envelope = json.dumps({"cwd": td})
+
+                result = _run(script, input=envelope)
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(result.stderr, "")
 
 
 if __name__ == "__main__":

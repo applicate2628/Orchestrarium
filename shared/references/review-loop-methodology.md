@@ -77,3 +77,27 @@ obligations. Replacement-reviewer equivalence must preserve: the review scope, i
 author, the same evidence target/version, and an equal-or-stronger declared tier — recorded in
 structured fields, not prose. Reviews outside any work-item remain governed by the spine clause alone
 (declared residual).
+
+**Review a FROZEN artifact, never the live working tree (2026-07-17, live incident).** A verdict is a
+statement about one artifact revision, so the thing under review must not move while the round runs:
+dispatch at a committed revision, a `git diff` patch file, or a copied snapshot, and give the
+reviewer its identity (sha or digests). An angle caught this gate's engine mid-edit — including a
+transient syntax error — and correctly refused the patch: "the moving live target prevents accepting
+that patch as the current implementation". If a finding forces an edit while a round is in flight,
+that edit makes a NEW snapshot and a NEW round; it never mutates what the current round is judging.
+Full lesson: `work-items/lessons/2026-07-17-review-a-frozen-snapshot-not-a-live-tree.md`.
+
+**Ledger read-back before reporting a verdict (2026-07-17, live incident).** On a tracked item, a
+lane's verdict may be reported or acted on ONLY after reading the ledger back and confirming the
+terminal event exists for that launch `runId`. The reviewer's `.out` prose is evidence of what the
+reviewer said, never evidence that the obligation moved. This is the polling-anchor discipline
+applied to closure: anchor on the authoritative store, not on a self-derived signal. The incident
+that forced the rule: a validator defect rejected terminal events whose artifact was a repository
+file, the wrapper only WARNed, and TWO real `PASS` verdicts were reported to the operator from prose
+while the ledger held nothing (`work-items/bugs/2026-07-17-validator-artifact-workitem-relative-only.md`).
+
+**Close every open runId of the lane, not just the latest.** Each round's `REVISE` is its own
+obligation, so a lane that went `REVISE → fix → REVISE → fix → PASS` needs the final closer to carry
+`closesRunIds` for EVERY still-open runId of that lane. Closing only the most recent one silently
+leaves the earlier obligations open — the checker will say so at the gate, which is the backstop, not
+the plan.

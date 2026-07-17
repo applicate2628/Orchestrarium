@@ -1,4 +1,4 @@
-"""Both SessionStart reminder hooks must be wired in ALL FOUR installers.
+"""All three SessionStart reminder hooks must be wired in ALL FOUR installers.
 
 Codex fix-coherence review of the delegation-posture hook caught the exact
 failure this guards against: `install-codex.ps1` declared the
@@ -8,15 +8,18 @@ agents-mode-reminder` invocation, so `install-codex.ps1 -Global` would have
 shipped only `mcp-usage-reminder` while the other three installers shipped both.
 Per-platform installer wiring has no single owner (each installer hand-writes its
 own hook-install block), so the invariant is enforced here: every installer must
-register BOTH SessionStart markers, and neither platform can silently lag again.
+register EVERY SessionStart marker in `SESSIONSTART_MARKERS`, and no platform can
+silently lag again -- this is what would have caught `check-scratch-valuables`
+shipping its byte-identical pack mirror under `src.codex/skills/lead/scripts/`
+without ever being wired into `install-codex.sh`/`.ps1`'s hook-install block.
 
 Two layers:
-  1. Static wiring — each of the four installer scripts contains, for BOTH
-     `mcp-usage-reminder` and `agents-mode-reminder`, an install-hypothesis-hook
-     invocation pairing `--hook-event SessionStart` with that `--script-marker`.
+  1. Static wiring — each of the four installer scripts contains, for EVERY
+     marker in `SESSIONSTART_MARKERS`, an install-hypothesis-hook invocation
+     pairing `--hook-event SessionStart` with that `--script-marker`.
   2. Functional idempotency — installing the `agents-mode-reminder` SessionStart
      entry twice yields exactly one entry (the marker-based merge is idempotent,
-     same as the other SessionStart entry).
+     same as every other SessionStart entry).
 """
 from __future__ import annotations
 
@@ -37,7 +40,7 @@ INSTALLERS = (
     ROOT / "scripts" / "install-codex.sh",
     ROOT / "scripts" / "install-codex.ps1",
 )
-SESSIONSTART_MARKERS = ("mcp-usage-reminder", "agents-mode-reminder")
+SESSIONSTART_MARKERS = ("mcp-usage-reminder", "agents-mode-reminder", "check-scratch-valuables")
 
 
 def _logical_lines(text: str) -> list[str]:

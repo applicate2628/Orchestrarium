@@ -946,6 +946,7 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         $RepositoryOrientationScriptTarget = Join-Path $TargetRoot "agents\hooks\check-repository-orientation.ps1"
         $ReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\mcp-usage-reminder.ps1"
         $AgentsModeReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\agents-mode-reminder.ps1"
+        $ScratchValuablesScriptTarget = Join-Path $TargetRoot "agents\scripts\check-scratch-valuables.ps1"
         Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows)..."
         & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-path $BugfixScriptTarget
         if ($LASTEXITCODE -ne 0) {
@@ -1002,6 +1003,12 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         }
         Write-Host "  Installing delegation-posture (agents-mode) SessionStart hook (host-os=windows)..."
         & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event SessionStart --script-marker agents-mode-reminder --script-path $AgentsModeReminderScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing scratch-valuables watchdog SessionStart hook (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event SessionStart --script-marker check-scratch-valuables --script-path $ScratchValuablesScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE

@@ -1,6 +1,35 @@
+"""Tests for the read-only `.scratch/` valuables watchdog.
+
+REFRAME (2026-07-17): this file previously exercised the sweep/quarantine/
+restore/purge/`.hold` mutation engine (v1-v20 of the janitor). That whole
+engine was deleted from `scripts/maintenance/cleanup.py` -- see
+`work-items/active/2026-07-16-cleanup-routine/design-watchdog-reframe.md` for
+the locked design.
+
+PREDICATE REDESIGN (2026-07-17, adversarial-review follow-up): the first cut
+gated purely on age (>7 days); live-tree evidence on this repository's own
+`.scratch/` showed that gate had near-zero precision (58 of 59 sampled
+flagged files were byte-identical to an existing git blob -- recoverable, not
+actually at risk). The PRIMARY predicate is now git-content-uniqueness (a
+file is a candidate only if `git cat-file --batch-check` reports its
+`git hash-object` blob SHA as MISSING from the repository's object
+database), with the junk denylist and non-empty filter as SECONDARY filters,
+and age demoted to a severity/sort key. When git is unavailable for the scan
+(no repository, no git executable, or any git call fails), the engine falls
+back to the original age-gated behavior. This file covers: the primary
+git-uniqueness predicate, the fail-open fallback (forced deterministically
+via monkeypatch, not by hoping the test host's ambient temp directory is
+git-free), junk-denylist correctness (secondary filter), the non-empty
+filter, self-exclusion, junction/reparse-point safety, and a hard
+zero-mutation guarantee covering both predicate paths and the git object
+store itself.
+"""
+
+import hashlib
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,10 +45,11 @@ cleanup = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = cleanup
 SPEC.loader.exec_module(cleanup)
 
-NOW = datetime(2026, 7, 16, 12, 34, 56, tzinfo=timezone.utc)
+NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=timezone.utc)
 
 
 def write_file(root: Path, relative: str, *, age_days: float, text: str = "data") -> Path:
+    """Write a file under `root` with an mtime `age_days` before NOW."""
     path = root / Path(relative)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -28,559 +58,595 @@ def write_file(root: Path, relative: str, *, age_days: float, text: str = "data"
     return path
 
 
-def write_active_reference(root: Path, text: str, name: str = "status.md") -> Path:
-    return write_file(
-        root,
-        f"work-items/active/live-item/{name}",
-        age_days=0,
-        text=text,
+def paths(valuables: list[dict]) -> list[str]:
+    return [item["path"] for item in valuables]
+
+
+def _snapshot(root: Path) -> dict[str, tuple[float, int, str]]:
+    """A deterministic fingerprint of every entry under `root`: mtime, size,
+    and a content hash for files (directories get a sentinel hash). Symlinks
+    are recorded by their link target, never followed, so a scan that
+    silently redirected through one would still show up as changed."""
+
+    snapshot: dict[str, tuple[float, int, str]] = {}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        for name in list(dirnames) + filenames:
+            full = Path(dirpath) / name
+            relative = full.relative_to(root).as_posix()
+            try:
+                if full.is_symlink():
+                    target = os.readlink(full)
+                    snapshot[relative] = (0.0, -1, f"symlink:{target}")
+                    continue
+                info = full.stat()
+                if full.is_dir():
+                    snapshot[relative] = (info.st_mtime, -2, "dir")
+                else:
+                    digest = hashlib.sha256(full.read_bytes()).hexdigest()
+                    snapshot[relative] = (info.st_mtime, info.st_size, digest)
+            except OSError as exc:  # pragma: no cover - snapshot must not itself fail silently
+                raise AssertionError(f"could not snapshot {full}: {exc}")
+    return snapshot
+
+
+def _run_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    result = subprocess.run(
+        ["git", *args], cwd=str(cwd), capture_output=True, text=True,
     )
+    assert result.returncode == 0, f"git {args} failed: {result.stderr}"
+    return result
 
 
-def outcome(report, relative: str) -> str:
-    return next(
-        action.outcome
-        for action in report.actions
-        if action.relative_path.as_posix() == relative
-    )
+def _init_repo(root: Path) -> None:
+    _run_git(["init", "-q", "."], root)
+    _run_git(["config", "user.email", "t@t"], root)
+    _run_git(["config", "user.name", "t"], root)
 
 
-def test_sweep_dry_run_then_apply_preserves_rename_xor_and_readme(tmp_path: Path):
-    source = write_file(tmp_path, ".scratch/jobs/result.out", age_days=8, text="payload")
-
-    dry_run = cleanup.run_sweep(tmp_path, now=NOW)
-
-    assert source.read_text(encoding="utf-8") == "payload"
-    assert dry_run.run_dir is None
-    assert outcome(dry_run, ".scratch/jobs/result.out") == "would-move"
-    assert dry_run.telemetry.eligible.count == 1
-    assert not (tmp_path / ".scratch/_trash").exists()
-
-    applied = cleanup.run_sweep(tmp_path, apply=True, now=NOW)
-
-    assert applied.run_dir == tmp_path / ".scratch/_trash/2026-07-16/123456"
-    destination = applied.run_dir / ".scratch/jobs/result.out"
-    assert source.exists() is False
-    assert destination.read_text(encoding="utf-8") == "payload"
-    assert cleanup.classify_transition(source, destination) == "destination-only"
-    assert outcome(applied, ".scratch/jobs/result.out") == "moved"
-    readme = tmp_path / ".scratch/_trash/README.md"
-    assert "wipeable zone" in readme.read_text(encoding="utf-8")
+def _commit_file(root: Path, relative: str, text: str) -> None:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    _run_git(["add", relative], root)
+    _run_git(["commit", "-q", "-m", "seed"], root)
 
 
-def test_transition_table_classifies_all_four_states(tmp_path: Path):
-    source = tmp_path / "source"
-    destination = tmp_path / "destination"
-    source.write_text("source", encoding="utf-8")
-    assert cleanup.classify_transition(source, destination) == "source-only"
-    destination.write_text("destination", encoding="utf-8")
-    assert cleanup.classify_transition(source, destination) == "both"
-    source.unlink()
-    assert cleanup.classify_transition(source, destination) == "destination-only"
-    destination.unlink()
-    assert cleanup.classify_transition(source, destination) == "neither"
+def _create_junction(link: Path, target: Path) -> bool:
+    """Create an NTFS directory junction without needing elevation. Uses
+    PowerShell's `New-Item -ItemType Junction` (robust to forward-slash paths
+    on any Python build, unlike `cmd /c mklink /J`). Returns False (never
+    raises) when unsupported -- non-Windows, no PowerShell, or the call
+    fails -- so the caller can skip cleanly."""
+
+    if os.name != "nt":
+        return False
+    try:
+        result = subprocess.run(
+            [
+                "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                "New-Item", "-ItemType", "Junction", "-Path", str(link), "-Target", str(target),
+            ],
+            capture_output=True, text=True, timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and os.path.isjunction(link)
 
 
-def test_same_injected_timestamp_reservations_get_unique_run_directories(tmp_path: Path):
-    first = cleanup.reserve_run_dir(tmp_path, now=NOW)
-    second = cleanup.reserve_run_dir(tmp_path, now=NOW)
-
-    assert first.name == "123456"
-    assert second.name == "123456-2"
-    assert first.parent == second.parent == tmp_path / ".scratch/_trash/2026-07-16"
-
-
-def test_restore_preserves_repository_relative_path(tmp_path: Path):
-    live = write_file(tmp_path, ".scratch/nested/result.err", age_days=8, text="restore-me")
-    sweep = cleanup.run_sweep(tmp_path, apply=True, now=NOW)
-    assert sweep.run_dir is not None
-
-    restored = cleanup.run_restore(tmp_path, sweep.run_dir, apply=True, now=NOW)
-
-    assert live.read_text(encoding="utf-8") == "restore-me"
-    assert outcome(restored, ".scratch/nested/result.err") == "restored"
-    assert not (sweep.run_dir / ".scratch/nested/result.err").exists()
+@pytest.fixture
+def no_git(monkeypatch):
+    """Force the FAIL-OPEN fallback path deterministically, regardless of
+    whether the test host's ambient temp directory happens to sit inside an
+    unrelated git repository."""
+    monkeypatch.setattr(cleanup, "_find_git_root", lambda start: None)
 
 
-def test_restore_occupied_live_target_skips_without_clobbering(tmp_path: Path):
-    run_dir = tmp_path / ".scratch/_trash/2026-07-01/010203"
-    quarantined = write_file(
-        tmp_path,
-        ".scratch/_trash/2026-07-01/010203/.scratch/data/value.out",
-        age_days=8,
-        text="quarantined",
-    )
-    live = write_file(tmp_path, ".scratch/data/value.out", age_days=0, text="live")
-
-    report = cleanup.run_restore(tmp_path, run_dir, apply=True, now=NOW)
-
-    assert live.read_text(encoding="utf-8") == "live"
-    assert quarantined.read_text(encoding="utf-8") == "quarantined"
-    assert outcome(report, ".scratch/data/value.out") == "skipped-occupied"
-    assert report.telemetry.blocked.count == 1
+# ---------------------------------------------------------------------------
+# Primary predicate: git-content-uniqueness
+# ---------------------------------------------------------------------------
 
 
-def test_run_lock_contention_fails_closed(tmp_path: Path):
-    lock = tmp_path / ".scratch/_trash/.janitor.lock"
-    lock.parent.mkdir(parents=True)
-    lock.write_text("pid=4242 at=2026-07-16T12:00:00+00:00\n", encoding="utf-8")
+def test_content_matching_an_existing_git_blob_is_not_flagged(tmp_path: Path):
+    _init_repo(tmp_path)
+    _commit_file(tmp_path, "tracked.md", "shared content, never changes")
+    # Never itself committed, but byte-identical to the committed blob.
+    write_file(tmp_path, ".scratch/copy.md", age_days=30, text="shared content, never changes")
 
-    with pytest.raises(cleanup.JanitorLockError, match="already running"):
-        cleanup.run_sweep(tmp_path, now=NOW)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    assert lock.exists()
-
-
-def test_run_lock_is_released_after_engine_exception(tmp_path: Path):
-    def fail_inside_lock():
-        raise RuntimeError("injected engine failure")
-
-    with pytest.raises(RuntimeError, match="injected engine failure"):
-        cleanup.run_sweep(tmp_path, now=NOW, operation_hook=fail_inside_lock)
-
-    assert not (tmp_path / ".scratch/_trash/.janitor.lock").exists()
+    assert result == []
 
 
-def test_stale_lock_diagnostic_requires_manual_recovery_and_never_takes_over(tmp_path: Path):
-    lock = tmp_path / ".scratch/_trash/.janitor.lock"
-    lock.parent.mkdir(parents=True)
-    lock.write_text("pid=999999 at=2026-01-01T00:00:00+00:00\n", encoding="utf-8")
+def test_content_with_no_matching_blob_is_flagged_even_when_brand_new(tmp_path: Path):
+    _init_repo(tmp_path)
+    _commit_file(tmp_path, "tracked.md", "some tracked content")
+    # Deliberately very fresh (well under the old 7-day gate) to prove age is
+    # no longer a filter under the primary predicate.
+    write_file(tmp_path, ".scratch/unique.md", age_days=0.01, text="genuinely unique, never committed")
 
-    with pytest.raises(cleanup.JanitorLockError) as caught:
-        cleanup.run_purge(tmp_path, apply=True, now=NOW)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    message = str(caught.value)
-    assert "pid=999999" in message
-    assert "No automatic takeover" in message
-    assert "remove the lock file" in message
-    assert lock.exists()
+    assert paths(result) == ["unique.md"]
 
 
-def test_failed_locked_file_rename_is_skipped_and_reported(tmp_path: Path, monkeypatch):
-    source = write_file(tmp_path, ".scratch/locked.out", age_days=8)
-    real_rename = cleanup.os.rename
+def test_uniqueness_predicate_needs_no_prior_commit(tmp_path: Path):
+    _init_repo(tmp_path)  # repo exists, but nothing committed anywhere
+    write_file(tmp_path, ".scratch/unique.md", age_days=1, text="unique content")
 
-    def locked_rename(old, new):
-        if Path(old) == source:
-            raise PermissionError("injected sharing violation")
-        return real_rename(old, new)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    monkeypatch.setattr(cleanup.os, "rename", locked_rename)
-
-    report = cleanup.run_sweep(tmp_path, apply=True, now=NOW)
-
-    assert source.exists()
-    assert outcome(report, ".scratch/locked.out") == "skipped-rename-failed"
-    assert any("sharing violation" in message for message in report.messages)
+    assert paths(result) == ["unique.md"]
 
 
-def test_purge_uses_date_component_not_mtime(tmp_path: Path):
-    old_run = tmp_path / ".scratch/_trash/2026-07-08/010101"
-    recent_run = tmp_path / ".scratch/_trash/2026-07-15/020202"
-    old_file = write_file(
-        tmp_path,
-        ".scratch/_trash/2026-07-08/010101/.scratch/old.out",
-        age_days=0,
-    )
-    recent_file = write_file(
-        tmp_path,
-        ".scratch/_trash/2026-07-15/020202/.scratch/recent.out",
-        age_days=100,
-    )
-    assert old_file.exists() and recent_file.exists()
+def test_junk_denylist_still_excludes_unique_content(tmp_path: Path):
+    _init_repo(tmp_path)
+    write_file(tmp_path, ".scratch/unique.log", age_days=1, text="unique but junk extension")
 
-    report = cleanup.run_purge(tmp_path, apply=True, now=NOW)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    assert not old_run.exists()
-    assert recent_run.exists()
-    assert any(action.outcome == "purged" for action in report.actions)
-    assert any(action.outcome == "retained" for action in report.actions)
+    assert result == []
 
 
-def test_purge_skips_and_reports_non_dated_directory(tmp_path: Path):
-    non_dated = tmp_path / ".scratch/_trash/manual-notes"
-    write_file(tmp_path, ".scratch/_trash/manual-notes/keep.txt", age_days=100)
+def test_empty_unique_file_is_still_never_flagged(tmp_path: Path):
+    _init_repo(tmp_path)
+    write_file(tmp_path, ".scratch/empty.md", age_days=1, text="")
 
-    report = cleanup.run_purge(tmp_path, apply=True, now=NOW)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    assert non_dated.exists()
-    assert outcome(report, ".scratch/_trash/manual-notes") == "skipped-non-dated"
-    assert any("non-dated" in message for message in report.messages)
+    assert result == []
 
 
-def test_purge_is_dry_run_by_default(tmp_path: Path):
-    run_dir = tmp_path / ".scratch/_trash/2026-07-01/010101"
-    write_file(tmp_path, ".scratch/_trash/2026-07-01/010101/.scratch/old.out", age_days=0)
+def test_git_mode_results_are_sorted_newest_first(tmp_path: Path):
+    _init_repo(tmp_path)
+    write_file(tmp_path, ".scratch/older.md", age_days=10, text="unique older content")
+    write_file(tmp_path, ".scratch/newer.md", age_days=1, text="unique newer content")
 
-    report = cleanup.run_purge(tmp_path, now=NOW)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    assert run_dir.exists()
-    assert any(action.outcome == "would-purge" for action in report.actions)
+    assert paths(result) == ["newer.md", "older.md"]
+
+
+# ---------------------------------------------------------------------------
+# Fail-open fallback (forced deterministically via the `no_git` fixture)
+# ---------------------------------------------------------------------------
+
+
+def test_fallback_gates_on_age_when_not_in_a_git_repository(no_git, tmp_path: Path):
+    write_file(tmp_path, ".scratch/old.md", age_days=30, text="anything")
+    write_file(tmp_path, ".scratch/young.md", age_days=1, text="anything else")
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert paths(result) == ["old.md"]
+
+
+def test_fallback_age_exactly_at_threshold_is_not_flagged(no_git, tmp_path: Path):
+    write_file(tmp_path, ".scratch/edge.md", age_days=7.0)
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert result == []
+
+
+def test_fallback_age_just_under_threshold_is_not_flagged(no_git, tmp_path: Path):
+    write_file(tmp_path, ".scratch/edge.md", age_days=6.99)
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert result == []
+
+
+def test_fallback_age_just_over_threshold_is_flagged(no_git, tmp_path: Path):
+    write_file(tmp_path, ".scratch/edge.md", age_days=7.01)
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert paths(result) == ["edge.md"]
+
+
+def test_fallback_age_days_is_configurable(no_git, tmp_path: Path):
+    write_file(tmp_path, ".scratch/edge.md", age_days=2.5)
+
+    short = cleanup.scan_valuables(tmp_path / ".scratch", fallback_age_days=2, now=NOW)
+    long = cleanup.scan_valuables(tmp_path / ".scratch", fallback_age_days=3, now=NOW)
+
+    assert paths(short) == ["edge.md"]
+    assert long == []
+
+
+def test_fallback_results_sorted_newest_first_ties_broken_by_path(no_git, tmp_path: Path):
+    write_file(tmp_path, ".scratch/zeta.md", age_days=8)
+    write_file(tmp_path, ".scratch/alpha.md", age_days=8)
+    write_file(tmp_path, ".scratch/newest.md", age_days=7.5)
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert paths(result) == ["newest.md", "alpha.md", "zeta.md"]
+
+
+def test_no_git_executable_falls_back_to_age_gate(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(cleanup.shutil, "which", lambda _name: None)
+    write_file(tmp_path, ".scratch/old.md", age_days=30, text="anything")
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert paths(result) == ["old.md"]
+
+
+def test_failed_git_hash_object_call_falls_back_to_age_gate(tmp_path: Path, monkeypatch):
+    _init_repo(tmp_path)
+    write_file(tmp_path, ".scratch/old.md", age_days=30, text="anything")
+
+    monkeypatch.setattr(cleanup, "_hash_object_batch", lambda git_root, files: None)
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert paths(result) == ["old.md"]
+
+
+def test_failed_git_cat_file_call_falls_back_to_age_gate(tmp_path: Path, monkeypatch):
+    _init_repo(tmp_path)
+    write_file(tmp_path, ".scratch/old.md", age_days=30, text="anything")
+
+    monkeypatch.setattr(cleanup, "_blobs_missing_from_store", lambda git_root, shas: None)
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert paths(result) == ["old.md"]
+
+
+# ---------------------------------------------------------------------------
+# Junk-denylist correctness (secondary filter -- forced into fallback mode so
+# classification is decided purely by the denylist, not by ambient git state)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("extension", [".tmp", ".log", ".out", ".err", ".swp", ".swo"])
+def test_denylisted_extensions_are_never_flagged(no_git, tmp_path: Path, extension: str):
+    write_file(tmp_path, f".scratch/noise{extension}", age_days=30)
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert result == []
+
+
+@pytest.mark.parametrize("basename", ["Thumbs.db", "thumbs.db", ".DS_Store", ".ds_store"])
+def test_denylisted_basenames_are_never_flagged(no_git, tmp_path: Path, basename: str):
+    write_file(tmp_path, f".scratch/{basename}", age_days=30)
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert result == []
 
 
 @pytest.mark.parametrize(
-    "reference",
-    [
-        ".scratch/results/task6-confirm-alpha.out",
-        r".scratch\results\task6-confirm-alpha.out",
-        "task6-confirm-*.out",
-        "task6-confirm-{alpha,beta}.out",
-    ],
-    ids=["exact", "backslash", "glob", "brace"],
+    "dirname",
+    ["__pycache__", "node_modules", ".pytest_cache", ".mypy_cache", ".ruff_cache", ".cache", "dist", "build"],
 )
-def test_reference_grammar_pins_exact_backslash_glob_and_brace(
-    tmp_path: Path, reference: str
+def test_denylisted_directories_are_pruned_when_a_direct_child_of_scratch(
+    no_git, tmp_path: Path, dirname: str
 ):
-    artifact = write_file(
-        tmp_path,
-        ".scratch/results/task6-confirm-alpha.out",
-        age_days=8,
-    )
-    write_active_reference(tmp_path, f"evidence: {reference}\n")
+    write_file(tmp_path, f".scratch/{dirname}/important-looking.md", age_days=30)
 
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    assert result.eligible is False
-    assert result.reason == "live reference"
-    assert result.report.telemetry.pinned.count == 1
-    assert result.report.telemetry.pinned_set_size == 1
+    assert result == []
 
 
-def test_live_report_bare_readme_basename_does_not_pin_scratch_copy(tmp_path: Path):
-    artifact = write_file(
-        tmp_path,
-        ".scratch/extract-x/README.md",
-        age_days=8,
-    )
-    write_file(
-        tmp_path,
-        ".reports/2026-07/live-report.md",
-        age_days=0,
-        text="README.md\n",
-    )
+@pytest.mark.parametrize("dirname", ["build", "dist", ".cache"])
+def test_ambiguous_directory_name_nested_deeper_is_not_pruned(no_git, tmp_path: Path, dirname: str):
+    # These AMBIGUOUS names could coincidentally name a hand-authored folder,
+    # so they are NOT a direct child of `.scratch/` here (two levels down)
+    # and the directory-pruning rule must not hide this file.
+    write_file(tmp_path, f".scratch/plans/{dirname}/notes.md", age_days=30)
 
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    assert result.eligible is True
-    assert result.report.telemetry.pinned.count == 0
-
-
-def test_live_report_prose_word_head_does_not_pin_matching_basename(tmp_path: Path):
-    artifact = write_file(tmp_path, ".scratch/x/HEAD", age_days=8)
-    write_file(
-        tmp_path,
-        ".reports/2026-07/live-report.md",
-        age_days=0,
-        text="HEAD\n",
-    )
-
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
-
-    assert result.eligible is True
-    assert result.report.telemetry.pinned.count == 0
-
-
-def test_live_report_full_path_still_pins_scratch_copy(tmp_path: Path):
-    artifact = write_file(
-        tmp_path,
-        ".scratch/extract-x/README.md",
-        age_days=8,
-    )
-    write_file(
-        tmp_path,
-        ".reports/2026-07/live-report.md",
-        age_days=0,
-        text=".scratch/extract-x/README.md\n",
-    )
-
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
-
-    assert result.eligible is False
-    assert result.reason == "live reference"
-
-
-def test_bare_timestamped_stem_still_pins_prompt_sibling_triple(tmp_path: Path):
-    stem = "cleanup-v3-20260716-123456"
-    paths = [
-        write_file(
-            tmp_path,
-            f".scratch/codex-prompts/{stem}{suffix}",
-            age_days=8,
-        )
-        for suffix in (".md", ".out", ".err")
-    ]
-    write_active_reference(tmp_path, f"evidence: {stem}\n")
-
-    results = [cleanup.evaluate_eligibility(tmp_path, path, now=NOW) for path in paths]
-
-    assert [result.eligible for result in results] == [False, False, False]
-    assert all(result.reason == "live reference" for result in results)
-
-
-def test_task6_output_glob_still_pins(tmp_path: Path):
-    artifact = write_file(
-        tmp_path,
-        ".scratch/results/task6-confirm-alpha.out",
-        age_days=8,
-    )
-    write_active_reference(tmp_path, "task6-confirm-*.out\n")
-
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
-
-    assert result.eligible is False
-    assert result.reason == "live reference"
-
-
-def test_markdown_emphasis_does_not_pin_an_uncited_artifact(tmp_path: Path):
-    artifact = write_file(
-        tmp_path,
-        ".scratch/arch-delta/bold-italic-artifact.md",
-        age_days=8,
-    )
-    write_active_reference(tmp_path, "This has **bold** and *italic* emphasis only.\n")
-
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
-
-    assert result.eligible is True
-    assert result.report.telemetry.pinned.count == 0
+    assert paths(result) == [f"plans/{dirname}/notes.md"]
 
 
 @pytest.mark.parametrize(
-    ("reference", "relative", "expected_eligible"),
-    [
-        (".scratch/*", ".scratch/a/b.md", True),
-        (".scratch/*", ".scratch/b.md", False),
-        (".scratch/**", ".scratch/a/b.md", False),
-    ],
-    ids=[
-        "star-stops-at-separator",
-        "star-matches-one-level",
-        "double-star-crosses-separator",
-    ],
+    "dirname", ["__pycache__", "node_modules", ".pytest_cache", ".mypy_cache", ".ruff_cache"]
 )
-def test_glob_matching_is_separator_aware(
-    tmp_path: Path,
-    reference: str,
-    relative: str,
-    expected_eligible: bool,
+def test_unambiguous_cache_directory_is_pruned_at_any_depth(no_git, tmp_path: Path, dirname: str):
+    # Regression: a prior direct-child-only version of this rule leaked
+    # hundreds of nested cache-directory files (measured: 332 .pyc files
+    # under nested __pycache__/, 572 total under nested junk dirs, on this
+    # repository's own live .scratch/). These names are UNAMBIGUOUS --
+    # nothing hand-authored ever lives inside one -- so they must be pruned
+    # regardless of nesting depth.
+    write_file(
+        tmp_path,
+        f".scratch/reviews/some-snapshot/tests/{dirname}/compiled.pyc",
+        age_days=30,
+    )
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert result == []
+
+
+@pytest.mark.parametrize("dirname", ["codex-prompts", "claude-prompts"])
+@pytest.mark.parametrize(
+    "suffix",
+    [".md", ".out", ".err", ".stdout", ".stderr", ".stdout.txt", ".stderr.txt", ".last.txt", ".events.txt"],
+)
+def test_prompt_capture_shapes_are_excluded_under_their_directory(
+    no_git, tmp_path: Path, dirname: str, suffix: str
 ):
-    artifact = write_file(tmp_path, relative, age_days=8)
-    write_active_reference(tmp_path, f"evidence: {reference}\n")
+    write_file(tmp_path, f".scratch/{dirname}/task-abc{suffix}", age_days=30)
 
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    assert result.eligible is expected_eligible
-
-
-@pytest.mark.parametrize("reference", ["?", "*", "**"])
-def test_bare_wildcard_token_pins_nothing(tmp_path: Path, reference: str):
-    artifact = write_file(tmp_path, ".scratch/x", age_days=8)
-    write_active_reference(tmp_path, f"{reference}\n")
-
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
-
-    assert result.eligible is True
-    assert result.report.telemetry.pinned.count == 0
+    assert result == []
 
 
-def test_glob_without_a_literal_segment_pins_nothing(tmp_path: Path):
-    artifact = write_file(tmp_path, ".scratch/x", age_days=8)
-    write_active_reference(tmp_path, "*/*\n")
+def test_markdown_outside_prompt_capture_directory_is_not_a_blanket_exclusion(no_git, tmp_path: Path):
+    # The prompt-capture rule must NOT become "all .md is junk": a hand-authored
+    # note elsewhere in .scratch/ is exactly what this watchdog protects.
+    write_file(tmp_path, ".scratch/notes/important-plan.md", age_days=30)
 
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    assert result.eligible is True
-    assert result.report.telemetry.pinned.count == 0
-
-
-def test_sibling_triple_reference_pins_md_out_and_err_as_one_set(tmp_path: Path):
-    paths = [
-        write_file(
-            tmp_path,
-            f".scratch/codex-prompts/task6-confirm-xyz{suffix}",
-            age_days=8,
-        )
-        for suffix in (".md", ".out", ".err")
-    ]
-    write_active_reference(
-        tmp_path,
-        "prompt `.scratch/codex-prompts/task6-confirm-xyz.md` with sibling `.out`/`.err`\n",
-    )
-
-    results = [cleanup.evaluate_eligibility(tmp_path, path, now=NOW) for path in paths]
-
-    assert [result.eligible for result in results] == [False, False, False]
-    assert all(result.reason == "live reference" for result in results)
+    assert paths(result) == ["notes/important-plan.md"]
 
 
-def test_directory_is_not_eligible_when_a_descendant_is_pinned(tmp_path: Path):
-    directory = tmp_path / ".scratch/tree"
-    write_file(tmp_path, ".scratch/tree/free.out", age_days=8)
-    write_file(tmp_path, ".scratch/tree/pinned.out", age_days=8)
-    write_active_reference(tmp_path, ".scratch/tree/pinned.out\n")
-
-    result = cleanup.evaluate_eligibility(tmp_path, directory, now=NOW)
-
-    assert result.eligible is False
-    assert result.report.telemetry.eligible.count == 1
-    assert result.report.telemetry.pinned.count == 1
-
-
-def test_unreadable_reference_file_fails_closed_for_every_artifact(tmp_path: Path, monkeypatch):
-    artifact = write_file(tmp_path, ".scratch/free.out", age_days=8)
-    unreadable = write_active_reference(tmp_path, "unrelated text\n", name="unreadable.md")
-    real_read_text = Path.read_text
-
-    def injected_read_text(self, *args, **kwargs):
-        if self == unreadable:
-            raise PermissionError("injected unreadable reference")
-        return real_read_text(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", injected_read_text)
-
-    report = cleanup.run_sweep(tmp_path, now=NOW)
-
-    assert artifact.exists()
-    assert report.telemetry.eligible.count == 0
-    assert report.telemetry.blocked.count == 1
-    assert report.errors and "injected unreadable reference" in report.errors[0]
-
-
-def test_archived_work_item_citation_is_not_live(tmp_path: Path):
-    artifact = write_file(tmp_path, ".scratch/archive-only.out", age_days=8)
+def test_self_report_basename_never_flags_itself(no_git, tmp_path: Path):
     write_file(
         tmp_path,
-        "work-items/archive/2026-07/old-item/status.md",
-        age_days=0,
-        text=".scratch/archive-only.out\n",
+        f".scratch/{cleanup.DEFAULT_JUNK_DENYLIST.self_report_basename}",
+        age_days=30,
     )
 
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    assert result.eligible is True
-
-
-def test_report_citation_expires_at_reference_liveness_ceiling(tmp_path: Path):
-    artifact = write_file(tmp_path, ".scratch/report-only.out", age_days=8)
-    write_file(
-        tmp_path,
-        ".reports/2026-04/old-report.md",
-        age_days=90,
-        text=".scratch/report-only.out\n",
-    )
-
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
-
-    assert result.eligible is True
+    assert result == []
 
 
-def test_artifact_over_90_days_is_eligible_despite_live_reference(tmp_path: Path):
-    artifact = write_file(tmp_path, ".scratch/hard-ceiling.out", age_days=91)
-    write_active_reference(tmp_path, ".scratch/hard-ceiling.out\n")
+def test_denylist_is_configurable_not_hardcoded(no_git, tmp_path: Path):
+    write_file(tmp_path, ".scratch/data.custom", age_days=30)
+    custom = cleanup.JunkDenylist(extensions=frozenset({".custom"}))
 
-    result = cleanup.evaluate_eligibility(tmp_path, artifact, now=NOW)
+    default_result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+    custom_result = cleanup.scan_valuables(tmp_path / ".scratch", denylist=custom, now=NOW)
 
-    assert result.eligible is True
-    assert "hard ceiling" in result.reason
-    assert result.report.telemetry.pinned_set_size == 1
-
-
-def test_work_item_staleness_report_uses_newest_file_mtime(tmp_path: Path):
-    write_file(tmp_path, ".scratch/young.out", age_days=1)
-    write_file(tmp_path, "work-items/active/stale/status.md", age_days=20)
-    write_file(tmp_path, "work-items/active/recent/status.md", age_days=20)
-    write_file(tmp_path, "work-items/active/recent/notes.md", age_days=2)
-
-    report = cleanup.build_sweep_plan(tmp_path, now=NOW)
-
-    assert report.stale_work_items == [Path("work-items/active/stale")]
+    assert paths(default_result) == ["data.custom"]
+    assert custom_result == []
 
 
-def test_telemetry_reports_counts_volumes_pinned_set_and_age_histogram(tmp_path: Path):
-    write_file(tmp_path, ".scratch/eligible.out", age_days=8, text="1234")
-    write_file(tmp_path, ".scratch/pinned.out", age_days=8, text="12345")
-    write_file(tmp_path, ".scratch/young.out", age_days=1, text="123456")
-    write_active_reference(tmp_path, ".scratch/pinned.out\n")
-
-    report = cleanup.build_sweep_plan(tmp_path, now=NOW)
-
-    assert (report.telemetry.eligible.count, report.telemetry.eligible.bytes) == (1, 4)
-    assert (report.telemetry.pinned.count, report.telemetry.pinned.bytes) == (1, 5)
-    assert (report.telemetry.blocked.count, report.telemetry.blocked.bytes) == (1, 6)
-    assert report.telemetry.pinned_set_size == 1
-    assert report.telemetry.age_histogram[">7-14d"].count == 2
-    assert report.telemetry.age_histogram["0-7d"].count == 1
+# ---------------------------------------------------------------------------
+# Non-empty filter
+# ---------------------------------------------------------------------------
 
 
-def test_symlink_is_pruned_from_sweep_when_supported(tmp_path: Path):
-    outside = write_file(tmp_path, "outside.out", age_days=100)
-    link = tmp_path / ".scratch/link.out"
-    link.parent.mkdir(parents=True)
+def test_empty_old_file_is_never_flagged(no_git, tmp_path: Path):
+    write_file(tmp_path, ".scratch/empty.md", age_days=30, text="")
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert result == []
+
+
+def test_nonempty_old_file_is_flagged(no_git, tmp_path: Path):
+    write_file(tmp_path, ".scratch/data.md", age_days=30, text="valuable content")
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert paths(result) == ["data.md"]
+    assert result[0]["size"] == len("valuable content")
+
+
+# ---------------------------------------------------------------------------
+# Baseline behavior / result shape / walker safety
+# ---------------------------------------------------------------------------
+
+
+def test_missing_scratch_dir_returns_empty_list(tmp_path: Path):
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert result == []
+
+
+def test_result_entries_have_the_documented_shape(no_git, tmp_path: Path):
+    write_file(tmp_path, ".scratch/data.md", age_days=10, text="hello")
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert len(result) == 1
+    entry = result[0]
+    assert set(entry) == {"path", "age_days", "size"}
+    assert isinstance(entry["path"], str)
+    assert isinstance(entry["age_days"], float)
+    assert isinstance(entry["size"], int)
+    assert entry["age_days"] == pytest.approx(10.0, abs=0.01)
+    assert entry["size"] == 5
+
+
+def test_nested_valuable_uses_scratch_relative_posix_path(no_git, tmp_path: Path):
+    write_file(tmp_path, ".scratch/deep/nested/dir/data.md", age_days=30)
+
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+
+    assert paths(result) == ["deep/nested/dir/data.md"]
+
+
+def test_symlink_is_never_followed_or_flagged(no_git, tmp_path: Path):
+    outside = write_file(tmp_path, "outside/target.md", age_days=100)
+    link = tmp_path / ".scratch" / "link.md"
+    link.parent.mkdir(parents=True, exist_ok=True)
     try:
         link.symlink_to(outside)
     except (OSError, NotImplementedError):
         pytest.skip("symlink creation is unavailable on this host")
 
-    report = cleanup.run_sweep(tmp_path, apply=True, now=NOW)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    assert link.exists()
+    assert result == []
     assert outside.exists()
-    assert report.telemetry.eligible.count == 0
-    assert any("pruned link/reparse point" in message for message in report.messages)
 
 
-def test_quarantine_subtree_is_pruned_without_enumerating_it(tmp_path: Path, monkeypatch):
-    write_file(tmp_path, ".scratch/live-scope.out", age_days=8)
-    trash = tmp_path / ".scratch/_trash"
-    trash.mkdir(parents=True)
-    real_scandir = cleanup.os.scandir
+def test_junction_is_never_followed_or_flagged(no_git, tmp_path: Path):
+    """Windows-specific regression: `entry.is_symlink()` alone returns False
+    for an NTFS directory junction, so a walker relying on it alone would
+    descend into the junction and enumerate files entirely outside
+    `.scratch/`. `_is_link_or_reparse` must catch this too."""
 
-    def guarded_scandir(path):
-        if Path(path) == trash:
-            raise AssertionError("sweep entered excluded quarantine subtree")
-        return real_scandir(path)
+    outside_target = write_file(tmp_path, "outside/target.md", age_days=100)
+    junction = tmp_path / ".scratch" / "junction-dir"
+    junction.parent.mkdir(parents=True, exist_ok=True)
+    if not _create_junction(junction, outside_target.parent):
+        pytest.skip("junction creation is unavailable on this host")
 
-    monkeypatch.setattr(cleanup.os, "scandir", guarded_scandir)
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    report = cleanup.run_sweep(tmp_path, now=NOW)
+    assert result == []
+    assert outside_target.exists()
 
-    assert report.telemetry.eligible.count == 1
+
+# ---------------------------------------------------------------------------
+# Zero-mutation guarantee (both predicate paths, including the git object store)
+# ---------------------------------------------------------------------------
 
 
-def test_eligible_json_cli_uses_exit_0_1_and_2_with_error_schema(
-    tmp_path: Path, monkeypatch, capsys
-):
-    monkeypatch.setattr(cleanup, "_utc_now", lambda: NOW)
-    old = write_file(tmp_path, ".scratch/old.out", age_days=8)
-    young = write_file(tmp_path, ".scratch/young.out", age_days=1)
+def test_scan_never_mutates_the_tree_in_fallback_mode(no_git, tmp_path: Path):
+    """Snapshot a nontrivial mixed tree, run the scan (twice, including once
+    via the CLI), and assert the tree is byte-identical afterwards -- the
+    scan must not create, modify, or delete anything, including its own
+    directory listing order or mtimes."""
 
-    eligible_code = cleanup.main(
-        ["eligible", "--path", str(old), "--json", "--root", str(tmp_path)]
+    write_file(tmp_path, ".scratch/valuable/plan.md", age_days=30, text="keep me")
+    write_file(tmp_path, ".scratch/valuable/fresh.md", age_days=1, text="too young")
+    write_file(tmp_path, ".scratch/noise.tmp", age_days=30)
+    write_file(tmp_path, ".scratch/noise.log", age_days=30)
+    write_file(tmp_path, ".scratch/__pycache__/cached.pyc", age_days=30)
+    write_file(tmp_path, ".scratch/codex-prompts/run1.md", age_days=30)
+    write_file(tmp_path, ".scratch/codex-prompts/run1.out", age_days=30)
+    write_file(tmp_path, ".scratch/empty.md", age_days=30, text="")
+    outside = write_file(tmp_path, "outside/target.md", age_days=100)
+    link = tmp_path / ".scratch" / "link.md"
+    try:
+        link.symlink_to(outside)
+        has_symlink = True
+    except (OSError, NotImplementedError):
+        has_symlink = False
+
+    before = _snapshot(tmp_path)
+
+    result_one = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+    assert paths(result_one) == ["valuable/plan.md"]
+
+    result_two = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
+    assert result_two == result_one
+
+    exit_code = cleanup.main(["--root", str(tmp_path)])
+    assert exit_code == 0
+
+    after = _snapshot(tmp_path)
+    assert after == before, "scan_valuables (or main()) mutated the tree"
+    if has_symlink:
+        assert link.is_symlink()
+
+
+def test_scan_never_mutates_the_tree_or_git_object_store_in_git_mode(tmp_path: Path):
+    """The git-uniqueness path runs two git subprocesses; both must be
+    provably read-only, including the `.git/objects` store itself (a
+    `git hash-object -w` or any write there would be a real, if subtle,
+    mutation this module must never perform)."""
+
+    _init_repo(tmp_path)
+    _commit_file(tmp_path, "tracked.md", "tracked content")
+    write_file(tmp_path, ".scratch/unique.md", age_days=1, text="unique content, never committed")
+    write_file(tmp_path, ".scratch/recoverable.md", age_days=1, text="tracked content")
+
+    before = _snapshot(tmp_path)
+    objects_before = sorted(
+        str(p.relative_to(tmp_path)) for p in (tmp_path / ".git" / "objects").rglob("*") if p.is_file()
     )
-    eligible_output = json.loads(capsys.readouterr().out)
-    assert eligible_code == 0
-    assert eligible_output["eligible"] is True
-    assert set(eligible_output["telemetry"]) == {
-        "eligible",
-        "pinned",
-        "blocked",
-        "pinnedSetSize",
-        "ageHistogram",
-    }
 
-    ineligible_code = cleanup.main(
-        ["eligible", "--path", str(young), "--json", "--root", str(tmp_path)]
-    )
-    ineligible_output = json.loads(capsys.readouterr().out)
-    assert ineligible_code == 1
-    assert ineligible_output["eligible"] is False
+    result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    error_code = cleanup.main(
-        ["eligible", "--path", ".scratch/missing.out", "--json", "--root", str(tmp_path)]
+    exit_code = cleanup.main(["--root", str(tmp_path)])
+    assert exit_code == 0
+
+    after = _snapshot(tmp_path)
+    objects_after = sorted(
+        str(p.relative_to(tmp_path)) for p in (tmp_path / ".git" / "objects").rglob("*") if p.is_file()
     )
+    # Mutation checks FIRST: if a future change ever writes to the object
+    # store (e.g. a stray `-w`), this must surface as the specific "wrote to
+    # git object store" failure, not get masked by a generic wrong-result
+    # assertion failing first.
+    assert objects_after == objects_before, "scan_valuables (or main()) wrote to the git object store"
+    assert after == before, "scan_valuables (or main()) mutated the working tree"
+    assert paths(result) == ["unique.md"]
+
+
+def test_json_cli_also_never_mutates_the_tree(no_git, tmp_path: Path, capsys):
+    write_file(tmp_path, ".scratch/data.md", age_days=30, text="valuable")
+    before = _snapshot(tmp_path)
+
+    exit_code = cleanup.main(["--root", str(tmp_path), "--json"])
     captured = capsys.readouterr()
-    error_output = json.loads(captured.err)
-    assert error_code == 2
-    assert captured.out == ""
-    assert error_output["ok"] is False
-    assert error_output["error"]["code"] == "cleanup_error"
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert paths(payload["valuables"]) == ["data.md"]
+    assert _snapshot(tmp_path) == before
+
+
+# ---------------------------------------------------------------------------
+# CLI report surface (debugging only -- never the "automatic" mechanism)
+# ---------------------------------------------------------------------------
+
+
+def test_cli_report_lists_valuables_and_returns_zero(no_git, tmp_path: Path, capsys):
+    write_file(tmp_path, ".scratch/data.md", age_days=30, text="valuable")
+
+    exit_code = cleanup.main(["--root", str(tmp_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "data.md" in captured.out
+    assert "watchdog" in captured.out
+
+
+def test_cli_report_lists_longest_lingering_first(no_git, tmp_path: Path, capsys):
+    # The operator's stated risk is data that has lingered LONG, not the
+    # current session's own recent churn -- the report must lead with the
+    # OLDEST candidate, not the newest.
+    write_file(tmp_path, ".scratch/newest.md", age_days=8, text="new")
+    write_file(tmp_path, ".scratch/oldest.md", age_days=90, text="old")
+
+    exit_code = cleanup.main(["--root", str(tmp_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "longest-lingering first" in captured.out
+    oldest_index = captured.out.index("oldest.md")
+    newest_index = captured.out.index("newest.md")
+    assert oldest_index < newest_index, "longest-lingering (oldest) entry must print first"
+
+
+def test_cli_report_says_none_found_when_scratch_is_clean(no_git, tmp_path: Path, capsys):
+    write_file(tmp_path, ".scratch/fresh.md", age_days=1)
+
+    exit_code = cleanup.main(["--root", str(tmp_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "no valuables" in captured.out
+
+
+def test_cli_fallback_age_days_flag_overrides_default_threshold(no_git, tmp_path: Path, capsys):
+    write_file(tmp_path, ".scratch/data.md", age_days=3)
+
+    exit_code = cleanup.main(["--root", str(tmp_path), "--fallback-age-days", "2", "--json"])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert paths(payload["valuables"]) == ["data.md"]
+
+
+if __name__ == "__main__":
+    raise SystemExit(pytest.main([__file__]))

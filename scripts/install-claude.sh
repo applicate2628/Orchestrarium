@@ -913,6 +913,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
         repository_orientation_script_target="$TARGET/agents/hooks/check-repository-orientation.ps1"
         reminder_script_target="$TARGET/agents/scripts/mcp-usage-reminder.ps1"
         agents_mode_reminder_script_target="$TARGET/agents/scripts/agents-mode-reminder.ps1"
+        scratch_valuables_script_target="$TARGET/agents/scripts/check-scratch-valuables.ps1"
         ;;
       *)
         hook_host_os="posix"
@@ -926,6 +927,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
         repository_orientation_script_target="$TARGET/agents/hooks/check-repository-orientation.sh"
         reminder_script_target="$TARGET/agents/scripts/mcp-usage-reminder.sh"
         agents_mode_reminder_script_target="$TARGET/agents/scripts/agents-mode-reminder.sh"
+        scratch_valuables_script_target="$TARGET/agents/scripts/check-scratch-valuables.sh"
         ;;
     esac
     echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os)..."
@@ -1004,6 +1006,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --hook-event SessionStart \
       --script-marker agents-mode-reminder \
       --script-path "$agents_mode_reminder_script_target"
+    echo "  Installing scratch-valuables watchdog SessionStart hook (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --hook-event SessionStart \
+      --script-marker check-scratch-valuables \
+      --script-path "$scratch_valuables_script_target"
   fi
 fi
 

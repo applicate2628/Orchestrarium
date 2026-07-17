@@ -103,6 +103,15 @@ AGENTS_MODE_REMINDERS = (
     (CODEX_SCRIPTS / "agents-mode-reminder.ps1", ".agents", "codex"),
 )
 
+# The conditional scratch-valuables watchdog reminder, in BOTH install trees
+# (2 files). Reads `cwd` from the stdin JSON envelope (not the process cwd),
+# so it is driven via stdin like the structural/audit hook wrappers rather
+# than the cwd= kwarg the agents-mode-reminder tests use.
+SCRATCH_VALUABLES_WRAPPERS = (
+    CLAUDE_SCRIPTS / "check-scratch-valuables.ps1",
+    CODEX_SCRIPTS / "check-scratch-valuables.ps1",
+)
+
 MCP_REMINDER_CONTEXT = "\n".join((
     "[MCP / tools reminder - re-shown at session start and after every compaction]",
     "MCP servers may be connected in this environment. For codebase, architecture, API/docs, search, browser, debugger, profiler, or repository-understanding tasks, make MCP/tool-discovery an explicit checkpoint before falling back to ad-hoc shell reads.",
@@ -334,6 +343,72 @@ class TestAgentsModeReminderWrapper(unittest.TestCase):
                         self.assertEqual(p.returncode, 0, p.stderr)
                         self.assertEqual(p.stdout.strip(), "",
                                          f"no-file/unresolved must be silent; got {p.stdout!r}")
+
+
+@unittest.skipIf(not INTERPRETERS, "no PowerShell host (pwsh/powershell) on PATH")
+class TestScratchValuablesWrapper(unittest.TestCase):
+    """The scratch-valuables SessionStart wrapper is CONDITIONAL, like
+    agents-mode-reminder, but on `.scratch/` content instead of
+    delegationMode: silent when there is nothing to flag, and emits a
+    hookSpecificOutput context block when there is. It reads `cwd` from the
+    stdin JSON envelope (not the process cwd), so it is driven via stdin
+    rather than the `cwd=` kwarg the agents-mode-reminder tests use.
+
+    A bare `git init` (no commits) is used to make the git-uniqueness
+    predicate deterministic regardless of the test host's ambient state: an
+    empty object database reports every blob as missing, so any non-junk,
+    non-empty file is a candidate independent of its age -- this locks in
+    the junction/reparse fix and the git-mode code path as an actual
+    Windows PowerShell entry-point regression test, not just a .py unit
+    test."""
+
+    def _init_git_repo(self, root: Path) -> None:
+        subprocess.run(["git", "init", "-q", str(root)], check=True, capture_output=True)
+
+    def test_emits_context_when_a_unique_valuable_is_present(self) -> None:
+        for interp in INTERPRETERS:
+            for wrapper in SCRATCH_VALUABLES_WRAPPERS:
+                self.assertTrue(wrapper.is_file(), f"missing wrapper: {wrapper}")
+                with self.subTest(interp=Path(interp).stem, wrapper=str(wrapper.relative_to(REPO_ROOT))):
+                    with tempfile.TemporaryDirectory() as td:
+                        root = Path(td)
+                        self._init_git_repo(root)
+                        scratch = root / ".scratch"
+                        scratch.mkdir()
+                        (scratch / "unique.md").write_text(
+                            "genuinely unique content, never committed", encoding="utf-8"
+                        )
+                        envelope = json.dumps({"cwd": str(root)})
+                        p = _run_ps1(interp, wrapper, stdin=envelope)
+                        self.assertEqual(p.returncode, 0, p.stderr)
+                        context = _decode_sessionstart_context(p.stdout)
+                        self.assertIn("scratch watchdog", context)
+                        self.assertIn("unique.md", context)
+
+    def test_silent_when_scratch_has_no_candidates(self) -> None:
+        for interp in INTERPRETERS:
+            for wrapper in SCRATCH_VALUABLES_WRAPPERS:
+                self.assertTrue(wrapper.is_file(), f"missing wrapper: {wrapper}")
+                with self.subTest(interp=Path(interp).stem, wrapper=str(wrapper.relative_to(REPO_ROOT))):
+                    with tempfile.TemporaryDirectory() as td:
+                        root = Path(td)
+                        (root / ".scratch").mkdir()
+                        envelope = json.dumps({"cwd": str(root)})
+                        p = _run_ps1(interp, wrapper, stdin=envelope)
+                        self.assertEqual(p.returncode, 0, p.stderr)
+                        self.assertEqual(p.stdout.strip(), "",
+                                         f"clean .scratch/ must be silent; got {p.stdout!r}")
+
+    def test_silent_when_no_scratch_dir_exists(self) -> None:
+        for interp in INTERPRETERS:
+            for wrapper in SCRATCH_VALUABLES_WRAPPERS:
+                with self.subTest(interp=Path(interp).stem, wrapper=str(wrapper.relative_to(REPO_ROOT))):
+                    with tempfile.TemporaryDirectory() as td:
+                        envelope = json.dumps({"cwd": td})
+                        p = _run_ps1(interp, wrapper, stdin=envelope)
+                        self.assertEqual(p.returncode, 0, p.stderr)
+                        self.assertEqual(p.stdout.strip(), "",
+                                         f"missing .scratch/ must be silent; got {p.stdout!r}")
 
 
 @unittest.skipIf(not INTERPRETERS or GIT is None, "needs a PowerShell host and git on PATH")

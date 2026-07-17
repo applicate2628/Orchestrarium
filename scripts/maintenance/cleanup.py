@@ -1,19 +1,67 @@
 #!/usr/bin/env python3
-"""Repository-local janitor engine.
+"""Repository-local `.scratch/` valuables watchdog -- READ-ONLY.
 
-Sweep transitions are deliberately journal-free:
+REFRAME (2026-07-17). The operator reset this tool's purpose and this rewrite
+DELETES the entire prior mutation engine (sweep / quarantine / restore / purge /
+`.hold` / manifest / digest machinery, v1-v20 of the janitor):
 
-=================  =================  ========================================
-source             destination        result
-=================  =================  ========================================
-present            absent             one same-volume ``os.rename``
-present            present            destination wins; skip and report
-absent             present            already quarantined; no action
-absent             absent             already purged/externally wiped
-=================  =================  ========================================
+    "mne ne nuzhen skript dlya udaleniya scratch, ya mogu eto sdelat sam v
+    lyuboy moment. mne nado chtoby v scratch sledili chtoby ne khranilis dolgo
+    vazhnye poleznye dannye, kotorye ya mogu sluchayno zatert." + "za etim
+    dolzhen sledit agent sam" (no user-run command; the agent watches).
 
-The quarantine layout itself preserves recovery identity.  No file is renamed
-inside quarantine and no live-tree sweep ever hard-deletes an artifact.
+    English: "I don't need a script to delete scratch -- I can do that myself
+    any time. I need `.scratch/` WATCHED so that valuable data doesn't linger
+    there long enough for me to accidentally overwrite it." + "the AGENT must
+    watch this on its own."
+
+See `work-items/active/2026-07-16-cleanup-routine/design-watchdog-reframe.md`
+for the locked design this rewrite implements. Do NOT resurrect any
+move/delete/quarantine/hold/restore path here -- that surface is exactly where
+every prior data-loss round in this file's history lived.
+
+PREDICATE REDESIGN (2026-07-17, adversarial-review follow-up). The first cut
+of this watchdog gated purely on age (>7 days). Live-tree evidence killed that
+gate: a random sample of flagged files on this repository's own `.scratch/`
+showed 58 of 59 resolvable files were BYTE-IDENTICAL to a git blob already in
+this repository's object history -- i.e. recoverable, not actually at risk of
+loss, and the detector's real-world precision on age alone was near zero
+(8631 flagged, almost all noise). The PRIMARY predicate is now git-content-
+uniqueness: a file is a candidate only if its exact bytes do not already exist
+as a blob anywhere in the local repository's object database (any commit, any
+branch -- content git can already recover, regardless of whether this
+particular copy was ever tracked). Age is DEMOTED from a gate to a severity /
+sort key (newest-modified first). The junk denylist and the non-empty filter
+remain SECONDARY filters on top of uniqueness. When `.scratch/` is not inside
+a git repository, git is unavailable, or any git call fails, this fails OPEN
+to the original age-gated behavior (see `scan_valuables`'s docstring) rather
+than silently returning nothing.
+
+The whole module is two functions:
+
+  * `scan_valuables()` -- pure, read-only. Walks a `.scratch/` tree and
+    returns every candidate valuable file (git-unique when git is available,
+    else age-gated). It NEVER writes, moves, deletes, renames, or creates
+    anything, on any platform, under any code path -- the filesystem/process
+    calls anywhere in its call graph are `os.scandir`, `DirEntry.is_symlink` /
+    `is_dir` / `is_file` / `.stat`, `os.path.isjunction`, `Path.stat`, and two
+    READ-ONLY git subprocesses (`git hash-object` WITHOUT `-w`, and
+    `git cat-file --batch-check`) -- neither writes to the object database.
+  * `main()` -- a thin CLI that prints the scan as a human report (or JSON),
+    for a developer to run by hand from this repository, purely for
+    debugging. It performs no mutation either.
+
+WHY THIS STAYS REPOSITORY-LOCAL, AND WHERE THE "AGENT WATCHES AUTOMATICALLY"
+PIECE ACTUALLY LIVES. The mechanism the operator asked for -- the agent
+watching without being told to run anything -- is the SessionStart hook at
+`scripts/universal-hooks/scripts/check-scratch-valuables.py`. That hook is
+installed into arbitrary target repositories by the pack installer (the same
+way as `mcp-usage-reminder`), so it cannot import this module: this file
+stays repository-local to Orchestrarium's own working tree (consistent with
+the prior engine, which was never installed into provider packs either). The
+hook therefore carries its own small, deliberately self-contained mirror of
+the scan below, INCLUDING the git-uniqueness predicate. If the algorithm
+changes here, update both -- each file's docstring points at the other.
 """
 
 from __future__ import annotations
@@ -21,122 +69,182 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
-import stat
+import stat as stat_module
+import subprocess
 import sys
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Iterable, Iterator, Sequence
+from typing import Iterator, Sequence
 
 
-SWEEP_DAYS = 7
-PURGE_DAYS = 7
-REFERENCE_LIVENESS_DAYS = 90
-STALE_WORK_ITEM_DAYS = 14
+SCRATCH_DIRNAME = ".scratch"
+
+# Fallback-only now (see `scan_valuables`): used purely when git is
+# unavailable for this scan. Overridable per call via
+# `scan_valuables(..., fallback_age_days=...)` or `--fallback-age-days` on
+# the CLI.
+VALUABLE_AGE_THRESHOLD_DAYS = 7
+
 SECONDS_PER_DAY = 24 * 60 * 60
-TRASH_RELATIVE = Path(".scratch") / "_trash"
-LOCK_NAME = ".janitor.lock"
-README_NAME = "README.md"
-TRASH_README = """# Janitor quarantine
 
-This directory is a wipeable zone. Everything stored here may be deleted at any
-time. Do not keep important or long-lived data here.
-"""
-REPARSE_POINT = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x0400)
-AGE_BUCKETS = ("0-7d", ">7-14d", ">14-30d", ">30-90d", ">90d")
-GLOB_TOKEN_RE = re.compile(r"[^\s\"'`<>]+")
+# `os.path.isjunction` is 3.12+; on older interpreters fall back to the raw
+# FILE_ATTRIBUTE_REPARSE_POINT stat bit (see `_is_link_or_reparse`).
+_HAS_ISJUNCTION = hasattr(os.path, "isjunction")
+_REPARSE_POINT_ATTR = getattr(stat_module, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
 
-
-class CleanupError(RuntimeError):
-    """Base class for errors that must fail closed."""
-
-
-class ReferenceScanError(CleanupError):
-    """A reference source could not be enumerated or read."""
-
-
-class JanitorLockError(CleanupError):
-    """Another janitor owns the exclusive run lock."""
+_GIT_TIMEOUT_SECONDS = 60
 
 
 @dataclass(frozen=True)
-class Artifact:
-    path: Path
-    relative_path: Path
-    size: int
-    mtime: float
-    age_days: float
+class JunkDenylist:
+    """The watchdog's SECONDARY junk classification, applied on top of the
+    primary git-uniqueness predicate (see the module docstring): a
+    unique-but-junk file (a timestamped log, a capture artifact) is still
+    excluded. Bias to OVER-warn (per the locked design) -- every list here
+    stays NARROW and evidence-based (only patterns actually
+    routine/transient in this repository's own `.scratch/` usage). A
+    denylist entry is a decision to NEVER surface a match, so an over-broad
+    entry silently hides real data from the operator; when in doubt, leave a
+    pattern OUT and let the file be flagged.
 
+    extensions:
+        File suffixes (casefold, with the leading dot) that are always junk,
+        wherever they sit -- routine tool stdout/stderr/log/temp churn plus
+        common editor swap files (`.swp`/`.swo`). DELIBERATE SPEC CHOICE,
+        stated here rather than left implicit: `.log`/`.out`/`.err` are a
+        BLANKET extension rule (any file with one of these suffixes is junk
+        regardless of location), which trades away some of the "bias to
+        over-warn" principle -- a hand-authored `.log` would be silently
+        excluded. That tradeoff is the locked design's own choice (see
+        `design-watchdog-reframe.md`), not an oversight; narrowing it to a
+        location-scoped rule is a possible future revision, not this one.
+    junk_basenames:
+        Exact file basenames (casefold) that are always junk wherever they
+        sit -- OS/editor litter that carries no user-authored content
+        (`Thumbs.db`, `.DS_Store`).
+    unambiguous_cache_directory_names:
+        Directory basenames (casefold) whose entire subtree is junk and is
+        not even walked, pruned at ANY depth -- these names are never
+        ambiguous with a hand-authored folder (nothing hand-authored ever
+        lives inside `__pycache__`, `node_modules`, `.pytest_cache`,
+        `.mypy_cache`, or `.ruff_cache`, no matter how deep they sit under
+        `.scratch/`). A prior direct-child-only version of this rule leaked
+        hundreds of nested `__pycache__/*.pyc` files from review-snapshot
+        subtrees straight into the flagged set -- machine artifacts, not
+        data to rescue.
+    directory_names:
+        Directory basenames (casefold) whose entire subtree is junk and is
+        not even walked, but ONLY when a DIRECT child of `.scratch/` --
+        `build`/`dist`/`.cache` COULD coincidentally name a hand-authored
+        folder (e.g. `.scratch/plans/build/notes.md`, where `build` is
+        nested two levels down), so a deeper match is walked normally and
+        NOT pruned. This is the ambiguous half of directory pruning; see
+        `unambiguous_cache_directory_names` for the any-depth half.
+    prompt_capture_dirnames / prompt_capture_extensions:
+        A narrower rule for one specific known-transient shape: an
+        external-CLI dispatch's captured prompt plus its stdout/stderr,
+        conventionally written as a `<stem>.md` / `<stem>.out` / `<stem>.err`
+        triple (or an older `<stem>.stdout` / `.stderr` / `.stdout.txt` /
+        `.stderr.txt` / `.last.txt` / `.events.txt` capture shape also seen
+        in this repository's history) under a directory literally named
+        `codex-prompts` or `claude-prompts`. Deliberately NOT a blanket
+        "`.md` is junk" rule -- a `.md` note anywhere else in `.scratch/` is
+        exactly the kind of hand-authored data this watchdog exists to
+        protect. `prompt_capture_extensions` entries are matched by
+        `str.endswith`, not `Path.suffix`, so the two-part suffixes above
+        (`.stdout.txt` etc.) match correctly.
+    self_report_basename:
+        This watchdog writes nothing today (see the module docstring), but a
+        future report persisted under `.scratch/` must never flag itself as
+        a rescue candidate. Reserved now so that addition never needs a
+        second denylist edit.
+    """
 
-@dataclass
-class Action:
-    path: Path
-    relative_path: Path
-    size: int
-    age_days: float
-    classification: str
-    reason: str
-    destination: Path | None = None
-    outcome: str = "pending"
-
-
-@dataclass
-class Bucket:
-    count: int = 0
-    bytes: int = 0
-
-
-@dataclass
-class Telemetry:
-    eligible: Bucket = field(default_factory=Bucket)
-    pinned: Bucket = field(default_factory=Bucket)
-    blocked: Bucket = field(default_factory=Bucket)
-    pinned_set_size: int = 0
-    age_histogram: dict[str, Bucket] = field(
-        default_factory=lambda: {name: Bucket() for name in AGE_BUCKETS}
+    extensions: frozenset[str] = field(
+        default_factory=lambda: frozenset({".tmp", ".log", ".out", ".err", ".swp", ".swo"})
     )
+    junk_basenames: frozenset[str] = field(
+        default_factory=lambda: frozenset({"thumbs.db", ".ds_store"})
+    )
+    unambiguous_cache_directory_names: frozenset[str] = field(
+        default_factory=lambda: frozenset(
+            {
+                "__pycache__",
+                "node_modules",
+                ".pytest_cache",
+                ".mypy_cache",
+                ".ruff_cache",
+            }
+        )
+    )
+    directory_names: frozenset[str] = field(
+        default_factory=lambda: frozenset({".cache", "dist", "build"})
+    )
+    prompt_capture_dirnames: frozenset[str] = field(
+        default_factory=lambda: frozenset({"codex-prompts", "claude-prompts"})
+    )
+    prompt_capture_extensions: frozenset[str] = field(
+        default_factory=lambda: frozenset(
+            {
+                ".md",
+                ".out",
+                ".err",
+                ".stdout",
+                ".stderr",
+                ".stdout.txt",
+                ".stderr.txt",
+                ".last.txt",
+                ".events.txt",
+            }
+        )
+    )
+    self_report_basename: str = ".scratch-valuables-report.json"
 
-    def add_classification(self, classification: str, size: int) -> None:
-        bucket = getattr(self, classification)
-        bucket.count += 1
-        bucket.bytes += size
+    def is_unambiguous_cache_directory(self, name: str) -> bool:
+        return name.casefold() in {d.casefold() for d in self.unambiguous_cache_directory_names}
 
-    def add_age(self, age_days: float, size: int) -> None:
-        if age_days <= 7:
-            name = "0-7d"
-        elif age_days <= 14:
-            name = ">7-14d"
-        elif age_days <= 30:
-            name = ">14-30d"
-        elif age_days <= 90:
-            name = ">30-90d"
-        else:
-            name = ">90d"
-        self.age_histogram[name].count += 1
-        self.age_histogram[name].bytes += size
+    def is_junk_directory(self, name: str) -> bool:
+        return name.casefold() in {d.casefold() for d in self.directory_names}
+
+    def is_junk_file(self, relative_path: Path) -> bool:
+        if relative_path.name == self.self_report_basename:
+            return True
+        name_casefold = relative_path.name.casefold()
+        if name_casefold in self.junk_basenames:
+            return True
+        suffix = relative_path.suffix.casefold()
+        if suffix in self.extensions:
+            return True
+        if any(
+            name_casefold.endswith(ext.casefold()) for ext in self.prompt_capture_extensions
+        ) and any(
+            part.casefold() in {d.casefold() for d in self.prompt_capture_dirnames}
+            for part in relative_path.parts[:-1]
+        ):
+            return True
+        return False
 
 
-@dataclass
-class Report:
-    action: str
-    apply: bool
-    actions: list[Action] = field(default_factory=list)
-    telemetry: Telemetry = field(default_factory=Telemetry)
-    messages: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
-    stale_work_items: list[Path] = field(default_factory=list)
-    run_dir: Path | None = None
+DEFAULT_JUNK_DENYLIST = JunkDenylist()
 
 
 @dataclass(frozen=True)
-class EligibilityResult:
-    eligible: bool
-    path: Path
-    reason: str
-    report: Report
+class Valuable:
+    """One flagged file: non-empty, non-junk, and (when git is available)
+    git-content-unique; else age-gated in the fallback path."""
+
+    relative_path: Path
+    age_days: float
+    size: int
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "path": self.relative_path.as_posix(),
+            "age_days": round(self.age_days, 2),
+            "size": self.size,
+        }
 
 
 def _utc_now() -> datetime:
@@ -154,910 +262,357 @@ def _age_days(mtime: float, now: datetime) -> float:
     return max(0.0, (now.timestamp() - mtime) / SECONDS_PER_DAY)
 
 
-def _is_within(path: Path, parent: Path) -> bool:
+def _is_link_or_reparse(entry: os.DirEntry) -> bool:
+    """True for a symlink OR any other reparse point -- notably an NTFS
+    directory JUNCTION (`IO_REPARSE_TAG_MOUNT_POINT`), which is the gap this
+    check exists to close. `entry.is_symlink()` alone only recognizes
+    `IO_REPARSE_TAG_SYMLINK` and returns **False** for a junction (confirmed
+    on this platform: `os.path.isjunction()` reports `True` and
+    `DirEntry.is_symlink()` reports `False` for the identical entry), so a
+    walker that trusted `is_symlink()` alone would DESCEND into a junction
+    and enumerate files entirely outside `.scratch/` -- a direct violation of
+    this module's "reparse points are never followed" invariant, and on the
+    operator's own platform (win32).
+
+    Prefers `os.path.isjunction` (3.12+, the correct stdlib primitive for
+    this) and falls back to the raw `FILE_ATTRIBUTE_REPARSE_POINT` stat bit
+    on older interpreters -- a broader check that also happens to catch
+    every reparse tag, not just junctions, and is a harmless no-op on POSIX,
+    where the attribute is simply absent."""
+
     try:
-        path.relative_to(parent)
+        if entry.is_symlink():
+            return True
+    except OSError:
+        return True  # cannot tell -> treat as unsafe to descend/yield
+    if _HAS_ISJUNCTION:
+        try:
+            return os.path.isjunction(entry.path)
+        except OSError:
+            return True
+    try:
+        info = entry.stat(follow_symlinks=False)
+    except OSError:
         return True
-    except ValueError:
-        return False
+    return bool(getattr(info, "st_file_attributes", 0) & _REPARSE_POINT_ATTR)
 
 
-def _is_reparse(stat_result: os.stat_result) -> bool:
-    return bool(getattr(stat_result, "st_file_attributes", 0) & REPARSE_POINT)
+def _iter_candidate_files(scratch_root: Path, denylist: JunkDenylist) -> Iterator[Path]:
+    """Walk `scratch_root`, read-only. Symlinks and reparse points (including
+    NTFS junctions -- see `_is_link_or_reparse`) are never followed (a link
+    is not lingering data to rescue, and following one risks leaving
+    `.scratch/` scope) and are simply skipped. Directory pruning is two-tier
+    (see `JunkDenylist`): an UNAMBIGUOUS cache-directory name is pruned at
+    ANY depth (nothing hand-authored ever lives inside one); an ambiguous
+    name (`build`/`dist`/`.cache`) is pruned ONLY when it is a DIRECT child
+    of `scratch_root` -- a deeper match is walked normally. Yields regular
+    files only. The only filesystem calls here are `os.scandir` and the
+    `DirEntry` type-check helpers -- nothing here can write, move, or
+    delete."""
 
-
-def _is_link_or_reparse(path: Path) -> bool:
-    try:
-        result = path.lstat()
-    except OSError as exc:
-        raise CleanupError(f"cannot inspect path {path}: {exc}") from exc
-    return stat.S_ISLNK(result.st_mode) or _is_reparse(result)
-
-
-def _walk_regular_files(
-    base: Path,
-    *,
-    error_type: type[CleanupError] = CleanupError,
-    on_pruned: Callable[[Path], None] | None = None,
-    prune_dir: Callable[[Path], bool] | None = None,
-) -> Iterator[Path]:
-    """Walk without following symbolic links or Windows reparse points."""
-
-    stack = [base]
+    stack = [scratch_root]
     while stack:
         directory = stack.pop()
+        is_scratch_root = directory == scratch_root
         try:
             with os.scandir(directory) as entries:
                 ordered = sorted(entries, key=lambda entry: entry.name.casefold())
-        except OSError as exc:
-            raise error_type(f"cannot enumerate {directory}: {exc}") from exc
-
-        child_dirs: list[Path] = []
-        for entry in ordered:
-            path = Path(entry.path)
-            try:
-                info = entry.stat(follow_symlinks=False)
-                link_or_reparse = entry.is_symlink() or _is_reparse(info)
-            except OSError as exc:
-                raise error_type(f"cannot inspect {path}: {exc}") from exc
-            if link_or_reparse:
-                if on_pruned is not None:
-                    on_pruned(path)
-                continue
-            if entry.is_dir(follow_symlinks=False):
-                if prune_dir is not None and prune_dir(path):
-                    continue
-                child_dirs.append(path)
-            elif entry.is_file(follow_symlinks=False):
-                yield path
-        stack.extend(reversed(child_dirs))
-
-
-def _normalize_reference(value: str) -> str:
-    normalized = value.replace("\\", "/")
-    return normalized.casefold() if os.name == "nt" else normalized
-
-
-def _split_brace_options(body: str) -> list[str]:
-    options: list[str] = []
-    depth = 0
-    start = 0
-    for index, char in enumerate(body):
-        if char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-        elif char == "," and depth == 0:
-            options.append(body[start:index])
-            start = index + 1
-    options.append(body[start:])
-    return options
-
-
-def brace_expand(pattern: str) -> list[str]:
-    """Expand comma braces recursively; unmatched braces remain literal."""
-
-    opening = pattern.find("{")
-    if opening < 0:
-        return [pattern]
-    depth = 0
-    closing = -1
-    for index in range(opening, len(pattern)):
-        if pattern[index] == "{":
-            depth += 1
-        elif pattern[index] == "}":
-            depth -= 1
-            if depth == 0:
-                closing = index
-                break
-    if closing < 0:
-        return [pattern]
-    body = pattern[opening + 1 : closing]
-    options = _split_brace_options(body)
-    if len(options) == 1:
-        return [pattern]
-    expanded: list[str] = []
-    for option in options:
-        expanded.extend(
-            brace_expand(pattern[:opening] + option + pattern[closing + 1 :])
-        )
-    return expanded
-
-
-def _has_dotted_extension(pattern: str) -> bool:
-    filename = pattern.rsplit("/", 1)[-1]
-    return re.search(r"\.[^.*?{}]+$", filename) is not None
-
-
-def _has_literal_glob_fragment(pattern: str) -> bool:
-    return any(fragment.strip("/") for fragment in re.split(r"\*+|\?", pattern))
-
-
-def _is_glob_citation(pattern: str) -> bool:
-    return (
-        ("/" in pattern or _has_dotted_extension(pattern))
-        and _has_literal_glob_fragment(pattern)
-    )
-
-
-def _glob_patterns(text: str) -> set[str]:
-    patterns: set[str] = set()
-    for raw in GLOB_TOKEN_RE.findall(text):
-        # `candidate`, not the auth-flavored noun: the publication scanner
-        # blocks that noun under assignment as a credential marker, and this
-        # value is a lexical glob fragment, never a secret.
-        candidate = raw.lstrip(",;:()").rstrip(".,;:()")
-        if not (
-            any(char in candidate for char in "*?")
-            or ("{" in candidate and "}" in candidate)
-        ):
-            continue
-        patterns.update(
-            pattern for pattern in brace_expand(candidate) if _is_glob_citation(pattern)
-        )
-    return patterns
-
-
-def _separator_aware_glob_match(target: str, pattern: str) -> bool:
-    expression: list[str] = []
-    index = 0
-    while index < len(pattern):
-        char = pattern[index]
-        if char == "*" and index + 1 < len(pattern) and pattern[index + 1] == "*":
-            expression.append(".*")
-            index += 2
-        elif char == "*":
-            expression.append("[^/]*")
-            index += 1
-        elif char == "?":
-            expression.append("[^/]")
-            index += 1
-        else:
-            expression.append(re.escape(char))
-            index += 1
-    return re.fullmatch("".join(expression), target) is not None
-
-
-def _prompt_triple_targets(relative_path: Path) -> set[str]:
-    if relative_path.suffix.casefold() not in {".md", ".out", ".err"}:
-        return set()
-    if not any("prompt" in part.casefold() for part in relative_path.parts[:-1]):
-        return set()
-    parent = relative_path.parent
-    stem = relative_path.stem
-    targets = {stem, (parent / stem).as_posix()}
-    for suffix in (".md", ".out", ".err"):
-        targets.add(f"{stem}{suffix}")
-        targets.add((parent / f"{stem}{suffix}").as_posix())
-    return {_normalize_reference(target) for target in targets}
-
-
-def _text_references_artifact(text: str, relative_path: Path) -> bool:
-    normalized_text = _normalize_reference(text)
-    path_target = _normalize_reference(relative_path.as_posix())
-    triple_targets = _prompt_triple_targets(relative_path)
-    literal_targets = {path_target, *triple_targets}
-    if any(target and target in normalized_text for target in literal_targets):
-        return True
-    glob_targets = {
-        path_target,
-        _normalize_reference(relative_path.name),
-        *triple_targets,
-    }
-    for pattern in _glob_patterns(normalized_text):
-        if any(
-            _separator_aware_glob_match(target, pattern) for target in glob_targets
-        ):
-            return True
-    return False
-
-
-def _reference_file_is_live(path: Path, root: Path, now: datetime) -> bool:
-    relative = path.relative_to(root)
-    parts = tuple(part.casefold() for part in relative.parts)
-    if len(parts) >= 3 and parts[0] == "work-items" and parts[1] == "active":
-        return True
-    if parts and parts[0] == ".reports":
-        try:
-            age = _age_days(path.stat().st_mtime, now)
-        except OSError as exc:
-            raise ReferenceScanError(f"cannot stat reference file {path}: {exc}") from exc
-        return age < REFERENCE_LIVENESS_DAYS
-    return False
-
-
-def _read_live_reference_texts(root: Path, now: datetime) -> list[tuple[Path, str]]:
-    live: list[tuple[Path, str]] = []
-    for relative_base in (Path(".reports"), Path("work-items")):
-        base = root / relative_base
-        if not base.exists():
-            continue
-        if _is_link_or_reparse(base):
-            raise ReferenceScanError(f"reference root is a link or reparse point: {base}")
-        for path in _walk_regular_files(base, error_type=ReferenceScanError):
-            # Read every reference source so an unreadable file fails the whole scan,
-            # even when its citation would later be considered expired.
-            try:
-                text = path.read_text(encoding="utf-8")
-            except (OSError, UnicodeError) as exc:
-                raise ReferenceScanError(f"cannot read reference file {path}: {exc}") from exc
-            if _reference_file_is_live(path, root, now):
-                live.append((path, text))
-    return live
-
-
-def _collect_artifacts(
-    root: Path,
-    now: datetime,
-    selected: Path | None = None,
-    messages: list[str] | None = None,
-) -> list[Artifact]:
-    scratch = (root / ".scratch").resolve(strict=False)
-    trash = (root / TRASH_RELATIVE).resolve(strict=False)
-    if selected is None:
-        base = root / ".scratch"
-        if not base.exists():
-            return []
-    else:
-        base = selected
-
-    pruned = messages.append if messages is not None else None
-    paths: Iterable[Path]
-    if base.is_file() and not _is_link_or_reparse(base):
-        paths = (base,)
-    elif base.is_dir() and not _is_link_or_reparse(base):
-        paths = _walk_regular_files(
-            base,
-            on_pruned=(lambda path: pruned(f"pruned link/reparse point: {path}"))
-            if pruned is not None
-            else None,
-            prune_dir=lambda path: _is_within(
-                path.resolve(strict=False), trash
-            ),
-        )
-    else:
-        raise CleanupError(f"path is not a regular file or directory: {base}")
-
-    artifacts: list[Artifact] = []
-    for path in paths:
-        try:
-            resolved = path.resolve(strict=True)
-            info = path.stat()
-        except OSError as exc:
-            raise CleanupError(f"cannot inspect artifact {path}: {exc}") from exc
-        if not _is_within(resolved, scratch) or _is_within(resolved, trash):
-            continue
-        try:
-            relative = path.relative_to(root)
-        except ValueError as exc:
-            raise CleanupError(f"artifact is outside repository root: {path}") from exc
-        artifacts.append(
-            Artifact(
-                path=path,
-                relative_path=relative,
-                size=info.st_size,
-                mtime=info.st_mtime,
-                age_days=_age_days(info.st_mtime, now),
-            )
-        )
-    return sorted(artifacts, key=lambda artifact: artifact.relative_path.as_posix().casefold())
-
-
-def _stale_work_items(root: Path, now: datetime) -> list[Path]:
-    active = root / "work-items" / "active"
-    if not active.is_dir() or _is_link_or_reparse(active):
-        return []
-    stale: list[Path] = []
-    for item in sorted(active.iterdir(), key=lambda path: path.name.casefold()):
-        if not item.is_dir() or _is_link_or_reparse(item):
-            continue
-        try:
-            mtimes = [path.stat().st_mtime for path in _walk_regular_files(item)]
-        except (CleanupError, OSError):
-            continue
-        if mtimes and _age_days(max(mtimes), now) > STALE_WORK_ITEM_DAYS:
-            stale.append(item.relative_to(root))
-    return stale
-
-
-def _analyze_artifacts(
-    root: Path,
-    artifacts: Sequence[Artifact],
-    now: datetime,
-    *,
-    action_name: str,
-    apply: bool,
-) -> Report:
-    report = Report(action=action_name, apply=apply)
-    report.stale_work_items = _stale_work_items(root, now)
-    try:
-        references = _read_live_reference_texts(root, now)
-    except ReferenceScanError as exc:
-        report.errors.append(str(exc))
-        references = []
-
-    referenced_paths: set[Path] = set()
-    if not report.errors:
-        for artifact in artifacts:
-            if any(
-                _text_references_artifact(text, artifact.relative_path)
-                for _source, text in references
-            ):
-                referenced_paths.add(artifact.relative_path)
-    report.telemetry.pinned_set_size = len(referenced_paths)
-
-    for artifact in artifacts:
-        report.telemetry.add_age(artifact.age_days, artifact.size)
-        if report.errors:
-            classification = "blocked"
-            reason = "reference scan failed closed"
-        elif artifact.age_days > REFERENCE_LIVENESS_DAYS:
-            classification = "eligible"
-            reason = f"older than hard ceiling ({REFERENCE_LIVENESS_DAYS}d)"
-        elif artifact.age_days <= SWEEP_DAYS:
-            classification = "blocked"
-            reason = f"not older than sweep threshold ({SWEEP_DAYS}d)"
-        elif artifact.relative_path in referenced_paths:
-            classification = "pinned"
-            reason = "live reference"
-        else:
-            classification = "eligible"
-            reason = "older than sweep threshold with no live reference"
-        report.telemetry.add_classification(classification, artifact.size)
-        report.actions.append(
-            Action(
-                path=artifact.path,
-                relative_path=artifact.relative_path,
-                size=artifact.size,
-                age_days=artifact.age_days,
-                classification=classification,
-                reason=reason,
-                outcome="would-move" if classification == "eligible" and not apply else "pending",
-            )
-        )
-    return report
-
-
-def build_sweep_plan(root: Path, *, now: datetime | None = None, apply: bool = False) -> Report:
-    root = root.resolve()
-    current = _coerce_now(now)
-    messages: list[str] = []
-    artifacts = _collect_artifacts(root, current, messages=messages)
-    report = _analyze_artifacts(
-        root, artifacts, current, action_name="sweep", apply=apply
-    )
-    report.messages[:0] = messages
-    return report
-
-
-def _lock_diagnostic(lock_path: Path) -> str:
-    holder = ""
-    try:
-        holder = lock_path.read_text(encoding="utf-8").strip()
-    except OSError:
-        pass
-    return (
-        f"janitor already running ({lock_path}; holder: {holder or 'unknown'}). "
-        "No automatic takeover — verify the holder pid is dead, remove the lock file, retry."
-    )
-
-
-@contextmanager
-def janitor_lock(
-    root: Path,
-    *,
-    now: datetime | None = None,
-    cleanup_created_dirs: bool = False,
-) -> Iterator[Path]:
-    root = root.resolve()
-    current = _coerce_now(now)
-    scratch = root / ".scratch"
-    trash = root / TRASH_RELATIVE
-    scratch_existed = scratch.exists()
-    trash_existed = trash.exists()
-    trash.mkdir(parents=True, exist_ok=True)
-    lock_path = trash / LOCK_NAME
-    descriptor: int | None = None
-    try:
-        try:
-            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError as exc:
-            raise JanitorLockError(_lock_diagnostic(lock_path)) from exc
-        try:
-            payload = f"pid={os.getpid()} at={current.isoformat()}\n".encode("utf-8")
-            os.write(descriptor, payload)
-        except BaseException:
-            os.close(descriptor)
-            descriptor = None
-            lock_path.unlink(missing_ok=True)
-            raise
-        yield lock_path
-    finally:
-        if descriptor is not None:
-            try:
-                os.close(descriptor)
-            finally:
-                lock_path.unlink(missing_ok=True)
-        if cleanup_created_dirs:
-            if not trash_existed:
-                try:
-                    trash.rmdir()
-                except OSError:
-                    pass
-            if not scratch_existed:
-                try:
-                    scratch.rmdir()
-                except OSError:
-                    pass
-
-
-def _ensure_trash_readme(root: Path) -> Path:
-    readme = root / TRASH_RELATIVE / README_NAME
-    try:
-        with readme.open("x", encoding="utf-8", newline="\n") as handle:
-            handle.write(TRASH_README)
-    except FileExistsError:
-        pass
-    return readme
-
-
-def reserve_run_dir(root: Path, *, now: datetime | None = None) -> Path:
-    root = root.resolve()
-    current = _coerce_now(now)
-    date_dir = root / TRASH_RELATIVE / current.strftime("%Y-%m-%d")
-    date_dir.mkdir(parents=True, exist_ok=True)
-    base_name = current.strftime("%H%M%S")
-    attempt = 1
-    while True:
-        name = base_name if attempt == 1 else f"{base_name}-{attempt}"
-        candidate = date_dir / name
-        try:
-            os.mkdir(candidate)
-            return candidate
-        except FileExistsError:
-            attempt += 1
-
-
-def classify_transition(source: Path, destination: Path) -> str:
-    source_exists = os.path.lexists(source)
-    destination_exists = os.path.lexists(destination)
-    if source_exists and not destination_exists:
-        return "source-only"
-    if source_exists and destination_exists:
-        return "both"
-    if not source_exists and destination_exists:
-        return "destination-only"
-    return "neither"
-
-
-def _checked_destination(base: Path, relative_path: Path, containment: Path) -> Path:
-    if relative_path.is_absolute() or ".." in relative_path.parts:
-        raise CleanupError(f"unsafe relative path: {relative_path}")
-    destination = base / relative_path
-    resolved = destination.resolve(strict=False)
-    containment_resolved = containment.resolve(strict=False)
-    if not _is_within(resolved, containment_resolved):
-        raise CleanupError(
-            f"destination escapes containment root: {destination} not under {containment}"
-        )
-    return destination
-
-
-def _apply_quarantine_move(report: Report, action: Action, trash: Path) -> None:
-    assert report.run_dir is not None
-    destination = _checked_destination(report.run_dir, action.relative_path, trash)
-    action.destination = destination
-    transition = classify_transition(action.path, destination)
-    if transition == "both":
-        action.outcome = "skipped-destination-wins"
-        report.messages.append(
-            f"skip {action.relative_path}: source and destination both exist; destination wins"
-        )
-        return
-    if transition == "destination-only":
-        action.outcome = "already-quarantined"
-        return
-    if transition == "neither":
-        action.outcome = "already-purged"
-        return
-    try:
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        _checked_destination(report.run_dir, action.relative_path, trash)
-        os.rename(action.path, destination)
-        action.outcome = "moved"
-    except OSError as exc:
-        action.outcome = "skipped-rename-failed"
-        report.messages.append(f"skip {action.relative_path}: rename failed: {exc}")
-
-
-def run_sweep(
-    root: Path,
-    *,
-    apply: bool = False,
-    now: datetime | None = None,
-    operation_hook: Callable[[], None] | None = None,
-) -> Report:
-    root = root.resolve()
-    current = _coerce_now(now)
-    with janitor_lock(root, now=current, cleanup_created_dirs=not apply):
-        if apply:
-            _ensure_trash_readme(root)
-        report = build_sweep_plan(root, now=current, apply=apply)
-        if operation_hook is not None:
-            operation_hook()
-        eligible = [
-            action for action in report.actions if action.classification == "eligible"
-        ]
-        if apply and eligible and not report.errors:
-            report.run_dir = reserve_run_dir(root, now=current)
-            trash = root / TRASH_RELATIVE
-            for action in eligible:
-                _apply_quarantine_move(report, action, trash)
-        return report
-
-
-def evaluate_eligibility(
-    root: Path,
-    path: Path,
-    *,
-    now: datetime | None = None,
-) -> EligibilityResult:
-    root = root.resolve()
-    current = _coerce_now(now)
-    candidate = path if path.is_absolute() else root / path
-    if not os.path.lexists(candidate):
-        raise CleanupError(f"path does not exist: {candidate}")
-    if _is_link_or_reparse(candidate):
-        raise CleanupError(f"path is a link or reparse point: {candidate}")
-    resolved = candidate.resolve(strict=True)
-    scratch = (root / ".scratch").resolve(strict=False)
-    trash = (root / TRASH_RELATIVE).resolve(strict=False)
-    if not _is_within(resolved, scratch) or _is_within(resolved, trash):
-        raise CleanupError(f"path is outside sweep scope: {candidate}")
-    artifacts = _collect_artifacts(root, current, selected=candidate)
-    report = _analyze_artifacts(
-        root, artifacts, current, action_name="eligible", apply=False
-    )
-    if report.errors:
-        raise ReferenceScanError(report.errors[0])
-    if not report.actions:
-        return EligibilityResult(False, candidate, "directory contains no eligible files", report)
-    eligible = all(action.classification == "eligible" for action in report.actions)
-    if eligible:
-        reason = "all files are eligible" if candidate.is_dir() else report.actions[0].reason
-    else:
-        first = next(action for action in report.actions if action.classification != "eligible")
-        reason = first.reason
-    return EligibilityResult(eligible, candidate, reason, report)
-
-
-def _resolve_run_dir(root: Path, value: Path) -> Path:
-    trash = (root / TRASH_RELATIVE).resolve(strict=False)
-    if value.is_absolute():
-        candidate = value
-    elif os.path.lexists(root / value):
-        candidate = root / value
-    else:
-        candidate = trash / value
-    if not os.path.lexists(candidate):
-        raise CleanupError(f"run directory does not exist: {candidate}")
-    if _is_link_or_reparse(candidate) or not candidate.is_dir():
-        raise CleanupError(f"run directory is not a regular directory: {candidate}")
-    resolved = candidate.resolve(strict=True)
-    if not _is_within(resolved, trash):
-        raise CleanupError(f"run directory is outside quarantine: {candidate}")
-    relative = resolved.relative_to(trash)
-    if len(relative.parts) != 2:
-        raise CleanupError(f"expected DATE/RUN quarantine directory: {candidate}")
-    try:
-        datetime.strptime(relative.parts[0], "%Y-%m-%d")
-    except ValueError as exc:
-        raise CleanupError(f"run directory has invalid date component: {candidate}") from exc
-    return candidate
-
-
-def _remove_empty_tree(path: Path, stop: Path) -> None:
-    current = path
-    while current != stop and _is_within(current.resolve(strict=False), stop.resolve(strict=False)):
-        try:
-            current.rmdir()
         except OSError:
-            break
+            continue  # unreadable directory: skip it, never fail hard (read-only tool)
+        subdirs: list[Path] = []
+        for entry in ordered:
+            try:
+                if _is_link_or_reparse(entry):
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    if denylist.is_unambiguous_cache_directory(entry.name):
+                        continue  # machine-cache directory: pruned at ANY depth
+                    if is_scratch_root and denylist.is_junk_directory(entry.name):
+                        continue  # ambiguous name: direct-child junk subtree only
+                    subdirs.append(Path(entry.path))
+                elif entry.is_file(follow_symlinks=False):
+                    yield Path(entry.path)
+            except OSError:
+                continue
+        stack.extend(subdirs)
+
+
+def _find_git_root(start: Path) -> Path | None:
+    """Walk up from `start` looking for a `.git` entry (a directory for an
+    ordinary repository, or a file for a worktree/submodule gitlink). Returns
+    None when `start` is not inside a git repository -- callers must treat
+    that as "git unavailable for this scan" and fail open, never as an
+    error. Read-only: only `Path.exists`."""
+
+    try:
+        current = start.resolve(strict=False)
+    except OSError:
+        return None
+    if current.is_file():
+        current = current.parent
+    while True:
+        if (current / ".git").exists():
+            return current
+        if current.parent == current:
+            return None
         current = current.parent
 
 
-def run_restore(
-    root: Path,
-    run_dir: Path,
-    *,
-    apply: bool = False,
-    now: datetime | None = None,
-) -> Report:
-    root = root.resolve()
-    current = _coerce_now(now)
-    with janitor_lock(root, now=current, cleanup_created_dirs=not apply):
-        if apply:
-            _ensure_trash_readme(root)
-        source_root = _resolve_run_dir(root, run_dir)
-        report = Report(action="restore", apply=apply, run_dir=source_root)
-        trash = root / TRASH_RELATIVE
-        scratch = root / ".scratch"
-        for source in _walk_regular_files(
-            source_root,
-            on_pruned=lambda path: report.messages.append(
-                f"pruned link/reparse point: {path}"
-            ),
-        ):
-            relative = source.relative_to(source_root)
-            info = source.stat()
-            age = _age_days(info.st_mtime, current)
-            report.telemetry.add_age(age, info.st_size)
-            target = _checked_destination(root, relative, scratch)
-            if os.path.lexists(target):
-                classification = "blocked"
-                reason = "occupied live target"
-                outcome = "skipped-occupied"
-            else:
-                classification = "eligible"
-                reason = "live target is unoccupied"
-                outcome = "would-restore" if not apply else "pending"
-            report.telemetry.add_classification(classification, info.st_size)
-            action = Action(
-                path=source,
-                relative_path=relative,
-                size=info.st_size,
-                age_days=age,
-                classification=classification,
-                reason=reason,
-                destination=target,
-                outcome=outcome,
+# In-process memoization only (see `scan_valuables`'s zero-mutation
+# guarantee): keyed by (absolute path string, mtime, size) -> git blob SHA.
+# Never persisted to disk -- a disk-backed cache would itself be a write,
+# which this module must never perform. Its only benefit is avoiding
+# redundant `git hash-object` calls across repeated `scan_valuables()` calls
+# within the SAME process (e.g. a caller re-scanning); a fresh hook process
+# starts with an empty cache every time, which is fine -- a single batched
+# `git hash-object --stdin-paths` call is already fast (see module docstring
+# evidence: seconds for ~14k files on this repository).
+_BLOB_SHA_CACHE: dict[tuple[str, float, int], str] = {}
+
+
+def _hash_object_batch(git_root: Path, paths: list[Path]) -> dict[Path, str] | None:
+    """Read-only: `git hash-object --stdin-paths` (NEVER `-w`) computes each
+    path's git blob SHA without writing anything to the object database.
+    Returns `{path: sha}` for every input path, or `None` on ANY failure
+    (missing git, non-zero exit, timeout, malformed/short output) so the
+    caller can fail open rather than guess."""
+
+    if not paths:
+        return {}
+    to_hash: list[Path] = []
+    result: dict[Path, str] = {}
+    stats: dict[Path, tuple[float, int]] = {}
+    for path in paths:
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        key = (str(path), info.st_mtime, info.st_size)
+        cached = _BLOB_SHA_CACHE.get(key)
+        if cached is not None:
+            result[path] = cached
+        else:
+            to_hash.append(path)
+            stats[path] = (info.st_mtime, info.st_size)
+    if to_hash:
+        stdin_payload = "\n".join(str(p) for p in to_hash) + "\n"
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(git_root), "hash-object", "--stdin-paths"],
+                input=stdin_payload,
+                capture_output=True,
+                text=True,
+                timeout=_GIT_TIMEOUT_SECONDS,
             )
-            report.actions.append(action)
-            if classification == "blocked":
-                report.messages.append(f"skip {relative}: occupied live target {target}")
-                continue
-            if not apply:
-                continue
-            try:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                _checked_destination(root, relative, scratch)
-                os.rename(source, target)
-                action.outcome = "restored"
-            except OSError as exc:
-                action.outcome = "skipped-rename-failed"
-                report.messages.append(f"skip {relative}: restore rename failed: {exc}")
-        if apply:
-            _remove_empty_tree(source_root, trash)
-        return report
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if proc.returncode != 0:
+            return None
+        shas = proc.stdout.splitlines()
+        if len(shas) != len(to_hash):
+            return None
+        for path, sha in zip(to_hash, shas):
+            sha = sha.strip()
+            if not sha:
+                return None
+            result[path] = sha
+            mtime, size = stats[path]
+            _BLOB_SHA_CACHE[(str(path), mtime, size)] = sha
+    return result
 
 
-def _tree_size(path: Path) -> int:
-    total = 0
+def _blobs_missing_from_store(git_root: Path, shas: set[str]) -> set[str] | None:
+    """Read-only: `git cat-file --batch-check` reports which of `shas` exist
+    in the object database (loose or packed, from ANY commit/branch reachable
+    in this repository's history -- not only the current working tree).
+    Returns the SUBSET that is MISSING (content git cannot recover), or
+    `None` on any failure so the caller can fail open."""
+
+    if not shas:
+        return set()
+    stdin_payload = "\n".join(sorted(shas)) + "\n"
     try:
-        for file_path in _walk_regular_files(path):
-            total += file_path.stat().st_size
-    except (CleanupError, OSError):
-        return total
-    return total
+        proc = subprocess.run(
+            ["git", "-C", str(git_root), "cat-file", "--batch-check"],
+            input=stdin_payload,
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    missing: set[str] = set()
+    for line in proc.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == "missing":
+            missing.add(parts[0])
+    return missing
 
 
-def run_purge(
-    root: Path,
+def _git_unique_paths(git_root: Path, paths: list[Path]) -> set[Path] | None:
+    """The subset of `paths` whose exact content is NOT recoverable from
+    `git_root`'s object database -- the PRIMARY valuable predicate (see the
+    module docstring). Returns `None` (the fail-open signal) if any git call
+    fails, so the caller falls back to the age gate rather than guessing."""
+
+    shas = _hash_object_batch(git_root, paths)
+    if shas is None:
+        return None
+    missing = _blobs_missing_from_store(git_root, set(shas.values()))
+    if missing is None:
+        return None
+    return {path for path, sha in shas.items() if sha in missing}
+
+
+def scan_valuables(
+    scratch_root: Path,
     *,
-    apply: bool = False,
+    denylist: JunkDenylist = DEFAULT_JUNK_DENYLIST,
     now: datetime | None = None,
-) -> Report:
-    root = root.resolve()
+    fallback_age_days: float = VALUABLE_AGE_THRESHOLD_DAYS,
+) -> list[dict[str, object]]:
+    """Read-only scan of `scratch_root` for lingering valuable data.
+
+    PRIMARY predicate: a file is a candidate only if its exact content is NOT
+    already recoverable from this repository's git object database -- `git
+    hash-object` computes its blob SHA and `git cat-file --batch-check`
+    reports that SHA as MISSING from the store. Content that exists as a blob
+    ANYWHERE in this repository's git history (any commit, any branch,
+    whether or not this particular copy was ever tracked) is recoverable and
+    is not a candidate. This is deliberately evidence-driven, not a tuning
+    knob: on this repository's own `.scratch/`, an age-only gate flagged 8631
+    files, and a random sample showed 58 of 59 resolvable ones were byte-
+    identical to an existing git blob (recoverable). Non-junk and non-empty
+    remain SECONDARY filters applied on top of uniqueness (a unique-but-junk
+    capture artifact is still excluded).
+
+    Age is NOT a gate here -- every git-unique, non-junk, non-empty file is
+    returned, sorted NEWEST-modified first (`age_days` ascending, ties broken
+    by path), so the caller can use age as a severity/sort signal.
+
+    FAIL-OPEN, per the locked design: if `scratch_root` is not inside a git
+    repository, git is not installed, or any git call fails, this falls back
+    to the ORIGINAL age-gated behavior instead -- every non-junk, non-empty
+    file strictly older than `fallback_age_days` (default 7) is a candidate,
+    with no uniqueness check. This never crashes and never silently returns
+    nothing or everything just because git happened to be unavailable.
+
+    Returns each candidate as `{"path": <scratch-relative posix str>,
+    "age_days": float, "size": int}`. If `scratch_root` does not exist (or is
+    not a directory), returns `[]`.
+
+    ZERO MUTATION, on every platform, under every code path, including the
+    git-uniqueness path: `git hash-object` is called WITHOUT `-w` (computes
+    only, never writes an object to the store) and `git cat-file
+    --batch-check` never writes either. No filesystem write, move, delete,
+    rename, mkdir, or file-open-for-write anywhere in this module.
+    """
+
     current = _coerce_now(now)
-    with janitor_lock(root, now=current, cleanup_created_dirs=not apply):
-        if apply:
-            _ensure_trash_readme(root)
-        trash = root / TRASH_RELATIVE
-        report = Report(action="purge", apply=apply)
-        for date_entry in sorted(trash.iterdir(), key=lambda path: path.name.casefold()):
-            if date_entry.name in {LOCK_NAME, README_NAME} or not date_entry.is_dir():
+    scratch_root = Path(scratch_root).resolve(strict=False)
+    if not scratch_root.is_dir():
+        return []
+
+    candidates: list[tuple[Path, Path, os.stat_result]] = []
+    for path in _iter_candidate_files(scratch_root, denylist):
+        try:
+            info = path.stat()
+        except OSError:
+            continue
+        if info.st_size == 0:
+            # DELIBERATE SPEC CHOICE (locked design): a 0-byte file is never
+            # flagged, even if non-junk. This trades away some of the "bias
+            # to over-warn" principle -- an empty placeholder a tool forgot
+            # to fill in is silently skipped -- on the judgment that an
+            # empty file carries no content an operator could lose.
+            continue
+        relative = path.relative_to(scratch_root)
+        if denylist.is_junk_file(relative):
+            continue
+        candidates.append((path, relative, info))
+
+    git_root = _find_git_root(scratch_root) if shutil.which("git") else None
+    unique_paths: set[Path] | None = None
+    if git_root is not None:
+        unique_paths = _git_unique_paths(git_root, [c[0] for c in candidates])
+
+    found: list[Valuable] = []
+    if unique_paths is not None:
+        # PRIMARY predicate available: gate on git-content-uniqueness, not age.
+        for path, relative, info in candidates:
+            if path not in unique_paths:
                 continue
-            if _is_link_or_reparse(date_entry):
-                report.messages.append(f"skip non-dated/reparse quarantine directory: {date_entry}")
-                continue
-            try:
-                quarantine_date = datetime.strptime(date_entry.name, "%Y-%m-%d").date()
-            except ValueError:
-                size = _tree_size(date_entry)
-                report.telemetry.blocked.count += 1
-                report.telemetry.blocked.bytes += size
-                report.actions.append(
-                    Action(
-                        path=date_entry,
-                        relative_path=date_entry.relative_to(root),
-                        size=size,
-                        age_days=0,
-                        classification="blocked",
-                        reason="non-dated quarantine directory",
-                        outcome="skipped-non-dated",
-                    )
-                )
-                report.messages.append(f"skip non-dated quarantine directory: {date_entry}")
-                continue
-            age_days = (current.date() - quarantine_date).days
-            for run_dir in sorted(date_entry.iterdir(), key=lambda path: path.name.casefold()):
-                if not run_dir.is_dir() or _is_link_or_reparse(run_dir):
-                    report.messages.append(f"skip invalid quarantine run entry: {run_dir}")
-                    continue
-                size = _tree_size(run_dir)
-                report.telemetry.add_age(max(0, float(age_days)), size)
-                if age_days > PURGE_DAYS:
-                    classification = "eligible"
-                    reason = f"quarantine date older than {PURGE_DAYS}d"
-                    outcome = "would-purge" if not apply else "pending"
-                else:
-                    classification = "pinned"
-                    reason = f"inside {PURGE_DAYS}d restore window"
-                    outcome = "retained"
-                report.telemetry.add_classification(classification, size)
-                action = Action(
-                    path=run_dir,
-                    relative_path=run_dir.relative_to(root),
-                    size=size,
-                    age_days=float(age_days),
-                    classification=classification,
-                    reason=reason,
-                    outcome=outcome,
-                )
-                report.actions.append(action)
-                if apply and classification == "eligible":
-                    try:
-                        checked = run_dir.resolve(strict=True)
-                        if not _is_within(checked, trash.resolve(strict=True)):
-                            raise CleanupError(f"purge target escapes quarantine: {run_dir}")
-                        shutil.rmtree(run_dir)
-                        action.outcome = "purged"
-                    except (OSError, CleanupError) as exc:
-                        action.outcome = "skipped-purge-failed"
-                        report.messages.append(f"skip {run_dir}: purge failed: {exc}")
-            if apply:
-                try:
-                    date_entry.rmdir()
-                except OSError:
-                    pass
-        return report
-
-
-def _telemetry_dict(telemetry: Telemetry) -> dict[str, object]:
-    return {
-        "eligible": {"count": telemetry.eligible.count, "bytes": telemetry.eligible.bytes},
-        "pinned": {"count": telemetry.pinned.count, "bytes": telemetry.pinned.bytes},
-        "blocked": {"count": telemetry.blocked.count, "bytes": telemetry.blocked.bytes},
-        "pinnedSetSize": telemetry.pinned_set_size,
-        "ageHistogram": {
-            name: {"count": bucket.count, "bytes": bucket.bytes}
-            for name, bucket in telemetry.age_histogram.items()
-        },
-    }
-
-
-def print_report(report: Report) -> None:
-    mode = "apply" if report.apply else "dry-run"
-    print(f"janitor {report.action} ({mode})")
-    if report.run_dir is not None:
-        print(f"run-dir: {report.run_dir}")
-    for action in report.actions:
-        print(
-            f"{action.classification}: {action.relative_path} "
-            f"[{action.outcome}] — {action.reason}"
-        )
-    for message in report.messages:
-        print(f"info: {message}")
-    for error in report.errors:
-        print(f"error: {error}", file=sys.stderr)
-    telemetry = report.telemetry
-    print(
-        "telemetry: "
-        f"eligible={telemetry.eligible.count}/{telemetry.eligible.bytes}B "
-        f"pinned={telemetry.pinned.count}/{telemetry.pinned.bytes}B "
-        f"blocked={telemetry.blocked.count}/{telemetry.blocked.bytes}B"
-    )
-    print(f"pinned-set-size: {telemetry.pinned_set_size}")
-    histogram = " ".join(
-        f"{name}={bucket.count}/{bucket.bytes}B"
-        for name, bucket in telemetry.age_histogram.items()
-    )
-    print(f"age-histogram: {histogram}")
-    if report.stale_work_items:
-        print("stale-work-items (>14d newest mtime):")
-        for path in report.stale_work_items:
-            print(f"  {path.as_posix()}")
+            age = _age_days(info.st_mtime, current)
+            found.append(Valuable(relative_path=relative, age_days=age, size=info.st_size))
     else:
-        print("stale-work-items (>14d newest mtime): none")
+        # FAIL-OPEN fallback: no git repo / git missing / a git call failed.
+        for path, relative, info in candidates:
+            age = _age_days(info.st_mtime, current)
+            if age <= fallback_age_days:
+                continue
+            found.append(Valuable(relative_path=relative, age_days=age, size=info.st_size))
+
+    # Newest-modified first (severity ordering); path is only a tiebreak.
+    found.sort(key=lambda v: (v.age_days, v.relative_path.as_posix().casefold()))
+    return [v.as_dict() for v in found]
 
 
-def _json_error(code: str, message: str) -> str:
-    return json.dumps(
-        {"ok": False, "error": {"code": code, "message": message}},
-        ensure_ascii=False,
+def print_report(valuables: Sequence[dict[str, object]]) -> None:
+    """`valuables` arrives sorted newest-modified first (see `scan_valuables`'s
+    docstring) -- that order is a stable, intentional part of the function's
+    RETURN CONTRACT and is left untouched here. Presentation is a separate
+    concern: the operator's actual risk is a file that has LINGERED, not the
+    current session's own recent churn, so this prints LONGEST-LINGERING
+    (oldest) FIRST -- a local reversal for display only."""
+
+    if not valuables:
+        print(f"scratch watchdog: no valuables found under {SCRATCH_DIRNAME}/")
+        return
+    print(
+        f"scratch watchdog: {len(valuables)} valuable-looking file(s) under "
+        f"{SCRATCH_DIRNAME}/ -- rescue before overwrite (this tool never deletes, "
+        f"moves, or touches them), longest-lingering first:"
     )
-
-
-def _add_common_options(
-    parser: argparse.ArgumentParser,
-    *,
-    include_apply: bool,
-    suppress_defaults: bool,
-) -> None:
-    default_root: object = argparse.SUPPRESS if suppress_defaults else Path.cwd()
-    parser.add_argument("--root", type=Path, default=default_root, help="Repository root (default: cwd)")
-    if include_apply:
-        default_apply: object = argparse.SUPPRESS if suppress_defaults else False
-        parser.add_argument(
-            "--apply",
-            action="store_true",
-            default=default_apply,
-            help="Perform mutations; without this flag the command is a dry-run",
-        )
+    for item in reversed(valuables):
+        print(f"  {item['path']}  (age={item['age_days']}d, size={item['size']}B)")
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Sweep, restore, and purge repository-local scratch artifacts.")
-    _add_common_options(parser, include_apply=True, suppress_defaults=False)
-    subparsers = parser.add_subparsers(dest="command")
-
-    sweep = subparsers.add_parser("sweep", help="Report or quarantine eligible .scratch files")
-    _add_common_options(sweep, include_apply=True, suppress_defaults=True)
-
-    restore = subparsers.add_parser("restore", help="Restore one DATE/RUN quarantine directory")
-    restore.add_argument("run_dir", type=Path, help="Quarantine run directory or DATE/RUN path")
-    _add_common_options(restore, include_apply=True, suppress_defaults=True)
-
-    purge = subparsers.add_parser("purge", help="Purge run directories outside the restore window")
-    _add_common_options(purge, include_apply=True, suppress_defaults=True)
-
-    eligible = subparsers.add_parser("eligible", help="Evaluate the one canonical eligibility rule")
-    eligible.add_argument("--path", type=Path, required=True, help="File or directory to evaluate")
-    eligible.add_argument("--json", action="store_true", help="Emit the result as JSON")
-    _add_common_options(eligible, include_apply=False, suppress_defaults=True)
+    parser = argparse.ArgumentParser(
+        description=(
+            f"Read-only watchdog for {SCRATCH_DIRNAME}/: lists non-empty, non-junk files "
+            "whose content is not already recoverable from this repository's git object "
+            "database (age-gated fallback when git is unavailable). NEVER deletes, moves, "
+            "or quarantines anything -- for debugging/manual inspection only. The automatic "
+            "mechanism the operator asked for is the SessionStart hook, not this CLI."
+        )
+    )
+    parser.add_argument("--root", type=Path, default=Path.cwd(), help="Repository root (default: cwd)")
+    parser.add_argument(
+        "--fallback-age-days",
+        type=float,
+        default=VALUABLE_AGE_THRESHOLD_DAYS,
+        help=(
+            "Age threshold in days used ONLY when git is unavailable for this scan "
+            f"(default: {VALUABLE_AGE_THRESHOLD_DAYS}); has no effect when the primary "
+            "git-uniqueness predicate runs"
+        ),
+    )
+    parser.add_argument("--json", action="store_true", help="Emit the result as JSON instead of a report")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     root = args.root.resolve()
-    try:
-        if args.command == "eligible":
-            result = evaluate_eligibility(root, args.path)
-            if args.json:
-                print(
-                    json.dumps(
-                        {
-                            "ok": True,
-                            "eligible": result.eligible,
-                            "path": str(result.path),
-                            "reason": result.reason,
-                            "telemetry": _telemetry_dict(result.report.telemetry),
-                        },
-                        ensure_ascii=False,
-                    )
-                )
-            else:
-                print(f"eligible={str(result.eligible).lower()}: {result.path} — {result.reason}")
-                print_report(result.report)
-            return 0 if result.eligible else 1
-        if args.command == "restore":
-            report = run_restore(root, args.run_dir, apply=args.apply)
-        elif args.command == "purge":
-            report = run_purge(root, apply=args.apply)
-        else:
-            report = run_sweep(root, apply=args.apply)
-        print_report(report)
-        return 2 if report.errors else 0
-    except JanitorLockError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    except (CleanupError, OSError) as exc:
-        if args.command == "eligible" and getattr(args, "json", False):
-            print(_json_error("cleanup_error", str(exc)), file=sys.stderr)
-        else:
-            print(f"error: {exc}", file=sys.stderr)
-        return 2
+    valuables = scan_valuables(root / SCRATCH_DIRNAME, fallback_age_days=args.fallback_age_days)
+    if args.json:
+        print(json.dumps({"valuables": valuables}, ensure_ascii=False))
+    else:
+        print_report(valuables)
+    return 0
 
 
 if __name__ == "__main__":
