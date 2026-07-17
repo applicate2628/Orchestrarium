@@ -222,7 +222,15 @@ if [[ -n "$LEDGER_ITEM" ]]; then
     for c in "${LEDGER_CLOSES[@]}"; do term_args+=(--closes "$c"); done
   fi
   python "$LEDGER_HELPER" "${term_args[@]}" >/dev/null \
-    || echo "WARN: could not record terminal event in $LEDGER_ITEM" >&2
+    || {
+      # LOUD, not a passing WARN: a dropped terminal loses the reviewer's verdict
+      # and leaves the launch unsettled, which is the exact failure this transport
+      # exists to prevent. The strict checker is the backstop, but the operator
+      # must see it HERE, with the recovery command.
+      echo "FAIL: could not record terminal event in $LEDGER_ITEM" >&2
+      echo "FAIL: the verdict in $OUT_PATH is NOT in the ledger; the launch $LAUNCH_RUN_ID stays unsettled." >&2
+      echo "FAIL: record it by hand: python scripts/agent-run-ledger.py --work-item $LEDGER_ITEM append --event-kind terminal --launch-run-id $LAUNCH_RUN_ID ..." >&2
+    }
 fi
 
 echo "$PROMPT_PATH"

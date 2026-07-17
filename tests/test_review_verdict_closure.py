@@ -351,3 +351,118 @@ class ClosureFixture(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ArtifactResolutionFixture(unittest.TestCase):
+    """A review's artifact is usually a REPOSITORY file, not a copy inside the item.
+
+    Live incident (2026-07-17): an adversarial reviewer returned `GATE: PASS` for
+    `scripts/maintenance/cleanup.py`; the wrapper's terminal append was REJECTED with
+    `artifact does not exist: scripts/maintenance/cleanup.py` because the validator
+    resolved the artifact only against the work-item directory. The verdict was dropped
+    and the obligation stayed open — the machinery silently refused to record the very
+    event it exists to demand.
+    """
+
+    def _repo(self) -> tuple[Path, Path]:
+        """A realistic layout: <root>/work-items/active/<item> plus a repo file."""
+        import json
+
+        root = Path(tempfile.mkdtemp())
+        item = root / "work-items" / "active" / "2026-07-17-fixture"
+        item.mkdir(parents=True)
+        (item / "status.md").write_text(STATUS_MD, encoding="utf-8")
+        (item / "design.md").write_text("work-item-local artifact\n", encoding="utf-8")
+        engine = root / "scripts" / "maintenance" / "cleanup.py"
+        engine.parent.mkdir(parents=True)
+        engine.write_text("# repository artifact under review\n", encoding="utf-8")
+        return root, item
+
+    def _write_events(self, item: Path, events: list[dict]) -> None:
+        import json
+
+        with (item / "agent-runs.jsonl").open("w", encoding="utf-8") as fh:
+            for e in events:
+                fh.write(json.dumps(e) + "\n")
+
+    def test_pass_closer_on_a_repository_artifact_is_recordable(self) -> None:
+        root, item = self._repo()
+        revise = _event(
+            "run-repoart-revise",
+            gate="REVISE",
+            status="revise",
+            artifact="scripts/maintenance/cleanup.py",
+            lane="impl-adversarial",
+            effort="high",
+            provider="codex",
+            findingClass="correctness",
+        )
+        closer = _event(
+            "run-repoart-pass",
+            gate="PASS",
+            artifact="scripts/maintenance/cleanup.py",
+            lane="impl-adversarial",
+            effort="high",
+            provider="codex",
+            closesRunIds=["run-repoart-revise"],
+            evidence=[{"kind": "review", "ref": ".scratch/x.out"}],
+        )
+        self._write_events(item, [revise, closer])
+
+        errors = vws.validate_work_item(item)
+
+        self.assertEqual(errors, [], f"repo-root artifact must resolve: {errors}")
+
+    def test_work_item_local_artifact_still_resolves(self) -> None:
+        root, item = self._repo()
+        closer = _event(
+            "run-localart-pass",
+            gate="PASS",
+            artifact="design.md",
+            lane="architecture-deep",
+            effort="xhigh",
+            provider="codex",
+            evidence=[{"kind": "review", "ref": ".scratch/x.out"}],
+        )
+        self._write_events(item, [closer])
+
+        errors = vws.validate_work_item(item)
+
+        self.assertEqual(errors, [], f"work-item-local artifact must still resolve: {errors}")
+
+    def test_missing_artifact_still_fails(self) -> None:
+        root, item = self._repo()
+        closer = _event(
+            "run-noart-pass",
+            gate="PASS",
+            artifact="scripts/maintenance/does-not-exist.py",
+            lane="impl-adversarial",
+            effort="high",
+            provider="codex",
+            evidence=[{"kind": "review", "ref": ".scratch/x.out"}],
+        )
+        self._write_events(item, [closer])
+
+        errors = vws.validate_work_item(item)
+
+        self.assertTrue(
+            any("artifact does not exist" in e for e in errors),
+            f"a genuinely missing artifact must still fail: {errors}",
+        )
+
+    def test_artifact_escaping_both_roots_fails(self) -> None:
+        root, item = self._repo()
+        closer = _event(
+            "run-escape-pass",
+            gate="PASS",
+            artifact="../../../../etc/passwd",
+            lane="impl-adversarial",
+            effort="high",
+            provider="codex",
+            evidence=[{"kind": "review", "ref": ".scratch/x.out"}],
+        )
+        self._write_events(item, [closer])
+
+        errors = vws.validate_work_item(item)
+
+        self.assertTrue(errors, "an artifact escaping the repository must fail")

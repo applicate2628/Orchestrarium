@@ -88,7 +88,32 @@ def load_jsonl(path: Path, errors: list[str]) -> list[dict]:
     return events
 
 
+def repo_root_for(item: Path) -> Path | None:
+    """The repository root that owns this work item.
+
+    Every work item lives under `<root>/work-items/...` (active/ or
+    archive/<YYYY-MM>/), so the parent of the `work-items` directory is the
+    root. Returns None when the item is not under a `work-items` tree.
+    """
+
+    for parent in item.resolve().parents:
+        if parent.name == "work-items":
+            return parent.parent
+    return None
+
+
 def resolve_work_item_path(item: Path, value: object, label: str, run_id: object, errors: list[str]) -> Path | None:
+    """Resolve a recorded path, work-item-relative FIRST, repo-root-relative second.
+
+    A review's artifact is often a repository file rather than a copy inside the
+    work item (reviewing `scripts/maintenance/cleanup.py` is the ordinary case
+    for an implementation gate). Resolving work-item-relative only made such a
+    verdict unrecordable: the PASS closer failed the artifact-exists check and
+    the reviewer's verdict was dropped, leaving the obligation open forever.
+    Both roots stay inside the repository; absolute paths and escapes are still
+    rejected.
+    """
+
     if not isinstance(value, str):
         fail(errors, f"{run_id}: {label} must be a string")
         return None
@@ -98,15 +123,30 @@ def resolve_work_item_path(item: Path, value: object, label: str, run_id: object
 
     candidate = Path(value)
     if candidate.is_absolute():
-        fail(errors, f"{run_id}: {label} must be relative to the work item: {value}")
+        fail(errors, f"{run_id}: {label} must be a relative path: {value}")
         return None
 
     item_root = item.resolve()
     resolved = (item_root / candidate).resolve()
-    if resolved != item_root and item_root not in resolved.parents:
-        fail(errors, f"{run_id}: {label} escapes the work item: {value}")
-        return None
+    if resolved == item_root or item_root in resolved.parents:
+        if resolved.exists():
+            return resolved
+        # Fall through: the same relative string may name a repository file.
+    elif resolved != item_root:
+        # The string escapes the work item; only the repo-root reading can be
+        # legitimate, and it is checked below.
+        resolved = None
 
+    root = repo_root_for(item)
+    if root is not None:
+        from_root = (root / candidate).resolve()
+        if from_root == root or root in from_root.parents:
+            if from_root.exists() or resolved is None:
+                return from_root
+
+    if resolved is None:
+        fail(errors, f"{run_id}: {label} escapes the work item and the repository: {value}")
+        return None
     return resolved
 
 

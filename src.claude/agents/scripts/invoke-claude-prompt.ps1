@@ -267,7 +267,14 @@ if ($Ledger) {
     foreach ($c in $LedgerCloses) { $termArgs += @('--closes', $c) }
   }
   & python $ledgerHelper @termArgs | Out-Null
-  if ($LASTEXITCODE -ne 0) { Write-Warning "could not record terminal event in $Ledger" }
+  if ($LASTEXITCODE -ne 0) {
+    # LOUD, not a passing warning: a dropped terminal loses the reviewer's verdict
+    # and leaves the launch unsettled — the exact failure this transport prevents.
+    # (Cross-shell parity with the .sh twins; step-back gate MINOR-1, 2026-07-17.)
+    Write-Error "FAIL: could not record terminal event in $Ledger" -ErrorAction Continue
+    Write-Error "FAIL: the verdict in $outPath is NOT in the ledger; launch $launchRunId stays unsettled." -ErrorAction Continue
+    Write-Error "FAIL: record it by hand: python scripts/agent-run-ledger.py --work-item $Ledger append --event-kind terminal --launch-run-id $launchRunId ..." -ErrorAction Continue
+  }
 }
 
 Write-Output $promptPath
