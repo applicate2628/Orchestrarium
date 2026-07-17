@@ -34,10 +34,10 @@
     "status": { "enum": ["planned", "running", "completed", "revise", "blocked", "cancelled"] },
     "gate": {
       "oneOf": [
-        { "enum": ["PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "advisory", "none", "WAIVED:user"] },
+        { "enum": ["PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "advisory", "none", "WAIVED:user", "WAIVED:security-reviewer"] },
         { "type": "string", "pattern": "^RETURN\\([a-z][a-z-]*\\)$" }
       ],
-      "$comment": "WAIVED:user (v2): typed user-authorized terminal disposition for open REVISE obligations — requires status 'completed', non-empty closesRunIds, and a manual-check evidence entry carrying the user's explicit authorization; never legal against a protected findingClass (publication-safety/security), whose only non-PASS discharge authority is the $security-reviewer (see the decision record)."
+      "$comment": "Typed v2 dispositions require status 'completed', non-empty closesRunIds, and exact target-bound manual-check evidence. WAIVED:user carries the user's explicit authorization and is never legal against a protected or unclassified finding. WAIVED:security-reviewer is legal only when role or assignedRole is security-reviewer, including for protected or unclassified findings (see decision 2026-07-16-review-verdict-closure items 8/10/13)."
     },
     "eventKind": {
       "enum": ["launch", "terminal", "standalone"],
@@ -52,7 +52,7 @@
       "type": "array",
       "minItems": 1,
       "items": { "type": "string", "minLength": 8 },
-      "$comment": "The normalized REVISE-closure relation (decision item 2): the exact runIds of earlier gate:REVISE events this PASS/WAIVED:user event discharges. Closure is NEVER derived from role/scope/artifact string matching."
+      "$comment": "The normalized REVISE-closure relation (decision item 2): the exact runIds of earlier gate:REVISE events this PASS/WAIVED:user/WAIVED:security-reviewer event discharges. Closure is NEVER derived from role/scope/artifact string matching."
     },
     "artifactRevision": {
       "type": "string",

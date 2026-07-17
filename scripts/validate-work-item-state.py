@@ -7,7 +7,19 @@ from pathlib import Path
 
 
 STATUS_VALUES = {"planned", "running", "completed", "revise", "blocked", "cancelled"}
-GATE_VALUES = {"PASS", "REVISE", "BLOCKED:dependency", "BLOCKED:prerequisite", "advisory", "none", "WAIVED:user"}
+USER_WAIVER_GATE = "WAIVED:user"
+SECURITY_REVIEWER_WAIVER_GATE = "WAIVED:security-reviewer"
+GATE_VALUES = {
+    "PASS",
+    "REVISE",
+    "BLOCKED:dependency",
+    "BLOCKED:prerequisite",
+    "advisory",
+    "none",
+    USER_WAIVER_GATE,
+    SECURITY_REVIEWER_WAIVER_GATE,
+}
+CLOSURE_GATES = {"PASS", USER_WAIVER_GATE, SECURITY_REVIEWER_WAIVER_GATE}
 # --- v2 REVISE-closure vocabulary (decision 2026-07-16-review-verdict-closure, minimal slice) ---
 EVENT_KINDS = {"launch", "terminal", "standalone"}
 EFFORT_ORDER = ["low", "medium", "high", "xhigh", "max"]  # ordered, ascending strength
@@ -173,6 +185,61 @@ def validate_evidence(evidence: object, run_id: object, errors: list[str], requi
             fail(errors, f"{run_id}: evidence[{index}].result must be a string")
 
 
+def has_security_reviewer_authority(event: dict) -> bool:
+    return (
+        event.get("role") == "security-reviewer"
+        or event.get("assignedRole") == "security-reviewer"
+    )
+
+
+def validate_waiver_fields(
+    event: dict,
+    gate: str,
+    run_id: object,
+    status: object,
+    authorization: str,
+    errors: list[str],
+) -> None:
+    """Validate the shared, target-bound shape of a typed waiver disposition."""
+
+    if status != "completed":
+        fail(errors, f"{run_id}: {gate} requires completed status")
+    if "closesRunIds" not in event:
+        fail(errors, f"{run_id}: {gate} requires closesRunIds")
+    entries = event.get("evidence") if isinstance(event.get("evidence"), list) else []
+    manual_refs = " ".join(
+        entry.get("ref", "")
+        for entry in entries
+        if (
+            isinstance(entry, dict)
+            and entry.get("kind") == "manual-check"
+            and isinstance(entry.get("ref"), str)
+        )
+    )
+    if not manual_refs:
+        fail(
+            errors,
+            f"{run_id}: {gate} requires a manual-check evidence entry with {authorization}",
+        )
+        return
+
+    # The authorization must NAME the exact obligations it waives (design:
+    # target-bound evidence; unrelated authorization text is not authority).
+    closes = event.get("closesRunIds") if isinstance(event.get("closesRunIds"), list) else []
+    for target_id in closes:
+        if not isinstance(target_id, str):
+            continue
+        # Exact token identity, not substring: 'run-x-extra' in the evidence
+        # must NOT authorize target 'run-x' (Sol impl-gate r2 prefix collision).
+        token_re = re.compile(rf"(?<![\w.-]){re.escape(target_id)}(?![\w.-])")
+        if not token_re.search(manual_refs):
+            fail(
+                errors,
+                f"{run_id}: {gate} manual-check evidence does not name target "
+                f"{target_id} exactly — authorization must be target-bound",
+            )
+
+
 def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -> None:
     required = ["schemaVersion", "runId", "workItem", "role", "executionRole", "status", "gate", "scope", "startedAt", "updatedAt"]
     for key in required:
@@ -267,8 +334,12 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
             fail(errors, f"{run_id}: closesRunIds must be a non-empty list of runId strings")
         elif len(set(closes)) != len(closes):
             fail(errors, f"{run_id}: closesRunIds must not contain duplicates")
-        if gate not in {"PASS", "WAIVED:user"}:
-            fail(errors, f"{run_id}: closesRunIds is only legal on PASS or WAIVED:user events")
+        if gate not in CLOSURE_GATES:
+            fail(
+                errors,
+                f"{run_id}: closesRunIds is only legal on PASS, {USER_WAIVER_GATE}, "
+                f"or {SECURITY_REVIEWER_WAIVER_GATE} events",
+            )
     for key in ("artifactRevision", "lane"):
         if key in event and (not isinstance(event.get(key), str) or not event[key].strip()):
             fail(errors, f"{run_id}: {key} must be a non-empty string")
@@ -277,34 +348,35 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
     if "findingClass" in event and event.get("findingClass") not in FINDING_CLASSES:
         fail(errors, f"{run_id}: invalid findingClass {event.get('findingClass')!r}")
 
-    if gate == "WAIVED:user":
+    if gate == USER_WAIVER_GATE:
         # Typed user disposition (decision item 4): sole legal terminal status is
         # 'completed'; it must name its exact targets; and the user's explicit
         # authorization must be carried as manual-check evidence. Free-text notes
         # carry no authority.
-        if status != "completed":
-            fail(errors, f"{run_id}: WAIVED:user requires completed status")
-        if "closesRunIds" not in event:
-            fail(errors, f"{run_id}: WAIVED:user requires closesRunIds")
-        entries = event.get("evidence") if isinstance(event.get("evidence"), list) else []
-        manual_refs = " ".join(
-            e.get("ref", "") for e in entries
-            if isinstance(e, dict) and e.get("kind") == "manual-check" and isinstance(e.get("ref"), str)
+        validate_waiver_fields(
+            event,
+            gate,
+            run_id,
+            status,
+            "the user's authorization",
+            errors,
         )
-        if not manual_refs:
-            fail(errors, f"{run_id}: WAIVED:user requires a manual-check evidence entry with the user's authorization")
-        else:
-            # The authorization must NAME the exact obligations it waives (design:
-            # target-bound evidence; unrelated authorization text is not authority).
-            closes = event.get("closesRunIds") if isinstance(event.get("closesRunIds"), list) else []
-            for target_id in closes:
-                if not isinstance(target_id, str):
-                    continue
-                # Exact token identity, not substring: 'run-x-extra' in the evidence
-                # must NOT authorize target 'run-x' (Sol impl-gate r2 prefix collision).
-                token_re = re.compile(rf"(?<![\w.-]){re.escape(target_id)}(?![\w.-])")
-                if not token_re.search(manual_refs):
-                    fail(errors, f"{run_id}: WAIVED:user manual-check evidence does not name target {target_id} exactly — authorization must be target-bound")
+
+    if gate == SECURITY_REVIEWER_WAIVER_GATE:
+        validate_waiver_fields(
+            event,
+            gate,
+            run_id,
+            status,
+            "the security-reviewer's authorization",
+            errors,
+        )
+        if not has_security_reviewer_authority(event):
+            fail(
+                errors,
+                f"{run_id}: {SECURITY_REVIEWER_WAIVER_GATE} requires security-reviewer "
+                "authority in role or assignedRole",
+            )
 
 
 def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str, int] | None = None) -> tuple[list[dict], list[dict]]:
@@ -356,6 +428,10 @@ def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str,
             continue
         rid = event.get("runId")
         gate = event.get("gate")
+        # Per-event validation records the authority error. Do not let that invalid
+        # event discharge an obligation while the candidate is being rejected.
+        if gate == SECURITY_REVIEWER_WAIVER_GATE and not has_security_reviewer_authority(event):
+            continue
         for target_id in closes:
             if not isinstance(target_id, str):
                 continue
@@ -377,11 +453,11 @@ def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str,
                 bump("C2-duplicate-discharge")
                 continue
             # C5 hard boundary: protected finding classes are non-user-waivable.
-            if gate == "WAIVED:user" and target.get("findingClass") not in (FINDING_CLASSES - PROTECTED_CLASSES):
+            if gate == USER_WAIVER_GATE and target.get("findingClass") not in (FINDING_CLASSES - PROTECTED_CLASSES):
                 # Fail closed two ways: a PROTECTED class is non-user-waivable, and an
                 # UNCLASSIFIED (or unknown) finding is treated as protected — omission
                 # must never be the cheaper path around the boundary.
-                fail(errors, f"{rid}: WAIVED:user cannot discharge finding {target_id} (findingClass={target.get('findingClass')!r}: protected or unclassified) — $security-reviewer authority only (C5)")
+                fail(errors, f"{rid}: {USER_WAIVER_GATE} cannot discharge finding {target_id} (findingClass={target.get('findingClass')!r}: protected or unclassified) — $security-reviewer authority only (C5)")
                 bump("C5-protected-waiver-fail")
                 continue
             # C3 (PASS closers): identity + authority + strength against the target.

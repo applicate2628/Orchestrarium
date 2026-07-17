@@ -385,7 +385,14 @@ def build_parser() -> argparse.ArgumentParser:
     # v2 closure/lifecycle fields (decision 2026-07-16-review-verdict-closure, minimal slice)
     append.add_argument("--event-kind", choices=["launch", "terminal", "standalone"], help="v2 lifecycle discriminator.")
     append.add_argument("--launch-run-id", help="On a terminal event: the runId of the launch it settles.")
-    append.add_argument("--closes", action="append", help="runId of an earlier REVISE this PASS/WAIVED:user event discharges. Repeatable.")
+    append.add_argument(
+        "--closes",
+        action="append",
+        help=(
+            "runId of an earlier REVISE this PASS/WAIVED:user/"
+            "WAIVED:security-reviewer event discharges. Repeatable."
+        ),
+    )
     append.add_argument("--artifact-revision", help="Revision of the reviewed artifact at review time (git sha or content digest).")
     append.add_argument("--lane", help="Review angle label (e.g. architecture-adversarial).")
     append.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"], help="Typed declared reasoning-effort tier.")

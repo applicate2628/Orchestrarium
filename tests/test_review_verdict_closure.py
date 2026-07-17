@@ -228,6 +228,82 @@ class ClosureFixture(unittest.TestCase):
         errors = self._validate([ordinary, no_evidence])
         self.assertTrue(any("manual-check" in e for e in errors), errors)
 
+    def test_security_reviewer_waiver_discharges_unclassified_finding(self) -> None:
+        revise = _event(
+            "run-00000066-unclassified",
+            gate="REVISE",
+            status="revise",
+            artifact="a.md",
+        )
+        waiver = _event(
+            "run-00000067-secwaive",
+            role="security-reviewer",
+            gate="WAIVED:security-reviewer",
+            status="completed",
+            closesRunIds=["run-00000066-unclassified"],
+            evidence=[{
+                "kind": "manual-check",
+                "ref": "security-reviewer waives run-00000066-unclassified",
+            }],
+        )
+
+        errors = self._validate([revise, waiver])
+
+        self.assertEqual(errors, [], errors)
+
+    def test_security_reviewer_waiver_accepts_assigned_role_authority(self) -> None:
+        revise = _event(
+            "run-00000068-protected",
+            gate="REVISE",
+            status="revise",
+            artifact="a.md",
+            findingClass="security",
+        )
+        waiver = _event(
+            "run-00000069-secwaive",
+            role="external-reviewer",
+            assignedRole="security-reviewer",
+            gate="WAIVED:security-reviewer",
+            status="completed",
+            closesRunIds=["run-00000068-protected"],
+            evidence=[{
+                "kind": "manual-check",
+                "ref": "security-reviewer waives run-00000068-protected",
+            }],
+        )
+
+        errors = self._validate([revise, waiver])
+
+        self.assertEqual(errors, [], errors)
+
+    def test_security_reviewer_waiver_rejects_non_security_role(self) -> None:
+        revise = _event(
+            "run-0000006a-protected",
+            gate="REVISE",
+            status="revise",
+            artifact="a.md",
+            findingClass="publication-safety",
+        )
+        waiver = _event(
+            "run-0000006b-badwaive",
+            role="architecture-reviewer",
+            assignedRole="architecture-reviewer",
+            gate="WAIVED:security-reviewer",
+            status="completed",
+            closesRunIds=["run-0000006a-protected"],
+            evidence=[{
+                "kind": "manual-check",
+                "ref": "architecture-reviewer waives run-0000006a-protected",
+            }],
+        )
+
+        errors = self._validate([revise, waiver])
+
+        self.assertTrue(
+            any("WAIVED:security-reviewer" in e and "authority" in e for e in errors),
+            errors,
+        )
+
     # ---------- lifecycle ----------
 
     def test_lifecycle_terminal_rules(self) -> None:
@@ -282,7 +358,7 @@ class ClosureFixture(unittest.TestCase):
         waiver = _event(
             "run-00000121-waiver", gate="WAIVED:user", status="completed",
             closesRunIds=["run-00000120-revise"],
-            evidence=[{"kind": "manual-check", "ref": "operator authorized"}],
+            evidence=[{"kind": "manual-check", "ref": "operator authorized run-00000120-revise"}],
         )
         errors = self._validate([revise, waiver])
         self.assertTrue(any("unclassified" in e and "(C5)" in e for e in errors), errors)

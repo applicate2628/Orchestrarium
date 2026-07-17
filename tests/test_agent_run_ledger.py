@@ -55,6 +55,33 @@ def prepare_valid_work_item(tmp_path: Path) -> Path:
     return item
 
 
+def append_unclassified_revise(item: Path) -> subprocess.CompletedProcess:
+    return run_ledger(
+        item,
+        "append",
+        "--run-id",
+        "run-security-revise-001",
+        "--role",
+        "security-reviewer",
+        "--execution-role",
+        "internal",
+        "--status",
+        "revise",
+        "--gate",
+        "REVISE",
+        "--scope",
+        "scripts/validate-work-item-state.py",
+        "--artifact",
+        "reviews/qa.md",
+        "--event-kind",
+        "standalone",
+        "--started-at",
+        "2026-07-18T10:00:00Z",
+        "--updated-at",
+        "2026-07-18T10:05:00Z",
+    )
+
+
 def test_append_records_event_and_validator_passes(tmp_path: Path):
     item = prepare_valid_work_item(tmp_path)
 
@@ -122,6 +149,102 @@ def test_append_rolls_back_invalid_pass_without_evidence(tmp_path: Path):
     assert result.returncode == 1
     assert "PASS gate requires evidence" in result.stderr
     assert not (item / "agent-runs.jsonl").exists()
+
+
+def test_append_accepts_security_reviewer_waiver_and_discharges_revise(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    revise = append_unclassified_revise(item)
+    assert revise.returncode == 0, revise.stderr
+
+    waiver = run_ledger(
+        item,
+        "append",
+        "--run-id",
+        "run-security-waiver-001",
+        "--role",
+        "security-reviewer",
+        "--execution-role",
+        "internal",
+        "--status",
+        "completed",
+        "--gate",
+        "WAIVED:security-reviewer",
+        "--scope",
+        "scripts/validate-work-item-state.py",
+        "--closes",
+        "run-security-revise-001",
+        "--evidence",
+        "manual-check:security-reviewer waives run-security-revise-001",
+        "--started-at",
+        "2026-07-18T10:10:00Z",
+        "--updated-at",
+        "2026-07-18T10:15:00Z",
+    )
+
+    assert waiver.returncode == 0, waiver.stderr
+    validator = run_validator(item)
+    assert validator.returncode == 0, validator.stdout + validator.stderr
+    events = [
+        json.loads(line)
+        for line in (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [event["gate"] for event in events] == ["REVISE", "WAIVED:security-reviewer"]
+
+
+def test_malformed_security_reviewer_waiver_rolls_back_atomically(tmp_path: Path):
+    item = prepare_valid_work_item(tmp_path)
+    revise = append_unclassified_revise(item)
+    assert revise.returncode == 0, revise.stderr
+    ledger = item / "agent-runs.jsonl"
+    original = ledger.read_bytes()
+    base = (
+        "append",
+        "--role",
+        "security-reviewer",
+        "--execution-role",
+        "internal",
+        "--gate",
+        "WAIVED:security-reviewer",
+        "--scope",
+        "scripts/validate-work-item-state.py",
+        "--started-at",
+        "2026-07-18T10:10:00Z",
+        "--updated-at",
+        "2026-07-18T10:15:00Z",
+    )
+    cases = (
+        (
+            "run-security-no-closes",
+            ("--status", "completed", "--evidence", "manual-check:security-reviewer waiver"),
+            "requires closesRunIds",
+        ),
+        (
+            "run-security-no-manual",
+            ("--status", "completed", "--closes", "run-security-revise-001"),
+            "requires a manual-check evidence entry",
+        ),
+        (
+            "run-security-wrong-status",
+            (
+                "--status",
+                "cancelled",
+                "--closes",
+                "run-security-revise-001",
+                "--evidence",
+                "manual-check:security-reviewer waives run-security-revise-001",
+            ),
+            "requires completed status",
+        ),
+    )
+
+    for run_id, extra, expected in cases:
+        result = run_ledger(item, *base, "--run-id", run_id, *extra)
+
+        assert result.returncode == 1, (run_id, result.stdout, result.stderr)
+        assert expected in result.stderr, (run_id, result.stderr)
+        assert ledger.read_bytes() == original, run_id
+        assert not ledger.with_suffix(".jsonl.tmp").exists(), run_id
+        assert not (item / "agent-runs.jsonl.lock").exists(), run_id
 
 
 def run_rollup_root(root: Path, *extra: str) -> subprocess.CompletedProcess:

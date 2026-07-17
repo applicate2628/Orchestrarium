@@ -101,4 +101,6 @@ A shipped loop MUST persist a per-round `review-loop-state` record under `.scrat
   belief, applied fixes, or a green mechanical validator never close it; `check-work-items-state`
   FAILs on open obligations by default and the root publication gate blocks on them.
 - Typed dispositions only: `WAIVED:user` with the user's authorization as manual-check evidence
-  (never against publication-safety/security findings); the `$security-reviewer` exception for those.
+  (never against protected or unclassified findings); `WAIVED:security-reviewer` requires completed
+  status, exact target-bound manual-check evidence, and `role` or `assignedRole` equal to
+  `security-reviewer`.

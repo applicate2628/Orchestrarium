@@ -70,8 +70,9 @@ adapter audit, a design review — whether or not this methodology was invoked: 
 closes only on a re-verification `PASS` from that angle or a recorded equivalent; author belief or a
 green mechanical validator never closes it** (the always-on spine carries this clause). Typed
 dispositions are the only alternatives: `WAIVED:user` (user-authorized, evidence-carried; never legal
-against publication-safety/security findings) and the `$security-reviewer` exception. For TRACKED
-work-items the relation is mechanical: the dispatch records launch+terminal events (wrapper
+against protected or unclassified findings) and `WAIVED:security-reviewer` (completed, exact
+target-bound `manual-check` evidence, with `role` or `assignedRole` equal to `security-reviewer`). For
+TRACKED work-items the relation is mechanical: the dispatch records launch+terminal events (wrapper
 `--ledger`), the closer names the exact `closesRunIds`, and `check-work-items-state` fails on open
 obligations. Replacement-reviewer equivalence must preserve: the review scope, independence from the
 author, the same evidence target/version, and an equal-or-stronger declared tier — recorded in

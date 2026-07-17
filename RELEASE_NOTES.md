@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-07-18
+
+### Fixed
+
+- **Protected or unclassified review findings now have the authority-checked discharge path their accepted closure design required.** The agent-run ledger accepts the typed `WAIVED:security-reviewer` gate only for a completed event whose `role` or `assignedRole` is `security-reviewer`, whose `closesRunIds` name earlier unique `REVISE` obligations, and whose `manual-check` evidence names every target exactly. This closes the gap where such obligations had no honest non-PASS resolution even though decision `2026-07-16-review-verdict-closure` items 8/10/13 specified one. The append helper still validates a temporary candidate before atomic replacement, so malformed or unauthorized attempts leave the live ledger unchanged. The existing boundary is preserved: `WAIVED:user` remains unconditionally invalid for protected or unclassified findings, while its typed non-protected discharge behavior is unchanged. **Who this affects:** operators and security reviewers maintaining tracked review obligations gain a mechanically validated exception without weakening ordinary user-waiver protection.
+
 ## 2026-07-17
 
 ### Changed

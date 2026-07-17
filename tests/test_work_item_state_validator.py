@@ -133,6 +133,19 @@ def test_schema_contract_check_exercises_validator_negative_cases() -> None:
     assert "RESULT: PASS" in result.stdout
 
 
+def test_schema_contract_includes_security_reviewer_waiver_gate() -> None:
+    schema = json.loads(
+        (ROOT / "shared" / "schemas" / "agent-runs.schema.json").read_text(encoding="utf-8")
+    )
+    gate_values = {
+        value
+        for branch in schema["properties"]["gate"]["oneOf"]
+        for value in branch.get("enum", [])
+    }
+
+    assert "WAIVED:security-reviewer" in gate_values
+
+
 def test_legacy_execution_role_lead_still_reads(tmp_path: Path) -> None:
     # F25 legacy READ-mapping: a ledger written before the main|lead collapse may
     # carry executionRole "lead"; it validates (reads as "main" — same owner).
