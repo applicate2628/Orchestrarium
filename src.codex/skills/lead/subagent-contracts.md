@@ -47,21 +47,24 @@ Receiving-side echo: the returned artifact MUST (a) report the Named regression 
 
 **Class-completeness trigger (mandatory):** when a reviewer, bot, or test cites one instance of a defect class, the dispatch prompt MUST direct the recipient to enumerate every participant of that class, classify each one, and fix every confirmed instance. A prompt scoped only to the named line is invalid.
 
-**Object-axis trigger (mandatory, PRE-verdict).** The class-completeness trigger above fires AFTER a
-finding: "you found one — where are its siblings?" This one fires BEFORE a clean verdict: "you are
-about to call this clean — did you aim at the right object?" A lens can be present, sharp and
+**Object-axis trigger (mandatory for C1-based clean verdicts, PRE-verdict).** The class-completeness
+trigger above fires AFTER a finding: "you found one — where are its siblings?" This one fires BEFORE
+a clean/verified verdict that relies on a C1 single-owner-invariant assessment: "you are about to
+call this clean — did you aim at the right object?" A lens can be present, sharp and
 productive and still miss an entire class because it was never aimed at a second axis: a real audit
 ran the split-ownership lens, found "one conceptual decision has four independent owners", and never
 found the same defect in policy VALUES — it asked who owns the decision, never who owns the number.
 The rule for the number already existed and was not applied.
 
-So a dispatch that can end in a clean/verified verdict MUST require, and the returned artifact MUST
-carry, an object-axis record — one row per lens used to support that verdict:
+When a clean/verified verdict relies on a C1 (single-owner-invariant) assessment, the dispatch MUST
+require, and the returned artifact MUST carry, an object-axis record — one row per C1 assessment used
+to support that verdict:
 
 `| lens | primary object examined | adjacent object classes re-aimed at | decision facts proved (not a proxy) | result + evidence |`
 
-An absent or empty-celled record fails mechanical acceptance exactly like the receiving-side echo; a
-grouped `N/A` needs a bounded one-phrase reason, never silence. Define the adjacent axis
+For such a C1-reliant verdict, an absent or empty-celled record fails mechanical acceptance exactly
+like the receiving-side echo; a grouped `N/A` needs a bounded one-phrase reason, never silence.
+Dispatches and verdicts that do not rely on a C1 assessment owe no object-axis record. Define the adjacent axis
 FUNCTIONALLY, never as a noun checklist (a closed list of nouns is the same blind lens one level
 down): the representations a legitimate policy change must update together; objects under ANOTHER
 owner that the operation touches; and the facts the decision actually used, not a proxy for them
