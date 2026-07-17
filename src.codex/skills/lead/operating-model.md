@@ -307,6 +307,8 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - If the target repository defines a periodic-control matrix, use it as the canonical cadence for freshness, completeness, repo consistency, publication safety, archive hygiene, and refactor-debt checks.
 - Keep the periodic layer lightweight: if a control is really about whether work may advance, it belongs in the stage-gate path instead.
 - Index sync (`$knowledge-archivist`): every active-item state change (create, resume, stage transition, park, close, archive) updates the recovery index in the same transition.
+- Board refresh (`$knowledge-archivist`): every delivery wave, in the same post-wave sync pass, refresh `work-items/README.md` against git and the tree.
+- Orchestrator-upgrades reconcile (`$knowledge-archivist`): same post-wave pass as Board refresh — reconcile `work-items/orchestrator-upgrades.md` rows against their source lessons' status in `work-items/lessons/`.
 
 Do not let a role that defines a critical constraint act as the only approval gate for that same risk.
 

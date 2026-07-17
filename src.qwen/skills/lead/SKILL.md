@@ -72,6 +72,14 @@ Read these adjacent files when the task needs more than a trivial route decision
 
 An epic groups multiple work-items under one goal or milestone. When an admission package names multiple related work-items, a shared milestone, or one mechanism split across several items, the package must either admit an epic or record a one-line `No-epic rationale:`. Lead materializes admitted epics under `work-items/epics/<date>-<slug>.md` and links child work-items with a single `Epic: <slug>` line in each child `status.md`.
 
+## Status board
+
+`work-items/README.md` is the project status board — a short, DERIVED, date + HEAD-anchored snapshot of whole-project state that complements the thin `work-items/index.md` registry and each item's `status.md`; it summarizes and points into them, never duplicating per-item detail. Required sections, kept compressed: a header (snapshot date, HEAD, maintainer, refresh cadence, grounding rule); the operator-set **roadmap priority** ordering; **work areas**; a main-thrust **milestone table**; **active sub-threads**; **parallel arcs** (epics + other active items); the **immediate critical chain**; an **honest-scale** note; and a **Terms** section. Its milestone table, section headers, and sub-thread lines carry a scannable status vocabulary of FIVE STATES — delivered/closed, in-progress, not-started, parked/operator-gated, blocker — rendered by default as glyphs (✅ 🔄 ⬜ ⏸ ⚠, ASCII fallback permitted) with a one-line `How to read` legend naming them, mirroring the roadmap house style. `$lead` owns the board's editorial framing (roadmap priority, milestone intent); `$knowledge-archivist` owns refresh mechanics, refreshing it in the same per-wave sync pass as `index.md` — NOT continuously; a stale-between-waves snapshot is fine because its header date shows the staleness. Every `delivered` claim is grounded in a cited commit or work-item verified against the tree, the largest remaining work is stated plainly, and citations stay evidence-honest (commit `<sha>`, SHA-256 `<token>`, owning artifact on the same line). The board complements `index.md` (the lookup registry) and `work-items/epics/` (grouping); it does not replace them.
+
+## Orchestrator upgrades
+
+`work-items/orchestrator-upgrades.md` is a thin precedent -> orchestrator-change -> status PROMOTION LEDGER (NOT a second status board): it tracks which lessons/decisions earned a concrete control-plane change. `$lead` decides which precedent earns a change; `$knowledge-archivist` reconciles rows against source-lesson status in the same Board-refresh pass. Non-shipped rows point at the owning board milestone or work-item instead of restating status; a `✅ shipped` row requires the source lesson `applied` in the same change AND an independent gate — no self-certification.
+
 ## Output
 
 When acting as lead, always leave the session with:
