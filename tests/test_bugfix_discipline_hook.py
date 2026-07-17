@@ -68,6 +68,17 @@ def assistant_tool_use(name: str, input_obj: dict) -> dict:
             "content": [{"type": "tool_use", "name": name, "input": input_obj}]}}
 
 
+def compact_summary(text: str) -> dict:
+    """The harness's post-compaction continuation prompt.
+
+    role=user with real prose, so every text-shaped genuine-user test passes it --
+    but no human typed it. Marked by the harness's own `isCompactSummary` flag, which
+    is what the hook keys on (the preamble's wording is not ours and can change).
+    """
+    entry = user(text)
+    entry["isCompactSummary"] = True
+    return entry
+
 def run_hook(script: Path, entries: list[dict], tool_name: str = "Edit") -> subprocess.CompletedProcess:
     with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8") as f:
         for e in entries:
@@ -302,3 +313,61 @@ class TestBugfixExemptPaths(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestCompactSummaryIsNotAUserBugReport(unittest.TestCase):
+    """The post-compaction continuation prompt drove `permissionDecision: deny` on
+    unrelated edits (reproduced 2026-07-17 on a live session whose transcript carried
+    21 such entries).
+
+    It is the worst possible input to a trigger-phrase matcher, and the failure is
+    self-amplifying: the harness quotes the prior session back -- file paths, error
+    output, and an "Errors and fixes" section naming every defect touched -- so the
+    MORE bug-fixing a session did, the more certainly the guard misfires afterwards.
+    It also fires at the worst moment: right after compaction, on every edit, until
+    the next human message.
+
+    The fix must not swing the other way. Discarding the summary makes the detector
+    walk back to the human's real pre-compaction message -- which IS still their last
+    genuine request -- so a real bug report behind a summary must still fire. A guard
+    that stops guarding is worse than one that occasionally over-fires."""
+
+    SUMMARY = (
+        "This session is being continued from a previous conversation that ran out of "
+        "context. The summary below covers the earlier portion.\n"
+        "Summary:\n4. Errors and fixes:\n - the assertion broke; Error: mismatch\n"
+        "If you need details (like exact error messages), read the full transcript."
+    )
+
+    def assert_outcome(self, entries: list[dict], should_deny: bool) -> None:
+        for script in HOOKS:
+            with self.subTest(script=script.name):
+                self.assertEqual(denies(run_hook(script, entries)), should_deny)
+
+    def test_compact_summary_alone_does_not_fire(self) -> None:
+        # THE reproduced false positive: the only trigger words are the harness's.
+        self.assert_outcome(
+            [compact_summary(self.SUMMARY), assistant("Resuming the batch.")],
+            should_deny=False,
+        )
+
+    def test_real_bug_report_behind_a_compact_summary_still_fires(self) -> None:
+        # The falsifier that keeps the fix honest: skipping the summary must reach the
+        # human's real request, not disarm the guard.
+        self.assert_outcome(
+            [user("the auth timeout is broken, fix it"), assistant("ok"),
+             compact_summary(self.SUMMARY), assistant("Resuming.")],
+            should_deny=True,
+        )
+
+    def test_benign_request_behind_a_bug_laden_summary_does_not_fire(self) -> None:
+        self.assert_outcome(
+            [user("add a docstring to the parser"), assistant("ok"),
+             compact_summary(self.SUMMARY), assistant("Resuming.")],
+            should_deny=False,
+        )
+
+    def test_is_meta_entries_are_not_user_reports_either(self) -> None:
+        # Same class, sibling flag: harness-authored user-role entries.
+        entry = user("Error: broken traceback не работает")
+        entry["isMeta"] = True
+        self.assert_outcome([entry, assistant("Resuming.")], should_deny=False)

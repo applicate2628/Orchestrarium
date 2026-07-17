@@ -181,14 +181,49 @@ def strip_injected_spans(text: str) -> str:
     return _INJECTED_SPAN_RE.sub(" ", text or "")
 
 
+def is_compact_summary(entry: object) -> bool:
+    """Is this user-role entry the harness's post-compaction continuation prompt?
+
+    Claude Code records it with `role=user` and real prose, so every text-shaped
+    genuine-user test passes it — but no human typed it. The harness did, and it
+    quotes the whole prior session back: file paths, error output, and an
+    "Errors and fixes" section listing every defect the session touched.
+
+    That makes it the WORST possible input to a trigger-phrase matcher, and the
+    failure is self-amplifying: the more bug-fixing a session did, the more bug
+    vocabulary the summary carries, so the guard is most certain to misfire on
+    exactly the sessions that worked hardest. It also fires at the worst moment
+    -- immediately after compaction, on every edit, until the next human message.
+    Reproduced: a synthetic continuation prompt carrying only summary prose drove
+    a `permissionDecision: deny` on an unrelated test edit. The live transcript
+    that reproduced it carried 21 of these entries.
+
+    Detected by the harness's own `isCompactSummary` flag rather than by matching
+    the preamble's wording: the flag is structural, the wording is not ours and
+    can change under us. `isMeta` covers the sibling harness-authored user entries
+    for the same reason.
+
+    Fails OPEN by design: an entry without the flag is treated as genuine. A
+    missed summary costs a false positive the operator can override; a summary
+    misread as human costs nothing but noise, while wrongly discarding a REAL bug
+    report would silently disarm the guard.
+    """
+    if not isinstance(entry, dict):
+        return False
+    return bool(entry.get("isCompactSummary") or entry.get("isMeta"))
+
+
 def extract_user_typed_text(entry: object) -> str:
     """The human-typed text of a user entry only.
 
     Excludes tool_result and tool_use blocks (those are tool I/O recorded under
-    role=user in Claude Code, not anything the human typed) and strips
+    role=user in Claude Code, not anything the human typed), skips the harness's
+    post-compaction continuation prompt (see `is_compact_summary`), and strips
     harness-injected spans. Returns "" for an entry that carries no genuine
     user text (e.g. a pure tool_result or a pure task-notification)."""
     if not isinstance(entry, dict):
+        return ""
+    if is_compact_summary(entry):
         return ""
     content = entry.get("content")
     if content is None:
