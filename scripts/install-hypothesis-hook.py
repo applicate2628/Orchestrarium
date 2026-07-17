@@ -408,7 +408,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--hook-event",
-        choices=("PreToolUse", "Stop", "SessionStart"),
+        choices=("PreToolUse", "Stop", "SessionStart", "UserPromptSubmit"),
         default="PreToolUse",
         help="Hook event to install under (default: PreToolUse)",
     )
