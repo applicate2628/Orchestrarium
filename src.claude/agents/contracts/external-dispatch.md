@@ -100,6 +100,7 @@ The prompt file is the only governance an external Command-Line Interface (CLI) 
 
 - A provider run is complete only when its exit code is recorded, its `.out` artifact exists and is non-empty with the requested artifact shape (provenance header plus gate line), and its `.err` artifact is free of authentication, quota, usage-limit, and mid-stream-truncation markers.
 - A failed oracle check makes the run `UNVERIFIED`: re-dispatch it or return `BLOCKED:dependency`. Never summarize a truncated or partial `.out` into an artifact or render it as `PASS`.
+- A completion notification — a harness background-task signal, a wrapper exit message, a task callback — or its absence, is never this oracle. Verify the `.out` artifact shape and `.err` cleanliness directly before counting a run done, regardless of any notification.
 
 ## Stall and timeout policy
 
@@ -109,6 +110,7 @@ The prompt file is the only governance an external Command-Line Interface (CLI) 
 | `xhigh` / `max` worker or review | 45-60 minutes |
 
 - Actively poll the `.out` / `.err` artifacts and process status. A stall declaration before the applicable window without process evidence violates this contract.
+- **Whether a completion notification arrives depends on HOW the run was launched; its presence is not proof and its absence is not a stall.** A harness completion notification fires only when the run is (1) launched by the MAIN orchestrating loop — a dispatched subagent is never re-invoked when a background child it launched finishes (see the no-spawn-and-wait rule in `subagent-contracts.md`), (2) as a harness-tracked background run (Claude Bash `run_in_background: true`), and (3) whose tracked process stays attached until the provider exits — a foreground launch that forks, `&`-detaches, or `nohup`s the provider notifies on the shell's exit, not the provider's. The canonical wrapper is the recommended way to satisfy (3) plus the transport contract; it is not itself the notifier. An improvised or untracked launch delivers no notification, so ending a turn "waiting to be notified" after one strands the run — actively poll regardless of whether a notification is expected.
 - If the shell times out, do not relaunch: identify the running process first and stop it only if it is orphaned or no longer needed.
 - A run declared stalled is `UNVERIFIED`; any re-dispatch cites the failed attempt and never duplicates a still-running process.
 

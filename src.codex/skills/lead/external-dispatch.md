@@ -107,6 +107,7 @@ The prompt file is the only governance an external Command-Line Interface (CLI) 
 
 - A provider run is complete only when its exit code is recorded, its `.out` artifact exists and is non-empty with the requested artifact shape (provenance header plus gate line), and its `.err` artifact is free of authentication, quota, usage-limit, and mid-stream-truncation markers.
 - A failed oracle check makes the run `UNVERIFIED`: re-dispatch it or return `BLOCKED:dependency`. Never summarize a truncated or partial `.out` into an artifact or render it as `PASS`.
+- A completion notification — a harness background-task signal, a wrapper exit message, a task callback — or its absence, is never this oracle. Verify the `.out` artifact shape and `.err` cleanliness directly before counting a run done, regardless of any notification.
 
 ## Stall and timeout policy
 
@@ -116,6 +117,7 @@ The prompt file is the only governance an external Command-Line Interface (CLI) 
 | `xhigh` / `max` worker or review | 45-60 minutes |
 
 - Actively poll the `.out` / `.err` artifacts and process status. A stall declaration before the applicable window without process evidence violates this contract.
+- **Do not wait for a completion notification — the transport-neutral chain provides none.** The Codex pack ships no primary-run prompt wrappers and launches through a transport-neutral chain with no harness re-invoke on the provider's exit, so no completion notification arrives to signal a launched run is done. Active polling of `.out` / `.err` / process status (above) is the only completion signal; a turn that ends "waiting to be notified" strands the run. (A dispatched subagent additionally receives no background-child notification at all — see the no-spawn-and-wait rule in `subagent-contracts.md`.)
 - If the shell times out, do not relaunch: identify the running process first and stop it only if it is orphaned or no longer needed.
 - A run declared stalled is `UNVERIFIED`; any re-dispatch cites the failed attempt and never duplicates a still-running process.
 
