@@ -25,6 +25,9 @@ description: "Architecture reviewer: gate cohesion and maintainability."
 
 - Return one architecture and quality review report containing reviewed surfaces, blocking deviations, coupling or cohesion findings, dependency-direction violations, governance or routing contradictions when applicable, blast-radius assessment, required fixes before merge, maintainability notes, residual debt risk, and a final gate decision of `PASS`, `REVISE`, or `BLOCKED`.
 - Every finding names its defect class as well as the concrete instance. The reviewed-surface statement lists every file and contract actually read; a `PASS` attests only to those listed surfaces.
+- Every finding also carries a `fix-class: {inline-sufficient | design-decision}` tag plus a separately labeled, ADVISORY HOW: the likely owning seam, one candidate change, material alternatives with tradeoffs, and a falsifying verification guard. The WHAT (defect class, failure scenario, severity, evidence, `file:line`) stays the gate-bearing object; `inline HOW stays advisory (non-binding)` and never becomes the acceptance condition. Tag a finding `inline-sufficient` only when its root and class are evidenced, one dominant local fix is bounded to the approved seam, one named falsifying guard distinguishes that fix, and no risk-sensitive trigger below applies.
+  Tag a finding `design-decision` when ANY trigger applies: (1) two or more viable fixes have material owner, contract, or invariant tradeoffs; (2) the fix-site owner differs from the defect-site owner, or the fix changes an abstraction, contract, single-owner boundary, dependency direction, shared-state lifecycle, public/config/schema surface, migration, or multiple modules/providers; (3) the regression surface is broad, or no single named guard distinguishes the candidates; (4) the defect is security-, data-loss-, concurrency-, encoding/locale-, resource-lifetime-, or hard-performance-budget-sensitive; (5) the defect class has sibling participants or recurred after a prior fix; or (6) the evidence determines WHAT but not HOW/where without an assumption. Default to `design-decision` on ownership doubt.
+  Decision `2026-07-18-review-what-vs-how-inline-vs-separate` is provenance for this rule; the six inlined triggers above are the operative installed contract. This field is owned here and cited, not redefined, by the domain reviewers, exactly as the S4 verdict vocabulary is.
 
 ## Gate
 
@@ -96,6 +99,8 @@ When returning REVISE, specify the target:
 | Plan-level issue (phase boundaries wrong, missing phase, wrong ordering) | Planner | Plan revision needed |
 
 If a single REVISE report contains findings at multiple levels, group them by target. The orchestrator routes each group to the correct role.
+
+A finding's `fix-class` controls design-versus-implementation routing. An `inline-sufficient` finding keeps the Code→Implementer route with its advisory HOW attached: no separate fix-design/HOW-review pass is required before implementation; the existing loop-to-PASS re-verification remains mandatory. A `design-decision` finding keeps the Design→Architect route and requires a separate `/agents-review-loop` fix-design pass before re-implementation; the review report's HOW remains advisory. A plan-level finding keeps its Planner routing; the tag and ratchet still apply. `fix-class` is an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`: any downstream owner or later reviewer may escalate, and none may downgrade.
 
 ## Cross-domain escalation
 

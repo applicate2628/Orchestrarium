@@ -18,6 +18,7 @@ description: "Performance reviewer: gate budgets and bottlenecks."
 - Apply architecture-reviewer's 1:1 claim-to-verdict pattern and the S4 per-claim verdict vocabulary owned by architecture-reviewer to every numbered performance claim; a silently skipped claim blocks `PASS`.
 - Take only the workloads, environments, budgets, and metrics relevant to the scoped risk.
 - Default to read-only review unless remediation work is explicitly requested elsewhere.
+- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through the lead to `performance-engineer`, the performance constraint/design owner, and requires a separate `/agents-review-loop` fix-design pass before implementation.
 
 ## Return exactly one artifact
 

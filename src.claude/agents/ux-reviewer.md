@@ -18,6 +18,7 @@ description: "UX reviewer: gate usability and interaction clarity."
 - When an accepted UX design package exists, treat its enumerated flows and interaction states, including empty, loading, error, and success behavior, as the claims list. Apply architecture-reviewer's 1:1 claim-to-verdict pattern and the S4 per-claim verdict vocabulary owned by architecture-reviewer to them.
 - Take only the user-facing surfaces relevant to the scoped review.
 - Default to read-only review unless a different role is explicitly assigned elsewhere.
+- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through the lead to the correct design owner (`$ux-designer` for user flow, interaction behavior, or content hierarchy; `$architect` for the owning seam or contract) and requires a separate `/agents-review-loop` fix-design pass before implementation.
 
 ## Return exactly one artifact
 

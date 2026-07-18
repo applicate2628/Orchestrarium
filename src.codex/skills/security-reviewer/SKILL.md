@@ -18,6 +18,7 @@ description: "Auth, secrets, injection, exposure: merge gate."
 - Apply architecture-reviewer's 1:1 claim-to-verdict pattern and the S4 per-claim verdict vocabulary owned by architecture-reviewer to the numbered security claims; run each claim's falsifying probe or record why it could not run.
 - Take only the code paths, configs, dependencies, and data flows relevant to the security surface.
 - Escalate missing threat context instead of assuming safety.
+- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through `$lead` to `security-engineer`, the security constraint/design owner, and requires a separate `/agents-review-loop` fix-design pass before implementation.
 
 ## Return exactly one artifact
 

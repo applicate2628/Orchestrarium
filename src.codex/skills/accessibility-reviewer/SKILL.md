@@ -17,6 +17,7 @@ description: "Keyboard, focus, screen-reader, contrast, WCAG A/AA."
 - Visual criteria require captured evidence even when no screenshot or recording arrived with the input; absence of a capture is not evidence of conformance.
 - Take only the surfaces and flows in scope for the phase.
 - Default to read-only review unless a different role is explicitly assigned elsewhere.
+- Tag every finding with the `fix-class: {inline-sufficient | design-decision}` triage owned by `architecture-reviewer`; `inline HOW stays advisory (non-binding)`, and the tag follows an `escalate-only one-way ratchet: inline-sufficient may be reclassified to design-decision, never the reverse`. An `inline-sufficient` finding keeps the existing implementation route. A `design-decision` finding routes through `$lead` to the correct design owner (`$ux-designer` for interaction or accessibility design; `$architect` for the owning seam or contract) and requires a separate `/agents-review-loop` fix-design pass before implementation.
 
 ## Return exactly one artifact
 
@@ -43,7 +44,7 @@ description: "Keyboard, focus, screen-reader, contrast, WCAG A/AA."
 - An automated scan is the floor for web surfaces, never a substitute for the manual keyboard pass.
 - A visual criterion such as contrast or focus visibility cannot pass without a directly inspected artifact: a screenshot pair with computed ratio, a focus-stop capture, or an accessibility-tree excerpt. Route desktop capture through `$windows-gui-manual-testing` or `$analyzing-video-bugs` and apply the shared visual-artifact-verification rule before the capture counts.
 - Distinguish blocking issues from non-blocking improvements.
-- Escalate implementation work back through the lead to the appropriate builder role.
+- Design-level rework follows the `fix-class` routing above.
 
 ## Accessibility finding registry
 

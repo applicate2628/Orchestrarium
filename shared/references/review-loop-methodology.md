@@ -79,6 +79,8 @@ author, the same evidence target/version, and an equal-or-stronger declared tier
 structured fields, not prose. Reviews outside any work-item remain governed by the spine clause alone
 (declared residual).
 
+**`HOW→VERIFY independence: VERIFY(F) owner/engine ≠ HOW(F) author`.** Independence lives on the HOW→VERIFY edge, not the WHAT→HOW edge: a reviewer may author a fix's HOW while context is fresh; only verification of the implemented fix must be independent. For an `inline-sufficient` finding, no separate fix-design/HOW-review pass is required before implementation, but loop-to-PASS re-verification remains mandatory. **Author-exclusion for design-class (`fix-class: design-decision`) fixes:** when the implemented fix of a `design-decision` finding followed a reviewer's authored HOW, at least one discharging verdict must come from an angle that did not author that HOW; a distinct scope counts as distinct even on the same engine. No non-authoring verifier means no clean `PASS`: leave the HOW advisory and report `UNVERIFIED`.
+
 **Review a FROZEN artifact, never the live working tree (2026-07-17, live incident).** A verdict is a
 statement about one artifact revision, so the thing under review must not move while the round runs:
 dispatch at a committed revision, a `git diff` patch file, or a copied snapshot, and give the
