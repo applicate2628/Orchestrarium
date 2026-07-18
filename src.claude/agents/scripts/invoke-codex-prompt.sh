@@ -192,8 +192,8 @@ echo "$OUT_PATH"
 echo "$ERR_PATH"
 echo "$LASTMSG_PATH"
 echo "# actively await this dispatch (do NOT passively wait for a notification):"
-printf 'bash .claude/agents/scripts/await-codex-dispatch.sh --out %q --err %q --lastmsg %q --stall-secs 2700\n' \
-  "$OUT_PATH" "$ERR_PATH" "$LASTMSG_PATH"
+printf 'bash %q --out %q --err %q --lastmsg %q --stall-secs 2700\n' \
+  "$(dirname "$0")/await-codex-dispatch.sh" "$OUT_PATH" "$ERR_PATH" "$LASTMSG_PATH"
 
 set +e
 (

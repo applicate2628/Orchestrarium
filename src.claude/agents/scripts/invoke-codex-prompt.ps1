@@ -210,8 +210,9 @@ Write-Output $outPath
 Write-Output $errPath
 Write-Output $lastmsgPath
 Write-Output '# actively await this dispatch (do NOT passively wait for a notification):'
-Write-Output ("powershell -NoProfile -ExecutionPolicy Bypass -File .claude\agents\scripts\await-codex-dispatch.ps1 -Out '{0}' -Err '{1}' -LastMsg '{2}' -StallSecs 2700" -f `
-  $outPath.Replace("'", "''"), $errPath.Replace("'", "''"), $lastmsgPath.Replace("'", "''"))
+$awaitPath = Join-Path $PSScriptRoot 'await-codex-dispatch.ps1'
+Write-Output ("powershell -NoProfile -ExecutionPolicy Bypass -File '{0}' -Out '{1}' -Err '{2}' -LastMsg '{3}' -StallSecs 2700" -f `
+  $awaitPath.Replace("'", "''"), $outPath.Replace("'", "''"), $errPath.Replace("'", "''"), $lastmsgPath.Replace("'", "''"))
 
 try {
   # Invoke codex via PowerShell native call operator. `&` handles shim resolution
@@ -249,12 +250,17 @@ foreach ($capturedPath in @($outPath, $errPath)) {
 
 # Shared completion oracle (decision 2026-07-16-review-verdict-closure): a verdict is
 # accepted ONLY when exit==0 AND .err has no auth/quota/capacity/truncation markers AND
-# .out is non-empty AND its FINAL non-blank line is exactly 'GATE: PASS|REVISE'. Earlier
-# prose mentions are ignored by definition. Anything else -> blocked/none with reason.
+# the preferred final-message source (.lastmsg when non-empty, otherwise .out) is
+# non-empty AND its FINAL non-blank line is exactly 'GATE: PASS|REVISE'. Earlier prose
+# mentions are ignored by definition. Anything else -> blocked/none with reason.
 if ($Ledger) {
+  $verdictPath = $outPath
+  if ((Test-Path -LiteralPath $lastmsgPath -PathType Leaf) -and (Get-Item -LiteralPath $lastmsgPath).Length -gt 0) {
+    $verdictPath = $lastmsgPath
+  }
   $finalLine = ''
-  if ((Test-Path -LiteralPath $outPath -PathType Leaf) -and (Get-Item -LiteralPath $outPath).Length -gt 0) {
-    $lines = Get-Content -LiteralPath $outPath | Where-Object { $_.Trim() -ne '' }
+  if ((Test-Path -LiteralPath $verdictPath -PathType Leaf) -and (Get-Item -LiteralPath $verdictPath).Length -gt 0) {
+    $lines = Get-Content -LiteralPath $verdictPath | Where-Object { $_.Trim() -ne '' }
     if ($lines) { $finalLine = ($lines | Select-Object -Last 1) -replace "`r$", '' }
   }
   $errMarkers = 0
@@ -263,7 +269,7 @@ if ($Ledger) {
   }
   $termStatus = 'blocked'; $termGate = 'none'; $termNote = 'oracle: '
   if ($exitCode -ne 0) { $termNote += "nonzero exit ($exitCode)" }
-  elseif (-not (Test-Path -LiteralPath $outPath -PathType Leaf) -or (Get-Item -LiteralPath $outPath).Length -eq 0) { $termNote += 'empty .out' }
+  elseif (-not (Test-Path -LiteralPath $verdictPath -PathType Leaf) -or (Get-Item -LiteralPath $verdictPath).Length -eq 0) { $termNote += 'empty .out' }
   elseif ($errMarkers -gt 0) { $termNote += "err markers present ($errMarkers)" }
   elseif ($finalLine -ceq 'GATE: PASS') { $termStatus = 'completed'; $termGate = 'PASS'; $termNote += 'final-line GATE: PASS' }
   elseif ($finalLine -ceq 'GATE: REVISE') { $termStatus = 'revise'; $termGate = 'REVISE'; $termNote += 'final-line GATE: REVISE' }
@@ -272,7 +278,7 @@ if ($Ledger) {
     '--role', $LedgerRole, '--execution-role', 'external-reviewer', '--provider', 'codex',
     '--status', $termStatus, '--gate', $termGate, '--scope', "external run: $slug",
     '--event-kind', 'terminal', '--launch-run-id', $launchRunId,
-    '--evidence', "review:$outPath", '--notes', $termNote)
+    '--evidence', "review:$verdictPath", '--notes', $termNote)
   if ($LedgerLane) { $termArgs += @('--lane', $LedgerLane) }
   if ($LedgerArtifact) { $termArgs += @('--artifact', $LedgerArtifact) }
   if ($ledgerEffort) { $termArgs += @('--effort', $ledgerEffort) }

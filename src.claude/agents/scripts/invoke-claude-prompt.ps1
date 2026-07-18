@@ -163,6 +163,9 @@ $OutputEncoding = $utf8NoBom
 # strictness is restored in the finally block.
 $ErrorActionPreference = 'Continue'
 
+$hadDispatchedReviewMarker = Test-Path Env:ORCHESTRARIUM_DISPATCHED_REVIEW
+$previousDispatchedReviewMarker = $env:ORCHESTRARIUM_DISPATCHED_REVIEW
+
 # A1 (arch review 2026-05-17) — Read prompt body under strict wrapper error
 # semantics with explicit UTF-8 no-BOM, BEFORE relaxing $ErrorActionPreference
 # for the native call. PS 5.1's `Get-Content -Raw` without `-Encoding UTF8`
@@ -203,6 +206,7 @@ if ($Ledger) {
 }
 
 try {
+  $env:ORCHESTRARIUM_DISPATCHED_REVIEW = '1'
   # Invoke claude via PowerShell native call operator. `&` handles shim resolution
   # (`.exe`, `.cmd`, `.ps1`) on both PS 5.1 + PS 7+ — unlike `[Process]::Start` with
   # `UseShellExecute=$false`, which only launches native `.exe` binaries and breaks
@@ -213,6 +217,11 @@ try {
     1> $outPath 2> $errPath
   $exitCode = $LASTEXITCODE
 } finally {
+  if ($hadDispatchedReviewMarker) {
+    $env:ORCHESTRARIUM_DISPATCHED_REVIEW = $previousDispatchedReviewMarker
+  } else {
+    Remove-Item Env:ORCHESTRARIUM_DISPATCHED_REVIEW -ErrorAction SilentlyContinue
+  }
   $ErrorActionPreference = $prevErrorAction
   $OutputEncoding = $prevOutputEncoding
   [Console]::InputEncoding = $prevConsoleIn

@@ -18,6 +18,8 @@ WATCH_SH = ROOT / "src.claude" / "agents" / "scripts" / "await-codex-dispatch.sh
 WATCH_PS1 = ROOT / "src.claude" / "agents" / "scripts" / "await-codex-dispatch.ps1"
 INVOKE_SH = ROOT / "src.claude" / "agents" / "scripts" / "invoke-codex-prompt.sh"
 INVOKE_PS1 = ROOT / "src.claude" / "agents" / "scripts" / "invoke-codex-prompt.ps1"
+CLAUDE_INVOKE_SH = ROOT / "src.claude" / "agents" / "scripts" / "invoke-claude-prompt.sh"
+CLAUDE_INVOKE_PS1 = ROOT / "src.claude" / "agents" / "scripts" / "invoke-claude-prompt.ps1"
 
 
 def _bash() -> str | None:
@@ -255,6 +257,7 @@ def test_both_wrappers_emit_active_watch_command_after_paths() -> None:
     assert shell.index('echo "$LASTMSG_PATH"') < shell.index(note)
     assert shell.index('echo "$PROMPT_PATH"') < shell.index('"$CODEX_CMD" exec')
     assert "await-codex-dispatch.sh" in shell
+    assert '$(dirname "$0")/await-codex-dispatch.sh' in shell
     assert "--out" in shell and "--err" in shell and "--lastmsg" in shell
     assert "--stall-secs 2700" in shell
 
@@ -262,6 +265,7 @@ def test_both_wrappers_emit_active_watch_command_after_paths() -> None:
     assert powershell.index("Write-Output $lastmsgPath") < powershell.index(note)
     assert powershell.index("Write-Output $promptPath") < powershell.index("$promptBody | & $codexPath exec")
     assert "await-codex-dispatch.ps1" in powershell
+    assert "Join-Path $PSScriptRoot 'await-codex-dispatch.ps1'" in powershell
     assert "-Out" in powershell and "-Err" in powershell and "-LastMsg" in powershell
     assert "-StallSecs 2700" in powershell
 
@@ -307,7 +311,8 @@ def test_bash_wrapper_prints_copy_pasteable_watch_command(tmp_path: Path) -> Non
     lines = result.stdout.splitlines()
     assert lines[-2] == "# actively await this dispatch (do NOT passively wait for a notification):"
     command = lines[-1]
-    assert command.startswith("bash .claude/agents/scripts/await-codex-dispatch.sh")
+    expected_watcher = _posix_path(INVOKE_SH.parent / "await-codex-dispatch.sh")
+    assert command.startswith(f"bash {shlex.quote(expected_watcher)}")
     assert f"--out {shlex.quote(lines[1])}" in command
     assert f"--err {shlex.quote(lines[2])}" in command
     assert f"--lastmsg {shlex.quote(lines[3])}" in command
@@ -319,3 +324,36 @@ def test_powershell_watcher_port_names_required_primitives() -> None:
     assert "Test-Path" in source
     assert "LastWriteTime" in source
     assert "Write-Output" in source
+    assert "Start-Sleep -Milliseconds" in source
+    assert "<#[" not in source
+    assert "]#>" not in source
+
+
+def test_powershell_watcher_usage_errors_are_stderr(tmp_path: Path) -> None:
+    if not _powershell():
+        pytest.skip("PowerShell is unavailable")
+
+    missing_out = _run_ps("-PollSecs", "0.05", "-MaxSecs", "1")
+    assert missing_out.returncode == 2
+    assert missing_out.stdout == ""
+    assert "FAIL: --out is required" in missing_out.stderr
+    assert "Usage:" in missing_out.stderr
+
+    invalid_timing = _run_ps(
+        "-Out", str(tmp_path / "dispatch.out"), "-PollSecs", "-1",
+    )
+    assert invalid_timing.returncode == 2
+    assert invalid_timing.stdout == ""
+    assert "FAIL: timing values must be non-negative" in invalid_timing.stderr
+
+
+def test_claude_prompt_wrappers_scope_dispatched_review_marker() -> None:
+    shell = CLAUDE_INVOKE_SH.read_text(encoding="utf-8")
+    powershell = CLAUDE_INVOKE_PS1.read_text(encoding="utf-8")
+
+    assert "export ORCHESTRARIUM_DISPATCHED_REVIEW=1" in shell
+    claude_call = '"$CLAUDE_CMD" "${CLAUDE_FLAGS[@]}"'
+    assert shell.index("export ORCHESTRARIUM_DISPATCHED_REVIEW=1") < shell.index(claude_call)
+    assert "$env:ORCHESTRARIUM_DISPATCHED_REVIEW" in powershell
+    assert "Remove-Item Env:ORCHESTRARIUM_DISPATCHED_REVIEW" in powershell
+    assert powershell.index("$env:ORCHESTRARIUM_DISPATCHED_REVIEW") < powershell.index("$promptBody | & $claudePath")

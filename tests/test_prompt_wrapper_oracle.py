@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import shutil
 import stat
 import subprocess
@@ -46,6 +47,10 @@ def _bash() -> str:
     return found or "bash"
 
 
+def _powershell() -> str | None:
+    return shutil.which("pwsh") or shutil.which("powershell")
+
+
 def _to_posix(p: Path) -> str:
     s = str(p).replace("\\", "/")
     if len(s) > 1 and s[1] == ":":
@@ -53,7 +58,13 @@ def _to_posix(p: Path) -> str:
     return s
 
 
-def _make_fake_provider(tmp_path: Path, which: str, exit_code: int) -> Path:
+def _make_fake_provider(
+    tmp_path: Path,
+    which: str,
+    exit_code: int,
+    *,
+    write_lastmsg: bool = True,
+) -> Path:
     """A provider stand-in with an empty stdout trace.
 
     The Codex shape requires `--output-last-message` and writes a PASS verdict
@@ -62,6 +73,7 @@ def _make_fake_provider(tmp_path: Path, which: str, exit_code: int) -> Path:
     """
     fake = tmp_path / "fake-provider.sh"
     if which == "codex":
+        lastmsg_write = "printf 'GATE: PASS\\n' > \"$lastmsg\"" if write_lastmsg else ":"
         body = f"""#!/usr/bin/env bash
 lastmsg=""
 while [[ $# -gt 0 ]]; do
@@ -72,7 +84,7 @@ while [[ $# -gt 0 ]]; do
 done
 cat >/dev/null
 [[ -n "$lastmsg" ]] || exit 97
-printf 'GATE: PASS\\n' > "$lastmsg"
+{lastmsg_write}
 exit {exit_code}
 """
     else:
@@ -127,7 +139,8 @@ def test_empty_trace_still_settles_terminal(tmp_path, which, provider_exit):
     output_lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
     if which == "codex":
         assert output_lines[-2] == "# actively await this dispatch (do NOT passively wait for a notification):"
-        assert output_lines[-1].startswith("bash .claude/agents/scripts/await-codex-dispatch.sh")
+        watcher = _to_posix(wrapper.parent / "await-codex-dispatch.sh")
+        assert output_lines[-1].startswith(f"bash {shlex.quote(watcher)}")
         paths = output_lines[:4]
     else:
         paths = output_lines
@@ -164,3 +177,83 @@ def test_empty_trace_still_settles_terminal(tmp_path, which, provider_exit):
     assert expected_note in term.get("notes", ""), term
     expected_evidence_ref = paths[3] if which == "codex" else paths[1]
     assert term.get("evidence") == [{"kind": "review", "ref": expected_evidence_ref}]
+
+
+def test_codex_empty_lastmsg_and_out_exit_zero_records_blocked_terminal(tmp_path: Path) -> None:
+    """An exit-zero Codex run with no final message or stdout still settles as blocked."""
+    wrapper = WRAPPERS["codex"]
+    fake = _make_fake_provider(tmp_path, "codex", 0, write_lastmsg=False)
+    item = _make_work_item(tmp_path)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("dummy prompt\n", encoding="utf-8")
+    outdir = tmp_path / "prompt-outputs"
+
+    env = os.environ.copy()
+    env[BIN_ENV["codex"]] = _to_posix(fake)
+    env[PROMPTS_DIR_ENV["codex"]] = _to_posix(outdir)
+    result = subprocess.run(
+        [_bash(), _to_posix(wrapper), "oracle-empty-codex",
+         "--prompt-file", _to_posix(prompt),
+         "--ledger", _to_posix(item),
+         "--ledger-role", "architecture-reviewer",
+         "--ledger-lane", "fixture-lane",
+         "--ledger-artifact", "design.md"],
+        capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120,
+    )
+
+    assert result.returncode == 0, result.stderr
+    output_lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    paths = output_lines[:4]
+    assert paths[3].endswith(".lastmsg")
+    events = [json.loads(ln) for ln in
+              (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip()]
+    terminal = next(e for e in events if e.get("eventKind") == "terminal")
+    assert terminal["gate"] == "none"
+    assert terminal["status"] == "blocked"
+    assert "empty .out" in terminal["notes"]
+    assert terminal["evidence"] == [{"kind": "review", "ref": paths[1]}]
+
+
+def test_powershell_codex_oracle_prefers_lastmsg(tmp_path: Path) -> None:
+    powershell = _powershell()
+    if not powershell:
+        pytest.skip("PowerShell is unavailable")
+
+    fake = tmp_path / "fake-codex.ps1"
+    fake.write_text(
+        "param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)\n"
+        "$lastmsg = ''\n"
+        "for ($i = 0; $i -lt $Arguments.Count; $i++) {\n"
+        "  if ($Arguments[$i] -eq '--output-last-message') { $lastmsg = $Arguments[$i + 1] }\n"
+        "}\n"
+        "if (-not $lastmsg) { exit 97 }\n"
+        "[System.IO.File]::WriteAllText($lastmsg, \"GATE: PASS`n\", [System.Text.UTF8Encoding]::new($false))\n"
+        "exit 0\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    item = _make_work_item(tmp_path)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("dummy prompt\n", encoding="utf-8")
+    outdir = tmp_path / "prompt-outputs"
+    env = os.environ.copy()
+    env["CODEX_BIN"] = str(fake)
+    env["CODEX_PROMPTS_DIR"] = str(outdir)
+
+    result = subprocess.run(
+        [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+         "-File", str(ROOT / "src.claude" / "agents" / "scripts" / "invoke-codex-prompt.ps1"),
+         "oracle-ps1", "-PromptFile", str(prompt), "-Ledger", str(item),
+         "-LedgerRole", "architecture-reviewer", "-LedgerLane", "fixture-lane",
+         "-LedgerArtifact", "design.md"],
+        capture_output=True, text=True, env=env, cwd=str(ROOT), timeout=120,
+    )
+
+    assert result.returncode == 0, result.stderr
+    paths = [line for line in result.stdout.splitlines() if line.strip()][:4]
+    events = [json.loads(line) for line in
+              (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
+    terminal = next(event for event in events if event.get("eventKind") == "terminal")
+    assert terminal["gate"] == "PASS"
+    assert terminal["status"] == "completed"
+    assert terminal["evidence"] == [{"kind": "review", "ref": paths[3]}]

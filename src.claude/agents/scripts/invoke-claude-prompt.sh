@@ -183,7 +183,10 @@ if [[ -n "$LEDGER_ITEM" ]]; then
 fi
 
 set +e
-"$CLAUDE_CMD" "${CLAUDE_FLAGS[@]}" < "$PROMPT_PATH" 1> "$OUT_PATH" 2> "$ERR_PATH"
+(
+  export ORCHESTRARIUM_DISPATCHED_REVIEW=1
+  "$CLAUDE_CMD" "${CLAUDE_FLAGS[@]}" < "$PROMPT_PATH" 1> "$OUT_PATH" 2> "$ERR_PATH"
+)
 EXIT_CODE=$?
 set -e
 

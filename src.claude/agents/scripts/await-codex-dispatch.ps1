@@ -1,14 +1,13 @@
-<#[
+<#
 .SYNOPSIS
     One-shot active completion watcher for a background Codex dispatch.
 .DESCRIPTION
     Watches the final-message/output artifacts, commit identity, stderr idle
     time, and a hard elapsed-time cap. Missing files and failed git probes are
     non-terminal so delayed provider artifacts do not crash the watcher.
-]#>
+#>
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory = $true)]
   [string]$Out,
   [string]$Err,
   [string]$LastMsg,
@@ -20,8 +19,23 @@ param(
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+function Write-Usage {
+  Write-Error @'
+Usage:
+  await-codex-dispatch.ps1 -Out <out-path> [-Err <err-path>]
+    [-LastMsg <lastmsg-path>] [-CommitBase <sha>]
+    [-StallSecs <seconds>] [-MaxSecs <seconds>] [-PollSecs <seconds>]
+'@ -ErrorAction Continue
+}
+
+if ([string]::IsNullOrWhiteSpace($Out)) {
+  Write-Error 'FAIL: --out is required' -ErrorAction Continue
+  Write-Usage
+  exit 2
+}
+
 if ($StallSecs -lt 0 -or $MaxSecs -lt 0 -or $PollSecs -lt 0) {
-  Write-Output 'FAIL: timing values must be non-negative'
+  Write-Error 'FAIL: timing values must be non-negative' -ErrorAction Continue
   exit 2
 }
 
@@ -78,5 +92,5 @@ while ($true) {
     exit 0
   }
 
-  Start-Sleep -Seconds $PollSecs
+  Start-Sleep -Milliseconds ([math]::Max(1, [int][math]::Ceiling($PollSecs * 1000)))
 }
