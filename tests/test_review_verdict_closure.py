@@ -238,8 +238,10 @@ class ClosureFixture(unittest.TestCase):
         waiver = _event(
             "run-00000067-secwaive",
             role="security-reviewer",
+            executionRole="external-reviewer",
             gate="WAIVED:security-reviewer",
             status="completed",
+            artifact="a.md",
             closesRunIds=["run-00000066-unclassified"],
             evidence=[{
                 "kind": "manual-check",
@@ -263,8 +265,10 @@ class ClosureFixture(unittest.TestCase):
             "run-00000069-secwaive",
             role="external-reviewer",
             assignedRole="security-reviewer",
+            executionRole="external-reviewer",
             gate="WAIVED:security-reviewer",
             status="completed",
+            artifact="a.md",
             closesRunIds=["run-00000068-protected"],
             evidence=[{
                 "kind": "manual-check",
@@ -275,6 +279,208 @@ class ClosureFixture(unittest.TestCase):
         errors = self._validate([revise, waiver])
 
         self.assertEqual(errors, [], errors)
+
+    def test_security_reviewer_waiver_rejects_classified_non_protected_targets(self) -> None:
+        for suffix, finding_class in (
+            ("correctness", "correctness"),
+            ("performance", "performance"),
+            ("other", "other"),
+        ):
+            with self.subTest(finding_class=finding_class):
+                target_id = f"run-secscope-{suffix}"
+                revise = _event(
+                    target_id,
+                    gate="REVISE",
+                    status="revise",
+                    artifact="a.md",
+                    findingClass=finding_class,
+                )
+                waiver = _event(
+                    f"run-secwaive-{suffix}",
+                    role="security-reviewer",
+                    executionRole="internal",
+                    gate="WAIVED:security-reviewer",
+                    status="completed",
+                    artifact="a.md",
+                    closesRunIds=[target_id],
+                    evidence=[{
+                        "kind": "manual-check",
+                        "ref": f"security-reviewer waives {target_id}",
+                    }],
+                )
+
+                errors = self._validate([revise, waiver])
+
+                self.assertTrue(
+                    any(
+                        "WAIVED:security-reviewer" in error
+                        and "findingClass" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+                self.assertTrue(
+                    any(target_id in error and "open REVISE obligation" in error for error in errors),
+                    errors,
+                )
+
+    def test_security_reviewer_waiver_rejects_main_execution_role(self) -> None:
+        target_id = "run-seclane-main-target"
+        revise = _event(
+            target_id,
+            gate="REVISE",
+            status="revise",
+            artifact="a.md",
+            findingClass="security",
+        )
+        waiver = _event(
+            "run-seclane-main-waiver",
+            role="security-reviewer",
+            executionRole="main",
+            gate="WAIVED:security-reviewer",
+            status="completed",
+            artifact="a.md",
+            closesRunIds=[target_id],
+            evidence=[{
+                "kind": "manual-check",
+                "ref": f"security-reviewer waives {target_id}",
+            }],
+        )
+
+        errors = self._validate([revise, waiver])
+
+        self.assertTrue(
+            any(
+                "WAIVED:security-reviewer" in error
+                and "executionRole" in error
+                and "reviewer-side" in error
+                for error in errors
+            ),
+            errors,
+        )
+        self.assertTrue(
+            any(target_id in error and "open REVISE obligation" in error for error in errors),
+            errors,
+        )
+
+    def test_security_reviewer_waiver_rejects_consultant_execution_role(self) -> None:
+        target_id = "run-seclane-consultant-target"
+        revise = _event(
+            target_id,
+            gate="REVISE",
+            status="revise",
+            artifact="a.md",
+            findingClass="publication-safety",
+        )
+        waiver = _event(
+            "run-seclane-consultant-waiver",
+            role="external-reviewer",
+            assignedRole="security-reviewer",
+            executionRole="consultant",
+            gate="WAIVED:security-reviewer",
+            status="completed",
+            artifact="a.md",
+            closesRunIds=[target_id],
+            evidence=[{
+                "kind": "manual-check",
+                "ref": f"security-reviewer waives {target_id}",
+            }],
+        )
+
+        errors = self._validate([revise, waiver])
+
+        self.assertTrue(
+            any(
+                "WAIVED:security-reviewer" in error
+                and "executionRole" in error
+                and "reviewer-side" in error
+                for error in errors
+            ),
+            errors,
+        )
+        self.assertTrue(
+            any(target_id in error and "open REVISE obligation" in error for error in errors),
+            errors,
+        )
+
+    def test_security_reviewer_waiver_requires_existing_artifact(self) -> None:
+        for suffix, artifact in (
+            ("omitted", None),
+            ("empty", ""),
+            ("missing", "missing-security-waiver-artifact.md"),
+        ):
+            with self.subTest(artifact=artifact):
+                target_id = f"run-secartifact-{suffix}-target"
+                revise = _event(
+                    target_id,
+                    gate="REVISE",
+                    status="revise",
+                    artifact="a.md",
+                    findingClass="security",
+                )
+                waiver_fields = {
+                    "role": "security-reviewer",
+                    "executionRole": "internal",
+                    "gate": "WAIVED:security-reviewer",
+                    "status": "completed",
+                    "closesRunIds": [target_id],
+                    "evidence": [{
+                        "kind": "manual-check",
+                        "ref": f"security-reviewer waives {target_id}",
+                    }],
+                }
+                if artifact is not None:
+                    waiver_fields["artifact"] = artifact
+                waiver = _event(f"run-secartifact-{suffix}-waiver", **waiver_fields)
+
+                errors = self._validate([revise, waiver])
+
+                self.assertTrue(
+                    any(
+                        "WAIVED:security-reviewer" in error
+                        and "artifact" in error
+                        for error in errors
+                    ),
+                    errors,
+                )
+                self.assertTrue(
+                    any(target_id in error and "open REVISE obligation" in error for error in errors),
+                    errors,
+                )
+
+    def test_security_reviewer_waiver_accepts_internal_reviewer_for_protected_and_unclassified_targets(self) -> None:
+        for suffix, finding_class in (
+            ("publication", "publication-safety"),
+            ("security", "security"),
+            ("unclassified", None),
+        ):
+            with self.subTest(finding_class=finding_class):
+                target_id = f"run-secinternal-{suffix}-target"
+                revise_fields = {
+                    "gate": "REVISE",
+                    "status": "revise",
+                    "artifact": "a.md",
+                }
+                if finding_class is not None:
+                    revise_fields["findingClass"] = finding_class
+                revise = _event(target_id, **revise_fields)
+                waiver = _event(
+                    f"run-secinternal-{suffix}-waiver",
+                    role="security-reviewer",
+                    executionRole="internal",
+                    gate="WAIVED:security-reviewer",
+                    status="completed",
+                    artifact="a.md",
+                    closesRunIds=[target_id],
+                    evidence=[{
+                        "kind": "manual-check",
+                        "ref": f"security-reviewer waives {target_id}",
+                    }],
+                )
+
+                errors = self._validate([revise, waiver])
+
+                self.assertEqual(errors, [], errors)
 
     def test_security_reviewer_waiver_rejects_non_security_role(self) -> None:
         revise = _event(
@@ -303,6 +509,216 @@ class ClosureFixture(unittest.TestCase):
             any("WAIVED:security-reviewer" in e and "authority" in e for e in errors),
             errors,
         )
+        self.assertTrue(
+            any(
+                "run-0000006a-protected" in e and "open REVISE obligation" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_security_reviewer_waiver_general_invalidity_keeps_target_open(self) -> None:
+        target_id = "run-prefix-target-revise"
+        revise = _event(
+            target_id,
+            gate="REVISE",
+            status="revise",
+            artifact="a.md",
+            lane="security-adversarial",
+            findingClass="security",
+        )
+        base_waiver = _event(
+            "run-prefix-base-waiver",
+            role="security-reviewer",
+            executionRole="internal",
+            gate="WAIVED:security-reviewer",
+            status="completed",
+            artifact="a.md",
+            closesRunIds=[target_id],
+            evidence=[{
+                "kind": "manual-check",
+                "ref": f"security-reviewer waives {target_id}",
+            }],
+        )
+        expected_open = (
+            "open REVISE obligation: run-prefix-target-revise "
+            "(lane='security-adversarial', artifact='a.md') — closes only on "
+            "re-verification PASS (closesRunIds) or a typed disposition, never on "
+            "author belief or validator green"
+        )
+        cases = (
+            (
+                "scope empty",
+                "run-prefix-scope-waiver",
+                {"scope": []},
+                "run-prefix-scope-waiver: scope must be a non-empty list",
+            ),
+            (
+                "schemaVersion 99",
+                "run-prefix-schema-waiver",
+                {"schemaVersion": 99},
+                "run-prefix-schema-waiver: schemaVersion must be 1 or 2",
+            ),
+            (
+                "evidence[2].extra",
+                "run-prefix-evidence-waiver",
+                {
+                    "evidence": [
+                        {
+                            "kind": "manual-check",
+                            "ref": f"security-reviewer waives {target_id}",
+                        },
+                        {
+                            "kind": "review",
+                            "ref": "security-reviewer evidence review",
+                            "extra": "invalid",
+                        },
+                    ],
+                },
+                "run-prefix-evidence-waiver: evidence[2] has unexpected field: extra",
+            ),
+        )
+
+        for case, run_id, overrides, expected_error in cases:
+            with self.subTest(case=case):
+                waiver = dict(base_waiver, runId=run_id, **overrides)
+
+                errors = self._validate([revise, waiver])
+
+                self.assertIn(expected_error, errors)
+                self.assertIn(expected_open, errors)
+
+    def test_security_reviewer_waiver_mixed_target_set_is_atomic(self) -> None:
+        protected_id = "run-atomic-protected-target"
+        correctness_id = "run-atomic-correctness-target"
+        protected = _event(
+            protected_id,
+            gate="REVISE",
+            status="revise",
+            artifact="a.md",
+            lane="security-protected",
+            findingClass="security",
+        )
+        correctness = _event(
+            correctness_id,
+            gate="REVISE",
+            status="revise",
+            artifact="design.md",
+            lane="correctness-nonprotected",
+            findingClass="correctness",
+        )
+        expected_protected_open = (
+            "open REVISE obligation: run-atomic-protected-target "
+            "(lane='security-protected', artifact='a.md') — closes only on "
+            "re-verification PASS (closesRunIds) or a typed disposition, never on "
+            "author belief or validator green"
+        )
+        expected_correctness_open = (
+            "open REVISE obligation: run-atomic-correctness-target "
+            "(lane='correctness-nonprotected', artifact='design.md') — closes only on "
+            "re-verification PASS (closesRunIds) or a typed disposition, never on "
+            "author belief or validator green"
+        )
+
+        for order_name, target_order in (
+            ("protected-first", [protected_id, correctness_id]),
+            ("correctness-first", [correctness_id, protected_id]),
+        ):
+            with self.subTest(order=order_name):
+                waiver_id = f"run-atomic-{order_name}-waiver"
+                waiver = _event(
+                    waiver_id,
+                    role="security-reviewer",
+                    executionRole="internal",
+                    gate="WAIVED:security-reviewer",
+                    status="completed",
+                    artifact="a.md",
+                    closesRunIds=target_order,
+                    evidence=[{
+                        "kind": "manual-check",
+                        "ref": (
+                            f"security-reviewer waives {protected_id} and "
+                            f"{correctness_id}"
+                        ),
+                    }],
+                )
+                telemetry: dict[str, int] = {}
+
+                errors = vws.validate_work_item(
+                    self._write([protected, correctness, waiver]),
+                    telemetry=telemetry,
+                )
+
+                self.assertIn(
+                    f"{waiver_id}: WAIVED:security-reviewer findingClass dimension "
+                    f"cannot discharge {correctness_id}: classified non-protected "
+                    "findingClass 'correctness'",
+                    errors,
+                )
+                self.assertIn(expected_protected_open, errors)
+                self.assertIn(expected_correctness_open, errors)
+                self.assertEqual(telemetry.get("closure-accepted", 0), 0, telemetry)
+
+    def test_security_reviewer_waiver_duplicate_target_identity_is_atomic(self) -> None:
+        target_id = "run-atomic-duplicate-target"
+        protected = _event(
+            target_id,
+            gate="REVISE",
+            status="revise",
+            artifact="a.md",
+            lane="duplicate-protected-position",
+            findingClass="security",
+        )
+        correctness = _event(
+            target_id,
+            gate="REVISE",
+            status="revise",
+            artifact="design.md",
+            lane="duplicate-correctness-position",
+            findingClass="correctness",
+        )
+        waiver_id = "run-atomic-duplicate-waiver"
+        waiver = _event(
+            waiver_id,
+            role="security-reviewer",
+            executionRole="internal",
+            gate="WAIVED:security-reviewer",
+            status="completed",
+            artifact="a.md",
+            closesRunIds=[target_id],
+            evidence=[{
+                "kind": "manual-check",
+                "ref": f"security-reviewer waives {target_id}",
+            }],
+        )
+        telemetry: dict[str, int] = {}
+
+        errors = vws.validate_work_item(
+            self._write([protected, correctness, waiver]),
+            telemetry=telemetry,
+        )
+
+        self.assertIn(f"duplicate runId: {target_id}", errors)
+        self.assertIn(
+            f"{waiver_id}: WAIVED:security-reviewer target identity dimension "
+            f"requires exactly one ledger event for {target_id}; found 2",
+            errors,
+        )
+        self.assertIn(
+            "open REVISE obligation: run-atomic-duplicate-target "
+            "(lane='duplicate-protected-position', artifact='a.md') — closes only on "
+            "re-verification PASS (closesRunIds) or a typed disposition, never on "
+            "author belief or validator green",
+            errors,
+        )
+        self.assertIn(
+            "open REVISE obligation: run-atomic-duplicate-target "
+            "(lane='duplicate-correctness-position', artifact='design.md') — closes only on "
+            "re-verification PASS (closesRunIds) or a typed disposition, never on "
+            "author belief or validator green",
+            errors,
+        )
+        self.assertEqual(telemetry.get("closure-accepted", 0), 0, telemetry)
 
     # ---------- lifecycle ----------
 

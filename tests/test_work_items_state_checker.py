@@ -231,6 +231,71 @@ def test_checker_reports_stale_running_agent_when_threshold_is_enabled(tmp_path:
     assert "stale running agent" in result.stdout
 
 
+def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Path, subtests):
+    def archived_case(case_name: str, *, invalid: bool = False, legacy_waiver: bool = False):
+        root = tmp_path / case_name
+        item_name = f"archived-{case_name}"
+        item = root / "work-items" / "archive" / "2026-07" / item_name
+        (item / "reviews").mkdir(parents=True)
+        (item / "reviews" / "security.md").write_text("PASS\n", encoding="utf-8")
+        target_id = f"run-archive-{case_name}-target"
+        waiver_id = f"run-archive-{case_name}-waiver"
+        target = ledger_event(
+            schemaVersion=2,
+            runId=target_id,
+            workItem=item_name,
+            role="security-reviewer",
+            executionRole="external-reviewer",
+            status="revise",
+            gate="REVISE",
+            artifact="reviews/security.md",
+            lane=f"archive-{case_name}",
+            findingClass="security",
+        )
+        waiver = ledger_event(
+            schemaVersion=1 if legacy_waiver else 2,
+            runId=waiver_id,
+            workItem=item_name,
+            role="security-reviewer",
+            executionRole="internal",
+            status="completed",
+            gate="WAIVED:security-reviewer",
+            scope=[] if invalid else ["archive security review"],
+            artifact="reviews/security.md",
+            evidence=[{
+                "kind": "manual-check",
+                "ref": f"security-reviewer waives {target_id}",
+            }],
+            closesRunIds=[target_id],
+        )
+        (item / "agent-runs.jsonl").write_text(
+            "\n".join(json.dumps(event) for event in (target, waiver)) + "\n",
+            encoding="utf-8",
+        )
+        return run_checker(root), target_id, waiver_id
+
+    with subtests.test(case="legal version-2 waiver"):
+        result, target_id, _waiver_id = archived_case("legal")
+
+        assert result.returncode == 0, result.stdout
+        assert f"open REVISE obligation survived archival: {target_id}" not in result.stdout
+        assert "archive scan clean" in result.stdout
+
+    with subtests.test(case="invalid version-2 waiver"):
+        result, target_id, waiver_id = archived_case("invalid", invalid=True)
+
+        assert result.returncode == 1
+        assert f"{waiver_id}: scope must be a non-empty list" in result.stdout
+        assert f"open REVISE obligation survived archival: {target_id}" in result.stdout
+
+    with subtests.test(case="legacy version-1 waiver"):
+        result, target_id, waiver_id = archived_case("legacy", legacy_waiver=True)
+
+        assert result.returncode == 1
+        assert f"open REVISE obligation survived archival: {target_id}" in result.stdout
+        assert f"{waiver_id}: field closesRunIds requires schemaVersion 2" not in result.stdout
+
+
 def test_done_predicate_twin_not_drifted():
     # The state-checker re-implements the archival hook's DONE_STATE regex (no
     # shared import across the hook/script boundary). Guard against silent drift:

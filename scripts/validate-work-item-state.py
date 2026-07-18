@@ -192,6 +192,45 @@ def has_security_reviewer_authority(event: dict) -> bool:
     )
 
 
+def validate_security_reviewer_waiver_closer(
+    event: dict,
+    artifact_path: Path | None,
+    run_id: object,
+    errors: list[str],
+) -> None:
+    """Validate every closer-side dimension of security-reviewer waiver authority."""
+
+    if not has_security_reviewer_authority(event):
+        fail(
+            errors,
+            f"{run_id}: {SECURITY_REVIEWER_WAIVER_GATE} authority dimension requires "
+            "security-reviewer in role or assignedRole",
+        )
+
+    execution_role = event.get("executionRole")
+    if execution_role in LEGACY_EXECUTION_ROLES:
+        execution_role = LEGACY_EXECUTION_ROLES[execution_role]
+    if execution_role not in {"external-reviewer", "internal"}:
+        fail(
+            errors,
+            f"{run_id}: {SECURITY_REVIEWER_WAIVER_GATE} executionRole dimension requires "
+            "reviewer-side executionRole (external-reviewer|internal)",
+        )
+
+    artifact = event.get("artifact")
+    if (
+        not isinstance(artifact, str)
+        or not artifact.strip()
+        or artifact_path is None
+        or not artifact_path.exists()
+    ):
+        fail(
+            errors,
+            f"{run_id}: {SECURITY_REVIEWER_WAIVER_GATE} artifact dimension requires "
+            "a non-empty existing artifact",
+        )
+
+
 def validate_waiver_fields(
     event: dict,
     gate: str,
@@ -240,7 +279,8 @@ def validate_waiver_fields(
             )
 
 
-def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -> None:
+def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -> bool:
+    error_count_on_entry = len(errors)
     required = ["schemaVersion", "runId", "workItem", "role", "executionRole", "status", "gate", "scope", "startedAt", "updatedAt"]
     for key in required:
         if key not in event:
@@ -371,15 +411,44 @@ def validate_event(event: dict, item: Path, seen: set[str], errors: list[str]) -
             "the security-reviewer's authorization",
             errors,
         )
-        if not has_security_reviewer_authority(event):
-            fail(
-                errors,
-                f"{run_id}: {SECURITY_REVIEWER_WAIVER_GATE} requires security-reviewer "
-                "authority in role or assignedRole",
-            )
+        validate_security_reviewer_waiver_closer(event, artifact_path, run_id, errors)
+
+    return len(errors) == error_count_on_entry
 
 
-def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str, int] | None = None) -> tuple[list[dict], list[dict]]:
+def derive_event_validity(
+    events: list[dict],
+    item: Path,
+    errors: list[str],
+    *,
+    validate_schema_version: int | None = None,
+) -> list[bool]:
+    """Return one validation result per input position.
+
+    When a schema version is selected, other positions remain aligned but are
+    ineligible without emitting diagnostics. This preserves the archive scanner's
+    intentional legacy epoch while keeping validation state validator-owned.
+    """
+    seen: set[str] = set()
+    event_validity: list[bool] = []
+    for event in events:
+        if (
+            validate_schema_version is not None
+            and event.get("schemaVersion") != validate_schema_version
+        ):
+            event_validity.append(False)
+            continue
+        event_validity.append(validate_event(event, item, seen, errors))
+    return event_validity
+
+
+def validate_closure(
+    events: list[dict],
+    errors: list[str],
+    telemetry: dict[str, int] | None = None,
+    *,
+    event_validity: list[bool] | None = None,
+) -> tuple[list[dict], list[dict]]:
     """Ledger-level REVISE-closure validation (decision 2026-07-16-review-verdict-closure,
     minimal slice). Returns (open_v2_revise_events, open_launch_events) — obligations never discharged/settled events (never discharged by a valid
     closer). Closure is derived ONLY from the closesRunIds relation — never from
@@ -391,10 +460,13 @@ def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str,
         tel[rule] = tel.get(rule, 0) + 1
 
     index: dict[str, tuple[int, dict]] = {}
+    positions_by_run_id: dict[str, list[tuple[int, dict]]] = {}
     for pos, event in enumerate(events):
         rid = event.get("runId")
-        if isinstance(rid, str) and rid not in index:
-            index[rid] = (pos, event)
+        if isinstance(rid, str):
+            positions_by_run_id.setdefault(rid, []).append((pos, event))
+            if rid not in index:
+                index[rid] = (pos, event)
 
     # Lifecycle integrity (only when eventKind is used): one terminal per launch,
     # terminal references an earlier launch.
@@ -423,15 +495,101 @@ def validate_closure(events: list[dict], errors: list[str], telemetry: dict[str,
 
     discharged: dict[str, str] = {}  # target runId -> closer runId
     for pos, event in enumerate(events):
+        gate = event.get("gate")
+        # Privileged waiver authorization consumes explicit validation state at
+        # the event's ledger position. Missing/misaligned state is invalid;
+        # rendered diagnostics and attacker-controlled runIds carry no authority.
+        security_validity: list[bool] | None = None
+        if gate == SECURITY_REVIEWER_WAIVER_GATE:
+            if (
+                event_validity is None
+                or len(event_validity) != len(events)
+                or not event_validity[pos]
+            ):
+                continue
+            security_validity = event_validity
         closes = event.get("closesRunIds")
         if not isinstance(closes, list) or not closes:
             continue
         rid = event.get("runId")
-        gate = event.get("gate")
-        # Per-event validation records the authority error. Do not let that invalid
-        # event discharge an obligation while the candidate is being rejected.
-        if gate == SECURITY_REVIEWER_WAIVER_GATE and not has_security_reviewer_authority(event):
+        if security_validity is not None:
+            eligible_targets: list[str] = []
+            preflight_failed = False
+            for target_id in closes:
+                if not isinstance(target_id, str):
+                    preflight_failed = True
+                    continue  # closer validity already carries the shape diagnostic
+                bump("closure-checked")
+                target_positions = positions_by_run_id.get(target_id, [])
+                if len(target_positions) != 1:
+                    fail(
+                        errors,
+                        f"{rid}: {SECURITY_REVIEWER_WAIVER_GATE} target identity dimension "
+                        f"requires exactly one ledger event for {target_id}; "
+                        f"found {len(target_positions)}",
+                    )
+                    bump("security-waiver-target-identity-fail")
+                    preflight_failed = True
+                    continue
+                target_pos, target = target_positions[0]
+                if target_pos >= pos:
+                    fail(
+                        errors,
+                        f"{rid}: closesRunIds target {target_id} does not reference "
+                        "an earlier event (C1)",
+                    )
+                    bump("C1-fail")
+                    preflight_failed = True
+                    continue
+                if not security_validity[target_pos]:
+                    fail(
+                        errors,
+                        f"{rid}: {SECURITY_REVIEWER_WAIVER_GATE} target validity dimension "
+                        f"cannot discharge {target_id}: target event is invalid",
+                    )
+                    bump("security-waiver-target-validity-fail")
+                    preflight_failed = True
+                    continue
+                if target.get("gate") != "REVISE":
+                    fail(
+                        errors,
+                        f"{rid}: closesRunIds target {target_id} is not a REVISE event (C2)",
+                    )
+                    bump("C2-fail")
+                    preflight_failed = True
+                    continue
+                if target_id in discharged:
+                    fail(
+                        errors,
+                        f"{rid}: REVISE {target_id} already discharged by "
+                        f"{discharged[target_id]} (C2 unique discharge)",
+                    )
+                    bump("C2-duplicate-discharge")
+                    preflight_failed = True
+                    continue
+                if "findingClass" in target:
+                    finding_class = target.get("findingClass")
+                    if finding_class not in PROTECTED_CLASSES:
+                        if finding_class in FINDING_CLASSES - PROTECTED_CLASSES:
+                            fail(
+                                errors,
+                                f"{rid}: {SECURITY_REVIEWER_WAIVER_GATE} "
+                                f"findingClass dimension cannot discharge {target_id}: "
+                                "classified non-protected findingClass "
+                                f"{finding_class!r}",
+                            )
+                            bump("security-waiver-finding-class-fail")
+                        preflight_failed = True
+                        continue
+                eligible_targets.append(target_id)
+
+            if preflight_failed:
+                continue
+            for target_id in eligible_targets:
+                discharged[target_id] = rid if isinstance(rid, str) else "<invalid>"
+                bump("closure-accepted")
             continue
+
         for target_id in closes:
             if not isinstance(target_id, str):
                 continue
@@ -563,10 +721,13 @@ def validate_work_item(
     """
     errors: list[str] = []
     events = load_jsonl(ledger_path or (item / "agent-runs.jsonl"), errors)
-    seen: set[str] = set()
-    for event in events:
-        validate_event(event, item, seen, errors)
-    open_revise, open_launches = validate_closure(events, errors, telemetry)
+    event_validity = derive_event_validity(events, item, errors)
+    open_revise, open_launches = validate_closure(
+        events,
+        errors,
+        telemetry,
+        event_validity=event_validity,
+    )
     if strict_revise:
         for event in open_launches:
             fail(

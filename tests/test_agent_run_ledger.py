@@ -171,6 +171,8 @@ def test_append_accepts_security_reviewer_waiver_and_discharges_revise(tmp_path:
         "WAIVED:security-reviewer",
         "--scope",
         "scripts/validate-work-item-state.py",
+        "--artifact",
+        "reviews/qa.md",
         "--closes",
         "run-security-revise-001",
         "--evidence",
