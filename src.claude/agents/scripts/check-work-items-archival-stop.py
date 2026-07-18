@@ -299,6 +299,10 @@ def main() -> int:
             return 0
         if _is_truthy(envelope.get("stop_hook_active")):
             return 0  # avoid recursive Stop loops
+        # Dispatched-review safety: an external review is not the main
+        # conversation and must never be blocked by main-conversation Stop guards.
+        if os.environ.get("ORCHESTRARIUM_DISPATCHED_REVIEW"):
+            return 0
 
         last_message = envelope.get("last_assistant_message")
         if isinstance(last_message, str) and OVERRIDE_MARKER_REGEX.search(last_message):

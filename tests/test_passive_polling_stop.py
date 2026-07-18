@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT_PATHS = (
+    REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-passive-polling-stop.py",
     REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-passive-polling-stop.py",
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-passive-polling-stop.py",
 )
@@ -52,6 +54,7 @@ class TestPassivePollingStop(unittest.TestCase):
         message: str | None = "Жду ответа бота",
         transcript_entries: list[dict[str, object]] | None = None,
         extra_envelope: dict[str, object] | None = None,
+        extra_env: dict[str, str] | None = None,
         raw_stdin: str | None = None,
     ) -> subprocess.CompletedProcess:
         with tempfile.TemporaryDirectory(prefix="passive-stop-test-") as tmp:
@@ -65,6 +68,10 @@ class TestPassivePollingStop(unittest.TestCase):
                 envelope.update(extra_envelope)
 
             stdin_text = raw_stdin if raw_stdin is not None else json.dumps(envelope, ensure_ascii=False)
+            env = os.environ.copy()
+            env.pop("ORCHESTRARIUM_DISPATCHED_REVIEW", None)
+            if extra_env:
+                env.update(extra_env)
             results: list[subprocess.CompletedProcess] = []
             for script in SCRIPT_PATHS:
                 with self.subTest(script=script):
@@ -81,6 +88,7 @@ class TestPassivePollingStop(unittest.TestCase):
                         capture_output=True,
                         text=True,
                         encoding="utf-8",
+                        env=env,
                     )
                     results.append(result)
                     self.assertEqual(result.returncode, 0, result.stderr)
@@ -115,6 +123,14 @@ class TestPassivePollingStop(unittest.TestCase):
             transcript_entries=[entry("user", "status?")],
         )
         self.assert_blocked(result)
+
+    def test_dispatched_review_env_allows_stop_without_probe(self) -> None:
+        result = self.run_hook(
+            message="Жду ответа бота",
+            transcript_entries=[entry("user", "status?")],
+            extra_env={"ORCHESTRARIUM_DISPATCHED_REVIEW": "1"},
+        )
+        self.assert_allowed(result)
 
     def test_strong_phrase_with_relevant_bash_date_probe_allows_stop(self) -> None:
         result = self.run_hook(

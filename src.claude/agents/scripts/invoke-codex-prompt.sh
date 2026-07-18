@@ -4,8 +4,8 @@
 #   1. Active-availability probe — `command -v codex` before doing anything; fails closed.
 #   2. Prompt body persisted to .scratch/codex-prompts/<topic>-<timestamp>.md
 #   3. codex invoked with prompt redirected from that file (stdin), never via argv
-#   4. stdout and stderr captured to sibling .out / .err files
-#   5. Three output paths printed to stdout in order: prompt, out, err (so the caller can read them)
+#   4. stdout and stderr captured to sibling .out / .err files; the final message to .lastmsg
+#   5. Four output paths printed to stdout in order: prompt, out, err, lastmsg (so the caller can read them)
 #   6. Codex exit code propagated
 #
 # Usage:
@@ -31,6 +31,7 @@ Output (printed to stdout in order):
   .scratch/codex-prompts/<topic-slug>-<timestamp>.md       # prompt body persisted
   .scratch/codex-prompts/<topic-slug>-<timestamp>.out      # codex stdout
   .scratch/codex-prompts/<topic-slug>-<timestamp>.err      # codex stderr
+  .scratch/codex-prompts/<topic-slug>-<timestamp>.lastmsg  # codex final message
 
 Environment:
   CODEX_BIN          Codex executable to invoke (default: codex on PATH)
@@ -135,6 +136,7 @@ mkdir -p "$OUTPUT_DIR"
 PROMPT_PATH="$OUTPUT_DIR/${SLUG}.md"
 OUT_PATH="$OUTPUT_DIR/${SLUG}.out"
 ERR_PATH="$OUTPUT_DIR/${SLUG}.err"
+LASTMSG_PATH="$OUTPUT_DIR/${SLUG}.lastmsg"
 
 if [[ -n "$PROMPT_FILE" ]]; then
   if [[ ! -f "$PROMPT_FILE" ]]; then
@@ -182,24 +184,34 @@ if [[ -n "$LEDGER_ITEM" ]]; then
 fi
 
 set +e
-"$CODEX_CMD" exec --skip-git-repo-check "${CODEX_FLAGS[@]}" < "$PROMPT_PATH" 1> "$OUT_PATH" 2> "$ERR_PATH"
+(
+  export ORCHESTRARIUM_DISPATCHED_REVIEW=1
+  "$CODEX_CMD" exec --skip-git-repo-check --output-last-message "$LASTMSG_PATH" \
+    "${CODEX_FLAGS[@]}" < "$PROMPT_PATH" 1> "$OUT_PATH" 2> "$ERR_PATH"
+)
 EXIT_CODE=$?
 set -e
 
+VERDICT_PATH="$OUT_PATH"
+if [[ -s "$LASTMSG_PATH" ]]; then
+  VERDICT_PATH="$LASTMSG_PATH"
+fi
+
 # Shared completion oracle (decision 2026-07-16-review-verdict-closure): a verdict is
 # accepted ONLY when exit code == 0 AND .err carries no auth/quota/truncation markers
-# AND .out is non-empty AND its FINAL non-blank line is exactly `GATE: PASS|REVISE`.
+# AND the preferred final-message source (falling back to .out) is non-empty AND
+# its FINAL non-blank line is exactly `GATE: PASS|REVISE`.
 # Earlier GATE: mentions in prose are ignored by definition. Anything else -> blocked.
 if [[ -n "$LEDGER_ITEM" ]]; then
-  # `|| true`: on an EMPTY .out grep exits 1 and `pipefail` would abort the wrapper
+  # `|| true`: on an EMPTY verdict source grep exits 1 and `pipefail` would abort the wrapper
   # here — before the blocked terminal is recorded — leaving an unsettled launch
   # (live incident 2026-07-16: codex usage-limit runs died exactly this way).
-  FINAL_LINE="$(grep -v '^[[:space:]]*$' "$OUT_PATH" 2>/dev/null | tail -1 | tr -d '\r' || true)"
+  FINAL_LINE="$(grep -v '^[[:space:]]*$' "$VERDICT_PATH" 2>/dev/null | tail -1 | tr -d '\r' || true)"
   ERR_MARKERS="$(grep -cE '^(ERROR|FATAL|API Error): ' "$ERR_PATH" 2>/dev/null || true)"
   TERM_STATUS="blocked"; TERM_GATE="none"; TERM_NOTE="oracle: "
   if [[ $EXIT_CODE -ne 0 ]]; then
     TERM_NOTE+="nonzero exit ($EXIT_CODE)"
-  elif [[ ! -s "$OUT_PATH" ]]; then
+  elif [[ ! -s "$VERDICT_PATH" ]]; then
     TERM_NOTE+="empty .out"
   elif [[ "${ERR_MARKERS:-0}" != "0" ]]; then
     TERM_NOTE+="err markers present ($ERR_MARKERS)"
@@ -214,7 +226,7 @@ if [[ -n "$LEDGER_ITEM" ]]; then
     --role "$LEDGER_ROLE" --execution-role external-reviewer --provider codex \
     --status "$TERM_STATUS" --gate "$TERM_GATE" --scope "external run: ${SLUG}" \
     --event-kind terminal --launch-run-id "$LAUNCH_RUN_ID" \
-    --evidence "review:${OUT_PATH}" --notes "$TERM_NOTE")
+    --evidence "review:${VERDICT_PATH}" --notes "$TERM_NOTE")
   [[ -n "$LEDGER_LANE" ]] && term_args+=(--lane "$LEDGER_LANE")
   [[ -n "$LEDGER_ARTIFACT" ]] && term_args+=(--artifact "$LEDGER_ARTIFACT")
   [[ -n "$LEDGER_EFFORT" ]] && term_args+=(--effort "$LEDGER_EFFORT")
@@ -228,7 +240,7 @@ if [[ -n "$LEDGER_ITEM" ]]; then
       # exists to prevent. The strict checker is the backstop, but the operator
       # must see it HERE, with the recovery command.
       echo "FAIL: could not record terminal event in $LEDGER_ITEM" >&2
-      echo "FAIL: the verdict in $OUT_PATH is NOT in the ledger; the launch $LAUNCH_RUN_ID stays unsettled." >&2
+      echo "FAIL: the verdict in $VERDICT_PATH is NOT in the ledger; the launch $LAUNCH_RUN_ID stays unsettled." >&2
       echo "FAIL: record it by hand: python scripts/agent-run-ledger.py --work-item $LEDGER_ITEM append --event-kind terminal --launch-run-id $LAUNCH_RUN_ID ..." >&2
     }
 fi
@@ -236,5 +248,6 @@ fi
 echo "$PROMPT_PATH"
 echo "$OUT_PATH"
 echo "$ERR_PATH"
+echo "$LASTMSG_PATH"
 
 exit $EXIT_CODE

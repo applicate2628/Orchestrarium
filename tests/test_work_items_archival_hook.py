@@ -5,7 +5,7 @@ is still sitting in work-items/active/ instead of being archived. It is the
 structural backstop for the Recovery rule's close step (the create-but-never-
 close failure that left orphans piling up in active/).
 
-These tests assert, against BOTH the Claude and Codex copies:
+These tests assert against the universal, Claude, and Codex copies:
   (1) the three orphan signals (closure.md present, status.md `State: closed`,
       status.md whole-item-done prose) each BLOCK;
   (2) a merely-active or parked item does NOT block (false-positive guard);
@@ -21,6 +21,7 @@ These tests assert, against BOTH the Claude and Codex copies:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOKS = (
+    REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-work-items-archival-stop.py",
     REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-work-items-archival-stop.py",
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-work-items-archival-stop.py",
 )
@@ -45,11 +47,20 @@ def make_repo(item: str | None = None, files: dict[str, str] | None = None) -> s
     return root
 
 
-def run_hook(script: Path, envelope: dict) -> subprocess.CompletedProcess:
+def run_hook(
+    script: Path,
+    envelope: dict,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    env = os.environ.copy()
+    env.pop("ORCHESTRARIUM_DISPATCHED_REVIEW", None)
+    if extra_env:
+        env.update(extra_env)
     return subprocess.run(
         [sys.executable, str(script)],
         input=json.dumps(envelope, ensure_ascii=False),
         capture_output=True, text=True, encoding="utf-8",
+        env=env,
     )
 
 
@@ -58,10 +69,16 @@ def blocks(p: subprocess.CompletedProcess) -> bool:
 
 
 class TestWorkItemsArchivalHook(unittest.TestCase):
-    def assert_outcome(self, envelope: dict, should_block: bool) -> None:
+    def assert_outcome(
+        self,
+        envelope: dict,
+        should_block: bool,
+        *,
+        extra_env: dict[str, str] | None = None,
+    ) -> None:
         for script in HOOKS:
             with self.subTest(pack=script.parent.parent.name):
-                p = run_hook(script, envelope)
+                p = run_hook(script, envelope, extra_env)
                 self.assertEqual(p.returncode, 0, p.stderr)  # always exits 0
                 self.assertEqual(blocks(p), should_block, f"stdout={p.stdout!r}")
 
@@ -183,6 +200,14 @@ class TestWorkItemsArchivalHook(unittest.TestCase):
         # An empty/falsey agent_id is NOT a subagent marker -> normal evaluation.
         repo = make_repo("itemA", {"closure.md": "x"})
         self.assert_outcome({"cwd": repo, "agent_id": "", "last_assistant_message": "done"}, should_block=True)
+
+    def test_dispatched_review_env_never_blocks_even_with_orphan(self) -> None:
+        repo = make_repo("itemA", {"closure.md": "x", "status.md": "State: closed\n"})
+        self.assert_outcome(
+            {"cwd": repo, "last_assistant_message": "done"},
+            should_block=False,
+            extra_env={"ORCHESTRARIUM_DISPATCHED_REVIEW": "1"},
+        )
 
     # --- override / loop-guard / out-of-scope / malformed: ALLOW ---------------
 

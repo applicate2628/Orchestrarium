@@ -8,10 +8,11 @@ terminal event was appended and before the three output paths were printed.
 Result: permanently unsettled launch events, the exact defect class the
 completion oracle exists to prevent.
 
-Contract under test (both bash wrappers): a provider run that fails or emits
-nothing must still (1) append a terminal event with status=blocked / gate=none
-linked to the launch via launchRunId, (2) print the three artifact paths, and
-(3) propagate the provider's exit code.
+Contract under test: a provider run that fails or emits nothing must still
+append a linked terminal event, print every artifact path, and propagate the
+provider's exit code. The Codex wrapper additionally passes
+`--output-last-message`, prints the fourth `.lastmsg` path, and uses that
+dedicated final message instead of an empty stdout trace when available.
 """
 
 from __future__ import annotations
@@ -52,12 +53,31 @@ def _to_posix(p: Path) -> str:
     return s
 
 
-def _make_fake_provider(tmp_path: Path, exit_code: int) -> Path:
-    """A provider stand-in that consumes stdin, writes NOTHING to stdout
-    (empty .out — the incident shape) and exits with the given code."""
+def _make_fake_provider(tmp_path: Path, which: str, exit_code: int) -> Path:
+    """A provider stand-in with an empty stdout trace.
+
+    The Codex shape requires `--output-last-message` and writes a PASS verdict
+    there, so the test distinguishes reliable final-message capture from the
+    trace-only failure mode. The Claude shape preserves its existing behavior.
+    """
     fake = tmp_path / "fake-provider.sh"
-    fake.write_text(f"#!/usr/bin/env bash\ncat >/dev/null\nexit {exit_code}\n",
-                    encoding="utf-8", newline="\n")
+    if which == "codex":
+        body = f"""#!/usr/bin/env bash
+lastmsg=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --output-last-message) lastmsg="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+cat >/dev/null
+[[ -n "$lastmsg" ]] || exit 97
+printf 'GATE: PASS\\n' > "$lastmsg"
+exit {exit_code}
+"""
+    else:
+        body = f"#!/usr/bin/env bash\ncat >/dev/null\nexit {exit_code}\n"
+    fake.write_text(body, encoding="utf-8", newline="\n")
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     return fake
 
@@ -76,12 +96,11 @@ def _make_work_item(tmp_path: Path) -> Path:
 
 @pytest.mark.parametrize("which", ["codex", "claude"])
 @pytest.mark.parametrize("provider_exit", [1, 0])
-def test_empty_out_still_records_blocked_terminal(tmp_path, which, provider_exit):
-    """Empty .out (with either nonzero OR zero provider exit) must yield a
-    blocked terminal, printed paths, and the provider's exit code — not a
-    pipefail death between launch and terminal."""
+def test_empty_trace_still_settles_terminal(tmp_path, which, provider_exit):
+    """An empty trace still settles the launch and propagates the provider
+    exit; Codex uses its dedicated final-message artifact when available."""
     wrapper = WRAPPERS[which]
-    fake = _make_fake_provider(tmp_path, provider_exit)
+    fake = _make_fake_provider(tmp_path, which, provider_exit)
     item = _make_work_item(tmp_path)
     prompt = tmp_path / "prompt.md"
     prompt.write_text("dummy prompt\n", encoding="utf-8")
@@ -106,10 +125,13 @@ def test_empty_out_still_records_blocked_terminal(tmp_path, which, provider_exit
         f"got {result.returncode}; stderr:\n{result.stderr}"
     )
     paths = [ln for ln in result.stdout.splitlines() if ln.strip()]
-    assert len(paths) == 3, (
-        "wrapper must print the three artifact paths even on a failed run; "
+    expected_path_count = 4 if which == "codex" else 3
+    assert len(paths) == expected_path_count, (
+        f"wrapper must print {expected_path_count} artifact paths even on a failed run; "
         f"stdout was:\n{result.stdout}\nstderr:\n{result.stderr}"
     )
+    if which == "codex":
+        assert paths[3].endswith(".lastmsg"), paths
 
     ledger = item / "agent-runs.jsonl"
     events = [json.loads(ln) for ln in
@@ -123,7 +145,16 @@ def test_empty_out_still_records_blocked_terminal(tmp_path, which, provider_exit
     )
     term = terminals[0]
     assert term["launchRunId"] == launches[0]["runId"]
-    assert term["gate"] == "none"
-    assert term.get("status") == "blocked"
-    expected_note = "nonzero exit" if provider_exit != 0 else "empty .out"
+    codex_success = which == "codex" and provider_exit == 0
+    assert term["gate"] == ("PASS" if codex_success else "none")
+    assert term.get("status") == ("completed" if codex_success else "blocked")
+    expected_note = (
+        "nonzero exit"
+        if provider_exit != 0
+        else "final-line GATE: PASS"
+        if codex_success
+        else "empty .out"
+    )
     assert expected_note in term.get("notes", ""), term
+    expected_evidence_ref = paths[3] if which == "codex" else paths[1]
+    assert term.get("evidence") == [{"kind": "review", "ref": expected_evidence_ref}]

@@ -22,6 +22,7 @@ Decision algorithm (fail-open on malformed envelopes and unreadable state):
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from hook_common import (
@@ -108,6 +109,10 @@ def main() -> int:
         if envelope.get("agent_id"):
             return 0
         if _is_truthy(envelope.get("stop_hook_active")):
+            return 0
+        # Dispatched-review safety: an external review is not the main
+        # conversation and must never be blocked by main-conversation Stop guards.
+        if os.environ.get("ORCHESTRARIUM_DISPATCHED_REVIEW"):
             return 0
 
         last_message = envelope.get("last_assistant_message")
