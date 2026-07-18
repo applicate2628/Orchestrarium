@@ -830,7 +830,7 @@ COMMON_SKILL_BODY_PINS=(
   "bug-hunting=56c6ed8a5a590559bdf29409102b2b8b654bf73c7be2b4ef23c4d2c74e019232"
   "explain-simply=f0f0e4dd1bed68aa8114adf6059fea32fedbee8fd06bf8bb12042dcd07ebb408"
   "mathtype-book-page=e0d3fa5233eaa5d59ba0c8b90b45ffb0aa2dd51e6a8a8a00659dd8bddd626323"
-  "vak-dissertation-review=01a081d65ed99e732c7b55220655514cf085a0f398639ec8fbedf95572999adf"
+  "vak-dissertation-review=75024fdb89de305cdef64b0ad7686b7ccd0942848c34e75a26244c6a5c97b1f0"
   "windows-gui-manual-testing=b3a029e6784d1d9e37f789b8b512f31f5e5c2161ca6807dc8a140854042ae6c8"
 )
 for pin in "${COMMON_SKILL_BODY_PINS[@]}"; do

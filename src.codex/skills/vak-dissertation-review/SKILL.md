@@ -9,6 +9,7 @@ Methodology for reviewing a Russian dissertation + autoreferat ahead of a scient
 defense. The output is a set of **рекомендательных** (advisory) review documents — never a
 go/no-go verdict. You are an assisting reviewer / нормоконтролёр; the qualification decision
 belongs to the диссертационный совет and ВАК.
+The review includes **нормоконтроль**: formatting control and normative-compliance control.
 
 This file is the map. Each `references/` file holds the depth — read the relevant one when you
 reach that part of the work; don't load all of them up front.
