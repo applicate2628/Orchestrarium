@@ -78,7 +78,7 @@ APPROVE_MARKER_REGEX = re.compile(r"\[approve-publication\]", re.IGNORECASE)
 PUSH_INSTRUCTION_REGEX = re.compile(
     r"(?ix)"
     r"\bpush\b|git\s+push|\bpublish\b|"
-    r"запушь|запушить|запушь?те|пушни|пушь|"
+    r"запушь|запушить|запушь?те|пушни|пушь|пуш|пушай|пушить|"
     r"залей|залить|"
     r"опубликуй|опубликовать|публикуй"
 )
