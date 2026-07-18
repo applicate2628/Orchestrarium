@@ -107,6 +107,15 @@ PINS = [
     ("A7-rule", "Before dispatch, fill `Diff-invisible invariants` and `Named regression guard`; `none` is valid only with a one-line reason.",
      ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
 
+    # A9 — object-axis re-aim trigger (both subagent-contracts); the 2448-char block was a
+    # hand-maintained byte-identical mirror with NO drift gate, unlike its five pinned A8/A7
+    # siblings. These two pins freeze cross-pack parity AND the deliberate C1-only scope
+    # (f1445ce0 narrowed it off the universal form) against a one-pack edit or a re-broadening.
+    ("A9-trigger", "**Object-axis trigger (mandatory for C1-based clean verdicts, PRE-verdict).**",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+    ("A9-scope", "Dispatches and verdicts that do not rely on a C1 assessment owe no object-axis record.",
+     ["src.claude/agents/contracts/subagent-contracts.md", "src.codex/skills/lead/subagent-contracts.md"]),
+
     # A3 — index sync on every active-item state change (row + bullet; case differs, use common substring)
     ("A3", "active-item state change (create, resume, stage transition, park, close, archive)",
      ["src.claude/agents/contracts/operating-model.md", "src.codex/skills/lead/operating-model.md"]),
