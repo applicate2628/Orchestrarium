@@ -505,6 +505,7 @@ except Exception:
 path = pathlib.Path(sys.argv[1])
 text = path.read_text(encoding="utf-8")
 required = ("display_name", "short_description", "default_prompt")
+MAX_DEFAULT_PROMPT_CHARS = 1024
 
 if yaml is not None:
     try:
@@ -520,6 +521,13 @@ if yaml is not None:
     if missing:
         print(f"{path}: interface missing/empty required keys: {', '.join(missing)}")
         sys.exit(1)
+    default_prompt = iface["default_prompt"]
+    if len(default_prompt) > MAX_DEFAULT_PROMPT_CHARS:
+        print(
+            f"{path}: interface.default_prompt exceeds {MAX_DEFAULT_PROMPT_CHARS} "
+            f"characters (length: {len(default_prompt)})"
+        )
+        sys.exit(1)
 else:
     # PyYAML unavailable: fall back to a regex structural check rather than
     # treating existence as sufficient (existence-only was the defect this
@@ -531,6 +539,17 @@ else:
     if missing:
         print(f"{path}: interface missing/empty required keys (regex fallback): {', '.join(missing)}")
         sys.exit(1)
+    default_prompt_match = re.search(r"^\s+default_prompt:\s*(?P<value>.+)$", text, re.MULTILINE)
+    if default_prompt_match:
+        default_prompt = default_prompt_match.group("value").strip()
+        if len(default_prompt) >= 2 and default_prompt[0] == default_prompt[-1] and default_prompt[0] in "\"'":
+            default_prompt = default_prompt[1:-1]
+        if len(default_prompt) > MAX_DEFAULT_PROMPT_CHARS:
+            print(
+                f"{path}: interface.default_prompt exceeds {MAX_DEFAULT_PROMPT_CHARS} "
+                f"characters (length: {len(default_prompt)}; regex fallback)"
+            )
+            sys.exit(1)
 PY
 )"; then
     pass "$label"
@@ -848,8 +867,6 @@ check_contains "$SKILLS_DIR/design-panel/SKILL.md" "synthesis" \
   "design-panel skill names the synthesis step"
 check_contains "$SKILLS_DIR/design-panel/SKILL.md" "N=2" \
   "design-panel skill carries the N=2 default quorum marker"
-check_openai_yaml_interface "$SKILLS_DIR/design-panel/agents/openai.yaml" \
-  "design-panel openai.yaml interface block parses with required keys (display_name, short_description, default_prompt)"
 check_contains "$SKILLS_DIR/lead/operating-model.md" "Design-panel and review-loop selection" \
   "lead operating-model carries the design-panel/review-loop selection block"
 check_h2_section_contains "$SKILLS_DIR/lead/operating-model.md" \
@@ -1200,6 +1217,13 @@ for role in "${indexed_roles[@]}"; do
   else
     pass "$skill_dir/agents/openai.yaml"
   fi
+done
+
+echo ""
+echo "=== OpenAI skill metadata ==="
+for openai_yaml in "$SKILLS_DIR"/*/agents/openai.yaml; do
+  check_openai_yaml_interface "$openai_yaml" \
+    "$openai_yaml interface block parses with required keys (display_name, short_description, default_prompt)"
 done
 
 echo ""
