@@ -22,7 +22,7 @@ Global layer: short, testable, cross-repo costly-mistake rules; no specialist du
 Three storage tiers: `work-items/` — canonical artifacts (briefs, status, research, design, plans, reviews, closures; structure defined by the lead and knowledge-archivist roles), the source of truth for tracked task memory; `.reports/YYYY-MM/` — session logs `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`; `.plans/YYYY-MM/` — plan snapshots `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` saved when a plan is created or materially revised.
 
 ### Session logging rule (mandatory)
-- Every participant (main conversation, subagent) MUST write a `.reports/YYYY-MM/` session log whenever the session produced a result, made a routing decision, or completed a review.
+- Main conversation and subagents MUST log each result/routing decision/completed review in `.reports/YYYY-MM/`; finished unit, not completion: continue if next action/plan remains.
 - Each log includes a one-paragraph summary (what was asked, what was done, key decisions, outcome `PASS`/`REVISE`/`BLOCKED`/advisory), participants, a pointer to any canonical `work-items/` artifact, and follow-ups or open items.
 - Provider-backed or external-adapter sessions add a short execution record on separate lines: `Execution role`; `Assigned / replaced internal role` or `none`; `Requested provider`; `Resolved provider` or `none`; `Actual execution path`; `Model / profile used` or `unspecified by runtime`; `Deviation reason`.
 - If the session created or revised a plan, also save a `.plans/YYYY-MM/` snapshot (with the same execution record when provider-backed).
