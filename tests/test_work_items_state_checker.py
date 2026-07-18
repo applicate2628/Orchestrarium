@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -84,6 +85,60 @@ def test_checker_validates_all_active_items(tmp_path: Path):
     assert "PASS valid-item" in result.stdout
     assert "FAIL bad-item" in result.stdout
     assert "missing ledger" in result.stdout
+
+
+def test_pass_surfaces_active_items_and_denies_completion(tmp_path: Path):
+    """Forcing function (bug 2026-07-18-false-completion-claim-validator-pass-conflated-with-done):
+    a green RESULT must never read as 'all closed'. The checker prints every active item + its
+    Next action, and the RESULT line itself says valid-state-not-completion — so a PASS cannot be
+    quoted as completion while active work remains."""
+    write_valid_item(tmp_path, "active-item")
+    result = run_checker(tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert "STILL OPEN" in result.stdout
+    assert "active-item -- Next action: Continue." in result.stdout
+    assert "NOT completion" in result.stdout
+    # and the empty case must not claim completion falsely either — it says 'no active work-items'
+    empty = run_checker(tmp_path / "does-not-exist")
+    assert "no active work-items" in empty.stdout
+    assert "STILL OPEN" not in empty.stdout  # no items => no STILL OPEN block
+
+
+def test_forcing_function_survives_non_ascii_next_action_on_narrow_console(tmp_path: Path):
+    """The enumeration prints ARBITRARY status content; a non-ASCII Next action (em-dash,
+    arrow) must NOT crash the report on a non-UTF-8 console. The stream-level errors=replace
+    guard in main() owns this — replacing the em-dash in one string literal would not
+    (fable + codex ff-review: the crash class lives in the interpolated data)."""
+    item = write_valid_item(tmp_path, "unicode-item")
+    (item / "status.md").write_text(
+        valid_status().replace("Continue.", "Run probe 1 — then reconcile → close."),
+        encoding="utf-8",
+    )
+    env = {**os.environ, "PYTHONIOENCODING": "cp866"}
+    result = subprocess.run(
+        [sys.executable, str(CHECKER), "--root", str(tmp_path)],
+        text=True, capture_output=True, encoding="cp866", errors="replace", env=env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr  # no UnicodeEncodeError
+    assert "unicode-item" in result.stdout
+    assert "STILL OPEN" in result.stdout
+
+
+def test_next_actionable_heading_does_not_false_match(tmp_path: Path):
+    """Exact heading match: a '## Next actionable' section must NOT be read as the
+    '## Next action' section (codex ff-review — the old startswith accepted it)."""
+    item = write_valid_item(tmp_path, "actionable-item")
+    (item / "status.md").write_text(
+        "# Status\n\n## Current state\n**Primary task status**: open\n\n"
+        "## Active agents\n- none\n\n## Completed agents\n- none\n\n"
+        "## Next actionable\nWRONG heading content\n\n"
+        "## Next action\nCORRECT action content\n",
+        encoding="utf-8",
+    )
+    result = run_checker(tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert "CORRECT action content" in result.stdout
+    assert "WRONG heading content" not in result.stdout
 
 
 def status_with_depends(dep_value: str) -> str:

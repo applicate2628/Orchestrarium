@@ -220,6 +220,38 @@ def iter_work_items(active_dir: Path) -> list[Path]:
     return sorted(path for path in active_dir.iterdir() if path.is_dir())
 
 
+def next_action_line(item: Path) -> str:
+    """First non-empty content line under the '## Next action' section of status.md,
+    for the still-open enumeration. Returns a loud marker (never silence) on a missing
+    file/section — open work must stay visible. The heading match is EXACT so
+    '## Next actionable' does not false-trigger (codex ff-review); a sub-heading inside
+    the section is skipped rather than mistaken for the action; long content is
+    ellipsis-truncated. Output-encoding safety (non-ASCII content on a non-UTF-8 console)
+    is owned at the stream level in main(), not here."""
+    status = item / "status.md"
+    if not status.is_file():
+        return "(no status.md)"
+    try:
+        text = status.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "(status.md unreadable)"
+    in_section = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not in_section:
+            if stripped.lower().rstrip(": ") in ("## next action", "## next actions"):
+                in_section = True
+            continue
+        if stripped.startswith("## "):  # next top-level section ends the block
+            break
+        if stripped.startswith("#"):  # a sub-heading inside the section is not the action
+            continue
+        content = stripped.lstrip("-*").strip()
+        if content:
+            return (content[:157] + "...") if len(content) > 160 else content
+    return "(no ## Next action content)"
+
+
 def command_check(args: argparse.Namespace) -> int:
     root = args.root.resolve()
     active_dir = (root / args.active_dir).resolve()
@@ -300,6 +332,17 @@ def command_check(args: argparse.Namespace) -> int:
         counters = ", ".join(f"{k}={v}" for k, v in sorted(telemetry.items()))
         print(f"TELEMETRY: {counters}")
 
+    # Forcing function (bug 2026-07-18-false-completion-claim-validator-pass-conflated-with-done):
+    # a green RESULT means "valid state + no open ledger obligations", NOT "all closed / done".
+    # Always surface every active item + its Next action so a PASS can never be quoted as
+    # completion while real unstarted work remains.
+    if items:
+        # Header is verdict-neutral (prints on PASS and FAIL runs alike): a check result
+        # of ANY kind is state, never completion, while these items remain open.
+        print("STILL OPEN - these active work-items are NOT closed (a check result is state, not completion):")
+        for item in items:
+            print(f"  - {item.name} -- Next action: {next_action_line(item)}")
+
     if failed:
         print(f"RESULT: FAIL ({failed} failures across active+archived work-items)")
         return 1
@@ -307,7 +350,10 @@ def command_check(args: argparse.Namespace) -> int:
     if not items:
         print(f"RESULT: PASS (no active work-items: {active_dir}; archive scan clean)")
         return 0
-    print(f"RESULT: PASS ({len(items)} active work-items)")
+    print(
+        f"RESULT: PASS - valid state only, NOT completion: {len(items)} active work-item(s) "
+        f"STILL OPEN (see 'STILL OPEN' list above; a done-claim must reconcile each one's Next action)"
+    )
     return 0
 
 
@@ -342,6 +388,17 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str]) -> int:
+    # Output-encoding guard at the owner (the stdout stream), not per-string: this tool
+    # prints arbitrary status.md content (Next-action previews) that routinely contains
+    # non-ASCII (em-dashes, arrows). On a non-UTF-8 console (e.g. cp866) an unguarded
+    # print would raise UnicodeEncodeError and kill the whole report. Replace
+    # un-encodable characters instead of crashing — closes the class for every print path.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(errors="replace")  # type: ignore[union-attr]
+            except (ValueError, OSError):
+                pass
     parser = build_parser()
     args = parser.parse_args(argv)
     return command_check(args)
