@@ -6,8 +6,8 @@
       1. Active-availability probe (Get-Command codex) before any file operation; fails closed.
       2. Prompt body persisted to .scratch/codex-prompts/<topic>-<timestamp>.md
       3. codex invoked with prompt piped via stdin redirection, never via argv
-      4. stdout and stderr captured to sibling .out / .err files
-      5. Three output paths printed in order: prompt, out, err
+      4. stdout and stderr captured to sibling .out / .err files; final message to .lastmsg
+      5. Four output paths and the active-watch command printed before the provider starts
       6. Codex exit code propagated
 .EXAMPLE
     Get-Content -Raw prompt.md |
@@ -112,6 +112,7 @@ if (-not $outputDirExisted -and $PSVersionTable.Platform -ne 'Unix') {
 $promptPath = Join-Path $outputDir "$slug.md"
 $outPath = Join-Path $outputDir "$slug.out"
 $errPath = Join-Path $outputDir "$slug.err"
+$lastmsgPath = Join-Path $outputDir "$slug.lastmsg"
 
 if ($PromptFile) {
   if (-not (Test-Path -LiteralPath $PromptFile -PathType Leaf)) {
@@ -202,6 +203,16 @@ if ($Ledger) {
   }
 }
 
+# Emit the artifact paths and forcing-function command before the provider call
+# so a background caller can launch the watcher while Codex is still running.
+Write-Output $promptPath
+Write-Output $outPath
+Write-Output $errPath
+Write-Output $lastmsgPath
+Write-Output '# actively await this dispatch (do NOT passively wait for a notification):'
+Write-Output ("powershell -NoProfile -ExecutionPolicy Bypass -File .claude\agents\scripts\await-codex-dispatch.ps1 -Out '{0}' -Err '{1}' -LastMsg '{2}' -StallSecs 2700" -f `
+  $outPath.Replace("'", "''"), $errPath.Replace("'", "''"), $lastmsgPath.Replace("'", "''"))
+
 try {
   # Invoke codex via PowerShell native call operator. `&` handles shim resolution
   # (`.exe`, `.cmd`, `.ps1`) on both PS 5.1 + PS 7+ — unlike `[Process]::Start` with
@@ -209,7 +220,7 @@ try {
   # on npm/nvm4w-installed `codex.ps1` shims. Prompt body is fed from the variable
   # above (read under strict semantics with explicit UTF-8); stdout/stderr captured
   # via PowerShell's native `1>` / `2>` redirection; exit code via `$LASTEXITCODE`.
-  $promptBody | & $codexPath exec --skip-git-repo-check @CodexFlags `
+  $promptBody | & $codexPath exec --skip-git-repo-check --output-last-message $lastmsgPath @CodexFlags `
     1> $outPath 2> $errPath
   $exitCode = $LASTEXITCODE
 } finally {
@@ -278,9 +289,5 @@ if ($Ledger) {
     Write-Error "FAIL: record it by hand: python scripts/agent-run-ledger.py --work-item $Ledger append --event-kind terminal --launch-run-id $launchRunId ..." -ErrorAction Continue
   }
 }
-
-Write-Output $promptPath
-Write-Output $outPath
-Write-Output $errPath
 
 exit $exitCode

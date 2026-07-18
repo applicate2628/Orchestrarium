@@ -5,7 +5,8 @@
 #   2. Prompt body persisted to .scratch/codex-prompts/<topic>-<timestamp>.md
 #   3. codex invoked with prompt redirected from that file (stdin), never via argv
 #   4. stdout and stderr captured to sibling .out / .err files; the final message to .lastmsg
-#   5. Four output paths printed to stdout in order: prompt, out, err, lastmsg (so the caller can read them)
+#   5. Four output paths and the active-watch command printed before the provider
+#      starts (so a background caller can launch the watcher immediately)
 #   6. Codex exit code propagated
 #
 # Usage:
@@ -183,6 +184,17 @@ if [[ -n "$LEDGER_ITEM" ]]; then
   fi
 fi
 
+# Emit the artifact paths and forcing-function command before the provider call.
+# The provider's stdout/stderr are redirected below, so these remain the final
+# wrapper-owned launch lines and are available while the background run is live.
+echo "$PROMPT_PATH"
+echo "$OUT_PATH"
+echo "$ERR_PATH"
+echo "$LASTMSG_PATH"
+echo "# actively await this dispatch (do NOT passively wait for a notification):"
+printf 'bash .claude/agents/scripts/await-codex-dispatch.sh --out %q --err %q --lastmsg %q --stall-secs 2700\n' \
+  "$OUT_PATH" "$ERR_PATH" "$LASTMSG_PATH"
+
 set +e
 (
   export ORCHESTRARIUM_DISPATCHED_REVIEW=1
@@ -244,10 +256,5 @@ if [[ -n "$LEDGER_ITEM" ]]; then
       echo "FAIL: record it by hand: python scripts/agent-run-ledger.py --work-item $LEDGER_ITEM append --event-kind terminal --launch-run-id $LAUNCH_RUN_ID ..." >&2
     }
 fi
-
-echo "$PROMPT_PATH"
-echo "$OUT_PATH"
-echo "$ERR_PATH"
-echo "$LASTMSG_PATH"
 
 exit $EXIT_CODE

@@ -124,7 +124,13 @@ def test_empty_trace_still_settles_terminal(tmp_path, which, provider_exit):
         f"wrapper must propagate provider exit {provider_exit}; "
         f"got {result.returncode}; stderr:\n{result.stderr}"
     )
-    paths = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    output_lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
+    if which == "codex":
+        assert output_lines[-2] == "# actively await this dispatch (do NOT passively wait for a notification):"
+        assert output_lines[-1].startswith("bash .claude/agents/scripts/await-codex-dispatch.sh")
+        paths = output_lines[:4]
+    else:
+        paths = output_lines
     expected_path_count = 4 if which == "codex" else 3
     assert len(paths) == expected_path_count, (
         f"wrapper must print {expected_path_count} artifact paths even on a failed run; "

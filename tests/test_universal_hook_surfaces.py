@@ -45,6 +45,9 @@ PACK_ONLY_SCRIPTS = {
         "invoke-claude-api.sh", "invoke-claude-api.ps1",
         "invoke-claude-prompt.sh", "invoke-claude-prompt.ps1",
         "invoke-codex-prompt.sh", "invoke-codex-prompt.ps1",
+        # Claude-line active watcher emitted by the Codex dispatch wrappers;
+        # it is provider-specific and has no Codex/canon mirror.
+        "await-codex-dispatch.sh", "await-codex-dispatch.ps1",
         # Per-pack validator (content differs per pack by design).
         "validate-skill-pack.sh", "validate-skill-pack.ps1",
     }),
