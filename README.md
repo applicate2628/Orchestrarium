@@ -13,6 +13,10 @@ Warning: Orchestrarium is optimized for maximum execution effectiveness and low 
 
 New maintenance sessions should start with [`docs/new-session-guide.md`](docs/new-session-guide.md). It records the source-first rule for this monorepo: tracked Orchestrarium source is canon, while `~/.codex/`, `~/.claude/`, project `.agents/`, and project `.claude/` are installed runtime outputs that should not be patched as the durable fix before the source owner is updated.
 
+## WARNING: Claude external authentication
+
+The `invoke-claude-prompt.sh` and `invoke-claude-prompt.ps1` transports run automated, headless `claude -p`. Subscription sign-in (OAuth), including Claude Pro and Max, is not permitted for these orchestrated runs; use a commercial API key, `apiKeyHelper`, Amazon Bedrock, or Google Vertex AI instead. The prompt wrappers fail closed when they cannot detect one of those commercial-auth signals. For the secret-backed path, use `invoke-claude-api.sh` or `invoke-claude-api.ps1` with the credentials documented in `SECRET.md`. See [Anthropic's Claude Code legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
+
 ## Repository layout
 
 ```text

@@ -196,6 +196,7 @@ If the advisory profile resolves to primary Claude, run the plain Claude CLI pat
 claude -p --output-format text --model opus --effort xhigh < "$PROMPT_FILE"
 ```
 
+- **ToS auth note (subscription guard):** this inline path bypasses the `invoke-claude-prompt.sh`/`.ps1` fail-closed guard. Automated `claude -p` is ToS-permitted only under commercial API-key auth, NOT a Claude Pro/Max subscription (OAuth) — https://code.claude.com/docs/en/legal-and-compliance. Prefer the guarded wrapper; if you use this inline path, ensure the resolved auth is `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN` (or Bedrock/Vertex/apiKeyHelper).
 - If the plain Claude CLI path fails, do not silently convert that same primary `claude` run to the wrapper.
 - If the advisory profile later resolves to `reserve`, bind it through `reserveResolver` after primary `claude`/`codex`.
 - If `reserve` is unavailable or fails, return an unavailable memo and keep routing honest.

@@ -4,14 +4,19 @@
 .DESCRIPTION
     Encapsulates the shared "External CLI prompt delivery" governance:
       1. Active-availability probe (Get-Command claude) before any file operation; fails closed.
-      2. Prompt body persisted to .scratch/claude-prompts/<topic>-<timestamp>.md
-      3. claude invoked with prompt piped via stdin redirection, never via argv
-      4. stdout and stderr captured to sibling .out / .err files
-      5. Three output paths printed in order: prompt, out, err
-      6. Claude exit code propagated
+      2. Commercial-auth ToS guard before prompt, ledger, or claude side effects; fails closed.
+      3. Prompt body persisted to .scratch/claude-prompts/<topic>-<timestamp>.md
+      4. claude invoked with prompt piped via stdin redirection, never via argv
+      5. stdout and stderr captured to sibling .out / .err files
+      6. Three output paths printed in order: prompt, out, err
+      7. Claude exit code propagated
 
-    This wrapper is for the routine `claude` CLI. For the secret-backed API transport
-    (the `reserveResolver: claude-wrapper` path), use `invoke-claude-api.ps1` instead.
+    This wrapper drives automated headless `claude -p` runs and refuses subscription
+    OAuth unless commercial auth is detected. Set
+    ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE=1 only for commercial auth exposed through
+    an undetectable path or when the operator explicitly accepts the risk. For the
+    secret-backed API transport (`reserveResolver: claude-wrapper`), use
+    `invoke-claude-api.ps1` instead.
 .EXAMPLE
     Get-Content -Raw prompt.md |
       powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-claude-prompt.ps1 advisory-adr
@@ -71,6 +76,78 @@ if (-not $commandInfo) {
   exit 1
 }
 $claudePath = $commandInfo.Source
+
+function Test-ClaudeAuthTruthy {
+  param([AllowNull()][string]$Value)
+
+  if ([string]::IsNullOrEmpty($Value)) {
+    return $false
+  }
+  $normalizedValue = $Value.ToLowerInvariant()
+  return ($normalizedValue -eq '1' -or
+          $normalizedValue -eq 'true' -or
+          $normalizedValue -eq 'yes')
+}
+
+$hasApiKeyHelper = $false
+$userHomeDir = $null
+if (-not [string]::IsNullOrEmpty($env:USERPROFILE)) {
+  $userHomeDir = $env:USERPROFILE
+} elseif (-not [string]::IsNullOrEmpty($env:HOME)) {
+  $userHomeDir = $env:HOME
+}
+
+$settingsPaths = @()
+if ($null -ne $userHomeDir -and -not [string]::IsNullOrEmpty($userHomeDir)) {
+  $settingsPaths += Join-Path -Path $userHomeDir -ChildPath '.claude\settings.json'
+}
+$settingsPaths += Join-Path -Path (Get-Location).Path -ChildPath '.claude\settings.json'
+foreach ($settingsPath in $settingsPaths) {
+  if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+    try {
+      $settingsContent = [System.IO.File]::ReadAllText($settingsPath)
+      if ($settingsContent.Contains('"apiKeyHelper"')) {
+        $hasApiKeyHelper = $true
+        break
+      }
+    } catch {
+      # An unreadable settings file cannot prove commercial auth; fail closed below.
+    }
+  }
+}
+
+$hasCommercialClaudeAuth = (
+  (-not [string]::IsNullOrEmpty($env:ANTHROPIC_API_KEY)) -or
+  (-not [string]::IsNullOrEmpty($env:ANTHROPIC_AUTH_TOKEN)) -or
+  (Test-ClaudeAuthTruthy $env:CLAUDE_CODE_USE_BEDROCK) -or
+  (Test-ClaudeAuthTruthy $env:CLAUDE_CODE_USE_VERTEX) -or
+  $hasApiKeyHelper -or
+  ((-not [string]::IsNullOrEmpty($env:ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE)) -and
+   $env:ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE -eq '1')
+)
+
+if (-not $hasCommercialClaudeAuth) {
+  $claudeSubscriptionWarning = @'
+WARNING: Refusing automated Claude launch.
+Automated `claude -p` under a subscription is not permitted.
+Anthropic policy: https://code.claude.com/docs/en/legal-and-compliance
+
+Note: this checks for a commercial-auth SIGNAL in the environment; it cannot confirm
+which credential the claude CLI ultimately uses. A stale ANTHROPIC_API_KEY/AUTH_TOKEN
+here does NOT guarantee the CLI is not falling back to a stored subscription (OAuth)
+login; make sure the commercial key is the auth claude actually resolves.
+
+Use one of these commercial authentication paths:
+  - set ANTHROPIC_API_KEY;
+  - use invoke-claude-api.sh/.ps1 with SECRET.md's ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL; or
+  - configure apiKeyHelper, Amazon Bedrock, or Google Vertex AI.
+
+For commercial auth exposed through an undetectable path, or to explicitly accept the risk, set:
+  ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE=1
+'@
+  [Console]::Error.WriteLine($claudeSubscriptionWarning)
+  exit 3
+}
 
 $outputDir = if ($env:CLAUDE_PROMPTS_DIR) { $env:CLAUDE_PROMPTS_DIR } else { '.scratch\claude-prompts' }
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'

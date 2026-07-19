@@ -121,6 +121,8 @@ def test_empty_trace_still_settles_terminal(tmp_path, which, provider_exit):
     env = os.environ.copy()
     env[BIN_ENV[which]] = _to_posix(fake)
     env[PROMPTS_DIR_ENV[which]] = _to_posix(outdir)
+    if which == "claude":
+        env["ANTHROPIC_API_KEY"] = "oracle-fixture-commercial-key"
 
     result = subprocess.run(
         [_bash(), _to_posix(wrapper), "oracle-fixture",

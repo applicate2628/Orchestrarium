@@ -8,7 +8,10 @@
 #   5. Three output paths printed to stdout in order: prompt, out, err
 #   6. Claude exit code propagated
 #
-# This wrapper is for the routine `claude` CLI (subscription auth or ambient API key).
+# This wrapper drives automated headless `claude -p` runs and fails closed unless it
+# detects commercial API-key/cloud auth. Subscription OAuth is not an allowed transport.
+# `ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE=1` overrides the guard for commercial auth
+# exposed through an undetectable path or when the operator explicitly accepts the risk.
 # For the secret-backed API transport (`reserveResolver: claude-wrapper` path), use
 # `invoke-claude-api.sh` instead — that wrapper layers SECRET.md env injection on top of
 # the same file-based prompt discipline.
@@ -22,8 +25,9 @@
 # (the current claude CLI removed the top-level `--quiet` flag; `-p`/`--print` is the non-interactive mode)
 #
 # Environment overrides:
-#   CLAUDE_BIN          Claude executable or absolute path (default: claude on PATH)
-#   CLAUDE_PROMPTS_DIR  Output directory (default: .scratch/claude-prompts)
+#   CLAUDE_BIN                                  Claude executable or absolute path
+#   CLAUDE_PROMPTS_DIR                          Output directory
+#   ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE=1  Explicit ToS-guard override
 set -euo pipefail
 
 usage() {
@@ -128,6 +132,56 @@ CLAUDE_CMD="${CLAUDE_BIN:-claude}"
 if ! command -v "$CLAUDE_CMD" >/dev/null 2>&1; then
   echo "FAIL: claude binary '$CLAUDE_CMD' not found on PATH. Set CLAUDE_BIN if installed elsewhere." >&2
   exit 1
+fi
+
+claude_auth_truthy() {
+  case "${1,,}" in
+    1|true|yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+claude_api_key_helper_configured() {
+  local settings_path
+  for settings_path in "${HOME:+$HOME/.claude/settings.json}" ".claude/settings.json"; do
+    [[ -n "$settings_path" && -f "$settings_path" ]] || continue
+    if grep -Fq '"apiKeyHelper"' "$settings_path"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+HAS_COMMERCIAL_CLAUDE_AUTH=0
+if [[ -n "${ANTHROPIC_API_KEY:-}" ||
+      -n "${ANTHROPIC_AUTH_TOKEN:-}" ]] ||
+   claude_auth_truthy "${CLAUDE_CODE_USE_BEDROCK:-}" ||
+   claude_auth_truthy "${CLAUDE_CODE_USE_VERTEX:-}" ||
+   claude_api_key_helper_configured ||
+   [[ "${ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE:-}" == "1" ]]; then
+  HAS_COMMERCIAL_CLAUDE_AUTH=1
+fi
+
+if [[ $HAS_COMMERCIAL_CLAUDE_AUTH -ne 1 ]]; then
+  cat >&2 <<'EOF'
+WARNING: Refusing automated Claude launch.
+Automated `claude -p` under a subscription is not permitted.
+Anthropic policy: https://code.claude.com/docs/en/legal-and-compliance
+
+Note: this checks for a commercial-auth SIGNAL in the environment; it cannot confirm
+which credential the claude CLI ultimately uses. A stale ANTHROPIC_API_KEY/AUTH_TOKEN
+here does NOT guarantee the CLI is not falling back to a stored subscription (OAuth)
+login; make sure the commercial key is the auth claude actually resolves.
+
+Use one of these commercial authentication paths:
+  - set ANTHROPIC_API_KEY;
+  - use invoke-claude-api.sh/.ps1 with SECRET.md's ANTHROPIC_AUTH_TOKEN and ANTHROPIC_BASE_URL; or
+  - configure apiKeyHelper, Amazon Bedrock, or Google Vertex AI.
+
+For commercial auth exposed through an undetectable path, or to explicitly accept the risk, set:
+  ORCHESTRARIUM_ALLOW_SUBSCRIPTION_CLAUDE=1
+EOF
+  exit 3
 fi
 
 OUTPUT_DIR="${CLAUDE_PROMPTS_DIR:-.scratch/claude-prompts}"
