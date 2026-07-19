@@ -7,6 +7,7 @@ This directory is the provider-local Claude reference tree for the Orchestrarium
 This tree follows the common provider-local reference layout used across the four branches:
 
 - `README.md`
+- `claude-md-structural-enforcement.md`
 - `evidence-based-answer-pipeline.md`
 - `operating-model-diagram.md`
 - `periodic-control-matrix.md`
@@ -24,4 +25,4 @@ Use together with:
 
 Provider-backed external CLI prompt delivery inherits the shared file-based prompt rule; use the Claude dispatch docs for the exact Claude-line runtime contract.
 
-Repository-orientation semantics are shared in `shared/AGENTS.shared.md` and expanded in `shared/references/spine/repository-orientation-and-mechanism-inventory.md`. The Claude Code-specific Bootstrap step 0, warn-only hook contract, installer behavior, and matcher details live in `src.claude/CLAUDE.md`.
+Repository-orientation semantics are shared in `shared/AGENTS.shared.md` and expanded in `shared/references/spine/repository-orientation-and-mechanism-inventory.md`. The Claude Code-specific Bootstrap step 0 and compact operative hook rules live in `src.claude/CLAUDE.md`; [claude-md-structural-enforcement.md](claude-md-structural-enforcement.md) preserves the exhaustive hook behavior, entry-point, installer, removal-command, path, and matcher detail outside the always-loaded entrypoint.
