@@ -178,7 +178,7 @@ $promptBody = [System.IO.File]::ReadAllText($promptPath, [System.Text.UTF8Encodi
 $launchRunId = ''
 $ledgerHelper = ''
 if ($Ledger) {
-  foreach ($cand in @('scripts/agent-run-ledger.py', (Join-Path $PSScriptRoot '..\..\..\scripts\agent-run-ledger.py'))) {
+  foreach ($cand in @((Join-Path $PSScriptRoot 'agent-run-ledger.py'), 'scripts/agent-run-ledger.py', (Join-Path $PSScriptRoot '..\..\..\scripts\agent-run-ledger.py'))) {
     if (Test-Path -LiteralPath $cand -PathType Leaf) { $ledgerHelper = $cand; break }
   }
   if (-not $ledgerHelper) {

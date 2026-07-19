@@ -63,6 +63,10 @@ CLAUDE_SCRIPTS = REPO_ROOT / "src.claude" / "agents" / "scripts"
 CLAUDE_HOOKS = REPO_ROOT / "src.claude" / "agents" / "hooks"
 CODEX_SCRIPTS = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts"
 CODEX_HOOKS = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks"
+PACK_VALIDATORS = (
+    CLAUDE_SCRIPTS / "validate-skill-pack.ps1",
+    CODEX_SCRIPTS / "validate-skill-pack.ps1",
+)
 
 # The nine stdin-piping structural/audit hook wrappers, in BOTH install trees (18 files).
 HOOK_WRAPPERS = (
@@ -553,6 +557,93 @@ class TestScannerWrapperDelegatesWhenBashAvailable(unittest.TestCase):
                         p = _run_ps1(interp, wrapper, cwd=td, env=env)
                         self.assertEqual(p.returncode, 1,
                                          f"staged leak must BLOCK (exit 1); stdout={p.stdout!r} stderr={p.stderr!r}")
+
+
+@unittest.skipIf(not INTERPRETERS, "needs a PowerShell host on PATH")
+class TestPackValidatorShellResolution(unittest.TestCase):
+    @staticmethod
+    def _write_cmd(path: Path, body: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("@echo off\r\n" + body, encoding="utf-8", newline="")
+
+    @staticmethod
+    def _copy_validator_fixture(root: Path, validator: Path) -> Path:
+        scripts = root / "pack" / "scripts"
+        scripts.mkdir(parents=True)
+        copied = scripts / "validate-skill-pack.ps1"
+        shutil.copy2(validator, copied)
+        (scripts / "validate-skill-pack.sh").write_text(
+            "#!/usr/bin/env bash\n"
+            "printf 'derived-root\\n' >> \"$ORCHESTRARIUM_SHELL_PROBE\"\n"
+            "exit 0\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+        return copied
+
+    def _path_shell_env(self, root: Path, git_dir: Path) -> tuple[dict, Path]:
+        marker = root / "shell.marker"
+        path_shells = root / "path-shells"
+        self._write_cmd(
+            path_shells / "bash.cmd",
+            ">>\"%ORCHESTRARIUM_SHELL_PROBE%\" echo path-bash\r\nexit /b 0\r\n",
+        )
+        self._write_cmd(
+            path_shells / "sh.cmd",
+            ">>\"%ORCHESTRARIUM_SHELL_PROBE%\" echo path-sh\r\nexit /b 0\r\n",
+        )
+        env = dict(os.environ)
+        env["ORCHESTRARIUM_SHELL_PROBE"] = str(marker)
+        env["PATH"] = os.pathsep.join((str(git_dir), str(path_shells), env.get("PATH", "")))
+        return env, marker
+
+    def test_path_fallback_uses_bash_after_derived_root_candidates_miss(self) -> None:
+        for interp in INTERPRETERS:
+            for validator in PACK_VALIDATORS:
+                with self.subTest(interp=Path(interp).stem, validator=str(validator.relative_to(REPO_ROOT))):
+                    with tempfile.TemporaryDirectory() as td:
+                        root = Path(td)
+                        copied = self._copy_validator_fixture(root, validator)
+                        git_dir = root / "fake-git" / "mingw64" / "bin"
+                        self._write_cmd(
+                            git_dir / "git.cmd",
+                            f"echo {root}\r\nexit /b 0\r\n",
+                        )
+                        env, marker = self._path_shell_env(root, git_dir)
+
+                        p = _run_ps1(interp, copied, cwd=str(root), env=env)
+
+                        self.assertEqual(
+                            p.returncode,
+                            0,
+                            "PATH bash fallback must run after all derived-root candidates miss; "
+                            f"stdout={p.stdout!r} stderr={p.stderr!r}",
+                        )
+                        self.assertEqual(marker.read_text(encoding="utf-8").splitlines(), ["path-bash"])
+
+    def test_derived_root_bash_precedes_path_bash(self) -> None:
+        bashable_git = _bash_locatable_git()
+        if bashable_git is None:
+            self.skipTest("no PATH git whose derived install root contains bash/sh")
+        git_dir = Path(bashable_git).parent
+
+        for interp in INTERPRETERS:
+            for validator in PACK_VALIDATORS:
+                with self.subTest(interp=Path(interp).stem, validator=str(validator.relative_to(REPO_ROOT))):
+                    with tempfile.TemporaryDirectory() as td:
+                        root = Path(td)
+                        copied = self._copy_validator_fixture(root, validator)
+                        env, marker = self._path_shell_env(root, git_dir)
+
+                        p = _run_ps1(interp, copied, cwd=str(root), env=env)
+
+                        self.assertEqual(
+                            p.returncode,
+                            0,
+                            "derived-root bash must run before PATH fallback; "
+                            f"stdout={p.stdout!r} stderr={p.stderr!r}",
+                        )
+                        self.assertEqual(marker.read_text(encoding="utf-8").splitlines(), ["derived-root"])
 
 
 if __name__ == "__main__":

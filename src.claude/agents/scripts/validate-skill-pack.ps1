@@ -25,6 +25,20 @@ $shellCandidates = @(
 
 $shellExecutable = $shellCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 if (-not $shellExecutable) {
+  foreach ($shellName in @('bash', 'sh')) {
+    $shellCommand = Get-Command -Name $shellName -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($shellCommand) {
+      $shellExecutable = $shellCommand.Source
+      if (-not $shellExecutable) {
+        $shellExecutable = $shellCommand.Path
+      }
+      if ($shellExecutable) {
+        break
+      }
+    }
+  }
+}
+if (-not $shellExecutable) {
   throw "Unable to locate bundled bash.exe or sh.exe under $gitInstallRoot."
 }
 

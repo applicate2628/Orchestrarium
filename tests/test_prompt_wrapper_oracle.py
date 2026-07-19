@@ -32,6 +32,22 @@ WRAPPERS = {
     "codex": ROOT / "src.claude" / "agents" / "scripts" / "invoke-codex-prompt.sh",
     "claude": ROOT / "src.claude" / "agents" / "scripts" / "invoke-claude-prompt.sh",
 }
+WRAPPER_VARIANTS = (
+    pytest.param("codex", "sh", WRAPPERS["codex"], id="codex-sh"),
+    pytest.param("claude", "sh", WRAPPERS["claude"], id="claude-sh"),
+    pytest.param(
+        "codex",
+        "ps1",
+        ROOT / "src.claude" / "agents" / "scripts" / "invoke-codex-prompt.ps1",
+        id="codex-ps1",
+    ),
+    pytest.param(
+        "claude",
+        "ps1",
+        ROOT / "src.claude" / "agents" / "scripts" / "invoke-claude-prompt.ps1",
+        id="claude-ps1",
+    ),
+)
 BIN_ENV = {"codex": "CODEX_BIN", "claude": "CLAUDE_BIN"}
 PROMPTS_DIR_ENV = {"codex": "CODEX_PROMPTS_DIR", "claude": "CLAUDE_PROMPTS_DIR"}
 
@@ -104,6 +120,183 @@ def _make_work_item(tmp_path: Path) -> Path:
         "## Completed agents\n\n- none\n\n## Next action\n\n- none\n",
         encoding="utf-8")
     return item
+
+
+def _make_fake_provider_ps1(tmp_path: Path, which: str) -> Path:
+    fake = tmp_path / f"fake-{which}.ps1"
+    if which == "codex":
+        body = """param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
+$lastmsg = ''
+for ($i = 0; $i -lt $Arguments.Count; $i++) {
+  if ($Arguments[$i] -eq '--output-last-message') { $lastmsg = $Arguments[$i + 1] }
+}
+if (-not $lastmsg) { exit 97 }
+$input | Out-Null
+[System.IO.File]::WriteAllText($lastmsg, "GATE: PASS`n", [System.Text.UTF8Encoding]::new($false))
+exit 0
+"""
+    else:
+        body = """param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)
+$input | Out-Null
+Write-Output 'GATE: PASS'
+exit 0
+"""
+    fake.write_text(body, encoding="utf-8", newline="\n")
+    return fake
+
+
+def _make_ledger_probe(helper: Path, marker: Path, label: str) -> None:
+    helper.parent.mkdir(parents=True, exist_ok=True)
+    helper.write_text(
+        "from pathlib import Path\n"
+        f"with Path({str(marker)!r}).open('a', encoding='utf-8') as stream:\n"
+        f"    stream.write({label!r} + '\\n')\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def _run_installed_wrapper(
+    tmp_path: Path,
+    which: str,
+    shell: str,
+    source_wrapper: Path,
+    *,
+    candidate_labels: tuple[str, ...],
+) -> tuple[subprocess.CompletedProcess, dict[str, Path]]:
+    wrapper_dir = tmp_path / "target" / "agents" / "scripts"
+    wrapper_dir.mkdir(parents=True)
+    wrapper = wrapper_dir / source_wrapper.name
+    shutil.copy2(source_wrapper, wrapper)
+
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    candidate_paths = {
+        "sibling": wrapper_dir / "agent-run-ledger.py",
+        "cwd": cwd / "scripts" / "agent-run-ledger.py",
+        "repository": (wrapper_dir / ".." / ".." / ".." / "scripts" / "agent-run-ledger.py").resolve(),
+    }
+    markers = {label: tmp_path / f"{label}.marker" for label in candidate_paths}
+    for label in candidate_labels:
+        _make_ledger_probe(candidate_paths[label], markers[label], label)
+
+    item = _make_work_item(tmp_path)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("installed wrapper probe\n", encoding="utf-8")
+    outdir = tmp_path / "prompt-outputs"
+    env = os.environ.copy()
+    env[PROMPTS_DIR_ENV[which]] = _to_posix(outdir) if shell == "sh" else str(outdir)
+    if which == "claude":
+        env["ANTHROPIC_API_KEY"] = "installed-wrapper-probe-key"
+
+    if shell == "sh":
+        fake = _make_fake_provider(tmp_path, which, 0)
+        env[BIN_ENV[which]] = _to_posix(fake)
+        command = [
+            _bash(),
+            _to_posix(wrapper),
+            "installed-ledger-probe",
+            "--prompt-file",
+            _to_posix(prompt),
+            "--ledger",
+            _to_posix(item),
+            "--ledger-role",
+            "architecture-reviewer",
+            "--ledger-lane",
+            "installed-probe",
+            "--ledger-artifact",
+            "design.md",
+        ]
+    else:
+        powershell = _powershell()
+        if not powershell:
+            pytest.skip("PowerShell is unavailable")
+        fake = _make_fake_provider_ps1(tmp_path, which)
+        env[BIN_ENV[which]] = str(fake)
+        command = [
+            powershell,
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(wrapper),
+            "installed-ledger-probe",
+            "-PromptFile",
+            str(prompt),
+            "-Ledger",
+            str(item),
+            "-LedgerRole",
+            "architecture-reviewer",
+            "-LedgerLane",
+            "installed-probe",
+            "-LedgerArtifact",
+            "design.md",
+        ]
+
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(cwd),
+        timeout=120,
+    ), markers
+
+
+@pytest.mark.parametrize("which,shell,source_wrapper", WRAPPER_VARIANTS)
+def test_installed_layout_uses_sibling_ledger_helper(
+    tmp_path: Path, which: str, shell: str, source_wrapper: Path
+) -> None:
+    result, markers = _run_installed_wrapper(
+        tmp_path,
+        which,
+        shell,
+        source_wrapper,
+        candidate_labels=("sibling",),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert markers["sibling"].read_text(encoding="utf-8").splitlines() == [
+        "sibling",
+        "sibling",
+    ]
+
+
+@pytest.mark.parametrize("which,shell,source_wrapper", WRAPPER_VARIANTS)
+@pytest.mark.parametrize(
+    "available,expected",
+    (
+        (("sibling", "cwd", "repository"), "sibling"),
+        (("cwd", "repository"), "cwd"),
+        (("repository",), "repository"),
+    ),
+    ids=("sibling-first", "cwd-fallback", "repository-fallback"),
+)
+def test_ledger_helper_resolution_prefers_sibling_and_preserves_fallbacks(
+    tmp_path: Path,
+    which: str,
+    shell: str,
+    source_wrapper: Path,
+    available: tuple[str, ...],
+    expected: str,
+) -> None:
+    result, markers = _run_installed_wrapper(
+        tmp_path,
+        which,
+        shell,
+        source_wrapper,
+        candidate_labels=available,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert markers[expected].read_text(encoding="utf-8").splitlines() == [
+        expected,
+        expected,
+    ]
+    for label, marker in markers.items():
+        if label != expected:
+            assert not marker.exists(), f"unexpected helper selected: {label}"
 
 
 @pytest.mark.parametrize("which", ["codex", "claude"])

@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-07-19
+
+### Fixed
+
+- **Installed Claude-line prompt wrappers now find their sibling agent-run ledger helper, and both Windows pack validators can use a shell resolved from `PATH`.** All four Bash and PowerShell prompt wrappers probe the installed sibling `agent-run-ledger.py` before their two existing monorepo candidates, so `--ledger` / `-Ledger` works in the layout produced by the installer. The Claude and Codex PowerShell pack validators keep bundled-shell discovery under the Git-derived root as their first choice, then probe `bash` followed by `sh` through `Get-Command` only when every derived-root candidate is absent. Existing monorepo fallback order, derived-root precedence, and fail-closed behavior when no helper or shell can be resolved remain unchanged. **Who this affects:** operators running installed prompt wrappers with ledger recording or invoking either pack validator from a Windows environment where Git resolves through `mingw64\bin` while Bash remains available on `PATH`.
+
 ## 2026-07-18
 
 ### Fixed

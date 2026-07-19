@@ -158,7 +158,7 @@ fi
 LAUNCH_RUN_ID=""
 LEDGER_HELPER=""
 if [[ -n "$LEDGER_ITEM" ]]; then
-  for cand in "scripts/agent-run-ledger.py" "$(dirname "$0")/../../../scripts/agent-run-ledger.py"; do
+  for cand in "$(dirname "$0")/agent-run-ledger.py" "scripts/agent-run-ledger.py" "$(dirname "$0")/../../../scripts/agent-run-ledger.py"; do
     [[ -f "$cand" ]] && LEDGER_HELPER="$cand" && break
   done
   if [[ -z "$LEDGER_HELPER" ]]; then
