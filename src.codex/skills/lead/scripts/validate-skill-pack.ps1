@@ -27,7 +27,7 @@ $shellCandidates = @(
 # git.exe sits at ...\Git\mingw64\bin\git.exe (or mingw32, or usr) and its real
 # bundled bash is one level up at ...\Git\bin. Gate on $gitInstallRoot's LEAF
 # being a mingw layer (mingw64/mingw32/usr): the normal ...\Git\cmd\git.exe
-# layout has leaf 'cmd', so the grandparent is NOT probed and an unrelated
+# layout has leaf 'Git', so the grandparent is NOT probed and an unrelated
 # <grandparent>\bin\bash.exe can never be mis-selected. This leaf test is also
 # non-empty by construction, so it subsumes the earlier drive-root guard -- a
 # drive-root install root (e.g. X:\, whose leaf is not a mingw layer) never
