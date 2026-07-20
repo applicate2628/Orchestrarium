@@ -44,7 +44,7 @@ Exactly five roles can be adopted inline instead of dispatched — no fresh cont
 | `/agents-policies` | View or update a specific policy (`/agents-policies testing tdd`) |
 | `/agents-check-policies` | Audit codebase compliance with configured policies |
 | `/agents-validate` | Structural integrity check of the skill-pack |
-| `/agents-status` | Project dashboard: active chains, policies, pack summary |
+| `/agents-status` | Project dashboard: active chains, policies, pack summary; flags reserved `$product-manager` admissions |
 | `/agents-check-safety` | Scan staged files for secrets before commit |
 
 ### Decision tree

@@ -564,6 +564,15 @@ check_h2_section_contains "$PACK/agents/contracts/operating-model.md" \
   "operating-model design-panel selection block states the verification side of the distinction"
 echo ""
 
+# 1d. agents-status reserved-PM-admission flag (structural presence only; predicate
+#     soundness/decidability lives in the pytest fixture spec-guard, not here)
+echo "[Reserved PM admissions]"
+check_contains "$PACK/commands/agents-status.md" "Reserved PM admissions" \
+  "agents-status flags reserved product-manager admissions"
+check_contains "$PACK/commands/agents-status.md" "I will not dispatch or modify" \
+  "agents-status reserved-PM offer stays read-only (no dispatch/modify without confirmation)"
+echo ""
+
 # 1b. Lead skill is the live Lead contract held BY the main conversation
 #     (agents/lead.md above stays the fail-closed dispatch stub; the /agents-external-brigade
 #     anchor on it is checked further down). The real contract must never be deletable with

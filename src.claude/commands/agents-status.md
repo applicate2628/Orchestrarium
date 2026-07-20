@@ -27,18 +27,23 @@ Show a compact status dashboard for the current project.
 
 5. **Open decisions.** Check if `work-items/decisions/` exists. Each file is a flat `<date>-<slug>.md` with bug-style list-item frontmatter (`- id:`, `- status: proposed | accepted | dropped | superseded | reverted`, `- decided-by:`, `- context:`, `- supersedes:`, `- superseded-by:`). Show every decision whose `- status:` is `proposed` (awaiting acceptance) with its id and `## Decision` first line, plus a one-line count of `accepted`. (`dropped`/`superseded`/`reverted` are terminal/history — do not list them by default.) The decision status enum is INDEPENDENT of the work-item done-predicate — decisions are never "closed" by it. If none, say "No decisions."
 
-6. **Open lessons.** Check if `work-items/lessons/` exists. Each file is a flat `<date>-<slug>.md` with bug-style list-item frontmatter (`- id:`, `- status: open | applied | dropped | archived`, `- source:`, `- category:`). Show every lesson whose `- status:` is `open` (captured, not yet acted on) with its id and `## Lesson` first line, plus the count. (`applied` is a non-open history state that can still move to `archived`; `dropped`/`archived` are terminal — none are listed by default.) The lesson status enum is INDEPENDENT of the work-item done-predicate. If none, say "No open lessons."
+6. **Reserved PM admissions.** Scan the three live cross-cutting registries — `work-items/decisions/`, `work-items/epics/`, and `work-items/bugs/` — for artifacts that reserve a `$product-manager` admission or acceptance that has not yet fired, so a scheduled PM call cannot stall unseen. Flag an artifact ONLY when BOTH signals hold:
+   - **(A) PM-admission-owner signal.** On a single line OR two adjacent lines, the body co-locates a `$product-manager` / `product-manager` token with an admission/acceptance action stem from the fixed set `{ admit, admitted, admitting, admission, accept, acceptance, intake, re-intake, pending, call }`. The co-location is what separates a *reserved admission* from a mere role-noun mention — a line that only names `product-manager` as a role, with no admission stem nearby, does NOT qualify.
+   - **(B) not-yet-admitted state.** Read the state from the artifact's authoritative frontmatter `status:` field ONLY — the `status:` (or list-item `- status:`) key line in the leading frontmatter block — never a `status:` substring appearing elsewhere in the body (a stale body line that still says "status: proposed" does not count). Per registry: `decisions/*` flags on `status: proposed` (terminal `accepted` / `dropped` / `superseded` / `reverted` are excluded); `epics/*` flags on `status: active` (terminal `closed` excluded); `bugs/*` flags on `status: open` (terminal `fixed` / `resolved` / `closed` / `superseded` excluded).
+   Scope: only these three live registries. Exclude `work-items/archive/**` (terminal by location) and the `## Backlog` items in `index.md` (already admitted — they are PM's output, not a reserved call). This flag is a STRICT SUBSET of the step-5 proposed-decisions list — it surfaces only the PM-owned ones, plus the epic and bug analogues, never all `proposed` decisions. When the flagged count is greater than zero, list the flagged artifacts and then append exactly ONE dispatch-offer line (see Format). The offer is presentation only: the command dispatches nothing and modifies no file. If the operator confirms, the MAIN conversation (not this command) dispatches `subagent_type: product-manager` with the flagged artifact(s) as the admission input; the operator may instead admit directly (the `OR direct human decision` bypass stays intact) or decline. If none match, say "Reserved PM admissions: none".
 
-7. **Recent reports.** Check if `.reports/` exists. Find the two most recent subdirectories (by name, format `YYYY-MM`), then list the 5 most recent `.md` files across them. Display filename and first heading. If none, say "No reports."
+7. **Open lessons.** Check if `work-items/lessons/` exists. Each file is a flat `<date>-<slug>.md` with bug-style list-item frontmatter (`- id:`, `- status: open | applied | dropped | archived`, `- source:`, `- category:`). Show every lesson whose `- status:` is `open` (captured, not yet acted on) with its id and `## Lesson` first line, plus the count. (`applied` is a non-open history state that can still move to `archived`; `dropped`/`archived` are terminal — none are listed by default.) The lesson status enum is INDEPENDENT of the work-item done-predicate. If none, say "No open lessons."
 
-8. **Recent plans.** Check if `.plans/` exists. Same logic — two most recent month dirs, 5 most recent `.md` files. Display filename and first heading. If none, say "No plans."
+8. **Recent reports.** Check if `.reports/` exists. Find the two most recent subdirectories (by name, format `YYYY-MM`), then list the 5 most recent `.md` files across them. Display filename and first heading. If none, say "No reports."
 
-9. **Skill-pack summary.** Count and display in one line:
+9. **Recent plans.** Check if `.plans/` exists. Same logic — two most recent month dirs, 5 most recent `.md` files. Display filename and first heading. If none, say "No plans."
+
+10. **Skill-pack summary.** Count and display in one line:
    - Number of role files in `.claude/agents/*.md`
    - Number of team templates in `.claude/agents/team-templates/*.json`
    - Number of skills in `.claude/commands/*.md`
 
-10. **Format.** Display as a compact dashboard:
+11. **Format.** Display as a compact dashboard:
 
 ```text
 === Claude Code Pack Status ===
@@ -69,6 +74,12 @@ Decisions: <proposed count or "none">
   [proposed] <id> — <decision first line>
   (accepted: <count>)
 
+Reserved PM admissions: <count or "none">
+  [decision] <id> — proposed, acceptance reserved for $product-manager
+  [epic]     <slug> — <active|parked>, admission reserved for $product-manager
+  [bug]      <filename> — open, admission reserved for $product-manager
+  → <count> reserved $product-manager admission(s) have not fired. Dispatch $product-manager to admit/accept them now? (I will not dispatch or modify any file without your confirmation.)
+
 Open lessons: <count or "none">
   [open] <id> — <lesson first line>
 
@@ -90,5 +101,6 @@ Pack: <N> roles · <N> templates · <N> skills
 ## Rules
 
 - Read-only. Do not modify any files.
+- The reserved-PM-admission section is presentation only: the command flags reserved `$product-manager` admissions and may print the single dispatch-offer line, but it never dispatches a subagent and never modifies any file without explicit operator confirmation.
 - Keep output concise — this is a glance, not a report.
 - If a directory or file doesn't exist, report its absence gracefully, don't error.

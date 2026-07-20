@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-07-20
+
+### Added
+
+- **`/agents-status` now surfaces reserved-but-unfired `$product-manager` admissions and offers an operator-confirmed dispatch.** A new "Reserved PM admissions" section scans the three live cross-cutting registries (`work-items/decisions/`, `work-items/epics/`, `work-items/bugs/`) and flags an artifact only when it BOTH co-locates a `$product-manager` admission/acceptance call (an action stem from `{admit, accept, intake, re-intake, pending, call}` on the same or an adjacent line) AND carries a non-terminal authoritative frontmatter `status:` (decisions `proposed`, epics `active`, bugs `open`); when the count is greater than zero it appends one dispatch-offer line. **Why it matters:** reserved product-manager calls — an epic unpark, acceptance of a `proposed` cross-cutting decision, admission of a new initiative — previously had no triggering entry point, so a scheduled PM dispatch silently never fired and the item stalled; the dashboard operators already run now makes those reserved calls visible and actionable. **Who this affects:** operators running `/agents-status`. **Preserved boundaries:** the command stays read-only (it flags and offers but never dispatches a subagent or mutates a file); any dispatch is operator-confirmed and performed by the main conversation, not the command; the `OR direct human decision` admission bypass is intact; the flag reads only the authoritative frontmatter `status:` key (never a stale body substring), excludes `work-items/archive/**` and `## Backlog` items, and is a strict subset of the existing proposed-decisions list rather than a duplicate of it.
+
 ## 2026-07-19
 
 ### Fixed
