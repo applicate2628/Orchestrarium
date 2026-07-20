@@ -912,6 +912,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
         stale_relation_script_target="$TARGET/agents/hooks/check-stale-relation-residue.ps1"
         repository_orientation_script_target="$TARGET/agents/hooks/check-repository-orientation.ps1"
         mcp_momentum_script_target="$TARGET/agents/hooks/check-mcp-momentum.ps1"
+        typed_routing_script_target="$TARGET/agents/hooks/check-typed-routing.ps1"
         reminder_script_target="$TARGET/agents/scripts/mcp-usage-reminder.ps1"
         agents_mode_reminder_script_target="$TARGET/agents/scripts/agents-mode-reminder.ps1"
         scratch_valuables_script_target="$TARGET/agents/scripts/check-scratch-valuables.ps1"
@@ -928,6 +929,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
         stale_relation_script_target="$TARGET/agents/hooks/check-stale-relation-residue.sh"
         repository_orientation_script_target="$TARGET/agents/hooks/check-repository-orientation.sh"
         mcp_momentum_script_target="$TARGET/agents/hooks/check-mcp-momentum.sh"
+        typed_routing_script_target="$TARGET/agents/hooks/check-typed-routing.sh"
         reminder_script_target="$TARGET/agents/scripts/mcp-usage-reminder.sh"
         agents_mode_reminder_script_target="$TARGET/agents/scripts/agents-mode-reminder.sh"
         scratch_valuables_script_target="$TARGET/agents/scripts/check-scratch-valuables.sh"
@@ -1002,6 +1004,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --script-marker check-mcp-momentum \
       --tool-matcher "Grep|Bash" \
       --script-path "$mcp_momentum_script_target"
+    echo "  Installing typed-routing PreToolUse hook [AUDIT] (host-os=$hook_host_os)..."
+    "$python_cmd" "$hook_installer" \
+      --target "$settings_target" \
+      --platform claude \
+      --host-os "$hook_host_os" \
+      --script-marker check-typed-routing \
+      --tool-matcher "Agent" \
+      --script-path "$typed_routing_script_target"
     echo "  Installing MCP-usage-reminder SessionStart hook (host-os=$hook_host_os)..."
     "$python_cmd" "$hook_installer" \
       --target "$settings_target" \

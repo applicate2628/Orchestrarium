@@ -42,7 +42,7 @@ Against false convergence (angles agreeing on a wrong-but-plausible result) and 
 2. **Every angle answers** "root proven?", "scope unchanged?", "verification adequate?" — not only its scope.
 3. **Reject bare PASS** — cite specific blockers (evidence/`file:line`) or a specific no-blocker rationale.
 4. **Per-round diff** — record what changed and why (which blocker it answers).
-5. **Verify OUTPUTS, not notifications** — read the captured angle output and confirm a real verdict/findings before counting it.
+5. **Verify OUTPUTS, not notifications** — read the captured angle output and confirm a real verdict/findings before counting it. A completion signal from a *sidecar* (watcher / notifier / background-task callback / "task done" notification) is NOT a liveness verdict on the process it watches: liveness of a launched run is proven only by a DIRECT probe of the run itself — its PID/exit status, or its own `.out`/`.err` carrying a normal-completion marker — never by a neighboring task's completion.
 6. **Escalate early on a stuck blocker.**
 
 ## review-loop-state ledger (structural backstop)

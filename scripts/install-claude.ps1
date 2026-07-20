@@ -945,6 +945,7 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         $StaleRelationScriptTarget = Join-Path $TargetRoot "agents\hooks\check-stale-relation-residue.ps1"
         $RepositoryOrientationScriptTarget = Join-Path $TargetRoot "agents\hooks\check-repository-orientation.ps1"
         $McpMomentumScriptTarget = Join-Path $TargetRoot "agents\hooks\check-mcp-momentum.ps1"
+        $TypedRoutingScriptTarget = Join-Path $TargetRoot "agents\hooks\check-typed-routing.ps1"
         $ReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\mcp-usage-reminder.ps1"
         $AgentsModeReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\agents-mode-reminder.ps1"
         $ScratchValuablesScriptTarget = Join-Path $TargetRoot "agents\scripts\check-scratch-valuables.ps1"
@@ -999,6 +1000,12 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
         }
         Write-Host "  Installing mcp-momentum PreToolUse hook [AUDIT] (host-os=windows)..."
         & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-mcp-momentum --tool-matcher "Grep|Bash" --script-path $McpMomentumScriptTarget
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Installing typed-routing PreToolUse hook [AUDIT] (host-os=windows)..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-typed-routing --tool-matcher "Agent" --script-path $TypedRoutingScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE

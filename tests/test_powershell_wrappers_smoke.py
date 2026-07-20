@@ -1,10 +1,10 @@
 """Smoke tests for the PowerShell (.ps1) hook + scanner wrappers.
 
 The installer registers a .ps1 entry point as the WINDOWS hook command for the
- nine structural/audit hooks (check-bugfix-discipline, check-git-push-gate,
+ nine shared structural/audit hooks (check-bugfix-discipline, check-git-push-gate,
  check-passive-polling-stop, check-work-items-archival-stop,
 check-machine-local-path, check-no-trash-in-repo, check-stale-relation-residue,
-check-repository-orientation, check-mcp-momentum),
+check-repository-orientation, check-mcp-momentum; the Claude line adds a tenth, the Claude-only check-typed-routing audit, covered by test_typed_routing_hook.py),
 the two informational SessionStart reminders
 (mcp-usage-reminder, agents-mode-reminder), and ships a .ps1 for the publication
 scanner — yet NO test executed any .ps1, so a syntax error, a broken fail-open
@@ -16,7 +16,7 @@ green (every other hook test drives the .py helper via sys.executable, never the
 
 Three wrapper shapes, three contracts:
 
-  * The nine structural/audit HOOK wrappers are thin stdin pipes around their .py helper. Contract:
+  * The nine shared structural/audit HOOK wrappers are thin stdin pipes around their .py helper. Contract:
     FAIL OPEN — on empty stdin AND on malformed JSON they must exit 0 with no
     stdout and no stderr (AUDIT/decision hooks never crash the host; the helper's
     own fail-open swallows bad input). Verified under every available interpreter.

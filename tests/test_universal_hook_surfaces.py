@@ -57,6 +57,22 @@ PACK_ONLY_SCRIPTS = {
     }),
 }
 
+# hooks/-dir members that intentionally have NO canon counterpart because they are
+# provider-SPECIFIC: the hook keys on a tool the target runtime exposes and the
+# other runtime does not, so mirroring it would ship a hook that can never fire.
+# Same declared-exception seam as PACK_ONLY_SCRIPTS above (decision
+# 2026-07-11-hook-placement-gate-semantics). Every entry needs a justification.
+PACK_ONLY_HOOKS = {
+    "src.claude/agents/hooks": frozenset({
+        # Claude-only typed-routing audit: keys on the subagent-dispatch tool
+        # (captured tool_name "Agent"). Codex CLI exposes no analogous
+        # subagent-dispatch tool (src.codex/AGENTS.codex.md: "Codex CLI has no
+        # analogous Agent-isolation"), so there is no Codex/canon mirror.
+        "check-typed-routing.py", "check-typed-routing.sh", "check-typed-routing.ps1",
+    }),
+    "src.codex/skills/lead/hooks": frozenset(),
+}
+
 
 class UniversalHookSurfaceTest(unittest.TestCase):
     def test_pack_neutral_hook_sources_exist_and_match_production_packs(self) -> None:
@@ -85,27 +101,28 @@ class UniversalHookSurfaceTest(unittest.TestCase):
                 )
 
     def test_pack_hooks_dir_has_no_hook_missing_from_canon(self) -> None:
-        """Set-equality: every audit-hook family in a pack's hooks/ dir must have
-        a canon counterpart (and vice versa). The pack hooks/ dirs hold exactly
-        the audit-hook set, so canon==pack is the right invariant here
-        (scripts/ has its own set-equality below: canon ∪ declared
-        `PACK_ONLY_SCRIPTS`). This is the check that would have
-        caught check-stale-relation-residue being absent from the canon."""
+        """Set-equality for hooks/: pack == canon ∪ declared `PACK_ONLY_HOOKS`.
+        Every audit-hook family in a pack's hooks/ dir must be either a canon
+        (universal) counterpart or a DECLARED provider-specific exception; an
+        undeclared pack-only hook still FAILS. This is the check that would have
+        caught check-stale-relation-residue being absent from the canon, now with
+        the same declared-exception seam scripts/ uses (`PACK_ONLY_SCRIPTS`) so a
+        genuinely provider-specific hook (check-typed-routing keys on the Agent
+        dispatch tool, which Codex has no analog for) is declared, not smuggled."""
         canon = set(RUNTIME_HOOK_NAMES)
-        for pack_hooks in (
-            ROOT / "src.claude" / "agents" / "hooks",
-            ROOT / "src.codex" / "skills" / "lead" / "hooks",
-        ):
+        for rel in ("src.claude/agents/hooks", "src.codex/skills/lead/hooks"):
+            pack_hooks = ROOT / Path(rel)
+            extra = PACK_ONLY_HOOKS.get(rel, frozenset())
             pack = {
                 p.name for p in pack_hooks.iterdir()
                 if p.is_file() and p.suffix in _HOOK_EXTS
             }
-            with self.subTest(pack=str(pack_hooks)):
+            with self.subTest(pack=rel):
                 self.assertEqual(
-                    canon, pack,
-                    f"hooks/ set mismatch: canon-only={canon - pack}, "
-                    f"pack-only={pack - canon} (a pack hook absent from the "
-                    f"universal canon, or vice versa)",
+                    canon | set(extra), pack,
+                    f"hooks/ set mismatch: undeclared pack-only="
+                    f"{pack - canon - set(extra)}, missing-from-pack="
+                    f"{(canon | set(extra)) - pack}",
                 )
 
     def test_pack_scripts_dir_is_canon_plus_declared_pack_only(self) -> None:

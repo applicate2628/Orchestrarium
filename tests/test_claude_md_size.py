@@ -29,20 +29,20 @@ BOOTSTRAP_SHA256 = "07374be13bb75fa40e827663927c619540f714b5e04f98a09ffd5b665c95
 
 EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
     "structural-overview": (
-        4_837,
-        "f3db3c7a00572f014f17f9e3f9591aa33cb3b53912e8d402b076663353400264",
+        4_850,
+        "c0624b3c42cc0a310896b98e4cc1dfac21f68131185e21b6eb138c5f8759a272",
     ),
     "hook-behavior-contracts": (
-        13_496,
-        "a2dba4653064e70a9ab175c97974d9e6e8282ec0e5940195ef9a2e10d3fdb123",
+        15_453,
+        "1f77f62c798f7f4065431500daa3f8a3830a9e2b131bbceff98af7af8b730077",
     ),
     "hook-entrypoints-placement": (
-        2_362,
-        "6f364280e3cb3374a36bee1b89627110235f739174958a089716eb0a8bec08b5",
+        2_492,
+        "d3e6865d0affdc394f85032175dda467494000ca8464edd083f1d7249365a67d",
     ),
     "installer-removal-json-path": (
-        6_345,
-        "fe4e76c7882e860810d0a2582e80419d784af2d8ff8310cba046caded6ad9b2d",
+        6_635,
+        "e4134cae926137fa4a9e074c95499a51b7589f00223a9a9ebe9c079a9e8a97f9",
     ),
 }
 
@@ -157,9 +157,9 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
     result = _run()
     assert result.returncode == 0, result.stdout + result.stderr
     for expected in (
-        "Code points: 36081",
-        "UTF-8 bytes: 36271",
-        "Binding size: 36271",
+        "Code points: 36423",
+        "UTF-8 bytes: 36613",
+        "Binding size: 36613",
         "Size cap: 36771",
         "Warning threshold: 36521",
         "Manifest: 47/47",
@@ -171,7 +171,7 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
 def test_tiny_size_cap_fails_closed() -> None:
     result = _run("--size-cap", "1000")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL: Claude Markdown binding size 36271 > size cap 1000" in result.stdout
+    assert "FAIL: Claude Markdown binding size 36613 > size cap 1000" in result.stdout
     assert "RESULT: FAIL" in result.stdout
 
 
