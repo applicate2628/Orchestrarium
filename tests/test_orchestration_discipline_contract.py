@@ -88,8 +88,12 @@ PINS = [
      ["src.claude/agents/contracts/review-loop.md", "src.codex/skills/review-loop/SKILL.md"]),
     # A5b — invariants-7-8-are-the-runtime-enforcement step (command + codex skill);
     # the validator itself stays dev/CI-only, per the recorded operator directive
-    # (RELEASE_NOTES.md :153) that the global install carries no repo-specific dev
-    # tooling — this pin deliberately does NOT assert the validator is installed.
+    # (RELEASE_NOTES.md, the 2026-06-03 entry "Kept the review-loop ledger validator
+    # repo/dev-only — not installed to the global.") that the global install carries no
+    # repo-specific dev tooling — this pin deliberately does NOT assert the validator is
+    # installed. Cited by stable title, not line number: RELEASE_NOTES.md is append-at-top,
+    # so every line number below an insertion point rots on the next release (this comment
+    # previously said ":153", which had drifted to :281 by 2026-07-25).
     ("A5b-run", "hardening invariants 7-8 (failed-lane-is-unverified, fail-closed aggregation);",
      ["src.claude/commands/agents-review-loop.md", "src.codex/skills/review-loop/SKILL.md"]),
 
