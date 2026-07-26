@@ -184,10 +184,17 @@ Decision algorithm (fail-open everywhere on internal error):
      for it, which yields no genuine user message, which fails BOTH (a) and
      (b) below on their own merits, falling through to step 9 (DENY). Only a
      genuinely MISSING field fails open; an unreadable-but-present one denies.
-  7. If the LAST GENUINE USER MESSAGE contains `[approve-publication]` →
+  7. If the LAST GENUINE USER MESSAGE contains `[approve-publication]` AND
+     that message is no longer than MARKER_MAX_MESSAGE_LENGTH characters →
      exit 0. The marker is honored ONLY from the user's own text — never from
      assistant prose, tool calls, or tool output — because prior provider or
-     file content quoting the marker must not approve a publication.
+     file content quoting the marker must not approve a publication. The
+     length bound (2026-07-26 hardening; see MARKER_MAX_MESSAGE_LENGTH's own
+     comment for the full contract decision and measurements) exists because
+     the deny reason at step 9 embeds this same marker verbatim, so an
+     operator who copies that reason back into chat reproduces the identical
+     marker; a message shaped like a copied multi-paragraph deny block does
+     not count as an approval here.
   8. If the current turn (entries after the last genuine user message) shows
      a publication-safety scan invocation among the model's own tool CALLS,
      under an id UNIQUE among this turn's calls (see COLLISION REJECTION note
@@ -202,6 +209,18 @@ Decision algorithm (fail-open everywhere on internal error):
      the stdout payload, not the exit code).
 
 WHAT THIS STILL DOES NOT COVER (disclosed, not silently assumed away):
+  - SHORT QUOTES OF THE BARE MARKER (2026-07-26, `$security-engineer`
+    contract decision on `work-items/bugs/2026-07-26-the-deny-message-
+    teaches-the-marker-that-opens-the-gate.md`). The MARKER_MAX_MESSAGE_LENGTH
+    bound (see step 7 and that constant's own comment) closes a long, copied
+    deny-block from opening the gate, but a SHORT quote of or question about
+    just the marker itself ("what does `[approve-publication]` mean?") is
+    still indistinguishable, by length or content, from a genuine short
+    approval — no fixed-string match at this layer can tell them apart with
+    certainty, because the marker is disclosed text a human can always
+    retype into either shape. Fully closing this needs a per-event nonce or
+    an out-of-band confirmation channel; both are larger contract changes
+    than this bounded fix makes.
   - NO WORKTREE / REPOSITORY / DESTINATION BINDING (2026-07-26, adversarial-
     gate finding, high). The clean-result line carries no repository,
     worktree, or commit identity — it is a plain string. This repository
@@ -281,6 +300,68 @@ from hook_common import (
 # (see the consultant continuation-prompt untrusted-data rule), so unlike
 # [skip-bugfix-discipline] this marker never counts from the model's own reply.
 APPROVE_MARKER_REGEX = re.compile(r"\[approve-publication\]", re.IGNORECASE)
+
+# MARKER-HONORING LENGTH BOUND (2026-07-26, `$security-engineer` contract
+# decision — work-items/bugs/2026-07-26-the-deny-message-teaches-the-marker-
+# that-opens-the-gate.md). The deny reason below embeds the marker verbatim
+# so the operator knows what to type; an operator who copies that SAME text
+# back into chat ("what does this mean?", pasting it into a bug report)
+# reproduces the identical marker byte-for-byte. A bare substring search
+# cannot distinguish that from a deliberate approval — both are the same
+# bytes. The marker is a disclosed, shared, non-secret token, not a nonce; no
+# fixed-string match at this layer separates "operator approved" from
+# "operator quoted the denial" with certainty, because a human can always
+# retype or paste any substring of already-disclosed text into either shape.
+#
+# Candidates considered and rejected (full comparison in the filed bug):
+#   - Marker-must-be-on-its-own-line: rejected — it BREAKS the existing,
+#     tested, documented approval convention. Both `test_user_marker_allows`
+#     ("looks good, push it [approve-publication]") and
+#     `test_lead_sync_flow_marker_allows` ("Wave E approved after review —
+#     sync all branches [approve-publication]") carry the marker inline at
+#     the end of an ordinary sentence, never alone on a line. A "fix" that
+#     invalidates the documented contract it is meant to protect is a
+#     regression, not a hardening.
+#   - Recognize-the-gate's-own-output (exclude when deny-text vocabulary
+#     co-occurs): rejected as the PRIMARY mechanism — it couples this
+#     matcher to the deny reason's prose. This file's own history
+#     (CORRELATION / COLLISION REJECTION / ORDERING / CALL-SIDE UNIQUENESS
+#     notes above) is a record of exactly this kind of self-referential
+#     pattern-matching drifting once real transcripts and real wording
+#     changes are thrown at it; adding a fourth self-referential layer here,
+#     on the strength of a single review pass with no adversarial pressure
+#     yet applied, is not a risk this fix should take on.
+#   - Change the marker string: rejected — the new string still has to
+#     appear verbatim in the deny text for the operator to know what to
+#     type, recreating the identical echo path under a new name, while
+#     breaking every existing workflow/doc/habit across all four provider
+#     packs for no structural gain.
+#
+# Chosen mitigation: a LENGTH BOUND, decoupled from the deny text's wording
+# entirely (robust to future edits of that prose, unlike the rejected
+# recognize-own-output approach). The marker is honored only when the
+# carrying message is short enough to plausibly be a deliberate one-line
+# approval, not a copied multi-paragraph block. Measured, not guessed
+# (2026-07-26): the two documented genuine approvals above are 41 and 70
+# characters; the shipped deny reason text is 2384 characters; a realistic
+# PARTIAL quote of just one deny clause (clause (a) alone, a plausible
+# "what does this bullet mean?" paste) measures 284-305 characters.
+# MARKER_MAX_MESSAGE_LENGTH sits below both measured accident sizes with
+# margin, while sitting well above both measured genuine-approval sizes —
+# closing the bug's own named scenario ("pasting it into a bug report")
+# with high confidence.
+#
+# NOT CLOSED (disclosed, not silently assumed away): a SHORT quote of, or
+# question about, just the bare marker itself ("what does `[approve-
+# publication]` mean?" — well under any length bound) is indistinguishable
+# by length OR content from a genuine short approval. This residual is
+# shared by every candidate considered above, not unique to this one;
+# closing it fully needs a per-event nonce or an out-of-band confirmation
+# channel, both larger contract changes than this bounded fix makes.
+# MARKER_MAX_MESSAGE_LENGTH is a tunable judgment call, not a measured
+# physical constant — recalibrate it if it is ever seen rejecting a genuine
+# operator approval in practice.
+MARKER_MAX_MESSAGE_LENGTH = 200
 
 # Explicit user push-instruction signal (English + Russian). Matched against
 # the last genuine user message only; used together with scan evidence.
@@ -523,8 +604,18 @@ def find_git_push_invocations(command: str) -> list[list[str]]:
         segment = strip_command_prefix(raw_segment)
         if not segment:
             continue
-        head = segment[0]
-        if not (head == "git" or head.endswith("/git")):
+        # Normalized comparison (2026-07-26 hardening) -- see
+        # `_normalized_command_word`'s docstring. The prior exact-match test
+        # (`head == "git" or head.endswith("/git")`) only ever caught a bare
+        # lowercase `git` or a forward-slash path ending in `/git`; measured
+        # live against the shipped detector, it missed `git.exe`, `git.EXE`,
+        # an absolute Windows path ending in `git.exe`, and bare-word case
+        # variants `GIT`/`Git` -- all of which resolve and run identically to
+        # `git` on Windows. The root cause was the exact-match test itself,
+        # not the `.exe` suffix specifically, so the fix normalizes the head
+        # token the same way the scan-script detector already normalizes its
+        # own command word, rather than special-casing `.exe` alone.
+        if _normalized_command_word(segment[0]) != "git":
             continue  # not a git invocation in this segment
         current_args: list[str] | None = None  # collecting args of an active `git push`
         skip_value = False
@@ -581,6 +672,37 @@ def _basename(path: str) -> str:
     return path.replace("\\", "/").rsplit("/", 1)[-1]
 
 
+def _normalized_command_word(token: str) -> str:
+    """Lowercased basename of `token` with a trailing `.exe` suffix stripped.
+
+    This is the SAME normalization `_segment_runs_scan_script` already
+    applied inline when recognizing the PowerShell/pwsh interpreter name
+    (`ps_name`, below) -- extracted here so `find_git_push_invocations`'s
+    git-head test REUSES it instead of growing a second, independently-
+    drifting normalizer for the identical "what shell word is this really"
+    question. Two normalizers for one concept is exactly the defect class
+    this file's own scan-execution detector exists to avoid (see
+    `iter_command_segments`'s docstring: "one tokenizer, two consumers ...
+    two parsers for one shell-command concept is how the halves drift
+    apart") -- this function applies that same discipline one layer down
+    (2026-07-26 hardening, `git.exe`/`GIT`/`Git` head-detection gap,
+    `work-items/bugs/2026-07-26-the-deny-message-teaches-the-marker-that-
+    opens-the-gate.md` §"A second, smaller one from the same review").
+
+    `_basename`'s backslash-to-forward-slash + rsplit handles a Windows
+    absolute path (`C:\\Program Files\\Git\\bin\\git.exe`); `.lower()`
+    handles Windows' case-insensitive command resolution (`GIT push`,
+    `Git push`, `git.EXE push` all resolve and run identically to `git
+    push` -- measured live, 2026-07-26: the pre-fix exact-match head test
+    caught none of these); the `.exe` strip handles the Windows executable
+    suffix both `git` and the PowerShell interpreters ship under, with or
+    without a path prefix."""
+    base = _basename(token).lower()
+    if base.endswith(".exe"):
+        base = base[:-4]
+    return base
+
+
 def _segment_runs_scan_script(raw_segment: list[str]) -> bool:
     """True if this ONE command segment's own leading command word directly
     EXECUTES a publication-safety scan script — never merely names one as an
@@ -604,8 +726,12 @@ def _segment_runs_scan_script(raw_segment: list[str]) -> bool:
     if head_base in _SHELL_INTERPRETERS:
         return len(segment) > 1 and _basename(segment[1]).lower() in _SCAN_SCRIPT_BASENAMES
 
-    # PowerShell / pwsh, any casing, optional `.exe` suffix.
-    ps_name = head_base[:-4] if head_base.endswith(".exe") else head_base
+    # PowerShell / pwsh, any casing, optional `.exe` suffix -- reuses
+    # `_normalized_command_word` (see its docstring) rather than repeating
+    # the basename/lower/`.exe`-strip sequence inline a second time; the
+    # `find_git_push_invocations` git-head test below now shares this exact
+    # function instead of carrying its own copy.
+    ps_name = _normalized_command_word(segment[0])
     if ps_name in ("powershell", "pwsh"):
         i = 1
         while i < len(segment):
@@ -708,7 +834,12 @@ def main() -> int:
 
     # (a) Per-turn user-side override — the marker counts ONLY from the last
     # genuine user message, never from assistant prose / tool calls / output.
-    if APPROVE_MARKER_REGEX.search(user_text):
+    # ALSO bounded by MARKER_MAX_MESSAGE_LENGTH (see that constant's comment
+    # for the full contract decision, measurements, and disclosed residual):
+    # a marker riding inside a long message — the shape of a copied deny
+    # block, not a one-line approval — does not open the gate here; it falls
+    # through to branch (b) and then to deny, same as no marker at all.
+    if APPROVE_MARKER_REGEX.search(user_text) and len(user_text) <= MARKER_MAX_MESSAGE_LENGTH:
         return 0
 
     # (b) Publication-safety scan EXECUTED this turn (find_scan_script_

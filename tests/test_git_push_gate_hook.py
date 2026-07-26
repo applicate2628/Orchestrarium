@@ -213,6 +213,46 @@ class TestGitPushGate(unittest.TestCase):
             should_deny=True,
         )
 
+    # --- deny: Windows git-head spelling variants (2026-07-26 hardening) ---
+    # The pre-fix head test was `head == "git" or head.endswith("/git")` --
+    # an exact-match test that missed every one of these on a real Windows
+    # shell, where all of them resolve and run identically to `git`. Measured
+    # live against the shipped (pre-fix) detector before this hardening
+    # (`work-items/bugs/2026-07-26-the-deny-message-teaches-the-marker-that-
+    # opens-the-gate.md` §"A second, smaller one from the same review").
+
+    def test_git_exe_lowercase_denied(self) -> None:
+        self.assert_outcome([user("wrap up")], "git.exe push origin main", should_deny=True)
+
+    def test_git_exe_uppercase_extension_denied(self) -> None:
+        self.assert_outcome([user("wrap up")], "git.EXE push origin main", should_deny=True)
+
+    def test_uppercase_git_word_denied(self) -> None:
+        self.assert_outcome([user("wrap up")], "GIT push origin main", should_deny=True)
+
+    def test_titlecase_git_word_denied(self) -> None:
+        self.assert_outcome([user("wrap up")], "Git push origin main", should_deny=True)
+
+    def test_quoted_absolute_windows_git_exe_path_denied(self) -> None:
+        # The only form of a spaced Windows install path that actually
+        # executes in any real shell is quoted -- the unquoted form from the
+        # audit table (`C:/Program Files/Git/bin/git.exe push`) is not a
+        # runnable command in any shell (the embedded space splits it into
+        # two tokens before git is ever reached), so it is not a meaningful
+        # detection target; the quoted equivalent is.
+        self.assert_outcome(
+            [user("wrap up")],
+            '"C:/Program Files/Git/bin/git.exe" push',
+            should_deny=True,
+        )
+
+    def test_no_space_absolute_windows_git_exe_path_denied(self) -> None:
+        self.assert_outcome([user("wrap up")], "C:/Git/bin/git.exe push", should_deny=True)
+
+    def test_git_exe_case_insensitive_extension_denied(self) -> None:
+        # Mixed case on both the word and the extension together.
+        self.assert_outcome([user("wrap up")], "Git.Exe push origin main", should_deny=True)
+
     # --- allow: user-side per-turn override marker ---
 
     def test_user_marker_allows(self) -> None:
@@ -259,6 +299,65 @@ class TestGitPushGate(unittest.TestCase):
                                           "new_string": "include `[approve-publication]` in your message"})],
             "git push origin main",
             should_deny=True,
+        )
+
+    # --- deny: marker present but message shape is a copied deny block, not
+    # an approval (2026-07-26 `$security-engineer` contract decision) ---
+    # `work-items/bugs/2026-07-26-the-deny-message-teaches-the-marker-that-
+    # opens-the-gate.md`: the deny reason embeds the marker verbatim, so an
+    # operator who copies that reason back into chat ("what does this
+    # mean?") reproduces the identical marker. MARKER_MAX_MESSAGE_LENGTH
+    # bounds this: the marker only counts in a message short enough to
+    # plausibly be a deliberate one-line approval.
+
+    def test_marker_inside_full_pasted_deny_block_denies(self) -> None:
+        # The literal accident named in the bug: the operator pastes the
+        # WHOLE prior deny message back into chat (e.g. into a bug report,
+        # or asking "what does this mean?") -- this must NOT approve the
+        # next push, even though the marker is present verbatim.
+        pasted_deny = (
+            "what does this mean? Git-push publication gate: this Bash command runs `git push` "
+            "(an irreversible publication), but this turn shows neither the per-turn user approval "
+            "marker nor a publication-safety scan that reported a clean result. Publication requires "
+            "human review PLUS a leak-check of staged changes. Pick one before retrying: (a) If the "
+            "user has NOT explicitly approved this push: STOP, report readiness to push, and ask the "
+            "user to approve. The user approves by including `[approve-publication]` in their next "
+            "message; then retry. The marker is honored only from the user's own message and only for "
+            "that turn."
+        )
+        self.assertGreater(len(pasted_deny), 200)  # sanity: this is the long-message shape under test
+        self.assert_outcome(
+            [user(pasted_deny), assistant("explaining the gate")],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    def test_marker_inside_single_pasted_deny_clause_denies(self) -> None:
+        # A shorter, still-realistic partial quote (just clause (a) from the
+        # deny message, measured at 284-305 characters) -- still over the
+        # bound, still must not approve.
+        clause_a_quote = (
+            "what does clause (a) mean: (a) If the user has NOT explicitly approved this push: STOP, "
+            "report readiness to push, and ask the user to approve. The user approves by including "
+            "`[approve-publication]` in their next message; then retry. The marker is honored only "
+            "from the user's own message and only for that turn."
+        )
+        self.assertGreater(len(clause_a_quote), 200)
+        self.assert_outcome(
+            [user(clause_a_quote), assistant("explaining")],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    def test_short_genuine_approval_with_marker_still_allows(self) -> None:
+        # Regression guard: the length bound must not break a realistic,
+        # slightly more verbose genuine approval that stays under the bound.
+        genuine = "Approved -- security review passed, RELEASE_NOTES updated, please push now [approve-publication]"
+        self.assertLessEqual(len(genuine), 200)
+        self.assert_outcome(
+            [user(genuine), assistant("pushing")],
+            "git push origin main",
+            should_deny=False,
         )
 
     # --- allow: scan evidence (invocation AND clean non-empty result) + explicit user push instruction ---
