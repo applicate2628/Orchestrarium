@@ -4,14 +4,17 @@
 # Hook entry shape (PreToolUse on Edit/Write/NotebookEdit/apply_patch and Bash):
 #   bash <this-script>
 # stdin: PreToolUse JSON envelope from Claude Code or Codex.
-# stdout: nothing (AUDIT mode allows; promotion to deny is a separate step).
-# stderr: an audit warning if an unrequested `git worktree add` is run (a single add
-#   ending with the exact `# orchestrarium:requested-isolation-worktree` marker is exempt).
-# exit: propagates the Python helper's exit code -- 1 on a hit (a non-blocking
-#       "<hook name> hook error" transcript notice so the warning is actually
-#       visible; exit 0's stderr is debug-log-only per the hooks reference), 0
-#       otherwise. NEVER 2 (that would block); AUDIT mode never blocks the tool
-#       call regardless of exit code. Wrapper-side errors (missing python or
+# stdout: on a hit, one line of JSON -- {"hookSpecificOutput":{"hookEventName":
+#   "PreToolUse","additionalContext":"..."}} -- the model-visible advisory if an
+#   unrequested `git worktree add` is run (a single add ending with the exact
+#   `# orchestrarium:requested-isolation-worktree` marker is exempt); nothing
+#   otherwise (see hook_common.emit_advisory).
+# stderr: nothing. The prior stderr-plus-exit-1 delivery was measured to reach
+#   nobody on either provider line; see work-items/bugs/2026-07-26-mcp-reminder-
+#   uses-the-once-per-session-form-its-sibling-calls-broken.md.
+# exit: propagates the Python helper's exit code, which is now ALWAYS 0 --
+#       AUDIT mode never blocks and the advisory travels via the stdout JSON
+#       above, not a non-zero exit. Wrapper-side errors (missing python or
 #       helper) still fail open to exit 0.
 #
 # All the actual logic lives in the .py sibling. If no Python interpreter is

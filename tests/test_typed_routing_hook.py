@@ -3,8 +3,14 @@
 
 The hook (`check-typed-routing.py`, Claude-only) warns -- never blocks -- when the
 orchestrator dispatches the built-in catch-all `subagent_type: general-purpose`
-for work that looks like typed specialist work. AUDIT mode: exit 1 + one stderr
-line on a hit, exit 0 otherwise, always allows.
+for work that looks like typed specialist work. AUDIT mode: on a hit, ALWAYS
+exits 0 and emits one line of JSON to stdout --
+`{"hookSpecificOutput":{"hookEventName":<event>,"additionalContext":<warning>}}`
+-- the model-visible delivery channel (see `hook_common.emit_advisory`); silent
+and exit 0 otherwise. This replaced a stderr-plus-exit-1 form measured to reach
+nobody on either provider line (see
+work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-its-
+sibling-calls-broken.md).
 
 CLAUDE-ONLY BY PLATFORM SEMANTICS. The hook keys on the subagent-dispatch tool.
 Codex CLI has no analogous Agent-dispatch tool (src.codex/AGENTS.codex.md records
@@ -47,16 +53,23 @@ HOOK = REPO_ROOT / "src.claude" / "agents" / "hooks" / "check-typed-routing.py"
 WRAPPER = REPO_ROOT / "src.claude" / "agents" / "hooks" / "check-typed-routing.ps1"
 WARNING = "[typed-routing AUDIT]"
 
-# A complete, REAL PreToolUse envelope for an Agent dispatch: the captured
-# tool_name ("Agent") + a real general-purpose tool_input shape (keys verbatim
-# from live transcripts: subagent_type/description/run_in_background/prompt),
-# wrapped in the documented PreToolUse envelope fields. The prompt carries
-# specialist signals ("Fix", ".ps1", "installer", "hook", "audit"). Feeding the
-# whole envelope also proves the hook ignores wrapper fields it does not read.
+# A complete PreToolUse envelope for an Agent dispatch: the captured tool_name
+# ("Agent") + a real general-purpose tool_input shape (keys verbatim from live
+# transcripts: subagent_type/description/run_in_background/prompt), wrapped in
+# the documented PreToolUse envelope fields. The prompt carries specialist
+# signals ("Fix", ".ps1", "installer", "hook", "audit"). Feeding the whole
+# envelope also proves the hook ignores wrapper fields it does not read.
+#
+# The three wrapper fields below are deliberately SYNTHETIC. Their only job is
+# to be present and unread, so a captured session id and a concrete machine dev
+# root would be published for nothing -- which is exactly what the
+# publication-safety scan caught here on 2026-07-26. Keep them placeholder-shaped:
+# the test's meaning is "these fields exist and are ignored", not "these are the
+# real ones".
 REAL_AGENT_FIXTURE = {
-    "session_id": "7150ffa8-d20c-4168-a26c-30bfcc619696",
-    "transcript_path": "~/.claude/projects/d--dev-Orchestrator/7150ffa8.jsonl",
-    "cwd": "D:\\dev\\Orchestrator\\Orchestrarium",
+    "session_id": "00000000-0000-4000-8000-000000000000",
+    "transcript_path": "~/.claude/projects/<project-dir>/00000000.jsonl",
+    "cwd": "C:\\Users\\<you>\\dev\\<repo>",
     "hook_event_name": "PreToolUse",
     "permission_mode": "bypassPermissions",
     "tool_name": "Agent",
@@ -100,23 +113,26 @@ def dispatch(
     return envelope
 
 
+def _decode_context(stdout: str) -> tuple[str, str]:
+    """Parse the hookSpecificOutput envelope; returns (hookEventName, additionalContext)."""
+    payload = json.loads(stdout)
+    specific = payload["hookSpecificOutput"]
+    return specific["hookEventName"], specific["additionalContext"]
+
+
 class TypedRoutingHookTests(unittest.TestCase):
     def assert_warns(self, envelope: object, raw: str | None = None) -> None:
         p = run_hook(envelope, raw)
-        # AUDIT never BLOCKS (never exit 2); a hit exits 1 -- a non-blocking
-        # "<hook name> hook error" transcript notice -- so the warning is visible
-        # (exit 0's stderr is debug-log-only, per the hooks reference).
-        self.assertEqual(p.returncode, 1, p.stderr)
-        self.assertEqual(p.stdout, "")
-        self.assertIn(WARNING, p.stderr)
-        # Exactly ONE physical stderr line: Claude Code surfaces only the FIRST
-        # line of a non-blocking exit-1 hook, so the marker and the REMEDY must
-        # share that line or the routing pointer is hidden from the model.
-        self.assertEqual(p.stderr.strip().count("\n"), 0,
-                         f"expected exactly one stderr line; got {p.stderr!r}")
+        # AUDIT never BLOCKS (never exit 2) and never exits 1 either -- the
+        # advisory now travels via stdout JSON, not a non-zero exit.
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.stderr, "")
+        event_name, context = _decode_context(p.stdout)
+        self.assertEqual(event_name, "PreToolUse")
+        self.assertIn(WARNING, context)
         # The remedy (the typed-roster pointer + typed-role guidance) must be present.
-        self.assertIn(".claude/agents/", p.stderr)
-        self.assertIn("subagent_type", p.stderr)
+        self.assertIn(".claude/agents/", context)
+        self.assertIn("subagent_type", context)
 
     def assert_silent(self, envelope: object, raw: str | None = None) -> None:
         p = run_hook(envelope, raw)
@@ -238,14 +254,16 @@ class TypedRoutingWrapperSmokeTests(unittest.TestCase):
                     self.assertEqual(p.stdout.strip(), "")
                     self.assertEqual(p.stderr.strip(), "")
 
-    def test_wrapper_exits_one_and_warns_on_a_real_hit(self) -> None:
+    def test_wrapper_exits_zero_and_warns_via_stdout_on_a_real_hit(self) -> None:
         payload = json.dumps(REAL_AGENT_FIXTURE, ensure_ascii=False)
         for interp in self._interpreters():
             with self.subTest(interp=Path(interp).stem):
                 p = self._run_ps1(interp, payload)
-                self.assertEqual(p.returncode, 1,
-                                 f"expected exit 1 on a hit; stdout={p.stdout!r} stderr={p.stderr!r}")
-                self.assertIn(WARNING, p.stderr)
+                self.assertEqual(p.returncode, 0,
+                                 f"expected exit 0 on a hit; stdout={p.stdout!r} stderr={p.stderr!r}")
+                self.assertEqual(p.stderr, "")
+                _event_name, context = _decode_context(p.stdout)
+                self.assertIn(WARNING, context)
 
 
 if __name__ == "__main__":

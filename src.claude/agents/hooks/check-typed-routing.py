@@ -42,15 +42,18 @@ version renames the dispatch tool or moves the field, this hook simply never
 fires until the constants are re-pinned to a freshly captured shape. It can never
 manufacture a false block from a shape mismatch.
 
-AUDIT mode: warn on stderr and ALLOW the tool call -- but exit 1 (never 2, which
-would block) on a nudge, so the warning actually surfaces. Per Claude Code's
-hooks reference, exit 0's stderr is written only to the debug log and is
-invisible in the transcript; any other non-zero, non-2 exit is a non-blocking
-"<hook name> hook error" notice plus the first stderr line, and execution
-continues exactly as on exit 0. Warn-only needs NO override marker -- the model
-proceeds regardless -- which keeps the surface minimal. Promotion to a blocking
-`deny` (exit 2) stays a separate reviewed step after the false-positive rate is
-measured from transcripts, the pack's standing audit-promotion discipline.
+AUDIT mode: ALWAYS ALLOW the tool call, never block. On a nudge, deliver the
+warning to the MODEL via `hookSpecificOutput.additionalContext` on stdout, exit
+0 (see `hook_common.emit_advisory`). This is the corrected delivery channel: a
+PreToolUse hook's previous stderr-plus-exit-1 form was measured to reach NOBODY
+on Claude Code 2.1.220 -- transcript-only, model-invisible (this hook is
+Claude-only; see work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-
+session-form-its-sibling-calls-broken.md for the full falsification-controlled
+measurement, including the sibling-runtime Codex CLI 0.145.0 result). Warn-only
+needs NO override marker -- the model proceeds regardless -- which keeps the
+surface minimal. Promotion to a blocking `deny` (exit 2) stays a separate
+reviewed step after the false-positive rate is measured from transcripts, the
+pack's standing audit-promotion discipline.
 
 Fail-open everywhere on internal error (return 0).
 """
@@ -63,13 +66,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 try:
-    from hook_common import parse_envelope, read_stdin_utf8
+    from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
 except Exception:  # pragma: no cover - fail open when the shared helper is absent
     def read_stdin_utf8() -> str:  # type: ignore[misc]
         return ""
 
     def parse_envelope(_: str) -> dict:  # type: ignore[misc]
         return {}
+
+    def emit_advisory(_envelope: object, _message: str, **_kwargs: object) -> None:  # type: ignore[misc]
+        pass
 
 
 # The subagent-dispatch tool as it appears in the PreToolUse envelope's
@@ -103,14 +109,6 @@ SPECIALIST_SIGNAL_RE = re.compile(
     r"\bdesign(?:s|ed|ing|er)?\b|\barchitect\w*|\bmigrat\w*",
     re.IGNORECASE,
 )
-
-
-def _emit(message: str) -> None:
-    try:
-        sys.stderr.write(message)
-        sys.stderr.flush()
-    except Exception:
-        pass
 
 
 def main() -> int:
@@ -151,22 +149,19 @@ def main() -> int:
         if not SPECIALIST_SIGNAL_RE.search(scan):
             return 0
 
-        # ONE physical stderr line: a non-blocking exit-1 hook surfaces only its
-        # FIRST stderr line in the transcript, so the REMEDY (the typed-roster
-        # pointer) must ride on the same line as the marker or the model never
-        # sees it. No internal newline -- the trailing "\n" just terminates it.
-        _emit(
+        emit_advisory(
+            envelope,
             "[typed-routing AUDIT] `general-purpose` was dispatched for work that "
             "looks like typed specialist work (an implementation/review/design/"
             "security/performance/toolchain signal is in the prompt) -- prefer the "
             "matching typed `subagent_type` from the roster `.claude/agents/*.md` "
             "(e.g. toolchain-engineer/platform-engineer for `.ps1`/install work, an "
             "engineer role for code, a reviewer role for review), or proceed if "
-            "`general-purpose` is genuinely the right open-ended fit. AUDIT -- allowing.\n"
+            "`general-purpose` is genuinely the right open-ended fit. AUDIT -- allowing.",
         )
-        # Exit 1 (never 2): a non-blocking "<hook name> hook error" transcript
-        # notice with the first stderr line, so the nudge is actually visible.
-        return 1
+        # Exit 0: the nudge reaches the model via hookSpecificOutput.
+        # additionalContext (see hook_common.emit_advisory) -- never exit 2 (block).
+        return 0
     except Exception:
         return 0
     return 0

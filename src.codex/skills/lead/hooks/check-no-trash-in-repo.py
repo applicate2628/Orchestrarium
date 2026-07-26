@@ -28,16 +28,16 @@ SCOPE (per the parallel-isolation protocol):
     "arbitrary in-repo trash" (no reliable non-name signal — that stays governance,
     i.e. "all scratch goes to .scratch/", not a hook).
 
-AUDIT mode: on a hit, warn to stderr and ALLOW the command -- but exit 1 (never
-2, which would block) so the warning actually surfaces. Per Claude Code's hooks
-reference, exit 0's stderr is written only to the debug log and is invisible in
-the transcript; any other non-zero, non-2 exit code is a non-blocking error that
-shows a "<hook name> hook error" notice plus the first stderr line in the
-transcript, and execution continues exactly as it does on exit 0. Exit 1 on a
-hit (0 otherwise) is what makes the AUDIT warning visible enough to actually
-measure the false-positive rate this posture exists to measure. Never blocks —
-a worktree can be legitimately requested, and the hook cannot read intent.
-Fails open on any internal error (return 0).
+AUDIT mode: on a hit, ALWAYS ALLOW the command and never block. Deliver the
+warning to the MODEL via `hookSpecificOutput.additionalContext` on stdout, exit
+0 (see `hook_common.emit_advisory`). This is the corrected delivery channel: a
+PreToolUse hook's previous stderr-plus-exit-1 form was measured to reach NOBODY
+on either Claude Code 2.1.220 (transcript-only, model-invisible) or Codex CLI
+0.145.0 (discarded entirely — the non-2-exit branch never copies stderr). See
+work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-its-
+sibling-calls-broken.md for the full falsification-controlled measurement.
+Never blocks — a worktree can be legitimately requested, and the hook cannot
+read intent. Fails open on any internal error (return 0).
 
 NOTE: the filename/install-marker `check-no-trash-in-repo` is retained for
 install-entry continuity (avoids a settings.json/hooks.json migration in this
@@ -54,23 +54,7 @@ import sys
 # so add the sibling scripts/ dir to the import path before importing it.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
-from hook_common import parse_envelope, read_stdin_utf8
-
-
-def _emit(msg: str) -> None:
-    """Write a warning to stderr as UTF-8 bytes, regardless of console codepage.
-
-    On Windows the default stderr encoding is the console codepage (e.g. cp1252);
-    Claude Code and the test harness both read hook stderr as UTF-8. Writing
-    UTF-8 bytes directly keeps the warning readable everywhere. Fail-open."""
-    try:
-        sys.stderr.buffer.write(msg.encode("utf-8"))
-        sys.stderr.buffer.flush()
-    except Exception:
-        try:
-            sys.stderr.write(msg)
-        except Exception:
-            pass
+from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
 
 
 # `git` global options that consume a SEPARATE following token as their value;
@@ -209,7 +193,8 @@ def main() -> int:
         # not-final marker, or a batch of adds) still warns.
         requested = add_count == 1 and command.rstrip().endswith(REQUESTED_ISOLATION_MARKER)
         if add_count and not requested:
-            _emit(
+            emit_advisory(
+                envelope,
                 "[stray-artifact AUDIT] this command creates a git worktree "
                 "(`git worktree add`). A worktree is an unrequested side effect unless "
                 "you were explicitly asked for one — confirm it is intended, and do not "
@@ -217,12 +202,11 @@ def main() -> int:
                 "A protocol-requested isolation worktree must be a SINGLE `git worktree "
                 "add` whose command ends with the exact marker "
                 "`# orchestrarium:requested-isolation-worktree`, added only after naming "
-                "the lane and isolation reason. AUDIT mode -- allowing.\n"
+                "the lane and isolation reason. AUDIT mode -- allowing.",
             )
-            # Exit 1 (never 2): a non-blocking "<hook name> hook error" transcript
-            # notice with the first stderr line, so the warning is actually
-            # visible -- exit 0 here is invisible outside --debug.
-            return 1
+            # Exit 0: the advisory reaches the model via hookSpecificOutput.
+            # additionalContext (see hook_common.emit_advisory) -- never exit 2 (block).
+            return 0
         return 0
 
     return 0

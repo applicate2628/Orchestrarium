@@ -6,15 +6,17 @@
     subagent-dispatch tool captured Phase-0 as tool_name "Agent"):
       powershell -NoProfile -ExecutionPolicy Bypass -File <this-script>
     stdin: PreToolUse JSON envelope from Claude Code.
-    stdout: nothing (AUDIT mode allows).
-    stderr: an audit nudge when a `general-purpose` subagent is dispatched for
-      work that looks like typed specialist work.
-    exit: propagates the Python helper's exit code -- 1 on a nudge (a non-blocking
-          "<hook name> hook error" transcript notice so the nudge is actually
-          visible; exit 0's stderr is debug-log-only per the hooks reference), 0
-          otherwise. NEVER 2 (that would block); AUDIT mode never blocks the
-          tool call regardless of exit code. Wrapper-side errors (missing
-          python or helper) still fail open to exit 0.
+    stdout: on a nudge, one line of JSON -- {"hookSpecificOutput":{"hookEventName":
+      "PreToolUse","additionalContext":"..."}} -- the model-visible nudge when a
+      `general-purpose` subagent is dispatched for work that looks like typed
+      specialist work (see hook_common.emit_advisory); nothing otherwise.
+    stderr: nothing. The prior stderr-plus-exit-1 delivery was measured to reach
+      nobody on Claude Code; see work-items/bugs/2026-07-26-mcp-reminder-uses-
+      the-once-per-session-form-its-sibling-calls-broken.md.
+    exit: propagates the Python helper's exit code, which is now ALWAYS 0 --
+          AUDIT mode never blocks and the nudge travels via the stdout JSON
+          above, not a non-zero exit. Wrapper-side errors (missing python or
+          helper) still fail open to exit 0.
 
     The Python helper does all the actual logic -- this wrapper only pipes stdin
     through and propagates output. If python is missing or the helper fails for

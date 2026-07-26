@@ -11,7 +11,11 @@ is load-bearing and was corrected by first-person evidence mid-build (see the
   * `check-mcp-momentum` (PreToolUse Grep|Bash, AUDIT) fires at the mid-turn TOOL CHOICE,
     the moment MCP momentum actually lapses (~100 successful shell calls, next tool picked
     from momentum not from a rule sitting in context). It nudges ONLY on code-navigation
-    shapes, ONLY when a code-intelligence MCP is actually configured, and never blocks.
+    shapes, ONLY when a code-intelligence MCP is actually configured, and never blocks --
+    always exits 0, delivering a nudge via `hookSpecificOutput.additionalContext` on
+    stdout (see `hook_common.emit_advisory`) rather than the stderr-plus-exit-1 form
+    measured to reach nobody (work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-
+    per-session-form-its-sibling-calls-broken.md).
 
 These were untested when shipped — the exact gap that let the `bugfix-discipline`
 isCompactSummary false positive live undetected. The bar here is the one that FP taught:
@@ -47,9 +51,10 @@ def run_hook(script: Path, envelope: dict) -> subprocess.CompletedProcess:
 
 
 class TestMcpMomentumDiscrimination(unittest.TestCase):
-    """AUDIT hook: it must ALWAYS exit 0, and it must warn on exactly the navigation
-    shapes and stay silent on everything else. A nudge that fires on every read is noise,
-    and noise trains the reader to ignore the whole class."""
+    """AUDIT hook: it must ALWAYS exit 0 and never write to stderr, and it must warn
+    (via stdout JSON) on exactly the navigation shapes and stay silent on everything
+    else. A nudge that fires on every read is noise, and noise trains the reader to
+    ignore the whole class."""
 
     def setUp(self) -> None:
         # The hook only nudges when a code-intelligence MCP is actually configured for
@@ -73,13 +78,16 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
 
     def assert_nudges(self, envelope: dict, should_nudge: bool) -> None:
         result = self._run(envelope)
-        # AUDIT hook never BLOCKS (never exit 2), but a nudge exits 1 -- a
-        # non-blocking "<hook name> hook error" transcript notice -- so the
-        # nudge is actually visible (exit 0's stderr is debug-log-only, see
-        # the hooks reference); silence still exits 0.
-        self.assertEqual(result.returncode, 1 if should_nudge else 0, result.stderr)
-        fired = "mcp-momentum" in result.stderr
-        self.assertEqual(fired, should_nudge, result.stderr or "(no stderr)")
+        # AUDIT hook never BLOCKS (never exit 2) and never uses a non-zero exit
+        # for a nudge either -- the advisory travels via stdout JSON, always
+        # exit 0 (see hook_common.emit_advisory).
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        fired = "mcp-momentum" in result.stdout
+        self.assertEqual(fired, should_nudge, result.stdout or "(no stdout)")
+        if should_nudge:
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["hookSpecificOutput"]["hookEventName"], "PreToolUse")
 
     def test_grep_for_a_definition_nudges(self) -> None:
         self.assert_nudges({"tool_name": "Grep", "tool_input": {"pattern": "def parse_config"}}, True)
@@ -123,7 +131,8 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
             capture_output=True, text=True, encoding="utf-8", env=env,
         )
         self.assertEqual(result.returncode, 0)
-        self.assertNotIn("mcp-momentum", result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertNotIn("mcp-momentum", result.stdout)
 
     def test_malformed_envelope_fails_open(self) -> None:
         result = subprocess.run(
@@ -131,6 +140,8 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
             input="not json at all", capture_output=True, text=True, encoding="utf-8", env=self._env,
         )
         self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(result.stderr, "")
 
     # --- Codex-awareness (2nd-round fix): the hook must not be silently inert
     # on the Codex pack it also ships into. Codex stores MCP config in
@@ -153,9 +164,10 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
             input=json.dumps({"tool_name": "Bash", "tool_input": {"command": "grep -rn 'class Foo' src/ --include=*.py"}}),
             capture_output=True, text=True, encoding="utf-8", env=env,
         )
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertIn("mcp-momentum", result.stderr)
-        self.assertIn("codegraph", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        self.assertIn("mcp-momentum", result.stdout)
+        self.assertIn("codegraph", result.stdout)
 
     def test_codex_config_toml_without_code_intel_server_stays_silent(self) -> None:
         home = tempfile.mkdtemp()
@@ -172,7 +184,8 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
             capture_output=True, text=True, encoding="utf-8", env=env,
         )
         self.assertEqual(result.returncode, 0)
-        self.assertNotIn("mcp-momentum", result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertNotIn("mcp-momentum", result.stdout)
 
     def test_malformed_codex_config_toml_fails_open(self) -> None:
         home = tempfile.mkdtemp()
@@ -187,6 +200,7 @@ class TestMcpMomentumDiscrimination(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stderr, "")
+        self.assertEqual(result.stdout, "")
 
 
 class TestTurnAnchorEmitsValidContext(unittest.TestCase):

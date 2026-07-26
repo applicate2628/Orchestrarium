@@ -13,18 +13,21 @@ them legitimately as examples:
   - `%USERPROFILE%`, `${CLAUDE_PROJECT_DIR}`, `$HOME`
   - common example usernames: `you`, `user`, `username`, `name`, `test`, `example`
 
-AUDIT mode (current posture): on a hit, print a warning to stderr and ALLOW the
-tool call -- but exit 1 (never 2, which would block) so the warning actually
-surfaces. Per Claude Code's hooks reference, exit 0's stderr is written only to
-the debug log and is invisible in the transcript; any other non-zero, non-2
-exit code is a non-blocking error that shows a "<hook name> hook error" notice
-plus the first stderr line in the transcript, and execution continues exactly
-as it does on exit 0. Exit 1 on a hit (0 on a clean write) is what makes the
-AUDIT warning visible enough to actually measure the false-positive rate this
-posture exists to measure; exit 0 on every outcome made every hit here
-invisible to everyone. Promotion to a blocking `deny` (exit 2) is a separate,
-reviewed step once the allowlist is proven tight (per the reviewed Phase-0.2
-plan: dry-run/audit first, measure FP, then decide block-vs-warn).
+AUDIT mode (current posture): on a hit, ALWAYS ALLOW the tool call and never
+block. Deliver the warning to the MODEL via `hookSpecificOutput.additionalContext`
+on stdout, exit 0 (see `hook_common.emit_advisory`). This is the corrected
+delivery channel: a PreToolUse hook's previous stderr-plus-exit-1 form was
+measured to reach NOBODY on either Claude Code 2.1.220 (transcript-only,
+model-invisible) or Codex CLI 0.145.0 (discarded entirely -- the non-2-exit
+branch never copies stderr). See
+work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-its-
+sibling-calls-broken.md for the full falsification-controlled measurement.
+Promotion to a blocking `deny` (exit 2) is a separate, reviewed step once the
+allowlist is proven tight (per the reviewed Phase-0.2 plan: dry-run/audit
+first, measure FP, then decide block-vs-warn). The JSON envelope also retires
+the old stderr-UTF-8-bytes trick this hook used for Cyrillic/non-ASCII paths:
+`json.dumps(..., ensure_ascii=True)` escapes every non-ASCII character, so the
+emitted line is pure ASCII regardless of console codepage.
 
 Design note: this hook fires on the EDIT's own `tool_input` (the file path and
 the content being written), NOT on session/transcript context. That is a
@@ -45,27 +48,7 @@ import sys
 # so add the sibling scripts/ dir to the import path before importing it.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
-from hook_common import parse_envelope, read_stdin_utf8
-
-
-def _emit(msg: str) -> None:
-    """Write a warning to stderr as UTF-8 bytes, regardless of console codepage.
-
-    On Windows the default stderr encoding is the console codepage (e.g. cp1252),
-    so a non-ASCII character (or non-ASCII data such as a Cyrillic path) is
-    written as bytes a UTF-8 consumer cannot decode — Claude Code and the test
-    harness both read hook stderr as UTF-8. Writing UTF-8 bytes directly keeps
-    the warning readable everywhere. Mirrors hook_common.read_stdin_utf8 on the
-    write side. Fail-open on any error.
-    """
-    try:
-        sys.stderr.buffer.write(msg.encode("utf-8"))
-        sys.stderr.buffer.flush()
-    except Exception:
-        try:
-            sys.stderr.write(msg)
-        except Exception:
-            pass
+from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
 
 
 # A path segment that is a placeholder, not a concrete machine name.
@@ -200,17 +183,17 @@ def main() -> int:
     hits = find_machine_paths(text)
     if hits:
         shown = ", ".join(hits[:5])
-        _emit(
+        emit_advisory(
+            envelope,
             "[machine-local-path AUDIT] candidate machine-local path(s) in write to "
-            f"{target or '<unknown target>'}: {shown}\n"
-            "  (machine-local-path-provenance rule: use a repo-neutral placeholder "
+            f"{target or '<unknown target>'}: {shown} "
+            "(machine-local-path-provenance rule: use a repo-neutral placeholder "
             "such as <repo>, %USERPROFILE%, or ${CLAUDE_PROJECT_DIR}, or keep the "
-            "exact path only under .scratch/. AUDIT mode -- allowing this write.)\n"
+            "exact path only under .scratch/. AUDIT mode -- allowing this write.)",
         )
-        # Exit 1 (never 2): a non-blocking "<hook name> hook error" transcript
-        # notice with the first stderr line, so the warning is actually visible
-        # -- exit 0 here is invisible outside --debug (see module docstring).
-        return 1
+        # Exit 0: the advisory reaches the model via hookSpecificOutput.
+        # additionalContext (see hook_common.emit_advisory) -- never exit 2 (block).
+        return 0
     # AUDIT mode: always allow the write. (Promotion to a blocking PreToolUse
     # deny -- exit 2 -- is a separate reviewed step once the false-positive
     # rate is measured.)

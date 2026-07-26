@@ -30,17 +30,19 @@ a "find all literals" validator):
   * only when a code-intelligence MCP is actually configured for this user — an
     unconditional nudge would be a lie on a machine without one.
 
-AUDIT mode: warn on stderr and ALLOW the tool call -- but exit 1 (never 2, which
-would block) on a nudge, so the warning actually surfaces. Per Claude Code's
-hooks reference, exit 0's stderr is written only to the debug log and is
-invisible in the transcript; any other non-zero, non-2 exit code is a
-non-blocking error that shows a "<hook name> hook error" notice plus the first
-stderr line in the transcript, and execution continues exactly as it does on
-exit 0. The pack's promotion discipline is dry-run first, measure the
-false-positive rate, then decide block-vs-warn -- exit 0 on every outcome would
-make that measurement impossible, the same defect the sibling machine-local-path
-/ no-trash-in-repo / stale-relation-residue audits had. Three blocking-hook
-false positives were paid for by the operator in a single session; a nudge that
+AUDIT mode: ALWAYS allow the tool call, never block. On a nudge, deliver the
+warning to the MODEL via `hookSpecificOutput.additionalContext` on stdout, exit
+0 (see `hook_common.emit_advisory`). This is the corrected delivery channel: a
+PreToolUse hook's previous stderr-plus-exit-1 form was measured to reach NOBODY
+on either Claude Code 2.1.220 (transcript-only, model-invisible) or Codex CLI
+0.145.0 (discarded entirely -- the non-2-exit branch never copies stderr). See
+work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-its-
+sibling-calls-broken.md for the full falsification-controlled measurement. The
+pack's promotion discipline is dry-run first, measure the false-positive rate,
+then decide block-vs-warn -- a silent audit would make that measurement
+impossible, the same defect the sibling machine-local-path / no-trash-in-repo /
+stale-relation-residue audits had before this fix. Three blocking-hook false
+positives were paid for by the operator in a single session; a nudge that
 cannot block (never exit 2) cannot repeat that.
 
 Fail-open everywhere on internal error (return 0).
@@ -56,13 +58,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 try:
-    from hook_common import parse_envelope, read_stdin_utf8
+    from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
 except Exception:  # pragma: no cover - fail open when the shared helper is absent
     def read_stdin_utf8() -> str:  # type: ignore[misc]
         return ""
 
     def parse_envelope(_: str) -> dict:  # type: ignore[misc]
         return {}
+
+    def emit_advisory(_envelope: object, _message: str, **_kwargs: object) -> None:  # type: ignore[misc]
+        pass
 
 
 # A code-intelligence server is one that answers "where is this symbol / who calls
@@ -159,14 +164,6 @@ def _looks_like_code_navigation(tool_name: str, tool_input: dict) -> bool:
     return False
 
 
-def _emit(message: str) -> None:
-    try:
-        sys.stderr.write(message)
-        sys.stderr.flush()
-    except Exception:
-        pass
-
-
 def main() -> int:
     try:
         envelope = parse_envelope(read_stdin_utf8())
@@ -195,19 +192,19 @@ def main() -> int:
         shown = ", ".join(servers[:3])
         if len(servers) > 3:
             shown += f" (+{len(servers) - 3} more)"
-        _emit(
+        emit_advisory(
+            envelope,
             "[mcp-momentum AUDIT] this looks like a code-navigation search, and a "
-            f"code-intelligence MCP is configured: {shown}.\n"
-            "  A text scan finds strings; those answer symbols, callers, and "
+            f"code-intelligence MCP is configured: {shown}. "
+            "A text scan finds strings; those answer symbols, callers, and "
             "definitions. Load the tool schema (ToolSearch) and ask it, or proceed "
-            "if the text scan is genuinely the right instrument here.\n"
-            "  (Fired at the tool choice on purpose: the once-per-session reminder "
-            "loses to the momentum of your last fifty calls. AUDIT mode -- allowing.)\n"
+            "if the text scan is genuinely the right instrument here. "
+            "(Fired at the tool choice on purpose: the once-per-session reminder "
+            "loses to the momentum of your last fifty calls. AUDIT mode -- allowing.)",
         )
-        # Exit 1 (never 2): a non-blocking "<hook name> hook error" transcript
-        # notice with the first stderr line, so the nudge is actually visible
-        # -- exit 0 here is invisible outside --debug.
-        return 1
+        # Exit 0: the advisory reaches the model via hookSpecificOutput.
+        # additionalContext (see hook_common.emit_advisory) -- never exit 2 (block).
+        return 0
     except Exception:
         return 0
     return 0

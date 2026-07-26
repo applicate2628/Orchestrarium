@@ -7,14 +7,14 @@ prose. This is a process backstop only: it never reads repository documents or
 infers canonical status from deprecation words. The shared governance rule
 remains binding. Every internal error fails open.
 
-AUDIT mode: on a hit, warn to stderr and ALLOW the action -- but exit 1 (never
-2, which would block) so the warning actually surfaces. Per Claude Code's
-hooks reference, exit 0's stderr is written only to the debug log and is
-invisible in the transcript; any other non-zero, non-2 exit code is a
-non-blocking error that shows a "<hook name> hook error" notice plus the first
-stderr line in the transcript, and execution continues exactly as it does on
-exit 0. Exit 1 on a hit (0 otherwise) is what makes the warning visible enough
-to actually measure the false-positive rate this posture exists to measure
+AUDIT mode: on a hit, ALWAYS ALLOW the action and never block. Deliver the
+warning to the MODEL via `hookSpecificOutput.additionalContext` on stdout, exit
+0 (see `hook_common.emit_advisory`). This is the corrected delivery channel: a
+PreToolUse hook's previous stderr-plus-exit-1 form was measured to reach NOBODY
+on either Claude Code 2.1.220 (transcript-only, model-invisible) or Codex CLI
+0.145.0 (discarded entirely -- the non-2-exit branch never copies stderr). See
+work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-its-
+sibling-calls-broken.md for the full falsification-controlled measurement
 (mirrors machine-local-path / no-trash-in-repo / stale-relation-residue).
 """
 from __future__ import annotations
@@ -28,6 +28,7 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
 from hook_common import (  # noqa: E402
+    emit_advisory,
     extract_assistant_prose,
     last_genuine_user_message,
     parse_envelope,
@@ -54,17 +55,6 @@ _DISCOVERY_COMMANDS = {
     "select-string", "tail", "test-path", "type", "where", "where.exe", "which",
 }
 _BUILD_TEST_RUN_COMMANDS = {"ctest", "make", "ninja", "msbuild", "pytest", "qmltestrunner"}
-
-
-def _emit(message: str) -> None:
-    try:
-        sys.stderr.buffer.write(message.encode("utf-8"))
-        sys.stderr.buffer.flush()
-    except Exception:
-        try:
-            sys.stderr.write(message)
-        except Exception:
-            pass
 
 
 def _nearest_git_root(start: Path) -> Path | None:
@@ -323,32 +313,35 @@ def main() -> int:
             and record["status"].lower() != "conflict"
             and _scope_contains(record["scope"], action_targets, root)
         )
-        hit = False
+        messages: list[str] = []
         if not valid:
-            _emit(
+            messages.append(
                 "[repository-orientation AUDIT] risky repository action lacks exactly one valid, "
                 "in-scope `REPOSITORY ORIENTATION:` record with scope/status/workflow/protected/"
                 "evidence and a path:line citation, or records status=conflict. This is a warn-only "
-                "backstop; the shared repository-orientation rule remains binding. AUDIT mode -- allowing.\n"
+                "backstop; the shared repository-orientation rule remains binding. AUDIT mode -- allowing."
             )
-            hit = True
 
         required_status = _stale_requirement(action_targets, root)
         historical_scope = bool(_HISTORICAL_RE.search(prose))
         if required_status and (
             record is None or record.get("status", "").lower() != required_status or not historical_scope
         ):
-            _emit(
+            messages.append(
                 f"[repository-orientation STALE-TARGET AUDIT] action target contains the path segment "
                 f"requiring status={required_status!s} but the assistant record lacks that matching "
                 "non-live status plus an explicit `USER-APPROVED HISTORICAL SCOPE:` statement. "
-                "No repository prose was scanned and no canonical status was inferred. AUDIT mode -- allowing.\n"
+                "No repository prose was scanned and no canonical status was inferred. AUDIT mode -- allowing."
             )
-            hit = True
-        # Exit 1 (never 2) on a hit: a non-blocking "<hook name> hook error"
-        # transcript notice with the first stderr line, so the warning is
-        # actually visible -- exit 0 here is invisible outside --debug.
-        return 1 if hit else 0
+
+        # Both findings share ONE hookSpecificOutput emission -- the harness reads
+        # a single JSON object per hook call, so two independent print()s would
+        # not compose the way two separate stderr lines used to.
+        if messages:
+            emit_advisory(envelope, " ".join(messages))
+        # Exit 0: the advisory reaches the model via hookSpecificOutput.
+        # additionalContext (see hook_common.emit_advisory) -- never exit 2 (block).
+        return 0
     except Exception:
         return 0
 

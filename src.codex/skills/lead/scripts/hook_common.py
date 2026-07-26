@@ -452,3 +452,231 @@ def extract_model_tool_calls(entry: object) -> str:
                     except Exception:
                         parts.append(str(item["input"]))
     return strip_injected_spans(" ".join(parts)).strip()
+
+
+def extract_model_tool_calls_with_ids(entry: object) -> list[tuple[str, str]]:
+    """Like `extract_model_tool_calls`, but returns a list of `(call_id,
+    call_text)` pairs — one per distinct model tool CALL in this entry — so a
+    caller can correlate a SPECIFIC invocation with its SPECIFIC result (see
+    `extract_tool_outputs_with_ids`), instead of merely knowing that some call
+    and some result both occurred somewhere in the turn.
+
+    `call_id` is the Claude `tool_use` block's own `id`, or the Codex
+    `function_call` payload's `call_id` — verified against real transcripts on
+    this installation (a Claude tool_use block carries `id`; its answering
+    tool_result carries the SAME value under `tool_use_id`. A Codex
+    `function_call` payload carries `call_id`; its answering
+    `function_call_output` carries the SAME value under `call_id`). A tool
+    call with no id is skipped — it cannot be correlated to anything, and
+    skipping (not fabricating an id) is the fail-closed direction: an
+    uncorrelatable call can never open a caller's correlated-evidence gate.
+
+    A SIBLING to `extract_model_tool_calls` — not a replacement. That function
+    stays byte-unchanged for its own caller (check-bugfix-discipline.py, an
+    invocation-only signal that never needed correlation). This function
+    exists because joining two independent per-entry haystacks (one for all
+    calls, one for all outputs, `\\n`-joined across the whole turn) lets an
+    UNRELATED tool result satisfy a result check that no scan ever produced —
+    e.g. a `Read` of a file that happens to quote the scanner's own clean-
+    result text (this very module's test fixtures do) would satisfy an
+    uncorrelated check with zero scan output at all. Demonstrated live against
+    the shipped hook (adversarial gate finding, 2026-07-26): an empty-index
+    scan plus an unrelated `Read` of a file containing the clean-result string
+    ALLOWed under haystack-joining and must DENY under id correlation."""
+    pairs: list[tuple[str, str]] = []
+    if not isinstance(entry, dict):
+        return pairs
+    payload = entry.get("payload")
+    if isinstance(payload, dict) and payload.get("type") == "function_call":
+        call_id = payload.get("call_id")
+        if isinstance(call_id, str) and call_id:
+            text = strip_injected_spans(f"{payload.get('name', '')} {payload.get('arguments', '')}").strip()
+            pairs.append((call_id, text))
+        return pairs
+    if not is_assistant_message(entry):
+        return pairs
+    content = entry.get("content")
+    if content is None:
+        msg = entry.get("message")
+        if isinstance(msg, dict):
+            content = msg.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict) or item.get("type") != "tool_use":
+                continue
+            call_id = item.get("id")
+            if not isinstance(call_id, str) or not call_id:
+                continue
+            parts: list[str] = []
+            if "name" in item:
+                parts.append(str(item["name"]))
+            if "input" in item:
+                try:
+                    parts.append(json.dumps(item["input"]))
+                except Exception:
+                    parts.append(str(item["input"]))
+            pairs.append((call_id, strip_injected_spans(" ".join(parts)).strip()))
+    return pairs
+
+
+def extract_tool_outputs_with_ids(entry: object) -> list[tuple[str, str]]:
+    """The correlation-half counterpart to `extract_model_tool_calls_with_ids`:
+    returns a list of `(call_id, output_text)` pairs for this entry's tool
+    OUTPUT — Claude `tool_result` content keyed by its own `tool_use_id`,
+    Codex `payload.function_call_output` (and its Codex top-level fallback
+    shape) output keyed by its own `call_id`. NOT tool CALLS, NOT assistant
+    prose, NOT user text. An output with no id is skipped — uncorrelatable,
+    so it can never satisfy a caller's correlated check (fail-closed)."""
+    pairs: list[tuple[str, str]] = []
+    if not isinstance(entry, dict):
+        return pairs
+    payload = entry.get("payload")
+    if isinstance(payload, dict) and payload.get("type") == "function_call_output":
+        call_id = payload.get("call_id")
+        if isinstance(call_id, str) and call_id:
+            pairs.append((call_id, strip_injected_spans(str(payload.get("output", ""))).strip()))
+        return pairs
+    # Codex top-level fallback shape (mirrors extract_text's own fallback).
+    if entry.get("type") == "function_call_output":
+        call_id = entry.get("call_id")
+        if isinstance(call_id, str) and call_id:
+            pairs.append((call_id, strip_injected_spans(str(entry.get("output", ""))).strip()))
+        return pairs
+
+    content = entry.get("content")
+    if content is None:
+        msg = entry.get("message")
+        if isinstance(msg, dict):
+            content = msg.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict) or item.get("type") != "tool_result":
+                continue
+            call_id = item.get("tool_use_id")
+            if not isinstance(call_id, str) or not call_id:
+                continue
+            inner = item.get("content")
+            if isinstance(inner, str):
+                text = inner
+            elif inner is not None:
+                text = extract_text({"content": inner})
+            else:
+                text = ""
+            pairs.append((call_id, strip_injected_spans(text).strip()))
+    return pairs
+
+
+def extract_model_shell_commands_with_ids(entry: object) -> list[tuple[str, str]]:
+    """Like `extract_model_tool_calls_with_ids`, but returns the RAW SHELL
+    COMMAND STRING for each shell-executing tool call, keyed by call id --
+    NOT a flattened `"<tool name> <full JSON input>"` blob. A consumer that
+    needs to parse the command the same way a live PreToolUse envelope's
+    `tool_input["command"]` would be parsed (shlex tokenization, command-
+    position / execution-vs-mention detection) cannot work from the
+    flattened blob at all -- `Bash {"command": "bash x.sh", "description":
+    "..."}` is not a parseable shell command, the flattening was only ever
+    meant for keyword search, not structural analysis.
+
+    Claude: any `tool_use` whose `input` is a dict with a STRING `command`
+    field (the Bash tool's own shape; not filtered by tool `name`, since
+    `command` is the load-bearing field regardless of what the tool happens
+    to be called).
+    Codex: a `function_call` payload whose `arguments` is a JSON string that
+    parses to an object with a STRING `command` field (verified against 65
+    real `function_call` entries in this machine's own `~/.codex/
+    archived_sessions/*.jsonl`, 2026-07-26 -- all 65 used a plain string,
+    none an argv-array form; real payloads carry `name: "shell_command"`,
+    NOT the `"shell"` name this module's own test fixtures had assumed, but
+    this extractor does not filter on `name` at all, so that naming
+    difference cannot cause a miss). A missing, non-string, or unparseable/
+    array-form `command` is skipped.
+
+    A call with no id, same as the sibling extractors, is skipped entirely
+    -- fail-closed: an uncorrelatable call can never be credited as a scan
+    execution by a caller keying off this function's output."""
+    pairs: list[tuple[str, str]] = []
+    if not isinstance(entry, dict):
+        return pairs
+    payload = entry.get("payload")
+    if isinstance(payload, dict) and payload.get("type") == "function_call":
+        call_id = payload.get("call_id")
+        if isinstance(call_id, str) and call_id:
+            raw_args = payload.get("arguments")
+            command = None
+            if isinstance(raw_args, str):
+                try:
+                    parsed = json.loads(raw_args)
+                except Exception:
+                    parsed = None
+                if isinstance(parsed, dict) and isinstance(parsed.get("command"), str):
+                    command = parsed["command"]
+            if command:
+                pairs.append((call_id, strip_injected_spans(command)))
+        return pairs
+    if not is_assistant_message(entry):
+        return pairs
+    content = entry.get("content")
+    if content is None:
+        msg = entry.get("message")
+        if isinstance(msg, dict):
+            content = msg.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict) or item.get("type") != "tool_use":
+                continue
+            call_id = item.get("id")
+            if not isinstance(call_id, str) or not call_id:
+                continue
+            input_obj = item.get("input")
+            if isinstance(input_obj, dict) and isinstance(input_obj.get("command"), str):
+                pairs.append((call_id, strip_injected_spans(input_obj["command"])))
+    return pairs
+
+
+def emit_advisory(envelope: object, message: str, *, default_event: str = "PreToolUse") -> None:
+    """Deliver a warn-only advisory to the MODEL, never the operator terminal.
+
+    Writes ``{"hookSpecificOutput": {"hookEventName": <event>, "additionalContext":
+    message}}`` as one line of JSON to stdout and returns (the caller still exits
+    0 itself -- this function does not exit the process). This REPLACES the
+    stderr-plus-exit-1 delivery every warn-only PreToolUse audit in this pack used
+    before it, which was measured to reach NOBODY: on Claude Code 2.1.220 a
+    non-blocking exit-1's stderr lands in the transcript record but is
+    model-invisible, and on Codex CLI 0.145.0 the non-2-exit branch never even
+    copies stderr (the operator console shows a bare "PreToolUse Failed" label).
+    `hookSpecificOutput.additionalContext` on `PreToolUse`, by contrast, was
+    measured to reach the model on BOTH runtimes when emitted on stdout with exit
+    0. See work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-
+    its-sibling-calls-broken.md for the full falsification-controlled measurement.
+
+    THE EVENT NAME TRAP (why `default_event` exists but is a FALLBACK, never a
+    hardcoded override): Claude Code silently discards the ENTIRE
+    `hookSpecificOutput` object when `hookEventName` does not match the event that
+    ACTUALLY fired -- measured, with the runtime emitting "Hook returned incorrect
+    event name: expected 'PreToolUse' but got 'PostToolUse'". `envelope`'s own
+    `hook_event_name` field is therefore read FIRST and used verbatim whenever
+    present; `default_event` is used ONLY when the envelope carries no
+    `hook_event_name` at all (e.g. a hand-built test envelope that omits it).
+    Every current caller of this helper is registered exclusively on `PreToolUse`,
+    which is why that is the documented default -- it is not a license for a
+    caller to skip reading the envelope's own field.
+
+    Exit-0 framing bonus: this also drops the misleading `hook_non_blocking_error`
+    label a warn-only audit's exit-1 form carried on the runtime's own transcript
+    -- a warn-only audit allowing its own tool call should never present as an
+    error. Fails open: any exception here is swallowed, matching the fail-open
+    posture of every caller.
+    """
+    event = envelope.get("hook_event_name") if isinstance(envelope, dict) else None
+    if not isinstance(event, str) or not event:
+        event = default_event
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": event,
+            "additionalContext": message,
+        }
+    }
+    try:
+        print(json.dumps(payload, ensure_ascii=True))
+    except Exception:
+        pass

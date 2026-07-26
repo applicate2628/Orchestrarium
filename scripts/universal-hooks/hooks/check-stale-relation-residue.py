@@ -24,16 +24,18 @@ WARN, NEVER BLOCK. The STALE-vs-LIVE discriminator is review-bound (C6 itself
 says so): a LIVE relation — a real dependency, a deliberate split, a current
 `X vs Y` comparison/measurement — is legitimate and uses some of the same
 words. A blocking gate would false-positive on legitimate current prose, so
-this guard only surfaces CANDIDATES for a human to judge, via exit 1 (never 2,
-which would block) on a hit. Per Claude Code's hooks reference, exit 0's stderr
-is written only to the debug log and is invisible in the transcript; any other
-non-zero, non-2 exit code is a non-blocking error that shows a "<hook name>
-hook error" notice plus the first stderr line in the transcript, and execution
-continues exactly as it does on exit 0. Exit 1 on a hit (0 otherwise) is what
-makes this guard's warning visible enough to actually measure the
-false-positive rate this posture exists to measure. Promotion to a blocking
-`deny` (exit 2) is a separate, reviewed step once the false-positive rate is
-measured over real repos (mirrors the machine-local-path / no-trash audits).
+this guard only surfaces CANDIDATES for a human to judge -- ALWAYS ALLOWING the
+tool call, never blocking. Deliver the candidate to the MODEL via
+`hookSpecificOutput.additionalContext` on stdout, exit 0 (see
+`hook_common.emit_advisory`). This is the corrected delivery channel: a
+PreToolUse hook's previous stderr-plus-exit-1 form was measured to reach NOBODY
+on either Claude Code 2.1.220 (transcript-only, model-invisible) or Codex CLI
+0.145.0 (discarded entirely -- the non-2-exit branch never copies stderr). See
+work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-its-
+sibling-calls-broken.md for the full falsification-controlled measurement.
+Promotion to a blocking `deny` (exit 2) is a separate, reviewed step once the
+false-positive rate is measured over real repos (mirrors the machine-local-path
+/ no-trash audits).
 
 EXEMPT targets (where a stale-relation phrase IS legitimate provenance — the
 "provenance lives in version control + ONE decision/closure record" clause of
@@ -58,23 +60,7 @@ import sys
 # hooks); this hook lives in the typed hooks/ dir per the source-hygiene rule.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
 
-from hook_common import parse_envelope, read_stdin_utf8
-
-
-def _emit(msg: str) -> None:
-    """Write a warning to stderr as UTF-8 bytes regardless of console codepage.
-
-    Mirrors hook_common.read_stdin_utf8 on the write side so Cyrillic / em-dash
-    / arrow characters survive a Windows cp1252 console. Fail-open on any error.
-    """
-    try:
-        sys.stderr.buffer.write(msg.encode("utf-8"))
-        sys.stderr.buffer.flush()
-    except Exception:
-        try:
-            sys.stderr.write(msg)
-        except Exception:
-            pass
+from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
 
 
 # High-confidence stale-relation residue markers (case-insensitive). Each almost
@@ -233,19 +219,19 @@ def main() -> int:
     hits = find_stale_relations(text)
     if hits:
         shown = "; ".join(hits[:5])
-        _emit(
+        emit_advisory(
+            envelope,
             "[stale-relation-residue AUDIT] candidate stale-relation residue in write to "
-            f"{target or '<unknown target>'}: {shown}\n"
-            "  (C6: a superseding change must leave ONLY the correct current state — "
+            f"{target or '<unknown target>'}: {shown} "
+            "(C6: a superseding change must leave ONLY the correct current state — "
             "erase residue of the obsolete relation. Discriminator is review-bound: "
             "if this asserts a STALE relationship (a done rename / gone alias / fixed "
             "misregistration) erase it; if it asserts a LIVE fact (a real dependency, a "
-            "current comparison) keep it. AUDIT mode -- allowing this write.)\n"
+            "current comparison) keep it. AUDIT mode -- allowing this write.)",
         )
-        # Exit 1 (never 2): a non-blocking "<hook name> hook error" transcript
-        # notice with the first stderr line, so the warning is actually visible
-        # -- exit 0 here is invisible outside --debug.
-        return 1
+        # Exit 0: the advisory reaches the model via hookSpecificOutput.
+        # additionalContext (see hook_common.emit_advisory) -- never exit 2 (block).
+        return 0
     # AUDIT mode: always allow the write. (Promotion to a blocking deny -- exit
     # 2 -- is a separate reviewed step once the false-positive rate is measured.)
     return 0
