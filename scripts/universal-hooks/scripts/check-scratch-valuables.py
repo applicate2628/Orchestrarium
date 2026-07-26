@@ -66,14 +66,44 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-try:
-    from hook_common import parse_envelope, read_stdin_utf8
-except Exception:  # pragma: no cover - fail open when the shared helper is absent
-    def read_stdin_utf8() -> str:  # type: ignore[misc]
-        return ""
-
-    def parse_envelope(stdin_text: str) -> dict:  # type: ignore[misc]
-        return {}
+# Import directly, with NO fallback stub -- matching every warn-only audit in
+# scripts/universal-hooks/hooks/ (check-machine-local-path.py, check-no-trash-
+# in-repo.py, check-stale-relation-residue.py, check-repository-orientation.py,
+# check-mcp-momentum.py, check-typed-routing.py). A prior version of this file
+# wrapped the import in `try/except Exception` and substituted a stub
+# `parse_envelope` that returned `{}` on failure. Unlike the mute audits above,
+# that stub was REACHABLE and LOSSY, not silent: discarding the envelope's
+# declared `cwd` made `_resolve_root` (below) fall through to `Path.cwd()`, so
+# a broken install scanned a DIFFERENT project than the one the envelope
+# named and reported those findings as belonging to the caller's own project
+# -- confidently wrong, not silently absent (work-items/bugs/2026-07-26-
+# scratch-valuables-degrades-to-scanning-the-wrong-project-and-reports-it-as-
+# correct.md; measured there: envelope declaring cwd=projB with the process at
+# projA yielded `KEEPME_projB` when healthy and `KEEPME_projA` when
+# `hook_common` was absent, exit 0 either way).
+#
+# CONTRACT CHOSEN: fail loud, matching every sibling audit's own resolved
+# contract (work-items/bugs/2026-07-26-the-mcp-momentum-audit-stubs-its-own-
+# delivery-to-a-no-op.md). A broken install now surfaces as an uncaught
+# ImportError before `main()` is ever entered -- a nonzero exit code (Python's
+# default is 1) and a traceback on stderr -- instead of a fabricated report
+# about the wrong project. This does not weaken this hook's own "never block
+# a session" contract: `check-scratch-valuables.sh` / `.ps1` unconditionally
+# exit 0 regardless of the Python process's own exit code (measured; those
+# wrappers do not propagate `$?`/`$LASTEXITCODE` the way the six PreToolUse
+# audit wrappers do), so a broken install still never blocks a session -- it
+# just stops printing invented data about the wrong project.
+#
+# What this choice does NOT close: (1) the failure is a raw traceback on
+# stderr, not a deliberate one-line diagnostic, and whether the operator ever
+# sees it depends on whether the host surfaces a SessionStart hook's stderr
+# when its wrapper still exits 0 -- not verified either way in this
+# repository; (2) it leaves unchanged the separate, pre-existing behavior
+# below where a SUCCESSFULLY parsed envelope that simply omits `cwd` still
+# resolves to `Path.cwd()` -- that is a different, legitimate code path
+# (hook_common working correctly, the envelope itself lacking the field) and
+# is out of this fix's scope.
+from hook_common import parse_envelope, read_stdin_utf8
 
 
 SCRATCH_DIRNAME = ".scratch"
