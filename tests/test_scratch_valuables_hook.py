@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import timedelta
 from pathlib import Path
 
@@ -305,6 +306,89 @@ def test_zero_mutation_of_working_tree_and_git_object_store(tmp_path: Path):
     after = snapshot()
 
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# Whole-hook work budget (work-items/bugs/2026-07-26-scratch-valuables-hangs-
+# session-start-for-65s-on-a-large-scratch-tree.md). The tests above cannot
+# reproduce that bug -- every fixture is small enough to finish well inside
+# any budget. These two exercise the two independent budget mechanisms
+# (`_scan_valuables`'s "BUDGET SHAPE": a git-check count/byte ceiling, and a
+# wall-clock deadline on the walk itself) without depending on an actual
+# large tree, per the task's own allowance ("set the budget low in the test,
+# or synthesise enough files to cross a count ceiling").
+# ---------------------------------------------------------------------------
+
+
+def test_git_check_ceiling_excludes_the_excess_and_discloses_it(tmp_path: Path):
+    # More git-unique candidates than MAX_GIT_CHECK_FILES, all tiny (total
+    # bytes nowhere near MAX_GIT_CHECK_BYTES) so COUNT is deterministically
+    # the binding limit, not size or wall-clock time -- no timing dependency
+    # at all, so this cannot flake.
+    _init_git_repo(tmp_path)
+    scratch = tmp_path / hook.SCRATCH_DIRNAME
+    scratch.mkdir()
+    extra = hook.MAX_GIT_CHECK_FILES + 25
+    for i in range(extra):
+        (scratch / f"file{i:04d}.md").write_text(f"unique content {i}", encoding="utf-8")
+
+    report = hook.ScanReport()
+    result = hook._scan_valuables(scratch, report=report)
+
+    assert report.candidates_found == extra
+    assert report.candidates_git_verified == hook.MAX_GIT_CHECK_FILES
+    # the excess was excluded from the git call, not merely slow to check
+    assert report.candidates_budget_age_gated == extra - hook.MAX_GIT_CHECK_FILES
+    # every file is brand new (age ~0), so the age-gate fallback applied to
+    # the excluded excess does NOT flag them -- they are absent from
+    # `result`, not silently promoted to "found" by a lucky fallback.
+    assert len(result) == hook.MAX_GIT_CHECK_FILES
+    assert report.budget_limited is True
+
+    message = hook._build_message(result, report)
+    assert "git-verification budget" in message
+    assert str(extra - hook.MAX_GIT_CHECK_FILES) in message
+
+
+def test_walk_time_budget_stops_early_and_discloses_partial_coverage(
+    tmp_path: Path, monkeypatch
+):
+    # Ten top-level directories, one file each. Per the shared "Race-window
+    # assertion discipline" (a transient window must be engineered
+    # deterministically large via a known-slow injection seam, not left to
+    # natural filesystem speed -- that would make this test flaky on a
+    # fast/warm machine, exactly the class of bug this fix is closing
+    # elsewhere), every filesystem entry visited during the walk is given a
+    # real, injected 15ms cost via `_is_link_or_reparse` (called exactly
+    # once per entry). A 20ms total time budget can then never cover more
+    # than a couple of the ten directories, on any machine, deterministically.
+    _init_git_repo(tmp_path)
+    scratch = tmp_path / hook.SCRATCH_DIRNAME
+    for i in range(10):
+        d = scratch / f"d{i:02d}"
+        d.mkdir(parents=True)
+        (d / "file.md").write_text(f"content {i}", encoding="utf-8")
+
+    real_check = hook._is_link_or_reparse
+
+    def slow_check(entry):
+        time.sleep(0.015)
+        return real_check(entry)
+
+    monkeypatch.setattr(hook, "_is_link_or_reparse", slow_check)
+
+    report = hook.ScanReport()
+    result = hook._scan_valuables(scratch, time_budget_seconds=0.02, report=report)
+
+    assert report.walk_truncated is True
+    assert report.dirs_remaining >= 1
+    assert report.entries_examined < 20  # 10 dirs + 10 files = 20 entries total
+    assert len(result) < 10  # could not have visited, let alone verified, every file
+    assert report.budget_limited is True
+
+    message = hook._build_message(result, report)
+    assert "time-boxed" in message
+    assert "unvisited" in message
 
 
 if __name__ == "__main__":
