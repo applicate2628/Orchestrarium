@@ -46,6 +46,7 @@ PACK_ONLY_SCRIPTS = {
         # Agent-tool dispatch idiom; the codex twin walks ./.agents/ + ~/.codex/
         # and speaks role/skill-activation idiom — intentionally different.
         "agents-mode-reminder.sh", "agents-mode-reminder.ps1",
+        "agents-mode-reminder.py",
         # Claude-line provider transport wrappers (no codex/canon analog).
         "invoke-claude-api.sh", "invoke-claude-api.ps1",
         "invoke-claude-prompt.sh", "invoke-claude-prompt.ps1",
@@ -58,6 +59,7 @@ PACK_ONLY_SCRIPTS = {
     }),
     "src.codex/skills/lead/scripts": frozenset({
         "agents-mode-reminder.sh", "agents-mode-reminder.ps1",  # see above
+        "agents-mode-reminder.py",
         "validate-skill-pack.sh", "validate-skill-pack.ps1",
     }),
 }

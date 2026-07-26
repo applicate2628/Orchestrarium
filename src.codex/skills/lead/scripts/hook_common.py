@@ -795,3 +795,55 @@ def emit_advisory(envelope: object, message: str, *, default_event: str = "PreTo
         print(json.dumps(payload, ensure_ascii=True))
     except Exception:
         pass
+
+
+def emit_session_start_context(message: str) -> None:
+    """Emit a SessionStart `hookSpecificOutput` context block as compact,
+    literal-UTF-8 JSON -- the byte-parity contract this pack's Python
+    SessionStart reminders (mcp-usage-reminder.py, agents-mode-reminder.py)
+    must hold against their hand-authored `.sh` / `.ps1` siblings:
+    ``{"hookSpecificOutput":{"hookEventName":"SessionStart",
+    "additionalContext":"..."}}``, no separator whitespace, and a literal
+    (non-escaped) UTF-8 em-dash rather than `\\u2014` -- verified byte-for-byte
+    against a captured `mcp-usage-reminder.ps1` run on 2026-07-27 (the .sh
+    heredoc form matches once its own CRLF-vs-LF line ending, which is a
+    platform artifact of `[Console]::Out.WriteLine` vs a bash heredoc, not a
+    content difference, is set aside).
+
+    DELIBERATELY NOT `emit_advisory` above: that function hardcodes
+    `ensure_ascii=True` and default `json.dumps` spacing for its own PreToolUse
+    audit callers (a different, already-shipped contract this function must
+    not silently change), and always reads `envelope.get("hook_event_name")`
+    -- every caller of THIS function is a SessionStart reminder with no such
+    envelope-declared variability, so the event name is hardcoded here,
+    matching every SessionStart reminder's own `.ps1`/`.sh` source (none of
+    which read `hook_event_name` from an envelope either).
+
+    UTF-8 SAFETY: reconfigures stdout to UTF-8 before writing, mirroring the
+    `[Console]::OutputEncoding = [System.Text.Encoding]::UTF8` line every
+    `.ps1` SessionStart reminder sets at its own top. Without this, a
+    non-UTF-8 system codepage (e.g. `cp437`, which cannot encode U+2014) can
+    raise `UnicodeEncodeError` on a literal em-dash and silently drop the
+    whole reminder -- confirmed empirically: `'\\u2014'.encode('cp437')`
+    raises, `'\\u2014'.encode('cp1251')` does not, so this is a real,
+    codepage-dependent failure mode, not a theoretical one. `reconfigure` is
+    itself wrapped in its own `try`/`except` (it is a Python 3.7+
+    `TextIOWrapper` method; absent or failing, the write is attempted anyway
+    under whatever encoding stdout already had).
+
+    Fails open: any exception here (including the write itself) is
+    swallowed; the caller still exits 0."""
+    payload = {
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": message,
+        }
+    }
+    try:
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+        print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+    except Exception:
+        pass
