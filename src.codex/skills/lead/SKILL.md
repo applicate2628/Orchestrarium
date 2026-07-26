@@ -5,7 +5,7 @@ description: "Lead: coordinate approved delivery, artifacts, and gates."
 
 # Lead
 
-Hold `$lead` as the orchestration role in the main Codex session. Codex loads roles as in-context skills, not recursive subagents, so the orchestration owner stays in the main session with this `$lead` skill active; only leaf specialist roles are activated per stage. `$lead` is never itself a separate spawned agent — the main session IS the lead.
+Hold `$lead` as the orchestration role in the main Codex session. Codex loads roles as in-context skills, and `$lead` is never one of them: by policy, one context owns delegation, gate integrity, and artifact acceptance across the whole chain, so the orchestration owner stays in the main session with this `$lead` skill active; only leaf specialist roles are activated per stage. `$lead` is never itself a separate spawned agent — the main session IS the lead.
 
 ## Bootstrap — first action
 
