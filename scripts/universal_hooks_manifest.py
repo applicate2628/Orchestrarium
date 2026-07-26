@@ -68,6 +68,14 @@ PACK_ONLY_HOOKS = {
         # (captured tool_name "Agent"). Codex CLI exposes no analogous
         # subagent-dispatch tool, so there is no Codex/canon mirror.
         "check-typed-routing.py", "check-typed-routing.sh", "check-typed-routing.ps1",
+        # Dispatch-time invariant registry (round-depth observer,
+        # work-items/active/2026-07-26-registry-bug-sweep/
+        # design-round-cap-observer.md), imported by check-typed-routing.py
+        # above -- not a registered hook entry itself (no .sh/.ps1 wrapper),
+        # so it carries no hooks.json/installer obligation. Single-tree for
+        # the same reason as its adapter: it keys on the Agent dispatch tool,
+        # which Codex CLI has no analog for.
+        "dispatch_sentinels.py",
     }),
     "src.codex/skills/lead/hooks": frozenset(),
 }

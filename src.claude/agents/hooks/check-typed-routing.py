@@ -55,6 +55,21 @@ surface minimal. Promotion to a blocking `deny` (exit 2) stays a separate
 reviewed step after the false-positive rate is measured from transcripts, the
 pack's standing audit-promotion discipline.
 
+WHAT THIS ALSO HOSTS (dispatch-time invariant registry). This file also
+imports and dispatches to `dispatch_sentinels.py`'s `REGISTRY` -- the
+round-depth observer (work-items/active/2026-07-26-registry-bug-sweep/
+design-round-cap-observer.md): how many times, within the current operator
+turn, THIS SAME `subagent_type` has already been dispatched. That invariant
+applies to every `subagent_type`, not only the catch-all ones this file's own
+nudge above is scoped to, and it is entirely independent of whether the
+typed-routing nudge fires -- both can fire together, separately, or neither.
+The registry module import is a LOCAL try/except inside `main()` (unlike
+`hook_common` above): the round-depth invariant is additive, and its absence
+must never disturb the pre-existing typed-routing nudge. See
+`dispatch_sentinels.py`'s own docstring for why this lives in a separate
+module (different event, different ctx, different severity vocabulary) and
+why it needs no new hook entry, installer change, or `hooks.json` change.
+
 Fail-open everywhere on internal error (return 0).
 """
 from __future__ import annotations
@@ -65,17 +80,38 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-try:
-    from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
-except Exception:  # pragma: no cover - fail open when the shared helper is absent
-    def read_stdin_utf8() -> str:  # type: ignore[misc]
-        return ""
-
-    def parse_envelope(_: str) -> dict:  # type: ignore[misc]
-        return {}
-
-    def emit_advisory(_envelope: object, _message: str, **_kwargs: object) -> None:  # type: ignore[misc]
-        pass
+# Import directly, with NO fallback stub -- matching every sibling universal
+# audit (check-machine-local-path.py, check-no-trash-in-repo.py, check-stale-
+# relation-residue.py, check-repository-orientation.py, check-mcp-momentum.py,
+# none of which catch the import). This file is Claude-only and has no canon
+# copy under scripts/universal-hooks/hooks/ (see PACK_ONLY_HOOKS in
+# scripts/universal_hooks_manifest.py -- Codex CLI exposes no analogous
+# subagent-dispatch tool), so it never got the same review pass that caught
+# the identical defect in check-mcp-momentum.py
+# (work-items/bugs/2026-07-26-the-mcp-momentum-audit-stubs-its-own-delivery-
+# to-a-no-op.md). On `main` this file's `try/except` stubbed only
+# `read_stdin_utf8`/`parse_envelope` (no `emit_advisory` to stub, because this
+# hook did not yet use it); the delivery-channel fix that added `emit_advisory`
+# on this branch widened the existing stub to cover it too, reintroducing the
+# exact same silent-death shape in the one copy no sync tool tracks.
+#
+# The stub was UNREACHABLE in the direction that mattered: the stubbed
+# `read_stdin_utf8()` returns "", the stubbed `parse_envelope("")` returns {},
+# so `envelope.get("tool_name")` below is never `DISPATCH_TOOL` ("Agent") and
+# `main()` returns 0 before a hit could ever be computed -- the `emit_advisory`
+# stub could never fire. Net effect: a broken install produced an exit-0 /
+# empty-stdout / empty-stderr run byte-identical to "nothing to warn about".
+#
+# Letting the ImportError propagate uncaught instead makes a broken install
+# DETECTABLE without inventing a new channel: a nonzero exit code (Python's
+# default is 1) and a traceback on stderr, instead of silent success. This
+# still honors AUDIT mode's "never block" contract -- per this pack's own
+# measured delivery-channel contract (work-items/bugs/2026-07-26-mcp-reminder-
+# uses-the-once-per-session-form-its-sibling-calls-broken.md), only an exit-2
+# PreToolUse hook blocks the tool call on Claude Code; an exit-1 (which an
+# uncaught exception produces) still ALLOWS the tool call, it just stops
+# pretending the audit ran cleanly when it did not.
+from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
 
 
 # The subagent-dispatch tool as it appears in the PreToolUse envelope's
@@ -137,29 +173,57 @@ def main() -> int:
         subagent_type = tool_input.get(SUBAGENT_TYPE_FIELD)
         if not isinstance(subagent_type, str) or not subagent_type:
             return 0  # absent/malformed field -> inert (fail-safe)
-        if subagent_type.casefold() not in CATCH_ALL_TYPES:
-            return 0  # a typed pack role -> nothing to nudge
 
-        # Scan the human-authored dispatch text (description + prompt) for a
-        # specialist-work signal. A truly open-ended general-purpose dispatch has
-        # none and is left alone.
-        scan = "\n".join(
-            str(tool_input.get(k) or "") for k in ("description", "prompt")
-        )
-        if not SPECIALIST_SIGNAL_RE.search(scan):
-            return 0
+        messages: list[str] = []
 
-        emit_advisory(
-            envelope,
-            "[typed-routing AUDIT] `general-purpose` was dispatched for work that "
-            "looks like typed specialist work (an implementation/review/design/"
-            "security/performance/toolchain signal is in the prompt) -- prefer the "
-            "matching typed `subagent_type` from the roster `.claude/agents/*.md` "
-            "(e.g. toolchain-engineer/platform-engineer for `.ps1`/install work, an "
-            "engineer role for code, a reviewer role for review), or proceed if "
-            "`general-purpose` is genuinely the right open-ended fit. AUDIT -- allowing.",
-        )
-        # Exit 0: the nudge reaches the model via hookSpecificOutput.
+        # --- (1) existing typed-routing nudge (DI-1: unchanged verdicts) ---
+        # Scoped to the catch-all types only, exactly as before -- this
+        # branch's own behavior and test suite are unchanged by what follows.
+        if subagent_type.casefold() in CATCH_ALL_TYPES:
+            # Scan the human-authored dispatch text (description + prompt)
+            # for a specialist-work signal. A truly open-ended general-purpose
+            # dispatch has none and is left alone.
+            scan = "\n".join(
+                str(tool_input.get(k) or "") for k in ("description", "prompt")
+            )
+            if SPECIALIST_SIGNAL_RE.search(scan):
+                messages.append(
+                    "[typed-routing AUDIT] `general-purpose` was dispatched for work that "
+                    "looks like typed specialist work (an implementation/review/design/"
+                    "security/performance/toolchain signal is in the prompt) -- prefer the "
+                    "matching typed `subagent_type` from the roster `.claude/agents/*.md` "
+                    "(e.g. toolchain-engineer/platform-engineer for `.ps1`/install work, an "
+                    "engineer role for code, a reviewer role for review), or proceed if "
+                    "`general-purpose` is genuinely the right open-ended fit. AUDIT -- allowing."
+                )
+
+        # --- (2) NEW: the dispatch-time invariant registry (round-depth
+        # observer, work-items/active/2026-07-26-registry-bug-sweep/
+        # design-round-cap-observer.md). Applies to EVERY subagent_type, not
+        # only the catch-all ones above -- round depth is a property of the
+        # dispatch, not of which role was dispatched.
+        #
+        # Deliberately a LOCAL try/except, unlike the top-level `hook_common`
+        # import above: `hook_common` is FOUNDATIONAL (without it this hook
+        # cannot even read stdin or emit an advisory), so its absence
+        # propagates uncaught -- a detectable broken install, not a silent
+        # no-op (see the import's own comment). `dispatch_sentinels` is an
+        # independent, ADDITIVE invariant; the design's own failure-mode
+        # table (§9) requires that its absence stay invisible to the
+        # pre-existing typed-routing nudge above -- no crash, no block, and
+        # the nudge still fires on its own.
+        try:
+            import dispatch_sentinels
+
+            ctx = dispatch_sentinels.build_context(envelope)
+            for finding in dispatch_sentinels.evaluate_all(ctx, event="PreToolUse"):
+                messages.append(finding.message)
+        except Exception:
+            pass
+
+        if messages:
+            emit_advisory(envelope, "\n\n".join(messages))
+        # Exit 0: every advisory reaches the model via hookSpecificOutput.
         # additionalContext (see hook_common.emit_advisory) -- never exit 2 (block).
         return 0
     except Exception:

@@ -633,6 +633,99 @@ def extract_model_shell_commands_with_ids(entry: object) -> list[tuple[str, str]
     return pairs
 
 
+def current_turn_entries(transcript_path: str, *, byte_cap: int) -> tuple[list[dict], str]:
+    """Bounded REVERSE scan to the CURRENT TURN's boundary -- the most recent
+    genuine user-typed message -- returning the transcript ENTRIES since that
+    boundary (the true current turn), without ever reading the whole
+    transcript file. Returns `(entries, status)` where `status` matches
+    `last_genuine_user_text`'s own vocabulary:
+
+      "found"          -- a genuine user message was located; `entries` are
+                          every parsed record strictly AFTER it, in original
+                          (forward) order (possibly [] if the boundary is the
+                          very last record in the window)
+      "absent"         -- `transcript_path` is empty/None
+      "unreadable"     -- the path does not resolve to a readable file
+      "not-in-window"  -- no genuine user message was found within
+                          `byte_cap` bytes of end-of-file; `entries` is []
+
+    WHY A SIBLING OF `last_genuine_user_text` RATHER THAN A SHARED REFACTOR.
+    `last_genuine_user_text` discards the "after" half of
+    `last_genuine_user_message`'s return value -- it only ever needed the
+    boundary's own typed text. A caller counting DISPATCHES since the
+    boundary (the round-depth observer,
+    work-items/active/2026-07-26-registry-bug-sweep/design-round-cap-
+    observer.md §3.6) needs the entries themselves, not the boundary's text.
+    This function duplicates `last_genuine_user_text`'s bounded, doubling
+    reverse-read loop rather than refactoring that function to delegate to a
+    shared helper, because `hook_common.py` is byte-identity-mirrored across
+    three trees (`tests/test_universal_hook_surfaces.py`) and the observer
+    design's own pre-registered claim 8 requires this addition to be
+    INSERTIONS ONLY -- editing `last_genuine_user_text`'s body would be a
+    modification, not an addition, to a function four OTHER hooks
+    (`check-bugfix-discipline.py`, `check-git-push-gate.py`,
+    `check-passive-polling-stop.py`, `check-repository-orientation.py`) rely
+    on staying byte-stable. The SEMANTIC half of the boundary predicate --
+    what counts as a genuine user message, and what does NOT (a tool_result,
+    a system-reminder/task-notification injection, a post-compaction
+    `isCompactSummary`/`isMeta` continuation prompt) -- is NOT duplicated:
+    both functions call the same, unchanged `last_genuine_user_message`, so a
+    turn's tool_results and harness injections are excluded here exactly as
+    they are there.
+    """
+    if not transcript_path:
+        return [], "absent"
+    tp = Path(transcript_path)
+    try:
+        if not tp.is_file():
+            return [], "unreadable"
+        file_size = tp.stat().st_size
+    except Exception:
+        return [], "unreadable"
+
+    chunk = min(1024 * 1024, byte_cap)  # start at 1 MiB, never exceeding byte_cap
+    while True:
+        read_size = min(chunk, file_size)
+        start_offset = file_size - read_size
+        try:
+            with tp.open("rb") as f:
+                f.seek(start_offset)
+                raw = f.read(read_size)
+        except Exception:
+            return [], "unreadable"
+
+        text_blob = raw.decode("utf-8", errors="replace")
+        lines = text_blob.split("\n")
+        # Discard the leading partial line UNLESS the read started at true
+        # file offset 0 (see last_genuine_user_text's identical handling).
+        if start_offset > 0 and lines:
+            lines = lines[1:]
+
+        entries: list[dict] = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(entry, dict):
+                entries.append(entry)
+
+        entry, _typed_text, after = last_genuine_user_message(entries)
+        if entry is not None:
+            return after, "found"
+
+        if start_offset == 0:
+            # Read the whole file and still found no boundary -- there is
+            # nothing more to read.
+            return [], "not-in-window"
+        if chunk >= byte_cap:
+            return [], "not-in-window"
+        chunk = min(chunk * 2, byte_cap)
+
+
 def emit_advisory(envelope: object, message: str, *, default_event: str = "PreToolUse") -> None:
     """Deliver a warn-only advisory to the MODEL, never the operator terminal.
 
