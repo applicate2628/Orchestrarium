@@ -47,6 +47,13 @@ SPEC.loader.exec_module(cleanup)
 
 NOW = datetime(2026, 7, 17, 12, 0, 0, tzinfo=timezone.utc)
 
+# The CLI path (`cleanup.main`) has no way to receive the frozen `NOW` above
+# except through its `--now` clock-injection seam (see
+# work-items/bugs/2026-07-26-cleanup-cli-path-has-no-now-seam-so-age-tests-are-time-bombs.md).
+# Every CLI-path test below must append this to its argv, or its age-dependent
+# assertions measure against the real wall clock instead of the frozen NOW.
+NOW_ARGV = ["--now", NOW.isoformat()]
+
 
 def write_file(root: Path, relative: str, *, age_days: float, text: str = "data") -> Path:
     """Write a file under `root` with an mtime `age_days` before NOW."""
@@ -538,7 +545,7 @@ def test_scan_never_mutates_the_tree_in_fallback_mode(no_git, tmp_path: Path):
     result_two = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
     assert result_two == result_one
 
-    exit_code = cleanup.main(["--root", str(tmp_path)])
+    exit_code = cleanup.main(["--root", str(tmp_path), *NOW_ARGV])
     assert exit_code == 0
 
     after = _snapshot(tmp_path)
@@ -565,7 +572,7 @@ def test_scan_never_mutates_the_tree_or_git_object_store_in_git_mode(tmp_path: P
 
     result = cleanup.scan_valuables(tmp_path / ".scratch", now=NOW)
 
-    exit_code = cleanup.main(["--root", str(tmp_path)])
+    exit_code = cleanup.main(["--root", str(tmp_path), *NOW_ARGV])
     assert exit_code == 0
 
     after = _snapshot(tmp_path)
@@ -585,7 +592,7 @@ def test_json_cli_also_never_mutates_the_tree(no_git, tmp_path: Path, capsys):
     write_file(tmp_path, ".scratch/data.md", age_days=30, text="valuable")
     before = _snapshot(tmp_path)
 
-    exit_code = cleanup.main(["--root", str(tmp_path), "--json"])
+    exit_code = cleanup.main(["--root", str(tmp_path), "--json", *NOW_ARGV])
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 
@@ -602,7 +609,7 @@ def test_json_cli_also_never_mutates_the_tree(no_git, tmp_path: Path, capsys):
 def test_cli_report_lists_valuables_and_returns_zero(no_git, tmp_path: Path, capsys):
     write_file(tmp_path, ".scratch/data.md", age_days=30, text="valuable")
 
-    exit_code = cleanup.main(["--root", str(tmp_path)])
+    exit_code = cleanup.main(["--root", str(tmp_path), *NOW_ARGV])
     captured = capsys.readouterr()
 
     assert exit_code == 0
@@ -617,7 +624,7 @@ def test_cli_report_lists_longest_lingering_first(no_git, tmp_path: Path, capsys
     write_file(tmp_path, ".scratch/newest.md", age_days=8, text="new")
     write_file(tmp_path, ".scratch/oldest.md", age_days=90, text="old")
 
-    exit_code = cleanup.main(["--root", str(tmp_path)])
+    exit_code = cleanup.main(["--root", str(tmp_path), *NOW_ARGV])
     captured = capsys.readouterr()
 
     assert exit_code == 0
@@ -630,7 +637,7 @@ def test_cli_report_lists_longest_lingering_first(no_git, tmp_path: Path, capsys
 def test_cli_report_says_none_found_when_scratch_is_clean(no_git, tmp_path: Path, capsys):
     write_file(tmp_path, ".scratch/fresh.md", age_days=1)
 
-    exit_code = cleanup.main(["--root", str(tmp_path)])
+    exit_code = cleanup.main(["--root", str(tmp_path), *NOW_ARGV])
     captured = capsys.readouterr()
 
     assert exit_code == 0
@@ -640,7 +647,9 @@ def test_cli_report_says_none_found_when_scratch_is_clean(no_git, tmp_path: Path
 def test_cli_fallback_age_days_flag_overrides_default_threshold(no_git, tmp_path: Path, capsys):
     write_file(tmp_path, ".scratch/data.md", age_days=3)
 
-    exit_code = cleanup.main(["--root", str(tmp_path), "--fallback-age-days", "2", "--json"])
+    exit_code = cleanup.main(
+        ["--root", str(tmp_path), "--fallback-age-days", "2", "--json", *NOW_ARGV]
+    )
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
 

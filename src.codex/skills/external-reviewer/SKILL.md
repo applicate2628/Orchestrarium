@@ -43,7 +43,7 @@ description: "Review or QA run on external CLI provider; read-only."
 
 - The Codex pack ships no primary-run prompt wrappers; use the transport-neutral probe, persisted prompt, sibling `.out` / `.err` capture, exact launch flags, and provider read-only or sandbox mode owned by the shared external-dispatch contract.
 - Actively poll output artifacts and process status, apply the contract's effort-tiered stall policy, and never duplicate a still-running launch.
-- Accept completion only when the shared run-completion oracle passes. A failed review run is `UNVERIFIED` under review-loop invariant 7 in `../lead/review-loop.md`; this role cites that lane-accounting owner instead of restating it.
+- Accept completion only when the shared run-completion oracle passes. A failed review run is `UNVERIFIED` under review-loop invariant 7 in `../review-loop/SKILL.md`; this role cites that lane-accounting owner instead of restating it.
 
 ## Return exactly one artifact
 

@@ -4,6 +4,13 @@ The hook is a process backstop, not a semantic canon detector. It warns before
 risky repository-local actions when assistant-authored prose in the current
 turn lacks one valid, task-scoped ``REPOSITORY ORIENTATION:`` record. It always
 allows, fails open, and never scans repository prose for deprecation language.
+On a hit it emits one line of JSON to stdout --
+``{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"..."}}``
+-- the model-visible delivery channel (see ``hook_common.emit_advisory``); always
+exits 0. This replaced a stderr-plus-exit-1 form measured to reach nobody on
+either provider line (see
+work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-its-
+sibling-calls-broken.md).
 """
 
 from __future__ import annotations
@@ -146,13 +153,15 @@ class RepositoryOrientationHookTests(unittest.TestCase):
         for script in HOOKS:
             with self.subTest(script=script):
                 result = run_hook(script, self.repo, entries, **kwargs)
-                # AUDIT never BLOCKS (never exit 2), but a hit exits 1 -- a
-                # non-blocking "<hook name> hook error" transcript notice --
-                # so the warning is actually visible (exit 0's stderr is
-                # debug-log-only, see the hooks reference).
-                self.assertEqual(result.returncode, 1, result.stderr)
-                self.assertEqual(result.stdout, "")
-                self.assertIn(WARNING, result.stderr)
+                # AUDIT never BLOCKS (never exit 2) and never uses a non-zero
+                # exit for a hit either -- the advisory travels via stdout
+                # JSON, always exit 0 (see hook_common.emit_advisory).
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                payload = json.loads(result.stdout)
+                specific = payload["hookSpecificOutput"]
+                self.assertEqual(specific["hookEventName"], "PreToolUse")
+                self.assertIn(WARNING, specific["additionalContext"])
 
     def assert_silent(self, entries: list[dict], **kwargs: object) -> None:
         for script in HOOKS:
@@ -222,9 +231,12 @@ class RepositoryOrientationHookTests(unittest.TestCase):
                     entries,
                     tool_input={"file_path": str(archived)},
                 )
-                # A hit (even the stale-target-only warning) exits 1, never 2.
-                self.assertEqual(result.returncode, 1)
-                self.assertIn(STALE_WARNING, result.stderr)
+                # A hit (even the stale-target-only warning) always exits 0 --
+                # never a non-zero exit, never 2 (block).
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stderr, "")
+                payload = json.loads(result.stdout)
+                self.assertIn(STALE_WARNING, payload["hookSpecificOutput"]["additionalContext"])
 
     def test_archived_path_is_silent_with_matching_status_and_user_approved_scope(self) -> None:
         archived = self.repo / "Archive" / "snapshot.md"

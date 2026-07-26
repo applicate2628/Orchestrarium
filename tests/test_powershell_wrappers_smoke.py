@@ -417,20 +417,25 @@ AUDIT_HOOK_HIT_CASES = (
 
 @unittest.skipIf(not INTERPRETERS, "no PowerShell host (pwsh/powershell) on PATH")
 class TestAuditHookWrappersExitOneOnHit(unittest.TestCase):
-    """BLOCKER regression: the three AUDIT hook wrappers used to hard-code
-    `exit 0` unconditionally at the end of the script, discarding whatever exit
-    code the Python helper actually returned. Per the hooks reference, exit 0's
-    stderr is written only to the debug log and is invisible in the transcript,
-    so every AUDIT warning these hooks emit was invisible outside `--debug` --
-    the false-positive-rate measurement this posture exists to enable could
-    never happen. The wrapper must now propagate the helper's exit code: 1 on a
-    hit (a non-blocking "<hook name> hook error" transcript notice), never 2
-    (that would block). Fail-open (missing python/helper -> exit 0) stays
-    covered by TestHookWrappersFailOpen above; this class is the mirror
-    positive-hit case, driven through the ACTUAL .ps1 entry point (a .py-only
-    test would not have caught the wrapper hard-coding exit 0)."""
+    """Regression coverage for the AUDIT hook wrappers' hit path, driven through
+    the ACTUAL .ps1 entry point (a .py-only test would not catch a wrapper-level
+    regression). A prior BLOCKER had these wrappers hard-code `exit 0`
+    unconditionally, discarding the Python helper's real exit code; the fix at
+    that time was to propagate exit 1 on a hit. That exit-1-plus-stderr channel
+    was ITSELF later measured to reach nobody -- neither Claude Code 2.1.220
+    (transcript-only, model-invisible) nor Codex CLI 0.145.0 (discarded
+    entirely) -- so the delivery channel changed again: a hit now emits one line
+    of JSON to stdout, `{"hookSpecificOutput":{"hookEventName":"PreToolUse",
+    "additionalContext":"..."}}`, and the helper always exits 0 (see
+    `hook_common.emit_advisory` and
+    work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-its-
+    sibling-calls-broken.md). The wrapper's job is unchanged -- propagate
+    whatever the Python helper returns/prints -- so this class now asserts exit
+    0 plus a non-empty, well-formed stdout JSON advisory instead of exit 1 plus
+    stderr. Fail-open (missing python/helper -> exit 0, silent) stays covered by
+    TestHookWrappersFailOpen above."""
 
-    def test_wrapper_exits_one_and_warns_on_a_real_hit(self) -> None:
+    def test_wrapper_exits_zero_and_warns_via_stdout_on_a_real_hit(self) -> None:
         for interp in INTERPRETERS:
             for name, envelope in AUDIT_HOOK_HIT_CASES:
                 for wrapper in (CLAUDE_HOOKS / name, CODEX_HOOKS / name):
@@ -438,11 +443,14 @@ class TestAuditHookWrappersExitOneOnHit(unittest.TestCase):
                     with self.subTest(interp=Path(interp).stem, wrapper=str(wrapper.relative_to(REPO_ROOT))):
                         p = _run_ps1(interp, wrapper, stdin=json.dumps(envelope, ensure_ascii=False))
                         self.assertEqual(
-                            p.returncode, 1,
-                            f"expected exit 1 (non-blocking notice) on a hit; "
-                            f"stdout={p.stdout!r} stderr={p.stderr!r}",
+                            p.returncode, 0,
+                            f"expected exit 0 on a hit; stdout={p.stdout!r} stderr={p.stderr!r}",
                         )
-                        self.assertNotEqual(p.stderr.strip(), "", "expected a warning on stderr")
+                        self.assertEqual(p.stderr.strip(), "", "expected no stderr on a hit")
+                        payload = json.loads(p.stdout)
+                        specific = payload["hookSpecificOutput"]
+                        self.assertEqual(specific["hookEventName"], "PreToolUse")
+                        self.assertTrue(specific["additionalContext"].strip(), "expected a non-empty advisory")
 
 
 @unittest.skipIf(not INTERPRETERS, "no PowerShell host (pwsh/powershell) on PATH")
@@ -1308,12 +1316,14 @@ class TestPublicationWrapperShellResolution(unittest.TestCase):
                         root = Path(td)
                         copied = self._copy_wrapper_fixture(root, wrapper)
                         # These publication wrappers `git rev-parse --show-toplevel`
-                        # and raw-`.Trim()` the result before invoking their sibling
-                        # .sh, so the fixture must be a real repo. The validators
-                        # also rev-parse, but null-safely (validate-skill-pack.ps1:~59,
-                        # `2>$null` + a $LASTEXITCODE guard), so they simply do not
-                        # need a real repo. Without this init the real git aborts with
-                        # "not a git repository" and the shell-precedence assertion
+                        # before invoking their sibling .sh, so the fixture must be a
+                        # real repo -- a non-repo cwd now hits the wrappers' own
+                        # guarded `throw "Unable to determine repository root."`
+                        # (null-safe rev-parse fixed 2026-07-26, mirroring the
+                        # validators' pattern: validate-skill-pack.ps1:~101, `2>$null`
+                        # + a $LASTEXITCODE guard) rather than the shell-precedence
+                        # path this test targets. Without this init, the wrapper
+                        # throws that clean error and the shell-precedence assertion
                         # can never be reached.
                         subprocess.run(
                             [bashable_git, "init", "-q", str(root)],
@@ -1410,9 +1420,10 @@ class TestPublicationWrapperShellResolution(unittest.TestCase):
                     with tempfile.TemporaryDirectory() as td:
                         root = Path(td)
                         copied = self._copy_wrapper_fixture(root, wrapper)
-                        # These wrappers rev-parse then raw-.Trim(); a non-repo cwd
-                        # would abort them before shell resolution, so init a real
-                        # repo (see test_derived_root_bash_precedes_path_bash).
+                        # These wrappers rev-parse (null-safely, since 2026-07-26);
+                        # a non-repo cwd would still throw a guarded error before
+                        # shell resolution, so init a real repo (see
+                        # test_derived_root_bash_precedes_path_bash).
                         subprocess.run(
                             [grandparent_git, "init", "-q", str(root)],
                             check=True, capture_output=True,
@@ -1455,8 +1466,10 @@ class TestPublicationWrapperShellResolution(unittest.TestCase):
                         root = Path(td)
                         copied = self._copy_wrapper_fixture(root, wrapper)
                         drive_dir = root / "driveroot"
-                        # These wrappers rev-parse then raw-.Trim(); the fake git
-                        # echoes a valid dir so Set-Location resolves without a repo.
+                        # These wrappers rev-parse (null-safely, since 2026-07-26);
+                        # the fake git echoes a valid dir with exit 0, so the
+                        # null-safe capture resolves it and Set-Location succeeds
+                        # without a real repo.
                         self._write_cmd(drive_dir / "cmd" / "git.cmd", f"echo {root}\r\nexit /b 0\r\n")
                         cp = subprocess.run([_SUBST, letter + ":", str(drive_dir)],
                                             capture_output=True, text=True)
@@ -1621,6 +1634,61 @@ class TestPublicationWrapperShellResolution(unittest.TestCase):
                             marker.read_text(encoding="utf-8").splitlines(),
                             ["path-bash"],
                             "the unrelated grandparent bash must not be probed or selected",
+                        )
+
+    def test_nonrepo_cwd_fails_closed_with_clean_throw_not_crash(self) -> None:
+        r"""Null-trim regression (work-items/bugs/2026-07-19-publication-wrapper-
+        nonrepo-null-trim.md): outside a git repository, `git rev-parse
+        --show-toplevel` exits nonzero with EMPTY stdout (git prints its error to
+        stderr). Pre-fix, the wrapper called `.Trim()` directly on that $null
+        result, and PowerShell threw `InvalidOperation: You cannot call a method
+        on a null-valued expression` BEFORE the wrapper's own designed clean
+        throw ("Unable to determine repository root.") could ever run --
+        unreachable dead code for the real non-repo case. Post-fix (null-safe
+        capture: `2>$null` + `$LASTEXITCODE` guard + try/catch, mirroring
+        validate-skill-pack.ps1's pattern, WITHOUT that validator's
+        fallback-root behavior -- these wrappers must keep hard-failing outside
+        a repo), the same not-a-repo condition must reach the clean guarded
+        throw with no interpreter-level crash and no null-method error, and the
+        sibling .sh must never run."""
+        for interp in INTERPRETERS:
+            for wrapper in PUBLICATION_WRAPPERS:
+                with self.subTest(interp=Path(interp).stem, wrapper=str(wrapper.relative_to(REPO_ROOT))):
+                    with tempfile.TemporaryDirectory() as td:
+                        root = Path(td)
+                        copied = self._copy_wrapper_fixture(root, wrapper)
+                        git_dir = root / "fake-git" / "mingw64" / "bin"
+                        # `rev-parse` fails (exit 128, like real git outside a
+                        # repo, no stdout); any other invocation (e.g. resolving
+                        # the executable) just echoes root and exits 0.
+                        self._write_cmd(
+                            git_dir / "git.cmd",
+                            'if "%1"=="rev-parse" (exit /b 128)\r\n'
+                            f"echo {root}\r\nexit /b 0\r\n",
+                        )
+                        env, marker = self._path_shell_env(root, git_dir)
+
+                        p = _run_ps1(interp, copied, cwd=str(root), env=env)
+
+                        combined = p.stdout + p.stderr
+                        for m in _INTERPRETER_CRASH_MARKERS:
+                            self.assertNotIn(
+                                m, combined,
+                                f"non-repo cwd must not crash the interpreter ({m!r}):\n{combined}",
+                            )
+                        self.assertNotIn(
+                            "null-valued expression", combined,
+                            f"the pre-fix null-.Trim() crash must not recur:\n{combined}",
+                        )
+                        self.assertNotEqual(
+                            p.returncode, 0, f"a non-repo cwd must fail, not silently proceed: {combined}",
+                        )
+                        self.assertIn(
+                            "Unable to determine repository root", combined,
+                            f"expected the guarded clean throw:\n{combined}",
+                        )
+                        self.assertFalse(
+                            marker.exists(), "the sibling .sh must never run outside a repo",
                         )
 
 

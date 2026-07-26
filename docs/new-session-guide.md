@@ -67,6 +67,7 @@ Inside this monorepo, a missing local `.agents/` tree is not a misconfiguration.
 | Claude behavior relies on `Agent` or slash-command mechanics | Keep that change in `src.claude/`; do not rewrite it for Codex unless there is a Codex-native owner. |
 | Codex behavior lacks a direct Agent tool | Check available Codex subagent or MCP tooling in the current runtime; if unavailable, record the gap honestly instead of pretending the Claude mechanism exists. |
 | Installed runtime has stale behavior | Verify the live installed file, patch source first, then reinstall or explicitly sync the installed file as a temporary live-runtime update. |
+| Editing a script/hook shared by `scripts/universal-hooks/`, `src.claude/agents/`, and `src.codex/skills/lead/` | Edit ONLY the copy under `scripts/universal-hooks/{scripts,hooks}/` — it is the stated canon (`tests/test_universal_hook_surfaces.py:10-11`), never a mirror. Then run `python scripts/sync-universal-hooks.py --sync` to propagate, and `--check` before reporting a result — do not rely on remembering "the other two trees"; that manual-memory step is exactly what produced a false-green test run in a prior session (`work-items/bugs/2026-07-26-mirror-parity-is-detected-but-never-propagated.md`). |
 | Shared governance changes | Update `shared/AGENTS.shared.md`, affected `shared/references/`, provider addenda, validator fingerprints if required, and `RELEASE_NOTES.md`. |
 | Context compaction loses active work | Restore active task, next unchecked step, and open evidence gates from the summary/status before acting; do not summarize and stop unless the task was parked, blocked, or complete. |
 | User says to stop closeout and work | Treat it as a continue-working correction, not a request for acknowledgement. Take the next concrete action in the active task immediately unless a real blocker prevents action. |
@@ -83,6 +84,7 @@ Run the smallest useful check first, then the affected pack checks.
 | Gemini example pack | `bash src.gemini/scripts/validate-pack.sh` |
 | Qwen example pack | `bash src.qwen/scripts/validate-pack.sh` |
 | Agents-mode docs/schema | `python scripts\sync-agents-mode-docs.py --root . --check` |
+| universal-hooks canon vs. mirrors (run before reporting any change to a mirrored script/hook) | `python scripts\sync-universal-hooks.py --check` |
 | Installer behavior | `python scripts\validate-agents-mode-installers.py --root .` |
 | Diff hygiene | `git diff --check` |
 | Publication safety before push/release | `bash scripts/check-publication-gate.sh` or `.\scripts\check-publication-gate.ps1` |

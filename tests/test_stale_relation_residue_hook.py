@@ -1,10 +1,17 @@
 """Regression tests for the stale-relation-residue PreToolUse hook (AUDIT mode).
 
 The hook is the structural backstop for architecture law C6 ("a superseding change
-leaves only the correct current state"): it warns to stderr when an Edit/Write ADDS
-a stale-relation residue phrase (deprecated alias / former name / "(was X)" /
+leaves only the correct current state"): it warns when an Edit/Write ADDS a
+stale-relation residue phrase (deprecated alias / former name / "(was X)" /
 misregistered as / arrow+alias / "is wrong ... correct is") into a LIVE-tree file,
-and ALWAYS exits 0 (audit mode never blocks; fail-open on any internal error).
+and ALWAYS exits 0 (audit mode never blocks; fail-open on any internal error). On
+a hit it emits one line of JSON to stdout --
+`{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"..."}}`
+-- the model-visible delivery channel (see `hook_common.emit_advisory`); silent
+otherwise. This replaced a stderr-plus-exit-1 form measured to reach nobody on
+either provider line (see
+work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-its-
+sibling-calls-broken.md).
 
 Tests drive the Python brain via subprocess for BOTH the Claude and Codex copies
 (mirroring test_machine_local_path_hook.py / test_no_trash_hook.py) and assert:
@@ -46,16 +53,27 @@ def run_hook(script: Path, envelope: object, raw_stdin: str | None = None) -> su
     )
 
 
+def _decode_context(stdout: str) -> tuple[str, str]:
+    """Parse the hookSpecificOutput envelope; returns (hookEventName, additionalContext)."""
+    payload = json.loads(stdout)
+    specific = payload["hookSpecificOutput"]
+    return specific["hookEventName"], specific["additionalContext"]
+
+
 class StaleRelationResidueHookBase(unittest.TestCase):
     def assert_flagged(self, tool_input: dict, flagged: bool) -> None:
         for script in RESIDUE_SCRIPTS:
             with self.subTest(script=script.parent.parent.name):
                 p = run_hook(script, {"tool_input": tool_input})
-                # AUDIT never BLOCKS (never exit 2), but a hit exits 1 -- a non-blocking
-                # "<hook name> hook error" transcript notice -- so the warning is
-                # actually visible (exit 0's stderr is debug-log-only, see hooks docs).
-                self.assertEqual(p.returncode, 1 if flagged else 0, p.stderr)
-                self.assertEqual(bool(p.stderr.strip()), flagged, f"stderr={p.stderr!r}")
+                # AUDIT never BLOCKS (never exit 2) and never uses a non-zero exit
+                # for a hit either -- the advisory travels via stdout JSON, always
+                # exit 0 (see hook_common.emit_advisory).
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(p.stderr, "")
+                self.assertEqual(bool(p.stdout.strip()), flagged, f"stdout={p.stdout!r}")
+                if flagged:
+                    event_name, _context = _decode_context(p.stdout)
+                    self.assertEqual(event_name, "PreToolUse")
 
     def assert_content_flagged(self, content: str, flagged: bool, target: str = "docs/live-doc.md") -> None:
         self.assert_flagged({"file_path": target, "content": content}, flagged)
@@ -107,17 +125,20 @@ class TestResiduePhraseMatrix(StaleRelationResidueHookBase):
         self.assert_content_flagged("keep the check-x -> check-y alias for one release", True)
 
     def test_unicode_arrow_alias_flagged_and_utf8_survives(self) -> None:
-        # Locks the _emit UTF-8 write side too: the snippet must round-trip through
-        # stderr as valid UTF-8 (a cp1252 write would mangle the arrow / Cyrillic).
+        # The snippet must round-trip correctly regardless of console codepage:
+        # the JSON envelope uses ensure_ascii=True, so the arrow / Cyrillic text
+        # is \uXXXX-escaped on the wire and json.loads decodes it back exactly.
         for script in RESIDUE_SCRIPTS:
             with self.subTest(script=script.parent.parent.name):
                 p = run_hook(
                     script,
                     {"tool_input": {"file_path": "docs/live-doc.md", "content": "старое → новое alias останется"}},
                 )
-                self.assertEqual(p.returncode, 1, p.stderr)  # a hit exits 1, never 2
-                self.assertTrue(p.stderr.strip(), "expected a warning")
-                self.assertIn("новое", p.stderr)
+                self.assertEqual(p.returncode, 0, p.stderr)  # AUDIT never exits non-zero
+                self.assertEqual(p.stderr, "")
+                self.assertTrue(p.stdout.strip(), "expected an advisory")
+                _event_name, context = _decode_context(p.stdout)
+                self.assertIn("новое", context)
 
     def test_is_wrong_correct_is_flagged(self) -> None:
         self.assert_content_flagged("this name is wrong, the correct is check_stray_artifact", True)
@@ -258,6 +279,7 @@ class TestFailOpen(StaleRelationResidueHookBase):
                 p = run_hook(script, None, raw_stdin="not json at all {{{")
                 self.assertEqual(p.returncode, 0)
                 self.assertEqual(p.stderr.strip(), "")
+                self.assertEqual(p.stdout.strip(), "")
 
     def test_envelope_without_tool_input_allows_silently(self) -> None:
         for script in RESIDUE_SCRIPTS:
@@ -265,6 +287,7 @@ class TestFailOpen(StaleRelationResidueHookBase):
                 p = run_hook(script, {"session_id": "x", "tool_name": "Write"})
                 self.assertEqual(p.returncode, 0)
                 self.assertEqual(p.stderr.strip(), "")
+                self.assertEqual(p.stdout.strip(), "")
 
     def test_non_dict_tool_input_allows_silently(self) -> None:
         for script in RESIDUE_SCRIPTS:
@@ -272,6 +295,7 @@ class TestFailOpen(StaleRelationResidueHookBase):
                 p = run_hook(script, {"tool_input": "a bare string, is a deprecated alias for nothing"})
                 self.assertEqual(p.returncode, 0)
                 self.assertEqual(p.stderr.strip(), "")
+                self.assertEqual(p.stdout.strip(), "")
 
 
 if __name__ == "__main__":

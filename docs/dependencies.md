@@ -21,10 +21,17 @@ An optional `Depends-on:` line in the dependent item's `status.md`
 Depends-on: <slug>, <slug>
 ```
 
-Targets are **work-items only**, resolved across `work-items/active/` +
-`work-items/archive/` (the slug is stable across the close-move). A slug that
-matches a bug, epic, or decision but no work-item is a **dangling** target by
-design — bugs/epics/decisions are not part of the dependency graph.
+Targets are **work-items only**, resolved across THREE locations:
+`work-items/active/`, `work-items/archive/` (the slug is stable across the
+close-move), and the `## Backlog` *section* of `work-items/index.md` —
+admitted-but-not-yet-started items (this is the index **section**, not a
+`work-items/backlog/` directory; the index is the one documented backlog
+authority). A backlog match is existence, not completion: an admitted item is
+never `done`, so a dependency on it stays open until the target item is
+actually finished. A slug that matches a bug, epic, or decision but no
+work-item — or that resolves in none of the three locations — is a
+**dangling** target by design — bugs/epics/decisions are not part of the
+dependency graph.
 
 ## Derived views (never stored)
 
@@ -38,7 +45,13 @@ scanning the active set (Codex has no commands):
   ≥1 open target is reported as `blocked`.
 - **ready-set** = active items whose every `Depends-on` target is done (or which
   have none) — the items safe to start now.
-- **dangling** = a `Depends-on` slug matching no item in `active/` or `archive/`.
+- **dangling** = a `Depends-on` slug that resolves in none of the three
+  locations (`active/`, `archive/`, or the `## Backlog` section of
+  `index.md`). In the checker script's own words, "cannot verify this
+  dependency is satisfied" and "this dependency doesn't parse as existing"
+  are the same epistemic state, and neither is evidence of readiness — so
+  `dangling` is folded INTO `blocked-by`, never excluded from it; the two are
+  NOT mutually exclusive.
 
 `/agents-status` shows the blocked count, the ready-set, and any dangling edge;
 `/agents-resume` warns when the item you are resuming is `blocked`.

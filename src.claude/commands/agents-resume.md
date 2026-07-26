@@ -8,7 +8,7 @@ Resume an interrupted agent chain from its saved state.
    - If a slug is given, load that work-item from `work-items/active/`
    - If empty, scan `work-items/active/` for all items. Display each with: slug, template, current stage, last completed agent, next action.
    - Also scan `work-items/epics/` for active epics and show each epic's roll-up (k/n children done), so a mid-epic resume restores the epic context, not just the single item.
-   - For each item, read the optional `Depends-on: <slug>, <slug>` line in its `status.md` and resolve each target across `work-items/active/` + `work-items/archive/` (done-predicate as in `/agents-status`). Show open targets as `blocked-by`, so the resume picture reflects standing blockers, not just the next action.
+   - For each item, read the optional `Depends-on: <slug>, <slug>` line in its `status.md` and resolve each target across `work-items/active/`, `work-items/archive/`, and the `## Backlog` section of `work-items/index.md` (done-predicate as in `/agents-status`; a backlog match is existence, not done). Show open targets as `blocked-by` — a target that resolves nowhere is ALSO shown as `blocked-by`, never treated as satisfied — so the resume picture reflects standing blockers, not just the next action.
    - If no active work-items found, say "Nothing to resume."
 
 2. **Load state.** Read `status.md` from the selected work-item:

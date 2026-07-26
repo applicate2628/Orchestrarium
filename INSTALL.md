@@ -171,6 +171,7 @@ Notes:
 - Repository classification: `WEAK MODEL / NOT RECOMMENDED`. Qwen is installable for explicit example, inspection, or compatibility use, while shipped production `externalProvider: auto` routing stays on `codex | claude`.
 - The root router currently exposes Qwen because matching root `scripts/install-qwen.sh` and `scripts/install-qwen.ps1` entrypoints are present in this checkout.
 - If a future checkout lacks those root entrypoints, fall back to the Qwen source tree directly: `src.qwen/QWEN.md`, `src.qwen/README.md`, and `src.qwen/scripts/validate-pack.sh` or `.\src.qwen\scripts\validate-pack.ps1`.
+- Project-level Qwen installs ensure `/.reports/`, `/.plans/`, `/work-items/`, and `/.scratch/` are present in the target repo `.gitignore` if they are missing, because session logs, plan snapshots, and repo-local task memory are local-only runtime output.
 - Decision-driving reads should prefer `.qwen/.agents-mode.yaml`, then local legacy `.qwen/.agents-mode`, then `~/.qwen/.agents-mode.yaml`, then global legacy `~/.qwen/.agents-mode`, then the shared cross-pack global `~/.agents-mode.yaml`; normalize whichever file supplied the effective config to the current canonical format in the same scope and never recreate any legacy file or synthesize a local override on read alone.
 
 ## Multi-pack setup

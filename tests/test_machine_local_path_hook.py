@@ -1,10 +1,16 @@
 """Regression tests for the machine-local-path PreToolUse hook (AUDIT mode).
 
-The hook fires on the edit's own tool_input (not session context), warns to
-stderr on a hit, and ALWAYS exits 0 (audit mode never blocks; fail-open on any
-internal error). Tests assert: real machine-local paths are flagged (stderr
-non-empty), placeholders / .scratch / clean content are not, and exit code is 0
-in every case — for BOTH the Claude and Codex copies of the hook.
+The hook fires on the edit's own tool_input (not session context), and ALWAYS
+exits 0 (audit mode never blocks; fail-open on any internal error). On a hit it
+emits one line of JSON to stdout --
+`{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":"..."}}`
+-- the model-visible delivery channel (see `hook_common.emit_advisory`); on a
+clean check it is silent. This replaced a stderr-plus-exit-1 form measured to
+reach nobody on either provider line (see
+work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-its-
+sibling-calls-broken.md). Tests assert: real machine-local paths are flagged
+(non-empty stdout JSON), placeholders / .scratch / clean content are not, and
+exit code is 0 in every case — for BOTH the Claude and Codex copies of the hook.
 
 (The companion no-trash-in-repo hook ships in the same install trees and has its
 own regression suite in test_no_trash_hook.py.)
@@ -51,16 +57,27 @@ _BS = chr(92)           # -> "\\" : a single literal backslash, kept out of sour
 _ELL = chr(0x2026)      # -> "…" : U+2026, kept out of source as pure-ASCII chr()
 
 
+def _decode_context(stdout: str) -> tuple[str, str]:
+    """Parse the hookSpecificOutput envelope; returns (hookEventName, additionalContext)."""
+    payload = json.loads(stdout)
+    specific = payload["hookSpecificOutput"]
+    return specific["hookEventName"], specific["additionalContext"]
+
+
 class TestMachineLocalPathHook(unittest.TestCase):
     def assert_flagged(self, tool_input: dict, flagged: bool) -> None:
         for script in MACHINE_PATH_SCRIPTS:
             with self.subTest(script=script.parent.parent.name):
                 p = run_hook(script, {"tool_input": tool_input})
-                # AUDIT never BLOCKS (never exit 2), but a hit exits 1 -- a non-blocking
-                # "<hook name> hook error" transcript notice -- so the warning is
-                # actually visible (exit 0's stderr is debug-log-only, see hooks docs).
-                self.assertEqual(p.returncode, 1 if flagged else 0, p.stderr)
-                self.assertEqual(bool(p.stderr.strip()), flagged, f"stderr={p.stderr!r}")
+                # AUDIT never BLOCKS (never exit 2) and never uses a non-zero exit
+                # for a hit either -- the advisory travels via stdout JSON, always
+                # exit 0 (see hook_common.emit_advisory).
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(p.stderr, "")
+                self.assertEqual(bool(p.stdout.strip()), flagged, f"stdout={p.stdout!r}")
+                if flagged:
+                    event_name, _context = _decode_context(p.stdout)
+                    self.assertEqual(event_name, "PreToolUse")
 
     def test_real_user_home_flagged(self) -> None:
         self.assert_flagged({"file_path": "README.md", "content": f"see C:/{_USERS}/realuser/.claude/x"}, True)
@@ -142,15 +159,18 @@ class TestMachineLocalPathHook(unittest.TestCase):
         self.assert_flagged({"file_path": "README.md", "content": "see C:/Users/X/foo"}, False)
 
     def test_cyrillic_path_emits_valid_utf8(self) -> None:
-        # Locks the _emit UTF-8 fix: a concrete Cyrillic username must flag AND
-        # round-trip through stderr as valid UTF-8 (a cp1252 write would mangle
-        # it, so the assertIn would fail on the replacement characters).
+        # A concrete Cyrillic username must flag AND round-trip correctly. The
+        # JSON envelope uses ensure_ascii=True, so the Cyrillic text is
+        # \uXXXX-escaped on the wire and json.loads decodes it back to the
+        # original characters regardless of console codepage.
         for script in MACHINE_PATH_SCRIPTS:
             with self.subTest(script=script.parent.parent.name):
                 p = run_hook(script, {"tool_input": {"file_path": "README.md", "content": f"see C:/{_USERS}/Петя/secret"}})
-                self.assertEqual(p.returncode, 1, p.stderr)  # a hit exits 1, never 2
-                self.assertTrue(p.stderr.strip(), "expected a warning")
-                self.assertIn("Петя", p.stderr)
+                self.assertEqual(p.returncode, 0, p.stderr)  # AUDIT never exits non-zero
+                self.assertEqual(p.stderr, "")
+                self.assertTrue(p.stdout.strip(), "expected an advisory")
+                _event_name, context = _decode_context(p.stdout)
+                self.assertIn("Петя", context)
 
     def test_malformed_stdin_fails_open(self) -> None:
         for script in MACHINE_PATH_SCRIPTS:
@@ -158,6 +178,7 @@ class TestMachineLocalPathHook(unittest.TestCase):
                 p = run_hook(script, None, raw_stdin="not json at all {{{")
                 self.assertEqual(p.returncode, 0)
                 self.assertEqual(p.stderr.strip(), "")
+                self.assertEqual(p.stdout.strip(), "")
 
 
 if __name__ == "__main__":

@@ -9,8 +9,13 @@ worktree per the parallel-isolation protocol). A missing/near-match/quoted/not-f
 marker, or two-or-more adds with one marker, still warns — one marker never
 suppresses a batch. `git worktree list/remove/prune`, `git add` (not `git worktree
 add`), other git commands, `git` inside a quoted string, non-git commands, and file
-writes never warn. AUDIT mode: always exit 0; a hit warns to stderr. Tested against
-BOTH the Claude and Codex hook copies.
+writes never warn. AUDIT mode: always exits 0; a hit emits one line of JSON to
+stdout -- `{"hookSpecificOutput":{"hookEventName":"PreToolUse","additionalContext":
+"..."}}` -- the model-visible delivery channel (see `hook_common.emit_advisory`);
+silent otherwise. This replaced a stderr-plus-exit-1 form measured to reach
+nobody on either provider line (see
+work-items/bugs/2026-07-26-mcp-reminder-uses-the-once-per-session-form-its-
+sibling-calls-broken.md). Tested against BOTH the Claude and Codex hook copies.
 """
 
 from __future__ import annotations
@@ -42,11 +47,12 @@ class TestStrayArtifactHook(unittest.TestCase):
         for script in HOOKS:
             with self.subTest(script=script.parent.parent.name):
                 p = run_hook(script, tool_input, raw)
-                # AUDIT never BLOCKS (never exit 2), but a hit exits 1 -- a non-blocking
-                # "<hook name> hook error" transcript notice -- so the warning is
-                # actually visible (exit 0's stderr is debug-log-only, see hooks docs).
-                self.assertEqual(p.returncode, 1 if should_warn else 0, p.stderr)
-                self.assertEqual(bool(p.stderr.strip()), should_warn, f"stderr={p.stderr!r}")
+                # AUDIT never BLOCKS (never exit 2) and never uses a non-zero exit
+                # for a hit either -- the advisory travels via stdout JSON, always
+                # exit 0 (see hook_common.emit_advisory).
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(p.stderr, "")
+                self.assertEqual(bool(p.stdout.strip()), should_warn, f"stdout={p.stdout!r}")
 
     # --- WARN: confident `git worktree add` ---
     def test_worktree_add_bare(self) -> None:
@@ -129,6 +135,7 @@ class TestStrayArtifactHook(unittest.TestCase):
                 p = run_hook(script, None, raw="not json {{{")
                 self.assertEqual(p.returncode, 0)
                 self.assertEqual(p.stderr.strip(), "")
+                self.assertEqual(p.stdout.strip(), "")
 
     def test_no_tool_input_fails_open(self) -> None:
         for script in HOOKS:
@@ -136,6 +143,7 @@ class TestStrayArtifactHook(unittest.TestCase):
                 p = run_hook(script, None, raw=json.dumps({"cwd": "/tmp"}))
                 self.assertEqual(p.returncode, 0)
                 self.assertEqual(p.stderr.strip(), "")
+                self.assertEqual(p.stdout.strip(), "")
 
 
 class TestRequestedIsolationMarker(unittest.TestCase):
@@ -150,11 +158,12 @@ class TestRequestedIsolationMarker(unittest.TestCase):
         for script in HOOKS:
             with self.subTest(script=script.parent.parent.name):
                 p = run_hook(script, tool_input, raw)
-                # AUDIT never BLOCKS (never exit 2), but a hit exits 1 -- a non-blocking
-                # "<hook name> hook error" transcript notice -- so the warning is
-                # actually visible (exit 0's stderr is debug-log-only, see hooks docs).
-                self.assertEqual(p.returncode, 1 if should_warn else 0, p.stderr)
-                self.assertEqual(bool(p.stderr.strip()), should_warn, f"stderr={p.stderr!r}")
+                # AUDIT never BLOCKS (never exit 2) and never uses a non-zero exit
+                # for a hit either -- the advisory travels via stdout JSON, always
+                # exit 0 (see hook_common.emit_advisory).
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(p.stderr, "")
+                self.assertEqual(bool(p.stdout.strip()), should_warn, f"stdout={p.stdout!r}")
 
     # --- silent: exactly one add + exact end-of-command marker ---
     def test_single_add_with_exact_marker_no_warn(self) -> None:

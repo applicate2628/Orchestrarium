@@ -29,7 +29,7 @@ Do NOT auto-invoke for single-module additive design, or when the design problem
    - Internal lane → `subagent_type: architect` with an explicit `model:` override.
    - External lane (when used) → `subagent_type: external-worker` inheriting `architect`.
    - Optional comparison scout (after lanes return) → `subagent_type: analyst`, `model: sonnet` — factual set-diff, no verdict.
-   Carry the identical pinned input to every lane; only the framing overlay differs. Each lane writes its candidate to `design-<lane>.md` — never `design.md`.
+   Carry the identical pinned input to every lane; only the framing overlay differs. Each lane writes its candidate to `design-<lane>.md` — never `design.md`. Where the host cannot launch every lane concurrently (for example, the in-session concurrency ceiling — see the lead skill's subagent thread-limit discipline — is already spent), dispatch the remaining lanes sequentially in fresh contexts instead; sequential execution does not change the panel's logic, only its concurrency — each lane still needs a fresh context that has not seen a sibling lane's output.
 
 5. **Collect.** Verify each lane's captured OUTPUT (not its notification) before counting it. A died, timed-out, or empty lane is `UNVERIFIED` — re-run it with the same framing; never silently reduce quorum below `N=2`.
 

@@ -36,6 +36,8 @@ The orchestrator drives the loop to convergence **without a human gate per round
 
 **Runaway guard:** cap at **N = 3** rounds; if not converged by round 3, stop and escalate the deadlock. Escalate EARLY if the same blocker survives unchanged across two rounds.
 
+**Model-mismatch trigger (a distinct escape the runaway cap misses).** The cap above catches a blocker that survives UNCHANGED. A different failure hides from it: the blocker MOVES — each round closes one manifestation and a new adjacent one appears (a "phase-graph chase"). That recurrence signals the MODEL is wrong, not that the last fix had a bug — a correctness loop, which only asks "is this fix correct?", cannot by construction name a model mismatch, so it chases the defect around the phase graph indefinitely. When the same defect CLASS reappears at a new spot across ~3 rounds, STOP correctness rounds and dispatch a MODEL-review lane (design/architecture angles, e.g. `architect` / `architecture-reviewer`) asked whether the mechanism/model is right or the chase is a model-mismatch symptom — fed the manifestation phase-graph (where the defect surfaced across rounds), not the latest diff — to name the right model or confirm the current one is at its honest documented-residual floor. Resume correctness rounds only after the model is confirmed or replaced. Per the `review-the-model-not-just-the-spec` precedent.
+
 ## Hardening invariants (every round)
 Against false convergence (angles agreeing on a wrong-but-plausible result) and weak anti-drift:
 1. **Runtime-evidence is a hard gate, not a section.** The artifact's runtime-verified root must be captured THIS session; a second-hand root (commit message, prior plan, report) is runtime-verified first or the loop does not start.
@@ -44,9 +46,11 @@ Against false convergence (angles agreeing on a wrong-but-plausible result) and 
 4. **Per-round diff** — record what changed and why (which blocker it answers).
 5. **Verify OUTPUTS, not notifications** — read the captured angle output and confirm a real verdict/findings before counting it. A completion signal from a *sidecar* (watcher / notifier / background-task callback / "task done" notification) is NOT a liveness verdict on the process it watches: liveness of a launched run is proven only by a DIRECT probe of the run itself — its PID/exit status, or its own `.out`/`.err` carrying a normal-completion marker — never by a neighboring task's completion.
 6. **Escalate early on a stuck blocker.**
+7. **Failed lane is unverified.** Any expected lane that errors, dies, or hits a time/token/usage limit is UNVERIFIED. Record the failed attempt, re-dispatch that lane, and never infer a clean result from silence. Before convergence, reconcile expected lanes against substantive outputs and recorded failures; every failure must name the successful re-dispatch that supersedes it.
+8. **Fail-closed aggregation.** A missing/null sub-verdict or findings payload is NOT-clean. An aggregation or gate remains `REVISE` and exits non-zero until every expected lane has substantive output and every recorded failure is reconciled.
 
 ## review-loop-state ledger (structural backstop)
-A SHIPPED loop in a governed pack runs autonomous-to-convergence (human only at convergence) but MUST persist a per-round `review-loop-state` record so the discipline leaves an auditable structural trace (a personal/operator-owned loop may run without it — the operator accepts that risk). Per round, persist:
+A SHIPPED loop in a governed pack runs autonomous-to-convergence (human only at convergence) and MUST persist a per-round `review-loop-state` record so the discipline leaves an auditable structural trace, and so hardening invariant 7 has a specified place to record a failed lane (a personal/operator-owned loop may run without it — the operator accepts that risk). Per round, persist:
 - pinned `objective`, `scope`, `runtime_root` (MUST be identical across all rounds of one loop)
 - `round` number (≤ cap)
 - `diff` (what changed since the prior round and why)
@@ -55,6 +59,8 @@ A SHIPPED loop in a governed pack runs autonomous-to-convergence (human only at 
 - evidence / output-artifact references
 
 A structural validator checks the SCHEMA (anchors present + unchanged, diff present, both verdict angles + scout present, no bare PASS, cap respected) — it does NOT and cannot check the semantics (whether the reasoning was sound; that stays review territory). This is the honest boundary: structure is mechanically enforceable, soundness is not.
+
+**Envelope of the ledger `MUST`.** It binds the orchestrator in-session and is what a reviewer or the operator cites when the trace is missing; it is NOT mechanically enforced. The residual is sharper than "the validator may not be installed": **no mechanism observes the ledger's ABSENCE** — the schema validator's only input IS the record, and the invariants are applied in-session by the same actor that would have written it, so neither can catch the case where no record is written at all. Closing that gap needs a runtime-authored observer of loop-ran-without-ledger, not a stronger verb. Until one exists, treat a missing ledger as a reviewable violation, never as a silently acceptable outcome.
 
 ## Terms and Abbreviations
 - **angle**: one independent review lens (surgical / deep / mechanical-scout) in the loop.

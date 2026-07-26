@@ -579,6 +579,23 @@ def print_report(valuables: Sequence[dict[str, object]]) -> None:
         print(f"  {item['path']}  (age={item['age_days']}d, size={item['size']}B)")
 
 
+def _parse_cli_now(value: str) -> datetime:
+    """Parse `--now`'s ISO-8601 argument into a datetime `_coerce_now` can
+    normalize to aware UTC. This is the CLI's clock-injection SEAM: `main`
+    has no other path to a caller-supplied clock, so every age-dependent
+    CLI test was previously unable to run deterministically (see
+    `work-items/bugs/2026-07-26-cleanup-cli-path-has-no-now-seam-so-age-tests-are-time-bombs.md`).
+    Malformed input raises `ArgumentTypeError` so argparse reports a clean
+    usage error instead of a raw traceback."""
+
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"--now must be an ISO-8601 datetime (e.g. 2026-07-17T12:00:00+00:00): {exc}"
+        ) from exc
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -601,13 +618,25 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--json", action="store_true", help="Emit the result as JSON instead of a report")
+    parser.add_argument(
+        "--now",
+        type=_parse_cli_now,
+        default=None,
+        help=(
+            "Override the clock used for age calculations (ISO-8601, e.g. "
+            "2026-07-17T12:00:00+00:00). Test/debugging seam only -- omit this to use the "
+            "real wall clock, which is the production behaviour."
+        ),
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     root = args.root.resolve()
-    valuables = scan_valuables(root / SCRATCH_DIRNAME, fallback_age_days=args.fallback_age_days)
+    valuables = scan_valuables(
+        root / SCRATCH_DIRNAME, fallback_age_days=args.fallback_age_days, now=args.now
+    )
     if args.json:
         print(json.dumps({"valuables": valuables}, ensure_ascii=False))
     else:
