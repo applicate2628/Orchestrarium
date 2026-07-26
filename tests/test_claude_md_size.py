@@ -33,8 +33,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "c0624b3c42cc0a310896b98e4cc1dfac21f68131185e21b6eb138c5f8759a272",
     ),
     "hook-behavior-contracts": (
-        21_395,
-        "8492ebbd9d89a8d2f324fb7da453b03c9d5aa951ab52fb293e43fbf8ecebe77f",
+        21_996,
+        "81d0152163c08f7ec32e4ed5b6fcc9bf82be6eec7a6c329ba167d40a6811f726",
     ),
     "hook-entrypoints-placement": (
         2_492,
