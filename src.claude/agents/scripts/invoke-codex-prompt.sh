@@ -60,7 +60,13 @@ LEDGER_CLOSES=()
 #     -- --model gpt-5.6-sol -c model_reasoning_effort=max
 #   `gpt-5.6-terra` (balanced/cheap tier; a distinct model, not an effort suffix):
 #     -- --model gpt-5.6-terra -c model_reasoning_effort=high
-# An explicit `--` block always overrides these defaults, including `--model`.
+# An explicit `--` block REPLACES these defaults wholesale, including `--model` —
+# it is not merged. A partial block (e.g. only `-c model_reasoning_effort=max`)
+# therefore drops the model pin entirely. To keep that from silently falling back
+# to whatever model ~/.codex/config.toml sets ambiently, the wrapper validates the
+# FINAL resolved flags below and refuses to launch unless an explicit --model and
+# an explicit -c model_reasoning_effort=<tier> are both present, regardless of
+# whether they came from these defaults or from a caller-supplied `--` block.
 CODEX_FLAGS=("--model" "gpt-5.6-sol" "-c" "model_reasoning_effort=xhigh")
 SAW_DELIMITER=0
 while [[ $# -gt 0 ]]; do
@@ -123,6 +129,46 @@ if [[ -z "$TOPIC" ]]; then
   exit 1
 fi
 
+# A12 guard: the FINAL resolved CODEX_FLAGS (the shipped default, OR a caller
+# `--` block that replaces it wholesale — see the comment above the default
+# assignment) must carry an explicit --model and an explicit
+# -c model_reasoning_effort=<tier>. Checked here, once, on whichever array the
+# arg-parsing loop above actually produced, so this catches both a partial `--`
+# block that drops the model pin and a hypothetical future variant that ships no
+# default at all — either way, an unpinned run must never reach codex and
+# silently resolve its model from the ambient ~/.codex/config.toml.
+CODEX_RESOLVED_MODEL=""
+CODEX_RESOLVED_EFFORT=""
+for ((_ci=0; _ci<${#CODEX_FLAGS[@]}; _ci++)); do
+  case "${CODEX_FLAGS[$_ci]}" in
+    --model)
+      # Reject a "value" that is itself another flag (e.g. `--model -c ...` with
+      # the model name missing) so a malformed override cannot resolve to a
+      # bogus non-empty model that passes the guard and gets recorded as-is.
+      _candidate="${CODEX_FLAGS[$((_ci+1))]:-}"
+      if [[ -n "$_candidate" && "$_candidate" != -* ]]; then
+        CODEX_RESOLVED_MODEL="$_candidate"
+      fi
+      ;;
+    -c)
+      # Anchored at BOTH ends (was start-only): an unlisted tier like
+      # "lowest" or "highestpossible" must not match "low"/"high" as a
+      # prefix — that would let the ledger record a tier the guard "approved"
+      # while codex itself receives the untruncated (and invalid) value.
+      if [[ "${CODEX_FLAGS[$((_ci+1))]:-}" =~ ^model_reasoning_effort=\"?(low|medium|high|xhigh|max)\"?$ ]]; then
+        CODEX_RESOLVED_EFFORT="${BASH_REMATCH[1]}"
+      fi
+      ;;
+  esac
+done
+if [[ -z "$CODEX_RESOLVED_MODEL" || -z "$CODEX_RESOLVED_EFFORT" ]]; then
+  echo "FAIL: A12 violation - the resolved codex flags carry no explicit --model and/or no explicit -c model_reasoning_effort=<tier>." >&2
+  echo "FAIL: a '--' block replaces ALL defaults, including --model, so a partial override (e.g. only changing effort or a feature toggle) silently drops the model pin and falls back to the ambient ~/.codex/config.toml model — the exact outcome A12 forbids." >&2
+  echo "FAIL: pass the FULL per-profile flag set after --, e.g.:" >&2
+  echo "FAIL:   -- --model gpt-5.6-sol -c model_reasoning_effort=xhigh" >&2
+  exit 1
+fi
+
 CODEX_CMD="${CODEX_BIN:-codex}"
 if ! command -v "$CODEX_CMD" >/dev/null 2>&1; then
   echo "FAIL: codex binary '$CODEX_CMD' not found on PATH. Set CODEX_BIN if installed elsewhere." >&2
@@ -166,18 +212,17 @@ if [[ -n "$LEDGER_ITEM" ]]; then
     exit 1
   fi
   LAUNCH_RUN_ID="$(date -u +%Y%m%dT%H%M%S)Z-launch-${SLUG}"
-  LEDGER_EFFORT=""
-  if [[ "${CODEX_FLAGS[*]}" =~ model_reasoning_effort=\"?(low|medium|high|xhigh|max) ]]; then
-    LEDGER_EFFORT="${BASH_REMATCH[1]}"
-  fi
+  # Both fields were already validated non-empty by the A12 guard above; reuse
+  # the same resolved values here instead of re-deriving them, so the guard and
+  # the recorded provenance can never key on different extractions.
   ledger_args=(--work-item "$LEDGER_ITEM" append --run-id "$LAUNCH_RUN_ID" \
     --role "$LEDGER_ROLE" --execution-role external-reviewer --provider codex \
     --status running --gate none --scope "external run: ${SLUG}" \
     --event-kind launch --prompt-file "$PROMPT_PATH" \
-    --notes "wrapper-dispatched; terminal event follows the completion oracle")
+    --notes "wrapper-dispatched; terminal event follows the completion oracle" \
+    --model "$CODEX_RESOLVED_MODEL" --effort "$CODEX_RESOLVED_EFFORT")
   [[ -n "$LEDGER_LANE" ]] && ledger_args+=(--lane "$LEDGER_LANE")
   [[ -n "$LEDGER_ARTIFACT" ]] && ledger_args+=(--artifact "$LEDGER_ARTIFACT")
-  [[ -n "$LEDGER_EFFORT" ]] && ledger_args+=(--effort "$LEDGER_EFFORT")
   if ! python "$LEDGER_HELPER" "${ledger_args[@]}" >/dev/null; then
     echo "FAIL: could not record launch event in $LEDGER_ITEM" >&2
     exit 1
@@ -238,10 +283,10 @@ if [[ -n "$LEDGER_ITEM" ]]; then
     --role "$LEDGER_ROLE" --execution-role external-reviewer --provider codex \
     --status "$TERM_STATUS" --gate "$TERM_GATE" --scope "external run: ${SLUG}" \
     --event-kind terminal --launch-run-id "$LAUNCH_RUN_ID" \
-    --evidence "review:${VERDICT_PATH}" --notes "$TERM_NOTE")
+    --evidence "review:${VERDICT_PATH}" --notes "$TERM_NOTE" \
+    --model "$CODEX_RESOLVED_MODEL" --effort "$CODEX_RESOLVED_EFFORT")
   [[ -n "$LEDGER_LANE" ]] && term_args+=(--lane "$LEDGER_LANE")
   [[ -n "$LEDGER_ARTIFACT" ]] && term_args+=(--artifact "$LEDGER_ARTIFACT")
-  [[ -n "$LEDGER_EFFORT" ]] && term_args+=(--effort "$LEDGER_EFFORT")
   if [[ "$TERM_GATE" == "PASS" && ${#LEDGER_CLOSES[@]} -gt 0 ]]; then
     for c in "${LEDGER_CLOSES[@]}"; do term_args+=(--closes "$c"); done
   fi

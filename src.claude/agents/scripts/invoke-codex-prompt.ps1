@@ -13,7 +13,33 @@
     Get-Content -Raw prompt.md |
       powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-codex-prompt.ps1 advisory-adr
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-codex-prompt.ps1 worker-task --% --prompt-file prompt.md -- --model gpt-5.6-sol
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "& '.claude\agents\scripts\invoke-codex-prompt.ps1' worker-task -PromptFile 'prompt.md' -CodexFlags @('--model','gpt-5.6-sol','-c','model_reasoning_effort=xhigh')"
+.NOTES
+    Overriding the default profile: use the `-Command` / call-operator (`&`) form shown
+    above — verified end-to-end (guard passes, reaches the codex binary probe) on both
+    Windows PowerShell 5.1 and PowerShell 7.6.
+
+    Do NOT use `-File` when overriding -CodexFlags. `-File` is a process-spawn boundary:
+    the child process receives only literal argv strings, and there is no `-File` shape
+    that survives it. All three of the following were measured to fail, identically, on
+    both hosts:
+      - an array literal typed after `-File` (`... -File script.ps1 ... -CodexFlags
+        @('--model', ...)`) — the OUTER shell evaluates and flattens `@(...)` into
+        separate strings before the CHILD process ever sees them, and the flattened
+        `-CodexFlags` token collides with the array elements that follow, so the child's
+        own parameter binder reports "parameter 'CodexFlags' is specified more than once";
+      - a bare `--` delimiter (`-- --model gpt-5.6-sol ...`) — unlike the Bash sibling,
+        PowerShell's parameter binder has no `--`-end-of-options convention: a literal
+        `--` token is parsed as an attempt to bind a parameter with an empty name, which
+        is ambiguous against every declared parameter here;
+      - a comma-joined string (`-CodexFlags --model,gpt-5.6-sol,-c,...`) — this arrives
+        as ONE literal token, not four, so the guard finds no exact `--model` match and
+        denies.
+    Only the `-Command`/call-operator form works, because there the SAME process that
+    evaluates the `@(...)` array literal also invokes the script via `&` — the array
+    never crosses a process boundary as flattened strings. This is a property of how any
+    process passes arguments to a child, not a PowerShell-host difference: both 5.1 and
+    7.6 were measured to behave identically for every shape above.
 #>
 param(
   [Parameter(Mandatory = $true, Position = 0)]
@@ -56,10 +82,64 @@ if (-not $CodexFlags -or $CodexFlags.Count -eq 0) {
   # top-level --quiet / --full-auto flags were removed. A12: every provider-backed
   # run must carry an explicit model AND effort, never an ambient one — the
   # default below pins the shipped default profile `gpt-5.6-sol-xhigh`. Callers
-  # needing a different profile (e.g. `--model gpt-5.6-sol -c
-  # model_reasoning_effort=max` or `--model gpt-5.6-terra -c model_reasoning_effort=high`) pass the full flag
-  # set after `--`, which always overrides this default.
+  # needing a different profile invoke via `-Command "& script.ps1 ... -CodexFlags
+  # @(...)"` (see the .EXAMPLE / .NOTES above this param block — `-File` cannot
+  # carry an override array across its process-spawn boundary, and a bare `--`
+  # delimiter is unsupported here regardless of host; both are documented and
+  # measured above, not just a style preference), which REPLACES this default
+  # wholesale (including --model) — it is not merged, so a partial override
+  # drops the pin. The guard below validates the FINAL
+  # resolved array and refuses to launch otherwise.
   $CodexFlags = @('--model', 'gpt-5.6-sol', '-c', 'model_reasoning_effort=xhigh')
+}
+
+# A12 guard helpers: find an explicit --model value, and an explicit
+# -c model_reasoning_effort=<tier> value, in a resolved codex flag array.
+# Case-sensitive matches (-ceq/-cmatch) so this mirrors the Bash sibling's
+# case-sensitive `case`/`=~` matching exactly, rather than PowerShell's
+# default case-INSENSITIVE string comparison.
+function Get-CodexFlagModel {
+  param([string[]]$Flags)
+  # Bound is $Flags.Count (not Count - 1): scanning every index, including the
+  # last one, is deliberate so no reader has to re-derive that a narrower bound
+  # is equivalent. $Flags[$i + 1] on the last index reads one past the end,
+  # which PowerShell returns as $null (no exception) — the `-and` short-circuits
+  # to false there, so this is a no-op for that index, not an out-of-bounds risk.
+  for ($i = 0; $i -lt $Flags.Count; $i++) {
+    if ($Flags[$i] -ceq '--model' -and $Flags[$i + 1] -and $Flags[$i + 1] -cnotmatch '^-') { return $Flags[$i + 1] }
+  }
+  return $null
+}
+function Get-CodexFlagEffort {
+  param([string[]]$Flags)
+  # See Get-CodexFlagModel above for why the bound is Count, not Count - 1.
+  for ($i = 0; $i -lt $Flags.Count; $i++) {
+    if ($Flags[$i] -ceq '-c' -and $Flags[$i + 1] -cmatch '^model_reasoning_effort="?(low|medium|high|xhigh|max)"?$') {
+      return $Matches[1]
+    }
+  }
+  return $null
+}
+
+# A12 guard: the FINAL resolved $CodexFlags (the shipped default above, OR a
+# non-empty remaining-argument block that replaces it wholesale — a partial
+# block bound to $CodexFlags at the top of the script suppresses the default
+# entirely, per the `ValueFromRemainingArguments` parameter) must carry an
+# explicit --model and an explicit -c model_reasoning_effort=<tier>. Checked
+# once here, on whichever array is in scope by this point, so this catches
+# both a partial override that drops the model pin and a hypothetical future
+# variant that ships no default at all — either way, an unpinned run must
+# never reach codex and silently resolve its model from the ambient
+# ~/.codex/config.toml.
+$codexResolvedModel = Get-CodexFlagModel -Flags $CodexFlags
+$codexResolvedEffort = Get-CodexFlagEffort -Flags $CodexFlags
+if ([string]::IsNullOrEmpty($codexResolvedModel) -or [string]::IsNullOrEmpty($codexResolvedEffort)) {
+  Write-Error ("FAIL: A12 violation - the resolved codex flags carry no explicit --model and/or no explicit " +
+    "-c model_reasoning_effort=<tier>. A remaining-argument block replaces ALL defaults, including --model, " +
+    "so a partial override (e.g. only changing effort or a feature toggle) silently drops the model pin and " +
+    "falls back to the ambient ~/.codex/config.toml model - the exact outcome A12 forbids. Pass the FULL " +
+    "per-profile flag set, e.g.: --model gpt-5.6-sol -c model_reasoning_effort=xhigh")
+  exit 1
 }
 
 $codexBin = if ($env:CODEX_BIN) { $env:CODEX_BIN } else { 'codex' }
@@ -186,16 +266,17 @@ if ($Ledger) {
     exit 1
   }
   $launchRunId = "{0:yyyyMMddTHHmmss}Z-launch-{1}" -f [DateTime]::UtcNow, $slug
-  $ledgerEffort = ''
-  if (($CodexFlags -join ' ') -match '(model_reasoning_effort=|--effort +)"?(low|medium|high|xhigh|max)') { $ledgerEffort = $Matches[2] }
+  # Both fields were already validated non-empty by the A12 guard above; reuse
+  # the same resolved values here instead of re-deriving them, so the guard and
+  # the recorded provenance can never key on different extractions.
   $ledgerArgs = @('--work-item', $Ledger, 'append', '--run-id', $launchRunId,
     '--role', $LedgerRole, '--execution-role', 'external-reviewer', '--provider', 'codex',
     '--status', 'running', '--gate', 'none', '--scope', "external run: $slug",
     '--event-kind', 'launch', '--prompt-file', $promptPath,
-    '--notes', 'wrapper-dispatched; terminal event follows the completion oracle')
+    '--notes', 'wrapper-dispatched; terminal event follows the completion oracle',
+    '--model', $codexResolvedModel, '--effort', $codexResolvedEffort)
   if ($LedgerLane) { $ledgerArgs += @('--lane', $LedgerLane) }
   if ($LedgerArtifact) { $ledgerArgs += @('--artifact', $LedgerArtifact) }
-  if ($ledgerEffort) { $ledgerArgs += @('--effort', $ledgerEffort) }
   & python $ledgerHelper @ledgerArgs | Out-Null
   if ($LASTEXITCODE -ne 0) {
     Write-Error "FAIL: could not record launch event in $Ledger"
@@ -278,10 +359,10 @@ if ($Ledger) {
     '--role', $LedgerRole, '--execution-role', 'external-reviewer', '--provider', 'codex',
     '--status', $termStatus, '--gate', $termGate, '--scope', "external run: $slug",
     '--event-kind', 'terminal', '--launch-run-id', $launchRunId,
-    '--evidence', "review:$verdictPath", '--notes', $termNote)
+    '--evidence', "review:$verdictPath", '--notes', $termNote,
+    '--model', $codexResolvedModel, '--effort', $codexResolvedEffort)
   if ($LedgerLane) { $termArgs += @('--lane', $LedgerLane) }
   if ($LedgerArtifact) { $termArgs += @('--artifact', $LedgerArtifact) }
-  if ($ledgerEffort) { $termArgs += @('--effort', $ledgerEffort) }
   if ($termGate -eq 'PASS' -and $LedgerCloses) {
     foreach ($c in $LedgerCloses) { $termArgs += @('--closes', $c) }
   }

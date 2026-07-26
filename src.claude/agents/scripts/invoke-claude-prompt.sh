@@ -67,7 +67,13 @@ LEDGER_CLOSES=()
 #     -- -p --output-format text --model opus --effort max
 #   `sonnet-high` (balanced/lighter tier):
 #     -- -p --output-format text --model sonnet --effort high
-# An explicit `--` block always overrides these defaults, including `--model`.
+# An explicit `--` block REPLACES these defaults wholesale, including `--model` —
+# it is not merged. A partial block (e.g. only changing `--effort`) therefore
+# drops the model pin entirely. To keep that from silently falling back to
+# whatever model the ambient claude config selects, the wrapper validates the
+# FINAL resolved flags below and refuses to launch unless an explicit --model
+# and an explicit --effort <tier> are both present, regardless of whether they
+# came from these defaults or from a caller-supplied `--` block.
 CLAUDE_FLAGS=("-p" "--output-format" "text" "--model" "opus" "--effort" "xhigh")
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -125,6 +131,47 @@ done
 if [[ -z "$TOPIC" ]]; then
   echo "FAIL: <topic-slug> required as first positional argument" >&2
   usage >&2
+  exit 1
+fi
+
+# A12 guard: the FINAL resolved CLAUDE_FLAGS (the shipped default, OR a caller
+# `--` block that replaces it wholesale — see the comment above the default
+# assignment) must carry an explicit --model and an explicit --effort <tier>.
+# Checked here, once, on whichever array the arg-parsing loop above actually
+# produced, so this catches both a partial `--` block that drops the model pin
+# and a hypothetical future variant that ships no default at all — either way,
+# an unpinned run must never reach claude and silently resolve its model from
+# ambient config.
+CLAUDE_RESOLVED_MODEL=""
+CLAUDE_RESOLVED_EFFORT=""
+for ((_ci=0; _ci<${#CLAUDE_FLAGS[@]}; _ci++)); do
+  case "${CLAUDE_FLAGS[$_ci]}" in
+    --model)
+      # Reject a "value" that is itself another flag (e.g. `--model --effort ...`
+      # with the model name missing) so a malformed override cannot resolve to a
+      # bogus non-empty model that passes the guard and gets recorded as-is.
+      _candidate="${CLAUDE_FLAGS[$((_ci+1))]:-}"
+      if [[ -n "$_candidate" && "$_candidate" != -* ]]; then
+        CLAUDE_RESOLVED_MODEL="$_candidate"
+      fi
+      ;;
+    --effort)
+      # Exact enum match (not a regex prefix), so an unlisted tier like
+      # "lowest" already cannot match "low" here — F5 does not apply to this
+      # extraction, only to the Codex sibling's `-c key=value` regex form.
+      case "${CLAUDE_FLAGS[$((_ci+1))]:-}" in
+        low|medium|high|xhigh|max)
+          CLAUDE_RESOLVED_EFFORT="${CLAUDE_FLAGS[$((_ci+1))]}"
+          ;;
+      esac
+      ;;
+  esac
+done
+if [[ -z "$CLAUDE_RESOLVED_MODEL" || -z "$CLAUDE_RESOLVED_EFFORT" ]]; then
+  echo "FAIL: A12 violation - the resolved claude flags carry no explicit --model and/or no explicit --effort <tier>." >&2
+  echo "FAIL: a '--' block replaces ALL defaults, including --model, so a partial override (e.g. only changing effort) silently drops the model pin and falls back to whatever model the ambient claude config selects — the exact outcome A12 forbids." >&2
+  echo "FAIL: pass the FULL per-profile flag set after --, e.g.:" >&2
+  echo "FAIL:   -- -p --output-format text --model opus --effort xhigh" >&2
   exit 1
 fi
 
@@ -220,16 +267,12 @@ if [[ -n "$LEDGER_ITEM" ]]; then
     exit 1
   fi
   LAUNCH_RUN_ID="$(date -u +%Y%m%dT%H%M%S)Z-launch-${SLUG}"
-  LEDGER_EFFORT=""
-  for ((i=0; i<${#CLAUDE_FLAGS[@]}; i++)); do
-    if [[ "${CLAUDE_FLAGS[$i]}" == "--effort" && -n "${CLAUDE_FLAGS[$((i+1))]:-}" ]]; then
-      LEDGER_EFFORT="${CLAUDE_FLAGS[$((i+1))]}"
-    fi
-  done
-  ledger_args=(--work-item "$LEDGER_ITEM" append --run-id "$LAUNCH_RUN_ID"     --role "$LEDGER_ROLE" --execution-role external-reviewer --provider claude     --status running --gate none --scope "external run: ${SLUG}"     --event-kind launch --prompt-file "$PROMPT_PATH"     --notes "wrapper-dispatched; terminal event follows the completion oracle")
+  # Both fields were already validated non-empty by the A12 guard above; reuse
+  # the same resolved values here instead of re-deriving them, so the guard and
+  # the recorded provenance can never key on different extractions.
+  ledger_args=(--work-item "$LEDGER_ITEM" append --run-id "$LAUNCH_RUN_ID"     --role "$LEDGER_ROLE" --execution-role external-reviewer --provider claude     --status running --gate none --scope "external run: ${SLUG}"     --event-kind launch --prompt-file "$PROMPT_PATH"     --notes "wrapper-dispatched; terminal event follows the completion oracle"     --model "$CLAUDE_RESOLVED_MODEL" --effort "$CLAUDE_RESOLVED_EFFORT")
   [[ -n "$LEDGER_LANE" ]] && ledger_args+=(--lane "$LEDGER_LANE")
   [[ -n "$LEDGER_ARTIFACT" ]] && ledger_args+=(--artifact "$LEDGER_ARTIFACT")
-  [[ -n "$LEDGER_EFFORT" ]] && ledger_args+=(--effort "$LEDGER_EFFORT")
   if ! python "$LEDGER_HELPER" "${ledger_args[@]}" >/dev/null; then
     echo "FAIL: could not record launch event in $LEDGER_ITEM" >&2
     exit 1
@@ -266,10 +309,9 @@ if [[ -n "$LEDGER_ITEM" ]]; then
   else
     TERM_NOTE+="final line is not an anchored GATE verdict"
   fi
-  term_args=(--work-item "$LEDGER_ITEM" append     --role "$LEDGER_ROLE" --execution-role external-reviewer --provider claude     --status "$TERM_STATUS" --gate "$TERM_GATE" --scope "external run: ${SLUG}"     --event-kind terminal --launch-run-id "$LAUNCH_RUN_ID"     --evidence "review:${OUT_PATH}" --notes "$TERM_NOTE")
+  term_args=(--work-item "$LEDGER_ITEM" append     --role "$LEDGER_ROLE" --execution-role external-reviewer --provider claude     --status "$TERM_STATUS" --gate "$TERM_GATE" --scope "external run: ${SLUG}"     --event-kind terminal --launch-run-id "$LAUNCH_RUN_ID"     --evidence "review:${OUT_PATH}" --notes "$TERM_NOTE"     --model "$CLAUDE_RESOLVED_MODEL" --effort "$CLAUDE_RESOLVED_EFFORT")
   [[ -n "$LEDGER_LANE" ]] && term_args+=(--lane "$LEDGER_LANE")
   [[ -n "$LEDGER_ARTIFACT" ]] && term_args+=(--artifact "$LEDGER_ARTIFACT")
-  [[ -n "$LEDGER_EFFORT" ]] && term_args+=(--effort "$LEDGER_EFFORT")
   if [[ "$TERM_GATE" == "PASS" && ${#LEDGER_CLOSES[@]} -gt 0 ]]; then
     for c in "${LEDGER_CLOSES[@]}"; do term_args+=(--closes "$c"); done
   fi

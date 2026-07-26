@@ -21,7 +21,34 @@
     Get-Content -Raw prompt.md |
       powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-claude-prompt.ps1 advisory-adr
 .EXAMPLE
-    powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-claude-prompt.ps1 worker-task --% --prompt-file prompt.md -- --model opus --effort max
+    powershell -NoProfile -ExecutionPolicy Bypass -Command "& '.claude\agents\scripts\invoke-claude-prompt.ps1' worker-task -PromptFile 'prompt.md' -ClaudeFlags @('-p','--output-format','text','--model','opus','--effort','xhigh')"
+.NOTES
+    Overriding the default profile: use the `-Command` / call-operator (`&`) form shown
+    above — verified end-to-end (guard passes, reaches the claude binary probe) on both
+    Windows PowerShell 5.1 and PowerShell 7.6.
+
+    Do NOT use `-File` when overriding -ClaudeFlags. `-File` is a process-spawn boundary:
+    the child process receives only literal argv strings, and there is no `-File` shape
+    that survives it. All three of the following were measured to fail, identically, on
+    both hosts:
+      - an array literal typed after `-File` (`... -File script.ps1 ... -ClaudeFlags
+        @('--model', ...)`) — the OUTER shell evaluates and flattens `@(...)` into
+        separate strings before the CHILD process ever sees them, and the flattened
+        `-ClaudeFlags` token collides with the array elements that follow, so the
+        child's own parameter binder reports "parameter 'ClaudeFlags' is specified more
+        than once";
+      - a bare `--` delimiter (`-- --model opus --effort max`) — unlike the Bash
+        sibling, PowerShell's parameter binder has no `--`-end-of-options convention: a
+        literal `--` token is parsed as an attempt to bind a parameter with an empty
+        name, which is ambiguous against every declared parameter here;
+      - a comma-joined string (`-ClaudeFlags -p,--output-format,text,--model,...`) —
+        this arrives as ONE literal token, not several, so the guard finds no exact
+        `--model` match and denies.
+    Only the `-Command`/call-operator form works, because there the SAME process that
+    evaluates the `@(...)` array literal also invokes the script via `&` — the array
+    never crosses a process boundary as flattened strings. This is a property of how any
+    process passes arguments to a child, not a PowerShell-host difference: both 5.1 and
+    7.6 were measured to behave identically for every shape above.
 #>
 param(
   [Parameter(Mandatory = $true, Position = 0)]
@@ -63,10 +90,64 @@ if (-not $ClaudeFlags -or $ClaudeFlags.Count -eq 0) {
   # A12: every provider-backed run must carry an explicit model AND effort, never
   # an ambient one — the default below pins the shipped default profile `opus-xhigh`
   # (same fix as the sibling invoke-codex-prompt.ps1). Callers needing a different
-  # profile (e.g. `--model opus --effort max` or `--model sonnet --effort high`)
-  # pass the full flag set after `--`, which always overrides this default.
-  # (current claude CLI removed top-level --quiet; -p/--print is non-interactive)
+  # profile invoke via `-Command "& script.ps1 ... -ClaudeFlags @(...)"` (see the
+  # .EXAMPLE / .NOTES above this param block — `-File` cannot carry an override
+  # array across its process-spawn boundary, and a bare `--` delimiter is
+  # unsupported here regardless of host; both are documented and measured above,
+  # not just a style preference), which REPLACES this default wholesale
+  # (including --model) — it is not merged, so a partial override drops the pin.
+  # The guard below validates the FINAL resolved array and refuses to launch
+  # otherwise. (current claude CLI removed top-level --quiet; -p/--print is
+  # non-interactive)
   $ClaudeFlags = @('-p', '--output-format', 'text', '--model', 'opus', '--effort', 'xhigh')
+}
+
+# A12 guard helpers: find an explicit --model value, and an explicit --effort
+# <tier> value, in a resolved claude flag array. Case-sensitive matches
+# (-ceq/-ccontains) so this mirrors the Bash sibling's case-sensitive `case`
+# matching exactly, rather than PowerShell's default case-INSENSITIVE string
+# comparison.
+function Get-ClaudeFlagModel {
+  param([string[]]$Flags)
+  # Bound is $Flags.Count (not Count - 1): scanning every index, including the
+  # last one, is deliberate so no reader has to re-derive that a narrower bound
+  # is equivalent. $Flags[$i + 1] on the last index reads one past the end,
+  # which PowerShell returns as $null (no exception) — the `-and` short-circuits
+  # to false there, so this is a no-op for that index, not an out-of-bounds risk.
+  for ($i = 0; $i -lt $Flags.Count; $i++) {
+    if ($Flags[$i] -ceq '--model' -and $Flags[$i + 1] -and $Flags[$i + 1] -cnotmatch '^-') { return $Flags[$i + 1] }
+  }
+  return $null
+}
+function Get-ClaudeFlagEffort {
+  param([string[]]$Flags)
+  $allowed = @('low', 'medium', 'high', 'xhigh', 'max')
+  # See Get-ClaudeFlagModel above for why the bound is Count, not Count - 1.
+  # `-ccontains` against the fixed enum is already an exact-equality membership
+  # test (not a prefix/substring match), so unlike the Codex effort regex this
+  # one needs no separate tail-anchoring fix (F5 does not apply here).
+  for ($i = 0; $i -lt $Flags.Count; $i++) {
+    if ($Flags[$i] -ceq '--effort' -and $allowed -ccontains $Flags[$i + 1]) { return $Flags[$i + 1] }
+  }
+  return $null
+}
+
+# A12 guard: the FINAL resolved $ClaudeFlags (the shipped default above, OR a
+# non-empty remaining-argument block that replaces it wholesale) must carry an
+# explicit --model and an explicit --effort <tier>. Checked once here, on
+# whichever array is in scope by this point, so this catches both a partial
+# override that drops the model pin and a hypothetical future variant that
+# ships no default at all — either way, an unpinned run must never reach
+# claude and silently resolve its model from ambient config.
+$claudeResolvedModel = Get-ClaudeFlagModel -Flags $ClaudeFlags
+$claudeResolvedEffort = Get-ClaudeFlagEffort -Flags $ClaudeFlags
+if ([string]::IsNullOrEmpty($claudeResolvedModel) -or [string]::IsNullOrEmpty($claudeResolvedEffort)) {
+  Write-Error ("FAIL: A12 violation - the resolved claude flags carry no explicit --model and/or no explicit " +
+    "--effort <tier>. A remaining-argument block replaces ALL defaults, including --model, so a partial " +
+    "override (e.g. only changing effort) silently drops the model pin and falls back to whatever model the " +
+    "ambient claude config selects - the exact outcome A12 forbids. Pass the FULL per-profile flag set, e.g.: " +
+    "-p --output-format text --model opus --effort xhigh")
+  exit 1
 }
 
 $claudeBin = if ($env:CLAUDE_BIN) { $env:CLAUDE_BIN } else { 'claude' }
@@ -265,16 +346,17 @@ if ($Ledger) {
     exit 1
   }
   $launchRunId = "{0:yyyyMMddTHHmmss}Z-launch-{1}" -f [DateTime]::UtcNow, $slug
-  $ledgerEffort = ''
-  if (($ClaudeFlags -join ' ') -match '(model_reasoning_effort=|--effort +)"?(low|medium|high|xhigh|max)') { $ledgerEffort = $Matches[2] }
+  # Both fields were already validated non-empty by the A12 guard above; reuse
+  # the same resolved values here instead of re-deriving them, so the guard and
+  # the recorded provenance can never key on different extractions.
   $ledgerArgs = @('--work-item', $Ledger, 'append', '--run-id', $launchRunId,
     '--role', $LedgerRole, '--execution-role', 'external-reviewer', '--provider', 'claude',
     '--status', 'running', '--gate', 'none', '--scope', "external run: $slug",
     '--event-kind', 'launch', '--prompt-file', $promptPath,
-    '--notes', 'wrapper-dispatched; terminal event follows the completion oracle')
+    '--notes', 'wrapper-dispatched; terminal event follows the completion oracle',
+    '--model', $claudeResolvedModel, '--effort', $claudeResolvedEffort)
   if ($LedgerLane) { $ledgerArgs += @('--lane', $LedgerLane) }
   if ($LedgerArtifact) { $ledgerArgs += @('--artifact', $LedgerArtifact) }
-  if ($ledgerEffort) { $ledgerArgs += @('--effort', $ledgerEffort) }
   & python $ledgerHelper @ledgerArgs | Out-Null
   if ($LASTEXITCODE -ne 0) {
     Write-Error "FAIL: could not record launch event in $Ledger"
@@ -345,10 +427,10 @@ if ($Ledger) {
     '--role', $LedgerRole, '--execution-role', 'external-reviewer', '--provider', 'claude',
     '--status', $termStatus, '--gate', $termGate, '--scope', "external run: $slug",
     '--event-kind', 'terminal', '--launch-run-id', $launchRunId,
-    '--evidence', "review:$outPath", '--notes', $termNote)
+    '--evidence', "review:$outPath", '--notes', $termNote,
+    '--model', $claudeResolvedModel, '--effort', $claudeResolvedEffort)
   if ($LedgerLane) { $termArgs += @('--lane', $LedgerLane) }
   if ($LedgerArtifact) { $termArgs += @('--artifact', $LedgerArtifact) }
-  if ($ledgerEffort) { $termArgs += @('--effort', $ledgerEffort) }
   if ($termGate -eq 'PASS' -and $LedgerCloses) {
     foreach ($c in $LedgerCloses) { $termArgs += @('--closes', $c) }
   }
