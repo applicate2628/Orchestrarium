@@ -57,17 +57,31 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
-try:
-    from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
-except Exception:  # pragma: no cover - fail open when the shared helper is absent
-    def read_stdin_utf8() -> str:  # type: ignore[misc]
-        return ""
-
-    def parse_envelope(_: str) -> dict:  # type: ignore[misc]
-        return {}
-
-    def emit_advisory(_envelope: object, _message: str, **_kwargs: object) -> None:  # type: ignore[misc]
-        pass
+# Import directly, with NO fallback stub -- matching every other universal
+# audit in this directory (check-machine-local-path.py, check-no-trash-in-
+# repo.py, check-stale-relation-residue.py, check-repository-orientation.py,
+# none of which catch the import). A prior version of this file wrapped the
+# import in `try/except Exception` and substituted no-op stubs on failure, so
+# a broken install would still "run clean". That stub was UNREACHABLE in the
+# direction that mattered: the stubbed `read_stdin_utf8()` returns "", the
+# stubbed `parse_envelope("")` returns {}, so `tool_input` below is never a
+# dict and `main()` returns 0 before a hit could ever be computed -- the
+# `emit_advisory` stub could never fire. Net effect: a broken install produced
+# an exit-0 / empty-stdout / empty-stderr run byte-identical to "nothing to
+# warn about" (work-items/bugs/2026-07-26-the-mcp-momentum-audit-stubs-its-
+# own-delivery-to-a-no-op.md) -- the one audit built to catch MCP-momentum
+# drift going silently dead exactly the way it exists to prevent.
+#
+# Letting the ImportError propagate uncaught instead makes a broken install
+# DETECTABLE without inventing a new channel: a nonzero exit code (Python's
+# default is 1) and a traceback on stderr, instead of silent success. This
+# still honors AUDIT mode's "never block" contract -- per this pack's own
+# measured delivery-channel contract (work-items/bugs/2026-07-26-mcp-reminder-
+# uses-the-once-per-session-form-its-sibling-calls-broken.md), only an exit-2
+# PreToolUse hook blocks the tool call on Claude Code or Codex CLI; an exit-1
+# (which an uncaught exception produces) still ALLOWS the tool call on both
+# runtimes, it just stops pretending the audit ran cleanly when it did not.
+from hook_common import emit_advisory, parse_envelope, read_stdin_utf8
 
 
 # A code-intelligence server is one that answers "where is this symbol / who calls
