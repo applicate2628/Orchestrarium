@@ -239,6 +239,7 @@ mkdir -p "$OUTPUT_DIR"
 PROMPT_PATH="$OUTPUT_DIR/${SLUG}.md"
 OUT_PATH="$OUTPUT_DIR/${SLUG}.out"
 ERR_PATH="$OUTPUT_DIR/${SLUG}.err"
+PID_PATH="$OUTPUT_DIR/${SLUG}.pid"
 
 if [[ -n "$PROMPT_FILE" ]]; then
   if [[ ! -f "$PROMPT_FILE" ]]; then
@@ -279,10 +280,42 @@ if [[ -n "$LEDGER_ITEM" ]]; then
   fi
 fi
 
+# Process start-time marker for PID-reuse detection (Linux/MSYS /proc/<pid>/
+# stat field 22, "starttime") -- duplicated from the sibling invoke-codex-
+# prompt.sh / await-codex-dispatch.sh copies (no shared bash library exists in
+# this script set; every wrapper here is a standalone entry point). See
+# await-codex-dispatch.sh's header for the full liveness-probe rationale
+# (work-items/bugs/2026-07-26-await-codex-dispatch-cannot-satisfy-its-own-
+# liveness-invariant.md).
+pid_start_marker() {
+  local pid="$1" stat_path raw rest
+  stat_path="/proc/$pid/stat"
+  [[ -r "$stat_path" ]] || return 0
+  raw="$(cat "$stat_path" 2>/dev/null)" || return 0
+  rest="${raw##*) }"
+  [[ "$rest" != "$raw" ]] || return 0
+  # shellcheck disable=SC2086
+  set -- $rest
+  (( $# >= 20 )) || return 0
+  printf '%s' "${20}"
+}
+
+# PID handoff: background the PROVIDER ITSELF (not just this wrapper) so `$!`
+# captures claude's OWN pid -- bash always forks to exec a background
+# command, so this is a real, separate OS process regardless of what
+# `claude` resolves to. Write the `.pid` file BEFORE `wait`ing so a
+# background caller can read it from launch.
 set +e
 (
   export ORCHESTRARIUM_DISPATCHED_REVIEW=1
-  "$CLAUDE_CMD" "${CLAUDE_FLAGS[@]}" < "$PROMPT_PATH" 1> "$OUT_PATH" 2> "$ERR_PATH"
+  "$CLAUDE_CMD" "${CLAUDE_FLAGS[@]}" < "$PROMPT_PATH" 1> "$OUT_PATH" 2> "$ERR_PATH" &
+  claude_pid=$!
+  {
+    printf 'pid=%s\n' "$claude_pid"
+    start_marker="$(pid_start_marker "$claude_pid")"
+    [[ -n "$start_marker" ]] && printf 'start=%s\n' "$start_marker"
+  } > "$PID_PATH"
+  wait "$claude_pid"
 )
 EXIT_CODE=$?
 set -e
@@ -294,7 +327,18 @@ if [[ -n "$LEDGER_ITEM" ]]; then
   # here — before the blocked terminal is recorded — leaving an unsettled launch
   # (live incident 2026-07-16: codex usage-limit runs died exactly this way).
   FINAL_LINE="$(grep -v '^[[:space:]]*$' "$OUT_PATH" 2>/dev/null | tail -1 | tr -d '\r' || true)"
-  ERR_MARKERS="$(grep -cE '^(ERROR|FATAL|API Error): ' "$ERR_PATH" 2>/dev/null || true)"
+  # Two marker shapes, both anchored at line start so a mid-line "ERROR" inside
+  # ordinary prose (e.g. the echoed prompt body) never counts:
+  #   1. `ERROR: `/`FATAL: `/`API Error: ` with no timestamp (original shape).
+  #   2. `<ISO8601Z timestamp> (ERROR|FATAL) <module::path>: ` -- the Rust
+  #      `tracing`-crate default formatter this CLI's own MCP transport layer
+  #      emits (2026-07-26 incident: `ERROR rmcp::transport::worker: worker
+  #      quit with fatal:`; also observed from `codex_core::tools::router`).
+  # Not covered (residual, unobserved in any real sample from this runtime):
+  # non-Z timezone-offset timestamps, WARN/INFO/DEBUG/TRACE severities (by
+  # design -- not fatal), a hyphenated target segment (Rust normalizes crate
+  # hyphens to underscores in tracing targets), lowercase severity tokens.
+  ERR_MARKERS="$(grep -cE '^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z? )?(ERROR|FATAL|API Error)(: | [A-Za-z0-9_]+(::[A-Za-z0-9_]+)*: )' "$ERR_PATH" 2>/dev/null || true)"
   TERM_STATUS="blocked"; TERM_GATE="none"; TERM_NOTE="oracle: "
   if [[ $EXIT_CODE -ne 0 ]]; then
     TERM_NOTE+="nonzero exit ($EXIT_CODE)"
@@ -329,5 +373,6 @@ fi
 echo "$PROMPT_PATH"
 echo "$OUT_PATH"
 echo "$ERR_PATH"
+echo "$PID_PATH"
 
 exit $EXIT_CODE

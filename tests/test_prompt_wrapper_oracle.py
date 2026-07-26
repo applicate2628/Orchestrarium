@@ -336,9 +336,12 @@ def test_empty_trace_still_settles_terminal(tmp_path, which, provider_exit):
         assert output_lines[-2] == "# actively await this dispatch (do NOT passively wait for a notification):"
         watcher = _to_posix(wrapper.parent / "await-codex-dispatch.sh")
         assert output_lines[-1].startswith(f"bash {shlex.quote(watcher)}")
+        assert "--pid-file" in output_lines[-1]
         paths = output_lines[:4]
+        pid_path = output_lines[4]
     else:
-        paths = output_lines
+        paths = output_lines[:3]
+        pid_path = output_lines[3]
     expected_path_count = 4 if which == "codex" else 3
     assert len(paths) == expected_path_count, (
         f"wrapper must print {expected_path_count} artifact paths even on a failed run; "
@@ -346,6 +349,19 @@ def test_empty_trace_still_settles_terminal(tmp_path, which, provider_exit):
     )
     if which == "codex":
         assert paths[3].endswith(".lastmsg"), paths
+    # PID handoff (work-items/bugs/2026-07-26-await-codex-dispatch-cannot-
+    # satisfy-its-own-liveness-invariant.md): the wrapper must ALWAYS emit a
+    # `.pid` artifact path, even when the provider itself fails or emits
+    # nothing -- it is written before the provider is even invoked. Read via
+    # `outdir` (a native Path the test controls) rather than parsing
+    # `pid_path` back into a native path -- the wrapper prints it in
+    # whatever form its OUTPUT_DIR env var arrived in (posix-style here),
+    # which Windows pathlib cannot open directly.
+    assert pid_path.endswith(".pid"), output_lines
+    pid_files = list(outdir.glob("*.pid"))
+    assert len(pid_files) == 1, pid_files
+    pid_file_content = pid_files[0].read_text(encoding="utf-8")
+    assert pid_file_content.splitlines()[0].startswith("pid="), pid_file_content
 
     ledger = item / "agent-runs.jsonl"
     events = [json.loads(ln) for ln in
@@ -400,6 +416,7 @@ def test_codex_empty_lastmsg_and_out_exit_zero_records_blocked_terminal(tmp_path
     output_lines = [ln for ln in result.stdout.splitlines() if ln.strip()]
     paths = output_lines[:4]
     assert paths[3].endswith(".lastmsg")
+    assert output_lines[4].endswith(".pid"), output_lines
     events = [json.loads(ln) for ln in
               (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines() if ln.strip()]
     terminal = next(e for e in events if e.get("eventKind") == "terminal")
@@ -445,7 +462,9 @@ def test_powershell_codex_oracle_prefers_lastmsg(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    paths = [line for line in result.stdout.splitlines() if line.strip()][:4]
+    output_lines = [line for line in result.stdout.splitlines() if line.strip()]
+    paths = output_lines[:4]
+    assert output_lines[4].endswith(".pid"), output_lines
     events = [json.loads(line) for line in
               (item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines() if line.strip()]
     terminal = next(event for event in events if event.get("eventKind") == "terminal")

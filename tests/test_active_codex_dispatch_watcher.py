@@ -89,8 +89,13 @@ def _init_git_fixture(root: Path) -> str:
     return subprocess.check_output(["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
 
 
-def _assert_one_line(result: subprocess.CompletedProcess[str], prefix: str) -> str:
-    assert result.returncode == 0, result.stderr
+def _assert_one_line(
+    result: subprocess.CompletedProcess[str], prefix: str, expected_returncode: int = 0
+) -> str:
+    assert result.returncode == expected_returncode, (
+        f"expected exit {expected_returncode} for a {prefix!r} terminal status; "
+        f"got {result.returncode}. stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
     lines = result.stdout.splitlines()
     assert len(lines) == 1, result.stdout
     assert lines[0].startswith(prefix), result.stdout
@@ -167,6 +172,7 @@ def test_err_idle_is_stall(tmp_path: Path) -> None:
             "--stall-secs", "1", "--poll-secs", "0.05", "--max-secs", "3",
         ),
         "STALL err-idle=",
+        expected_returncode=75,
     )
     assert int(line.split("=", 1)[1]) >= 1
 
@@ -179,8 +185,43 @@ def test_max_elapsed_is_timeout(tmp_path: Path) -> None:
             "--out", _posix_path(out), "--poll-secs", "0.05", "--max-secs", "1",
         ),
         "TIMEOUT max=",
+        expected_returncode=124,
     )
     assert line == "TIMEOUT max=1"
+
+
+def test_terminal_status_exit_codes_are_distinct_and_machine_readable(tmp_path: Path) -> None:
+    """Regression lock for the liveness-invariant bug: a caller testing $?/exit
+    code alone (never reading stdout) must be able to tell DONE from a stall or
+    a timeout. Before the fix, DONE/STALL/TIMEOUT all exited 0 -- a caller
+    could not distinguish a delivered review from a 45-minute stall by exit
+    code (work-items/bugs/2026-07-26-await-codex-dispatch-cannot-satisfy-its-
+    own-liveness-invariant.md)."""
+    out = tmp_path / "dispatch.out"
+    out.write_text("GATE: PASS\n", encoding="ascii")
+    done = _run_sh("--out", _posix_path(out), "--poll-secs", "0.05", "--max-secs", "2")
+    assert done.returncode == 0, done.stderr
+
+    err = tmp_path / "dispatch.err"
+    err.write_text("provider started\n", encoding="ascii")
+    old = time.time() - 5
+    os.utime(err, (old, old))
+    stall = _run_sh(
+        "--out", _posix_path(tmp_path / "missing.out"), "--err", _posix_path(err),
+        "--stall-secs", "1", "--poll-secs", "0.05", "--max-secs", "3",
+    )
+    assert stall.returncode == 75, stall.stderr
+
+    timeout = _run_sh(
+        "--out", _posix_path(tmp_path / "missing.out"), "--poll-secs", "0.05", "--max-secs", "1",
+    )
+    assert timeout.returncode == 124, timeout.stderr
+
+    # All three terminal codes must be pairwise distinct AND distinct from the
+    # existing usage-error code (2, unchanged) -- the whole point is that a
+    # caller can tell all four apart from $? alone.
+    codes = {"done": done.returncode, "stall": stall.returncode, "timeout": timeout.returncode, "usage": 2}
+    assert len(set(codes.values())) == len(codes), codes
 
 
 def test_powershell_port_covers_terminal_matrix(tmp_path: Path) -> None:
@@ -210,13 +251,13 @@ def test_powershell_port_covers_terminal_matrix(tmp_path: Path) -> None:
         "-Out", str(tmp_path / "missing.out"), "-Err", str(err),
         "-StallSecs", "1", "-PollSecs", "0.05", "-MaxSecs", "3",
     )
-    assert line.returncode == 0, line.stderr
+    assert line.returncode == 75, line.stderr
     assert line.stdout.startswith("STALL err-idle=")
 
     line = _run_ps(
         "-Out", str(tmp_path / "missing.out"), "-PollSecs", "0.05", "-MaxSecs", "1",
     )
-    assert line.returncode == 0, line.stderr
+    assert line.returncode == 124, line.stderr
     assert line.stdout.splitlines() == ["TIMEOUT max=1"]
 
     repo = tmp_path / "git-fixture"
@@ -357,3 +398,480 @@ def test_claude_prompt_wrappers_scope_dispatched_review_marker() -> None:
     assert "$env:ORCHESTRARIUM_DISPATCHED_REVIEW" in powershell
     assert "Remove-Item Env:ORCHESTRARIUM_DISPATCHED_REVIEW" in powershell
     assert powershell.index("$env:ORCHESTRARIUM_DISPATCHED_REVIEW") < powershell.index("$promptBody | & $claudePath")
+
+
+# --- Direct liveness probe (--pid-file / -PidFile) -------------------------
+#
+# Regression coverage for the still-open half of work-items/bugs/2026-07-26-
+# await-codex-dispatch-cannot-satisfy-its-own-liveness-invariant.md: the
+# watcher previously inferred everything from artifact timestamps and could
+# never observe a process that died silently -- exactly the live incident's
+# shape (8 of 16 provider runs producing zero-byte output, indistinguishable
+# from "still working" for the full 45-60 minute stall/timeout window).
+
+
+def _write_pid_file(path: Path, pid: int | str, start: str | None = None) -> None:
+    lines = [f"pid={pid}"]
+    if start is not None:
+        lines.append(f"start={start}")
+    path.write_text("\n".join(lines) + "\n", encoding="ascii")
+
+
+def _spawn_bash_background(command: str) -> tuple[subprocess.Popen, int]:
+    """Launch a background bash process and return (Popen, msys_pid).
+
+    The watcher's `kill -0` / `/proc` probes run inside Git Bash's MSYS
+    runtime, which has its OWN pid namespace distinct from the raw Windows
+    PID `subprocess.Popen.pid` reports (empirically verified: a Windows PID
+    from `subprocess.Popen(['sleep', ...])` is NOT recognized by `kill -0`
+    inside a separate bash invocation -- `kill: (<winpid>) - No such
+    process` even while the process is alive). Spawning via
+    `bash -c 'echo $$; ...'` and reading bash's own `$$` back is the only way
+    to get a PID this watcher's probes will actually recognize -- exactly how
+    invoke-codex-prompt.sh's own `$!` capture works.
+    """
+    bash = _bash()
+    if not bash:
+        pytest.skip("bash is unavailable")
+    proc = subprocess.Popen(
+        [bash, "-c", f"echo $$; {command}"],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    msys_pid = int(proc.stdout.readline().strip())
+    return proc, msys_pid
+
+
+def test_dead_pid_with_no_completion_artifact_is_dead(tmp_path: Path) -> None:
+    """The incident-shaped unit case: a launched run whose process dies
+    leaving a zero-byte output artifact must be detected within one poll
+    interval, not after the full --stall-secs/--max-secs window."""
+    proc, msys_pid = _spawn_bash_background("sleep 30")
+    proc.terminate()
+    proc.wait(timeout=5)
+    time.sleep(0.3)
+
+    out = tmp_path / "dispatch.out"  # never written -- the run died silently
+    pid_file = tmp_path / "dispatch.pid"
+    _write_pid_file(pid_file, msys_pid)
+
+    started = time.monotonic()
+    line = _assert_one_line(
+        _run_sh(
+            "--out", _posix_path(out), "--pid-file", _posix_path(pid_file),
+            "--poll-secs", "0.05", "--max-secs", "10", "--stall-secs", "2700",
+        ),
+        "DEAD pid-file=",
+        expected_returncode=69,
+    )
+    elapsed = time.monotonic() - started
+    assert line == f"DEAD pid-file={_posix_path(pid_file)}"
+    # Detection must be near-instant relative to the 10s --max-secs this test
+    # deliberately sets far above the expected detection latency -- proving
+    # the watcher did not fall through to the old blind wait.
+    assert elapsed < 5, f"DEAD took {elapsed}s -- should be near-instant"
+
+
+def test_alive_pid_with_no_artifact_is_not_dead(tmp_path: Path) -> None:
+    """Sanity check for the combined rule: a genuinely alive process with no
+    artifact yet must NOT be reported dead -- it falls through to the
+    pre-existing TIMEOUT path exactly as before this fix."""
+    proc, msys_pid = _spawn_bash_background("sleep 30")
+    try:
+        out = tmp_path / "dispatch.out"
+        pid_file = tmp_path / "dispatch.pid"
+        _write_pid_file(pid_file, msys_pid)
+
+        line = _assert_one_line(
+            _run_sh(
+                "--out", _posix_path(out), "--pid-file", _posix_path(pid_file),
+                "--poll-secs", "0.05", "--max-secs", "1", "--stall-secs", "2700",
+            ),
+            "TIMEOUT max=",
+            expected_returncode=124,
+        )
+        assert line == "TIMEOUT max=1"
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_dead_pid_but_completion_artifact_present_is_still_done(tmp_path: Path) -> None:
+    """Combined rule, the other direction (a finished-successfully run and a
+    died-silently run are both 'not running' on their own): a confirmed-dead
+    PID alongside a real completion signal is still DONE, never DEAD, because
+    the DONE checks run first every poll."""
+    proc, msys_pid = _spawn_bash_background("sleep 30")
+    proc.terminate()
+    proc.wait(timeout=5)
+    time.sleep(0.3)
+
+    out = tmp_path / "dispatch.out"
+    out.write_text("GATE: PASS\n", encoding="ascii")
+    pid_file = tmp_path / "dispatch.pid"
+    _write_pid_file(pid_file, msys_pid)
+
+    line = _assert_one_line(
+        _run_sh(
+            "--out", _posix_path(out), "--pid-file", _posix_path(pid_file),
+            "--poll-secs", "0.05", "--max-secs", "2",
+        ),
+        "DONE out=",
+    )
+    assert line == f"DONE out={len(out.read_bytes())}"
+
+
+def test_missing_pid_file_degrades_to_pre_fix_behavior(tmp_path: Path) -> None:
+    """--pid-file pointing at a path that never gets created (an older
+    invoke-*-prompt, a hand-rolled background launch, or any run started
+    outside the wrapper -- the common case the live incident's own loop hit,
+    not the edge) must behave IDENTICALLY to omitting the flag entirely: the
+    watcher must still reach TIMEOUT, never DEAD."""
+    out = tmp_path / "dispatch.out"
+    pid_file = tmp_path / "never-created.pid"
+
+    line = _assert_one_line(
+        _run_sh(
+            "--out", _posix_path(out), "--pid-file", _posix_path(pid_file),
+            "--poll-secs", "0.05", "--max-secs", "1",
+        ),
+        "TIMEOUT max=",
+        expected_returncode=124,
+    )
+    assert line == "TIMEOUT max=1"
+
+
+def test_malformed_pid_file_degrades_to_pre_fix_behavior(tmp_path: Path) -> None:
+    """A `.pid` file with no parseable `pid=` line degrades exactly like a
+    missing one -- never treated as dead."""
+    out = tmp_path / "dispatch.out"
+    pid_file = tmp_path / "dispatch.pid"
+    pid_file.write_text("not a pid file\n", encoding="ascii")
+
+    line = _assert_one_line(
+        _run_sh(
+            "--out", _posix_path(out), "--pid-file", _posix_path(pid_file),
+            "--poll-secs", "0.05", "--max-secs", "1",
+        ),
+        "TIMEOUT max=",
+        expected_returncode=124,
+    )
+    assert line == "TIMEOUT max=1"
+
+
+def test_recycled_pid_with_mismatched_start_marker_is_dead(tmp_path: Path) -> None:
+    """PID-reuse hazard: a recorded PID that is CURRENTLY alive but whose
+    start-time marker no longer matches (a DIFFERENT, later process now holds
+    that PID) must be classified dead, not alive -- otherwise a recycled PID
+    would mask a genuinely dead run indefinitely."""
+    proc, msys_pid = _spawn_bash_background("sleep 30")
+    try:
+        out = tmp_path / "dispatch.out"
+        pid_file = tmp_path / "dispatch.pid"
+        # A real, currently-alive PID, but a start marker that cannot
+        # possibly match it (an implausibly large tick count).
+        _write_pid_file(pid_file, msys_pid, start="99999999999999999")
+
+        line = _assert_one_line(
+            _run_sh(
+                "--out", _posix_path(out), "--pid-file", _posix_path(pid_file),
+                "--poll-secs", "0.05", "--max-secs", "10", "--stall-secs", "2700",
+            ),
+            "DEAD pid-file=",
+            expected_returncode=69,
+        )
+        assert line == f"DEAD pid-file={_posix_path(pid_file)}"
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_incident_shaped_regression_invoke_and_watch_together(tmp_path: Path) -> None:
+    """End-to-end incident replay: invoke-codex-prompt.sh launches a fake
+    provider that hangs forever without ever writing lastmsg/out (the exact
+    live-incident signature -- 8 of 16 provider runs producing zero-byte
+    output), the provider is then killed directly (simulating whatever killed
+    the real provider), and the watcher launched against the wrapper's own
+    printed --pid-file must report DEAD within one poll cycle instead of
+    silently waiting out the full stall/timeout window."""
+    bash = _bash()
+    if not bash:
+        pytest.skip("bash is unavailable")
+
+    fake = tmp_path / "fake-codex-hangs.sh"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        "lastmsg=''\n"
+        "while [[ $# -gt 0 ]]; do\n"
+        "  case \"$1\" in\n"
+        "    --output-last-message) lastmsg=\"$2\"; shift 2 ;;\n"
+        "    *) shift ;;\n"
+        "  esac\n"
+        "done\n"
+        "cat >/dev/null\n"
+        "sleep 300\n",  # never reaches the point of writing lastmsg/out
+        encoding="ascii",
+        newline="\n",
+    )
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("incident replay\n", encoding="ascii")
+    output_dir = tmp_path / "outputs"
+    env = os.environ.copy()
+    env["CODEX_BIN"] = _posix_path(fake)
+    env["CODEX_PROMPTS_DIR"] = _posix_path(output_dir)
+
+    wrapper_proc = subprocess.Popen(
+        [bash, _posix_path(INVOKE_SH), "incident-replay", "--prompt-file", _posix_path(prompt)],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        pid_file = None
+        for _ in range(100):
+            candidates = list(output_dir.glob("*.pid"))
+            if candidates:
+                pid_file = candidates[0]
+                break
+            time.sleep(0.1)
+        assert pid_file is not None, "invoke-codex-prompt.sh never wrote a .pid file"
+
+        recorded_pid = pid_file.read_text(encoding="ascii").splitlines()[0].split("=", 1)[1]
+        out_file = next(output_dir.glob("*.out"))
+        err_file = next(output_dir.glob("*.err"))
+        lastmsg_file = output_dir / (pid_file.stem + ".lastmsg")
+
+        # Kill the ACTUAL provider process the wrapper backgrounded -- not the
+        # wrapper itself -- reproducing "the process died", not "the
+        # orchestrator died". Uses bash's own `kill` (MSYS pid namespace, see
+        # _spawn_bash_background) rather than Python's process APIs.
+        subprocess.run([bash, "-c", f"kill -9 {recorded_pid}"], check=False)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            probe = subprocess.run([bash, "-c", f"kill -0 {recorded_pid} 2>/dev/null"])
+            if probe.returncode != 0:
+                break
+            time.sleep(0.1)
+
+        started = time.monotonic()
+        watch = subprocess.run(
+            [bash, _posix_path(WATCH_SH),
+             "--out", _posix_path(out_file), "--err", _posix_path(err_file),
+             "--lastmsg", _posix_path(lastmsg_file), "--pid-file", _posix_path(pid_file),
+             "--poll-secs", "0.1", "--stall-secs", "2700", "--max-secs", "3600"],
+            capture_output=True, text=True, timeout=15,
+        )
+        elapsed = time.monotonic() - started
+        assert watch.returncode == 69, (watch.stdout, watch.stderr)
+        assert watch.stdout.splitlines() == [f"DEAD pid-file={_posix_path(pid_file)}"]
+        assert elapsed < 10, f"DEAD detection took {elapsed}s -- should be near-instant"
+    finally:
+        if wrapper_proc.poll() is None:
+            wrapper_proc.terminate()
+            try:
+                wrapper_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                wrapper_proc.kill()
+        try:
+            wrapper_proc.communicate(timeout=5)
+        except Exception:
+            pass
+
+
+def test_invoke_wrappers_write_pid_file_with_pid_line(tmp_path: Path) -> None:
+    """Both invoke-*-prompt.sh wrappers must write a `.pid` sidecar carrying
+    a parseable `pid=<integer>` first line -- the wire-level handoff the
+    watcher's --pid-file probe depends on."""
+    bash = _bash()
+    if not bash:
+        pytest.skip("bash is unavailable")
+
+    cases = (
+        (
+            INVOKE_SH, "CODEX_BIN", "CODEX_PROMPTS_DIR",
+            "#!/usr/bin/env bash\nlastmsg=''\n"
+            "while [[ $# -gt 0 ]]; do case \"$1\" in "
+            "--output-last-message) lastmsg=\"$2\"; shift 2 ;; *) shift ;; esac; done\n"
+            "cat >/dev/null\nprintf 'GATE: PASS\\n' > \"$lastmsg\"\n",
+            {},
+        ),
+        (
+            CLAUDE_INVOKE_SH, "CLAUDE_BIN", "CLAUDE_PROMPTS_DIR",
+            "#!/usr/bin/env bash\ncat >/dev/null\nprintf 'GATE: PASS\\n'\n",
+            {"ANTHROPIC_API_KEY": "pid-file-wiring-test-key"},
+        ),
+    )
+    for wrapper, bin_env, dir_env, fake_body, extra_env in cases:
+        fake = tmp_path / f"fake-{wrapper.stem}.sh"
+        fake.write_text(fake_body, encoding="ascii", newline="\n")
+        fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+        prompt = tmp_path / f"prompt-{wrapper.stem}.md"
+        prompt.write_text("pid-file wiring test\n", encoding="ascii")
+        outdir = tmp_path / f"outputs-{wrapper.stem}"
+        env = os.environ.copy()
+        env[bin_env] = _posix_path(fake)
+        env[dir_env] = _posix_path(outdir)
+        env.update(extra_env)
+
+        result = subprocess.run(
+            [bash, _posix_path(wrapper), "pid-wiring-test", "--prompt-file", _posix_path(prompt)],
+            cwd=ROOT, env=env, capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0, result.stderr
+
+        pid_files = list(outdir.glob("*.pid"))
+        assert len(pid_files) == 1, (wrapper, result.stdout, result.stderr)
+        first_line = pid_files[0].read_text(encoding="utf-8").splitlines()[0]
+        assert first_line.split("=", 1)[0] == "pid"
+        assert first_line.split("=", 1)[1].isdigit(), first_line
+
+
+def test_powershell_dead_pid_with_no_completion_artifact_is_dead(tmp_path: Path) -> None:
+    powershell = _powershell()
+    if not powershell:
+        pytest.skip("PowerShell is unavailable")
+
+    proc = subprocess.Popen(
+        [powershell, "-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]
+    )
+    win_pid = proc.pid
+    proc.terminate()
+    proc.wait(timeout=5)
+    time.sleep(0.3)
+
+    out = tmp_path / "dispatch.out"
+    pid_file = tmp_path / "dispatch.pid"
+    pid_file.write_text(f"pid={win_pid}\n", encoding="ascii")
+
+    started = time.monotonic()
+    result = _run_ps(
+        "-Out", str(out), "-PidFile", str(pid_file),
+        "-PollSecs", "0.1", "-MaxSecs", "10", "-StallSecs", "2700",
+    )
+    elapsed = time.monotonic() - started
+    assert result.returncode == 69, result.stderr
+    assert result.stdout.splitlines() == [f"DEAD pid-file={pid_file}"]
+    assert elapsed < 5, f"DEAD took {elapsed}s -- should be near-instant"
+
+
+def test_powershell_alive_pid_with_no_artifact_is_not_dead(tmp_path: Path) -> None:
+    powershell = _powershell()
+    if not powershell:
+        pytest.skip("PowerShell is unavailable")
+
+    proc = subprocess.Popen(
+        [powershell, "-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]
+    )
+    try:
+        out = tmp_path / "dispatch.out"
+        pid_file = tmp_path / "dispatch.pid"
+        pid_file.write_text(f"pid={proc.pid}\n", encoding="ascii")
+
+        result = _run_ps(
+            "-Out", str(out), "-PidFile", str(pid_file),
+            "-PollSecs", "0.1", "-MaxSecs", "1", "-StallSecs", "2700",
+        )
+        assert result.returncode == 124, result.stderr
+        assert result.stdout.splitlines() == ["TIMEOUT max=1"]
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_powershell_missing_pid_file_degrades_to_pre_fix_behavior(tmp_path: Path) -> None:
+    if not _powershell():
+        pytest.skip("PowerShell is unavailable")
+
+    out = tmp_path / "dispatch.out"
+    pid_file = tmp_path / "never-created.pid"
+
+    result = _run_ps(
+        "-Out", str(out), "-PidFile", str(pid_file),
+        "-PollSecs", "0.1", "-MaxSecs", "1",
+    )
+    assert result.returncode == 124, result.stderr
+    assert result.stdout.splitlines() == ["TIMEOUT max=1"]
+
+
+def test_powershell_recycled_pid_with_mismatched_start_marker_is_dead(tmp_path: Path) -> None:
+    powershell = _powershell()
+    if not powershell:
+        pytest.skip("PowerShell is unavailable")
+
+    proc = subprocess.Popen(
+        [powershell, "-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 30"]
+    )
+    try:
+        out = tmp_path / "dispatch.out"
+        pid_file = tmp_path / "dispatch.pid"
+        pid_file.write_text(f"pid={proc.pid}\nstart=99999999999999999\n", encoding="ascii")
+
+        result = _run_ps(
+            "-Out", str(out), "-PidFile", str(pid_file),
+            "-PollSecs", "0.1", "-MaxSecs", "10", "-StallSecs", "2700",
+        )
+        assert result.returncode == 69, result.stderr
+        assert result.stdout.splitlines() == [f"DEAD pid-file={pid_file}"]
+    finally:
+        proc.terminate()
+        proc.wait(timeout=5)
+
+
+def test_invoke_ps1_wrappers_write_pid_file_with_pid_line(tmp_path: Path) -> None:
+    """Both invoke-*-prompt.ps1 wrappers must write a `.pid` sidecar carrying
+    a parseable `pid=<integer>` first line, mirroring the Bash sibling."""
+    powershell = _powershell()
+    if not powershell:
+        pytest.skip("PowerShell is unavailable")
+
+    codex_fake = tmp_path / "fake-codex.ps1"
+    codex_fake.write_text(
+        "param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)\n"
+        "$lastmsg = ''\n"
+        "for ($i = 0; $i -lt $Arguments.Count; $i++) {\n"
+        "  if ($Arguments[$i] -eq '--output-last-message') { $lastmsg = $Arguments[$i + 1] }\n"
+        "}\n"
+        "if (-not $lastmsg) { exit 97 }\n"
+        "$input | Out-Null\n"
+        "[System.IO.File]::WriteAllText($lastmsg, \"GATE: PASS`n\", [System.Text.UTF8Encoding]::new($false))\n"
+        "exit 0\n",
+        encoding="utf-8", newline="\n",
+    )
+    claude_fake = tmp_path / "fake-claude.ps1"
+    claude_fake.write_text(
+        "param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)\n"
+        "$input | Out-Null\n"
+        "Write-Output 'GATE: PASS'\n"
+        "exit 0\n",
+        encoding="utf-8", newline="\n",
+    )
+
+    cases = (
+        (INVOKE_PS1, "CODEX_BIN", "CODEX_PROMPTS_DIR", codex_fake, {}),
+        (CLAUDE_INVOKE_PS1, "CLAUDE_BIN", "CLAUDE_PROMPTS_DIR", claude_fake,
+         {"ANTHROPIC_API_KEY": "pid-file-wiring-test-key"}),
+    )
+    for wrapper, bin_env, dir_env, fake, extra_env in cases:
+        prompt = tmp_path / f"prompt-{wrapper.stem}.md"
+        prompt.write_text("pid-file wiring test\n", encoding="utf-8")
+        outdir = tmp_path / f"outputs-{wrapper.stem}"
+        env = os.environ.copy()
+        env[bin_env] = str(fake)
+        env[dir_env] = str(outdir)
+        env.update(extra_env)
+
+        result = subprocess.run(
+            [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-File", str(wrapper), "pid-wiring-test", "-PromptFile", str(prompt)],
+            cwd=str(ROOT), env=env, capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+        pid_files = list(outdir.glob("*.pid"))
+        assert len(pid_files) == 1, (wrapper, result.stdout, result.stderr)
+        first_line = pid_files[0].read_text(encoding="utf-8").splitlines()[0]
+        assert first_line.split("=", 1)[0] == "pid"
+        assert first_line.split("=", 1)[1].isdigit(), first_line

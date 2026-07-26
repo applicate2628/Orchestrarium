@@ -21,55 +21,83 @@
     Get-Content -Raw prompt.md |
       powershell -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-claude-prompt.ps1 advisory-adr
 .EXAMPLE
-    powershell -NoProfile -ExecutionPolicy Bypass -Command "& '.claude\agents\scripts\invoke-claude-prompt.ps1' worker-task -PromptFile 'prompt.md' -ClaudeFlags @('-p','--output-format','text','--model','opus','--effort','xhigh')"
+    powershell -NoProfile -ExecutionPolicy Bypass -File .claude\agents\scripts\invoke-claude-prompt.ps1 worker-task -PromptFile prompt.md -p --output-format text --model opus --effort xhigh
 .NOTES
-    Overriding the default profile: use the `-Command` / call-operator (`&`) form shown
-    above — verified end-to-end (guard passes, reaches the claude binary probe) on both
-    Windows PowerShell 5.1 and PowerShell 7.6.
+    Overriding the default profile: pass the full per-profile flag set as plain trailing
+    tokens after the recognized control flags, e.g. `-PromptFile prompt.md -p
+    --output-format text --model opus --effort xhigh`. This now works identically via
+    `-File` and via `-Command`/the call operator (`&`) — verified end-to-end (guard
+    passes, reaches the claude binary probe, and claude's own `-p`/`-c` survive
+    byte-for-byte) on both Windows PowerShell 5.1 and PowerShell 7.6.
 
-    Do NOT use `-File` when overriding -ClaudeFlags. `-File` is a process-spawn boundary:
-    the child process receives only literal argv strings, and there is no `-File` shape
-    that survives it. All three of the following were measured to fail, identically, on
-    both hosts:
-      - an array literal typed after `-File` (`... -File script.ps1 ... -ClaudeFlags
-        @('--model', ...)`) — the OUTER shell evaluates and flattens `@(...)` into
-        separate strings before the CHILD process ever sees them, and the flattened
-        `-ClaudeFlags` token collides with the array elements that follow, so the
-        child's own parameter binder reports "parameter 'ClaudeFlags' is specified more
-        than once";
-      - a bare `--` delimiter (`-- --model opus --effort max`) — unlike the Bash
-        sibling, PowerShell's parameter binder has no `--`-end-of-options convention: a
-        literal `--` token is parsed as an attempt to bind a parameter with an empty
-        name, which is ambiguous against every declared parameter here;
-      - a comma-joined string (`-ClaudeFlags -p,--output-format,text,--model,...`) —
-        this arrives as ONE literal token, not several, so the guard finds no exact
-        `--model` match and denies.
-    Only the `-Command`/call-operator form works, because there the SAME process that
-    evaluates the `@(...)` array literal also invokes the script via `&` — the array
-    never crosses a process boundary as flattened strings. This is a property of how any
-    process passes arguments to a child, not a PowerShell-host difference: both 5.1 and
-    7.6 were measured to behave identically for every shape above.
+    Bug 2026-07-26-powershell-flag-abbreviation-collision-blocks-provider-overrides:
+    PowerShell's own argument binder applies unique-PREFIX abbreviation to every
+    declared parameter name, and (once a script has ANY `[Parameter(...)]` attribute,
+    which `ValueFromRemainingArguments` requires) ALSO to the always-present common
+    parameters (`-Verbose`, `-PipelineVariable`, `-ProgressAction`, ...). That made
+    claude's own `-p` (print) collide with a declared `-PromptFile` parameter, and
+    claude's own `-c` (continue) collide with a declared `-ClaudeFlags` parameter --
+    both silently swallowed or hard-errored, empirically measured identically on PS 5.1
+    and 7.6, via both `-File` and `-Command`.
+    The fix: this script declares NO `param()` block at all. A script with zero
+    declared parameters is not an "advanced" script and gets none of that automatic
+    binding -- every argument lands verbatim, in original order, in the classic `$args`
+    array (smoke-verified on both hosts, both invocation styles, preserving `-p`, `-c`,
+    and `--model` untouched). The block below parses `$args` by hand, mirroring the
+    Bash sibling's `case "$1" in ...` loop, using exact (not prefix) string matching for
+    this wrapper's own recognized flags -- so no provider flag, whatever its first
+    letter, can ever be mistaken for one of ours again.
 #>
-param(
-  [Parameter(Mandatory = $true, Position = 0)]
-  [string]$TopicSlug,
-
-  [string]$PromptFile,
-
-  # Work-item dir: the dispatch PRODUCES its ledger events (decision
-  # 2026-07-16-review-verdict-closure) — launch before the run, terminal after it
-  # via the shared completion oracle.
-  [string]$Ledger,
-  [string]$LedgerRole = 'architecture-reviewer',
-  [string]$LedgerLane,
-  [string]$LedgerArtifact,
-  [string[]]$LedgerCloses,
-
-  [Parameter(ValueFromRemainingArguments = $true)]
-  [string[]]$ClaudeFlags
-)
 
 $ErrorActionPreference = 'Stop'
+
+# Manual argument parsing (see .NOTES above for why there is no param() block).
+# Recognized control flags are consumed by exact, case-insensitive match (matching
+# PowerShell's own historical parameter-name comparison), in any order relative to
+# each other. The first token that matches none of them becomes the mandatory
+# topic-slug; every token after that -- recognized or not -- is forwarded to claude
+# completely unexamined, in original order, so a caller's `-c`/`-p`/... reaches
+# claude exactly as typed. A lone `--` is accepted (but not required) as a no-op
+# boundary marker for callers used to the Bash sibling's convention.
+$TopicSlug = $null
+$PromptFile = $null
+$Ledger = $null
+$LedgerRole = 'architecture-reviewer'
+$LedgerLane = $null
+$LedgerArtifact = $null
+$LedgerCloses = @()
+$ClaudeFlags = @()
+$_i = 0
+while ($_i -lt $args.Count) {
+  $_tok = $args[$_i]
+  if ($_tok -eq '-PromptFile') {
+    if ($_i + 1 -ge $args.Count) { Write-Error "FAIL: -PromptFile requires a value"; exit 1 }
+    $PromptFile = $args[$_i + 1]; $_i += 2
+  } elseif ($_tok -eq '-Ledger') {
+    if ($_i + 1 -ge $args.Count) { Write-Error "FAIL: -Ledger requires a value"; exit 1 }
+    $Ledger = $args[$_i + 1]; $_i += 2
+  } elseif ($_tok -eq '-LedgerRole') {
+    if ($_i + 1 -ge $args.Count) { Write-Error "FAIL: -LedgerRole requires a value"; exit 1 }
+    $LedgerRole = $args[$_i + 1]; $_i += 2
+  } elseif ($_tok -eq '-LedgerLane') {
+    if ($_i + 1 -ge $args.Count) { Write-Error "FAIL: -LedgerLane requires a value"; exit 1 }
+    $LedgerLane = $args[$_i + 1]; $_i += 2
+  } elseif ($_tok -eq '-LedgerArtifact') {
+    if ($_i + 1 -ge $args.Count) { Write-Error "FAIL: -LedgerArtifact requires a value"; exit 1 }
+    $LedgerArtifact = $args[$_i + 1]; $_i += 2
+  } elseif ($_tok -eq '-LedgerCloses') {
+    if ($_i + 1 -ge $args.Count) { Write-Error "FAIL: -LedgerCloses requires a value"; exit 1 }
+    $LedgerCloses += $args[$_i + 1]; $_i += 2
+  } elseif ($_tok -eq '--') {
+    # Optional no-op boundary; not required (unlike the Bash sibling) since every
+    # leftover token already flows to $ClaudeFlags below regardless of position.
+    $_i += 1
+  } elseif ($null -eq $TopicSlug) {
+    $TopicSlug = $_tok; $_i += 1
+  } else {
+    $ClaudeFlags += $_tok; $_i += 1
+  }
+}
 
 # F1 (security review 2026-05-17) — TopicSlug filesystem-boundary validation.
 # The slug is concatenated into captured filenames in $outputDir. Without
@@ -90,11 +118,10 @@ if (-not $ClaudeFlags -or $ClaudeFlags.Count -eq 0) {
   # A12: every provider-backed run must carry an explicit model AND effort, never
   # an ambient one — the default below pins the shipped default profile `opus-xhigh`
   # (same fix as the sibling invoke-codex-prompt.ps1). Callers needing a different
-  # profile invoke via `-Command "& script.ps1 ... -ClaudeFlags @(...)"` (see the
-  # .EXAMPLE / .NOTES above this param block — `-File` cannot carry an override
-  # array across its process-spawn boundary, and a bare `--` delimiter is
-  # unsupported here regardless of host; both are documented and measured above,
-  # not just a style preference), which REPLACES this default wholesale
+  # profile pass the full per-profile flag set as plain trailing tokens (see the
+  # .EXAMPLE / .NOTES above — this works identically via `-File` and `-Command`
+  # since the manual `$args` parser above forwards every token, including
+  # claude's own `-p`/`-c`, untouched), which REPLACES this default wholesale
   # (including --model) — it is not merged, so a partial override drops the pin.
   # The guard below validates the FINAL resolved array and refuses to launch
   # otherwise. (current claude CLI removed top-level --quiet; -p/--print is
@@ -272,6 +299,7 @@ if (-not $outputDirExisted -and $PSVersionTable.Platform -ne 'Unix') {
 $promptPath = Join-Path $outputDir "$slug.md"
 $outPath = Join-Path $outputDir "$slug.out"
 $errPath = Join-Path $outputDir "$slug.err"
+$pidPath = Join-Path $outputDir "$slug.pid"
 
 if ($PromptFile) {
   if (-not (Test-Path -LiteralPath $PromptFile -PathType Leaf)) {
@@ -364,6 +392,22 @@ if ($Ledger) {
   }
 }
 
+# PID handoff (work-items/bugs/2026-07-26-await-codex-dispatch-cannot-
+# satisfy-its-own-liveness-invariant.md): record THIS wrapper's own $PID +
+# StartTime before invoking claude. Same rationale as the sibling
+# invoke-codex-prompt.ps1: PowerShell's call operator does not always spawn a
+# separate OS process (a `.ps1`-shim target runs in-process), so this
+# wrapper's own PID is the accurate direct-probe answer on this platform, not
+# a fallback proxy -- it is the OS-level unit that owns prompt persistence,
+# the provider call, and output capture end-to-end for this dispatch. Same
+# disclosed residual gap as the Codex sibling: an orphaned `.exe`/`.cmd`
+# child surviving a killed-parent-only scenario is not covered here.
+$pidStartMarker = $null
+try { $pidStartMarker = (Get-Process -Id $PID).StartTime.Ticks.ToString() } catch { }
+$pidFileLines = @("pid=$PID")
+if ($pidStartMarker) { $pidFileLines += "start=$pidStartMarker" }
+[System.IO.File]::WriteAllText($pidPath, (($pidFileLines -join "`n") + "`n"), [System.Text.UTF8Encoding]::new($false))
+
 try {
   $env:ORCHESTRARIUM_DISPATCHED_REVIEW = '1'
   # Invoke claude via PowerShell native call operator. `&` handles shim resolution
@@ -414,7 +458,18 @@ if ($Ledger) {
   }
   $errMarkers = 0
   if ((Test-Path -LiteralPath $errPath -PathType Leaf) -and (Get-Item -LiteralPath $errPath).Length -gt 0) {
-    $errMarkers = @(Select-String -LiteralPath $errPath -Pattern '^(ERROR|FATAL|API Error): ' -CaseSensitive -AllMatches).Count
+    # Two marker shapes, both anchored at line start so a mid-line "ERROR"
+    # inside ordinary prose (e.g. the echoed prompt body) never counts:
+    #   1. `ERROR: `/`FATAL: `/`API Error: ` with no timestamp (original shape).
+    #   2. `<ISO8601Z timestamp> (ERROR|FATAL) <module::path>: ` -- the Rust
+    #      `tracing`-crate default formatter this CLI's own MCP transport layer
+    #      emits (2026-07-26 incident: `ERROR rmcp::transport::worker: worker
+    #      quit with fatal:`; also observed from `codex_core::tools::router`).
+    # Not covered (residual, unobserved in any real sample from this runtime):
+    # non-Z timezone-offset timestamps, WARN/INFO/DEBUG/TRACE severities (by
+    # design -- not fatal), a hyphenated target segment (Rust normalizes crate
+    # hyphens to underscores in tracing targets), lowercase severity tokens.
+    $errMarkers = @(Select-String -LiteralPath $errPath -Pattern '^([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z? )?(ERROR|FATAL|API Error)(: | [A-Za-z0-9_]+(::[A-Za-z0-9_]+)*: )' -CaseSensitive -AllMatches).Count
   }
   $termStatus = 'blocked'; $termGate = 'none'; $termNote = 'oracle: '
   if ($exitCode -ne 0) { $termNote += "nonzero exit ($exitCode)" }
@@ -448,5 +503,6 @@ if ($Ledger) {
 Write-Output $promptPath
 Write-Output $outPath
 Write-Output $errPath
+Write-Output $pidPath
 
 exit $exitCode

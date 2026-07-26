@@ -26,16 +26,24 @@ values in the ledger. This file proves:
   5. the ledger records the resolved --model alongside --effort in both the
      launch and terminal events, so provenance is backed by data.
 
-PowerShell CLI note (see the adjacent-finding bug this session also filed): a
-bare `-c` (Codex's own reasoning-effort flag) or `-p` (Claude's own print flag),
-passed as trailing remaining-argument tokens via `-File`, collides with
+PowerShell CLI note, UPDATED (bug
+work-items/bugs/2026-07-26-powershell-flag-abbreviation-collision-blocks-provider-overrides.md,
+now fixed): a bare `-c` (Codex's own config-override flag) or `-p` (Claude's own
+print flag), passed as trailing tokens via `-File`, used to collide with
 PowerShell's own unique-prefix parameter-name abbreviation ("-c" uniquely
-abbreviates "-CodexFlags", "-p" uniquely abbreviates "-PromptFile") and gets
+abbreviated "-CodexFlags", "-p" uniquely abbreviated "-PromptFile") and got
 silently swallowed as an attempt to (re)bind THAT parameter instead of landing in
-the flags array -- a pre-existing defect independent of this fix. The PowerShell
-"full profile" tests below therefore use a genuine PowerShell array literal via
-`-Command` (`-CodexFlags @('--model', ...)`), which is unambiguous and exercises
-the real end-to-end script rather than working around the collision.
+the flags array. Both `.ps1` wrappers now declare NO `param()` block at all --
+a script with zero declared parameters gets none of PowerShell's automatic
+name-matching (not even the built-in common parameters like `-PipelineVariable`,
+which "-p" ALSO collided with once `[Parameter(ValueFromRemainingArguments=$true)]`
+made the old param() block "advanced") -- and instead parse the raw `$args` array
+by hand, exactly like the Bash sibling's `case "$1" in ...` loop. `-File` and
+`-Command` now behave identically, and a bare `-c`/`-p` survives byte-for-byte via
+either. The PowerShell tests below exercise BOTH invocation styles directly with
+the real colliding short flags -- no array-literal workaround needed or supported
+any more (the old `-CodexFlags @(...)` named-splat shape no longer parses, since
+that parameter no longer exists).
 """
 
 from __future__ import annotations
@@ -287,13 +295,32 @@ pytestmark_ps = pytest.mark.skipif(INTERPRETER is None, reason="no PowerShell ho
 
 
 def _make_fake_provider_ps1(tmp_path: Path, which: str) -> Path:
+    """Fake stand-in for the real `codex`/`claude` binary.
+
+    Deliberately declares NO `param()` block -- an EARLIER version of this
+    fixture used `param([Parameter(ValueFromRemainingArguments=$true)]
+    [string[]]$Arguments)`, which (empirically, discovered this session while
+    building the regression test for the collision bug below) made the FIXTURE
+    ITSELF swallow a leading `-p` token via the exact same PowerShell
+    common-parameter collision (`-p` uniquely abbreviates the built-in
+    `-PipelineVariable`, present on any script with an advanced/`[Parameter()]`
+    param block) that this whole bug is about -- masking the wrapper's own
+    behavior rather than proving it, since the assertion would still have
+    passed (wrong reason: the fixture ate the token, not the wrapper). A real
+    provider CLI is a compiled/Node binary with no PowerShell parameter binder
+    at all; reading the classic `$args` array (no param() block, so this
+    script is never "advanced") is the faithful stand-in, and it also echoes
+    every token it actually received to stdout (`ARGRECV[i]=<token>`, captured
+    in the wrapper's `.out` file) so a test can prove byte-for-byte argument
+    fidelity, not just infer it from the A12 guard's pass/fail verdict.
+    """
     fake = tmp_path / f"fake-{which}.ps1"
     if which == "codex":
         body = (
-            "param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)\n"
             "$lastmsg = ''\n"
-            "for ($i = 0; $i -lt $Arguments.Count; $i++) {\n"
-            "  if ($Arguments[$i] -eq '--output-last-message') { $lastmsg = $Arguments[$i + 1] }\n"
+            "for ($i = 0; $i -lt $args.Count; $i++) {\n"
+            "  Write-Output \"ARGRECV[$i]=<$($args[$i])>\"\n"
+            "  if ($args[$i] -eq '--output-last-message') { $lastmsg = $args[$i + 1] }\n"
             "}\n"
             "$input | Out-Null\n"
             "if ($lastmsg) { [System.IO.File]::WriteAllText($lastmsg, \"GATE: PASS`n\", [System.Text.UTF8Encoding]::new($false)) }\n"
@@ -301,7 +328,7 @@ def _make_fake_provider_ps1(tmp_path: Path, which: str) -> Path:
         )
     else:
         body = (
-            "param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Arguments)\n"
+            "for ($i = 0; $i -lt $args.Count; $i++) { Write-Output \"ARGRECV[$i]=<$($args[$i])>\" }\n"
             "$input | Out-Null\n"
             "Write-Output 'GATE: PASS'\n"
             "exit 0\n"
@@ -337,11 +364,9 @@ def _ps_quote(value: str) -> str:
 
 def _run_ps_command(tmp_path: Path, which: str, topic: str, flag_array: list[str] | None,
                      *, ledger_item: Path | None = None) -> subprocess.CompletedProcess:
-    """Invoke via `-Command` using an explicit named parameter with a genuine
-    PowerShell array literal (`-CodexFlags @('a','b',...)`), which unambiguously
-    constructs a multi-element array regardless of any token's shape -- the
-    collision-free path used for cases that need Codex's own `-c` or Claude's own
-    `-p` flag."""
+    """Invoke via `-Command`/the call operator (`&`) with bare trailing tokens --
+    see the comment on `parts` below for why this no longer uses the old
+    named-parameter array-literal splat."""
     wrapper = PS_WRAPPERS[which]
     fake = _make_fake_provider_ps1(tmp_path, which)
     prompt = tmp_path / "prompt.md"
@@ -354,11 +379,19 @@ def _run_ps_command(tmp_path: Path, which: str, topic: str, flag_array: list[str
     if which == "claude":
         env["ANTHROPIC_API_KEY"] = "a12-guard-fixture-key"
 
-    flags_param = "CodexFlags" if which == "codex" else "ClaudeFlags"
+    # Bare tokens, exactly like `_run_ps_file` -- the fix removed the named
+    # `-CodexFlags`/`-ClaudeFlags` parameter entirely, so the old array-literal
+    # splat (`-CodexFlags @(...)`) no longer parses (with no such parameter left
+    # to bind, it now lands as two unrelated literal tokens: the wrapper's manual
+    # `$args` parser would take "-CodexFlags" as the topic-slug-if-unset-else-a-
+    # stray-provider-flag, and the array value collapses to one ToString()-joined
+    # string -- see the bug work-item for the measured repro). Kept as a
+    # SEPARATE helper from `_run_ps_file` (rather than deleting it) specifically
+    # to prove `-Command`/the call operator behaves identically to `-File` now,
+    # which is the fix's central claim.
     parts = [f"& {_ps_quote(str(wrapper))}", _ps_quote(topic), "-PromptFile", _ps_quote(str(prompt))]
     if flag_array is not None:
-        literal = "@(" + ",".join(_ps_quote(v) for v in flag_array) + ")"
-        parts += [f"-{flags_param}", literal]
+        parts += [_ps_quote(v) for v in flag_array]
     if ledger_item is not None:
         parts += ["-Ledger", _ps_quote(str(ledger_item)),
                   "-LedgerRole", "architecture-reviewer",
@@ -374,21 +407,20 @@ def _run_ps_command(tmp_path: Path, which: str, topic: str, flag_array: list[str
 def test_ps_partial_override_missing_model_fails_closed(tmp_path: Path, which: str) -> None:
     """Effort-only override, no --model: must fail closed.
 
-    Uses the array-literal `-Command` invocation (`_run_ps_command`), NOT bare
-    trailing args via `-File`. A bare `-c` token passed as a trailing arg to the
-    Codex wrapper collides with PowerShell's own unique-prefix abbreviation of
-    `-CodexFlags` (see the module docstring) and collapses to a one-element
-    array with the `-c` marker itself silently stripped -- a genuinely different
-    failure mechanism than "effort given, model omitted". An earlier version of
-    this test used that bare-args shape and got a `returncode != 0` for the
-    wrong reason (the collision, not the A12 guard's own model-presence check),
-    which a caught review correctly flagged: a passing assertion that does not
-    exercise its stated scenario is worse than no test at all. The array literal
-    constructs the intended two-element `-c model_reasoning_effort=xhigh` (or,
-    for Claude, `--effort xhigh`) array exactly, isolating the guard's own
-    behavior from that unrelated collision."""
-    partial_array = ["-c", "model_reasoning_effort=xhigh"] if which == "codex" else ["--effort", "xhigh"]
-    result = _run_ps_command(tmp_path, which, "a12-ps-partial", partial_array)
+    Uses bare trailing tokens via `-File` -- the ACTUAL shape the collision bug
+    was reported against, and now safe to use directly since the fix (removing
+    the wrapper's own named parameters in favor of manual `$args` parsing) means
+    a bare `-c`/`-p` no longer collides with anything. Before the fix, this exact
+    invocation could not isolate "guard rejects a partial override" from "the
+    collision ate the `-c` marker" -- both produced `returncode != 0`, for
+    different reasons (see the module docstring and the fixed
+    `_make_fake_provider_ps1` above, which used to mask this the same way). This
+    now reproduces the reported bug shape directly rather than working around
+    it."""
+    partial_args = (
+        ["-c", "model_reasoning_effort=xhigh"] if which == "codex" else ["--effort", "xhigh"]
+    )
+    result = _run_ps_file(tmp_path, which, "a12-ps-partial", partial_args)
 
     assert result.returncode != 0, (
         f"partial override must fail closed; stdout={result.stdout!r} stderr={result.stderr!r}"
@@ -400,12 +432,14 @@ def test_ps_partial_override_missing_model_fails_closed(tmp_path: Path, which: s
 @pytestmark_ps
 @pytest.mark.parametrize("which", ["codex", "claude"])
 def test_ps_full_profile_override_still_launches(tmp_path: Path, which: str) -> None:
-    full_array = (
+    """Full per-profile override via bare `-File` trailing tokens -- the same
+    invocation shape as the test above, now exercised on the success path."""
+    full_args = (
         ["--model", "gpt-5.6-sol", "-c", "model_reasoning_effort=xhigh"]
         if which == "codex"
         else ["-p", "--output-format", "text", "--model", "opus", "--effort", "xhigh"]
     )
-    result = _run_ps_command(tmp_path, which, "a12-ps-full", full_array)
+    result = _run_ps_file(tmp_path, which, "a12-ps-full", full_args)
 
     assert result.returncode == 0, (
         f"full per-profile override must still launch; stderr={result.stderr!r}"
@@ -485,3 +519,74 @@ def test_ps_ledger_records_resolved_model_alongside_effort(tmp_path: Path, which
     for event in (launches[0], terminals[0]):
         assert event.get("model") == expected_model, event
         assert event.get("effort") == expected_effort, event
+
+
+@pytestmark_ps
+@pytest.mark.parametrize("which", ["codex", "claude"])
+def test_ps_file_bare_args_forward_the_actual_colliding_short_flag(tmp_path: Path, which: str) -> None:
+    """Direct end-to-end reproduction of
+    2026-07-26-powershell-flag-abbreviation-collision-blocks-provider-overrides,
+    NOT the guard-inferred proxy the tests above rely on. This invokes the real
+    `.ps1` wrapper via `-File` with BARE trailing tokens -- the wrapper's own
+    documented usage shape, and the exact shape the bug report reproduced against
+    -- carrying codex's real `-c` config-override flag / claude's real `-p` print
+    flag as the FIRST token of a full per-profile override, mixed with a
+    `-Ledger`/... block so provenance is checked too.
+
+    Before the fix: PowerShell's automatic parameter-name abbreviation intercepted
+    `-c`/`-p` as an attempt to (re)bind the wrapper's own `-CodexFlags`/
+    `-PromptFile` parameter (or, for `-p`, the always-present common parameter
+    `-PipelineVariable` once `-PromptFile` alone did not exist to collide with --
+    see the module docstring) -- corrupting the array or hard-erroring -- so this
+    exact invocation could not succeed via `-File` at all.
+
+    This asserts three independent things, each closing a different way the fix
+    could be wrong for the right-looking reason:
+      1. the launch succeeds (proves no collision/hard-error occurred);
+      2. the ledger's recorded model/effort match the override exactly (proves
+         the override -- not a corrupted array that happened to still satisfy
+         the guard some other way -- is what actually resolved);
+      3. the fake provider's OWN echoed argv (captured in its `.out` file)
+         contains the literal colliding token AND `--model`, in order -- direct
+         proof the provider received it byte-for-byte, not an inference from the
+         guard's verdict (which the module docstring's `_make_fake_provider_ps1`
+         history shows can itself mask a swallowed token)."""
+    item = _make_work_item(tmp_path, name=f"2026-01-01-a12-ps-collision-{which}-fixture")
+    full_args = (
+        ["-c", "model_reasoning_effort=xhigh", "--model", "gpt-5.6-sol"]
+        if which == "codex"
+        else ["-p", "--output-format", "text", "--model", "sonnet", "--effort", "high"]
+    )
+    ledger_args = ["-Ledger", str(item), "-LedgerRole", "architecture-reviewer",
+                   "-LedgerLane", "a12-collision-fixture", "-LedgerArtifact", "design.md"]
+    topic = "a12-ps-collision"
+    result = _run_ps_file(tmp_path, which, topic, [*ledger_args, *full_args])
+
+    colliding_flag = "-c" if which == "codex" else "-p"
+    assert result.returncode == 0, (
+        f"a full override carrying the provider's own colliding short flag "
+        f"({colliding_flag!r}) as its first token must launch cleanly via -File; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+
+    events = _read_ledger(item)
+    launches = [e for e in events if e.get("eventKind") == "launch"]
+    terminals = [e for e in events if e.get("eventKind") == "terminal"]
+    assert len(launches) == 1
+    assert len(terminals) == 1
+
+    expected_model = "gpt-5.6-sol" if which == "codex" else "sonnet"
+    expected_effort = "xhigh" if which == "codex" else "high"
+    for event in (launches[0], terminals[0]):
+        assert event.get("model") == expected_model, event
+        assert event.get("effort") == expected_effort, event
+
+    outdir = tmp_path / "prompt-outputs"
+    out_files = sorted(outdir.glob(f"{topic}-*.out"))
+    assert len(out_files) == 1, out_files
+    received = out_files[0].read_text(encoding="utf-8")
+    assert f"<{colliding_flag}>" in received, (
+        f"the fake provider's own echoed argv must contain the literal "
+        f"{colliding_flag!r} token unmodified; received={received!r}"
+    )
+    assert "<--model>" in received, received
