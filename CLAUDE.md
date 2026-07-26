@@ -81,7 +81,7 @@ src.claude/              ← Claude Code pack source (install copies to target .
     contracts/           ← operating model + subagent contracts + policy catalog
     team-templates/      ← 8 routing templates (JSON)
     scripts/             ← validation + safety scripts + the 2 blocking hooks + hook_common
-    hooks/               ← the 4 warn-only audit hooks (machine-local-path, no-trash/stray-artifact, stale-relation-residue, repository-orientation)
+    hooks/               ← the 6 warn-only audit hooks (machine-local-path, no-trash/stray-artifact, stale-relation-residue, repository-orientation, mcp-momentum, typed-routing)
   commands/              ← slash commands (agents-*)
   skills/                ← common skills (workflow-focused, Skill-tool invokable)
 src.codex/               ← Codex pack source; canonical Codex-line implementation
