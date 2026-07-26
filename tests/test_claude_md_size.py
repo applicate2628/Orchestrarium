@@ -33,8 +33,8 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         "c0624b3c42cc0a310896b98e4cc1dfac21f68131185e21b6eb138c5f8759a272",
     ),
     "hook-behavior-contracts": (
-        15_453,
-        "1f77f62c798f7f4065431500daa3f8a3830a9e2b131bbceff98af7af8b730077",
+        21_395,
+        "8492ebbd9d89a8d2f324fb7da453b03c9d5aa951ab52fb293e43fbf8ecebe77f",
     ),
     "hook-entrypoints-placement": (
         2_492,
@@ -157,9 +157,9 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
     result = _run()
     assert result.returncode == 0, result.stdout + result.stderr
     for expected in (
-        "Code points: 36423",
-        "UTF-8 bytes: 36613",
-        "Binding size: 36613",
+        "Code points: 36551",
+        "UTF-8 bytes: 36741",
+        "Binding size: 36741",
         "Size cap: 36771",
         "Warning threshold: 36521",
         "Manifest: 47/47",
@@ -171,7 +171,7 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
 def test_tiny_size_cap_fails_closed() -> None:
     result = _run("--size-cap", "1000")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL: Claude Markdown binding size 36613 > size cap 1000" in result.stdout
+    assert "FAIL: Claude Markdown binding size 36741 > size cap 1000" in result.stdout
     assert "RESULT: FAIL" in result.stdout
 
 

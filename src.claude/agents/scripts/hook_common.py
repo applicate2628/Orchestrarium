@@ -87,6 +87,98 @@ def read_transcript_tail(transcript_path: str, n: int = 100) -> list[dict]:
     return entries
 
 
+def last_genuine_user_text(transcript_path: str, *, byte_cap: int) -> tuple[str, str]:
+    """Bounded REVERSE scan to the CURRENT TURN's boundary -- the most recent
+    genuine user-typed message -- without ever reading the whole transcript
+    file. Returns `(text, status)` where `status` is one of:
+
+      "found"          -- a genuine user message was located; `text` is its
+                          typed content (possibly "" if the message itself
+                          was empty, which cannot happen for a real typed
+                          message but is defensive)
+      "absent"         -- `transcript_path` is empty/None
+      "unreadable"     -- the path does not resolve to a readable file
+      "not-in-window"  -- no genuine user message was found within
+                          `byte_cap` bytes of end-of-file
+
+    WHY A SEPARATE HELPER, AND WHY `read_transcript_tail` IS UNTOUCHED
+    (design.md, review-round-cap-enforcement, S4.5 / F2). The turn boundary
+    (where the CURRENT turn started) is a SEMANTIC position; a fixed record
+    window (`read_transcript_tail`'s `n`) is a COST CAP. Conflating them
+    under one constant loses the boundary whenever a turn produces more
+    records than the window -- measured at 36.8% of real turns for n=100
+    and still 19.5% for n=200 (a bigger constant does not fix the defect
+    class, it only moves the failure rate). This function anchors on the
+    boundary itself: start with a small trailing read (1 MiB) and only read
+    MORE when that chunk does not contain the boundary, doubling up to
+    `byte_cap`. Measured cheaper on both axes than the fixed-window
+    approach: 8 records / 0.6 ms to find the boundary on the largest
+    transcript measured here, versus `read_transcript_tail`'s whole-file
+    `read_text()` at 1,482 ms for the same file.
+
+    `read_transcript_tail` and every other export in this module are
+    BYTE-UNCHANGED by this addition -- this is a new, additive function, not
+    a rewrite of the existing one. The four existing callers
+    (`check-bugfix-discipline.py`, `check-git-push-gate.py`,
+    `check-passive-polling-stop.py`, `check-repository-orientation.py`) keep
+    reading via `read_transcript_tail` exactly as before; this helper is for
+    a caller that specifically needs the semantic turn boundary rather than
+    a bounded tail (design.md seam S5)."""
+    if not transcript_path:
+        return "", "absent"
+    tp = Path(transcript_path)
+    try:
+        if not tp.is_file():
+            return "", "unreadable"
+        file_size = tp.stat().st_size
+    except Exception:
+        return "", "unreadable"
+
+    chunk = min(1024 * 1024, byte_cap)  # start at 1 MiB, never exceeding byte_cap
+    while True:
+        read_size = min(chunk, file_size)
+        start_offset = file_size - read_size
+        try:
+            with tp.open("rb") as f:
+                f.seek(start_offset)
+                raw = f.read(read_size)
+        except Exception:
+            return "", "unreadable"
+
+        text_blob = raw.decode("utf-8", errors="replace")
+        lines = text_blob.split("\n")
+        # Discard the leading partial line UNLESS the read started at true
+        # file offset 0 (in which case there is no partial line -- the read
+        # begins at a real record boundary). A doubling retry re-includes
+        # the discarded partial line whole, so this is safe rather than lossy.
+        if start_offset > 0 and lines:
+            lines = lines[1:]
+
+        entries: list[dict] = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entry = json.loads(line)
+            except Exception:
+                continue
+            if isinstance(entry, dict):
+                entries.append(entry)
+
+        entry, typed_text, _after = last_genuine_user_message(entries)
+        if entry is not None:
+            return typed_text, "found"
+
+        if start_offset == 0:
+            # Read the whole file and still found no boundary -- there is
+            # nothing more to read.
+            return "", "not-in-window"
+        if chunk >= byte_cap:
+            return "", "not-in-window"
+        chunk = min(chunk * 2, byte_cap)
+
+
 def slice_current_turn(entries: list[dict]) -> tuple[dict | None, list[dict]]:
     """Return the last GENUINE user-typed entry and the entries after it.
 

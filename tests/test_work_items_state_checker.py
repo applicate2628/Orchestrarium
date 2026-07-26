@@ -352,11 +352,18 @@ def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Pat
 
 
 def test_done_predicate_twin_not_drifted():
-    # The state-checker re-implements the archival hook's DONE_STATE regex (no
-    # shared import across the hook/script boundary). Guard against silent drift:
-    # the distinctive pattern line must appear verbatim in BOTH files.
+    # The state-checker re-implements the SEN-0 archival-orphan invariant's
+    # DONE_STATE regex (no shared import across the sentinel/validator
+    # boundary — workitem_sentinels.py must never be imported BY the
+    # validator's twin logic, only the reverse; design.md §3.2). Guard against
+    # silent drift: the distinctive pattern line must appear verbatim in BOTH
+    # files. As of the sentinel-registry migration
+    # (2026-07-25-review-round-cap-enforcement), the regex's owning file is
+    # `workitem_sentinels.py`, not `check-work-items-archival-stop.py` (now a
+    # thin adapter that imports it) — the twin-check follows the regex to its
+    # new home rather than the file that used to hold it.
     line = r'r"\s*\*{0,3}\s*:\s*\*{0,3}\s*(?:closed|done|complete|completed|archived)(?![\w-])"'
-    hook = (ROOT / "src.claude" / "agents" / "scripts" / "check-work-items-archival-stop.py").read_text(encoding="utf-8")
+    sentinels = (ROOT / "src.claude" / "agents" / "scripts" / "workitem_sentinels.py").read_text(encoding="utf-8")
     checker = CHECKER.read_text(encoding="utf-8")
-    assert line in hook, "hook DONE_STATE pattern changed — update the twin in check-work-items-state.py"
-    assert line in checker, "check-work-items-state.py DONE_STATE pattern drifted from the hook"
+    assert line in sentinels, "workitem_sentinels.py DONE_STATE pattern changed — update the twin in check-work-items-state.py"
+    assert line in checker, "check-work-items-state.py DONE_STATE pattern drifted from workitem_sentinels.py"

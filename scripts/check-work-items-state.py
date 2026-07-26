@@ -19,6 +19,39 @@ def load_validator():
     return module
 
 
+def load_sentinels():
+    """One-way import (seam S4): this validator MAY report the invariant
+    registry's own findings informationally. The registry itself MUST NEVER
+    import this validator (design.md §3.2 -- Sentinel != Validator; §5.2)
+    and this function's failure must never affect this validator's own
+    PASS/FAIL verdict -- reporting is best-effort, not the gated path.
+
+    Two candidate locations because this file's relative position to
+    `workitem_sentinels.py` differs between the source repo and an installed
+    target: in the SOURCE repo this file lives at `scripts/` while the
+    registry lives at `scripts/universal-hooks/scripts/`; once INSTALLED,
+    both land side by side in the same `agents/scripts/` (Claude) or
+    `skills/lead/scripts/` (Codex) directory (both installers copy their
+    containing directories wholesale -- design.md §5.2/F-B10)."""
+    candidates = (
+        Path(__file__).with_name("workitem_sentinels.py"),  # installed layout: same dir as this file
+        Path(__file__).parent / "universal-hooks" / "scripts" / "workitem_sentinels.py",  # source-repo layout
+    )
+    for candidate in candidates:
+        if not candidate.is_file():
+            continue
+        try:
+            spec = importlib.util.spec_from_file_location("workitem_sentinels", candidate)
+            if spec is None or spec.loader is None:
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+        except Exception:
+            continue
+    return None
+
+
 def parse_time(value: str) -> datetime:
     normalized = value.strip()
     if normalized.endswith("Z"):
@@ -294,6 +327,28 @@ def command_check(args: argparse.Namespace) -> int:
             print(f"  info: {note}")
     for note in global_notes:
         print(f"info: {note}")
+
+    # Sentinel findings, reported informationally (S4 seam). This NEVER
+    # affects `failed` / the RESULT line: the sentinel registry answers "has
+    # the process failed?" at the always-on Stop path, this validator answers
+    # "does this document conform?" on demand -- two different questions, one
+    # owner each (design.md §3.2). A sentinel RESOLVE/NOTICE surfaces here
+    # purely as an extra signal for a human running this checker by hand (a
+    # third tier, HALT, was designed and then withdrawn before release --
+    # design.md §0.9/§1.0 -- so it is never a value `finding.severity` takes).
+    sentinels = load_sentinels()
+    if sentinels is not None:
+        try:
+            # build_context() dropped its own `now` parameter (r8): nothing in
+            # SEN-0/SEN-1's evaluate paths reads a timestamp now that SEN-2's
+            # date arithmetic is cut, so this validator's own `now` (used above
+            # for stale-running checks) is not threaded through here.
+            sentinel_ctx = sentinels.build_context(str(root))
+            for finding in sentinels.evaluate_all(sentinel_ctx):
+                first_line = finding.message.splitlines()[0] if finding.message else ""
+                print(f"info: sentinel {finding.id} ({finding.severity}): {first_line}")
+        except Exception:
+            pass  # reporting-only; a sentinel-side failure must not affect this validator's verdict
 
     # Archival must not launder open obligations (decision item 3; fable impl gate
     # REVISE-1): an archived item's ledger is still scanned for open v2 REVISEs.

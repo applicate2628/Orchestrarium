@@ -12,9 +12,10 @@ This tree follows the common provider-local reference layout used across the fou
 - `periodic-control-matrix.md`
 - `repository-publication-safety.md`
 - `repository-task-memory.md`
+- `stop-hook-halting-primitives.md`
 - `subagent-operating-model.md`
 - `workflow-strategy-comparison.md`
-- `ru/` translations for the evidence pipeline, diagram, periodic controls, publication safety, task memory, subagent operating model, and workflow strategy comparison
+- `ru/` translations for the evidence pipeline, diagram, periodic controls, publication safety, task memory, stop-hook halting primitives, subagent operating model, and workflow strategy comparison
 
 Use together with:
 
