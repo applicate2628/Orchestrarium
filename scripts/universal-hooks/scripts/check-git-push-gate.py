@@ -129,6 +129,64 @@ stays on `extract_model_shell_commands_with_ids`, unchanged, because only a
 shell call can ever execute the scanner. A non-shell call can now never hide
 a second claimant on a scan id.
 
+RESULT MATCH IS WHOLE-LINE, NOT SUBSTRING (2026-07-26, CRITICAL hardening —
+`work-items/bugs/2026-07-26-push-gate-credits-a-blocking-scan-whose-grep-
+echoes-the-clean-line.md`, found by `$security-reviewer` (fable), reproduced
+end to end by `$lead`). `SCAN_CLEAN_TRACKED_REGEX` used to be a plain
+substring search over a correlated result's whole text. That is exploitable
+even with correlation, uniqueness, and ordering all intact, because the
+scanner's OWN honest report of a BLOCKED scan can itself contain the
+clean-result string as a SUBSTRING: `check-publication-safety.sh`'s
+`nonpath_cmd` prints a matching `git grep` line straight to stdout (correct
+behavior for a human reader — see that script's own `nonpath_cmd`/`echo
+"$scanner_line"` handling), and `git grep` always prefixes `path:lineno:` to
+the line it found. A single staged line such as `token = "publication-
+safety: clean (tracked, examined 9 files)"` trips the `[Tt]oken` leak
+pattern (a real, correct BLOCK — exit 1) while ALSO embedding the exact
+clean-receipt text as a substring of that one grep report line. The
+unanchored regex matched inside it regardless, and this hook never reads the
+scan's own exit status (see the module's WHAT THIS STILL DOES NOT COVER
+section on why that channel is unavailable to it) — so the scanner's honest
+account of its own failure became the very string this hook accepted as
+proof of success. None of the CORRELATION / COLLISION REJECTION / ORDERING /
+CALL-SIDE UNIQUENESS hardenings above touch this: they all police WHO
+produced the text (the right call, a unique id, the right order), never
+WHAT the scan concluded — every one of them can hold exactly as designed
+while this hole stays open, because the credited text is genuinely the
+scan's own output, genuinely under its own unique id, genuinely in the
+right order. The fix anchors `SCAN_CLEAN_TRACKED_REGEX` to a WHOLE LINE
+(`^...$` under `re.MULTILINE`) — see that pattern's own comment block for
+the full three-condition contract and why `git grep`'s mandatory
+`path:lineno:` prefix means this costs the genuine receipt nothing. A
+belt-and-braces companion, `SCAN_FAILURE_MARKER_REGEX`, additionally
+excludes any correlated result that ALSO carries the scanner's own
+self-reported failure line, so a scan cannot be credited as both blocked and
+clean from the same output no matter how the whole-line anchor is
+approached from some future angle.
+
+A CRASH WHILE DECIDING FALLS THROUGH TO DENY, NEVER TO ALLOW (2026-07-26,
+HIGH-severity hardening — `work-items/bugs/2026-07-26-push-gate-new-paths-
+fail-open-because-the-wrapper-discards-the-exit-code.md`, found by
+`$security-reviewer` (fable)). Before this hardening, `main()`'s only
+`try/except` covered `parse_envelope` alone; every step from tool-input
+extraction through the scan-evidence correlation loop ran unguarded. Both
+wrapper scripts (`check-git-push-gate.sh`, `check-git-push-gate.ps1`)
+unconditionally exit 0 regardless of what the python helper does internally
+— that is the deliberate fail-open contract for a hook that CANNOT decide
+(missing transcript, malformed envelope, no command). It is NOT a defensible
+outcome for a hook that CRASHED WHILE DECIDING: an uncaught exception in that
+unguarded code printed nothing to stdout and exited non-zero, the wrapper
+discarded that exit code and exited 0 anyway, so the model-facing result was
+a SILENT ALLOW — indistinguishable from a legitimate pass to everything
+downstream, the identical failure-indistinguishable-from-success shape this
+same review batch kept finding elsewhere. The fix moves every step from
+tool-input extraction through the scan-evidence loop into `evaluate_push`,
+called from `main()` inside one `try/except Exception` that treats a raised
+exception as "fall through to the deny payload", never as "return 0
+(allow)" — see `evaluate_push`'s own docstring for the exact mechanics and
+why the five pre-existing deliberate fail-open returns inside it are
+unaffected (they are ordinary returns, not exceptions).
+
 HONESTY RULE — THIS IS A BACKSTOP, NOT A GUARANTEE. It under-detects by design
 (a push wrapped in a script the hook only sees as `bash sync.sh`, `eval`,
 command substitution, or another command-wrapper is not modelled — the hook
@@ -163,7 +221,11 @@ something. The binding rule remains the governance text: human review +
 publication-safety leak-check before any push. Do not represent this hook as
 enforcing that rule.
 
-Decision algorithm (fail-open everywhere on internal error):
+Decision algorithm (fail-open on envelope-parse failure, step 1, and on the
+five deliberate no-decision returns in steps 2-6; an uncaught exception
+anywhere in steps 2-8 now falls through to the DENY payload at step 9 rather
+than silently allowing — 2026-07-26 hardening, see `evaluate_push`'s
+docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
 
   1. Read the PreToolUse JSON envelope from stdin.
   2. If the envelope carries `agent_id` (a subagent context) → exit 0 (allow;
@@ -201,12 +263,17 @@ Decision algorithm (fail-open everywhere on internal error):
      below), WHOSE OWN correlated tool OUTPUT (same call id — see the
      CORRELATION note above), itself under an id unique among this turn's
      outputs and recorded STRICTLY AFTER the call it answers, reports a
-     clean, non-empty, `tracked`-mode result, AND the last genuine user
-     message contains an explicit push-instruction signal (`push`, `запушь`,
-     `залей`, ...) → exit 0.
-  9. Otherwise → emit a structured `permissionDecision: "deny"` payload with
-     exact compliance instructions. Always exit 0 (the decision is carried by
-     the stdout payload, not the exit code).
+     clean, non-empty, `tracked`-mode result ON A WHOLE LINE BY ITSELF (see
+     the RESULT MATCH IS WHOLE-LINE note above and `SCAN_CLEAN_TRACKED_
+     REGEX`'s own comment) AND does NOT also carry the scanner's own
+     self-reported failure line (`SCAN_FAILURE_MARKER_REGEX`), AND the last
+     genuine user message contains an explicit push-instruction signal
+     (`push`, `запушь`, `залей`, ...) → exit 0.
+  9. Otherwise — including when steps 2-8 raise an uncaught exception (see
+     the "A CRASH WHILE DECIDING" note above and `evaluate_push`'s own
+     docstring; 2026-07-26 hardening) — emit a structured `permissionDecision:
+     "deny"` payload with exact compliance instructions. Always exit 0 (the
+     decision is carried by the stdout payload, not the exit code).
 
 WHAT THIS STILL DOES NOT COVER (disclosed, not silently assumed away):
   - SHORT QUOTES OF THE BARE MARKER (2026-07-26, `$security-engineer`
@@ -399,9 +466,8 @@ PUSH_INSTRUCTION_REGEX = re.compile(
 # merely mentioning the scanner cannot satisfy it either, whether or not it
 # shares a turn with an unrelated scan invocation. This is the scanner's OWN
 # self-reported clean-pass line (check-publication-safety.sh / .ps1, all
-# copies): "publication-safety: clean (tracked, examined N files)". Two
-# conditions are both load-bearing and
-# neither is optional:
+# copies): "publication-safety: clean (tracked, examined N files)". THREE
+# conditions are all load-bearing and none is optional:
 #   - `tracked` only. A `--path` fixture-testing invocation reports `path` in
 #     the same slot; requiring the literal word `tracked` keeps a local fixture
 #     scan (which can point at an arbitrary directory, scanning content that
@@ -416,8 +482,62 @@ PUSH_INSTRUCTION_REGEX = re.compile(
 #     that examined nothing is UNVERIFIED, not clean, for gate purposes — this
 #     is the empty-index defect this hardening exists to close
 #     (work-items/bugs/2026-07-25-push-gate-keys-on-scan-invocation-not-result.md).
+#   - WHOLE-LINE MATCH (`^...$` under `re.MULTILINE`), not a bare substring
+#     search — added 2026-07-26 as a CRITICAL fix, `$security-reviewer`
+#     (fable) finding, reproduced end to end by `$lead`: `work-items/bugs/
+#     2026-07-26-push-gate-credits-a-blocking-scan-whose-grep-echoes-the-
+#     clean-line.md`. A plain substring search is satisfied just as readily
+#     by the clean-receipt text appearing INSIDE a longer line as by the
+#     receipt being the whole line — and the scanner's own `nonpath_cmd` /
+#     `scanner_nonpath_cmd` `git grep` output (check-publication-safety.sh,
+#     printed straight to stdout, correct behavior for a human reader) is
+#     exactly such a longer line whenever the leaked content itself happens
+#     to quote the receipt text: `git grep` unconditionally prefixes
+#     `path:lineno:` to whatever it found, so a staged line such as
+#     `token = "publication-safety: clean (tracked, examined 9 files)"`
+#     both trips a real leak pattern (the scan correctly BLOCKS, exit 1) and
+#     embeds the exact clean-receipt substring in the same report line — and
+#     this hook never reads the scan's own exit status (see the module
+#     docstring's WHAT THIS STILL DOES NOT COVER section), so the scanner's
+#     honest report of its OWN failure was, verbatim, the string this gate
+#     accepted as proof of success. Anchoring to a whole line costs the
+#     genuine receipt nothing: check-publication-safety.sh's own emission
+#     (`echo "publication-safety: clean (${scan_mode}, examined
+#     ${examined_count} ${examined_word})"`, .sh:429) is always the sole
+#     content of its own physical line, and `git grep`'s mandatory
+#     `path:lineno:` prefix (or a line-numbering wrapper such as `cat -n`)
+#     means an EMBEDDED occurrence can never itself start at the beginning
+#     of a line. `re.MULTILINE`'s `$` matches immediately before a `\n`
+#     (or at end-of-string), and the trailing `\s*` before it consumes a
+#     stray `\r` from a CRLF-terminated capture (`\r` is itself whitespace),
+#     so a Windows-style `\r\n` line ending does not defeat the anchor —
+#     verified against fixtures carrying a trailing `\r` and against the
+#     receipt as the ONLY line in the captured output (both anchor cases
+#     bottom out in `$` matching at true end-of-string, no trailing newline
+#     required). See `SCAN_FAILURE_MARKER_REGEX` immediately below for the
+#     belt-and-braces companion check this same finding also requires.
 SCAN_CLEAN_TRACKED_REGEX = re.compile(
-    r"publication-safety:\s*clean\s*\(\s*tracked\s*,\s*examined\s+([1-9]\d*)\s+files?\s*\)",
+    r"^publication-safety:\s*clean\s*\(\s*tracked\s*,\s*examined\s+([1-9]\d*)\s+files?\s*\)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# Belt-and-braces companion to SCAN_CLEAN_TRACKED_REGEX (2026-07-26, same
+# critical hardening as the whole-line-match condition above — see that
+# regex's own comment for the full reasoning this shares). Even a genuine
+# whole-line match of the clean receipt must NOT be credited if the SAME
+# correlated tool output also carries the scanner's own self-reported
+# FAILURE line (check-publication-safety.sh's exact stderr text on a block,
+# .sh:387, printed immediately before its `exit 1`). A single scan cannot
+# both fail and pass; if a correlated result carries both strings, the
+# honest and defensible reading is DENY, not a coin flip between two
+# self-contradictory reports. Matched by plain SUBSTRING on purpose (unlike
+# the whole-line-anchored clean regex above): this line's exact text is a
+# fixed, known one-liner with nothing meaningful to anchor against, and this
+# check only ever NARROWS what counts as clean — it can turn a would-be
+# ALLOW into a DENY, never the reverse — so a broader match here costs
+# nothing.
+SCAN_FAILURE_MARKER_REGEX = re.compile(
+    r"publication-safety scan found potential tracked-content leak markers",
     re.IGNORECASE,
 )
 
@@ -793,38 +913,64 @@ def find_scan_script_executions(command: str) -> bool:
     return _command_is_solely_scan_execution(command)
 
 
-def main() -> int:
-    try:
-        envelope = parse_envelope(read_stdin_utf8())
-    except Exception:
-        return 0  # malformed envelope -> fail open
+def evaluate_push(envelope: dict) -> bool:
+    """Steps 2-8 of the decision algorithm (see the module docstring): return
+    True to ALLOW the push (`main()` then exits 0 with no payload), False to
+    fall through to the deny payload. MAY RAISE — `main()` wraps the call to
+    this function in one try/except and treats a raised exception exactly
+    like a False return (fall through to deny), never like True.
 
+    Split out of `main()` (2026-07-26 HIGH-severity hardening — `work-items/
+    bugs/2026-07-26-push-gate-new-paths-fail-open-because-the-wrapper-
+    discards-the-exit-code.md`; see the module docstring's "A CRASH WHILE
+    DECIDING" note for the full defect this closes). Before this split, an
+    uncaught exception ANYWHERE in this logic propagated out of `main()`
+    entirely: both wrapper scripts (`check-git-push-gate.sh`,
+    `check-git-push-gate.ps1`) unconditionally discard the python process's
+    exit code and exit 0 regardless, so a crash meant nothing was ever
+    printed to stdout — no deny payload, nothing — and the model-facing
+    result was a SILENT ALLOW, indistinguishable from a legitimate pass.
+    Fail-open is the deliberate, documented posture for a hook that CANNOT
+    decide (a missing transcript, no command, a dry run); it is not
+    defensible for a hook that CRASHED WHILE DECIDING, because those two are
+    indistinguishable to everything downstream.
+
+    The bug report's own count of "five" fail-open paths refers to the five
+    NUMBERED steps 2-6 in the module docstring's decision algorithm (step 3
+    there bundles two code-level checks — non-dict `tool_input` and a
+    missing/non-string `command` — under one label, "tool_input.command is
+    absent or empty"). Concretely, SIX `return True` statements below are
+    UNCHANGED by this split: subagent context, non-dict `tool_input`, no/
+    empty `command`, no `git push` found, every push is `--dry-run`, and a
+    missing `transcript_path`. Each is an ordinary return reached without any
+    exception being raised, so `main()`'s try/except never intercepts them —
+    only a genuinely raised exception is redirected to deny."""
     # Subagent context: mirrors check-bugfix-discipline.py. The subagent's
     # envelope points at the MAIN session transcript, and the subagent cannot
     # put the user-side [approve-publication] marker there — gating it here is
     # an un-overridable false block. Governance still forbids delegating a
     # push to a subagent to dodge review; this hook stays a backstop.
     if envelope.get("agent_id"):
-        return 0
+        return True
 
     tool_input = envelope.get("tool_input")
     if not isinstance(tool_input, dict):
-        return 0
+        return True
 
     command = tool_input.get("command")
     if not isinstance(command, str) or not command:
-        return 0
+        return True
 
     pushes = find_git_push_invocations(command)
     if not pushes:
-        return 0  # no `git push` in command position
+        return True  # no `git push` in command position
 
     if all("--dry-run" in args for args in pushes):
-        return 0  # every push is a dry run; nothing is sent
+        return True  # every push is a dry run; nothing is sent
 
     transcript_path = envelope.get("transcript_path") or ""
     if not transcript_path:
-        return 0  # cannot determine turn state; fail open
+        return True  # cannot determine turn state; fail open
 
     entries = read_transcript_tail(transcript_path, TRANSCRIPT_TAIL_LINES)
     last_user_entry, user_text, after_user_entries = last_genuine_user_message(entries)
@@ -840,7 +986,7 @@ def main() -> int:
     # block, not a one-line approval — does not open the gate here; it falls
     # through to branch (b) and then to deny, same as no marker at all.
     if APPROVE_MARKER_REGEX.search(user_text) and len(user_text) <= MARKER_MAX_MESSAGE_LENGTH:
-        return 0
+        return True
 
     # (b) Publication-safety scan EXECUTED this turn (find_scan_script_
     # executions — real execution, never a mere MENTION of the scanner's
@@ -899,7 +1045,14 @@ def main() -> int:
             for idx, entry in enumerate(after_user_entries):
                 for result_id, result_text in extract_tool_outputs_with_ids(entry):
                     result_positions.setdefault(result_id, []).append(idx)
-                    if SCAN_CLEAN_TRACKED_REGEX.search(result_text):
+                    # WHOLE-LINE match AND no co-occurring scanner FAILURE
+                    # line (2026-07-26 critical hardening — see
+                    # SCAN_CLEAN_TRACKED_REGEX's and SCAN_FAILURE_MARKER_
+                    # REGEX's own comments): a scan's honest report of its
+                    # OWN block must never be credited as its own clean pass.
+                    if SCAN_CLEAN_TRACKED_REGEX.search(result_text) and not SCAN_FAILURE_MARKER_REGEX.search(
+                        result_text
+                    ):
                         clean_result_ids.add(result_id)
 
             for call_id in unambiguous_scan_call_ids:
@@ -915,7 +1068,27 @@ def main() -> int:
                 # module docstring's COLLISION REJECTION note), so `>` never
                 # rejects a genuine pair.
                 if positions[0] > call_positions[call_id][0]:
-                    return 0
+                    return True
+
+    return False  # no allow condition satisfied -> caller falls through to deny
+
+
+def main() -> int:
+    try:
+        envelope = parse_envelope(read_stdin_utf8())
+    except Exception:
+        return 0  # malformed envelope -> fail open
+
+    try:
+        if evaluate_push(envelope):
+            return 0
+    except Exception:
+        # A crash WHILE DECIDING is a decision not made, not a decision to
+        # allow — fall through to the deny payload below rather than
+        # returning 0 silently (2026-07-26 hardening; see evaluate_push's
+        # own docstring and the module docstring's "A CRASH WHILE DECIDING"
+        # note for the full defect this closes).
+        pass
 
     # Deny.
     reason = (
