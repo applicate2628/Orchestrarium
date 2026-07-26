@@ -22,6 +22,11 @@ Coverage:
     token, env-key assignment) BLOCK while a prose prefix mention PASSes; the
     credential FILENAME blocks in every casing; and the scanner's own source
     passes only under its own filename (self-exemption keyed, no general hole).
+  - F7 pins (2026-07-27, delimiter-class over-breadth): a private-field
+    assignment, a private call, a secrets-mount path value, a documentation
+    placeholder, and an underscored C# DI member access all PASS -- none
+    contains a secret, and all five measured BLOCKING against the
+    un-narrowed `[^[:alnum:][:space:]]` delimiter class before this fix.
 
 MF6 (gate safety): this test file is itself scanned by the publication gate, so
 it must contain NO machine-local-path literal that the scanner would flag. Every
@@ -155,6 +160,51 @@ def block_rows() -> dict[str, str]:
         # (assembled per MF6 so no trippable token literal sits in this source).
         "b26_sk_ant_token": _join("sk-", "ant-", "a" * 20),
         "b27_anthropic_key_assignment": _join("ANTHROPIC_", "API_", "KEY", "=", "x" * 8),
+        # NEW (2026-07-26 value-shape fix): a real secret VALUE for each of the
+        # 4 reworked patterns (password/secret/token/api-key) must still BLOCK
+        # under the new anchor + value-shape requirement -- these are the
+        # POSITIVE-direction fixtures the fix contract requires alongside the
+        # negative (declaration) rows in pass_rows() below. Assembled per MF6
+        # so no complete trigger literal sits contiguously in this source.
+        "b28_secret_quoted_leak": _join("sec", "ret", " = ", '"', "a1b2c3d4e5f6g7h8ijk", '"'),
+        "b29_token_quoted_leak": _join("to", "ken", " = ", '"', "a1b2c3d4e5f6g7h8ijk", '"'),
+        "b30_apikey_quoted_leak": _join("api", "Key", " = ", '"', "AbCdEf123456ghijklmn", '"'),
+        "b31_apikey_bare_digit_leak": _join("api", "_key", "=", "a1b2c3d4e5f6"),
+        # Anchor-widening positive guard: a snake_case / camelCase / ALL-CAPS
+        # identifier segment must still BLOCK with a real leak value present.
+        # b34 also pins the case-sensitivity widening: the old `[Tt]oken`
+        # never matched all-caps TOKEN at all (verified pre-fix, see the
+        # implementer report), so this row is a coverage IMPROVEMENT, not
+        # just a regression guard.
+        "b32_access_token_snake_leak": _join("access", "_to", "ken", " = ", '"', "a1b2c3d4e5f6g7h8ijk", '"'),
+        "b33_apiToken_camel_leak": _join("api", "To", "ken", " = ", '"', "a1b2c3d4e5f6g7h8ijk", '"'),
+        "b34_AUTH_TOKEN_upper_leak": _join("AUTH", "_TO", "KEN", " = ", '"', "A1B2C3D4E5F6G7H8IJK", '"'),
+        # NEW (2026-07-27 F1 fix): a quote-STYLE regression reproduced by
+        # $security-reviewer -- the quoted branch used to match a literal `"`
+        # only, so a SINGLE-quoted or BACKTICK-quoted leak of any length or
+        # digit content passed clean (neither `'` nor `` ` `` is in the bare
+        # alphabet either). This is the exact false-negative direction this
+        # work item exists to close; single-quoted strings are Python's own
+        # idiomatic style, and Python is this repo's hook language. Assembled
+        # per MF6 so no complete trigger literal sits contiguously in source.
+        "b35_token_single_quoted_leak": _join("to", "ken", " = ", "'", "a1b2c3d4e5f6g7h8ijkl", "'"),
+        "b36_token_single_quoted_colon_leak": _join("to", "ken", ": ", "'", "a1b2c3d4e5f6g7h8ijkl", "'"),
+        "b37_token_backtick_leak": _join("to", "ken", " = ", "`", "a1b2c3d4e5f6g7h8ijkl", "`"),
+        "b38_password_single_quoted_leak": _join("pass", "word", " = ", "'", "a1b2c3d4e5f6g7h8ijkl", "'"),
+        # NEW (2026-07-27 F2 fix): a quoted value below the flat 12-char floor
+        # but WITH a digit used to pass clean even though the identical BARE
+        # value blocks (quoting a real secret made it disappear). Fixed by
+        # applying the same 5-chars-one-side-of-a-digit bare shape inside the
+        # quote/delimiter too. `Summ3r2024` is the reviewer's own example.
+        "b39_password_quoted_short_digit_leak": _join("pass", "word", " = ", '"', "Summ3r2024", '"'),
+        "b40_token_quoted_short_digit_leak": _join("to", "ken", " = ", '"', "short123", '"'),
+        # F4 regression pin: the effective bare floor is 10 chars (not the 6-char
+        # nominal floor) when the digit sits centered, because the digit must
+        # fall with >=5 chars on ONE side. `abcd5efghi` (10 chars, 4-and-5 split
+        # around the digit) is the shortest centered-digit value that still
+        # blocks; see the matching pass_rows() pin for the 9-char value that
+        # stays clean. Assembled per MF6.
+        "b41_token_centered_digit_floor_ten": _join("to", "ken", " = ", "abcd5efghi"),
     }
 
 
@@ -203,6 +253,75 @@ def pass_rows() -> dict[str, str]:
             "docs discuss the sk-", "ant- token prefix and the ANTHROPIC_",
             " env prefix without any concrete value",
         ),
+        # NEW (2026-07-26 value-shape fix): the exact false-positive
+        # reproduction -- C# parameter/field DECLARATIONS with no secret
+        # present -- must PASS under the new value-shape requirement. These
+        # were the reported false-positive rows, measured BLOCKING (exit 1)
+        # against the un-fixed scanner before this fix landed. Kept as plain
+        # literals (not MF6-obfuscated): neither `default` nor `config.ApiKey`
+        # contains a digit or a quote, so no contiguous trigger exists here
+        # even pre-obfuscation -- that absence IS the fix being exercised.
+        "p32_cancellationToken_param_default": "public async Task RunAsync(CancellationToken cancellationToken = default)",
+        "p33_cancellationToken_var_default": "public Task StopAsync(CancellationToken token = default) => Task.CompletedTask;",
+        "p34_apikey_member_access": "private readonly string apiKey = config.ApiKey;",
+        # Declaration-value shapes named explicitly in the fix contract: none
+        # of these bare keywords contains a digit, so the value-shape
+        # requirement rejects all of them regardless of the identifier anchor.
+        "p35_token_null": "let token = null;",
+        "p36_token_none": "token = None",
+        "p37_token_nil": "var token = nil",
+        "p38_token_undefined": "let token = undefined;",
+        "p39_token_empty_string": 'token = ""',
+        "p40_token_end_of_line": "token =",
+        "p41_token_await_call": "var token = await GetTokenAsync(ct);",
+        # Declaration-value negative for the other 2 reworked patterns
+        # (token/api-key already covered above): neither bare `null` contains
+        # a digit, so both stay clean under the same value-shape requirement.
+        "p43_password_declaration": "var password = null;",
+        "p44_secret_declaration": "var secret = null;",
+        # Anchor rejects the keyword as an incidental substring of an
+        # unrelated identifier with no segment boundary before it, even when
+        # a real leak-shaped value follows. Assembled per MF6.
+        "p42_anchor_incidental_myatoken": _join("my", "a", "to", "ken", " = ", '"', "a1b2c3d4e5f6g7h8ijk", '"'),
+        # NEW (2026-07-27 F1 fix guard): the SAME declaration shapes as
+        # p35-p38, now in SINGLE-quoted and BACKTICK-quoted form, must stay
+        # clean under the new delimiter-class branch -- it must not become a
+        # blanket "anything quoted blocks" rule. Kept as plain literals (not
+        # MF6-obfuscated): none of `default` / `None` / `null` / `ghp_xxxx`
+        # contains a digit, so no contiguous trigger exists even pre-fix.
+        "p45_token_single_quoted_default": "token = 'default'",
+        "p46_token_single_quoted_none": "token = 'None'",
+        "p47_token_single_quoted_null": "token = 'null'",
+        "p48_token_backtick_default": "token = `default`",
+        "p49_token_single_quoted_ghp_example": "token = 'ghp_xxxx'",
+        # F4 regression pin (see the matching b41 in block_rows()): a digit
+        # centered in a 9-char value (4 chars before, 4 after) stays clean --
+        # the effective floor is 10, not the nominal 6, when the digit cannot
+        # land with >=5 chars on either side. Plain literal: 9 chars total
+        # with no quote/keyword-adjacency trigger beyond this value shape.
+        "p50_token_centered_digit_below_floor": "token = abcd5efgh",
+        # NEW (2026-07-27 F7 fix): the delimiter class from the F1 fix
+        # (`[^[:alnum:][:space:]]`) matched far more than quote characters --
+        # identifier and statement punctuation too (`_ ( [ { < . / ; , -`),
+        # which C-family/scripting code supplies a CLOSING member of for free.
+        # These four rows are the exact false-positive reproduction (none
+        # contains any secret): a private-field assignment, a private call, a
+        # path-valued config line, and a documentation placeholder. All four
+        # measured BLOCKING against the un-narrowed class before this fix
+        # landed; the delimiter class was narrowed to exclude identifier and
+        # statement punctuation so all four now PASS. Kept as plain literals
+        # (no MF6 obfuscation needed): none contains a digit, so no
+        # contiguous trigger exists even pre-fix.
+        "p51_private_field_assignment": "token = _refreshTokenValue;",
+        "p52_private_call_no_args": "token = _load_token_value()",
+        "p53_secrets_mount_path_value": "password: /run/secrets/db_password",
+        "p54_doc_placeholder_angle_upper": "api_key = <YOUR_API_KEY>",
+        # The finding in one line: idiomatic C# dependency-injection member
+        # access with a leading underscore on the field. p34 above
+        # (`apiKey = config.ApiKey;`) only stayed clean because `config` has
+        # no underscore -- this row is the same member-access shape with the
+        # underscore the admission fixture happened to omit.
+        "p55_csharp_di_underscored_member_access": "apiKey = _configuration.ApiKey;",
     }
 
 

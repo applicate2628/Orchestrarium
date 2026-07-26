@@ -64,10 +64,132 @@ nonpath_patterns=(
   'sk-ant-[A-Za-z0-9_-]{20,}'
   'ANTHROPIC_[A-Z_]*(KEY|TOKEN)[^[:alnum:]_]?[[:space:]]*[:=]'
   'Bearer[[:space:]]+[A-Za-z0-9._~+/=-]+'
-  '[Pp]assword[[:space:]]*[:=]'
-  '[Ss]ecret[[:space:]]*[:=]'
-  '[Tt]oken[[:space:]]*[:=]'
-  'api[_-]?[Kk]ey[[:space:]]*[:=]'
+  # The next 4 entries (password/secret/token/api-key) test the VALUE, not just
+  # the variable name -- fixed 2026-07-26 after a false-positive reproduction:
+  # unanchored `[Tt]oken[[:space:]]*[:=]` matched the tail of the C#
+  # PARAMETER NAME `cancellationToken` in `CancellationToken cancellationToken
+  # = default`, because "Token" sits right before "=" with no leak present.
+  # Independent hardenings, all POSIX ERE (git grep -E: no \b, no (?:...), no
+  # lookaround, no backreferences):
+  #   1. Left-anchor group `((^|[^A-Za-z])X|[a-z]X)` requires the keyword to
+  #      start at an identifier-segment boundary: start-of-line, a non-letter
+  #      char (`_`, `-`, `.`, digit, space, punctuation -- covers
+  #      access_token / API_KEY / auth-token), OR a lower->upper camelCase
+  #      transition (covers apiToken / myApiKey). This rejects the keyword as
+  #      an incidental substring of an unrelated word (`myatoken`, `mistoken`)
+  #      while still catching AUTH_TOKEN (a pre-existing false-negative this
+  #      widening also closes: the old `[Tt]oken` was case-sensitive on
+  #      "oken" and never matched all-caps TOKEN at all).
+  #   2. Value-shape alternation after `[:=]` requires either a QUOTED literal
+  #      (see #3 below) or a BARE literal containing a digit with >=5 chars on
+  #      one side of it (floor: 6 total chars, verified against the shortest
+  #      real fixture in this file's own test corpus, `password: hunter2`).
+  #      This is what actually rejects `cancellationToken = default` (and
+  #      null/None/nil/undefined/"" /end-of-line): none of those keywords
+  #      contain a digit, and a member access (`config.ApiKey`) or call
+  #      (`GetTokenAsync(ct)`) is truncated by the `.`/`(` before the
+  #      digit-or-length requirement can be met. BARE requires a digit as an
+  #      extra signal, so 6 chars is enough -- shorter would re-admit short
+  #      English words that happen to contain a digit -- BUT the digit must
+  #      fall with >=5 chars on ONE side, so a digit sitting near the CENTER
+  #      of a short value pushes the EFFECTIVE floor to 10, not 6: `abc3def`
+  #      and `abcd5efgh` (7/9 chars, digit centered) stay clean, `abcd5efghi`
+  #      (10 chars) blocks -- all three verified against this file's own test
+  #      corpus. This asymmetric-floor consequence is recorded here rather
+  #      than left implicit; it is not itself a fix target.
+  #   3. QUOTED (revised 2026-07-27 to close two false-negative regressions
+  #      reproduced by $security-reviewer):
+  #      a. Quote-STYLE blind spot. The quoted branch used to match a LITERAL
+  #         `"` only. A `'` or `` ` `` is not in the bare alphabet either, so
+  #         `token = '<20 random chars>'` passed CLEAN regardless of length or
+  #         digit content -- a real false-negative regression, not a
+  #         documented tradeoff (single-quoted strings are Python's idiomatic
+  #         style, and Python is this repo's own hook language). Fixed by
+  #         matching a DELIMITER CLASS instead of a literal quote character
+  #         (originally `[^[:alnum:][:space:]]`, anything neither
+  #         alphanumeric nor whitespace, on both sides of the value --
+  #         narrowed again the same day, see 3.c below, so this paragraph
+  #         describes the MECHANISM, not the current class literal). This is
+  #         load-bearing, not stylistic: a bash single-quoted array literal
+  #         has NO way to embed a literal `'` without ending the literal
+  #         early -- doing so would break this exact catalog entry's own
+  #         "entire line is one single-quoted literal, no interior `'`"
+  #         shape, which is what lets `is_intentional_scanner_regex_line`
+  #         (bash, below) and its Python mirror `_is_intentional_scanner_line`
+  #         (further below) recognize it as an intentional pattern-catalog
+  #         line during the scanner's self-scan. So this pattern could never
+  #         spell a `'`-delimiter directly; the class sidesteps that by never
+  #         needing the literal character in its own source text, while
+  #         still matching it at runtime. The two delimiters matched are not
+  #         required to be the SAME punctuation character (POSIX ERE, as run
+  #         by `git grep -E`, has no backreference to enforce that), so a
+  #         mismatched pair like `token = 'value"` also matches -- accepted,
+  #         since a mismatched pair only widens which delimiter SHAPES are
+  #         recognized as quoting, it does not by itself admit any new
+  #         character into the class. That is a narrower claim than "the
+  #         delimiter mechanism only widens the catch set" -- the class
+  #         itself (which characters count as a delimiter at all) is a
+  #         separate axis, and on THAT axis the original class over-widened
+  #         and had to be narrowed back down (3.c).
+  #      b. Quoted-short-secret gap. Inside the delimiters, a flat >=12-char
+  #         run of the quote alphabet (`[A-Za-z0-9_./+=-]`, no digit required
+  #         -- this is what keeps this repo's own illustrative leak example,
+  #         `token = "ghp_xxxx"` (8 chars, digit-free), clean) used to be the
+  #         ONLY accepted shape, so a quoted value below that floor was clean
+  #         EVEN WITH A DIGIT PRESENT: `password = "Summ3r2024"` (10 chars)
+  #         passed while the identical BARE value `password = Summ3r2024`
+  #         blocked -- quoting a real secret made it disappear, an incoherent
+  #         wire shape. Fixed by adding the SAME 5-chars-one-side-of-a-digit
+  #         BARE shape as a second accepted shape inside the delimiters.
+  #      c. Delimiter-class over-breadth (found by $security-reviewer round 2,
+  #         over 15 rows, 13 blocking -- fixed same day as 3.a/3.b, which is
+  #         why this is 3.c and not a new top-level item). The class from 3.a,
+  #         `[^[:alnum:][:space:]]`, matches far more than quote characters:
+  #         it also matches identifier and statement punctuation --
+  #         `_ ( [ { < . / ; , -`. C-family/scripting code supplies a
+  #         CLOSING member of that set for free, so any value that starts
+  #         with one of those and contains a conforming digit-bearing run
+  #         ending at another punctuation character satisfied the "delimited
+  #         value" shape with NO quote involved at all -- re-creating, through
+  #         a route no fixture covered, the exact name-not-value defect this
+  #         item was admitted to fix. Measured false positives, none
+  #         containing a secret: `apiKey = _configuration.ApiKey;` (idiomatic
+  #         C# dependency injection -- the admission fixture
+  #         `config.ApiKey` only stayed clean because `config` has no leading
+  #         `_`), `token = _refreshTokenValue;`, `password: /run/secrets/db_
+  #         password` (an ordinary k8s/compose file path), and
+  #         `api_key = <YOUR_API_KEY>` (a documentation placeholder). Fixed
+  #         by narrowing the class to
+  #         `[^][:alnum:][:space:]_.,;:(){}<>/+=~-]` (POSIX bracket-expression
+  #         position rules: leading `]` and trailing `-` are both literal
+  #         members of the set, not stray syntax) on BOTH delimiter
+  #         occurrences. This excludes alphanumerics, whitespace, and
+  #         `_ . , ; : ( ) { } < > / + = ~ -`, leaving `" ' `` ! @ # $ % ^ & *
+  #         ? |` as the matchable delimiters -- still every quoting style 3.a
+  #         was about, none of the punctuation a C-family/scripting
+  #         identifier or statement supplies. Measured zero detection loss:
+  #         the false-positive corpus dropped from 13-of-15 blocked to 2 (the
+  #         survivors are `expiry_token = "2024-01-01"`, a genuinely quoted
+  #         digit-bearing value that IS this catalog's intended shape, and
+  #         `password = --force-with-lease12`, which matches through the
+  #         pre-existing bare-value branch and is unrelated to the delimiter
+  #         class); the anchor and quote-hole corpora (3.a/3.b) kept an
+  #         identical catch set; the original 41-line reproduction corpus
+  #         kept exact 20/20 parity. All measured against this file's own
+  #         fixture corpora with `git grep`-compatible ERE.
+  #
+  # Known, undisclosed-until-now alphabet limit (left OPEN, NOT fixed here --
+  # widening the alphabet is a design decision with real false-positive cost,
+  # not an in-place fix): both the quoted and bare alphabets above cover only
+  # `[A-Za-z0-9_./+=-]`. A secret containing `@ : $ ! % ~ #`, an embedded
+  # space, or a non-ASCII byte is invisible to this catalog UNLESS a
+  # conforming run of sufficient length also sits in the same value --
+  # `P@ssw0rd1234567`, a `$2b$12$...` bcrypt hash, and a `user:pass@host`
+  # URL-embedded credential all measure clean today.
+  '((^|[^A-Za-z])[Pp]|[a-z]P)[Aa][Ss][Ss][Ww][Oo][Rr][Dd][[:space:]]*[:=][[:space:]]*([^][:alnum:][:space:]_.,;:(){}<>/+=~-]([A-Za-z0-9_./+=-]{12,}|[A-Za-z0-9_./+=-]{5,}[0-9][A-Za-z0-9_./+=-]*|[A-Za-z0-9_./+=-]*[0-9][A-Za-z0-9_./+=-]{5,})[^][:alnum:][:space:]_.,;:(){}<>/+=~-]|[A-Za-z0-9_+/=-]{5,}[0-9][A-Za-z0-9_+/=-]*|[A-Za-z0-9_+/=-]*[0-9][A-Za-z0-9_+/=-]{5,})'
+  '((^|[^A-Za-z])[Ss]|[a-z]S)[Ee][Cc][Rr][Ee][Tt][[:space:]]*[:=][[:space:]]*([^][:alnum:][:space:]_.,;:(){}<>/+=~-]([A-Za-z0-9_./+=-]{12,}|[A-Za-z0-9_./+=-]{5,}[0-9][A-Za-z0-9_./+=-]*|[A-Za-z0-9_./+=-]*[0-9][A-Za-z0-9_./+=-]{5,})[^][:alnum:][:space:]_.,;:(){}<>/+=~-]|[A-Za-z0-9_+/=-]{5,}[0-9][A-Za-z0-9_+/=-]*|[A-Za-z0-9_+/=-]*[0-9][A-Za-z0-9_+/=-]{5,})'
+  '((^|[^A-Za-z])[Tt]|[a-z]T)[Oo][Kk][Ee][Nn][[:space:]]*[:=][[:space:]]*([^][:alnum:][:space:]_.,;:(){}<>/+=~-]([A-Za-z0-9_./+=-]{12,}|[A-Za-z0-9_./+=-]{5,}[0-9][A-Za-z0-9_./+=-]*|[A-Za-z0-9_./+=-]*[0-9][A-Za-z0-9_./+=-]{5,})[^][:alnum:][:space:]_.,;:(){}<>/+=~-]|[A-Za-z0-9_+/=-]{5,}[0-9][A-Za-z0-9_+/=-]*|[A-Za-z0-9_+/=-]*[0-9][A-Za-z0-9_+/=-]{5,})'
+  '((^|[^A-Za-z])[Aa]|[a-z]A)[Pp][Ii][_-]?[Kk][Ee][Yy][[:space:]]*[:=][[:space:]]*([^][:alnum:][:space:]_.,;:(){}<>/+=~-]([A-Za-z0-9_./+=-]{12,}|[A-Za-z0-9_./+=-]{5,}[0-9][A-Za-z0-9_./+=-]*|[A-Za-z0-9_./+=-]*[0-9][A-Za-z0-9_./+=-]{5,})[^][:alnum:][:space:]_.,;:(){}<>/+=~-]|[A-Za-z0-9_+/=-]{5,}[0-9][A-Za-z0-9_+/=-]*|[A-Za-z0-9_+/=-]*[0-9][A-Za-z0-9_+/=-]{5,})'
   'BEGIN RSA PRIVATE KEY'
   'BEGIN OPENSSH PRIVATE KEY'
   'BEGIN PRIVATE KEY'
