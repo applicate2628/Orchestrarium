@@ -97,12 +97,26 @@ if (-not $shellExecutable) {
 
 $repoRootOutput = $null
 $repoRootExitCode = 1
+# ErrorActionPreference is relaxed around JUST this native call, then restored:
+# under Windows PowerShell 5.1, invoking a `.cmd`/`.bat` git with `2>$null`
+# redirection can surface an UNRELATED native-stderr line (e.g. from a cmd.exe
+# `AutoRun` registry hook some environments set, such as conda's) as an
+# ErrorRecord, which `$ErrorActionPreference = 'Stop'` then promotes to a
+# terminating exception -- misreporting a perfectly good repo as "cannot
+# determine repository root". Reproduced empirically under PowerShell 5.1 with
+# a synthetic cmd.exe AutoRun hook; pwsh 7 is unaffected either way. This does
+# NOT weaken the null-safety: $LASTEXITCODE is still read right after the call
+# and still gates $repoRoot below.
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
 try {
   $repoRootOutput = & $gitExecutable rev-parse --show-toplevel 2>$null
   $repoRootExitCode = $LASTEXITCODE
 } catch {
   $repoRootOutput = $null
   $repoRootExitCode = 1
+} finally {
+  $ErrorActionPreference = $previousErrorActionPreference
 }
 
 $repoRoot = if ($repoRootExitCode -eq 0 -and $repoRootOutput) {

@@ -346,19 +346,394 @@ function Ensure-LocalOnlyGitignoreEntries {
     $entries = @("/.reports/", "/.plans/", "/work-items/", "/.scratch/")
     $existingLines = @()
     if (Test-Path -LiteralPath $gitignore) {
-        $existingLines = Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue
+        # Get-Content already strips line terminators (LF or CRLF) and
+        # auto-detects/strips a leading UTF-8 byte-order mark via its default
+        # encoding detection (verified directly under both pwsh 7 and Windows
+        # PowerShell 5.1). TrimEnd() additionally tolerates trailing
+        # whitespace an operator may have typed by hand, so a bash-produced
+        # or hand-edited .gitignore matches identically here.
+        $existingLines = @(Get-Content -LiteralPath $gitignore -ErrorAction SilentlyContinue | ForEach-Object { $_.TrimEnd() })
     }
 
     $missing = @()
+    $declinedNegation = @()
+    $declinedSentinel = @()
+    $declinedUnverifiable = @()
+    # git's OWN negation syntax (an "!entry" line) must be resolved by GIT's
+    # own matcher, not a fixed spelling list: three rounds of widening a
+    # literal enumeration (two forms, then four) each missed spellings git
+    # itself honors (glob forms such as "!**/work-items/", character
+    # classes, single-char wildcards -- confirmed against real
+    # "git check-ignore -v" this session, including an end-to-end destroy
+    # proof: "/wo*/" plus "!**/work-items/" with core.ignorecase=true tracked
+    # '/work-items/' before this writer ran and was silently re-ignored
+    # after, under the four-form enumeration). Ask git instead of guessing:
+    # for each tier not already resolved by literal presence or the decline
+    # sentinel below, an ISOLATED throwaway repo (never the operator's real
+    # .gitignore or repo -- created fresh in system temp and always removed
+    # before this function returns) is seeded with this file's OWN content
+    # and probed twice via "git check-ignore": once as-is, once with every
+    # "!"-prefixed line stripped. Ignored in the first probe but not the
+    # second means a negation IN THIS FILE is responsible (declined -- this
+    # matches git check-ignore's own authority instead of a spelling list,
+    # so it also naturally follows the target repo's own core.ignorecase);
+    # ignored in neither means genuinely missing (append); ignored in the
+    # first probe alone means some existing pattern already covers it
+    # (nothing to do). The probe path is a FILE inside the tier directory
+    # ("<tier>/.orchestrarium-probe"), not the bare directory name --
+    # confirmed this session that a directory-targeting negation (e.g.
+    # "!/Work-Items/", trailing slash) only takes effect once git is asked
+    # about a path unambiguously inside that directory. Every native git
+    # call below relaxes $ErrorActionPreference first: under Windows
+    # PowerShell 5.1, a native command's stderr (even redirected to $null)
+    # becomes an ErrorRecord that $ErrorActionPreference = 'Stop' promotes
+    # to a terminating exception -- this is what made the PRIOR
+    # core.ignorecase read here abort the whole installer on an ordinary
+    # corrupt .git/config value (reproduced directly this session: exit 1,
+    # hooks/.gitignore/credential entry all left uninstalled). See
+    # work-items/bugs/2026-07-25-tier-writer-silently-reverts-considered-decline.md.
+    $unresolved = @()
     foreach ($entry in $entries) {
         $alternate = $entry.TrimStart("/")
-        if ($existingLines -notcontains $entry -and $existingLines -notcontains $alternate) {
-            $missing += $entry
+        # The decline sentinel: an exact whole-line comment naming this
+        # specific tier. Case-SENSITIVE on BOTH engines -- OUR OWN token, our
+        # own rules (contrast the git-delegated negation check below, which
+        # follows GIT's own core.ignorecase rules instead).
+        $declineMarker = "# orchestrarium:local-only-tier-declined:$entry"
+        if ($existingLines -ccontains $entry -or $existingLines -ccontains $alternate) {
+            continue
+        }
+        if ($existingLines -ccontains $declineMarker) {
+            $declinedSentinel += $entry
+            continue
+        }
+        $unresolved += $entry
+    }
+
+    if ($unresolved.Count -gt 0) {
+        $giprobeRoot = $null
+        # THE INVARIANT THIS BLOCK ENFORCES: the probe consults nothing
+        # outside the throwaway repository and the file under test. Every
+        # mechanism below -- clearing environment variables AND setting
+        # config values explicitly -- exists only to make that invariant
+        # hold; when adding a new git call here, check it against the
+        # invariant directly rather than against the list of vectors found
+        # so far, because the list is provably incomplete (three rounds have
+        # each found a member neither of the prior rounds had named, and the
+        # git-documented environment-variable list itself was consulted via
+        # empirical enumeration on this machine, not a rendered man page --
+        # treat it as thorough, not complete).
+        #
+        # Two DISTINCT classes of leak, needing two DIFFERENT mechanisms:
+        #   1. Environment variables that redirect the probe onto a
+        #      DIFFERENT repository or inject config directly (GIT_DIR,
+        #      GIT_WORK_TREE, GIT_COMMON_DIR, ... GIT_CONFIG_COUNT below) --
+        #      closed by CLEARING them, since an absent variable cannot
+        #      redirect anything.
+        #   2. A resolution FALLBACK that fires precisely when a setting is
+        #      UNSET -- core.excludesFile has no default VALUE, but git
+        #      falls back to a default PATH ($XDG_CONFIG_HOME/git/ignore,
+        #      else $HOME/.config/git/ignore) whenever core.excludesFile
+        #      itself is unset. Pointing GIT_CONFIG_GLOBAL at a nonexistent
+        #      file leaves core.excludesFile unset, which is exactly the
+        #      condition that triggers this fallback -- so clearing
+        #      GIT_CONFIG_GLOBAL/GIT_CONFIG_NOSYSTEM does NOT close it
+        #      (confirmed this session on bash, pwsh 7, and Windows
+        #      PowerShell 5.1: an ambient HOME or XDG_CONFIG_HOME pointing
+        #      at a personal global-gitignore covering the tier still
+        #      leaked in, SILENTLY, under the round-6 fix). This is
+        #      plausibly the MOST LIKELY trigger of any vector found so
+        #      far: `~/.config/git/ignore` is the standard personal
+        #      global-gitignore location, and an operator who uses this
+        #      pack across several repos and adds a tier to their own
+        #      global ignore -- a natural thing to do -- would get silence
+        #      on every project, forever, with no message. Closed by
+        #      SETTING core.excludesFile EXPLICITLY on the throwaway repo
+        #      (below, right after `git init`) rather than relying on it
+        #      staying unset: an explicit value, even a nonexistent path,
+        #      means the "unset" condition the fallback keys on never
+        #      occurs, so no future default-path fallback can reopen this
+        #      by a different name.
+        #
+        # GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR (individually or paired)
+        # can redirect a `-C <dir>`-targeted call onto a COMPLETELY
+        # DIFFERENT repository -- but NOT identically: measured this
+        # session with `git rev-parse --show-toplevel --git-dir` as well as
+        # `check-ignore`, GIT_WORK_TREE alone redirects BOTH the working
+        # tree AND git-dir discovery (so a WORKING-TREE-relative ignore
+        # source, e.g. a plain `.gitignore`, leaks); GIT_DIR alone
+        # redirects ONLY git-dir discovery, leaving the working tree in
+        # place (so a GIT-DIR-relative ignore source, e.g.
+        # `$GIT_DIR/info/exclude`, leaks, while a `.gitignore` does not) --
+        # both are real leaks, just through different ignore-source
+        # channels, and clearing both closes both regardless of which
+        # channel a given operator's ambient state happens to use.
+        # GIT_ICASE_PATHSPECS / GIT_LITERAL_PATHSPECS / GIT_NOGLOB_PATHSPECS
+        # / GIT_GLOB_PATHSPECS make `check-ignore` itself fail outright
+        # ("pathspec magic not supported by this command", exit 128,
+        # confirmed this session on both pwsh 7 and Windows PowerShell 5.1
+        # -- on PS 5.1 specifically this surfaces as a NativeCommandError,
+        # the same class this block's own relax-and-restore wrap already
+        # guards every native call against) -- not a silent leak, since the
+        # writer's own exit-code handling below degrades that to "could not
+        # be checked" rather than misreading it as ignored or not, but it
+        # still leaves the tier unwritten with no way to recover except by
+        # clearing the variable, so it is cleared alongside the rest.
+        # GIT_CONFIG_COUNT (paired with GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n)
+        # injects arbitrary config -- including core.excludesFile --
+        # directly from the environment, bypassing GIT_CONFIG_NOSYSTEM/
+        # GIT_CONFIG_GLOBAL entirely (confirmed this session; found by
+        # reading git's own documented environment-variable list rather
+        # than extending piecemeal from previously-named vectors, not named
+        # by anyone before that read). A realistic trigger for any of the
+        # redirect/injection vars: the installer running from inside a git
+        # hook, mid-rebase, or from a CI/IDE wrapper that exports them.
+        # Cleared for the ENTIRE unresolved-tier block (not just calls
+        # targeting the throwaway repo): the SAME vars would equally
+        # corrupt the project_root-targeted `config --local
+        # core.ignorecase` read below. None of these have a legitimate
+        # reason to survive here -- this probe only ever needs a fresh,
+        # self-contained repository at a path this function chose itself.
+        $giprobeRepoLocationVars = @(
+            "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+            "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+            "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+            "GIT_CONFIG_SYSTEM", "GIT_CONFIG_COUNT",
+            "GIT_ICASE_PATHSPECS", "GIT_LITERAL_PATHSPECS", "GIT_NOGLOB_PATHSPECS", "GIT_GLOB_PATHSPECS"
+        )
+        $giprobeSavedEnv = @{}
+        foreach ($varName in $giprobeRepoLocationVars) {
+            $giprobeSavedEnv[$varName] = [System.Environment]::GetEnvironmentVariable($varName)
+            if ($null -ne $giprobeSavedEnv[$varName]) {
+                Remove-Item "Env:\$varName" -ErrorAction SilentlyContinue
+            }
+        }
+        $previousGitConfigNoSystem = $env:GIT_CONFIG_NOSYSTEM
+        $previousGitConfigGlobal = $env:GIT_CONFIG_GLOBAL
+        try {
+            if (Get-Command git -ErrorAction SilentlyContinue) {
+                $candidateRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("orchestrarium-giprobe-" + [System.IO.Path]::GetRandomFileName())
+                # Neutralize the OPERATOR's ambient git environment for this
+                # throwaway repo: GIT_CONFIG_NOSYSTEM plus a nonexistent
+                # GIT_CONFIG_GLOBAL stop a global `core.excludesFile` from
+                # leaking into the probe's verdict, and `--template=
+                # <nonexistent>` stops a global `init.templateDir` from
+                # seeding `info/exclude` -- confirmed this session that
+                # without this, an operator's own global core.excludesFile
+                # covering the tier made the writer silently decide "already
+                # ignored" for a PROJECT whose own .gitignore said nothing
+                # about it, so a teammate cloning without that global config
+                # would track the tier -- the exact publication-safety
+                # failure this tier system exists to prevent. A nonexistent
+                # path is sufficient for both (git treats it as "no such
+                # config"/"no such template", not an error). Saved/restored
+                # via try/finally below since these are PROCESS-wide
+                # environment variables, not scoped to one native call.
+                $env:GIT_CONFIG_NOSYSTEM = "1"
+                $env:GIT_CONFIG_GLOBAL = "$candidateRoot.noconfig"
+                $previousErrorActionPreference = $ErrorActionPreference
+                $ErrorActionPreference = "Continue"
+                try {
+                    New-Item -ItemType Directory -Path $candidateRoot -Force | Out-Null
+                    & git init -q --template="$candidateRoot.notemplate" $candidateRoot 2>$null
+                    if ($LASTEXITCODE -eq 0) {
+                        $giprobeRoot = $candidateRoot
+                    }
+                } catch {
+                    $giprobeRoot = $null
+                } finally {
+                    $ErrorActionPreference = $previousErrorActionPreference
+                }
+                if (-not $giprobeRoot -and (Test-Path -LiteralPath $candidateRoot)) {
+                    Remove-Item -LiteralPath $candidateRoot -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                if ($giprobeRoot) {
+                    # core.excludesFile has no default VALUE, but git falls
+                    # back to a default PATH ($XDG_CONFIG_HOME/git/ignore,
+                    # else $HOME/.config/git/ignore) whenever it is UNSET --
+                    # which is exactly the state GIT_CONFIG_GLOBAL=
+                    # <nonexistent> leaves it in. Setting it EXPLICITLY here
+                    # (a nonexistent path is enough) ends the fallback
+                    # permanently, rather than relying on it staying unset --
+                    # confirmed this session that an ambient HOME or
+                    # XDG_CONFIG_HOME pointing at a real
+                    # `~/.config/git/ignore` covering the tier otherwise
+                    # leaked in SILENTLY even with GIT_CONFIG_NOSYSTEM/
+                    # GIT_CONFIG_GLOBAL already neutralized.
+                    $previousErrorActionPreference = $ErrorActionPreference
+                    $ErrorActionPreference = "Continue"
+                    try {
+                        & git -C $giprobeRoot config core.excludesFile "$giprobeRoot.noexcludes" 2>$null
+                    } catch {
+                    } finally {
+                        $ErrorActionPreference = $previousErrorActionPreference
+                    }
+                    # If project_root is ALREADY a repo with an EXPLICIT
+                    # LOCAL core.ignorecase override -- not just the
+                    # filesystem-auto-detected default the throwaway repo
+                    # would otherwise pick up on its own -- mirror that
+                    # explicit choice onto the (now-neutralized) throwaway
+                    # repo, so an operator-set override at the REAL target
+                    # is not silently ignored. --local (never plain
+                    # `config`, which falls through to global/system config
+                    # even from inside a repo with no local override) keeps
+                    # this scoped to project_root's OWN repo only; a
+                    # non-repo project_root fails harmlessly (non-zero
+                    # exit), same as an unset override.
+                    $previousErrorActionPreference = $ErrorActionPreference
+                    $ErrorActionPreference = "Continue"
+                    $projectIgnorecaseRaw = $null
+                    $projectIgnorecaseExitCode = 1
+                    try {
+                        $projectIgnorecaseRaw = & git -C $ProjectRoot config --local --type=bool core.ignorecase 2>$null
+                        $projectIgnorecaseExitCode = $LASTEXITCODE
+                    } catch {
+                        $projectIgnorecaseRaw = $null
+                        $projectIgnorecaseExitCode = 1
+                    } finally {
+                        $ErrorActionPreference = $previousErrorActionPreference
+                    }
+                    if ($projectIgnorecaseExitCode -eq 0 -and ($projectIgnorecaseRaw -eq "true" -or $projectIgnorecaseRaw -eq "false")) {
+                        $previousErrorActionPreference = $ErrorActionPreference
+                        $ErrorActionPreference = "Continue"
+                        try {
+                            & git -C $giprobeRoot config core.ignorecase $projectIgnorecaseRaw 2>$null
+                        } catch {
+                        } finally {
+                            $ErrorActionPreference = $previousErrorActionPreference
+                        }
+                    }
+                }
+            }
+
+            # Every "!"-prefixed line's OWN stripped pattern, collected once
+            # (not per tier): a BARE/unpaired negation -- e.g.
+            # "!/work-items/" alone, no positive counterpart anywhere in the
+            # file -- is un-ignored both WITH and WITHOUT negations present,
+            # so a whole-file before/after-stripping DIFFERENTIAL (an
+            # earlier version of this fix) cannot tell "declined via
+            # negation" apart from "genuinely missing"; appending in that
+            # case adds the very positive pattern the operator just
+            # negated, flipping git's real verdict to the OPPOSITE of what
+            # they wrote (reproduced directly this session on bash, pwsh 7,
+            # and Windows PowerShell 5.1: NOT-ignored before this writer
+            # ran, IGNORED after -- exactly the silent-revert-of-a-
+            # considered-decline defect this whole bug exists to prevent).
+            # Testing each negation line's OWN pattern in isolation catches
+            # this regardless of whether a companion positive pattern
+            # exists anywhere else in the file, while still using git's own
+            # matcher -- not a spelling list -- for arbitrary glob forms. If
+            # NO negation line covers the tier, the file's OWN full current
+            # content is checked once more: ignored means some OTHER
+            # existing pattern already covers it (nothing to do); not
+            # ignored means genuinely missing (append).
+            $giprobeNegationPatterns = @()
+            if ($giprobeRoot) {
+                foreach ($line in $existingLines) {
+                    if ($line.StartsWith("!", [System.StringComparison]::Ordinal)) {
+                        $giprobeNegationPatterns += $line.Substring(1)
+                    }
+                }
+            }
+
+            foreach ($entry in $unresolved) {
+                $altNoSlash = $entry.TrimStart("/").TrimEnd("/")
+                $probe = "$altNoSlash/.orchestrarium-probe"
+                if (-not $giprobeRoot) {
+                    $declinedUnverifiable += $entry
+                    continue
+                }
+                $scratchGitignore = Join-Path $giprobeRoot ".gitignore"
+
+                $negationMatched = $false
+                foreach ($pattern in $giprobeNegationPatterns) {
+                    [System.IO.File]::WriteAllLines($scratchGitignore, [string[]]@($pattern), [System.Text.UTF8Encoding]::new($false))
+                    $previousErrorActionPreference = $ErrorActionPreference
+                    $ErrorActionPreference = "Continue"
+                    $patternExitCode = 1
+                    try {
+                        & git -C $giprobeRoot check-ignore -q $probe 2>$null
+                        $patternExitCode = $LASTEXITCODE
+                    } catch {
+                        $patternExitCode = 2
+                    } finally {
+                        $ErrorActionPreference = $previousErrorActionPreference
+                    }
+                    if ($patternExitCode -eq 0) {
+                        $negationMatched = $true
+                        break
+                    }
+                }
+                if ($negationMatched) {
+                    $declinedNegation += $entry
+                    continue
+                }
+
+                [System.IO.File]::WriteAllLines($scratchGitignore, [string[]]$existingLines, [System.Text.UTF8Encoding]::new($false))
+                $previousErrorActionPreference = $ErrorActionPreference
+                $ErrorActionPreference = "Continue"
+                $wholeFileExitCode = 1
+                try {
+                    & git -C $giprobeRoot check-ignore -q $probe 2>$null
+                    $wholeFileExitCode = $LASTEXITCODE
+                } catch {
+                    $wholeFileExitCode = 2
+                } finally {
+                    $ErrorActionPreference = $previousErrorActionPreference
+                }
+                if ($wholeFileExitCode -eq 0) {
+                    continue
+                } elseif ($wholeFileExitCode -eq 1) {
+                    $missing += $entry
+                } else {
+                    $declinedUnverifiable += $entry
+                }
+            }
+        } finally {
+            # Cleanup that MUST run even on an interrupt/abort/hung git:
+            # PowerShell's `finally` executes during pipeline-stop
+            # processing (Ctrl-C), unlike a bare end-of-script cleanup --
+            # confirmed this session with a real interrupt sent mid-probe.
+            if ($giprobeRoot -and (Test-Path -LiteralPath $giprobeRoot)) {
+                Remove-Item -LiteralPath $giprobeRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            if ($null -eq $previousGitConfigNoSystem) {
+                Remove-Item Env:\GIT_CONFIG_NOSYSTEM -ErrorAction SilentlyContinue
+            } else {
+                $env:GIT_CONFIG_NOSYSTEM = $previousGitConfigNoSystem
+            }
+            if ($null -eq $previousGitConfigGlobal) {
+                Remove-Item Env:\GIT_CONFIG_GLOBAL -ErrorAction SilentlyContinue
+            } else {
+                $env:GIT_CONFIG_GLOBAL = $previousGitConfigGlobal
+            }
+            foreach ($varName in $giprobeRepoLocationVars) {
+                if ($null -ne $giprobeSavedEnv[$varName]) {
+                    [System.Environment]::SetEnvironmentVariable($varName, $giprobeSavedEnv[$varName])
+                }
+            }
         }
     }
 
+    foreach ($entry in $declinedNegation) {
+        # NOT "already un-ignored": this writer's probe reflects only THIS
+        # file's own patterns at the moment it ran, not full multi-source
+        # gitignore precedence (nested .gitignore files, global excludes).
+        # So we report what this file's own negation currently does, not a
+        # permanent verdict.
+        Write-Host "  .gitignore: '$entry' has a '!' negation on file -- leaving as-is (not re-appending; a later broader ignore pattern could still re-ignore this tree, which this writer does not check)"
+    }
+    foreach ($entry in $declinedSentinel) {
+        Write-Host "  .gitignore: '$entry' declined by operator (sentinel present) -- leaving as-is"
+    }
+    foreach ($entry in $declinedUnverifiable) {
+        Write-Host "  .gitignore: '$entry' could not be checked against git (git unavailable or the check itself failed) -- leaving as-is rather than risk overriding an undetected '!' negation"
+    }
+
     if ($missing.Count -eq 0) {
-        Write-Host "  .gitignore: local-only entries already present"
+        if ($declinedNegation.Count -eq 0 -and $declinedSentinel.Count -eq 0 -and $declinedUnverifiable.Count -eq 0) {
+            Write-Host "  .gitignore: local-only entries already present"
+        }
         return
     }
 
@@ -376,11 +751,15 @@ function Ensure-LocalOnlyGitignoreEntries {
 
     if (-not (Test-Path -LiteralPath $gitignore)) {
         Set-Content -LiteralPath $gitignore -Value ($missing -join "`r`n")
+        foreach ($entry in $missing) {
+            Write-Host "    added '$entry' to $gitignore"
+        }
         return
     }
 
     foreach ($entry in $missing) {
         Add-Content -LiteralPath $gitignore -Value "`r`n$entry"
+        Write-Host "    added '$entry' to $gitignore"
     }
 }
 
