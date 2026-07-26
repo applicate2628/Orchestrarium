@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import filecmp
+import importlib.util
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -13,65 +16,43 @@ ROOT = Path(__file__).resolve().parents[1]
 # packs but was never added to the canon or the tuple), so the list must come
 # from the canon dir itself and a set-equality check must flag a pack hook that
 # has no canon counterpart.
-_CANON = ROOT / "scripts" / "universal-hooks"
-_HOOK_EXTS = (".py", ".sh", ".ps1")
+#
+# The canon-name derivation AND the declared pack-only exceptions below live in
+# scripts/universal_hooks_manifest.py — a small, dependency-free module (no
+# dataclasses, no subprocess, no argparse) shared by this test AND the CLI
+# propagation tool (scripts/sync-universal-hooks.py), so neither can drift from
+# the other about what the complete file set even is (the two-owners-drift
+# shape this test exists to catch elsewhere — see work-items/bugs/2026-07-26-
+# mirror-parity-is-detected-but-never-propagated.md).
+#
+# Deliberately NOT importing scripts/sync-universal-hooks.py itself here: an
+# earlier version of this file did, and a `dataclasses` + Python-3.14
+# interaction inside that CLI tool's own `DriftEntry` (fixed by moving it to
+# this manifest as a `NamedTuple`) took THIS FILE'S ENTIRE COLLECTION down with
+# it — every test below, including ones with nothing to do with the sync tool,
+# stopped running, and another lane had to `--ignore` this file to get a clean
+# suite run. Importing only the tiny manifest module here means a future bug in
+# the CLI tool's argparse/subprocess/git-integration code can no longer do that;
+# see test_sync_tool_cli_module_is_importable below for how the CLI tool's own
+# importability is still checked, but as one attributable test, not a
+# collection-time crash for this whole file.
+#
+# Load it the way tests/test_cleanup_engine.py and tests/test_work_item_state_
+# validator.py already load scripts/ modules by file path via importlib
+# (registering in sys.modules BEFORE exec_module — dataclasses-era modules in
+# this repo need that; this module has no dataclass but the pattern is kept for
+# consistency and because NamedTuple costs nothing extra from it).
+_MANIFEST_PATH = ROOT / "scripts" / "universal_hooks_manifest.py"
+_manifest_spec = importlib.util.spec_from_file_location("universal_hooks_manifest", _MANIFEST_PATH)
+assert _manifest_spec is not None and _manifest_spec.loader is not None
+universal_hooks_manifest = importlib.util.module_from_spec(_manifest_spec)
+sys.modules[_manifest_spec.name] = universal_hooks_manifest
+_manifest_spec.loader.exec_module(universal_hooks_manifest)
 
-
-def _canon_names(subdir: str) -> tuple:
-    d = _CANON / subdir
-    return tuple(sorted(
-        p.name for p in d.iterdir()
-        if p.is_file() and p.suffix in _HOOK_EXTS
-    ))
-
-
-RUNTIME_SCRIPT_NAMES = _canon_names("scripts")
-RUNTIME_HOOK_NAMES = _canon_names("hooks")
-
-# scripts/-dir members that intentionally have NO byte-identical canon
-# counterpart. Every entry needs a justification comment; anything in a pack
-# scripts/ dir that is neither canon nor declared here FAILS the set-equality
-# test below. (This is the seam the amended hook-placement law names:
-# shared/references/repository-source-hygiene.md, decision
-# 2026-07-11-hook-placement-gate-semantics.)
-PACK_ONLY_SCRIPTS = {
-    "src.claude/agents/scripts": frozenset({
-        # Provider-specialized SessionStart context hook: walks the CLAUDE-line
-        # .agents-mode.yaml read-order (./.claude/, ~/.claude/) and speaks
-        # Agent-tool dispatch idiom; the codex twin walks ./.agents/ + ~/.codex/
-        # and speaks role/skill-activation idiom — intentionally different.
-        "agents-mode-reminder.sh", "agents-mode-reminder.ps1",
-        # Claude-line provider transport wrappers (no codex/canon analog).
-        "invoke-claude-api.sh", "invoke-claude-api.ps1",
-        "invoke-claude-prompt.sh", "invoke-claude-prompt.ps1",
-        "invoke-codex-prompt.sh", "invoke-codex-prompt.ps1",
-        # Claude-line active watcher emitted by the Codex dispatch wrappers;
-        # it is provider-specific and has no Codex/canon mirror.
-        "await-codex-dispatch.sh", "await-codex-dispatch.ps1",
-        # Per-pack validator (content differs per pack by design).
-        "validate-skill-pack.sh", "validate-skill-pack.ps1",
-    }),
-    "src.codex/skills/lead/scripts": frozenset({
-        "agents-mode-reminder.sh", "agents-mode-reminder.ps1",  # see above
-        "validate-skill-pack.sh", "validate-skill-pack.ps1",
-    }),
-}
-
-# hooks/-dir members that intentionally have NO canon counterpart because they are
-# provider-SPECIFIC: the hook keys on a tool the target runtime exposes and the
-# other runtime does not, so mirroring it would ship a hook that can never fire.
-# Same declared-exception seam as PACK_ONLY_SCRIPTS above (decision
-# 2026-07-11-hook-placement-gate-semantics). Every entry needs a justification.
-PACK_ONLY_HOOKS = {
-    "src.claude/agents/hooks": frozenset({
-        # Claude-only typed-routing audit: keys on the subagent-dispatch tool
-        # (captured tool_name "Agent"). Codex CLI exposes no analogous
-        # subagent-dispatch tool (src.codex/AGENTS.codex.md: "Codex CLI has no
-        # analogous Agent-isolation"), so there is no Codex/canon mirror.
-        "check-typed-routing.py", "check-typed-routing.sh", "check-typed-routing.ps1",
-    }),
-    "src.codex/skills/lead/hooks": frozenset(),
-}
+RUNTIME_SCRIPT_NAMES = universal_hooks_manifest.canon_names(ROOT, "scripts")
+RUNTIME_HOOK_NAMES = universal_hooks_manifest.canon_names(ROOT, "hooks")
+PACK_ONLY_SCRIPTS = universal_hooks_manifest.PACK_ONLY_SCRIPTS
+PACK_ONLY_HOOKS = universal_hooks_manifest.PACK_ONLY_HOOKS
 
 
 class UniversalHookSurfaceTest(unittest.TestCase):
@@ -115,7 +96,7 @@ class UniversalHookSurfaceTest(unittest.TestCase):
             extra = PACK_ONLY_HOOKS.get(rel, frozenset())
             pack = {
                 p.name for p in pack_hooks.iterdir()
-                if p.is_file() and p.suffix in _HOOK_EXTS
+                if p.is_file() and p.suffix in universal_hooks_manifest.HOOK_EXTS
             }
             with self.subTest(pack=rel):
                 self.assertEqual(
@@ -136,7 +117,7 @@ class UniversalHookSurfaceTest(unittest.TestCase):
             pack_dir = ROOT / Path(rel)
             pack = {
                 p.name for p in pack_dir.iterdir()
-                if p.is_file() and p.suffix in _HOOK_EXTS
+                if p.is_file() and p.suffix in universal_hooks_manifest.HOOK_EXTS
             }
             with self.subTest(pack=rel):
                 self.assertEqual(
@@ -145,6 +126,87 @@ class UniversalHookSurfaceTest(unittest.TestCase):
                     f"{pack - canon - set(extra)}, missing-from-pack="
                     f"{(canon | set(extra)) - pack}",
                 )
+
+    def test_sync_tool_drift_detection_matches_primary_parity_loop(self) -> None:
+        """universal_hooks_manifest.find_drift() must enumerate exactly the same
+        drifted files as the byte-for-byte loop in
+        test_pack_neutral_hook_sources_exist_and_match_production_packs above —
+        otherwise a lane's fast standalone `--check` (point 2 of
+        work-items/bugs/2026-07-26-mirror-parity-is-detected-but-never-
+        propagated.md: detection belongs where a lane hits it before reporting,
+        not only in the full suite) could report clean while the full-suite gate
+        still fails, or vice versa. This test re-derives provider_pairs
+        independently (deliberately not sharing code with the primary test
+        above) so the two detection paths are cross-checked, not just aliased."""
+        universal_scripts = ROOT / "scripts" / "universal-hooks" / "scripts"
+        universal_hooks = ROOT / "scripts" / "universal-hooks" / "hooks"
+        provider_pairs = (
+            (ROOT / "src.codex" / "skills" / "lead" / "scripts", RUNTIME_SCRIPT_NAMES),
+            (ROOT / "src.claude" / "agents" / "scripts", RUNTIME_SCRIPT_NAMES),
+            (ROOT / "src.codex" / "skills" / "lead" / "hooks", RUNTIME_HOOK_NAMES),
+            (ROOT / "src.claude" / "agents" / "hooks", RUNTIME_HOOK_NAMES),
+        )
+        expected_drifted: set[str] = set()
+        for provider_dir, names in provider_pairs:
+            universal_dir = universal_scripts if provider_dir.name == "scripts" else universal_hooks
+            for name in names:
+                m_path = provider_dir / name
+                if not m_path.is_file() or not filecmp.cmp(universal_dir / name, m_path, shallow=False):
+                    expected_drifted.add(m_path.relative_to(ROOT).as_posix())
+
+        actual_drifted = {
+            e.mirror_path.relative_to(ROOT).as_posix()
+            for e in universal_hooks_manifest.find_drift(ROOT)
+        }
+        self.assertEqual(expected_drifted, actual_drifted)
+
+    def test_sync_tool_check_cli_exit_code_matches_drift_presence(self) -> None:
+        """Exercise the actual CLI subprocess (not just the importable
+        functions) — that is what a lane runs in its own targeted pass before
+        reporting a result, per the documented obligation in
+        docs/new-session-guide.md. A subprocess crash here fails only this one
+        test; it cannot take down this file's collection (see the module-level
+        comment above and test_sync_tool_cli_module_is_importable below)."""
+        result = subprocess.run(
+            [
+                sys.executable, str(ROOT / "scripts" / "sync-universal-hooks.py"),
+                "--check", "--root", str(ROOT),
+            ],
+            capture_output=True, text=True,
+        )
+        has_drift = bool(universal_hooks_manifest.find_drift(ROOT))
+        self.assertEqual(
+            result.returncode, 1 if has_drift else 0,
+            f"stdout={result.stdout!r} stderr={result.stderr!r}",
+        )
+
+    def test_sync_tool_cli_module_is_importable(self) -> None:
+        """scripts/sync-universal-hooks.py (the CLI/mutation tool — argparse,
+        subprocess, git integration — as opposed to the manifest module
+        imported at the top of this file) is loaded HERE, inside this single
+        test method, specifically so a defect in it fails as ONE named,
+        attributable test rather than crashing collection for this entire
+        file. That crash is exactly what happened before the manifest split:
+        a `dataclasses` + Python-3.14 interaction in an earlier `DriftEntry`
+        implementation living in this file took every test below down with
+        it, and a neighbouring lane had to run the full suite with
+        `--ignore=tests/test_universal_hook_surfaces.py` to get a clean
+        result — the parity gate was unavailable, not failing loud, exactly
+        the defect class work-items/bugs/2026-07-26-mirror-parity-is-
+        detected-but-never-propagated.md is about one dependency over."""
+        tool_path = ROOT / "scripts" / "sync-universal-hooks.py"
+        spec = importlib.util.spec_from_file_location("sync_universal_hooks_cli_probe", tool_path)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception as exc:  # noqa: BLE001 - deliberately broad: any
+            # import-time failure in the CLI tool must show up as THIS named
+            # test failing, never as a collection-time crash for the module.
+            self.fail(f"scripts/sync-universal-hooks.py failed to import: {exc!r}")
+        finally:
+            sys.modules.pop(spec.name, None)
 
     def test_gemini_qwen_installers_copy_universal_hook_helpers(self) -> None:
         required_fragments = (
