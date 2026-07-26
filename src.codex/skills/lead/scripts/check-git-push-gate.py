@@ -98,6 +98,37 @@ extract_model_shell_commands_with_ids and extract_tool_outputs_with_ids), so
 this ordering check never rejects a genuine pair, only a same-id result that
 could not possibly be answering the call it is being credited against.
 
+CALL-SIDE UNIQUENESS COVERS EVERY ID-CARRYING CALL, NOT ONLY SHELL CALLS
+(2026-07-26, third correlation finding on this same mechanism, external
+adversarial-gate review — `work-items/bugs/2026-07-26-non-shell-call-can-
+claim-a-scan-id-and-open-the-push-gate.md`). The COLLISION REJECTION fix
+above computed call-side uniqueness (`call_positions`) by walking
+`extract_model_shell_commands_with_ids` alone, because that was already the
+only extractor in scope for scan CALL detection. That conflated two
+separable concerns: what makes an id AMBIGUOUS is any second claimant
+regardless of tool type, while what makes a call a SCAN invocation is its
+command text specifically. A non-shell call (a `Read`, a Codex call whose
+arguments carry no `command` field, anything without a parseable shell
+command) sharing a scan call's id was therefore invisible to the shell-only
+uniqueness map, not merely uncounted — reproduced live: a scan call under id
+`X` whose OWN answering result never arrives (an interrupted call), plus an
+unrelated non-shell call sharing id `X`, plus one clean-shaped output under
+`X` (necessarily the foreign call's own real answer, since the scan's own
+answer is absent) still ALLOWed, because the shell-only map counted exactly
+one claimant for `X` and the result-side collision check also saw exactly
+one output for `X` — the ambiguity existed only on the call side, where the
+shell-only walk could not see it. This is why the "a call-side collision
+must produce a result-side collision" transitive argument (informally relied
+on when the COLLISION REJECTION fix above shipped, and disclosed there as
+`ASSUMPTION (UNVERIFIED)`) does not hold in general: it silently assumed the
+scan's own answer always arrives under the scan's own id, which is exactly
+the assumption an interrupted call violates. The fix separates the two
+walks: call-side uniqueness now walks `extract_model_tool_calls_with_ids` —
+every id-carrying call, regardless of tool type — while scan CALL detection
+stays on `extract_model_shell_commands_with_ids`, unchanged, because only a
+shell call can ever execute the scanner. A non-shell call can now never hide
+a second claimant on a scan id.
+
 HONESTY RULE — THIS IS A BACKSTOP, NOT A GUARANTEE. It under-detects by design
 (a push wrapped in a script the hook only sees as `bash sync.sh`, `eval`,
 command substitution, or another command-wrapper is not modelled — the hook
@@ -237,6 +268,7 @@ import sys
 
 from hook_common import (
     extract_model_shell_commands_with_ids,
+    extract_model_tool_calls_with_ids,
     extract_tool_outputs_with_ids,
     last_genuine_user_message,
     parse_envelope,
@@ -703,11 +735,22 @@ def main() -> int:
         # index doubles as ORDERING evidence: `after_user_entries` is forward
         # chronological, so a credited result must be found at a strictly
         # LATER index than the call it answers.
+        #
+        # CALL-SIDE UNIQUENESS COVERS EVERY ID-CARRYING CALL (see the module
+        # docstring's CALL-SIDE UNIQUENESS COVERS EVERY ID-CARRYING CALL note):
+        # `call_positions` is built from `extract_model_tool_calls_with_ids` --
+        # ANY tool call with an id, not only shell calls -- because what makes
+        # an id ambiguous is any second claimant regardless of tool type. Scan
+        # CALL detection stays a SEPARATE walk over
+        # `extract_model_shell_commands_with_ids`, because what makes a call a
+        # scan invocation is its command text, and only a shell call can ever
+        # execute the scanner.
         call_positions: dict[str, list[int]] = {}
         scan_call_ids: set[str] = set()
         for idx, entry in enumerate(after_user_entries):
-            for call_id, command_text in extract_model_shell_commands_with_ids(entry):
+            for call_id, _call_text in extract_model_tool_calls_with_ids(entry):
                 call_positions.setdefault(call_id, []).append(idx)
+            for call_id, command_text in extract_model_shell_commands_with_ids(entry):
                 if find_scan_script_executions(command_text):
                     scan_call_ids.add(call_id)
 

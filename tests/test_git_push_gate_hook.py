@@ -911,6 +911,72 @@ class TestGitPushGate(unittest.TestCase):
             should_deny=True,
         )
 
+    # --- deny: NON-SHELL COLLISION regression (third correlation finding on
+    # this same mechanism, 2026-07-26 -- see work-items/bugs/2026-07-26-non-
+    # shell-call-can-claim-a-scan-id-and-open-the-push-gate.md). The COLLISION
+    # REJECTION fix above computed call-side uniqueness by walking
+    # `extract_model_shell_commands_with_ids` ALONE -- the same extractor scan
+    # DETECTION already used -- so a non-shell call (no `command` field at
+    # all: a `Read`, a Codex call with a different argument shape) sharing a
+    # scan call's id was invisible to the uniqueness map entirely, not merely
+    # uncounted. THE EXACT SHAPE THAT MAKES THE "CAUGHT TRANSITIVELY" ARGUMENT
+    # FAIL: the scan call's OWN answering result never arrives (an
+    # interrupted call) -- so exactly ONE output remains under the shared id,
+    # and it is the FOREIGN (non-shell) call's own real answer, which happens
+    # to be clean-shaped. The result-side collision check sees no collision
+    # either, because there really is only one output -- the ambiguity is
+    # entirely on the CALL side, where the pre-fix code could not see it at
+    # all (it never walked a non-shell extractor over the calls).
+
+    def test_nonshell_call_sharing_scan_id_with_missing_scan_answer_denies(self) -> None:
+        shared_id = "toolu_nonshell_collide"
+        scan_call = assistant_tool_use(
+            "Bash", {"command": "bash .claude/agents/scripts/check-publication-safety.sh"},
+            tool_id=shared_id,
+        )
+        # Non-shell call sharing the SAME id -- no "command" field at all, so
+        # extract_model_shell_commands_with_ids cannot see it; only
+        # extract_model_tool_calls_with_ids (walking every id-carrying call)
+        # can.
+        nonshell_call = assistant_tool_use(
+            "Read", {"file_path": "tests/test_git_push_gate_hook.py"}, tool_id=shared_id,
+        )
+        # The ONLY output under shared_id -- the scan's own answer never
+        # arrives; this is the non-shell call's real answer, and it happens
+        # to be clean-shaped (a realistic accident: this very file contains
+        # that exact string as fixture data).
+        foreign_clean_result = tool_result(
+            "publication-safety: clean (tracked, examined 3 files)", tool_id=shared_id,
+        )
+        self.assert_outcome(
+            [user("push the branch"), scan_call, nonshell_call, foreign_clean_result],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    def test_codex_nonshell_call_sharing_scan_id_with_missing_scan_answer_denies(self) -> None:
+        # Codex-shape counterpart: a function_call whose arguments carry no
+        # "command" field at all (a different tool, e.g. a file read) shares
+        # the scan's call_id; the scan's own function_call_output never
+        # arrives, leaving the non-shell call's own clean-shaped output as
+        # the only claimant under that id.
+        shared_id = "call_nonshell_collide"
+        scan_call = codex_function_call(
+            "shell", '{"command": "bash .codex/skills/lead/scripts/check-publication-safety.sh"}',
+            call_id=shared_id,
+        )
+        nonshell_call = codex_function_call(
+            "read_file", '{"path": "notes.md"}', call_id=shared_id,
+        )
+        foreign_clean_result = codex_function_call_output(
+            "publication-safety: clean (tracked, examined 3 files)", call_id=shared_id,
+        )
+        self.assert_outcome(
+            [user("push the branch"), scan_call, nonshell_call, foreign_clean_result],
+            "git push origin main",
+            should_deny=True,
+        )
+
     def test_interleaved_collision_across_multiple_call_result_pairs_denies(self) -> None:
         # INTERLEAVING: calls and results are not neatly paired -- an
         # unrelated grep call/result is interleaved BETWEEN the colliding
