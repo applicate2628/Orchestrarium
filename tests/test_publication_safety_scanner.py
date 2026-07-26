@@ -219,6 +219,19 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         in its production --cached tracked mode (cwd = the throwaway repo). The
         scanner resolves its allowlist owner via its own absolute BASH_SOURCE, so
         it uses the real reference hook regardless of cwd. Returns the exit code."""
+        return self._run_cached_full(scanner, content, env_overrides=env_overrides, filename=filename)[0]
+
+    def _run_cached_full(
+        self,
+        scanner: Path,
+        content: str,
+        env_overrides: dict | None = None,
+        filename: str = "fixture.txt",
+    ) -> tuple[int, str]:
+        """Same as `_run_cached` but also returns stdout, for tests that must
+        inspect the scanner's own self-reported RESULT text (2026-07-26
+        hardening: check-git-push-gate.py step 8 branch (b) now keys on this
+        text, not just the exit code)."""
         git = _git()
         bash = _bash()
         with tempfile.TemporaryDirectory() as td:
@@ -240,7 +253,27 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                 encoding="utf-8",
                 env=env,
             )
-            return proc.returncode
+            return proc.returncode, proc.stdout
+
+    def _run_cached_nothing_staged(self, scanner: Path) -> tuple[int, str]:
+        """Run the scanner in a real repo with NOTHING staged at all -- the
+        live-failure shape (2026-07-25/26): after a commit, the index equals
+        HEAD, so `git diff --cached` is empty and the scanner examines nothing.
+        Distinct from `_run_cached`, which always stages exactly one file."""
+        git = _git()
+        bash = _bash()
+        with tempfile.TemporaryDirectory() as td:
+            subprocess.run([git, "init", "-q", td], check=True, capture_output=True)
+            subprocess.run([git, "-C", td, "config", "user.email", "t@t"], check=True, capture_output=True)
+            subprocess.run([git, "-C", td, "config", "user.name", "t"], check=True, capture_output=True)
+            proc = subprocess.run(
+                [bash, str(scanner)],
+                cwd=td,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            return proc.returncode, proc.stdout
 
     def test_block_rows_exit_1(self) -> None:
         for scanner in SCANNERS:
@@ -260,6 +293,86 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
                 self.assertEqual(self._run_cached(scanner, "nothing machine-local here"), 0)
+
+    def test_clean_nonempty_scan_reports_tracked_examined_count(self) -> None:
+        # 2026-07-26 hardening (D2/S6): a REAL clean scan over a non-empty
+        # staged set must self-report a distinguishable "tracked, examined N
+        # files" result -- this is the exact text check-git-push-gate.py's
+        # SCAN_CLEAN_TRACKED_REGEX matches against tool OUTPUT.
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                rc, out = self._run_cached_full(scanner, "nothing machine-local here")
+                self.assertEqual(rc, 0)
+                self.assertIn("publication-safety: clean (tracked, examined 1 file)", out)
+
+    def test_nothing_staged_exits_0_but_reports_zero_examined(self) -> None:
+        # THE LIVE FAILURE (2026-07-25/26): with nothing staged at all (the
+        # ordinary post-commit state, where the index already equals HEAD),
+        # the scan still exits 0 -- but it must be able to tell a caller that
+        # it examined NOTHING, so an "examined 0" result is never mistaken for
+        # a real pass. This is the exact defect the push-gate hardening closes:
+        # an empty scan must never read as a pass.
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                rc, out = self._run_cached_nothing_staged(scanner)
+                self.assertEqual(rc, 0, "an empty staged set is not itself a finding")
+                self.assertIn("examined 0 files", out)
+                # And, just as importantly, it must NOT accidentally satisfy
+                # the push gate's non-empty regex (`[1-9]\d*`).
+                self.assertNotRegex(out, r"examined [1-9]\d* files?")
+
+    def test_path_mode_clean_scan_reports_path_not_tracked(self) -> None:
+        # A `--path` fixture-testing invocation must self-report scan MODE
+        # "path", never "tracked" -- so it can never launder as push-gate
+        # evidence for what is actually staged (§3.3-parallel guard: the
+        # narrowed push-gate mechanism keys on the literal word "tracked").
+        # `--path` mode still requires a repo context (the scanner
+        # unconditionally `cd`s to `git rev-parse --show-toplevel`), so the
+        # fixture directory is git-init'd even though nothing is staged there.
+        git = _git()
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                with tempfile.TemporaryDirectory() as td:
+                    subprocess.run([git, "init", "-q", td], check=True, capture_output=True)
+                    fixture = Path(td) / "clean.txt"
+                    fixture.write_text("nothing machine-local here\n", encoding="utf-8")
+                    proc = subprocess.run(
+                        [_bash(), str(scanner), "--path", str(fixture)],
+                        cwd=td,
+                        capture_output=True, text=True, encoding="utf-8",
+                    )
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    self.assertIn("publication-safety: clean (path, examined 1 file)", proc.stdout)
+                    self.assertNotIn("tracked", proc.stdout)
+
+    def test_path_mode_directory_reports_actual_file_count_not_hardcoded_one(self) -> None:
+        # Honesty regression (2026-07-26 adversarial-gate Finding 11a): a
+        # `--path` argument naming a DIRECTORY with several files must report
+        # the real count it walked, not a hardcoded "1" (the scan_files array
+        # always holds exactly one entry -- the `--path` argument itself --
+        # regardless of whether it names a file or a directory containing
+        # many). Path mode can never satisfy the push gate regardless of
+        # count (it is tagged "path", never "tracked"), so this was never a
+        # security hole -- only a false record of what was scanned.
+        git = _git()
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                with tempfile.TemporaryDirectory() as td:
+                    subprocess.run([git, "init", "-q", td], check=True, capture_output=True)
+                    fixture_dir = Path(td) / "fixtures"
+                    fixture_dir.mkdir()
+                    (fixture_dir / "a.txt").write_text("nothing machine-local here\n", encoding="utf-8")
+                    (fixture_dir / "b.txt").write_text("also nothing machine-local here\n", encoding="utf-8")
+                    proc = subprocess.run(
+                        [_bash(), str(scanner), "--path", str(fixture_dir)],
+                        cwd=td,
+                        capture_output=True, text=True, encoding="utf-8",
+                    )
+                    self.assertEqual(proc.returncode, 0, proc.stderr)
+                    self.assertIn(
+                        "publication-safety: clean (path, examined 2 files)", proc.stdout,
+                        f"expected the real walked count (2), got: {proc.stdout!r}",
+                    )
 
     def test_env_filename_blocks_even_without_secret_content(self) -> None:
         for scanner in SCANNERS:

@@ -123,6 +123,17 @@ if [[ "$scan_mode" == "tracked" ]]; then
   done < <(git diff --cached --name-only --diff-filter=ACMRTUXB -z --)
 
   if [[ ${#staged_paths[@]} -eq 0 ]]; then
+    # Honest-result signal (2026-07-26 hardening, D2 of
+    # work-items/backlog/2026-07-25-push-gate-blind-to-scan-result/brief.md
+    # §11.5): an empty `git diff --cached` is NOT a clean scan, it is a scan
+    # that examined NOTHING -- the exact shape of the ordinary commit-then-push
+    # flow, where the staged index already equals HEAD. Exit 0 is still correct
+    # (there is nothing here to block on), but the caller consuming this
+    # scan's RESULT (check-git-push-gate.py step 8 branch (b)) must be able to
+    # tell this apart from a real clean scan, so it never counts an empty scan
+    # as a pass. This line is deliberately tagged "tracked" with a "0" count so
+    # SCAN_CLEAN_TRACKED_REGEX's `[1-9]\d*` requirement cannot match it.
+    echo "publication-safety: clean (tracked, examined 0 files -- nothing staged)"
     exit 0
   fi
   scan_files=("${staged_paths[@]}")
@@ -384,4 +395,36 @@ if [[ $nonpath_status -ge 2 ]]; then
   exit "$nonpath_status"
 fi
 
+# Honest-result signal (2026-07-26 hardening, see the matching comment on the
+# tracked-mode empty-set exit above): report the scan MODE and the actual
+# examined count so a caller reading this scan's own output (not just its exit
+# code) can tell a real, non-empty, tracked-mode clean pass apart from an
+# empty-set pass or a `--path` fixture-testing pass. `scan_mode` is printed
+# verbatim ("tracked" or "path") -- deliberately NOT normalized to one word --
+# so a `--path` invocation can never read as "tracked" gate evidence
+# (check-git-push-gate.py's SCAN_CLEAN_TRACKED_REGEX requires the literal word
+# "tracked").
+#
+# examined_count for `path` mode is NOT `${#scan_files[@]}` (that array always
+# holds exactly one entry: the `--path` argument itself, whether it names a
+# file or a directory) -- it is the ACTUAL number of files examined, computed
+# the same way the Python allowlist path (`_expand_path_mode`) walks a
+# directory. Reporting a hardcoded "1" for a directory argument that in fact
+# contained several files would be a false record of what was scanned (an
+# honesty defect flagged 2026-07-26; path mode can never satisfy the gate
+# regardless of count, so this was never a security hole, only a wrong number).
+if [[ "$scan_mode" == "path" ]]; then
+  if [[ -d "$scan_path" ]]; then
+    examined_count="$(find "$scan_path" -type f | wc -l | tr -d '[:space:]')"
+  else
+    examined_count=1
+  fi
+else
+  examined_count="${#scan_files[@]}"
+fi
+examined_word="files"
+if [[ "$examined_count" -eq 1 ]]; then
+  examined_word="file"
+fi
+echo "publication-safety: clean (${scan_mode}, examined ${examined_count} ${examined_word})"
 exit 0

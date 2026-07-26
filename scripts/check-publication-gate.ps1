@@ -19,9 +19,9 @@ $gitExecutable = (Resolve-Path $gitExecutable).Path
 $gitInstallRoot = Split-Path -Parent (Split-Path -Parent $gitExecutable)
 $gitParentRoot = Split-Path -Parent $gitInstallRoot
 $shellCandidates = @(
-  (Join-Path $gitInstallRoot 'bin\\bash.exe'),
-  (Join-Path $gitInstallRoot 'usr\\bin\\bash.exe'),
-  (Join-Path $gitInstallRoot 'usr\\bin\\sh.exe')
+  (Join-Path $gitInstallRoot 'bin\bash.exe'),
+  (Join-Path $gitInstallRoot 'usr\bin\bash.exe'),
+  (Join-Path $gitInstallRoot 'usr\bin\sh.exe')
 )
 # Only probe the grandparent root in the Git-for-Windows mingw layout, where
 # git.exe sits at ...\Git\mingw64\bin\git.exe (or mingw32, or usr) and its real
@@ -35,9 +35,9 @@ $shellCandidates = @(
 # and cannot throw.
 $gitInstallLeaf = Split-Path -Leaf $gitInstallRoot
 if (@('mingw64', 'mingw32', 'usr') -contains $gitInstallLeaf) {
-  $shellCandidates += (Join-Path $gitParentRoot 'bin\\bash.exe')
-  $shellCandidates += (Join-Path $gitParentRoot 'usr\\bin\\bash.exe')
-  $shellCandidates += (Join-Path $gitParentRoot 'usr\\bin\\sh.exe')
+  $shellCandidates += (Join-Path $gitParentRoot 'bin\bash.exe')
+  $shellCandidates += (Join-Path $gitParentRoot 'usr\bin\bash.exe')
+  $shellCandidates += (Join-Path $gitParentRoot 'usr\bin\sh.exe')
 }
 
 $shellExecutable = $shellCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -95,7 +95,36 @@ if (-not $shellExecutable) {
   throw "Unable to locate a non-WSL bundled bash.exe or sh.exe (searched under $gitInstallRoot and its parent, then PATH excluding WSL launchers)."
 }
 
-$repoRoot = (& $gitExecutable rev-parse --show-toplevel).Trim()
+$repoRootOutput = $null
+$repoRootExitCode = 1
+# ErrorActionPreference is relaxed around JUST this native call, then restored:
+# under Windows PowerShell 5.1, invoking a `.cmd`/`.bat` git with `2>$null`
+# redirection can surface an UNRELATED native-stderr line (e.g. from a cmd.exe
+# `AutoRun` registry hook some environments set, such as conda's) as an
+# ErrorRecord, which `$ErrorActionPreference = 'Stop'` then promotes to a
+# terminating exception -- misreporting a perfectly good repo as "cannot
+# determine repository root". Reproduced empirically under PowerShell 5.1 with
+# a synthetic cmd.exe AutoRun hook; pwsh 7 is unaffected either way. This does
+# NOT weaken the null-safety: $LASTEXITCODE is still read right after the call
+# and still gates $repoRoot below.
+$previousErrorActionPreference = $ErrorActionPreference
+$ErrorActionPreference = 'Continue'
+try {
+  $repoRootOutput = & $gitExecutable rev-parse --show-toplevel 2>$null
+  $repoRootExitCode = $LASTEXITCODE
+} catch {
+  $repoRootOutput = $null
+  $repoRootExitCode = 1
+} finally {
+  $ErrorActionPreference = $previousErrorActionPreference
+}
+
+$repoRoot = if ($repoRootExitCode -eq 0 -and $repoRootOutput) {
+  ($repoRootOutput | Select-Object -First 1).Trim()
+} else {
+  $null
+}
+
 if (-not $repoRoot) {
   throw "Unable to determine repository root."
 }
