@@ -560,14 +560,33 @@ function Ensure-LocalOnlyGitignoreEntries {
                     # `~/.config/git/ignore` covering the tier otherwise
                     # leaked in SILENTLY even with GIT_CONFIG_NOSYSTEM/
                     # GIT_CONFIG_GLOBAL already neutralized.
+                    # This write's own failure must fail the probe CLOSED,
+                    # the same way the `git init` check above already does:
+                    # `catch` alone does not observe a native command's exit
+                    # code, so $LASTEXITCODE is checked explicitly -- a probe
+                    # that cannot CONFIRM core.excludesFile is neutralized is
+                    # not merely unhardened, it is UNVERIFIABLE, and must
+                    # never be trusted to decide "already ignored" for real --
+                    # an external review forced this failure and confirmed
+                    # the ambient leak survives silently without this check.
                     $previousErrorActionPreference = $ErrorActionPreference
                     $ErrorActionPreference = "Continue"
+                    $giprobeExcludesConfigured = $false
                     try {
                         & git -C $giprobeRoot config core.excludesFile "$giprobeRoot.noexcludes" 2>$null
+                        if ($LASTEXITCODE -eq 0) {
+                            $giprobeExcludesConfigured = $true
+                        }
                     } catch {
                     } finally {
                         $ErrorActionPreference = $previousErrorActionPreference
                     }
+                    if (-not $giprobeExcludesConfigured) {
+                        Remove-Item -LiteralPath $giprobeRoot -Recurse -Force -ErrorAction SilentlyContinue
+                        $giprobeRoot = $null
+                    }
+                }
+                if ($giprobeRoot) {
                     # If project_root is ALREADY a repo with an EXPLICIT
                     # LOCAL core.ignorecase override -- not just the
                     # filesystem-auto-detected default the throwaway repo

@@ -623,7 +623,19 @@ ensure_local_only_gitignore_entries() {
           # XDG_CONFIG_HOME pointing at a real `~/.config/git/ignore`
           # covering the tier otherwise leaked in SILENTLY even with
           # GIT_CONFIG_NOSYSTEM/GIT_CONFIG_GLOBAL already neutralized.
-          git -C "$giprobe_root" config core.excludesFile "${giprobe_root}.noexcludes" >/dev/null 2>&1 || true
+          # This write's own failure must fail the probe CLOSED, the same
+          # way the `git init` check right above already does: a probe that
+          # cannot CONFIRM core.excludesFile is neutralized is not merely
+          # unhardened, it is UNVERIFIABLE, and an unverifiable probe must
+          # never be trusted to decide "already ignored" for real -- an
+          # external review forced this failure and confirmed the ambient
+          # leak survives silently without this check.
+          if ! git -C "$giprobe_root" config core.excludesFile "${giprobe_root}.noexcludes" >/dev/null 2>&1; then
+            rm -rf "$giprobe_root" 2>/dev/null || true
+            giprobe_root=""
+          fi
+        fi
+        if [[ -n "$giprobe_root" ]]; then
           # Mirror project_root's own EXPLICIT LOCAL core.ignorecase, when
           # set, onto the (now-neutralized) throwaway repo -- --local (never
           # plain `config`, which falls through to global/system config even

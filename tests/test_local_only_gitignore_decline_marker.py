@@ -1261,6 +1261,210 @@ class PowerShellGitEnvironmentNeutralizationTest(unittest.TestCase):
                                 self.assertIn("/work-items/", after.splitlines())
 
 
+def _write_bash_excludes_failure_shim(shim_dir: Path, real_git: str) -> Path:
+    """A `git` placed first on PATH that passes every invocation through to
+    the REAL git UNMODIFIED except the one exact call the round-8 hardening
+    fix targets -- `git -C <dir> config core.excludesFile <path>` -- which it
+    fails with exit 1, emitting a recognizable stdout marker so a preflight
+    probe can confirm THIS shim (not a real git failure for some unrelated
+    reason) actually fired. `git init`, `check-ignore`, and the
+    `core.ignorecase` mirror calls all reach the real git untouched, so the
+    throwaway repo this fix guards is genuinely alive for the run -- only its
+    own hardening write is made to fail, mirroring the exact fault an
+    external review forced (injecting the failure into ONLY this command
+    left the installer returning 0 and the tier silently left unappended,
+    with the ambient-leak fixture from
+    test_default_excludes_path_fallback_and_pathspec_magic_do_not_leak
+    proving the leak survives without this fix)."""
+    shim_dir.mkdir(parents=True, exist_ok=True)
+    git_shim = shim_dir / "git"
+    git_shim.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [ "$1" = "-C" ] && [ "$3" = "config" ] && [ "$4" = "core.excludesFile" ]; then\n'
+        '  echo "FAKE_GIT_EXCLUDES_FAILURE_MARKER"\n'
+        "  exit 1\n"
+        "fi\n"
+        'exec "$REAL_GIT" "$@"\n',
+        encoding="utf-8", newline="\n",
+    )
+    git_shim.chmod(0o755)
+    return git_shim
+
+
+def _write_ps1_excludes_failure_shim(shim_dir: Path) -> Path:
+    """Windows/PowerShell counterpart to _write_bash_excludes_failure_shim
+    above: a `git.cmd` placed first on PATH so native command resolution
+    finds it before the real git.exe. Delegates every invocation to the real
+    git (path supplied via the REAL_GIT env var, quoted for a path that may
+    contain spaces) except the one exact `-C <dir> config
+    core.excludesFile <path>` call, which it fails with exit code 1 after
+    the same stdout marker."""
+    shim_dir.mkdir(parents=True, exist_ok=True)
+    git_cmd = shim_dir / "git.cmd"
+    git_cmd.write_text(
+        "@echo off\r\n"
+        'if "%~1"=="-C" if "%~3"=="config" if "%~4"=="core.excludesFile" (\r\n'
+        "  echo FAKE_GIT_EXCLUDES_FAILURE_MARKER\r\n"
+        "  exit /b 1\r\n"
+        ")\r\n"
+        '"%REAL_GIT%" %*\r\n',
+        encoding="utf-8", newline="",
+    )
+    return git_cmd
+
+
+@unittest.skipIf(BASH is None or GIT is None, "needs bash and git on PATH")
+class BashConfigWriteFailureFailsClosedTest(unittest.TestCase):
+    """Regression for
+    work-items/bugs/2026-07-26-the-excludesfile-hardening-step-does-not-verify-its-own-precondition.md
+    (external-review-forced): the `git config core.excludesFile ...`
+    hardening write added for round 8 (see
+    BashGitEnvironmentNeutralizationTest.test_default_excludes_path_fallback_
+    and_pathspec_magic_do_not_leak above) had its OWN failure discarded via
+    `|| true`, while its neighbour two lines above (`git init`) already fails
+    the probe closed on failure -- one precondition failed closed, the other
+    failed open, in the SAME function. An external review injected a failure
+    into ONLY the excludesFile write and confirmed the installer still
+    returned 0 with the tier silently left unappended -- looking safe by the
+    OTHER assertion direction (nothing wrongly ignored) -- but a probe whose
+    own hardening step could not be confirmed is UNVERIFIABLE, not merely
+    unhardened, and the round-8 fixture above proves the concrete
+    consequence: the ambient-leak scenario this hardening step exists to
+    close survives it silently when the write itself fails partway. Fixed by
+    checking the write's own exit status and discarding the throwaway repo
+    (mirroring the `git init` check already immediately above it) rather
+    than assuming success.
+
+    This test locks in the fail-closed direction directly, independent of
+    any particular ambient leak: an injected excludesFile-write failure, on
+    its own, must decline every unresolved tier rather than silently trust
+    an unverifiable probe."""
+
+    def test_excludes_write_failure_declines_rather_than_silently_proceeds(self) -> None:
+        for installer in SH_INSTALLERS:
+            with self.subTest(installer=installer.name):
+                with tempfile.TemporaryDirectory() as shim_td, tempfile.TemporaryDirectory() as td:
+                    shim_dir = Path(shim_td)
+                    _write_bash_excludes_failure_shim(shim_dir, GIT)
+                    env = dict(os.environ)
+                    env["PATH"] = str(shim_dir) + os.pathsep + env.get("PATH", "")
+                    env["REAL_GIT"] = GIT
+
+                    # Precondition check, not an assumption (same defensive
+                    # style as BashNegationGitUnavailableFallbackTest above):
+                    # some MSYS2/Git-for-Windows bash builds re-derive their
+                    # OWN base PATH at startup, which could resolve "git" to
+                    # something other than this shim despite the PATH
+                    # override. Confirm the SHIM specifically fired (via its
+                    # marker), not merely that some command failed, before
+                    # trusting the end-to-end run below.
+                    probe = subprocess.run(
+                        [BASH, "-c",
+                         "git -C orchestrarium-nonexistent-probe-dir config "
+                         "core.excludesFile orchestrarium-nonexistent-probe-dir.noexcludes"],
+                        env=env, capture_output=True, text=True,
+                    )
+                    if "FAKE_GIT_EXCLUDES_FAILURE_MARKER" not in probe.stdout:
+                        self.skipTest(
+                            "this bash does not resolve 'git' to the injected shim "
+                            "(some MSYS2/Git-for-Windows builds re-derive their own base "
+                            "PATH) -- cannot inject the excludesFile-write failure via env "
+                            "PATH alone here"
+                        )
+
+                    root = Path(td)
+                    # No .gitignore at all: every one of the four tiers is
+                    # unresolved, so the injected failure's effect on ALL of
+                    # them (giprobe_root is computed once, before the
+                    # per-entry loop) is visible in one run.
+                    p = _run_bash_writer(installer, root, env=env)
+                    self.assertEqual(p.returncode, 0, p.stderr)
+                    self.assertNotIn(
+                        "added '/work-items/'", p.stdout,
+                        f"{installer.name}: writer appended /work-items/ despite the "
+                        f"core.excludesFile hardening write failing -- the unverifiable "
+                        f"probe result was silently trusted instead of declined; "
+                        f"stdout={p.stdout!r}",
+                    )
+                    self.assertIn(
+                        "could not be checked against git", p.stdout,
+                        f"{installer.name}: missing the unverifiable-probe disclosure "
+                        f"message after the injected excludesFile-write failure; "
+                        f"stdout={p.stdout!r}",
+                    )
+                    gitignore_path = root / ".gitignore"
+                    after = gitignore_path.read_text(encoding="utf-8", newline="") if gitignore_path.is_file() else ""
+                    for entry in ("/.reports/", "/.plans/", "/work-items/", "/.scratch/"):
+                        self.assertNotIn(
+                            entry, after.splitlines(),
+                            f"{installer.name}: '{entry}' present in .gitignore after an "
+                            f"unverifiable probe result -- should have been declined, not "
+                            f"written",
+                        )
+
+
+@unittest.skipIf(not PS_INTERPRETERS or GIT is None, "needs a PowerShell host and git on PATH")
+class PowerShellConfigWriteFailureFailsClosedTest(unittest.TestCase):
+    """PowerShell counterpart to BashConfigWriteFailureFailsClosedTest above.
+    Windows-native process resolution is expected to be reliable (no MSYS2
+    own-base-PATH re-derivation to defend against), but the shim's marker is
+    still verified directly via a preflight probe rather than assumed, for
+    the same reason the fixture tables in this module measure PowerShell
+    parity instead of inferring it from the bash-side result."""
+
+    def test_excludes_write_failure_declines_rather_than_silently_proceeds(self) -> None:
+        for interp in PS_INTERPRETERS:
+            for installer in PS1_INSTALLERS:
+                with self.subTest(interp=Path(interp).stem, installer=installer.name):
+                    with tempfile.TemporaryDirectory() as shim_td, tempfile.TemporaryDirectory() as td:
+                        shim_dir = Path(shim_td)
+                        _write_ps1_excludes_failure_shim(shim_dir)
+                        env = dict(os.environ)
+                        env["PATH"] = str(shim_dir) + os.pathsep + env.get("PATH", "")
+                        env["REAL_GIT"] = GIT
+
+                        probe = subprocess.run(
+                            [interp, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+                             "git -C orchestrarium-nonexistent-probe-dir config "
+                             "core.excludesFile orchestrarium-nonexistent-probe-dir.noexcludes"],
+                            env=env, capture_output=True, text=True,
+                        )
+                        if "FAKE_GIT_EXCLUDES_FAILURE_MARKER" not in probe.stdout:
+                            self.skipTest(
+                                f"{interp}: 'git' does not resolve to the injected shim here -- "
+                                f"cannot inject the excludesFile-write failure via env PATH alone"
+                            )
+
+                        root = Path(td)
+                        p = _run_ps1_writer(interp, installer, root, env=env)
+                        self.assertEqual(p.returncode, 0, p.stderr)
+                        self.assertNotIn(
+                            "added '/work-items/'", p.stdout,
+                            f"{installer.name} ({interp}): writer appended /work-items/ despite "
+                            f"the core.excludesFile hardening write failing -- the unverifiable "
+                            f"probe result was silently trusted instead of declined; "
+                            f"stdout={p.stdout!r}",
+                        )
+                        self.assertIn(
+                            "could not be checked against git", p.stdout,
+                            f"{installer.name} ({interp}): missing the unverifiable-probe "
+                            f"disclosure message after the injected excludesFile-write failure; "
+                            f"stdout={p.stdout!r}",
+                        )
+                        gitignore_path = root / ".gitignore"
+                        after = (
+                            gitignore_path.read_text(encoding="utf-8", newline="")
+                            if gitignore_path.is_file() else ""
+                        )
+                        for entry in ("/.reports/", "/.plans/", "/work-items/", "/.scratch/"):
+                            self.assertNotIn(
+                                entry, after.splitlines(),
+                                f"{installer.name} ({interp}): '{entry}' present in .gitignore "
+                                f"after an unverifiable probe result -- should have been "
+                                f"declined, not written",
+                            )
+
+
 @unittest.skipIf(BASH is None or GIT is None, "needs bash and git on PATH")
 class GitGroundTruthTest(unittest.TestCase):
     """REVISE round 4: "consider whether the table needs ... a git-ground-
