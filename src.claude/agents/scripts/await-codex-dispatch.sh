@@ -25,10 +25,44 @@
 #   75  STALL   - .err went idle past --stall-secs. EX_TEMPFAIL (sysexits.h):
 #                 a temporary condition, not proof of process death, so a
 #                 retry/extended wait is a reasonable caller response.
+#   77  FILTERED - a THIRD silent-success shape, distinct from DEAD: the
+#                 completion artifacts are still empty AND the tail of --err
+#                 carries the provider's cybersecurity content-filter refusal
+#                 (observed live: 0-byte .out, absent .lastmsg, exit 0, 229k
+#                 tokens spent, work-items/bugs/2026-07-26-registry-bug-sweep
+#                 session). EX_NOPERM (sysexits.h) -- the provider is
+#                 refusing on policy grounds, not merely idle or gone. This
+#                 condition is MODEL-SPECIFIC: the fix is to re-dispatch the
+#                 SAME lane on a DIFFERENT model, never to reword the prompt
+#                 to appease the filter (that changes what was asked, a worse
+#                 outcome than a model swap). See "Cybersecurity content-
+#                 filter detection" below for the conjunction this rests on.
 #   124 TIMEOUT - --max-secs elapsed with nothing else terminal. Matches the
 #                 exit code the GNU coreutils `timeout(1)` command uses for
 #                 the same condition, a convention callers may already check.
 #   2   usage/argument error (unchanged).
+#
+# Cybersecurity content-filter detection (FILTERED, exit 77): exit code 0 with
+# empty completion artifacts is indistinguishable from "still working" --
+# without this check the filtered case above cost a full --stall-secs wait
+# (2700s shipped default) before anything was reported, and what was finally
+# reported (STALL) named the wrong cause. Detection rests on the CONJUNCTION,
+# never on either leg alone:
+#   1. the DONE checks below did not fire this poll (lastmsg/out still empty,
+#      no --commit-base change) -- a completed run is never overridden even if
+#      its .err happens to contain the phrase (e.g. quoted in a log line);
+#   2. the LAST few KB of --err (never the whole file) contain the filter
+#      marker -- a real dispatch's .err is a full transcript that starts by
+#      echoing the prompt itself; scanning the whole file risks matching an
+#      early, unrelated mention (e.g. this very detection being discussed in
+#      a dispatched prompt) while the run is still genuinely alive. The real
+#      marker sits in the last ~15 lines of a 4000+ line transcript.
+# The marker string is provider prose that will drift in wording, so the match
+# requires both the "flag" concept and the "cybersecurity" concept to appear
+# (case-insensitively, in either order) in that tail window, rather than
+# pinning the exact sentence -- loose enough to survive rewording, but two
+# independent words rather than one common word, to keep a healthy run's
+# unrelated chatter from misfiring this status.
 #
 # Direct liveness probe (--pid-file), the other half of the bug above: the
 # contract (contracts/review-loop.md:57, hardening invariant 5) defines
@@ -162,6 +196,26 @@ file_mtime() {
   printf '%s' "$mtime"
 }
 
+# Bytes of --err's TAIL scanned for the cybersecurity filter marker (see the
+# header comment). Deliberately NOT the whole file -- see rationale above.
+FILTER_TAIL_BYTES=8192
+
+# True (0) iff the tail of $1 carries both the "flag" and "cybersecurity"
+# concepts, case-insensitively. False (1) for a missing/unreadable/empty file
+# or a tail with neither/only-one concept -- the caller then falls through to
+# pre-existing behavior, never a false positive from an absent file.
+contains_filter_marker() {
+  local path="$1" tail_text="" lower=""
+  [[ -n "$path" && -f "$path" ]] || return 1
+  tail_text="$(tail -c "$FILTER_TAIL_BYTES" "$path" 2>/dev/null)"
+  [[ -n "$tail_text" ]] || return 1
+  # tr, not bash 4's ${var,,} -- this script already carries a `stat -f`
+  # fallback for BSD/macOS, whose default /bin/bash is 3.2 (no case-
+  # conversion parameter expansion); tr works identically on both.
+  lower="$(printf '%s' "$tail_text" | tr '[:upper:]' '[:lower:]')"
+  [[ "$lower" == *"flag"* && "$lower" == *"cybersecurit"* ]]
+}
+
 # Process start-time marker for PID-reuse detection (Linux/MSYS /proc/<pid>/
 # stat field 22, "starttime"). Recorded once at launch by invoke-codex-
 # prompt.sh / invoke-claude-prompt.sh; re-read here and compared for EQUALITY
@@ -230,6 +284,15 @@ while :; do
       printf 'DONE committed=%s\n' "$current_head"
       exit 0
     fi
+  fi
+
+  # Cybersecurity content-filter detection: only reached when none of the
+  # DONE checks above fired THIS poll (see header comment for the full
+  # conjunction). Independent of --pid-file -- fires on content alone, every
+  # poll, so it never waits out --stall-secs the way the live incident did.
+  if [[ -n "$ERR_PATH" ]] && contains_filter_marker "$ERR_PATH"; then
+    printf 'FILTERED err=%s reason=provider-cybersecurity-content-filter action=redispatch-different-model-do-not-reword\n' "$ERR_PATH"
+    exit 77
   fi
 
   # Direct liveness probe: only reached when none of the DONE checks above

@@ -26,11 +26,37 @@
       75  STALL   - .err went idle past -StallSecs. EX_TEMPFAIL (sysexits.h):
                     a temporary condition, not proof of process death, so a
                     retry/extended wait is a reasonable caller response.
+      77  FILTERED - a THIRD silent-success shape, distinct from DEAD: the
+                    completion artifacts are still empty AND the tail of -Err
+                    carries the provider's cybersecurity content-filter
+                    refusal (observed live: 0-byte .out, absent .lastmsg,
+                    exit 0, 229k tokens spent). EX_NOPERM (sysexits.h) -- the
+                    provider is refusing on policy grounds, not merely idle
+                    or gone. MODEL-SPECIFIC: re-dispatch the SAME lane on a
+                    DIFFERENT model; never reword the prompt to appease the
+                    filter (that changes what was asked, worse than a model
+                    swap). See "Cybersecurity content-filter detection" below.
       124 TIMEOUT - -MaxSecs elapsed with nothing else terminal. Matches the
                     exit code the GNU coreutils `timeout(1)` command uses for
                     the same condition, a convention callers may already
                     check.
       2   usage/argument error (unchanged).
+
+    Cybersecurity content-filter detection (FILTERED, exit 77): exit code 0
+    with empty completion artifacts is indistinguishable from "still
+    working" -- without this check the filtered case above cost a full
+    -StallSecs wait before anything was reported, and what was finally
+    reported (STALL) named the wrong cause. Detection rests on the
+    CONJUNCTION, never on either leg alone: (1) the DONE checks below did not
+    fire this poll -- a completed run is never overridden even if its .err
+    happens to contain the phrase; (2) the LAST few KB of -Err (never the
+    whole file) contain the filter marker -- a real dispatch's .err starts by
+    echoing the prompt itself, so scanning the whole file risks matching an
+    early, unrelated mention while the run is still genuinely alive. The
+    marker string is provider prose that will drift in wording, so the match
+    requires both the "flag" concept and the "cybersecurity" concept
+    (case-insensitively, either order) in that tail window rather than the
+    exact sentence.
 
     Direct liveness probe (-PidFile), the other half of the bug above: the
     contract (contracts/review-loop.md:57, hardening invariant 5) defines
@@ -106,6 +132,44 @@ function Get-CurrentHead {
   return ''
 }
 
+# Bytes of -Err's TAIL scanned for the cybersecurity filter marker (see the
+# header comment). Deliberately NOT the whole file -- see rationale above.
+$FilterTailBytes = 8192
+
+# Read the last $MaxBytes bytes of $Path as text, or '' for a missing/
+# unreadable/empty file. Opened with FileShare ReadWrite so a still-writing
+# provider process is never blocked or locked out by this read.
+function Get-TailText([string]$Path, [int]$MaxBytes) {
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return '' }
+  try {
+    $length = (Get-Item -LiteralPath $Path -Force).Length
+    if ($length -le 0) { return '' }
+    $readLength = [Math]::Min([int64]$MaxBytes, $length)
+    $stream = [System.IO.File]::Open($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    try {
+      $stream.Seek(-$readLength, [System.IO.SeekOrigin]::End) | Out-Null
+      $buffer = New-Object byte[] $readLength
+      $stream.Read($buffer, 0, $readLength) | Out-Null
+    } finally {
+      $stream.Dispose()
+    }
+    return [System.Text.Encoding]::UTF8.GetString($buffer)
+  } catch {
+    return ''
+  }
+}
+
+# True iff the tail of $Path carries both the "flag" and "cybersecurity"
+# concepts, case-insensitively. False for a missing/unreadable/empty file or
+# a tail with neither/only-one concept -- the caller then falls through to
+# pre-existing behavior, never a false positive from an absent file.
+function Test-FilterMarker([string]$Path) {
+  $tailText = Get-TailText $Path $FilterTailBytes
+  if (-not $tailText) { return $false }
+  $lower = $tailText.ToLowerInvariant()
+  return ($lower.Contains('flag') -and $lower.Contains('cybersecurit'))
+}
+
 # Classify the sidecar `.pid` file's recorded run as 'alive' | 'dead' |
 # 'unknown'. 'unknown' (missing file, unreadable, or a malformed `pid=` line)
 # is the explicit degrade path: the caller must fall back to the
@@ -166,6 +230,15 @@ while ($true) {
       Write-Output "DONE committed=$currentHead"
       exit 0
     }
+  }
+
+  # Cybersecurity content-filter detection: only reached when none of the
+  # DONE checks above fired THIS poll (see header comment for the full
+  # conjunction). Independent of -PidFile -- fires on content alone, every
+  # poll, so it never waits out -StallSecs the way the live incident did.
+  if ($Err -and (Test-FilterMarker $Err)) {
+    Write-Output "FILTERED err=$Err reason=provider-cybersecurity-content-filter action=redispatch-different-model-do-not-reword"
+    exit 77
   }
 
   # Direct liveness probe: only reached when none of the DONE checks above

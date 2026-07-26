@@ -16,6 +16,15 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 WATCH_SH = ROOT / "src.claude" / "agents" / "scripts" / "await-codex-dispatch.sh"
 WATCH_PS1 = ROOT / "src.claude" / "agents" / "scripts" / "await-codex-dispatch.ps1"
+# Real incident evidence (work-items/bugs/2026-07-26-registry-bug-sweep session):
+# a live gpt-5.6-sol dispatch hit the provider's cybersecurity content filter --
+# 0-byte .out, absent .lastmsg, exit 0, .err carrying the flagged-content
+# notice. .scratch/ is gitignored (local-only), so this file may not exist in
+# every checkout; the fixture-backed test below skips rather than fails when
+# it is absent, but MUST run and pass in the session that has it.
+FIXTURE_FILTERED_ERR = (
+    ROOT / ".scratch" / "codex-prompts" / "prepush-round2-sol-20260726-153908.err"
+)
 INVOKE_SH = ROOT / "src.claude" / "agents" / "scripts" / "invoke-codex-prompt.sh"
 INVOKE_PS1 = ROOT / "src.claude" / "agents" / "scripts" / "invoke-codex-prompt.ps1"
 CLAUDE_INVOKE_SH = ROOT / "src.claude" / "agents" / "scripts" / "invoke-claude-prompt.sh"
@@ -875,3 +884,206 @@ def test_invoke_ps1_wrappers_write_pid_file_with_pid_line(tmp_path: Path) -> Non
         first_line = pid_files[0].read_text(encoding="utf-8").splitlines()[0]
         assert first_line.split("=", 1)[0] == "pid"
         assert first_line.split("=", 1)[1].isdigit(), first_line
+
+
+# --- Cybersecurity content-filter detection (FILTERED) ----------------------
+#
+# Regression coverage for a second silent-success shape distinct from the DEAD
+# fix above: a provider's own content-policy filter fires mid-run, the child
+# process exits 0 having spent its whole token budget, and BOTH completion
+# artifacts stay empty forever -- exit code 0 is indistinguishable from "still
+# working" for the entire --stall-secs window (previously reported as STALL,
+# the wrong cause, after paying the full 2700s wait). Detection rests on the
+# CONJUNCTION -- empty completion artifacts AND a filter marker in `.err`'s
+# TAIL, never either leg alone -- so a healthy, still-running dispatch is
+# never misclassified, and a completed run is never overridden even if its
+# `.err` happens to contain the phrase somewhere.
+
+
+def _write_err_with_marker(path: Path, marker: str, *, leading_padding: int = 0) -> None:
+    """Build a synthetic .err: optional filler BEFORE the marker (to test the
+    tail-window restriction), then a line carrying `marker`, then a short
+    trailer resembling the real transcript's tail (tokens-used footer)."""
+    body = []
+    if leading_padding:
+        # Deliberately far from any reasonable tail window and containing
+        # the word "cybersecurity" on its own (but not "flag") so it can
+        # never itself satisfy the conjunction -- only `marker` can.
+        body.append(("filler cybersecurity line without the flag word.\n") * (leading_padding // 55 + 1))
+    body.append(f"{marker}\n")
+    body.append("tokens used\n123,456\n")
+    path.write_text("".join(body), encoding="ascii")
+
+
+def test_cybersecurity_filter_incident_fixture_is_filtered(tmp_path: Path) -> None:
+    """Primary regression: the REAL incident fixture (0-byte .out, absent
+    .lastmsg, .err carrying the actual provider filter notice) must report
+    FILTERED immediately -- not silently poll toward STALL/TIMEOUT."""
+    if not FIXTURE_FILTERED_ERR.exists():
+        pytest.skip(f"real incident fixture not present in this checkout: {FIXTURE_FILTERED_ERR}")
+
+    out = tmp_path / "dispatch.out"  # never written -- matches the real 0-byte artifact
+    started = time.monotonic()
+    line = _assert_one_line(
+        _run_sh(
+            "--out", _posix_path(out), "--err", _posix_path(FIXTURE_FILTERED_ERR),
+            "--poll-secs", "0.05", "--max-secs", "5", "--stall-secs", "2700",
+        ),
+        "FILTERED err=",
+        expected_returncode=77,
+    )
+    elapsed = time.monotonic() - started
+    assert "model" in line.lower()
+    assert "reword" in line.lower()
+    assert elapsed < 3, f"FILTERED took {elapsed}s -- must fire well before --stall-secs, not after it"
+
+
+def test_cybersecurity_filter_reworded_marker_is_filtered(tmp_path: Path) -> None:
+    """The marker string is provider prose and will drift -- matching must
+    survive rewording. Uses a deliberately DIFFERENT sentence shape than the
+    real fixture (still naming the flag + cybersecurity concepts) to prove
+    the match is not pinned to the exact incident sentence."""
+    out = tmp_path / "dispatch.out"
+    err = tmp_path / "dispatch.err"
+    _write_err_with_marker(
+        err,
+        "NOTICE: this request was flagged as a possible Cybersecurity concern; contact support.",
+    )
+
+    line = _assert_one_line(
+        _run_sh(
+            "--out", _posix_path(out), "--err", _posix_path(err),
+            "--poll-secs", "0.05", "--max-secs", "2",
+        ),
+        "FILTERED err=",
+        expected_returncode=77,
+    )
+    assert line == f"FILTERED err={_posix_path(err)} reason=provider-cybersecurity-content-filter action=redispatch-different-model-do-not-reword"
+
+
+def test_healthy_slow_run_with_no_marker_still_polls(tmp_path: Path) -> None:
+    """Negative control: a genuinely alive, slow dispatch (empty .out, .err
+    present with ordinary chatter, no marker anywhere) must NOT be
+    misclassified FILTERED -- it falls through to the pre-existing TIMEOUT
+    path exactly as before this fix. A false FILTERED here would be worse
+    than the gap being fixed."""
+    out = tmp_path / "dispatch.out"
+    err = tmp_path / "dispatch.err"
+    err.write_text("provider started\nstill working...\n", encoding="ascii")
+
+    line = _assert_one_line(
+        _run_sh(
+            "--out", _posix_path(out), "--err", _posix_path(err),
+            "--poll-secs", "0.05", "--max-secs", "1", "--stall-secs", "2700",
+        ),
+        "TIMEOUT max=",
+        expected_returncode=124,
+    )
+    assert line == "TIMEOUT max=1"
+
+
+def test_marker_outside_tail_window_does_not_misfire(tmp_path: Path) -> None:
+    """A filter message could in principle appear far earlier in a huge `.err`
+    transcript (e.g. an echoed prompt that happens to quote or discuss the
+    marker phrasing) while the run is still genuinely alive and working --
+    the real incident's marker sits in the last ~15 lines of a 4000+ line
+    transcript. Detection must be tail-scoped so an early, unrelated mention
+    cannot misfire FILTERED on a healthy in-progress run."""
+    out = tmp_path / "dispatch.out"
+    err = tmp_path / "dispatch.err"
+    # Full marker sentence far from the end, then >20KB of unrelated filler,
+    # comfortably outside any reasonable tail-scan window.
+    err.write_text(
+        "ERROR: This content was flagged for possible cybersecurity risk.\n"
+        + ("still working on the review, no terminal signal yet.\n" * 400),
+        encoding="ascii",
+    )
+
+    line = _assert_one_line(
+        _run_sh(
+            "--out", _posix_path(out), "--err", _posix_path(err),
+            "--poll-secs", "0.05", "--max-secs", "1", "--stall-secs", "2700",
+        ),
+        "TIMEOUT max=",
+        expected_returncode=124,
+    )
+    assert line == "TIMEOUT max=1"
+
+
+def test_completed_run_with_marker_in_err_is_still_done(tmp_path: Path) -> None:
+    """The conjunction's other leg: a completed run (non-empty .out) whose
+    .err happens to contain the filter phrase (e.g. quoted in a log line)
+    must still report DONE -- the DONE checks run first every poll, so a real
+    completion signal always wins over the content-filter heuristic."""
+    out = tmp_path / "dispatch.out"
+    out.write_text("GATE: PASS\n", encoding="ascii")
+    err = tmp_path / "dispatch.err"
+    _write_err_with_marker(err, "ERROR: This content was flagged for possible cybersecurity risk.")
+
+    line = _assert_one_line(
+        _run_sh(
+            "--out", _posix_path(out), "--err", _posix_path(err),
+            "--poll-secs", "0.05", "--max-secs", "2",
+        ),
+        "DONE out=",
+    )
+    assert line == f"DONE out={len(out.read_bytes())}"
+
+
+def test_terminal_status_exit_codes_include_filtered_and_stay_distinct() -> None:
+    """FILTERED's exit code must not collide with any existing terminal or
+    usage-error code -- the same pairwise-distinctness invariant the DEAD fix
+    established, extended to cover the new status."""
+    codes = {"done": 0, "dead": 69, "stall": 75, "filtered": 77, "timeout": 124, "usage": 2}
+    assert len(set(codes.values())) == len(codes), codes
+
+
+def test_powershell_cybersecurity_filter_is_filtered(tmp_path: Path) -> None:
+    if not _powershell():
+        pytest.skip("PowerShell is unavailable")
+
+    out = tmp_path / "dispatch.out"
+    err = tmp_path / "dispatch.err"
+    _write_err_with_marker(err, "ERROR: This content was flagged for possible cybersecurity risk.")
+
+    line = _run_ps(
+        "-Out", str(out), "-Err", str(err),
+        "-PollSecs", "0.05", "-MaxSecs", "2", "-StallSecs", "2700",
+    )
+    assert line.returncode == 77, line.stderr
+    assert line.stdout.splitlines() == [
+        f"FILTERED err={err} reason=provider-cybersecurity-content-filter action=redispatch-different-model-do-not-reword"
+    ]
+
+
+def test_powershell_healthy_slow_run_is_not_filtered(tmp_path: Path) -> None:
+    if not _powershell():
+        pytest.skip("PowerShell is unavailable")
+
+    out = tmp_path / "dispatch.out"
+    err = tmp_path / "dispatch.err"
+    err.write_text("provider started\nstill working...\n", encoding="ascii")
+
+    line = _run_ps(
+        "-Out", str(out), "-Err", str(err),
+        "-PollSecs", "0.05", "-MaxSecs", "1", "-StallSecs", "2700",
+    )
+    assert line.returncode == 124, line.stderr
+    assert line.stdout.splitlines() == ["TIMEOUT max=1"]
+
+
+def test_powershell_completed_run_with_marker_in_err_is_still_done(tmp_path: Path) -> None:
+    if not _powershell():
+        pytest.skip("PowerShell is unavailable")
+
+    out = tmp_path / "dispatch.out"
+    out.write_text("GATE: PASS\n", encoding="ascii")
+    err = tmp_path / "dispatch.err"
+    _write_err_with_marker(err, "ERROR: This content was flagged for possible cybersecurity risk.")
+
+    line = _run_ps(
+        "-Out", str(out), "-Err", str(err),
+        "-PollSecs", "0.05", "-MaxSecs", "2",
+    )
+    assert line.returncode == 0, line.stderr
+    assert line.stdout.splitlines() == [f"DONE out={len(out.read_bytes())}"]
