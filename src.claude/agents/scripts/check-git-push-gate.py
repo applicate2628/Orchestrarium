@@ -61,6 +61,43 @@ top-level Codex fallback shape with no id at all, no id — which is skipped,
 i.e. can never correlate, the
 fail-closed direction).
 
+COLLISION REJECTION, NOT RESOLUTION (2026-07-26, second correlation finding on
+this same mechanism, external adversarial-gate review). Correlating by id
+(the fix above) is only sound if an id actually identifies ONE call and ONE
+result. The code checked SET MEMBERSHIP only ("is this id present"), never
+UNIQUENESS ("does exactly one call/result carry it") — reproduced live with
+executable fixtures for both provider shapes: a real scan call and an
+UNRELATED call sharing one literal id (e.g. `"duplicate"`), each with its own
+matching tool output under that same shared id, still ALLOWed even though no
+single call-and-its-own-result pair ever reported a genuine clean scan. A
+colliding id cannot be resolved by picking a side (first-seen, scan-matching,
+longest match, anything) — that is a guess dressed up as a correlation, and
+this hook's whole reason to exist is to not guess about publication safety.
+The only safe reading of an ambiguous transcript is to exclude the colliding
+id from evidence on BOTH sides independently: an id claimed by more than one
+model tool CALL can no longer identify "the" scan invocation, and an id
+claimed by more than one tool OUTPUT can no longer identify "the" scan's own
+answer, regardless of which of the colliding occurrences happens to look
+legitimate. This is the same fail-closed posture as the missing-id case
+below (an uncorrelatable call/result was always skipped, never credited) —
+collision is just the mirror case: TOO MANY claimants instead of none, and
+both resolve to "exclude, do not guess."
+
+A same-id result that appears BEFORE the call it is supposedly answering, in
+transcript order, is the mirror defect of collision and is closed by the same
+change: correlation is retroactive within a turn (a call happens, then its
+own result), never the reverse. `after_user_entries` is already forward
+chronological order (`last_genuine_user_message` reverses it back into
+original order before returning), so each call/result's own entry INDEX
+doubles as its position in the turn; the fix requires a credited result's
+index to be strictly greater than its call's index. A call and its own real
+answering result can never land in the same transcript entry in either
+provider shape (a `tool_use`/`function_call` entry and its answering
+`tool_result`/`function_call_output` entry are always distinct records — see
+extract_model_shell_commands_with_ids and extract_tool_outputs_with_ids), so
+this ordering check never rejects a genuine pair, only a same-id result that
+could not possibly be answering the call it is being credited against.
+
 HONESTY RULE — THIS IS A BACKSTOP, NOT A GUARANTEE. It under-detects by design
 (a push wrapped in a script the hook only sees as `bash sync.sh`, `eval`,
 command substitution, or another command-wrapper is not modelled — the hook
@@ -121,11 +158,14 @@ Decision algorithm (fail-open everywhere on internal error):
      assistant prose, tool calls, or tool output — because prior provider or
      file content quoting the marker must not approve a publication.
   8. If the current turn (entries after the last genuine user message) shows
-     a publication-safety scan invocation among the model's own tool CALLS
-     WHOSE OWN correlated tool OUTPUT (same call id — see the CORRELATION
-     note above) reports a clean, non-empty, `tracked`-mode result, AND the
-     last genuine user message contains an explicit push-instruction signal
-     (`push`, `запушь`, `залей`, ...) → exit 0.
+     a publication-safety scan invocation among the model's own tool CALLS,
+     under an id UNIQUE among this turn's calls (see COLLISION REJECTION note
+     below), WHOSE OWN correlated tool OUTPUT (same call id — see the
+     CORRELATION note above), itself under an id unique among this turn's
+     outputs and recorded STRICTLY AFTER the call it answers, reports a
+     clean, non-empty, `tracked`-mode result, AND the last genuine user
+     message contains an explicit push-instruction signal (`push`, `запушь`,
+     `залей`, ...) → exit 0.
   9. Otherwise → emit a structured `permissionDecision: "deny"` payload with
      exact compliance instructions. Always exit 0 (the decision is carried by
      the stdout payload, not the exit code).
@@ -654,17 +694,54 @@ def main() -> int:
     # the scanner gets to have its own answering output checked against
     # SCAN_CLEAN_TRACKED_REGEX.
     if PUSH_INSTRUCTION_REGEX.search(user_text):
+        # COLLISION REJECTION (see the module docstring's COLLISION REJECTION
+        # note): correlating by id is only sound while an id is unique. Track
+        # every entry INDEX a call id / result id was seen at (not just
+        # whether it was seen) so a same id claimed by more than one call, or
+        # more than one output, can be detected and excluded — never
+        # resolved by guessing which claimant is "the real one". The same
+        # index doubles as ORDERING evidence: `after_user_entries` is forward
+        # chronological, so a credited result must be found at a strictly
+        # LATER index than the call it answers.
+        call_positions: dict[str, list[int]] = {}
         scan_call_ids: set[str] = set()
-        for entry in after_user_entries:
+        for idx, entry in enumerate(after_user_entries):
             for call_id, command_text in extract_model_shell_commands_with_ids(entry):
+                call_positions.setdefault(call_id, []).append(idx)
                 if find_scan_script_executions(command_text):
                     scan_call_ids.add(call_id)
 
-        if scan_call_ids:
-            for entry in after_user_entries:
+        # A scan-matching id claimed by more than one call in this turn is
+        # ambiguous — exclude it entirely rather than crediting either call.
+        unambiguous_scan_call_ids = {
+            call_id
+            for call_id in scan_call_ids
+            if len(call_positions.get(call_id, [])) == 1
+        }
+
+        if unambiguous_scan_call_ids:
+            result_positions: dict[str, list[int]] = {}
+            clean_result_ids: set[str] = set()
+            for idx, entry in enumerate(after_user_entries):
                 for result_id, result_text in extract_tool_outputs_with_ids(entry):
-                    if result_id in scan_call_ids and SCAN_CLEAN_TRACKED_REGEX.search(result_text):
-                        return 0
+                    result_positions.setdefault(result_id, []).append(idx)
+                    if SCAN_CLEAN_TRACKED_REGEX.search(result_text):
+                        clean_result_ids.add(result_id)
+
+            for call_id in unambiguous_scan_call_ids:
+                positions = result_positions.get(call_id, [])
+                # Mirror collision rule, result side: an id claimed by more
+                # than one tool output cannot be trusted to be THIS call's
+                # own answer either — exclude rather than pick one.
+                if len(positions) != 1 or call_id not in clean_result_ids:
+                    continue
+                # ORDERING: the credited result must sit strictly AFTER the
+                # call it is answering. A call and its own real answering
+                # result can never share one transcript entry (see the
+                # module docstring's COLLISION REJECTION note), so `>` never
+                # rejects a genuine pair.
+                if positions[0] > call_positions[call_id][0]:
+                    return 0
 
     # Deny.
     reason = (

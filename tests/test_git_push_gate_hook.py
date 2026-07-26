@@ -774,6 +774,209 @@ class TestGitPushGate(unittest.TestCase):
             should_deny=True,
         )
 
+    # --- deny: COLLISION regressions (second correlation finding, external
+    # adversarial-gate review, 2026-07-26). The id-correlation hardening above
+    # checks SET MEMBERSHIP ("is this id present among scan-matching calls /
+    # among clean results") but never UNIQUENESS ("does exactly one call, and
+    # exactly one output, carry this id"). Reproduced live with executable
+    # fixtures for both provider shapes: a real scan call and an UNRELATED
+    # call sharing one literal id, each with its own answering output under
+    # that same shared id, still ALLOWed -- the shared id let the unrelated
+    # call's own (independently clean-shaped) output get credited to the
+    # scan, even though no single call-and-its-own-result pair ever reported
+    # a genuine clean scan. Every test below constructs a collision the old
+    # set-membership check could not distinguish from a genuine unique
+    # correlation, and asserts DENY -- reject-on-collision, never
+    # resolve-by-guessing. A same-id result recorded BEFORE the call it
+    # supposedly answers is the mirror defect (closed by the same ordering
+    # check) and is covered alongside the collision tests.
+
+    def test_call_id_collision_between_scan_and_unrelated_call_denies(self) -> None:
+        # THE DEFECT, MINIMAL FORM: two DIFFERENT calls share one id
+        # ("toolu_dup") -- a real scan execution (whose own result correctly
+        # reports examined 0 files, which alone would deny) and an unrelated
+        # `echo` (whose own result independently satisfies the clean-result
+        # regex). Pre-fix set-membership credited "toolu_dup" as scan
+        # evidence the moment ANY result under that id matched, regardless of
+        # which call it truly answered.
+        dup_scan_call = assistant_tool_use(
+            "Bash", {"command": "bash .claude/agents/scripts/check-publication-safety.sh"},
+            tool_id="toolu_dup",
+        )
+        dup_scan_result = tool_result(
+            "publication-safety: clean (tracked, examined 0 files)", tool_id="toolu_dup"
+        )
+        dup_unrelated_call = assistant_tool_use("Bash", {"command": "echo unrelated"}, tool_id="toolu_dup")
+        dup_unrelated_result = tool_result(
+            "publication-safety: clean (tracked, examined 5 files)", tool_id="toolu_dup"
+        )
+        self.assert_outcome(
+            [user("push the branch"),
+             dup_scan_call, dup_scan_result, dup_unrelated_call, dup_unrelated_result],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    def test_result_id_collision_with_unrelated_output_denies(self) -> None:
+        # Collision on the RESULT side only: the scan call's OWN id is unique
+        # among this turn's calls, but TWO different tool outputs share that
+        # id -- one unrelated, one independently clean-shaped. An id claimed
+        # by more than one output cannot be trusted to be the scan's own
+        # answer, so this must deny exactly like the call-side collision.
+        scan_call = assistant_tool_use(
+            "Bash", {"command": "bash .claude/agents/scripts/check-publication-safety.sh"},
+            tool_id="toolu_rescollide",
+        )
+        genuine_but_wrong_result = tool_result(
+            "some other tool output that happens to share this id", tool_id="toolu_rescollide"
+        )
+        forged_clean_result = tool_result(
+            "publication-safety: clean (tracked, examined 7 files)", tool_id="toolu_rescollide"
+        )
+        self.assert_outcome(
+            [user("push the branch"), scan_call, genuine_but_wrong_result, forged_clean_result],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    def test_result_before_its_call_does_not_allow(self) -> None:
+        # ORDERING: a same-id "result" recorded BEFORE the call it is
+        # supposedly answering cannot be a real answer to it -- correlation
+        # is retroactive within a turn (call, then its own result), never the
+        # reverse.
+        early_result = tool_result(
+            "publication-safety: clean (tracked, examined 4 files)", tool_id="toolu_early"
+        )
+        late_scan_call = assistant_tool_use(
+            "Bash", {"command": "bash .claude/agents/scripts/check-publication-safety.sh"},
+            tool_id="toolu_early",
+        )
+        self.assert_outcome(
+            [user("push the branch"), early_result, late_scan_call],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    def test_codex_call_id_collision_between_scan_and_unrelated_call_denies(self) -> None:
+        # Codex-shape counterpart: function_call / function_call_output
+        # sharing one call_id across a real scan and an unrelated call.
+        dup_scan_call = codex_function_call(
+            "shell", '{"command": "bash .codex/skills/lead/scripts/check-publication-safety.sh"}',
+            call_id="call_dup",
+        )
+        dup_scan_result = codex_function_call_output(
+            "publication-safety: clean (tracked, examined 0 files)", call_id="call_dup"
+        )
+        dup_unrelated_call = codex_function_call("shell", '{"command": "cat notes.md"}', call_id="call_dup")
+        dup_unrelated_result = codex_function_call_output(
+            "publication-safety: clean (tracked, examined 5 files)", call_id="call_dup"
+        )
+        self.assert_outcome(
+            [user("push the branch"),
+             dup_scan_call, dup_scan_result, dup_unrelated_call, dup_unrelated_result],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    def test_codex_result_id_collision_denies(self) -> None:
+        # Codex-shape counterpart to the result-side collision above.
+        scan_call = codex_function_call(
+            "shell", '{"command": "bash .codex/skills/lead/scripts/check-publication-safety.sh"}',
+            call_id="call_rescollide",
+        )
+        genuine_but_wrong_result = codex_function_call_output(
+            "some other tool output sharing this id", call_id="call_rescollide"
+        )
+        forged_clean_result = codex_function_call_output(
+            "publication-safety: clean (tracked, examined 6 files)", call_id="call_rescollide"
+        )
+        self.assert_outcome(
+            [user("push the branch"), scan_call, genuine_but_wrong_result, forged_clean_result],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    def test_codex_result_before_its_call_does_not_allow(self) -> None:
+        # Codex-shape counterpart to the ordering test above.
+        early_result = codex_function_call_output(
+            "publication-safety: clean (tracked, examined 4 files)", call_id="call_early"
+        )
+        late_scan_call = codex_function_call(
+            "shell", '{"command": "bash .codex/skills/lead/scripts/check-publication-safety.sh"}',
+            call_id="call_early",
+        )
+        self.assert_outcome(
+            [user("push the branch"), early_result, late_scan_call],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    def test_interleaved_collision_across_multiple_call_result_pairs_denies(self) -> None:
+        # INTERLEAVING: calls and results are not neatly paired -- an
+        # unrelated grep call/result is interleaved BETWEEN the colliding
+        # scan-call/result pair. Proves the collision check inspects every
+        # entry in the turn for a same-id claimant, not merely "the last two
+        # entries" or adjacent pairs.
+        self.assert_outcome(
+            [user("push the branch"),
+             UNRELATED_GREP_CALL,
+             assistant_tool_use(
+                 "Bash", {"command": "bash .claude/agents/scripts/check-publication-safety.sh"},
+                 tool_id="toolu_interleave",
+             ),
+             UNRELATED_GREP_RESULT,
+             tool_result("publication-safety: clean (tracked, examined 0 files)", tool_id="toolu_interleave"),
+             assistant_tool_use("Bash", {"command": "echo other"}, tool_id="toolu_interleave"),
+             tool_result("publication-safety: clean (tracked, examined 9 files)", tool_id="toolu_interleave")],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    def test_codex_interleaved_collision_across_multiple_call_result_pairs_denies(self) -> None:
+        # Codex-shape counterpart to the interleaving test above.
+        self.assert_outcome(
+            [user("push the branch"),
+             codex_function_call("shell", '{"command": "cat notes.md"}', call_id="call_other1"),
+             codex_function_call(
+                 "shell", '{"command": "bash .codex/skills/lead/scripts/check-publication-safety.sh"}',
+                 call_id="call_interleave",
+             ),
+             codex_function_call_output("notes contents", call_id="call_other1"),
+             codex_function_call_output(
+                 "publication-safety: clean (tracked, examined 0 files)", call_id="call_interleave"
+             ),
+             codex_function_call("shell", '{"command": "echo other"}', call_id="call_interleave"),
+             codex_function_call_output(
+                 "publication-safety: clean (tracked, examined 9 files)", call_id="call_interleave"
+             )],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    # --- allow: collision-rejection sanity/regression guards -- proves the
+    # collision and ordering checks fire ONLY on a genuinely shared id or a
+    # genuinely out-of-order result, never merely because more than one call
+    # or result exists in the turn, and never because calls/results are
+    # interleaved with unrelated ones rather than adjacent pairs. ---
+
+    def test_scan_call_and_unrelated_call_with_distinct_ids_still_allows(self) -> None:
+        self.assert_outcome(
+            [user("push the branch"),
+             SCAN_CALL, SCAN_RESULT_CLEAN_TRACKED,
+             UNRELATED_GREP_CALL, UNRELATED_GREP_RESULT],
+            "git push origin main",
+            should_deny=False,
+        )
+
+    def test_interleaved_distinct_ids_still_allows(self) -> None:
+        self.assert_outcome(
+            [user("push the branch"),
+             UNRELATED_GREP_CALL, SCAN_CALL,
+             UNRELATED_GREP_RESULT, SCAN_RESULT_CLEAN_TRACKED],
+            "git push origin main",
+            should_deny=False,
+        )
+
     # --- allow: dry run / non-push / quoted ---
 
     def test_dry_run_allowed(self) -> None:
