@@ -114,6 +114,42 @@ def repo_root_for(item: Path) -> Path | None:
     return None
 
 
+def _resolve_active_slug_in_archive(root: Path, candidate: Path) -> Path | None:
+    """Retry a recorded `work-items/active/<slug>/<tail>` path under
+    `work-items/archive/<YYYY-MM>/<slug>/<tail>`.
+
+    The ledger records an artifact path while the item lives under active/; the
+    mandatory close step (owned by the lead contract + knowledge-archivist
+    mechanics) moves the item directory to archive/<YYYY-MM>/ WITHOUT touching
+    the ledger -- the ledger is an append-only audit record of what was true
+    when written, and rewriting historical entries to match the new location is
+    the one response this bug class forbids (see
+    work-items/bugs/2026-07-26-archiving-an-item-breaks-its-own-ledger-artifact-
+    paths.md). The slug segment is stable across the move, so the same tail can
+    be relocated by searching the archive month directories for it -- the
+    identical lookup shape `_slug_archived` (scripts/check-work-items-state.py)
+    already uses for Depends-on / done-predicate resolution across the same
+    active/archive boundary.
+    """
+    parts = candidate.parts
+    if len(parts) < 3 or parts[0] != "work-items" or parts[1] != "active":
+        return None
+    slug = parts[2]
+    tail = parts[3:]
+    archive_dir = root / "work-items" / "archive"
+    if not archive_dir.is_dir():
+        return None
+    try:
+        month_dirs = sorted(path for path in archive_dir.iterdir() if path.is_dir())
+    except OSError:
+        return None
+    for month_dir in month_dirs:
+        candidate_path = month_dir.joinpath(slug, *tail)
+        if candidate_path.exists():
+            return candidate_path.resolve()
+    return None
+
+
 def resolve_work_item_path(item: Path, value: object, label: str, run_id: object, errors: list[str]) -> Path | None:
     """Resolve a recorded path, work-item-relative FIRST, repo-root-relative second.
 
@@ -155,6 +191,15 @@ def resolve_work_item_path(item: Path, value: object, label: str, run_id: object
         if from_root == root or root in from_root.parents:
             if from_root.exists() or resolved is None:
                 return from_root
+            # The repo-root reading faithfully reconstructs a `work-items/active/
+            # <slug>/...` path that no longer exists because the item was closed
+            # (moved to archive/<YYYY-MM>/<slug>/) after the ledger recorded it.
+            # No additional search *root* fixes this -- the recorded path itself
+            # names the stale location. Retry the same tail under the slug's
+            # archived location before giving up.
+            archived = _resolve_active_slug_in_archive(root, candidate)
+            if archived is not None:
+                return archived
 
     if resolved is None:
         fail(errors, f"{run_id}: {label} escapes the work item and the repository: {value}")

@@ -1,5 +1,7 @@
+import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +17,13 @@ def run_checker(root: Path, *args: str) -> subprocess.CompletedProcess:
         text=True,
         capture_output=True,
     )
+
+
+def load_checker_module():
+    spec = importlib.util.spec_from_file_location("check_work_items_state_direct", CHECKER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def valid_status() -> str:
@@ -349,6 +358,64 @@ def test_archive_scan_propagates_security_reviewer_waiver_validity(tmp_path: Pat
         assert result.returncode == 1
         assert f"open REVISE obligation survived archival: {target_id}" in result.stdout
         assert f"{waiver_id}: field closesRunIds requires schemaVersion 2" not in result.stdout
+
+
+# --- resolver family direct coverage: _slug_archived / _slug_exists had no unit
+# tests of their own (bug 2026-07-26-archiving-an-item-breaks-its-own-ledger-
+# artifact-paths.md names the whole family as uncovered). These exercise the
+# functions directly, including a real active/ -> archive/<YYYY-MM>/ move.
+
+def test_slug_archived_finds_slug_under_dated_month_dir(tmp_path: Path) -> None:
+    archive_dir = tmp_path / "archive"
+    (archive_dir / "2026-07" / "my-slug").mkdir(parents=True)
+    module = load_checker_module()
+    assert module._slug_archived("my-slug", archive_dir) is True
+
+
+def test_slug_archived_false_when_slug_absent(tmp_path: Path) -> None:
+    archive_dir = tmp_path / "archive"
+    archive_dir.mkdir()
+    module = load_checker_module()
+    assert module._slug_archived("nowhere", archive_dir) is False
+
+
+def test_slug_archived_false_when_archive_dir_missing(tmp_path: Path) -> None:
+    module = load_checker_module()
+    assert module._slug_archived("anything", tmp_path / "does-not-exist") is False
+
+
+def test_slug_exists_true_for_active_dir(tmp_path: Path) -> None:
+    active_dir = tmp_path / "active"
+    (active_dir / "item-a").mkdir(parents=True)
+    archive_dir = tmp_path / "archive"
+    module = load_checker_module()
+    assert module._slug_exists("item-a", active_dir, archive_dir) is True
+
+
+def test_slug_exists_true_after_real_archive_move(tmp_path: Path) -> None:
+    """A slug moved from active/ to archive/<YYYY-MM>/ (the mandatory close step)
+    must still resolve as existing -- the same slug-stability the validator's
+    archive-fallback resolver and this function's own Depends-on callers rely on.
+    Uses a real shutil.move, not a simulated path, per the entry's requirement
+    that the resolver family only gets covered by a test that performs a move."""
+    active_dir = tmp_path / "active"
+    archive_dir = tmp_path / "archive"
+    active_dir.mkdir()
+    item = active_dir / "moved-item"
+    item.mkdir()
+    archived_item = archive_dir / "2026-07" / "moved-item"
+    archived_item.parent.mkdir(parents=True)
+    shutil.move(str(item), str(archived_item))
+
+    module = load_checker_module()
+    assert module._slug_exists("moved-item", active_dir, archive_dir) is True
+    # and the slug is no longer found under active/ post-move
+    assert not (active_dir / "moved-item").exists()
+
+
+def test_slug_exists_false_when_nowhere(tmp_path: Path) -> None:
+    module = load_checker_module()
+    assert module._slug_exists("ghost", tmp_path / "active", tmp_path / "archive") is False
 
 
 def test_done_predicate_twin_not_drifted():
