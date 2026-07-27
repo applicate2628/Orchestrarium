@@ -6,20 +6,37 @@ usage() {
 Usage:
   bash <path>/check-publication-safety.sh
   bash <path>/check-publication-safety.sh --path <dir>
+  bash <path>/check-publication-safety.sh --range <remote> <dst>
 
 By default, scans staged tracked files in the repository for publication-safety issues.
 Use --path only for local fixture testing or explicit manual checks.
+Use --range to scan the commit set about to be PUBLISHED to <remote>/<dst> (the tip is
+resolved as the current HEAD) -- see the --range mode note below the pattern catalog.
 EOF
 }
 
 scan_path="."
 scan_mode="tracked"
+range_remote=""
+range_dst=""
+tip=""
 
 if [[ $# -gt 0 ]]; then
   case "$1" in
     -h|--help)
       usage
       exit 0
+      ;;
+    --range)
+      shift
+      if [[ $# -lt 2 ]]; then
+        echo "error: --range requires <remote> <dst> arguments" >&2
+        exit 2
+      fi
+      range_remote="$1"
+      range_dst="$2"
+      scan_mode="range"
+      shift 2
       ;;
     --path)
       shift
@@ -259,6 +276,110 @@ if [[ "$scan_mode" == "tracked" ]]; then
     exit 0
   fi
   scan_files=("${staged_paths[@]}")
+elif [[ "$scan_mode" == "range" ]]; then
+  # --range mode (2026-07-27, work-items/active/2026-07-26-push-gate-range-
+  # receipt/): `tracked` mode's subject is `git diff --cached`, which is
+  # EMPTY by the time a commit-then-review-then-push-later turn reaches
+  # push -- the index already equals HEAD, so `tracked` can never be
+  # satisfied there (see this file's own module-level framing in
+  # check-git-push-gate.py). Range mode's subject is instead the commit set
+  # about to be PUBLISHED: everything reachable from the current HEAD that
+  # `<remote>` does not already have on any of its tracking refs, modelled
+  # as `<tip> --not --remotes=<remote>` (design.md §3) -- defined even when
+  # the destination ref does not exist yet, so a brand-new branch needs no
+  # special case.
+  #
+  # Narrow scope, stated here so the next reader does not assume more than
+  # was built: this mode enumerates the range and reads content AT THE TIP
+  # (never the working tree, never the index) and reports a receipt naming
+  # `remote`/`dst`/`tip` for the push gate to compare against argv. It does
+  # NOT validate the push command's own grammar (no exact-spelling argv
+  # allowlist, no force/tag/config-expanding-push denial, no requirement
+  # that the push's refspec source literally equal `tip`) -- those are
+  # explicitly out of scope for this item (see work-items/active/2026-07-26-
+  # push-gate-range-receipt/status.md, "$lead disposition") and remain filed
+  # separately. The disclosed residual: a command that mutates git state
+  # (e.g. `git commit`) and pushes in the SAME call can still publish an
+  # unscanned commit while binding cleanly on remote+dst alone -- a smaller
+  # hole than every push falling to the no-scan marker branch, which is the
+  # defect this item exists to fix.
+
+  # Remote-name validation (design.md §5.7 F6/F7): `<remote>` must be an
+  # EXACT configured remote name. A URL or a `--remotes=` glob value would
+  # otherwise (a) enter the receipt/error text verbatim -- a real risk when
+  # the value is a credential-bearing URL -- and (b) `--remotes=` is
+  # glob-matched by git, so a typo'd or non-matching value silently expands
+  # the range to the WHOLE history instead of failing loudly (measured in
+  # this repository: `--remotes=orig`, matching no remote, returned the
+  # entire history rather than an error). Reject before touching anything
+  # else, and never echo the rejected value (it may be a URL carrying
+  # credentials).
+  remote_valid=0
+  remote_count=0
+  while IFS= read -r configured_remote; do
+    [[ -z "$configured_remote" ]] && continue
+    remote_count=$((remote_count + 1))
+    if [[ "$configured_remote" == "$range_remote" ]]; then
+      remote_valid=1
+    fi
+  done < <(git remote)
+  if [[ $remote_valid -ne 1 ]]; then
+    echo "range: argument is not a configured remote name (${remote_count} remotes configured); refusing" >&2
+    exit 2
+  fi
+
+  # `tip` is resolved here, from the current HEAD, at scan time -- the
+  # commit the operator is about to publish. (Narrow-scope note: the push
+  # gate does NOT require the eventual push's refspec source to equal this
+  # value -- see the scope note above -- so this is what the scanner reads
+  # content FROM, not a binding the gate enforces.)
+  if ! tip="$(git rev-parse HEAD 2>/dev/null)"; then
+    echo "range: could not resolve HEAD to a commit; refusing" >&2
+    exit 2
+  fi
+
+  # File set: the deduplicated union of every ADDED/COPIED/MODIFIED/RENAMED/
+  # TYPE-CHANGED path across the commit set (design.md §3, §6). Deletions
+  # are excluded (a deleted file has no content at `tip` to leak); a rename
+  # reports only the new path (verified live: without rename detection
+  # enabled, an unmodified rename is a plain add+delete pair and the
+  # ACMRT filter naturally keeps only the new path's `A`). A path that was
+  # added and then deleted again within the range has NO content at `tip`
+  # -- `git cat-file -e` below skips it, silently and correctly (FM-5: this
+  # is expected, not an error, and must not inflate `examined_count`).
+  declare -A _range_seen=()
+  range_paths=()
+  regular_range_paths=()
+  scanner_range_paths=()
+  while IFS= read -r -d '' range_path; do
+    [[ -z "$range_path" ]] && continue
+    if [[ -n "${_range_seen[$range_path]:-}" ]]; then
+      continue
+    fi
+    _range_seen[$range_path]=1
+    if git cat-file -e "${tip}:${range_path}" 2>/dev/null; then
+      range_paths+=("$range_path")
+      if [[ "$range_path" == *"/check-publication-safety.sh" || "$range_path" == "check-publication-safety.sh" ]]; then
+        scanner_range_paths+=("$range_path")
+      else
+        regular_range_paths+=("$range_path")
+      fi
+    fi
+  done < <(git log --name-only --pretty=format: --diff-filter=ACMRT -z "$tip" --not --remotes="$range_remote" --)
+
+  if [[ ${#range_paths[@]} -eq 0 ]]; then
+    # Mirror of tracked mode's zero-examined armor (design.md §5.2, G1): a
+    # range that publishes NOTHING NEW (the tip is already on the remote, or
+    # every candidate path was added-then-deleted within the range) is not a
+    # clean pass over real content, it is nothing to scan. Shaped so this
+    # can never satisfy the gate's `[1-9]\d*` requirement AND so it carries
+    # none of the `remote`/`dst`/`tip` fields the real clean line does --
+    # doubly un-creditable, mirroring the tracked-mode zero line's own
+    # doubled armor (mode word + count).
+    echo "publication-safety: clean (range, examined 0 files -- nothing to publish)"
+    exit 0
+  fi
+  scan_files=("${range_paths[@]}")
 else
   scan_files=("$scan_path")
 fi
@@ -312,6 +433,12 @@ if [[ "$scan_mode" == "tracked" ]]; then
   else
     nonpath_cmd=()
   fi
+elif [[ "$scan_mode" == "range" ]]; then
+  if [[ ${#regular_range_paths[@]} -gt 0 ]]; then
+    nonpath_cmd+=("$tip" -- "${regular_range_paths[@]}")
+  else
+    nonpath_cmd=()
+  fi
 else
   nonpath_cmd+=(--no-index -- "$scan_path")
 fi
@@ -361,6 +488,47 @@ if [[ "$scan_mode" == "tracked" && ${#scanner_staged_paths[@]} -gt 0 ]]; then
     echo "publication-safety: scanner-file nonpath grep failed (status $scanner_nonpath_status); over-blocking" >&2
     nonpath_block=1
   fi
+elif [[ "$scan_mode" == "range" && ${#scanner_range_paths[@]} -gt 0 ]]; then
+  # Self-exemption for the scanner's OWN copy inside a scanned RANGE (design.md
+  # §6, guard G3). `git grep <tip> -- <paths>` (commit mode, no `--cached`/
+  # `--no-index`) prefixes every hit with the commit-ish itself, producing a
+  # FOURTH field the tracked-mode 3-field parser above cannot read:
+  # `<tip>:<path>:<lineno>:<content>` instead of `<path>:<lineno>:<content>`.
+  # Verified live: `HEAD:scripts/.../check-publication-safety.sh:60:...` vs
+  # the tracked/path-mode shape `scripts/.../check-publication-safety.sh:60:...`.
+  # Without this, the scanner's own copy would self-block whenever it appears
+  # inside a scanned range (its pattern-catalog lines would be mis-parsed as
+  # real leak content instead of recognized as intentional).
+  scanner_nonpath_cmd=(git grep -n -I -E --full-name)
+  for pattern in "${nonpath_patterns[@]}"; do
+    scanner_nonpath_cmd+=(-e "$pattern")
+  done
+  scanner_nonpath_cmd+=("$tip" -- "${scanner_range_paths[@]}")
+  set +e
+  scanner_nonpath_output="$(MSYS2_ARG_CONV_EXCL='*' "${scanner_nonpath_cmd[@]}")"
+  scanner_nonpath_status=$?
+  set -e
+  if [[ $scanner_nonpath_status -eq 0 ]]; then
+    while IFS= read -r scanner_line; do
+      [[ -z "$scanner_line" ]] && continue
+      # `$tip` is a known, literal, colon-free 40-hex string, so stripping it
+      # as a fixed leading prefix reduces the line to the SAME 3-field shape
+      # the tracked-mode parser above already handles, rather than writing a
+      # second, independently-drifting 4-field regex.
+      scanner_line_body="${scanner_line#"$tip":}"
+      if [[ "$scanner_line_body" =~ ^([^:]+):([0-9]+):(.*)$ ]]; then
+        scanner_content="${BASH_REMATCH[3]}"
+        if is_intentional_scanner_regex_line "$scanner_content"; then
+          continue
+        fi
+      fi
+      echo "$scanner_line" >&2
+      nonpath_block=1
+    done <<< "$scanner_nonpath_output"
+  elif [[ $scanner_nonpath_status -ge 2 ]]; then
+    echo "publication-safety: scanner-file nonpath grep failed (status $scanner_nonpath_status); over-blocking" >&2
+    nonpath_block=1
+  fi
 fi
 
 # Path check: prefer approach B (Python allowlist owner, immune to MSYS argv
@@ -377,7 +545,7 @@ fi
 path_block=0
 if [[ -n "$python_bin" && -f "$ref_module" ]]; then
   set +e
-  "$python_bin" - "$ref_module" "$scan_mode" "${scan_files[@]}" <<'PUBSAFE_PATHFILTER_PY'
+  "$python_bin" - "$ref_module" "$scan_mode" "${tip:-}" "${scan_files[@]}" <<'PUBSAFE_PATHFILTER_PY'
 import importlib.util
 import os
 import subprocess
@@ -391,11 +559,23 @@ def _load_find_machine_paths(mod_file):
     return mod.find_machine_paths
 
 
-def _staged_content(path):
-    out = subprocess.run(["git", "show", ":" + path], capture_output=True)
+def _staged_content(path, tip, mode):
+    # range mode reads the COMMITTED blob at `tip` (`git show <tip>:<path>`),
+    # never the working tree and never the index -- design.md §6, the single
+    # most important range-mode content-source property. tracked mode keeps
+    # its existing staged-index read (`git show :<path>`) unchanged.
+    ref = (tip + ":" + path) if mode == "range" else (":" + path)
+    out = subprocess.run(["git", "show", ref], capture_output=True)
     if out.returncode != 0:
         return None
-    return out.stdout.decode("utf-8", errors="replace")
+    raw = out.stdout
+    if mode == "range" and b"\x00" in raw:
+        # Binary skip, range mode only (design.md §6: "range mode must apply
+        # an explicit binary check to match the grep half" -- `git grep -I`
+        # already skips binaries on the nonpath side of this scan; tracked/
+        # path mode behavior is intentionally UNCHANGED here).
+        return None
+    return raw.decode("utf-8", errors="replace")
 
 
 def _disk_content(path):
@@ -437,10 +617,10 @@ def _is_intentional_scanner_line(line):
 
 
 def main(argv):
-    if len(argv) < 2:
-        sys.stderr.write("pubsafe path filter: missing reference module / mode\n")
+    if len(argv) < 3:
+        sys.stderr.write("pubsafe path filter: missing reference module / mode / tip\n")
         return 1
-    mod_file, mode, raw_files = argv[0], argv[1], argv[2:]
+    mod_file, mode, tip, raw_files = argv[0], argv[1], argv[2], argv[3:]
     try:
         find_machine_paths = _load_find_machine_paths(mod_file)
     except Exception as exc:
@@ -448,12 +628,27 @@ def main(argv):
             f"pubsafe path filter: cannot load allowlist owner {mod_file!r}: {exc}; over-blocking\n"
         )
         return 1
-    files = list(raw_files) if mode == "tracked" else list(_expand_path_mode(raw_files))
+    files = list(raw_files) if mode in ("tracked", "range") else list(_expand_path_mode(raw_files))
     blocking = 0
     for path in files:
         is_scanner_file = os.path.basename(path) == SCANNER_BASENAME
-        content = _staged_content(path) if mode == "tracked" else _disk_content(path)
+        if mode in ("tracked", "range"):
+            content = _staged_content(path, tip, mode)
+        else:
+            content = _disk_content(path)
         if content is None:
+            if mode == "range":
+                # A range path with no readable content at `tip` (added then
+                # deleted within the range -- the bash-side `git cat-file -e`
+                # pre-filter should already exclude this, this is a defensive
+                # second net -- or a binary, see `_staged_content`) is
+                # EXPECTED, not an error (design.md §6, FM-5). Skipping it,
+                # never incrementing `blocking`, is the range-mode-specific
+                # departure from tracked/path mode's over-block-on-unreadable
+                # rule just below: a STAGED or on-disk path that cannot be
+                # read is genuinely anomalous and must fail safe, but a range
+                # path with no tip content is a normal, honest outcome.
+                continue
             sys.stderr.write(
                 f"pubsafe path filter: could not read {mode} content for {path!r}; over-blocking\n"
             )
@@ -489,6 +684,8 @@ else
   done
   if [[ "$scan_mode" == "tracked" ]]; then
     fallback_cmd+=(--cached -- "${scan_files[@]}")
+  elif [[ "$scan_mode" == "range" ]]; then
+    fallback_cmd+=("$tip" -- "${scan_files[@]}")
   else
     fallback_cmd+=(--no-index -- "$scan_path")
   fi
@@ -548,5 +745,14 @@ examined_word="files"
 if [[ "$examined_count" -eq 1 ]]; then
   examined_word="file"
 fi
-echo "publication-safety: clean (${scan_mode}, examined ${examined_count} ${examined_word})"
+if [[ "$scan_mode" == "range" ]]; then
+  # The range receipt (design.md §5.2): a distinct mode word (never
+  # "tracked" -- see the mode-dispatch comment above), plus the exact
+  # `remote`/`dst`/`tip` fields check-git-push-gate.py's narrow range
+  # predicate compares against the push's own argv. `tracked` and `path`'s
+  # own lines (just above) are BYTE-FOR-BYTE unchanged by this branch.
+  echo "publication-safety: clean (range, examined ${examined_count} ${examined_word}, remote ${range_remote}, dst ${range_dst}, tip ${tip})"
+else
+  echo "publication-safety: clean (${scan_mode}, examined ${examined_count} ${examined_word})"
+fi
 exit 0

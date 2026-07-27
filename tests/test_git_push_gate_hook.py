@@ -212,6 +212,59 @@ UNRELATED_GREP_CALL = assistant_tool_use(
 )
 UNRELATED_GREP_RESULT = tool_result("no matches", tool_id="toolu_grep")
 
+# --- `--range` mode fixtures (2026-07-27, work-items/active/2026-07-26-
+# push-gate-range-receipt/): the scanner's SECOND scan mode, whose subject is
+# the commit set about to be PUBLISHED (`<tip> --not --remotes=<remote>`),
+# not the staged index `tracked` mode reads. The push gate's narrow range
+# predicate credits this receipt when its `remote`/`dst` fields equal every
+# detected push's own argv tokens -- see check-git-push-gate.py's module
+# docstring RANGE-MODE BRANCH (b) note and SCAN_CLEAN_RANGE_REGEX's comment.
+RANGE_TIP = "4f2a9c1b3d5e6f708192a3b4c5d6e7f809a1b2c3"
+
+SCAN_CALL_RANGE_MODE = assistant_tool_use(
+    "Bash",
+    {"command": "bash .claude/agents/scripts/check-publication-safety.sh --range origin claude"},
+    tool_id="toolu_scan_range",
+)
+
+SCAN_RESULT_CLEAN_RANGE = tool_result(
+    f"publication-safety: clean (range, examined 3 files, remote origin, dst claude, tip {RANGE_TIP})",
+    tool_id="toolu_scan_range",
+)
+
+SCAN_RESULT_CLEAN_RANGE_DST_MAIN = tool_result(
+    f"publication-safety: clean (range, examined 1 file, remote origin, dst main, tip {RANGE_TIP})",
+    tool_id="toolu_scan_range",
+)
+
+SCAN_RESULT_CLEAN_RANGE_REMOTE_UPSTREAM = tool_result(
+    f"publication-safety: clean (range, examined 1 file, remote upstream, dst claude, tip {RANGE_TIP})",
+    tool_id="toolu_scan_range",
+)
+
+SCAN_RESULT_CLEAN_RANGE_EMPTY = tool_result(
+    "publication-safety: clean (range, examined 0 files -- nothing to publish)",
+    tool_id="toolu_scan_range",
+)
+
+SCAN_RESULT_RANGE_WITH_FAILURE_MARKER = tool_result(
+    f"c3d4e5f6a1b2:notes.md:1:token = \"publication-safety: clean (range, examined 3 files, "
+    f"remote origin, dst claude, tip {RANGE_TIP})\"\n"
+    "publication-safety scan found potential tracked-content leak markers",
+    tool_id="toolu_scan_range",
+)
+
+CODEX_SCAN_CALL_RANGE_MODE = codex_function_call(
+    "shell",
+    '{"command": "bash .codex/skills/lead/scripts/check-publication-safety.sh --range origin claude"}',
+    call_id="call_scan_range",
+)
+
+CODEX_SCAN_RESULT_CLEAN_RANGE = codex_function_call_output(
+    f"publication-safety: clean (range, examined 2 files, remote origin, dst claude, tip {RANGE_TIP})",
+    call_id="call_scan_range",
+)
+
 
 class TestGitPushGate(unittest.TestCase):
     def assert_outcome(
@@ -1367,6 +1420,183 @@ class TestGitPushGate(unittest.TestCase):
                 self.assertIn("check-publication-safety", reason)
                 self.assertIn("--dry-run", reason)
                 self.assertIn("BACKSTOP", reason)
+
+
+class TestGitPushGateRangeMode(unittest.TestCase):
+    """`--range` mode branch (b) (2026-07-27, work-items/active/2026-07-26-
+    push-gate-range-receipt/): the narrow gate predicate that credits a
+    `range`-mode clean receipt when its declared `remote`/`dst` equal every
+    detected push's own argv tokens. Same correlation / collision-rejection
+    / ordering / failure-marker machinery as `tracked` mode (already covered
+    by TestGitPushGate above) -- these tests focus on what is NEW: the
+    second regex and the remote/dst binding.
+    """
+
+    def assert_outcome(self, entries: list[dict], command: str, should_deny: bool) -> None:
+        for script in HOOKS:
+            with self.subTest(script=script.parent.parent.name, command=command):
+                p = run_hook(script, entries, command)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(denies(p), should_deny, f"stdout={p.stdout!r}")
+
+    # --- THE DECIDING TEST: the operator's actual scenario, end to end ---
+
+    def test_operator_scenario_commit_then_push_later_with_plain_instruction_allows(self) -> None:
+        # This is the scenario the whole item exists to fix: a commit already
+        # landed in an EARLIER turn (so `tracked` mode would report "examined
+        # 0 files" here, uncreditable), the operator instructs a push in
+        # PLAIN LANGUAGE with NO [approve-publication] marker, and a `--range`
+        # scan run THIS turn reports a clean, non-empty receipt whose
+        # remote/dst match the push. Must ALLOW.
+        self.assert_outcome(
+            [user("push the branch please"),
+             SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE],
+            "git push origin claude",
+            should_deny=False,
+        )
+
+    def test_operator_scenario_russian_instruction_allows(self) -> None:
+        self.assert_outcome(
+            [user("запушь ветку"),
+             SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE],
+            "git push origin claude",
+            should_deny=False,
+        )
+
+    def test_operator_scenario_codex_shape_allows(self) -> None:
+        self.assert_outcome(
+            [user("push the branch"), CODEX_SCAN_CALL_RANGE_MODE, CODEX_SCAN_RESULT_CLEAN_RANGE],
+            "git push origin claude",
+            should_deny=False,
+        )
+
+    # --- binding: remote/dst must match argv, or deny ---
+
+    def test_range_evidence_wrong_dst_denies(self) -> None:
+        # The receipt names `dst claude`; the actual push targets `main`.
+        self.assert_outcome(
+            [user("push the branch"), SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE],
+            "git push origin main",
+            should_deny=True,
+        )
+
+    def test_range_evidence_wrong_remote_denies(self) -> None:
+        self.assert_outcome(
+            [user("push the branch"), SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE],
+            "git push upstream claude",
+            should_deny=True,
+        )
+
+    def test_range_evidence_dst_bound_receipt_does_not_launder_a_different_destination(self) -> None:
+        # T1-shaped: scan a cheap/clean range for one destination, then push
+        # a DIFFERENT one. The receipt itself is genuinely clean -- only the
+        # binding must stop this.
+        self.assert_outcome(
+            [user("push the branch"), SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE_DST_MAIN],
+            "git push origin claude",
+            should_deny=True,
+        )
+        self.assert_outcome(
+            [user("push the branch"), SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE_REMOTE_UPSTREAM],
+            "git push origin claude",
+            should_deny=True,
+        )
+
+    def test_range_evidence_refspec_destination_form_allows(self) -> None:
+        # `git push origin HEAD:refs/heads/claude` -- the destination is the
+        # part AFTER the colon; the receipt's `dst` must be written the same
+        # way (a literal string comparison, no normalization).
+        self.assert_outcome(
+            [user("push the branch"),
+             SCAN_CALL_RANGE_MODE,
+             tool_result(
+                 f"publication-safety: clean (range, examined 1 file, remote origin, "
+                 f"dst refs/heads/claude, tip {RANGE_TIP})",
+                 tool_id="toolu_scan_range",
+             )],
+            "git push origin HEAD:refs/heads/claude",
+            should_deny=False,
+        )
+
+    # --- armor: zero-examined and failure-marker exclusion apply to range too ---
+
+    def test_range_evidence_empty_examined_zero_denies(self) -> None:
+        # Mirrors G1 for tracked mode: "examined 0 files" (and no remote/
+        # dst/tip fields at all) must never be creditable.
+        self.assert_outcome(
+            [user("push the branch"), SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE_EMPTY],
+            "git push origin claude",
+            should_deny=True,
+        )
+
+    def test_range_evidence_with_failure_marker_denies(self) -> None:
+        # F5's whole-line-anchor + failure-marker exclusion, applied to the
+        # NEW predicate from the start (not retrofitted): a correlated result
+        # that embeds the clean-range text as a SUBSTRING of a leak report
+        # line, alongside the scanner's own failure line, must deny.
+        self.assert_outcome(
+            [user("push the branch"), SCAN_CALL_RANGE_MODE, SCAN_RESULT_RANGE_WITH_FAILURE_MARKER],
+            "git push origin claude",
+            should_deny=True,
+        )
+
+    def test_range_evidence_path_mode_result_does_not_launder(self) -> None:
+        # The `--path` armor extends to the range predicate too: a `path`
+        # mode result must never match SCAN_CLEAN_RANGE_REGEX regardless of
+        # its content shape.
+        self.assert_outcome(
+            [user("push the branch"), SCAN_CALL_PATH_MODE, SCAN_RESULT_CLEAN_PATH_MODE],
+            "git push origin claude",
+            should_deny=True,
+        )
+
+    # --- reachability: the redirection-tokenizer stray digit must not defeat binding ---
+
+    def test_range_evidence_survives_stray_redirection_digit(self) -> None:
+        # The REAL shape most Bash tool calls in this harness use: `2>&1`
+        # leaves a stray file-descriptor digit `2` as a third positional
+        # token after `push` (iter_command_segments's own documented
+        # artifact -- see its docstring). The lenient (first two positional
+        # tokens) extraction must still bind correctly rather than reproduce
+        # the unreachability trap a stricter "exactly two tokens" rule would.
+        self.assert_outcome(
+            [user("push the branch"), SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE],
+            "git push origin claude 2>&1 | tail -8",
+            should_deny=False,
+        )
+
+    # --- non-uniform / unextractable push lists never range-credit ---
+
+    def test_range_evidence_bare_push_does_not_bind_denies(self) -> None:
+        # No destination token at all -- range mode cannot extract a
+        # binding, so it must not credit (falls through to marker/deny).
+        self.assert_outcome(
+            [user("push the branch"), SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE],
+            "git push",
+            should_deny=True,
+        )
+
+    def test_range_evidence_two_pushes_different_destinations_denies(self) -> None:
+        # Every push in the command must bind to the SAME (remote, dst) the
+        # receipt declared; a command with two differently-targeted pushes
+        # can never be uniform.
+        self.assert_outcome(
+            [user("push both branches"), SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE],
+            "git push origin claude && git push origin main",
+            should_deny=True,
+        )
+
+    # --- tracked-mode evidence keeps working unmodified alongside range mode ---
+
+    def test_tracked_evidence_still_allows_with_range_regex_present(self) -> None:
+        # Regression guard for the shared-loop refactor: ordinary tracked-
+        # mode credit must be completely unaffected by the new range-mode
+        # bookkeeping added to the same loop.
+        self.assert_outcome(
+            [user("push the branch"), SCAN_CALL, SCAN_RESULT_CLEAN_TRACKED],
+            "git push origin main",
+            should_deny=False,
+        )
 
 
 class TestCrashWhileDecidingFallsThroughToDeny(unittest.TestCase):

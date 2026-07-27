@@ -9,8 +9,10 @@ override marker `[approve-publication]` in the LAST GENUINE USER MESSAGE, nor
 `check-publication-gate` / `agents-check-safety`) was invoked among the
 model's own tool calls AND that SAME invocation's OWN tool OUTPUT this same
 turn — correlated by call identity, never by mere co-occurrence — reported a
-clean result over a NON-EMPTY tracked staged set — combined with an explicit
-push instruction in the last genuine user message.
+clean result over a NON-EMPTY tracked staged set, OR a NON-EMPTY published
+commit range bound to the push's own remote and destination (`range` mode,
+2026-07-27 — see the RANGE-MODE BRANCH (b) note below) — combined with an
+explicit push instruction in the last genuine user message.
 
 WHY: `git push` is the highest-stakes irreversible action the pack governs —
 "Human review before git push ... must include a leak-check of staged changes"
@@ -187,6 +189,54 @@ exception as "fall through to the deny payload", never as "return 0
 why the five pre-existing deliberate fail-open returns inside it are
 unaffected (they are ordinary returns, not exceptions).
 
+RANGE-MODE BRANCH (b) ADDED (2026-07-27, narrow scope — work-items/active/
+2026-07-26-push-gate-range-receipt/, `$lead` disposition overriding a PARK
+recommendation on new operator evidence: "меня задолбали сессии своими
+[approve-publication]", demonstrated live in the same session — an explicit
+plain-language push instruction denied anyway because branch (b) as shipped
+was unreachable). `tracked` mode's subject is `git diff --cached`, which the
+operator's own governance-prescribed workflow (commit early, review rounds,
+push many turns later) leaves EMPTY by push time — the staged index already
+equals HEAD, so a scan run there examines nothing and branch (b) is
+STRUCTURALLY UNREACHABLE, routing every push onto the marker (a) — the one
+branch that needs no leak-check at all. `check-publication-safety.sh --range
+<remote> <dst>` scans a DIFFERENT subject: the commit set about to be
+PUBLISHED, modelled as `<tip> --not --remotes=<remote>` (`tip` resolved as
+the current HEAD at scan time), reading content from the COMMITTED BLOB at
+`tip` — never the working tree, never the index. Its receipt names
+`remote`/`dst`/`tip` (`SCAN_CLEAN_RANGE_REGEX`, whole-line anchored under
+`re.MULTILINE` from the start, with the SAME `[1-9]\\d*` zero-examined armor
+and the SAME `SCAN_FAILURE_MARKER_REGEX` exclusion `SCAN_CLEAN_TRACKED_
+REGEX` already carries — see that regex's own comment for why each of those
+three conditions is load-bearing), and this hook credits a range receipt
+under the IDENTICAL call-id-correlation / collision-rejection / ordering
+machinery as `tracked` — gated on one additional check `tracked` mode has
+never needed: the receipt's declared `remote` and `dst` must equal every
+detected `git push`'s own argv tokens (`_extract_push_remote_and_dst`).
+
+NARROW BY DELIBERATE SCOPE CUT, NOT OVERSIGHT. The design this predicate is
+drawn from (`work-items/active/2026-07-26-push-gate-range-receipt/design.md`,
+revision 2, `$architecture-reviewer` PASS) specified a much larger grammar on
+top of the same range-scanning idea: an exact-spelling argv allowlist (every
+token after `push` individually admitted or denied), a literal-40-hex-SHA
+refspec-source binding (the push's refspec source compared against the
+receipt's `tip`, closing a TOCTOU window where a command mutates git state —
+e.g. `git commit` — and pushes in the SAME call, before this hook ever
+runs), and a pinned git-config gate (`push.followTags`, `remote.*.mirror`,
+...). `$lead` cut ALL of that from this item after re-scoping to the
+operator's actual, recurring pain — "every push falls to the marker" — which
+none of that wider grammar removes; the SCANNER'S RANGE-COMPUTATION AND
+RECEIPT ALONE do. See that work item's `status.md` "$lead disposition" for
+the full reasoning. What this means concretely, stated as a residual rather
+than left implicit: this predicate binds ONLY `remote` + `dst`. A command
+that runs a git-state-mutating command and `git push` together in one call,
+or that adds a flag the wider (unbuilt) grammar would deny (`--force`, a tag
+refspec, `git -c push.followTags=true`, ...), CAN still be credited here as
+long as `remote`/`dst` match — a SMALLER hole than every push falling to the
+no-scan marker branch (today's actual, structural defect), but a real,
+disclosed residual, not a hidden one. Closing it further is filed as
+separate work, not silently promised here.
+
 HONESTY RULE — THIS IS A BACKSTOP, NOT A GUARANTEE. It under-detects by design
 (a push wrapped in a script the hook only sees as `bash sync.sh`, `eval`,
 command substitution, or another command-wrapper is not modelled — the hook
@@ -262,13 +312,17 @@ docstring and the module docstring's "A CRASH WHILE DECIDING" note above):
      under an id UNIQUE among this turn's calls (see COLLISION REJECTION note
      below), WHOSE OWN correlated tool OUTPUT (same call id — see the
      CORRELATION note above), itself under an id unique among this turn's
-     outputs and recorded STRICTLY AFTER the call it answers, reports a
-     clean, non-empty, `tracked`-mode result ON A WHOLE LINE BY ITSELF (see
-     the RESULT MATCH IS WHOLE-LINE note above and `SCAN_CLEAN_TRACKED_
-     REGEX`'s own comment) AND does NOT also carry the scanner's own
-     self-reported failure line (`SCAN_FAILURE_MARKER_REGEX`), AND the last
-     genuine user message contains an explicit push-instruction signal
-     (`push`, `запушь`, `залей`, ...) → exit 0.
+     outputs and recorded STRICTLY AFTER the call it answers, reports EITHER
+     (i) a clean, non-empty, `tracked`-mode result ON A WHOLE LINE BY ITSELF
+     (see the RESULT MATCH IS WHOLE-LINE note above and `SCAN_CLEAN_TRACKED_
+     REGEX`'s own comment), OR (ii) a clean, non-empty, `range`-mode result
+     ON A WHOLE LINE BY ITSELF whose declared `remote` and `dst` equal every
+     detected `git push`'s own argv tokens (see the RANGE-MODE BRANCH (b)
+     note above and `SCAN_CLEAN_RANGE_REGEX`'s own comment) — AND in EITHER
+     case does NOT also carry the scanner's own self-reported failure line
+     (`SCAN_FAILURE_MARKER_REGEX`), AND the last genuine user message
+     contains an explicit push-instruction signal (`push`, `запушь`,
+     `залей`, ...) → exit 0.
   9. Otherwise — including when steps 2-8 raise an uncaught exception (see
      the "A CRASH WHILE DECIDING" note above and `evaluate_push`'s own
      docstring; 2026-07-26 hardening) — emit a structured `permissionDecision:
@@ -288,19 +342,25 @@ WHAT THIS STILL DOES NOT COVER (disclosed, not silently assumed away):
     retype into either shape. Fully closing this needs a per-event nonce or
     an out-of-band confirmation channel; both are larger contract changes
     than this bounded fix makes.
-  - NO WORKTREE / REPOSITORY / DESTINATION BINDING (2026-07-26, adversarial-
-    gate finding, high). The clean-result line carries no repository,
-    worktree, or commit identity — it is a plain string. This repository
-    alone runs SIX live worktrees of itself and forward-commits through them.
-    A scan invoked (and correlated) in one worktree's turn and a `git push`
-    issued in a DIFFERENT worktree within the same turn are NOT distinguished
-    by anything in this mechanism — the gate cannot currently tell "the scan
-    that ran was scanning the tree this push is publishing" from "a scan ran
-    somewhere, on something, this turn." Binding requires comparing the
-    scan's and the push's own effective working directory (cwd / `-C`
-    argument), which this hook does not currently capture or compare. Treat
-    this exactly as the multi-commit gap below: real, not hypothetical,
-    explicitly not closed by this change.
+  - NO WORKTREE / REPOSITORY / DESTINATION BINDING FOR `tracked` MODE; A
+    NARROWER GAP FOR `range` MODE (2026-07-26, adversarial-gate finding,
+    high; refined 2026-07-27 when `range` mode's remote+dst binding shipped
+    — see the RANGE-MODE BRANCH (b) note above). For `tracked`, the
+    clean-result line still carries no repository, worktree, or destination
+    identity at all — it is a plain string. This repository alone runs SIX
+    live worktrees of itself and forward-commits through them. A scan
+    invoked (and correlated) in one worktree's turn and a `git push` issued
+    in a DIFFERENT worktree within the same turn are NOT distinguished by
+    anything in this mechanism for `tracked` mode. For `range` mode, the
+    DESTINATION (remote name + dst ref) IS bound to the push's own argv —
+    but repository/worktree IDENTITY is still not: the gate cannot tell
+    which repository or worktree the scan actually ran in, only that SOME
+    scan somewhere reported a receipt naming this destination. Binding
+    repository identity requires comparing the scan's and the push's own
+    effective working directory (cwd / `-C` argument), which this hook does
+    not currently capture or compare in EITHER mode. Treat this exactly as
+    the multi-commit gap below: real, not hypothetical, explicitly not
+    closed by this change.
   - Multi-commit pushes, force pushes, rebases, amends, and mirror/tag pushes
     all fall to the operator marker exactly as before — nothing here binds the
     scanned content to a specific commit object or destination ref.
@@ -540,6 +600,80 @@ SCAN_FAILURE_MARKER_REGEX = re.compile(
     r"publication-safety scan found potential tracked-content leak markers",
     re.IGNORECASE,
 )
+
+# Publication-safety scan RESULT for `range` mode (2026-07-27 — see the
+# module docstring's RANGE-MODE BRANCH (b) note for the full context and the
+# narrow scope this predicate stays inside). Same THREE load-bearing
+# conditions as SCAN_CLEAN_TRACKED_REGEX, applied to the SAME check-
+# publication-safety.sh emission site (.sh's final echo, range branch):
+#   - `range` only, never `tracked` or `path` — a distinct mode word so one
+#     token never denotes two different scan subjects (mirrors why `path`
+#     cannot launder as `tracked` evidence today).
+#   - `[1-9]\d*` only — an examined count of exactly 0 (the range is already
+#     fully published, or every candidate path was added-then-deleted within
+#     it) must not match; check-publication-safety.sh's own zero-range line
+#     ("range, examined 0 files -- nothing to publish") is shaped so it
+#     cannot, doubly (wrong count AND a different tail with no remote/dst/tip
+#     fields at all).
+#   - WHOLE-LINE MATCH (`^...$` under `re.MULTILINE`), inherited from the
+#     start rather than retrofitted — see SCAN_CLEAN_TRACKED_REGEX's own
+#     comment for why a bare substring search is unsound here (a `git grep`
+#     report line embedding this text as a substring must never be credited).
+# `remote`, `dst`, and `tip` are captured so `evaluate_push` can compare the
+# first two against the push's own argv (`_extract_push_remote_and_dst`,
+# below) — the receipt's binding mechanism this predicate exists to check.
+# `tip` is captured (and its shape validated as 40 hex characters) because it
+# is always part of the real receipt's own text, but this narrow-scope
+# predicate does NOT compare it against anything — see the module docstring
+# for why that binding was cut from this item's scope.
+SCAN_CLEAN_RANGE_REGEX = re.compile(
+    r"^publication-safety:\s*clean\s*\(\s*range\s*,\s*examined\s+(?P<count>[1-9]\d*)\s+files?\s*,"
+    r"\s*remote\s+(?P<remote>\S+)\s*,\s*dst\s+(?P<dst>\S+)\s*,\s*tip\s+(?P<tip>[0-9a-f]{40})\s*\)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _extract_push_remote_and_dst(push_args: list[str]) -> tuple[str, str] | None:
+    """Best-effort (remote, dst) extraction from ONE detected push's argument
+    list (the token list `find_git_push_invocations` returns for that push,
+    i.e. everything after `push` in its command segment) — used ONLY for the
+    narrow `range`-mode binding (see the module docstring's RANGE-MODE
+    BRANCH (b) note and SCAN_CLEAN_RANGE_REGEX's own comment). This is
+    deliberately NOT the exact-spelling argv grammar the fuller design
+    specified (that is out of scope for this item): it takes the first TWO
+    tokens that do not start with `-` as (remote, dst_token) and IGNORES any
+    further token, rather than admitting or denying the command shape.
+
+    Two consequences of that leniency, both intentional:
+      - A push carrying a trailing redirection artifact (e.g. the stray
+        file-descriptor digit `iter_command_segments` can leave behind for
+        `2>&1` — see that function's own docstring) does not lose range
+        credit merely because the argv token list is one token longer than
+        the two we need.
+      - This function makes NO admissibility claim about the rest of the
+        command (a force flag, `--follow-tags`, a third positional, ...) --
+        it only extracts what it needs to compare, safely, because the
+        caller falls through to the marker/deny path exactly as it does
+        today when this returns None or when the comparison fails. Ignoring
+        extra tokens never launders anything the comparison itself does not
+        already gate.
+
+    Splits a `<src>:<dst>` refspec on its FIRST `:` to recover the
+    destination (a git ref name cannot itself contain `:`); a bare token with
+    no colon (`git push origin claude`) is used as-is. Returns None when
+    fewer than two positional tokens are present (a bare `git push` or
+    `git push origin` alone) or when the extracted destination is empty (a
+    delete refspec, `:dst`, or `+:dst`) -- either way, range credit is simply
+    not attempted, and the marker/deny fallback is unaffected."""
+    positionals = [tok for tok in push_args if not tok.startswith("-")]
+    if len(positionals) < 2:
+        return None
+    remote, dst_token = positionals[0], positionals[1]
+    dst = dst_token.split(":", 1)[1] if ":" in dst_token else dst_token
+    if not dst:
+        return None
+    return remote, dst
+
 
 # How many transcript JSONL lines to read (same tail budget as the sibling
 # bugfix-discipline hook). DISCLOSED REACHABILITY GAP (2026-07-26, adversarial-
@@ -1042,6 +1176,15 @@ def evaluate_push(envelope: dict) -> bool:
         if unambiguous_scan_call_ids:
             result_positions: dict[str, list[int]] = {}
             clean_result_ids: set[str] = set()
+            # RANGE-MODE binding (2026-07-27 — see the module docstring's
+            # RANGE-MODE BRANCH (b) note). Maps a correlated result's OWN id
+            # to the (remote, dst) its range receipt declared, so branch (b)
+            # below can credit a `range`-mode clean receipt the SAME way it
+            # already credits a `tracked`-mode one — same correlation,
+            # collision-rejection, ordering, and failure-marker exclusion —
+            # gated on the ADDITIONAL remote/dst comparison against argv that
+            # `tracked` mode has never needed (it names no destination).
+            clean_range_bindings: dict[str, tuple[str, str]] = {}
             for idx, entry in enumerate(after_user_entries):
                 for result_id, result_text in extract_tool_outputs_with_ids(entry):
                     result_positions.setdefault(result_id, []).append(idx)
@@ -1050,24 +1193,56 @@ def evaluate_push(envelope: dict) -> bool:
                     # SCAN_CLEAN_TRACKED_REGEX's and SCAN_FAILURE_MARKER_
                     # REGEX's own comments): a scan's honest report of its
                     # OWN block must never be credited as its own clean pass.
-                    if SCAN_CLEAN_TRACKED_REGEX.search(result_text) and not SCAN_FAILURE_MARKER_REGEX.search(
-                        result_text
-                    ):
+                    # The SAME exclusion applies to a range receipt, for the
+                    # identical reason (2026-07-27) — checked ONCE, ahead of
+                    # both mode-specific matches below, so neither can be
+                    # credited from a result that also reports its own block.
+                    if SCAN_FAILURE_MARKER_REGEX.search(result_text):
+                        continue
+                    if SCAN_CLEAN_TRACKED_REGEX.search(result_text):
                         clean_result_ids.add(result_id)
+                    range_match = SCAN_CLEAN_RANGE_REGEX.search(result_text)
+                    if range_match:
+                        clean_range_bindings[result_id] = (
+                            range_match.group("remote"),
+                            range_match.group("dst"),
+                        )
+
+            # Every detected push in this command must extract to the SAME
+            # (remote, dst) the range receipt declared — mirrors the existing
+            # `all(... for args in pushes)` posture the `--dry-run` check
+            # above already uses: an ambiguous or partially-unextractable
+            # push list is never credited by range mode, it simply falls
+            # through (the marker and `tracked`-mode evidence are still
+            # available). `_extract_push_remote_and_dst` returning None for
+            # ANY push makes range credit impossible for this command.
+            push_bindings = [_extract_push_remote_and_dst(args) for args in pushes]
+            range_binding_uniform = (
+                all(binding is not None for binding in push_bindings)
+                and len(set(push_bindings)) == 1
+            )
 
             for call_id in unambiguous_scan_call_ids:
                 positions = result_positions.get(call_id, [])
                 # Mirror collision rule, result side: an id claimed by more
                 # than one tool output cannot be trusted to be THIS call's
                 # own answer either — exclude rather than pick one.
-                if len(positions) != 1 or call_id not in clean_result_ids:
+                if len(positions) != 1:
                     continue
                 # ORDERING: the credited result must sit strictly AFTER the
                 # call it is answering. A call and its own real answering
                 # result can never share one transcript entry (see the
                 # module docstring's COLLISION REJECTION note), so `>` never
                 # rejects a genuine pair.
-                if positions[0] > call_positions[call_id][0]:
+                if positions[0] <= call_positions[call_id][0]:
+                    continue
+                if call_id in clean_result_ids:
+                    return True
+                if (
+                    range_binding_uniform
+                    and call_id in clean_range_bindings
+                    and clean_range_bindings[call_id] == push_bindings[0]
+                ):
                     return True
 
     return False  # no allow condition satisfied -> caller falls through to deny

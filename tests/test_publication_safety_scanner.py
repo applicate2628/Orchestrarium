@@ -589,6 +589,197 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                 )
 
 
+@unittest.skipIf(_bash() is None or _git() is None, "needs bash + git on PATH")
+class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
+    """Regression tests for `--range <remote> <dst>` (2026-07-27,
+    work-items/active/2026-07-26-push-gate-range-receipt/): the scanner's
+    subject becomes the commit set about to be PUBLISHED
+    (`<tip> --not --remotes=<remote>`), read from the COMMITTED BLOB at
+    `tip` -- never the working tree, never the index -- rather than the
+    staged index `tracked` mode reads. See that scanner's own `--range`
+    branch comment for the full design citation."""
+
+    def _init_range_repo(self, td: Path) -> Path:
+        """git-init a bare 'origin.git' and a working 'repo' next to it,
+        wire 'repo' to 'origin' as remote `origin`, and publish one
+        throwaway seed commit so `--range origin main` has a real remote
+        tracking ref to diff against. Returns the working repo path."""
+        git = _git()
+        origin = td / "origin.git"
+        repo = td / "repo"
+        subprocess.run([git, "init", "-q", "--bare", str(origin)], check=True, capture_output=True)
+        subprocess.run([git, "init", "-q", str(repo)], check=True, capture_output=True)
+        subprocess.run([git, "-C", str(repo), "config", "user.email", "t@t"], check=True, capture_output=True)
+        subprocess.run([git, "-C", str(repo), "config", "user.name", "t"], check=True, capture_output=True)
+        subprocess.run(
+            [git, "-C", str(repo), "remote", "add", "origin", str(origin)], check=True, capture_output=True
+        )
+        (repo / "seed.txt").write_text("seed content, nothing machine-local here\n", encoding="utf-8")
+        subprocess.run([git, "-C", str(repo), "add", "seed.txt"], check=True, capture_output=True)
+        subprocess.run([git, "-C", str(repo), "commit", "-q", "-m", "seed"], check=True, capture_output=True)
+        subprocess.run(
+            [git, "-C", str(repo), "push", "-q", "origin", "HEAD:refs/heads/main"],
+            check=True, capture_output=True,
+        )
+        return repo
+
+    def _commit_file(self, repo: Path, filename: str, content: str, message: str = "add file") -> None:
+        git = _git()
+        path = repo / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content + "\n", encoding="utf-8")
+        subprocess.run([git, "-C", str(repo), "add", filename], check=True, capture_output=True)
+        subprocess.run([git, "-C", str(repo), "commit", "-q", "-m", message], check=True, capture_output=True)
+
+    def _rm_file(self, repo: Path, filename: str, message: str = "remove file") -> None:
+        git = _git()
+        subprocess.run([git, "-C", str(repo), "rm", "-q", filename], check=True, capture_output=True)
+        subprocess.run([git, "-C", str(repo), "commit", "-q", "-m", message], check=True, capture_output=True)
+
+    def _run_range(self, scanner: Path, repo: Path, remote: str, dst: str) -> tuple[int, str, str]:
+        bash = _bash()
+        proc = subprocess.run(
+            [bash, str(scanner), "--range", remote, dst],
+            cwd=str(repo),
+            capture_output=True, text=True, encoding="utf-8",
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
+    def test_range_mode_clean_scan_reports_remote_dst_tip_receipt(self) -> None:
+        # The exact receipt shape check-git-push-gate.py's SCAN_CLEAN_RANGE_
+        # REGEX matches: mode word "range", a non-empty examined count, and
+        # the remote/dst/tip fields the gate compares against push argv.
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                with tempfile.TemporaryDirectory() as td:
+                    repo = self._init_range_repo(Path(td))
+                    self._commit_file(repo, "b.txt", "clean content, nothing machine-local here")
+                    git = _git()
+                    tip = subprocess.run(
+                        [git, "-C", str(repo), "rev-parse", "HEAD"],
+                        check=True, capture_output=True, text=True,
+                    ).stdout.strip()
+                    rc, out, err = self._run_range(scanner, repo, "origin", "claude")
+                    self.assertEqual(rc, 0, err)
+                    self.assertIn(
+                        f"publication-safety: clean (range, examined 1 file, remote origin, dst claude, tip {tip})",
+                        out,
+                    )
+
+    def test_range_mode_empty_range_reports_zero_and_is_not_creditable(self) -> None:
+        # THE OPERATOR'S SCENARIO, scanner half: the tip is ALREADY published
+        # (nothing to publish). Must exit 0 (nothing to block on) but the
+        # "examined 0" line must never satisfy the gate's non-empty regex --
+        # mirrors tracked mode's own zero-examined armor (G1).
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                with tempfile.TemporaryDirectory() as td:
+                    repo = self._init_range_repo(Path(td))
+                    rc, out, err = self._run_range(scanner, repo, "origin", "main")
+                    self.assertEqual(rc, 0, err)
+                    self.assertIn("publication-safety: clean (range, examined 0 files -- nothing to publish)", out)
+                    self.assertNotRegex(out, r"examined [1-9]\d* files?")
+                    self.assertNotIn("remote origin", out)
+
+    def test_range_mode_reads_content_at_tip_not_working_tree(self) -> None:
+        # O16, the single most important range-mode content-source property:
+        # a file DIRTY in the working tree with a planted secret but CLEAN at
+        # tip must PASS (exit 0) -- proving content comes from the committed
+        # blob, never disk.
+        leak = "pass" + "word" + ": hunter2"
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                with tempfile.TemporaryDirectory() as td:
+                    repo = self._init_range_repo(Path(td))
+                    self._commit_file(repo, "b.txt", "clean content, nothing machine-local here")
+                    (repo / "b.txt").write_text(leak + "\n", encoding="utf-8")  # dirty disk, NOT staged/committed
+                    rc, out, err = self._run_range(scanner, repo, "origin", "claude")
+                    self.assertEqual(rc, 0, err)
+                    self.assertIn("publication-safety: clean (range,", out)
+
+    def test_range_mode_blocks_secret_committed_within_range(self) -> None:
+        # The mirror case: a secret committed (present at tip) blocks, even
+        # though it was never staged in THIS invocation's index (there is no
+        # index-staging step in this flow at all -- the commit already
+        # happened in an earlier turn, exactly the operator's workflow).
+        leak = "pass" + "word" + ": hunter2"
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                with tempfile.TemporaryDirectory() as td:
+                    repo = self._init_range_repo(Path(td))
+                    self._commit_file(repo, "c.txt", leak)
+                    rc, out, err = self._run_range(scanner, repo, "origin", "claude")
+                    self.assertEqual(rc, 1, out)
+                    self.assertIn("publication-safety scan found potential tracked-content leak markers", err)
+
+    def test_range_mode_add_then_delete_path_skipped_not_over_blocked(self) -> None:
+        # FM-5: a path added then deleted again within the range has NO
+        # content at `tip` -- it must be silently skipped (not counted, not
+        # an error), never over-blocked.
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                with tempfile.TemporaryDirectory() as td:
+                    repo = self._init_range_repo(Path(td))
+                    self._commit_file(repo, "gone.txt", "temporary, nothing machine-local here")
+                    self._rm_file(repo, "gone.txt")
+                    rc, out, err = self._run_range(scanner, repo, "origin", "claude")
+                    self.assertEqual(rc, 0, err)
+                    self.assertIn("publication-safety: clean (range, examined 0 files -- nothing to publish)", out)
+
+    def test_range_mode_self_exemption_for_scanner_copy_inside_range(self) -> None:
+        # Guard G3: the scanner's own copy, committed inside a scanned range,
+        # must self-exempt under the FOUR-field commit-mode grep shape
+        # (`<tip>:<path>:<lineno>:<content>`), not self-block on its own
+        # pattern-catalog lines.
+        content = CODEX_SCANNER.read_text(encoding="utf-8")
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                with tempfile.TemporaryDirectory() as td:
+                    repo = self._init_range_repo(Path(td))
+                    self._commit_file(repo, "scripts/check-publication-safety.sh", content, message="add scanner")
+                    rc, out, err = self._run_range(scanner, repo, "origin", "claude")
+                    self.assertEqual(rc, 0, err)
+
+    def test_range_mode_rejects_unconfigured_remote_name_and_redacts_value(self) -> None:
+        # F6/F7: an exact configured-remote-name check, and the rejected
+        # value must never be echoed (it may carry credentials).
+        secret_url = "https://user:token123@example.com/x.git"
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                with tempfile.TemporaryDirectory() as td:
+                    repo = self._init_range_repo(Path(td))
+                    rc, out, err = self._run_range(scanner, repo, secret_url, "claude")
+                    self.assertEqual(rc, 2)
+                    self.assertNotIn(secret_url, err)
+                    self.assertNotIn("token123", err)
+                    self.assertIn("not a configured remote name", err)
+
+    def test_range_mode_rejects_glob_remote_value(self) -> None:
+        # F7: `--remotes=` is glob-matched by git; a glob value must be
+        # rejected by the exact-name check rather than silently under- or
+        # over-scanning.
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                with tempfile.TemporaryDirectory() as td:
+                    repo = self._init_range_repo(Path(td))
+                    rc, out, err = self._run_range(scanner, repo, "*", "claude")
+                    self.assertEqual(rc, 2)
+                    self.assertIn("not a configured remote name", err)
+
+    def test_range_mode_missing_arguments_errors(self) -> None:
+        bash = _bash()
+        for scanner in SCANNERS:
+            with self.subTest(scanner=scanner.parent.parent.name):
+                with tempfile.TemporaryDirectory() as td:
+                    repo = self._init_range_repo(Path(td))
+                    proc = subprocess.run(
+                        [bash, str(scanner), "--range", "origin"],
+                        cwd=str(repo),
+                        capture_output=True, text=True, encoding="utf-8",
+                    )
+                    self.assertEqual(proc.returncode, 2)
+
+
 class TestPublicationSafetyScannerLauncher(unittest.TestCase):
     def test_windows_launcher_does_not_use_wsl_bash_for_windows_paths(self) -> None:
         if os.name != "nt":
