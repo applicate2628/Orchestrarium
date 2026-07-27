@@ -15,19 +15,33 @@ Covers the cases listed in the architecture review of commit 79aa5eb:
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK_INSTALLER = REPO_ROOT / "scripts" / "install-hypothesis-hook.py"
-SCRIPT_PATH = "/tmp/check-bugfix-discipline.sh"
-STOP_SCRIPT_PATH = "/tmp/check-passive-polling-stop.sh"
-REMINDER_SCRIPT_PATH = "/tmp/mcp-usage-reminder.sh"
+PY_SCRIPT_PATH = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-bugfix-discipline.py"
+SCRIPT_PATH = str(PY_SCRIPT_PATH.with_suffix(".sh"))
+STOP_PY_SCRIPT_PATH = (
+    REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "check-passive-polling-stop.py"
+)
+STOP_SCRIPT_PATH = str(STOP_PY_SCRIPT_PATH.with_suffix(".sh"))
+REMINDER_PY_SCRIPT_PATH = (
+    REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp-usage-reminder.py"
+)
+REMINDER_SCRIPT_PATH = str(REMINDER_PY_SCRIPT_PATH.with_suffix(".sh"))
+
+SPEC = importlib.util.spec_from_file_location("install_hypothesis_hook", HOOK_INSTALLER)
+assert SPEC and SPEC.loader
+HOOK_MODULE = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = HOOK_MODULE
+SPEC.loader.exec_module(HOOK_MODULE)
 
 
 def run_installer(
@@ -35,7 +49,8 @@ def run_installer(
     *extra: str,
     platform: str = "claude",
     host_os: str = "posix",
-    script_path: str = SCRIPT_PATH,
+    script_path: str = str(PY_SCRIPT_PATH),
+    hook_runtime: str | None = "wrapper",
     env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = [
@@ -49,8 +64,10 @@ def run_installer(
         host_os,
         "--script-path",
         script_path,
-        *extra,
     ]
+    if hook_runtime is not None:
+        cmd.extend(["--hook-runtime", hook_runtime])
+    cmd.extend(extra)
     full_env = os.environ.copy()
     full_env.pop("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", None)
     if env:
@@ -88,8 +105,12 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertNotIn("if", hook)
 
     def test_install_claude_windows_powershell_exec_form(self) -> None:
-        ps1_path = "C:\\Users\\test\\.claude\\agents\\scripts\\check-bugfix-discipline.ps1"
-        result = run_installer(self.target, host_os="windows", script_path=ps1_path)
+        ps1_path = str(PY_SCRIPT_PATH.with_suffix(".ps1"))
+        result = run_installer(
+            self.target,
+            host_os="windows",
+            script_path=str(PY_SCRIPT_PATH),
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         data = load_json(self.target)
         hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
@@ -163,8 +184,12 @@ class TestInstallHypothesisHook(unittest.TestCase):
         # designs. PowerShell.exe always resolves to one known system path.
         # Trust step remains the user's manual responsibility via the
         # codex TUI; the installer cannot trust hooks programmatically.
-        ps1_path = "C:\\Users\\test\\.codex\\skills\\lead\\scripts\\check-bugfix-discipline.ps1"
-        result = run_installer(self.target, platform="codex", host_os="windows", script_path=ps1_path)
+        result = run_installer(
+            self.target,
+            platform="codex",
+            host_os="windows",
+            script_path=str(PY_SCRIPT_PATH),
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.target.exists(), "Codex+Windows must write hooks.json entry")
         data = load_json(self.target)
@@ -180,14 +205,24 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertNotIn(" bash ", " " + hook["command"] + " ")
 
     def test_codex_windows_escapes_powershell_single_quote_in_path(self) -> None:
-        ps1_path = "C:\\Users\\O'Brien\\.codex\\skills\\lead\\scripts\\check-bugfix-discipline.ps1"
-        result = run_installer(self.target, platform="codex", host_os="windows", script_path=ps1_path)
+        quoted_dir = self.tmpdir / "O'Brien"
+        quoted_dir.mkdir()
+        python_path = quoted_dir / "check-bugfix-discipline.py"
+        wrapper_path = python_path.with_suffix(".ps1")
+        python_path.write_text("", encoding="utf-8")
+        wrapper_path.write_text("", encoding="utf-8")
+        result = run_installer(
+            self.target,
+            platform="codex",
+            host_os="windows",
+            script_path=str(python_path),
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         data = load_json(self.target)
         command = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
         self.assertIn("powershell.exe", command)
-        self.assertIn("C:\\Users\\O''Brien", command)
-        self.assertNotIn("C:\\Users\\O'Brien", command)
+        self.assertIn("O''Brien", command)
+        self.assertNotIn("O'Brien", command)
 
     def test_install_sessionstart_hook_entry_shape(self) -> None:
         result = run_installer(
@@ -428,13 +463,12 @@ class TestInstallHypothesisHook(unittest.TestCase):
         # (args array, no shell), so the malicious string is passed as a
         # single literal argument with zero shell interpretation possible.
         malicious = "/tmp/safe path; echo PWNED"
-        result = run_installer(self.target, script_path=malicious)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        data = load_json(self.target)
-        hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
+        hook = HOOK_MODULE.build_claude_entry(
+            HOOK_MODULE.HookTarget("/usr/bin/bash", (malicious,))
+        )["hooks"][0]
         # Exec form: command="bash", args contains the raw malicious path as
         # a single argv element. No shell metacharacter interpretation.
-        self.assertEqual(hook["command"], "bash")
+        self.assertEqual(hook["command"], "/usr/bin/bash")
         self.assertEqual(hook["args"], [malicious])
         # The dangerous metacharacters must NOT appear in a shell-interpreted
         # `command` string anywhere.
@@ -445,10 +479,10 @@ class TestInstallHypothesisHook(unittest.TestCase):
         # exec form. Verify the persisted shell-form command contains the
         # malicious chars only inside POSIX single-quotes.
         malicious = "/tmp/safe path; echo PWNED"
-        result = run_installer(self.target, platform="codex", script_path=malicious)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        data = load_json(self.target)
-        recorded = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+        recorded = HOOK_MODULE.build_codex_entry(
+            HOOK_MODULE.HookTarget("/usr/bin/bash", (malicious,)),
+            "posix",
+        )["hooks"][0]["command"]
         # shlex.quote wraps it in single-quotes so bash treats it as a single
         # literal argument, not a shell metacharacter chain.
         self.assertIn("'", recorded, f"expected shlex quoting, got: {recorded}")
@@ -515,6 +549,254 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(nested.exists(), "Codex+Windows must write the entry to target")
         self.assertTrue(nested.parent.is_dir(), "parent directory must be created")
+
+    def test_default_runtime_registers_absolute_python_target(self) -> None:
+        result = run_installer(self.target, hook_runtime=None)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        hook = load_json(self.target)["hooks"]["PreToolUse"][0]["hooks"][0]
+        self.assertEqual(Path(hook["command"]).resolve(), Path(sys.executable).resolve())
+        self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH)])
+        self.assertTrue(Path(hook["command"]).is_absolute())
+        self.assertTrue(Path(hook["args"][0]).is_absolute())
+
+    def test_no_registered_entry_invokes_an_interpreter_wrapper(self) -> None:
+        forbidden = ("powershell.exe", "pwsh", ".ps1", "bash", ".sh")
+        for platform in ("claude", "codex"):
+            python_targets = sorted(
+                {
+                    wrapper.with_suffix(".py")
+                    for wrapper in HOOK_MODULE.owned_hook_wrapper_sources(
+                        REPO_ROOT,
+                        platform,
+                    )
+                }
+            )
+            self.assertTrue(python_targets)
+            for host_os in ("posix", "windows"):
+                for python_target in python_targets:
+                    with self.subTest(
+                        platform=platform,
+                        host_os=host_os,
+                        target=python_target.name,
+                    ):
+                        target = HOOK_MODULE.resolve_hook_target(
+                            str(python_target),
+                            host_os,
+                            "python",
+                            platform,
+                            python_executable=sys.executable,
+                        )
+                        entry = (
+                            HOOK_MODULE.build_claude_entry(target)
+                            if platform == "claude"
+                            else HOOK_MODULE.build_codex_entry(target, host_os)
+                        )
+                        serialized = json.dumps(entry).lower()
+                        self.assertFalse(
+                            any(token in serialized for token in forbidden),
+                            serialized,
+                        )
+                        self.assertTrue(Path(target.executable).is_absolute())
+                        self.assertEqual(len(target.args), 1)
+                        self.assertTrue(Path(target.args[0]).is_absolute())
+                        self.assertTrue(Path(target.args[0]).is_file())
+
+    def test_python_profile_preflights_all_owned_hooks_before_mutation(self) -> None:
+        original = b'{\n  "sentinel": true\n}\n'
+        self.target.write_bytes(original)
+        installer_texts = (
+            REPO_ROOT / "scripts" / "install-claude.sh",
+            REPO_ROOT / "scripts" / "install-claude.ps1",
+            REPO_ROOT / "scripts" / "install-codex.sh",
+            REPO_ROOT / "scripts" / "install-codex.ps1",
+        )
+        for installer in installer_texts:
+            text = installer.read_text(encoding="utf-8")
+            self.assertLess(
+                text.index("--validate-only"),
+                text.index("Installing bugfix-discipline"),
+            )
+
+        for platform in ("claude", "codex"):
+            owned = sorted(
+                {
+                    wrapper.with_suffix(".py")
+                    for wrapper in HOOK_MODULE.owned_hook_wrapper_sources(
+                        REPO_ROOT,
+                        platform,
+                    )
+                }
+            )
+            self.assertTrue(owned)
+            missing = self.tmpdir / platform / "missing-last-owned-hook.py"
+            for host_os in ("posix", "windows"):
+                with self.subTest(platform=platform, host_os=host_os):
+                    candidates = [*owned, missing]
+                    with self.assertRaisesRegex(ValueError, "hook Python target"):
+                        tuple(
+                            HOOK_MODULE.resolve_hook_target(
+                                str(candidate),
+                                host_os,
+                                "python",
+                                platform,
+                                python_executable=sys.executable,
+                            )
+                            for candidate in candidates
+                        )
+                    self.assertEqual(self.target.read_bytes(), original)
+
+    def test_registered_script_arg_is_absolute(self) -> None:
+        target = HOOK_MODULE.resolve_hook_target(
+            str(PY_SCRIPT_PATH),
+            "windows",
+            "python",
+            "claude",
+            python_executable=sys.executable,
+        )
+        self.assertTrue(Path(target.executable).is_absolute())
+        self.assertEqual(len(target.args), 1)
+        self.assertTrue(Path(target.args[0]).is_absolute())
+
+    def test_missing_python_target_fails_before_registration_mutation(self) -> None:
+        original = b'{\n  "user": true\n}\n'
+        self.target.write_bytes(original)
+        missing = self.tmpdir / "missing" / "check-bugfix-discipline.py"
+        result = run_installer(
+            self.target,
+            script_path=str(missing),
+            hook_runtime="python",
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("hook Python target", result.stderr)
+        self.assertEqual(self.target.read_bytes(), original)
+
+    def test_invalid_python_interpreter_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "hook executable"):
+            HOOK_MODULE.resolve_hook_target(
+                str(PY_SCRIPT_PATH),
+                "windows",
+                "python",
+                "claude",
+                python_executable=str(self.tmpdir / "missing-python.exe"),
+            )
+
+    def test_windows_unquoted_shape_and_unsupported_path_rejection(self) -> None:
+        target = HOOK_MODULE.resolve_hook_target(
+            str(PY_SCRIPT_PATH),
+            "windows",
+            "python",
+            "codex",
+            python_executable=sys.executable,
+        )
+        entry = HOOK_MODULE.build_codex_entry(target, "windows")
+        command = entry["hooks"][0]["command"]
+        # Pin the exact spelling the operator verified live under both cmd.exe
+        # and PowerShell: two unquoted absolute tokens with forward separators.
+        # Codex hashes entry content for trust, so this byte shape is what lets
+        # a reinstall match the stored trusted_hash instead of raising a modal.
+        expected = (
+            f"{PureWindowsPath(sys.executable).as_posix()} "
+            f"{PureWindowsPath(PY_SCRIPT_PATH).as_posix()}"
+        )
+        self.assertEqual(command, expected)
+        self.assertNotIn("\\", command)
+        self.assertNotIn('"', command)
+        self.assertNotIn("'", command)
+
+        spaced_dir = self.tmpdir / "contains space"
+        spaced_dir.mkdir()
+        spaced_target = spaced_dir / "check-bugfix-discipline.py"
+        spaced_target.write_text("", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "unsupported Windows"):
+            HOOK_MODULE.resolve_hook_target(
+                str(spaced_target),
+                "windows",
+                "python",
+                "codex",
+                python_executable=sys.executable,
+            )
+
+    def test_hook_target_layers_are_separable(self) -> None:
+        synthetic = HOOK_MODULE.HookTarget(
+            str(self.tmpdir / "future-hook.exe"),
+            ("--sentinel",),
+        )
+        claude = HOOK_MODULE.build_claude_entry(synthetic)
+        codex = HOOK_MODULE.build_codex_entry(synthetic, "windows")
+        self.assertEqual(claude["hooks"][0]["command"], synthetic.executable)
+        self.assertEqual(claude["hooks"][0]["args"], ["--sentinel"])
+        self.assertEqual(
+            codex["hooks"][0]["command"],
+            f"{synthetic.executable} --sentinel",
+        )
+        self.assertNotIn("python", json.dumps((claude, codex)).lower())
+
+    def test_migration_collapses_wrapper_entry_to_target_entry(self) -> None:
+        old_entry = HOOK_MODULE.build_codex_entry(
+            HOOK_MODULE.resolve_hook_target(
+                str(PY_SCRIPT_PATH),
+                "windows",
+                "wrapper",
+                "codex",
+            ),
+            "windows",
+        )
+        self.target.write_text(
+            json.dumps({"hooks": {"PreToolUse": [old_entry, old_entry]}}, indent=2),
+            encoding="utf-8",
+        )
+        result = run_installer(
+            self.target,
+            platform="codex",
+            host_os="windows",
+            hook_runtime="python",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        entries = load_json(self.target)["hooks"]["PreToolUse"]
+        self.assertEqual(len(entries), 1)
+        command = entries[0]["hooks"][0]["command"].lower()
+        self.assertNotIn("powershell", command)
+        self.assertIn(".py", command)
+
+    def test_codex_entry_order_is_stable(self) -> None:
+        first = {
+            "matcher": "Bash",
+            "hooks": [{"type": "command", "command": "echo user-hook"}],
+        }
+        wrapper = HOOK_MODULE.build_codex_entry(
+            HOOK_MODULE.resolve_hook_target(
+                str(PY_SCRIPT_PATH),
+                "windows",
+                "wrapper",
+                "codex",
+            ),
+            "windows",
+        )
+        last = {
+            "matcher": "Read",
+            "hooks": [{"type": "command", "command": "echo user-last"}],
+        }
+        self.target.write_text(
+            json.dumps({"hooks": {"PreToolUse": [first, wrapper, last]}}, indent=2),
+            encoding="utf-8",
+        )
+        result = run_installer(
+            self.target,
+            platform="codex",
+            host_os="windows",
+            hook_runtime="python",
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        entries = load_json(self.target)["hooks"]["PreToolUse"]
+        self.assertEqual(entries[0], first)
+        self.assertEqual(entries[2], last)
+        self.assertIn("check-bugfix-discipline", entries[1]["hooks"][0]["command"])
+
+    def test_native_slot_fails_loudly_while_target_is_absent(self) -> None:
+        result = run_installer(self.target, hook_runtime="native")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("hook executable", result.stderr)
+        self.assertFalse(self.target.exists())
 
 
 if __name__ == "__main__":

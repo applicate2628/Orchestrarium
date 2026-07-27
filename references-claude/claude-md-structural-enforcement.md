@@ -61,24 +61,18 @@ Registered ONLY on the `Stop` event (never `SubagentStop`) and fails open on any
 <!-- BEGIN ORCHESTRARIUM PAYLOAD: hook-entrypoints-placement -->
 Hook entry points:
 
-- `.claude/agents/scripts/check-bugfix-discipline.sh` / `.ps1`
-- `.claude/agents/scripts/check-git-push-gate.sh` / `.ps1`
-- `.claude/agents/scripts/check-passive-polling-stop.sh` / `.ps1`
-- `.claude/agents/scripts/check-work-items-archival-stop.sh` / `.ps1`
-- `.claude/agents/hooks/check-machine-local-path.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
-- `.claude/agents/hooks/check-no-trash-in-repo.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
-- `.claude/agents/hooks/check-stale-relation-residue.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
-- `.claude/agents/hooks/check-repository-orientation.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
-- `.claude/agents/hooks/check-mcp-momentum.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
-- `.claude/agents/hooks/check-typed-routing.sh` / `.ps1` (audit, Claude-only; imports `hook_common` from the sibling `scripts/`)
+- `.claude/agents/scripts/check-{bugfix-discipline,git-push-gate,passive-polling-stop,work-items-archival-stop}.py`
+- `.claude/agents/hooks/check-{machine-local-path,no-trash-in-repo,stale-relation-residue,repository-orientation,mcp-momentum,typed-routing}.py`
 
-This list covers the ten structural hooks (blocking + audit); the four reminder/context hooks (`mcp-usage-reminder`, `agents-mode-reminder`, `check-scratch-valuables`, `turn-anchor-reminder`) are described above and live at `.claude/agents/scripts/<name>.sh` / `.ps1`.
+This list covers the ten structural hooks (blocking + audit); the four reminder/context hooks (`mcp-usage-reminder`, `agents-mode-reminder`, `check-scratch-valuables`, `turn-anchor-reminder`) are described above and are registered through `.claude/agents/scripts/<name>.py`. Same-stem `.sh` and `.ps1` wrappers remain in the source pack only as the rollback profile.
 
-Per the source-hygiene placement law (hooks split by GATE SEMANTICS; decision record `2026-07-11-hook-placement-gate-semantics`), the six warn-only audit hooks live in the typed `agents/hooks/` dir, while the four blocking hooks (bugfix-discipline, git-push-gate, passive-polling, work-items-archival) and the four reminder/context hooks (mcp-usage-reminder, agents-mode-reminder, check-scratch-valuables, turn-anchor-reminder) live in `agents/scripts/` beside the shared `hook_common.py` plumbing — a placement convention, not an import necessity (the audit hooks import `hook_common` across directories via an explicit path shim). `check-scratch-valuables` sits in `scripts/` despite its `check-` name because its GATE SEMANTICS are a SessionStart reminder, not a PreToolUse audit — placement follows the hook's gate role, not its filename. All eleven `check-*` wrappers are thin fail-open wrappers around their sibling Python brain; `mcp-usage-reminder`, `agents-mode-reminder`, and `turn-anchor-reminder` carry no separate Python brain and emit their JSON envelope directly from the shell/PowerShell script. Shared JSON envelope and transcript helpers live in `.claude/agents/scripts/hook_common.py`.
+Per the source-hygiene placement law (hooks split by GATE SEMANTICS; decision record `2026-07-11-hook-placement-gate-semantics`), the six warn-only audit hooks live in the typed `agents/hooks/` dir, while the four blocking hooks and the four reminder/context hooks live in `agents/scripts/` beside the shared `hook_common.py` plumbing. The Python files are the registered brains. Retained `.sh` and `.ps1` files are rollback adapters and are never the default entry point. Shared JSON envelope and transcript helpers live in `.claude/agents/scripts/hook_common.py`.
 <!-- END ORCHESTRARIUM PAYLOAD: hook-entrypoints-placement -->
 
 <!-- BEGIN ORCHESTRARIUM PAYLOAD: installer-removal-json-path -->
 **The installer auto-installs all fourteen hook entries by default.** Both `scripts/install-claude.sh --global` and `scripts/install-claude.sh --target <project>` merge the `PreToolUse` entries (bugfix-discipline + git-push-gate on a `Bash` matcher + machine-local-path + no-trash-in-repo, the last with a `Bash`-inclusive matcher so it sees the `git worktree add` command, + stale-relation-residue + repository-orientation on the full edit/shell matcher + mcp-momentum on a `Grep|Bash` matcher + typed-routing on an `Agent` dispatch-tool matcher), the two `Stop` entries (passive-polling + work-items-archival), the three informational `SessionStart` entries (`mcp-usage-reminder` + `agents-mode-reminder` + `check-scratch-valuables`, all no-matcher), and the `UserPromptSubmit` entry (`turn-anchor-reminder`, also no-matcher) into `settings.json` with an idempotent JSON merge that preserves other keys and hooks. Opt out at install time with `--no-hypothesis-hook` (legacy flag name kept for back-compat) or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1`. Remove entries independently:
+
+The default registration invokes the installed `.py` file directly with the absolute `sys.executable` of the Python process running the installer. Before registration mutation, the Python profile checks every owned hook: the interpreter and `.py` target must be absolute regular files; Windows requires a non-reparse `.exe`, while POSIX requires execute permission on the interpreter. The later health gate actually launches every registered hook. The wrapper profile remains the retained rollback path and preflights its wrapper files; the reserved native profile requires a real native executable and fails before mutation because no native hook binaries ship. The transaction is strictly **SYNC → REGISTER → VERIFY → RECLAIM**; `scripts/check-hook-health.py` is the hard verification gate. An installed wrapper is reclaimed only when its exact name is manifest-owned and an adjacent same-stem `.py` target ships in the pack. Reclaim is last, idempotent, dry-run-visible, and disabled by `--hook-runtime wrapper`; all source wrappers remain for rollback.
 
 ```bash
 python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --script-path <ignored> --remove
@@ -97,7 +91,7 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
 python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path <ignored> --remove
 ```
 
-The auto-installed entries use this shape (Windows exec form using PowerShell; POSIX uses `bash` instead). The example shows the `check-bugfix-discipline` PreToolUse entry and the `check-passive-polling-stop` Stop entry; the other eight `PreToolUse`/`Stop` auto-installed entries — `check-work-items-archival-stop` (a second `Stop` entry, same Stop shape with its own marker and `-File` path), `check-git-push-gate` (a blocking PreToolUse entry on the `Bash` matcher), plus the `check-machine-local-path`, `check-no-trash-in-repo`, `check-stale-relation-residue`, `check-repository-orientation`, `check-mcp-momentum`, and `check-typed-routing` PreToolUse audits — share these shapes with their own markers and `-File` paths (`check-no-trash-in-repo` also adds `Bash` to its matcher so it sees the `git worktree add` command; machine-local-path and stale-relation-residue use the default `Edit|Write|NotebookEdit|apply_patch` matcher; repository-orientation uses the full edit/shell matcher; mcp-momentum uses a `Grep|Bash` matcher; typed-routing uses the `Agent` dispatch-tool matcher). The remaining four entries use the no-`matcher` shape: `check-scratch-valuables` joins `mcp-usage-reminder` and `agents-mode-reminder` under `SessionStart`, and `turn-anchor-reminder` is the sole entry under `UserPromptSubmit`:
+The auto-installed entries use the same direct-Python exec shape on Windows and POSIX; only the absolute paths differ:
 
 ```json
 {
@@ -108,13 +102,9 @@ The auto-installed entries use this shape (Windows exec form using PowerShell; P
         "hooks": [
           {
             "type": "command",
-            "command": "powershell",
+            "command": "C:\\Python314\\python.exe",
             "args": [
-              "-NoProfile",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-bugfix-discipline.ps1"
+              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-bugfix-discipline.py"
             ]
           }
         ]
@@ -125,13 +115,9 @@ The auto-installed entries use this shape (Windows exec form using PowerShell; P
         "hooks": [
           {
             "type": "command",
-            "command": "powershell",
+            "command": "C:\\Python314\\python.exe",
             "args": [
-              "-NoProfile",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-passive-polling-stop.ps1"
+              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-passive-polling-stop.py"
             ]
           }
         ]
@@ -143,9 +129,8 @@ The auto-installed entries use this shape (Windows exec form using PowerShell; P
 
 Path resolution notes:
 
-- The script-path in `args` is an absolute path; relative paths like `.claude/agents/scripts/...` are unreliable because the hook runs with the session's current working directory, not the directory of `settings.json` — see the [Hooks path placeholders](https://code.claude.com/docs/en/hooks.md#path-placeholders) docs.
-- For project-local hooks (script lives at `<repo>/.claude/agents/scripts/...`), use `${CLAUDE_PROJECT_DIR}\.claude\agents\scripts\check-bugfix-discipline.ps1` instead.
-- POSIX exec form uses `command: "bash", args: ["<abs-path>/check-bugfix-discipline.sh"]` and the equivalent `check-passive-polling-stop.sh` path for Stop.
+- The executable and the `.py` argument are absolute paths, so hook execution does not depend on the session's current working directory.
+- `--hook-runtime wrapper` restores the retained same-stem `.sh`/`.ps1` adapters and their previous registration shape; reclaim is disabled in that profile.
 
 The matcher `Edit|Write|NotebookEdit|apply_patch` (regex on tool name) covers Claude's code-mutating tools plus Codex's `apply_patch`. `Stop`, `SessionStart`, and `UserPromptSubmit` all ignore matcher; the installer omits it for those entries.
 <!-- END ORCHESTRARIUM PAYLOAD: installer-removal-json-path -->

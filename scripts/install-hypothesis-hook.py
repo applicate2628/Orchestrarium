@@ -15,8 +15,10 @@ Supported targets:
                          or approved wrapper-driven hook wiring.
 
 Cross-platform behavior:
-  Claude/generic use exec form; Codex uses shell form. POSIX hosts use bash
-  wrappers. Windows hosts use PowerShell wrappers.
+  Claude/generic use exec form; Codex uses shell form. The default runtime
+  profile invokes the installed Python target directly through the absolute
+  interpreter path reported by the installer process's sys.executable.
+  The wrapper profile preserves the prior bash/PowerShell entries for rollback.
 
 Removal:
   --remove  Removes ALL of our hook entries (handles duplicates from earlier
@@ -44,11 +46,14 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import sys
 import tempfile
-from pathlib import Path
-from typing import Any
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path, PureWindowsPath
+from typing import Any, Mapping
 
 DEFAULT_SCRIPT_MARKER = "check-bugfix-discipline"
 
@@ -59,6 +64,39 @@ DEFAULT_SCRIPT_MARKER = "check-bugfix-discipline"
 # detected from the session transcript.
 TOOL_MATCHER_REGEX = "Edit|Write|NotebookEdit|apply_patch"
 
+WINDOWS_UNQUOTED_PATH_RE = re.compile(r"^[A-Za-z0-9_:\\./-]+$")
+WRAPPER_EXECUTABLES = frozenset({"bash", "powershell", "powershell.exe", "pwsh", "pwsh.exe"})
+TEST_TRANSACTION_ABORT_ENV = "ORCHESTRARIUM_TEST_ABORT_HOOK_TRANSACTION_AFTER"
+TEST_TRANSACTION_STAGES = ("sync", "register", "verify", "reclaim")
+TEST_TRANSACTION_ABORT_EXIT = 86
+
+
+class TestTransactionAbort(RuntimeError):
+    """Intentional, scratch-contained installer interruption for regression tests."""
+
+
+@dataclass(frozen=True)
+class AbortRequest:
+    """Validated process-boundary request for one test-only transaction abort."""
+
+    stage: str
+
+
+class InstallScope(str, Enum):
+    """Resolved installer scope injected into the test-only checkpoint policy."""
+
+    REPO = "repo"
+    TARGET = "target"
+    GLOBAL = "global"
+
+
+@dataclass(frozen=True)
+class HookTarget:
+    """Runtime-neutral process target serialized into a hook registration."""
+
+    executable: str
+    args: tuple[str, ...] = ()
+
 
 def powershell_single_quote(value: str) -> str:
     """Return a PowerShell single-quoted literal for a shell command string.
@@ -68,6 +106,131 @@ def powershell_single_quote(value: str) -> str:
     the target shell's syntax instead of treated as a pre-split argv element.
     """
     return "'" + value.replace("'", "''") + "'"
+
+
+def _absolute_file(path_value: str, label: str) -> Path:
+    path = Path(path_value).expanduser()
+    if not path.is_absolute():
+        raise ValueError(f"{label} must be absolute: {path}")
+    if not path.is_file():
+        raise ValueError(f"{label} does not name an existing file: {path}")
+    return path
+
+
+def _validate_spawnable_executable(path_value: str, host_os: str) -> Path:
+    path = _absolute_file(path_value, "hook executable")
+    if host_os == "windows":
+        if path.suffix.lower() != ".exe":
+            raise ValueError(f"Windows hook executable must be a real .exe, not a shim: {path}")
+        is_junction = getattr(path, "is_junction", lambda: False)
+        if path.is_symlink() or is_junction():
+            raise ValueError(f"Windows hook executable must not be a reparse target: {path}")
+    elif not os.access(path, os.X_OK):
+        raise ValueError(f"hook executable is not executable: {path}")
+    return path
+
+
+def _codex_windows_command_tokens(target: HookTarget) -> HookTarget:
+    """Render the operator-verified Codex Windows token spelling.
+
+    The verified unquoted Windows grammar spells absolute paths with forward
+    separators. Both cmd.exe and PowerShell resolve either separator for an
+    absolute command token, so this is not a correctness fix -- it is a byte
+    fidelity one. Codex derives each hook's trust hash from the entry content,
+    so emitting exactly the spelling the operator already trusted lets a
+    reinstall reproduce the stored `trusted_hash` instead of re-keying all 13
+    entries and raising a blocking review modal.
+
+    Applies to the python and native profiles only. The wrapper profile must
+    keep reproducing the historical bytes so the documented rollback stays
+    modal-free too.
+    """
+    return HookTarget(
+        PureWindowsPath(target.executable).as_posix(),
+        tuple(PureWindowsPath(arg).as_posix() for arg in target.args),
+    )
+
+
+def _validate_windows_unquoted_tokens(target: HookTarget) -> None:
+    for token in (target.executable, *target.args):
+        if not WINDOWS_UNQUOTED_PATH_RE.fullmatch(token):
+            raise ValueError(
+                "unsupported Windows hook command token for the verified unquoted "
+                f"serialization: {token!r}"
+            )
+
+
+def resolve_hook_target(
+    script_path: str,
+    host_os: str,
+    hook_runtime: str,
+    platform: str,
+    *,
+    python_executable: str | None = None,
+) -> HookTarget:
+    """Resolve and validate the one stage-dependent hook process target.
+
+    This is the only owner of wrapper/python/native selection. Serializers
+    consume HookTarget without knowing which profile produced it.
+    """
+    requested_script = Path(script_path).expanduser()
+    if not requested_script.is_absolute():
+        raise ValueError(f"hook script path must be absolute: {requested_script}")
+
+    if hook_runtime == "wrapper":
+        wrapper_path = requested_script.with_suffix(".ps1" if host_os == "windows" else ".sh")
+        _absolute_file(str(wrapper_path), "hook wrapper")
+        if host_os == "windows":
+            if platform == "codex":
+                target = HookTarget(
+                    "powershell.exe",
+                    (
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        powershell_single_quote(str(wrapper_path)),
+                    ),
+                )
+            else:
+                target = HookTarget(
+                    "powershell",
+                    (
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        str(wrapper_path),
+                    ),
+                )
+        else:
+            target = HookTarget("bash", (str(wrapper_path),))
+        return target
+
+    if hook_runtime == "python":
+        executable = _validate_spawnable_executable(
+            python_executable if python_executable is not None else sys.executable,
+            host_os,
+        )
+        script = _absolute_file(str(requested_script), "hook Python target")
+        if script.suffix.lower() != ".py":
+            raise ValueError(f"Python hook target must end in .py: {script}")
+        target = HookTarget(str(executable), (str(script),))
+        if platform == "codex" and host_os == "windows":
+            target = _codex_windows_command_tokens(target)
+            _validate_windows_unquoted_tokens(target)
+        return target
+
+    if hook_runtime == "native":
+        native_path = requested_script.with_suffix(".exe" if host_os == "windows" else "")
+        executable = _validate_spawnable_executable(str(native_path), host_os)
+        target = HookTarget(str(executable), ())
+        if platform == "codex" and host_os == "windows":
+            target = _codex_windows_command_tokens(target)
+            _validate_windows_unquoted_tokens(target)
+        return target
+
+    raise ValueError(f"unsupported hook runtime: {hook_runtime}")
 
 
 def _with_event_matcher(
@@ -85,58 +248,20 @@ def _with_event_matcher(
 
 
 def build_claude_entry(
-    script_path: str,
-    host_os: str,
+    target: HookTarget,
     hook_event: str = "PreToolUse",
     tool_matcher: str | None = None,
 ) -> dict[str, Any]:
-    """Build a Claude hook entry in exec form (args array, no shell).
-
-    Exec form is the documented portable cross-platform pattern per
-    https://code.claude.com/docs/hooks-reference#exec-form-and-shell-form
-    — each `args` element is passed as a literal argument, with no shell
-    interpretation, so paths with spaces or shell metacharacters are safe
-    without any quoting concern.
-
-    POSIX host: `command: "bash", args: [<sh_path>]`.
-    Windows host: `command: "powershell", args: [-NoProfile, -ExecutionPolicy,
-    Bypass, -File, <ps1_path>]` — native PowerShell invocation without any
-    Git Bash dependency.
-
-    The matcher regex (Edit|Write|NotebookEdit|apply_patch) fires on every
-    code-mutating tool call; the script's first action is to inspect the
-    PreToolUse envelope's `transcript_path` for bug-context signals and
-    decide whether to allow or deny.
-    """
-    if host_os == "windows":
-        return _with_event_matcher(
-            {
+    """Build the host-independent Claude exec-form entry for a HookTarget."""
+    return _with_event_matcher(
+        {
             "hooks": [
                 {
                     "type": "command",
-                    "command": "powershell",
-                    "args": [
-                        "-NoProfile",
-                        "-ExecutionPolicy",
-                        "Bypass",
-                        "-File",
-                        script_path,
-                    ],
+                    "command": target.executable,
+                    "args": list(target.args),
                 }
             ],
-            },
-            hook_event,
-            tool_matcher,
-        )
-    return _with_event_matcher(
-        {
-        "hooks": [
-            {
-                "type": "command",
-                "command": "bash",
-                "args": [script_path],
-            }
-        ],
         },
         hook_event,
         tool_matcher,
@@ -144,74 +269,35 @@ def build_claude_entry(
 
 
 def build_generic_entry(
-    script_path: str,
-    host_os: str,
+    target: HookTarget,
     hook_event: str = "PreToolUse",
     tool_matcher: str | None = None,
 ) -> dict[str, Any]:
-    """Build a provider-neutral exec-form hook entry.
-
-    This is intentionally the same shape as the Claude exec form: a command
-    plus literal argv list, with `hooks.<event>[]` and optional PreToolUse
-    matcher. Runtimes or wrappers that support this JSON shape can consume it
-    without pretending to be Claude; runtimes with a different native schema
-    should adapt from the universal hook/helper scripts directly.
-    """
-    return build_claude_entry(script_path, host_os, hook_event, tool_matcher)
+    """Build the provider-neutral exec form for a HookTarget."""
+    return build_claude_entry(target, hook_event, tool_matcher)
 
 
 def build_codex_entry(
-    script_path: str,
+    target: HookTarget,
     host_os: str,
     hook_event: str = "PreToolUse",
     tool_matcher: str | None = None,
 ) -> dict[str, Any]:
-    """Build a Codex hook entry in shell form.
-
-    Codex hooks (per https://developers.openai.com/codex/hooks) do NOT support
-    an `args` array or a `shell` field — only `type`, `command`, `statusMessage`,
-    `timeout`, and `async`. Commands are always interpreted by the host's
-    default shell. shlex.quote() defends against metacharacter injection in
-    the script path.
-
-    POSIX host: `bash <quoted_sh_path>`.
-    Windows host: `powershell.exe -NoProfile -ExecutionPolicy Bypass -File
-    <quoted_ps1_path>` — explicit `powershell.exe` avoids the Windows PATH
-    gotcha where `bash` may resolve to the WSL launcher (`C:\\Windows\\System32
-    \\bash.exe`) instead of Git Bash. WSL bash cannot resolve `C:\\Users\\...`
-    paths, so the previous bash-first form silently broke on default Windows
-    installs that have WSL installed alongside Git Bash. PowerShell.exe always
-    resolves to a single known system path with no PATH ambiguity.
-
-    Codex matchers do not support the Claude-style `if` permission-rule
-    filter; the script self-filters on bug-context detected from the
-    PreToolUse envelope's transcript_path.
-
-    Note: Codex marks newly-written hook entries as "untrusted"; the user
-    must run `codex` interactively at least once and trust the hook via the
-    TUI before it fires. This installer writes the entry; trust is the
-    user's responsibility (Codex does not currently expose a programmatic
-    trust API).
-    """
-    if host_os == "windows":
-        # Native PowerShell on Windows — single-quote the script path so any
-        # space in $HOME or path component is interpreted as part of the
-        # filename, not as a flag boundary.
-        quoted = powershell_single_quote(script_path)
-        command_str = (
-            f"powershell.exe -NoProfile -ExecutionPolicy Bypass -File {quoted}"
-        )
-    else:
-        quoted = shlex.quote(script_path)
-        command_str = f"bash {quoted}"
+    """Build the Codex shell-form entry for a resolved HookTarget."""
+    tokens = (target.executable, *target.args)
+    command_str = (
+        " ".join(tokens)
+        if host_os == "windows"
+        else " ".join(shlex.quote(token) for token in tokens)
+    )
     return _with_event_matcher(
         {
-        "hooks": [
-            {
-                "type": "command",
-                "command": command_str,
-            }
-        ],
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": command_str,
+                }
+            ],
         },
         hook_event,
         tool_matcher,
@@ -265,6 +351,264 @@ def find_our_entry_indices(hook_event_list: list[Any], script_marker: str) -> li
                 indices.append(idx)
                 break
     return indices
+
+
+def _hook_source_dirs(platform: str) -> tuple[tuple[str, str], ...]:
+    if platform == "claude":
+        return (
+            ("scripts", "src.claude/agents/scripts"),
+            ("hooks", "src.claude/agents/hooks"),
+        )
+    if platform == "codex":
+        return (
+            ("scripts", "src.codex/skills/lead/scripts"),
+            ("hooks", "src.codex/skills/lead/hooks"),
+        )
+    raise ValueError(f"reclaim is unsupported for platform: {platform}")
+
+
+def owned_hook_wrapper_sources(
+    repo_root: Path,
+    platform: str,
+) -> tuple[Path, ...]:
+    """Return source wrappers satisfying both accepted ownership conditions."""
+    scripts_dir = Path(__file__).resolve().parent
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import universal_hooks_manifest as manifest
+
+    candidates: list[Path] = []
+    for subdir, source_rel in _hook_source_dirs(platform):
+        source_dir = repo_root / source_rel
+        pack_only_owner = (
+            manifest.PACK_ONLY_SCRIPTS
+            if subdir == "scripts"
+            else manifest.PACK_ONLY_HOOKS
+        )
+        owned_names = set(manifest.canon_names(repo_root, subdir))
+        owned_names.update(pack_only_owner[source_rel])
+        for extension in (".ps1", ".sh"):
+            for wrapper in sorted(source_dir.glob(f"*{extension}")):
+                if wrapper.name not in owned_names:
+                    continue
+                if not wrapper.with_suffix(".py").is_file():
+                    continue
+                candidates.append(wrapper)
+    return tuple(candidates)
+
+
+def profile_verification_exclusions(
+    repo_root: Path,
+    platform: str,
+    hook_runtime: str,
+) -> tuple[str, ...]:
+    """Return provider-source-relative files intentionally absent by profile.
+
+    This is the single owner used by all four installers' post-reclaim source
+    verification. The wrapper profile requires every shipped wrapper. The
+    Python profile permits only the same two-condition wrapper inventory that
+    reclaim owns to be absent.
+    """
+    if hook_runtime != "python":
+        return ()
+    provider_root = repo_root / ("src.claude" if platform == "claude" else "src.codex")
+    return tuple(
+        sorted(
+            wrapper.relative_to(provider_root).as_posix()
+            for wrapper in owned_hook_wrapper_sources(repo_root, platform)
+        )
+    )
+
+
+def reclaimable_hook_wrappers(
+    repo_root: Path,
+    installed_root: Path,
+    platform: str,
+) -> tuple[Path, ...]:
+    """Return installed wrappers satisfying both accepted ownership conditions."""
+    provider_root = repo_root / ("src.claude" if platform == "claude" else "src.codex")
+    candidates: list[Path] = []
+    for wrapper in owned_hook_wrapper_sources(repo_root, platform):
+        source_relative = wrapper.relative_to(provider_root)
+        if platform == "claude":
+            installed_relative = source_relative.relative_to("agents")
+        else:
+            installed_relative = source_relative.relative_to("skills/lead")
+        installed = installed_root / installed_relative
+        if installed.is_file():
+            candidates.append(installed)
+    return tuple(candidates)
+
+
+def resolve_test_abort_request(
+    environ: Mapping[str, str] | None = None,
+) -> AbortRequest | None:
+    """Read and validate the test-only abort request exactly once per process."""
+    source = os.environ if environ is None else environ
+    requested = source.get(TEST_TRANSACTION_ABORT_ENV)
+    if not requested:
+        return None
+    if requested not in TEST_TRANSACTION_STAGES:
+        raise ValueError(
+            f"{TEST_TRANSACTION_ABORT_ENV} must name one of: "
+            + ", ".join(sorted(TEST_TRANSACTION_STAGES))
+        )
+    if not source.get("PYTEST_CURRENT_TEST"):
+        raise ValueError(
+            f"{TEST_TRANSACTION_ABORT_ENV} is test-only and requires pytest provenance"
+        )
+    return AbortRequest(stage=requested)
+
+
+def test_transaction_checkpoint(
+    stage: str,
+    target_path: Path,
+    repo_root: Path,
+    abort_request: AbortRequest | None,
+    install_scope: InstallScope,
+) -> None:
+    """Abort only an explicit pytest transaction under repository scratch.
+
+    This is the single owner for the production-installer interruption seam.
+    Installers invoke every stage unconditionally. The process boundary passes
+    the immutable request resolved once by ``resolve_test_abort_request``;
+    absence is the normal no-op. This function owns target containment and
+    stage-match policy, and refuses to act outside the repository's resolved
+    .scratch tree.
+    """
+    if abort_request is None:
+        return
+    if stage not in TEST_TRANSACTION_STAGES:
+        raise ValueError(
+            "test transaction checkpoint stage must name one of: "
+            + ", ".join(TEST_TRANSACTION_STAGES)
+        )
+    if abort_request.stage != stage:
+        return
+    if not isinstance(install_scope, InstallScope):
+        raise ValueError("test transaction checkpoint install scope is invalid")
+    if install_scope is InstallScope.GLOBAL:
+        raise ValueError("test transaction abort is forbidden for global install scope")
+    if install_scope not in (InstallScope.REPO, InstallScope.TARGET):
+        raise ValueError(
+            f"test transaction abort install scope is unsupported: {install_scope.value}"
+        )
+
+    resolved_repo = repo_root.expanduser().resolve()
+    scratch_root = (resolved_repo / ".scratch").resolve()
+    resolved_target = target_path.expanduser().resolve(strict=False)
+    try:
+        relative = resolved_target.relative_to(scratch_root)
+    except ValueError as exc:
+        raise ValueError(
+            "test transaction abort target must remain under repository .scratch: "
+            f"{resolved_target}"
+        ) from exc
+    if not relative.parts:
+        raise ValueError("test transaction abort target must be below repository .scratch")
+    raise TestTransactionAbort(
+        f"intentional test interruption after {stage.upper()} at {resolved_target}"
+    )
+
+
+def _target_uses_wrapper(target: HookTarget) -> bool:
+    executable_name = Path(target.executable).name.lower()
+    if executable_name in WRAPPER_EXECUTABLES:
+        return True
+    return any(Path(arg.strip("'\"")).suffix.lower() in {".ps1", ".sh"} for arg in target.args)
+
+
+def _iter_command_hooks(data: dict[str, Any]) -> list[dict[str, Any]]:
+    hooks = data.get("hooks", {})
+    if not isinstance(hooks, dict):
+        raise ValueError("'hooks' key is not a JSON object")
+    result: list[dict[str, Any]] = []
+    for entries in hooks.values():
+        if not isinstance(entries, list):
+            raise ValueError("hook event value is not a JSON array")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            commands = entry.get("hooks")
+            if not isinstance(commands, list):
+                continue
+            result.extend(command for command in commands if isinstance(command, dict))
+    return result
+
+
+def _registration_wrapper_state(
+    data: dict[str, Any],
+    expected_stems: set[str],
+) -> bool:
+    found: set[str] = set()
+    wrapper_found = False
+    for hook in _iter_command_hooks(data):
+        for stem in expected_stems:
+            if _hook_contains_marker(hook, stem):
+                found.add(stem)
+                command = hook.get("command", "")
+                if isinstance(command, str):
+                    if "args" in hook:
+                        args = hook["args"]
+                        if not isinstance(args, list) or not all(
+                            isinstance(arg, str) for arg in args
+                        ):
+                            raise ValueError(
+                                f"registered hook args are malformed for {stem}"
+                            )
+                        wrapper_found = wrapper_found or _target_uses_wrapper(
+                            HookTarget(command, tuple(args))
+                        )
+                    else:
+                        stripped = command.strip()
+                        first = stripped.split(maxsplit=1)[0].strip("'\"") if stripped else ""
+                        wrapper_found = wrapper_found or (
+                            Path(first).name.lower() in WRAPPER_EXECUTABLES
+                            or bool(
+                                re.search(
+                                    r"(?i)\.(?:ps1|sh)(?:['\"]?\s|$)",
+                                    stripped,
+                                )
+                            )
+                        )
+                break
+    missing = sorted(expected_stems - found)
+    if missing:
+        raise ValueError(
+            "registered hook inventory is incomplete; refusing reclaim: "
+            + ", ".join(missing)
+        )
+    return wrapper_found
+
+
+def reclaim_stale_hook_wrappers(
+    *,
+    repo_root: Path,
+    installed_root: Path,
+    platform: str,
+    registration_data: dict[str, Any],
+    dry_run: bool,
+    install_scope: InstallScope,
+    abort_request: AbortRequest | None = None,
+) -> tuple[Path, ...]:
+    """Reclaim last, only after direct registrations are present and verified."""
+    candidates = reclaimable_hook_wrappers(repo_root, installed_root, platform)
+    expected_stems = {path.stem for path in candidates}
+    if not expected_stems:
+        return ()
+    if _registration_wrapper_state(registration_data, expected_stems):
+        return ()
+    for candidate in candidates:
+        if not dry_run:
+            candidate.unlink()
+            test_transaction_checkpoint(
+                "reclaim",
+                installed_root,
+                repo_root,
+                abort_request,
+                install_scope,
+            )
+    return candidates
 
 
 def load_existing(target: Path) -> dict[str, Any]:
@@ -397,14 +741,19 @@ def main() -> int:
     )
     parser.add_argument(
         "--script-path",
-        required=True,
-        help="Absolute or expandable path to the hook script (.sh on POSIX, .ps1 on Windows)",
+        help="Absolute installed .py hook target; wrapper/native paths are resolved from its stem",
     )
     parser.add_argument(
         "--host-os",
         choices=("posix", "windows"),
         default="posix",
-        help="Host OS class (controls exec-form vs shell-form / bash vs powershell)",
+        help="Host OS class used for target validation and Codex command serialization",
+    )
+    parser.add_argument(
+        "--hook-runtime",
+        choices=("wrapper", "python", "native"),
+        default="python",
+        help="Hook runtime profile (default: python; wrapper is rollback; native is reserved)",
     )
     parser.add_argument(
         "--hook-event",
@@ -433,9 +782,42 @@ def main() -> int:
         help="Remove our hook entry instead of installing it",
     )
     parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Resolve and validate the selected target without reading or writing registration",
+    )
+    parser.add_argument(
+        "--reclaim-root",
+        help="Installed provider root containing scripts/ and hooks/ to reclaim after verification",
+    )
+    parser.add_argument(
+        "--repo-root",
+        help="Repository root used to derive manifest ownership for reclaim",
+    )
+    parser.add_argument(
+        "--preview-reclaim",
+        action="store_true",
+        help="Print the gated reclaim set without reading or mutating registration",
+    )
+    parser.add_argument(
+        "--print-verification-exclusions",
+        action="store_true",
+        help="Print provider-source-relative files intentionally absent after reclaim",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print what would change without modifying any file",
+    )
+    parser.add_argument(
+        "--test-transaction-checkpoint",
+        choices=TEST_TRANSACTION_STAGES[:-1],
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--test-install-scope",
+        choices=tuple(scope.value for scope in InstallScope),
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
 
@@ -448,42 +830,134 @@ def main() -> int:
         )
         return 0
 
-    # Codex hooks require an interactive trust step via the `codex` TUI before
-    # they actually fire — Codex marks newly-installed hooks as "untrusted"
-    # and `codex exec` silently skips them until the user runs `codex`
-    # interactively and trusts the hook. This installer writes the entry; the
-    # trust step remains the user's responsibility (it can't be performed
-    # programmatically without an explicit trust API, which Codex does not
-    # currently expose).
-    #
-    # On Windows, the Codex shell-form command we emit invokes the hook via
-    # `powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<ps1>'` (see
-    # build_codex_entry) — explicit powershell.exe avoids the PATH gotcha where
-    # `bash` resolves to the WSL launcher, which cannot read `C:\Users\...`
-    # paths. If a user's Codex runtime uses a different interpreter the hook
-    # entry is visible in the trust UI but may fail to invoke; the user can edit
-    # ~/.codex/hooks.json after install to match their shell.
     target = Path(args.target).expanduser()
-    data = load_existing(target)
 
-    if args.remove:
-        changed = remove(data, args.hook_event, args.script_marker)
-        action = "removed"
-    else:
-        if args.platform == "claude":
-            entry = build_claude_entry(
-                args.script_path, args.host_os, args.hook_event, args.tool_matcher
+    try:
+        if args.test_transaction_checkpoint:
+            if not args.repo_root:
+                raise ValueError(
+                    "--repo-root is required with --test-transaction-checkpoint"
+                )
+            if not args.test_install_scope:
+                raise ValueError(
+                    "--test-install-scope is required with "
+                    "--test-transaction-checkpoint"
+                )
+            test_transaction_checkpoint(
+                args.test_transaction_checkpoint,
+                target,
+                Path(args.repo_root),
+                resolve_test_abort_request(),
+                InstallScope(args.test_install_scope),
             )
-        elif args.platform == "codex":
-            entry = build_codex_entry(
-                args.script_path, args.host_os, args.hook_event, args.tool_matcher
+            return 0
+
+        if args.print_verification_exclusions:
+            if not args.repo_root:
+                raise ValueError(
+                    "--repo-root is required with --print-verification-exclusions"
+                )
+            for relative in profile_verification_exclusions(
+                Path(args.repo_root).expanduser().resolve(),
+                args.platform,
+                args.hook_runtime,
+            ):
+                sys.stdout.write(relative + "\n")
+            return 0
+
+        if args.reclaim_root:
+            if not args.repo_root:
+                raise ValueError("--repo-root is required with --reclaim-root")
+            if not args.test_install_scope:
+                raise ValueError("--test-install-scope is required with --reclaim-root")
+            repo_root = Path(args.repo_root).expanduser().resolve()
+            installed_root = Path(args.reclaim_root).expanduser()
+            install_scope = InstallScope(args.test_install_scope)
+            abort_request = resolve_test_abort_request()
+            candidates = reclaimable_hook_wrappers(
+                repo_root,
+                installed_root,
+                args.platform,
             )
+            if args.preview_reclaim:
+                if not args.script_path:
+                    raise ValueError("--script-path is required for --preview-reclaim")
+                planned_target = resolve_hook_target(
+                    args.script_path,
+                    args.host_os,
+                    args.hook_runtime,
+                    args.platform,
+                )
+                if _target_uses_wrapper(planned_target):
+                    sys.stdout.write("  wrapper profile: reclaim disabled\n")
+                    return 0
+                for candidate in candidates:
+                    sys.stdout.write(f"  [dry-run] would reclaim hook wrapper: {candidate}\n")
+                return 0
+
+            registration_data = load_existing(target)
+            removed = reclaim_stale_hook_wrappers(
+                repo_root=repo_root,
+                installed_root=installed_root,
+                platform=args.platform,
+                registration_data=registration_data,
+                dry_run=args.dry_run,
+                install_scope=install_scope,
+                abort_request=abort_request,
+            )
+            if not removed:
+                sys.stdout.write("  hook wrapper reclaim disabled or already complete\n")
+            else:
+                prefix = "[dry-run] would reclaim" if args.dry_run else "reclaimed"
+                for candidate in removed:
+                    sys.stdout.write(f"  {prefix} hook wrapper: {candidate}\n")
+            return 0
+
+        if args.remove:
+            data = load_existing(target)
+            changed = remove(data, args.hook_event, args.script_marker)
+            action = "removed"
         else:
-            entry = build_generic_entry(
-                args.script_path, args.host_os, args.hook_event, args.tool_matcher
+            if not args.script_path:
+                raise ValueError("--script-path is required when installing a hook")
+            hook_target = resolve_hook_target(
+                args.script_path,
+                args.host_os,
+                args.hook_runtime,
+                args.platform,
             )
-        changed = install(data, entry, args.hook_event, args.script_marker)
-        action = "installed/updated"
+            if args.validate_only:
+                sys.stdout.write(
+                    f"  validated hook target: {hook_target.executable}"
+                    + (
+                        " " + " ".join(hook_target.args)
+                        if hook_target.args
+                        else ""
+                    )
+                    + "\n"
+                )
+                return 0
+            if args.platform == "claude":
+                entry = build_claude_entry(
+                    hook_target, args.hook_event, args.tool_matcher
+                )
+            elif args.platform == "codex":
+                entry = build_codex_entry(
+                    hook_target, args.host_os, args.hook_event, args.tool_matcher
+                )
+            else:
+                entry = build_generic_entry(
+                    hook_target, args.hook_event, args.tool_matcher
+                )
+            data = load_existing(target)
+            changed = install(data, entry, args.hook_event, args.script_marker)
+            action = "installed/updated"
+    except TestTransactionAbort as exc:
+        sys.stderr.write(f"TEST-ABORT: {exc}\n")
+        return TEST_TRANSACTION_ABORT_EXIT
+    except (OSError, ValueError) as exc:
+        sys.stderr.write(f"FAIL: {exc}\n")
+        return 1
 
     if not changed:
         sys.stdout.write(

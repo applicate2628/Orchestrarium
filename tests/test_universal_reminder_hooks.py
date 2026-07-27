@@ -38,6 +38,7 @@ BASH = shutil.which("bash")
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MCP_HOOK = REPO_ROOT / "scripts" / "universal-hooks" / "hooks" / "check-mcp-momentum.py"
 TURN_ANCHOR_SH = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "turn-anchor-reminder.sh"
+TURN_ANCHOR_PY = REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "turn-anchor-reminder.py"
 
 
 def run_hook(script: Path, envelope: dict) -> subprocess.CompletedProcess:
@@ -221,6 +222,52 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
         # The anchor's load-bearing sentence must actually be present.
         self.assertIn("passed slice is not completion", out["additionalContext"])
         self.assertIn("next unchecked action", out["additionalContext"])
+
+    def test_turn_anchor_never_exits_two(self) -> None:
+        for stdin_text in ("", "not json", "x" * 1_000_000):
+            with self.subTest(size=len(stdin_text)):
+                result = subprocess.run(
+                    [sys.executable, str(TURN_ANCHOR_PY)],
+                    input=stdin_text,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertNotEqual(result.returncode, 2)
+                self.assertEqual(result.stderr, "")
+                payload = json.loads(result.stdout)
+                self.assertEqual(
+                    payload["hookSpecificOutput"]["hookEventName"],
+                    "UserPromptSubmit",
+                )
+                result.stdout.encode("ascii")
+
+    @unittest.skipUnless(BASH, "bash is required to compare the canonical shell payload")
+    def test_turn_anchor_py_matches_sh_text(self) -> None:
+        python_result = subprocess.run(
+            [sys.executable, str(TURN_ANCHOR_PY)],
+            input="",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        shell_result = subprocess.run(
+            [BASH, str(TURN_ANCHOR_SH)],
+            input="",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(python_result.returncode, 0, python_result.stderr)
+        self.assertEqual(shell_result.returncode, 0, shell_result.stderr)
+        python_context = json.loads(python_result.stdout)["hookSpecificOutput"][
+            "additionalContext"
+        ]
+        shell_context = json.loads(shell_result.stdout)["hookSpecificOutput"][
+            "additionalContext"
+        ]
+        self.assertEqual(python_context.encode("utf-8"), shell_context.encode("utf-8"))
 
 
 if __name__ == "__main__":

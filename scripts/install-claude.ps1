@@ -15,7 +15,9 @@ param(
     [switch]$Force,
     [switch]$DryRun,
     [switch]$AllowUnsafeTarget,
-    [switch]$NoHypothesisHook
+    [switch]$NoHypothesisHook,
+    [ValidateSet("wrapper", "python", "native")]
+    [string]$HookRuntime = "python"
 )
 
 $ErrorActionPreference = "Stop"
@@ -29,6 +31,9 @@ $DefaultAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
 # BRANCH artifact, reclaimed here if left stale by a prior install.
 $Dirs = @("agents", "commands", "skills")
 $script:PromptMode = $null
+$HookVerificationExclusions = [System.Collections.Generic.HashSet[string]]::new(
+    [System.StringComparer]::OrdinalIgnoreCase
+)
 
 function Test-Interactive {
     try {
@@ -1321,7 +1326,7 @@ if ($Mode -eq "global") {
 # user's settings.json idempotently. Preserves all other user keys and other
 # hooks. Opt out with -NoHypothesisHook or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1.
 # Fails closed (non-zero exit) if Python is required but unavailable.
-if (-not $NoHypothesisHook -and -not $DryRun) {
+if (-not $NoHypothesisHook -and -not $DryRun -and [string]::IsNullOrEmpty($env:ORCHESTRARIUM_NO_HYPOTHESIS_HOOK)) {
     $HookInstaller = Join-Path $RepoDir "scripts\install-hypothesis-hook.py"
     if (-not (Test-Path $HookInstaller)) {
         Write-Warning "hypothesis-hook installer not found at $HookInstaller; skipping hook install"
@@ -1332,110 +1337,194 @@ if (-not $NoHypothesisHook -and -not $DryRun) {
             exit 1
         }
         $SettingsTarget = Join-Path $TargetRoot "settings.json"
-        # PowerShell installer always emits Windows-native exec form referencing
-        # the .ps1 hook script. Bash form is reserved for the .sh installer.
-        $BugfixScriptTarget = Join-Path $TargetRoot "agents\scripts\check-bugfix-discipline.ps1"
-        $GitPushGateScriptTarget = Join-Path $TargetRoot "agents\scripts\check-git-push-gate.ps1"
-        $StopScriptTarget = Join-Path $TargetRoot "agents\scripts\check-passive-polling-stop.ps1"
-        $WiArchivalScriptTarget = Join-Path $TargetRoot "agents\scripts\check-work-items-archival-stop.ps1"
-        $MachinePathScriptTarget = Join-Path $TargetRoot "agents\hooks\check-machine-local-path.ps1"
-        $NoTrashScriptTarget = Join-Path $TargetRoot "agents\hooks\check-no-trash-in-repo.ps1"
-        $StaleRelationScriptTarget = Join-Path $TargetRoot "agents\hooks\check-stale-relation-residue.ps1"
-        $RepositoryOrientationScriptTarget = Join-Path $TargetRoot "agents\hooks\check-repository-orientation.ps1"
-        $McpMomentumScriptTarget = Join-Path $TargetRoot "agents\hooks\check-mcp-momentum.ps1"
-        $TypedRoutingScriptTarget = Join-Path $TargetRoot "agents\hooks\check-typed-routing.ps1"
-        $ReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\mcp-usage-reminder.ps1"
-        $AgentsModeReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\agents-mode-reminder.ps1"
-        $ScratchValuablesScriptTarget = Join-Path $TargetRoot "agents\scripts\check-scratch-valuables.ps1"
-        $TurnAnchorReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\turn-anchor-reminder.ps1"
+        # HookTarget resolution is centralized in install-hypothesis-hook.py.
+        # The installer supplies the installed Python brain; wrapper/native
+        # rollback profiles derive their own stage-specific target there.
+        $BugfixScriptTarget = Join-Path $TargetRoot "agents\scripts\check-bugfix-discipline.py"
+        $GitPushGateScriptTarget = Join-Path $TargetRoot "agents\scripts\check-git-push-gate.py"
+        $StopScriptTarget = Join-Path $TargetRoot "agents\scripts\check-passive-polling-stop.py"
+        $WiArchivalScriptTarget = Join-Path $TargetRoot "agents\scripts\check-work-items-archival-stop.py"
+        $MachinePathScriptTarget = Join-Path $TargetRoot "agents\hooks\check-machine-local-path.py"
+        $NoTrashScriptTarget = Join-Path $TargetRoot "agents\hooks\check-no-trash-in-repo.py"
+        $StaleRelationScriptTarget = Join-Path $TargetRoot "agents\hooks\check-stale-relation-residue.py"
+        $RepositoryOrientationScriptTarget = Join-Path $TargetRoot "agents\hooks\check-repository-orientation.py"
+        $McpMomentumScriptTarget = Join-Path $TargetRoot "agents\hooks\check-mcp-momentum.py"
+        $TypedRoutingScriptTarget = Join-Path $TargetRoot "agents\hooks\check-typed-routing.py"
+        $ReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\mcp-usage-reminder.py"
+        $AgentsModeReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\agents-mode-reminder.py"
+        $ScratchValuablesScriptTarget = Join-Path $TargetRoot "agents\scripts\check-scratch-valuables.py"
+        $TurnAnchorReminderScriptTarget = Join-Path $TargetRoot "agents\scripts\turn-anchor-reminder.py"
+        $HookTargets = @(
+            $BugfixScriptTarget,
+            $GitPushGateScriptTarget,
+            $StopScriptTarget,
+            $WiArchivalScriptTarget,
+            $MachinePathScriptTarget,
+            $NoTrashScriptTarget,
+            $StaleRelationScriptTarget,
+            $RepositoryOrientationScriptTarget,
+            $McpMomentumScriptTarget,
+            $TypedRoutingScriptTarget,
+            $ReminderScriptTarget,
+            $AgentsModeReminderScriptTarget,
+            $ScratchValuablesScriptTarget,
+            $TurnAnchorReminderScriptTarget
+        )
+        function Invoke-TestHookTransactionCheckpoint([string]$Stage) {
+            & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --repo-root $RepoDir --test-install-scope $Mode --test-transaction-checkpoint $Stage
+            if ($LASTEXITCODE -ne 0) {
+                [Console]::Error.WriteLine("hook transaction test checkpoint exited with code $LASTEXITCODE")
+                exit $LASTEXITCODE
+            }
+        }
+        foreach ($HookTargetPath in $HookTargets) {
+            & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --script-path $HookTargetPath --validate-only
+            if ($LASTEXITCODE -ne 0) {
+                Write-Error "hook target preflight failed with code $LASTEXITCODE"
+                exit $LASTEXITCODE
+            }
+        }
+        Invoke-TestHookTransactionCheckpoint "sync"
         Write-Host "  Installing bugfix-discipline PreToolUse hook (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-path $BugfixScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --script-path $BugfixScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing git-push publication-gate PreToolUse hook (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-git-push-gate --tool-matcher "Bash|PowerShell" --script-path $GitPushGateScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --script-marker check-git-push-gate --tool-matcher "Bash|PowerShell" --script-path $GitPushGateScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing passive-polling Stop hook (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event Stop --script-marker check-passive-polling-stop --script-path $StopScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --hook-event Stop --script-marker check-passive-polling-stop --script-path $StopScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing work-items-archival Stop hook (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event Stop --script-marker check-work-items-archival-stop --script-path $WiArchivalScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --hook-event Stop --script-marker check-work-items-archival-stop --script-path $WiArchivalScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing machine-local-path PreToolUse hook [AUDIT] (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-machine-local-path --script-path $MachinePathScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --script-marker check-machine-local-path --script-path $MachinePathScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing no-trash-in-repo PreToolUse hook [AUDIT] (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-no-trash-in-repo --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell" --script-path $NoTrashScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --script-marker check-no-trash-in-repo --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell" --script-path $NoTrashScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing stale-relation-residue PreToolUse hook [AUDIT] (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-stale-relation-residue --script-path $StaleRelationScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --script-marker check-stale-relation-residue --script-path $StaleRelationScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing repository-orientation PreToolUse hook [AUDIT] (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-repository-orientation --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command" --script-path $RepositoryOrientationScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --script-marker check-repository-orientation --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command" --script-path $RepositoryOrientationScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing mcp-momentum PreToolUse hook [AUDIT] (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-mcp-momentum --tool-matcher "Grep|Bash" --script-path $McpMomentumScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --script-marker check-mcp-momentum --tool-matcher "Grep|Bash" --script-path $McpMomentumScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing typed-routing PreToolUse hook [AUDIT] (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --script-marker check-typed-routing --tool-matcher "Agent" --script-path $TypedRoutingScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --script-marker check-typed-routing --tool-matcher "Agent" --script-path $TypedRoutingScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing MCP-usage-reminder SessionStart hook (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event SessionStart --script-marker mcp-usage-reminder --script-path $ReminderScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --hook-event SessionStart --script-marker mcp-usage-reminder --script-path $ReminderScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing delegation-posture (agents-mode) SessionStart hook (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event SessionStart --script-marker agents-mode-reminder --script-path $AgentsModeReminderScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --hook-event SessionStart --script-marker agents-mode-reminder --script-path $AgentsModeReminderScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing scratch-valuables watchdog SessionStart hook (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event SessionStart --script-marker check-scratch-valuables --script-path $ScratchValuablesScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --hook-event SessionStart --script-marker check-scratch-valuables --script-path $ScratchValuablesScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
         }
         Write-Host "  Installing turn-anchor-reminder UserPromptSubmit hook (host-os=windows)..."
-        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path $TurnAnchorReminderScriptTarget
+        & $PythonCmd $HookInstaller --hook-runtime $HookRuntime --target $SettingsTarget --platform claude --host-os windows --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path $TurnAnchorReminderScriptTarget
         if ($LASTEXITCODE -ne 0) {
             Write-Error "hypothesis-hook installer exited with code $LASTEXITCODE"
             exit $LASTEXITCODE
+        }
+        Invoke-TestHookTransactionCheckpoint "register"
+        $HookHealthChecker = Join-Path $RepoDir "scripts\check-hook-health.py"
+        if (-not (Test-Path -LiteralPath $HookHealthChecker -PathType Leaf)) {
+            Write-Error "hook health checker not found at $HookHealthChecker"
+            exit 1
+        }
+        Write-Host "  Verifying registered hook targets before reclaiming wrappers..."
+        & $PythonCmd $HookHealthChecker --target $SettingsTarget --platform claude --host-os windows --repo-root $RepoDir
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hook target verification failed with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        $ExcludedSourceFiles = & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --hook-runtime $HookRuntime --repo-root $RepoDir --print-verification-exclusions
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "hook verification exclusion resolution failed with code $LASTEXITCODE"
+            exit $LASTEXITCODE
+        }
+        foreach ($ExcludedSourceFile in @($ExcludedSourceFiles)) {
+            if (-not [string]::IsNullOrWhiteSpace($ExcludedSourceFile)) {
+                [void]$HookVerificationExclusions.Add(
+                    $ExcludedSourceFile.Trim().Replace("\", "/")
+                )
+            }
+        }
+        Invoke-TestHookTransactionCheckpoint "verify"
+        Write-Host "  Reclaiming owned installed hook wrappers after verification..."
+        & $PythonCmd $HookInstaller --target $SettingsTarget --platform claude --host-os windows --reclaim-root (Join-Path $TargetRoot "agents") --repo-root $RepoDir --test-install-scope $Mode
+        if ($LASTEXITCODE -ne 0) {
+            $HookReclaimExitCode = $LASTEXITCODE
+            [Console]::Error.WriteLine("hook wrapper reclaim failed with code $HookReclaimExitCode")
+            exit $HookReclaimExitCode
         }
     }
 }
 
 if ($DryRun) {
+    if (-not $NoHypothesisHook -and [string]::IsNullOrEmpty($env:ORCHESTRARIUM_NO_HYPOTHESIS_HOOK)) {
+        $PythonCmd = Get-PythonCommand
+        if (-not $PythonCmd) {
+            Write-Error "python or python3 is required to preview structural hook installation."
+            exit 1
+        }
+        $HookInstaller = Join-Path $RepoDir "scripts\install-hypothesis-hook.py"
+        & $PythonCmd $HookInstaller `
+            --target (Join-Path $TargetRoot "settings.json") `
+            --platform claude `
+            --host-os windows `
+            --hook-runtime $HookRuntime `
+            --script-path (Join-Path $Source "agents\scripts\check-bugfix-discipline.py") `
+            --reclaim-root (Join-Path $TargetRoot "agents") `
+            --repo-root $RepoDir `
+            --test-install-scope $Mode `
+            --preview-reclaim `
+            --dry-run
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
     Write-Host ""
     Write-Host "RESULT: DRY-RUN complete (no files modified)."
     exit 0
@@ -1466,10 +1555,20 @@ function Get-SourceFiles($DirRoot) {
     return $items
 }
 
+function Test-SourceFileRequiredForProfile($RelativePath) {
+    return -not $HookVerificationExclusions.Contains(
+        $RelativePath.Replace("\", "/")
+    )
+}
+
 foreach ($dir in $Dirs) {
     Write-Host "Verifying $dir/ files..."
     foreach ($relative in Get-SourceFiles $dir) {
-        Test-InstalledFile (Join-Path $TargetRoot $relative) $relative
+        if (Test-SourceFileRequiredForProfile $relative) {
+            Test-InstalledFile (Join-Path $TargetRoot $relative) $relative
+        } else {
+            Write-Host "  OK  $relative (intentionally reclaimed for hook-runtime=$HookRuntime)" -ForegroundColor Green
+        }
     }
 }
 

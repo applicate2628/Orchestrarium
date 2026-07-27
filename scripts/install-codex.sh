@@ -20,8 +20,10 @@ FORCE=0
 DRY_RUN=0
 ALLOW_UNSAFE_TARGET=0
 NO_HYPOTHESIS_HOOK=0
+HOOK_RUNTIME="python"
 MODE=""
 TARGET=""
+hook_verification_exclusions=()
 
 usage() {
   echo "Usage:"
@@ -31,6 +33,7 @@ usage() {
   echo "  bash scripts/install-codex.sh --force                  Skip deletion prompts"
   echo "  bash scripts/install-codex.sh --dry-run                Print planned actions without changing files"
   echo "  bash scripts/install-codex.sh --allow-unsafe-target    Override allowlist for custom target path"
+  echo "  bash scripts/install-codex.sh --hook-runtime PROFILE   wrapper|python|native (default: python)"
   echo "  bash scripts/install-codex.sh --help                   Show help"
   exit 1
 }
@@ -343,6 +346,14 @@ while [[ $# -gt 0 ]]; do
     --no-hypothesis-hook)
       NO_HYPOTHESIS_HOOK=1
       shift
+      ;;
+    --hook-runtime)
+      if [[ $# -lt 2 ]] || [[ "$2" != "wrapper" && "$2" != "python" && "$2" != "native" ]]; then
+        echo "FAIL: --hook-runtime requires wrapper, python, or native." >&2
+        exit 1
+      fi
+      HOOK_RUNTIME="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -1274,7 +1285,7 @@ fi
 # preserves all other user keys and other hooks. Opt out with --no-hypothesis-hook
 # or ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1. Codex's matcher field has no `if`-style
 # argument filter, so the hook script self-filters by parsing tool_input.command.
-if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
+if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ] && [ -z "${ORCHESTRARIUM_NO_HYPOTHESIS_HOOK:-}" ]; then
   hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
   if [ ! -f "$hook_installer" ]; then
     echo "WARN: hypothesis-hook installer not found at $hook_installer; skipping hook install" >&2
@@ -1285,12 +1296,9 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       echo "      Rerun with --no-hypothesis-hook to skip, or install Python and re-run." >&2
       exit 1
     fi
-    # OS-aware host-os flag. On Windows the Codex hook entry uses
-    # `powershell.exe ... -File <.ps1>` to avoid the PATH gotcha where
-    # `bash` may resolve to the WSL launcher (System32\bash.exe) instead of
-    # Git Bash — WSL bash cannot resolve `C:\Users\...` paths and the entry
-    # silently fails. PowerShell.exe always resolves to one known system
-    # path with no PATH ambiguity. On POSIX, plain `bash <script.sh>` works.
+    # Host detection controls validation and command serialization only.
+    # resolve_hook_target is the single owner of wrapper/python/native target
+    # selection.
     case "$(uname -s 2>/dev/null)" in
       MINGW*|MSYS*|CYGWIN*) hook_host_os="windows" ;;
       *) hook_host_os="posix" ;;
@@ -1300,43 +1308,64 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
     # AGENTS_ROOT is ~/.codex (global) or <project>/.agents (target) — skills
     # live under AGENTS_ROOT.
     hooks_target="$TARGET/hooks.json"
-    if [ "$hook_host_os" = "windows" ]; then
-      bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.ps1"
-      git_push_gate_script_target="$AGENTS_ROOT/skills/lead/scripts/check-git-push-gate.ps1"
-      stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.ps1"
-      wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.ps1"
-      machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.ps1"
-      notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.ps1"
-      stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.ps1"
-      repository_orientation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-repository-orientation.ps1"
-      mcp_momentum_script_target="$AGENTS_ROOT/skills/lead/hooks/check-mcp-momentum.ps1"
-      reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.ps1"
-      agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.ps1"
-      scratch_valuables_script_target="$AGENTS_ROOT/skills/lead/scripts/check-scratch-valuables.ps1"
-      turn_anchor_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/turn-anchor-reminder.ps1"
-    else
-      bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.sh"
-      git_push_gate_script_target="$AGENTS_ROOT/skills/lead/scripts/check-git-push-gate.sh"
-      stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.sh"
-      wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.sh"
-      machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.sh"
-      notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.sh"
-      stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.sh"
-      repository_orientation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-repository-orientation.sh"
-      mcp_momentum_script_target="$AGENTS_ROOT/skills/lead/hooks/check-mcp-momentum.sh"
-      reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.sh"
-      agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.sh"
-      scratch_valuables_script_target="$AGENTS_ROOT/skills/lead/scripts/check-scratch-valuables.sh"
-      turn_anchor_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/turn-anchor-reminder.sh"
-    fi
+    bugfix_script_target="$AGENTS_ROOT/skills/lead/scripts/check-bugfix-discipline.py"
+    git_push_gate_script_target="$AGENTS_ROOT/skills/lead/scripts/check-git-push-gate.py"
+    stop_script_target="$AGENTS_ROOT/skills/lead/scripts/check-passive-polling-stop.py"
+    wi_archival_script_target="$AGENTS_ROOT/skills/lead/scripts/check-work-items-archival-stop.py"
+    machine_path_script_target="$AGENTS_ROOT/skills/lead/hooks/check-machine-local-path.py"
+    notrash_script_target="$AGENTS_ROOT/skills/lead/hooks/check-no-trash-in-repo.py"
+    stale_relation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-stale-relation-residue.py"
+    repository_orientation_script_target="$AGENTS_ROOT/skills/lead/hooks/check-repository-orientation.py"
+    mcp_momentum_script_target="$AGENTS_ROOT/skills/lead/hooks/check-mcp-momentum.py"
+    reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/mcp-usage-reminder.py"
+    agents_mode_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/agents-mode-reminder.py"
+    scratch_valuables_script_target="$AGENTS_ROOT/skills/lead/scripts/check-scratch-valuables.py"
+    turn_anchor_reminder_script_target="$AGENTS_ROOT/skills/lead/scripts/turn-anchor-reminder.py"
+    hook_targets=(
+      "$bugfix_script_target"
+      "$git_push_gate_script_target"
+      "$stop_script_target"
+      "$wi_archival_script_target"
+      "$machine_path_script_target"
+      "$notrash_script_target"
+      "$stale_relation_script_target"
+      "$repository_orientation_script_target"
+      "$mcp_momentum_script_target"
+      "$reminder_script_target"
+      "$agents_mode_reminder_script_target"
+      "$scratch_valuables_script_target"
+      "$turn_anchor_reminder_script_target"
+    )
+    for hook_target_path in "${hook_targets[@]}"; do
+      "$python_cmd" "$hook_installer" \
+        --target "$hooks_target" \
+        --platform codex \
+        --host-os "$hook_host_os" \
+        --hook-runtime "$HOOK_RUNTIME" \
+        --script-path "$hook_target_path" \
+        --validate-only
+    done
+    run_hook_installer() {
+      "$python_cmd" "$hook_installer" --hook-runtime "$HOOK_RUNTIME" "$@"
+    }
+    run_test_hook_transaction_checkpoint() {
+      local stage="$1"
+      "$python_cmd" "$hook_installer" \
+        --target "$hooks_target" \
+        --platform codex \
+        --repo-root "$REPO_DIR" \
+        --test-install-scope "$MODE" \
+        --test-transaction-checkpoint "$stage"
+    }
+    run_test_hook_transaction_checkpoint sync
     echo "  Installing bugfix-discipline PreToolUse hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
       --script-path "$bugfix_script_target"
     echo "  Installing git-push publication-gate PreToolUse hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
@@ -1344,7 +1373,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --tool-matcher "Bash|PowerShell" \
       --script-path "$git_push_gate_script_target"
     echo "  Installing passive-polling Stop hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
@@ -1352,7 +1381,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --script-marker check-passive-polling-stop \
       --script-path "$stop_script_target"
     echo "  Installing work-items-archival Stop hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
@@ -1360,14 +1389,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --script-marker check-work-items-archival-stop \
       --script-path "$wi_archival_script_target"
     echo "  Installing machine-local-path PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
       --script-marker check-machine-local-path \
       --script-path "$machine_path_script_target"
     echo "  Installing no-trash-in-repo PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
@@ -1375,14 +1404,14 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell" \
       --script-path "$notrash_script_target"
     echo "  Installing stale-relation-residue PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
       --script-marker check-stale-relation-residue \
       --script-path "$stale_relation_script_target"
     echo "  Installing repository-orientation PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
@@ -1390,7 +1419,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --tool-matcher "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell|shell_command|exec_command" \
       --script-path "$repository_orientation_script_target"
     echo "  Installing mcp-momentum PreToolUse hook [AUDIT] (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
@@ -1398,7 +1427,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --tool-matcher "Grep|Bash" \
       --script-path "$mcp_momentum_script_target"
     echo "  Installing MCP-usage-reminder SessionStart hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
@@ -1406,7 +1435,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --script-marker mcp-usage-reminder \
       --script-path "$reminder_script_target"
     echo "  Installing delegation-posture (agents-mode) SessionStart hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
@@ -1414,7 +1443,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --script-marker agents-mode-reminder \
       --script-path "$agents_mode_reminder_script_target"
     echo "  Installing scratch-valuables watchdog SessionStart hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
@@ -1422,17 +1451,77 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ]; then
       --script-marker check-scratch-valuables \
       --script-path "$scratch_valuables_script_target"
     echo "  Installing turn-anchor-reminder UserPromptSubmit hook (host-os=$hook_host_os; trust step manual via codex TUI)..."
-    "$python_cmd" "$hook_installer" \
+    run_hook_installer \
       --target "$hooks_target" \
       --platform codex \
       --host-os "$hook_host_os" \
       --hook-event UserPromptSubmit \
       --script-marker turn-anchor-reminder \
       --script-path "$turn_anchor_reminder_script_target"
+    run_test_hook_transaction_checkpoint register
+
+    hook_health_checker="$REPO_DIR/scripts/check-hook-health.py"
+    if [[ ! -f "$hook_health_checker" ]]; then
+      echo "FAIL: hook health checker not found at $hook_health_checker" >&2
+      exit 1
+    fi
+    echo "  Verifying registered hook targets before reclaiming wrappers..."
+    "$python_cmd" "$hook_health_checker" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --repo-root "$REPO_DIR"
+    excluded_source_files="$(
+      "$python_cmd" "$hook_installer" \
+        --target "$hooks_target" \
+        --platform codex \
+        --host-os "$hook_host_os" \
+        --hook-runtime "$HOOK_RUNTIME" \
+        --repo-root "$REPO_DIR" \
+        --print-verification-exclusions
+    )"
+    while IFS= read -r excluded_source_file; do
+      excluded_source_file="${excluded_source_file%$'\r'}"
+      if [[ -n "$excluded_source_file" ]]; then
+        hook_verification_exclusions+=("$excluded_source_file")
+      fi
+    done <<< "$excluded_source_files"
+    run_test_hook_transaction_checkpoint verify
+    echo "  Reclaiming owned installed hook wrappers after verification..."
+    "$python_cmd" "$hook_installer" \
+      --target "$hooks_target" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --reclaim-root "$AGENTS_ROOT/skills/lead" \
+      --repo-root "$REPO_DIR" \
+      --test-install-scope "$MODE"
   fi
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
+  if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ -z "${ORCHESTRARIUM_NO_HYPOTHESIS_HOOK:-}" ]; then
+    python_cmd="$(resolve_python)" || exit 1
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*) hook_host_os="windows" ;;
+      *) hook_host_os="posix" ;;
+    esac
+    hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
+    if [[ ! -f "$hook_installer" ]]; then
+      echo "FAIL: hook installer not found at $hook_installer" >&2
+      exit 1
+    fi
+    "$python_cmd" "$hook_installer" \
+      --target "$TARGET/hooks.json" \
+      --platform codex \
+      --host-os "$hook_host_os" \
+      --hook-runtime "$HOOK_RUNTIME" \
+      --script-path "$SOURCE/skills/lead/scripts/check-bugfix-discipline.py" \
+      --reclaim-root "$AGENTS_ROOT/skills/lead" \
+      --repo-root "$REPO_DIR" \
+      --test-install-scope "$MODE" \
+      --preview-reclaim \
+      --dry-run
+  fi
   echo ""
   echo "RESULT: DRY-RUN complete (no files modified)."
   exit 0
@@ -1456,13 +1545,29 @@ check_file() {
   fi
 }
 
+source_file_is_optional_for_profile() {
+  local rel_path="$1"
+  local excluded_source_file
+  for excluded_source_file in "${hook_verification_exclusions[@]}"; do
+    if [[ "$rel_path" == "$excluded_source_file" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 check_installed_manifest() {
   local source_dir="$1"
   local target_base="$2"
   local source_base="$3"
   while IFS= read -r -d '' source_file; do
     local rel_path="${source_file#$source_base/}"
-    check_file "$target_base/$rel_path" "$rel_path"
+    local source_rel_path="${source_file#$SOURCE/}"
+    if source_file_is_optional_for_profile "$source_rel_path"; then
+      echo "  OK  $source_rel_path (intentionally reclaimed for hook-runtime=$HOOK_RUNTIME)"
+    else
+      check_file "$target_base/$rel_path" "$rel_path"
+    fi
   done < <(find "$source_dir" -type f -print0)
 }
 

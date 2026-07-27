@@ -112,25 +112,33 @@ A third invariant, SEN-2 (delivery drought), was designed, then CUT before relea
 
 Hook entry points:
 
-- `~/.codex/skills/lead/scripts/check-bugfix-discipline.sh` / `.ps1`
-- `~/.codex/skills/lead/scripts/check-git-push-gate.sh` / `.ps1`
-- `~/.codex/skills/lead/scripts/check-passive-polling-stop.sh` / `.ps1`
-- `~/.codex/skills/lead/scripts/check-work-items-archival-stop.sh` / `.ps1`
-- `~/.codex/skills/lead/hooks/check-machine-local-path.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
-- `~/.codex/skills/lead/hooks/check-no-trash-in-repo.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
-- `~/.codex/skills/lead/hooks/check-stale-relation-residue.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
-- `~/.codex/skills/lead/hooks/check-repository-orientation.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
-- `~/.codex/skills/lead/hooks/check-mcp-momentum.sh` / `.ps1` (audit; imports `hook_common` from the sibling `scripts/`)
+- `~/.codex/skills/lead/scripts/check-{bugfix-discipline,git-push-gate,passive-polling-stop,work-items-archival-stop}.py`
+- `~/.codex/skills/lead/hooks/check-{machine-local-path,no-trash-in-repo,stale-relation-residue,repository-orientation,mcp-momentum}.py`
 
-This list covers the nine structural hooks (blocking + audit); the four reminder/context hooks (`mcp-usage-reminder`, `agents-mode-reminder`, `check-scratch-valuables`, `turn-anchor-reminder`) are described above and live at `~/.codex/skills/lead/scripts/<name>.sh` / `.ps1`.
+This list covers the nine structural hooks (blocking + audit); the four reminder/context hooks are registered through `~/.codex/skills/lead/scripts/<name>.py`. Same-stem `.sh` and `.ps1` files remain in the source pack as the rollback profile.
 
-Per the source-hygiene placement law (hooks split by GATE SEMANTICS; decision record `2026-07-11-hook-placement-gate-semantics`), the five warn-only audit hooks live in the typed `skills/lead/hooks/` dir, while the four blocking hooks (bugfix-discipline, git-push-gate, passive-polling, work-items-archival) and the four reminder/context hooks (mcp-usage-reminder, agents-mode-reminder, check-scratch-valuables, turn-anchor-reminder) live in `skills/lead/scripts/` beside the shared `hook_common.py` plumbing — a placement convention, not an import necessity (the audit hooks import `hook_common` across directories via an explicit path shim). `check-scratch-valuables` sits in `scripts/` despite its `check-` name because its GATE SEMANTICS are a SessionStart reminder, not a PreToolUse audit — placement follows the hook's gate role, not its filename. All ten `check-*` wrappers are thin fail-open wrappers around their sibling Python brain; `mcp-usage-reminder`, `agents-mode-reminder`, and `turn-anchor-reminder` carry no separate Python brain and emit their JSON envelope directly from the shell/PowerShell script. Shared JSON envelope and transcript helpers live in `~/.codex/skills/lead/scripts/hook_common.py`.
+Per the source-hygiene placement law, the five warn-only audits live in `skills/lead/hooks/`, while blocking and reminder/context hooks live in `skills/lead/scripts/` beside `hook_common.py`. The Python files are the registered brains. Retained `.sh` and `.ps1` files are rollback adapters, never the default entry point.
 
 **The installer auto-installs all thirteen hook entries by default on all platforms** into `~/.codex/hooks.json` (`--global`) or `<project>/.codex/hooks.json` (`--target`): nine structural/audit entries plus the three informational `SessionStart` entries (`mcp-usage-reminder` + `agents-mode-reminder` + `check-scratch-valuables`) and the one `UserPromptSubmit` entry (`turn-anchor-reminder`). The JSON merge is idempotent and preserves all other user keys and hooks. Opt out with `--no-hypothesis-hook` (legacy flag kept for back-compat) or `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1` in the environment.
 
-**Manual trust step required (Codex security model).** Unlike Claude Code, Codex marks every newly-installed or never-yet-approved hook entry as **untrusted** by design — on a fresh install all thirteen entries are written to `hooks.json` but do **not fire** until the user reviews and trusts them via the interactive `codex` TUI, and `codex exec` skips an untrusted entry silently. Trust is **keyed per hooks.json entry** as `'<hooks.json path>:<event>:<group_index>:<hook_index>'` (a literal path string, lexically normalized but not canonicalized — a bare case difference in that path is a different key) and hashed over a **normalized entry identity** — event name, matcher, command string, timeout, async flag, status message, context limit — built by `codex-rs/hooks/src/engine/discovery.rs:630-653` (`NormalizedHookIdentity` struct at `:630-634`, populated by `command_hook_hash` at `:636-653`) and hashed by `codex-rs/config/src/fingerprint.rs:37-49` (verified against the installed tag `rust-v0.145.0`); **the hash never covers the hook script file's own contents.** Re-trust is only actually required when (a) an entry's command string, matcher, timeout, async flag, status message, or context limit changes, or (b) an entry is inserted, removed, or reordered ahead of another, shifting its positional index onto a different stored hash — editing a wrapper script's *contents* while its filename and hooks.json command line stay byte-stable re-trusts nothing (the pack relies on exactly this for in-place upgrades), and simply appending a new entry at the end leaves every earlier entry's key and hash untouched. After install, or after any upgrade that changes a trusted entry under (a) or (b), run `codex` once interactively, open the hook browser (per the on-screen prompt — typically the keystroke shown next to "Trust to view hooks; to trust; to toggle"), and trust the affected entries — when in doubt, review all thirteen (the nine structural/audit entries plus the three `SessionStart` entries (`mcp-usage-reminder` + `agents-mode-reminder` + `check-scratch-valuables`) and the `UserPromptSubmit` entry (`turn-anchor-reminder`)). Until an entry is trusted it stays visible-but-inactive (so the reminders, too, only start firing once trusted).
+The default runtime invokes each installed `.py` target directly with the absolute `sys.executable` of the Python process running the installer. `resolve_hook_target` is the only `wrapper|python|native` selection point. Before registration mutation, the Python profile checks every owned hook: the interpreter and `.py` target must be absolute regular files; on Windows the interpreter must be a non-reparse `.exe`, and on POSIX it must have execute permission. The later health gate actually launches every registered hook. The wrapper profile remains the retained rollback path and preflights its wrapper files. The reserved native profile requires a real native executable and fails before mutation because no native hook binaries ship. On Windows, the registered command is the verified `cmd.exe`/PowerShell-compatible unquoted absolute interpreter followed by the unquoted absolute `.py` path; unsupported whitespace or metacharacters fail the install instead of creating a dead registration.
 
-**Windows hook command shape.** On Windows, entries use `powershell.exe -NoProfile -ExecutionPolicy Bypass -File '<abs-path>\<script>.ps1'` — explicit `powershell.exe` avoids the Windows PATH gotcha where `bash` may resolve to the WSL launcher (`C:\Windows\System32\bash.exe`) instead of Git Bash. WSL bash cannot resolve `C:\Users\...` paths, so a `bash 'C:\...'` form silently failed on default Windows installs that have WSL installed alongside Git Bash. POSIX hosts use `bash <abs-path>/<script>.sh`.
+Upgrade ordering is strictly **SYNC → REGISTER → VERIFY → RECLAIM**. `scripts/check-hook-health.py` verifies every registered executable and target before reclaim can run. An installed wrapper is reclaimed only if its exact name is owned by `scripts/universal_hooks_manifest.py` and an adjacent same-stem `.py` ships in the pack. Reclaim is last, idempotent, dry-run-visible, and disabled by `--hook-runtime wrapper`; source wrappers remain available for rollback.
+
+Unlike Claude Code, Codex marks every newly-installed or changed hook entry as untrusted.
+
+#### Manual trust step required (Codex security model)
+
+After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for all 13 affected entries.
+Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.
+`codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.
+The trust modal does not time out and the operator must review all 13 entries before making the explicit choice.
+
+#### Trust identity
+
+Trust is keyed to the normalized registration identity, so changing the command from a wrapper to direct Python intentionally requires this one-time review; later Python-source edits do not change that identity.
+
+**Windows hook command shape.** The default command is `<absolute-python.exe> <absolute-script.py>`, with both tokens unquoted. That exact form was verified under both `cmd.exe` and PowerShell. The installer rejects unsupported tokens instead of guessing a quoting form. The old PowerShell and Bash command shapes remain available only through the explicit wrapper rollback profile.
 
 To remove already-installed entries independently:
 
@@ -150,7 +158,7 @@ python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform 
 python scripts/install-hypothesis-hook.py --target <hooks.json path> --platform codex --host-os posix --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path <ignored> --remove
 ```
 
-The auto-installed entries on Windows have this shape (showing the `check-bugfix-discipline` PreToolUse entry and the `check-passive-polling-stop` Stop entry; the other eight auto-installed entries — `check-work-items-archival-stop` (a second `Stop` entry, same Stop shape with its own marker), `check-git-push-gate` (a blocking PreToolUse entry on the `Bash` matcher), the `check-machine-local-path`, `check-no-trash-in-repo`, `check-stale-relation-residue`, `check-repository-orientation`, and `check-mcp-momentum` PreToolUse audits, plus `check-scratch-valuables` (a third `SessionStart` entry) and `turn-anchor-reminder` (the sole `UserPromptSubmit` entry) — share these shapes with their own markers and `-File` paths (or no matcher at all for the two reminder-tier additions); `check-no-trash-in-repo` adds `Bash` to its matcher so it sees the `git worktree add` command; machine-local-path and stale-relation-residue use the default `Edit|Write|NotebookEdit|apply_patch` matcher; repository-orientation uses the full edit/shell matcher; mcp-momentum uses a `Grep|Bash` matcher):
+The auto-installed entries on Windows have this direct-Python shape:
 
 ```json
 {
@@ -161,7 +169,7 @@ The auto-installed entries on Windows have this shape (showing the `check-bugfix
         "hooks": [
           {
             "type": "command",
-            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\\Users\\<you>\\.codex\\skills\\lead\\scripts\\check-bugfix-discipline.ps1'"
+            "command": "C:\\Python314\\python.exe C:\\Users\\<you>\\.codex\\skills\\lead\\scripts\\check-bugfix-discipline.py"
           }
         ]
       }
@@ -171,7 +179,7 @@ The auto-installed entries on Windows have this shape (showing the `check-bugfix
         "hooks": [
           {
             "type": "command",
-            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File 'C:\\Users\\<you>\\.codex\\skills\\lead\\scripts\\check-passive-polling-stop.ps1'"
+            "command": "C:\\Python314\\python.exe C:\\Users\\<you>\\.codex\\skills\\lead\\scripts\\check-passive-polling-stop.py"
           }
         ]
       }

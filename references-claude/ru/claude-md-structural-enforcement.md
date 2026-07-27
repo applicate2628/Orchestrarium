@@ -61,24 +61,18 @@
 <!-- BEGIN ORCHESTRARIUM PAYLOAD: hook-entrypoints-placement -->
 Точки входа хуков:
 
-- `.claude/agents/scripts/check-bugfix-discipline.sh` / `.ps1`
-- `.claude/agents/scripts/check-git-push-gate.sh` / `.ps1`
-- `.claude/agents/scripts/check-passive-polling-stop.sh` / `.ps1`
-- `.claude/agents/scripts/check-work-items-archival-stop.sh` / `.ps1`
-- `.claude/agents/hooks/check-machine-local-path.sh` / `.ps1` (аудит; импортирует `hook_common` из соседней `scripts/`)
-- `.claude/agents/hooks/check-no-trash-in-repo.sh` / `.ps1` (аудит; импортирует `hook_common` из соседней `scripts/`)
-- `.claude/agents/hooks/check-stale-relation-residue.sh` / `.ps1` (аудит; импортирует `hook_common` из соседней `scripts/`)
-- `.claude/agents/hooks/check-repository-orientation.sh` / `.ps1` (аудит; импортирует `hook_common` из соседней `scripts/`)
-- `.claude/agents/hooks/check-mcp-momentum.sh` / `.ps1` (аудит; импортирует `hook_common` из соседней `scripts/`)
-- `.claude/agents/hooks/check-typed-routing.sh` / `.ps1` (аудит, только Claude; импортирует `hook_common` из соседней `scripts/`)
+- `.claude/agents/scripts/check-{bugfix-discipline,git-push-gate,passive-polling-stop,work-items-archival-stop}.py`
+- `.claude/agents/hooks/check-{machine-local-path,no-trash-in-repo,stale-relation-residue,repository-orientation,mcp-momentum,typed-routing}.py`
 
-Этот список покрывает десять структурных хуков (blocking + audit); четыре reminder/context хука (`mcp-usage-reminder`, `agents-mode-reminder`, `check-scratch-valuables`, `turn-anchor-reminder`) описаны выше и живут в `.claude/agents/scripts/<name>.sh` / `.ps1`.
+Этот список покрывает десять структурных хуков (blocking + audit); четыре reminder/context хука (`mcp-usage-reminder`, `agents-mode-reminder`, `check-scratch-valuables`, `turn-anchor-reminder`) регистрируются через `.claude/agents/scripts/<name>.py`. Одноимённые `.sh` и `.ps1` остаются в исходном паке только как rollback-профиль.
 
-Согласно source-hygiene placement law (хуки разделены по GATE SEMANTICS; decision record `2026-07-11-hook-placement-gate-semantics`), шесть warn-only аудит-хуков живут в типизированной директории `agents/hooks/`, тогда как четыре блокирующих хука (bugfix-discipline, git-push-gate, passive-polling, work-items-archival) и четыре reminder/context хука (mcp-usage-reminder, agents-mode-reminder, check-scratch-valuables, turn-anchor-reminder) живут в `agents/scripts/` рядом с общей обвязкой `hook_common.py` — это placement-конвенция, а не необходимость импорта (аудит-хуки импортируют `hook_common` через директории с помощью явного path shim). `check-scratch-valuables` находится в `scripts/`, несмотря на своё имя `check-`, потому что его GATE SEMANTICS — это SessionStart reminder, а не PreToolUse audit — размещение следует за gate-ролью хука, а не за его именем файла. Все одиннадцать `check-*` враппера — это тонкие fail-open враппера вокруг соседнего Python-мозга; `mcp-usage-reminder`, `agents-mode-reminder` и `turn-anchor-reminder` не несут отдельного Python-мозга и выдают свой JSON-конверт напрямую из shell/PowerShell скрипта. Общие хелперы JSON-конверта и транскрипта живут в `.claude/agents/scripts/hook_common.py`.
+Согласно source-hygiene placement law, шесть warn-only аудит-хуков живут в `agents/hooks/`, а блокирующие и reminder/context хуки — в `agents/scripts/` рядом с `hook_common.py`. Зарегистрированными точками входа служат Python-файлы; сохранённые `.sh` и `.ps1` — rollback-адаптеры, а не дефолтный runtime.
 <!-- END ORCHESTRARIUM PAYLOAD: hook-entrypoints-placement -->
 
 <!-- BEGIN ORCHESTRARIUM PAYLOAD: installer-removal-json-path -->
 **Инсталлятор по умолчанию авто-устанавливает все четырнадцать hook-записей.** И `scripts/install-claude.sh --global`, и `scripts/install-claude.sh --target <project>` мержат записи `PreToolUse` (bugfix-discipline + git-push-gate на matcher `Bash` + machine-local-path + no-trash-in-repo, последний с `Bash`-инклюзивным matcher, чтобы он видел команду `git worktree add`, + stale-relation-residue + repository-orientation на полном edit/shell matcher + mcp-momentum на matcher `Grep|Bash` + typed-routing на matcher dispatch-инструмента `Agent`), две записи `Stop` (passive-polling + work-items-archival), три информационные записи `SessionStart` (`mcp-usage-reminder` + `agents-mode-reminder` + `check-scratch-valuables`, все без matcher) и запись `UserPromptSubmit` (`turn-anchor-reminder`, тоже без matcher) в `settings.json` идемпотентным JSON-мержем, который сохраняет другие ключи и хуки. Отказаться на этапе установки можно через `--no-hypothesis-hook` (legacy имя флага сохранено для обратной совместимости) или `ORCHESTRARIUM_NO_HYPOTHESIS_HOOK=1`. Удалять записи независимо:
+
+По умолчанию регистрация напрямую запускает установленный `.py` через абсолютный `sys.executable` Python-процесса инсталлятора. До изменения регистрации профиль Python проверяет каждый принадлежащий пакету хук: интерпретатор и `.py`-цель должны быть абсолютными обычными файлами; в Windows интерпретатор должен быть `.exe`, не являющимся reparse-точкой, а в POSIX у него должно быть право на выполнение. Последующий health-gate действительно запускает каждый зарегистрированный хук. Профиль wrapper остаётся сохранённым путём отката и предварительно проверяет файлы обёрток; зарезервированный профиль native требует настоящий исполняемый native-файл и завершается до изменения регистрации, поскольку пакет не поставляет native-бинарники хуков. Порядок фиксирован: **SYNC → REGISTER → VERIFY → RECLAIM**; `scripts/check-hook-health.py` является жёстким VERIFY-гейтом. Установленный wrapper удаляется только когда одновременно выполнены два условия: точное имя принадлежит манифесту, и рядом поставляется одноимённый `.py`. Reclaim идемпотентен, видим в dry run, выполняется последним и отключён для `--hook-runtime wrapper`; исходные wrappers сохраняются для rollback.
 
 ```bash
 python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --script-path <ignored> --remove
@@ -97,7 +91,7 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
 python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --platform claude --hook-event UserPromptSubmit --script-marker turn-anchor-reminder --script-path <ignored> --remove
 ```
 
-Авто-устанавливаемые записи используют такую форму (Windows exec-форма с PowerShell; POSIX использует `bash` вместо неё). Пример показывает PreToolUse-запись `check-bugfix-discipline` и Stop-запись `check-passive-polling-stop`; остальные восемь авто-устанавливаемых записей `PreToolUse`/`Stop` — `check-work-items-archival-stop` (вторая запись `Stop`, та же Stop-форма с собственным маркером и путём `-File`), `check-git-push-gate` (блокирующая PreToolUse-запись на matcher `Bash`), плюс PreToolUse-аудиты `check-machine-local-path`, `check-no-trash-in-repo`, `check-stale-relation-residue`, `check-repository-orientation`, `check-mcp-momentum` и `check-typed-routing` — разделяют эти формы со своими маркерами и путями `-File` (`check-no-trash-in-repo` также добавляет `Bash` в свой matcher, чтобы видеть команду `git worktree add`; machine-local-path и stale-relation-residue используют дефолтный matcher `Edit|Write|NotebookEdit|apply_patch`; repository-orientation использует полный edit/shell matcher; mcp-momentum использует matcher `Grep|Bash`; typed-routing использует matcher dispatch-инструмента `Agent`). Остальные четыре записи используют форму без `matcher`: `check-scratch-valuables` присоединяется к `mcp-usage-reminder` и `agents-mode-reminder` под `SessionStart`, а `turn-anchor-reminder` — единственная запись под `UserPromptSubmit`:
+На Windows и POSIX авто-устанавливаемые записи используют одну direct-Python exec-форму; различаются только абсолютные пути:
 
 ```json
 {
@@ -108,13 +102,9 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
         "hooks": [
           {
             "type": "command",
-            "command": "powershell",
+            "command": "C:\\Python314\\python.exe",
             "args": [
-              "-NoProfile",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-bugfix-discipline.ps1"
+              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-bugfix-discipline.py"
             ]
           }
         ]
@@ -125,13 +115,9 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
         "hooks": [
           {
             "type": "command",
-            "command": "powershell",
+            "command": "C:\\Python314\\python.exe",
             "args": [
-              "-NoProfile",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-passive-polling-stop.ps1"
+              "C:\\Users\\<you>\\.claude\\agents\\scripts\\check-passive-polling-stop.py"
             ]
           }
         ]
@@ -143,9 +129,8 @@ python scripts/install-hypothesis-hook.py --target ~/.claude/settings.json --pla
 
 Заметки по разрешению путей:
 
-- script-path в `args` — это абсолютный путь; относительные пути вроде `.claude/agents/scripts/...` ненадёжны, потому что хук выполняется с текущим рабочим каталогом сессии, а не с каталогом `settings.json` — см. документацию [Hooks path placeholders](https://code.claude.com/docs/en/hooks.md#path-placeholders).
-- Для project-local хуков (скрипт живёт в `<repo>/.claude/agents/scripts/...`) используйте вместо этого `${CLAUDE_PROJECT_DIR}\.claude\agents\scripts\check-bugfix-discipline.ps1`.
-- POSIX exec-форма использует `command: "bash", args: ["<abs-path>/check-bugfix-discipline.sh"]` и эквивалентный путь `check-passive-polling-stop.sh` для Stop.
+- И executable, и `.py`-аргумент — абсолютные пути, поэтому запуск не зависит от текущего рабочего каталога.
+- `--hook-runtime wrapper` восстанавливает сохранённые `.sh`/`.ps1` и прежнюю форму регистрации; reclaim в этом профиле отключён.
 
 Matcher `Edit|Write|NotebookEdit|apply_patch` (regex по имени инструмента) покрывает code-mutating инструменты Claude плюс `apply_patch` от Codex. `Stop`, `SessionStart` и `UserPromptSubmit` все игнорируют matcher; инсталлятор опускает его для этих записей.
 <!-- END ORCHESTRARIUM PAYLOAD: installer-removal-json-path -->

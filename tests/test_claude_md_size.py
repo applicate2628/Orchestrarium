@@ -36,13 +36,22 @@ EXPECTED_PAYLOADS: dict[str, tuple[int, str]] = {
         21_996,
         "81d0152163c08f7ec32e4ed5b6fcc9bf82be6eec7a6c329ba167d40a6811f726",
     ),
+    # Re-pinned 2026-07-27 when the hook registration moved from `.sh`/`.ps1`
+    # wrappers to direct `.py` invocation. The pin exists to force exactly this
+    # review, so the change was read before the numbers were refreshed, not
+    # after: the removed text is the PowerShell entry example
+    # (`-NoProfile -ExecutionPolicy Bypass -File …ps1`) and the POSIX `bash …sh`
+    # note, both of which stopped being true; the added text describes the
+    # `sys.executable` resolution, the preflight, and the
+    # SYNC -> REGISTER -> VERIFY -> RECLAIM transaction. A pin refreshed without
+    # reading the diff would defeat the mechanism entirely.
     "hook-entrypoints-placement": (
-        2_492,
-        "d3e6865d0affdc394f85032175dda467494000ca8464edd083f1d7249365a67d",
+        1_216,
+        "1c679072806a87812964343a86f9cbc8cf0779e6cfc38376192b9587044c4490",
     ),
     "installer-removal-json-path": (
-        6_635,
-        "e4134cae926137fa4a9e074c95499a51b7589f00223a9a9ebe9c079a9e8a97f9",
+        5_957,
+        "6809d9ba25ffd78f0763127879193cd6dfdc306aa09aff5c2db76682a5c57c04",
     ),
 }
 

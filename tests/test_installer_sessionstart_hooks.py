@@ -90,7 +90,13 @@ class InstallerSessionStartWiringTest(unittest.TestCase):
                         "--script-marker",
                         "agents-mode-reminder",
                         "--script-path",
-                        "/tmp/agents-mode-reminder.sh",
+                        str(
+                            ROOT
+                            / "src.claude"
+                            / "agents"
+                            / "scripts"
+                            / "agents-mode-reminder.py"
+                        ),
                     ],
                     capture_output=True,
                     text=True,
