@@ -206,3 +206,71 @@ def test_hook_health_nonzero_names_failing_hook(tmp_path: Path) -> None:
     assert completed.returncode != 0
     assert failing_stem in completed.stderr
     assert "deliberate installed hook failure" in completed.stderr
+
+
+def test_foreign_entry_without_args_is_tolerated(tmp_path: Path) -> None:
+    config = _config("claude")
+    config["hooks"]["PreToolUse"].append(
+        {"hooks": [{"type": "command", "command": "codegraph prompt-hook"}]}
+    )
+    target = tmp_path / "settings.json"
+    target.write_text(json.dumps(config), encoding="utf-8")
+    messages = CHECKER.verify_config(
+        target=target,
+        platform="claude",
+        host_os="posix",
+        repo_root=ROOT,
+        verify_fires=False,
+    )
+    expected = CHECKER._manifest_stems(ROOT, "claude")
+    assert len(messages) == len(expected)
+
+
+def test_unparseable_entry_naming_owned_stem_fails_loudly(tmp_path: Path) -> None:
+    stem = "check-bugfix-discipline"
+    target_script = _target_for("claude", stem)
+    config = _config("claude")
+    config["hooks"]["PreToolUse"].append(
+        {
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": f'"{sys.executable}" "{target_script}"',
+                }
+            ]
+        }
+    )
+    target = tmp_path / "settings.json"
+    target.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(ValueError, match=stem):
+        CHECKER.verify_config(
+            target=target,
+            platform="claude",
+            host_os="posix",
+            repo_root=ROOT,
+            verify_fires=False,
+        )
+
+
+def test_corrupted_args_on_owned_entry_names_the_stem(tmp_path: Path) -> None:
+    stem = "check-bugfix-discipline"
+    config = _config("claude")
+    matching_hooks = [
+        hook
+        for entry in config["hooks"]["PreToolUse"]
+        for hook in entry["hooks"]
+        if Path(hook["args"][0]).stem == stem
+    ]
+    assert len(matching_hooks) == 1
+    matching_hooks[0]["args"] = matching_hooks[0]["args"][0]
+    target = tmp_path / "settings.json"
+    target.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(ValueError, match=stem) as excinfo:
+        CHECKER.verify_config(
+            target=target,
+            platform="claude",
+            host_os="posix",
+            repo_root=ROOT,
+            verify_fires=False,
+        )
+    assert "missing registered hooks" not in str(excinfo.value)

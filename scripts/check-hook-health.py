@@ -106,7 +106,43 @@ def _iter_owned_hooks(
             for command_hook in commands:
                 if not isinstance(command_hook, dict):
                     continue
-                argv = _command_argv(command_hook, platform, host_os)
+                # `_command_argv` enforces the exec shape this pack's own
+                # installer writes (Claude: `command` plus a string-array
+                # `args`). Third-party tools registering into the same
+                # settings.json need not use that shape -- a real one on this
+                # machine registers `{"command": "codegraph prompt-hook"}` with
+                # no `args` at all, which is valid for the runtime and simply
+                # not ours. Parsing used to run BEFORE the stem filter, so one
+                # foreign entry failed the whole health check and reported the
+                # operator's fully converted, working registration as broken.
+                # An entry `_command_argv` cannot parse is NOT proof it was
+                # never ours: a command-only entry with no `args` key -- the
+                # exact shape a foreign tool is allowed to use -- also fails
+                # to parse on the Claude platform even when its command
+                # string names one of THIS pack's own manifest stems (e.g. a
+                # mis-registered or hand-edited duplicate). Silently skipping
+                # that entry would let it fire this pack's own hook a second
+                # time without the duplicate check ever seeing it, because a
+                # skipped entry never becomes a counted row. So an unparseable
+                # entry is interrogated before it is skipped: the raw entry is
+                # serialized and searched for an owned manifest stem. Naming
+                # one is fatal (loud failure, naming the stem) precisely
+                # because it cannot be verified as safe; naming none means it
+                # cannot be ours and is skipped. This narrows what the checker
+                # polices to what the pack installs -- it does not weaken any
+                # check on an owned, parseable entry.
+                try:
+                    argv = _command_argv(command_hook, platform, host_os)
+                except ValueError:
+                    raw = json.dumps(command_hook)
+                    named_stems = sorted(stem for stem in stems if stem in raw)
+                    if named_stems:
+                        raise ValueError(
+                            "entry names owned hook stem(s) but could not be "
+                            "parsed as this pack's exec shape: "
+                            + ", ".join(named_stems)
+                        )
+                    continue
                 joined = "\0".join(argv)
                 matches = sorted(stem for stem in stems if stem in joined)
                 if len(matches) == 1:

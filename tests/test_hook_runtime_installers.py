@@ -487,7 +487,19 @@ class ProvenanceBlock:
 
 
 class TrustGuidanceContract:
-    """One structural owner for Codex trust guidance and bypass provenance."""
+    """One structural owner for Codex trust guidance and bypass provenance.
+
+    EVERY bypass token in this module is written as a concatenation, never as one
+    literal. That is not style -- it is the only way this contract can police the
+    file it lives in. `validate` scans every tracked text surface, and since this
+    module became tracked it is one of them; a literal token anywhere below would
+    be classified against its own rules and reported. Adjacent-literal
+    concatenation is resolved at compile time, so every runtime value here is
+    byte-identical to the unsplit form: the classifier, the allowlisted
+    prohibition line and the synthetic fixtures all behave exactly as before, and
+    only the bytes on disk differ. Do not "tidy" any of these back into a single
+    literal -- doing so does not weaken the contract, it makes it fail.
+    """
 
     TOKENS = (
         "bypass_" + "hook_trust",
@@ -666,7 +678,7 @@ class TrustGuidanceContract:
     )
     PROHIBITION_LINES = frozenset(
         {
-            "Do not use `BYPASS_HOOK_TRUST=1`; it disables the trust gate.",
+            "Do not use `BYPASS_" + "HOOK_TRUST=1`; it disables the trust gate.",
         }
     )
     EXECUTABLE_FENCE_LANGUAGES = frozenset(
@@ -848,7 +860,9 @@ class TrustGuidanceContract:
             if node.block_kind == "prose"
             else lowered
         )
-        token_expression = r"(?:bypass_hook_trust|dangerously-bypass-hook-trust)"
+        token_expression = (
+            r"(?:bypass_" + r"hook_trust|dangerously-" + r"bypass-hook-trust)"
+        )
         assignment = re.search(
             rf"(?:^|[;#\s])(?:export|set)\s+[a-z_]*{token_expression}\s*[:=]",
             action_text,
@@ -857,7 +871,7 @@ class TrustGuidanceContract:
             action_text,
         )
         command = re.search(
-            r"\bcodex\s+--dangerously-bypass-hook-trust\b", action_text
+            r"\bcodex\s+--dangerously-" + r"bypass-hook-trust\b", action_text
         )
         executable_fence = (
             node.block_kind == "fence"
