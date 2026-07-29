@@ -7,6 +7,16 @@ independently re-verifiable form of the finding; `work-items/active/2026-07-25-r
 enforcement/model-review.md` and `design.md` §0.9/§4.4c are the session narrative and are not required to
 re-check anything below.
 
+## Current pack status (2026-07-29)
+
+The r8 SEN-2 cut documented below remains the historical disposition of the rejected threshold/NOTICE-only
+design; it no longer means SEN-2 is absent. Accepted decision
+`2026-07-29-host-correlated-action-evidence-for-delivery-gates` reinstates SEN-2 as the registry's third,
+stateless RESOLVE-tier sentinel for one exact opted-in Primary mutation action. Only a direct semantic
+exact-target mutation plus a same-id explicit-success result earns credit; child/re-entry skips bound it to
+one block per root user turn, and invalid input fails open. T-14/T-20 are unchanged: HALT remains absent,
+and operator-directed NOTICE remains unreliable on Codex.
+
 ## The fact
 
 At the `Stop` hook event, on **both** the Claude Code line and the Codex line, `decision: "block"` is a
@@ -238,9 +248,11 @@ stream, saved transcript, UI) shows the payload's `stopReason`/`systemMessage` t
   whether `stopReason`/`systemMessage` reach the operator on the Codex line at all — are no longer open
   questions for the configuration actually tested (`--json`-mode `codex exec`, fresh `CODEX_HOME`,
   `--dangerously-bypass-hook-trust`): both fields reached nobody, confirmed genuine per the three checks
-  above. The design decisions built on this (r7 HALT removal, r8 SEN-2 cut) do not need a
+  above. The r7 HALT removal and the operator-channel premise behind the r8 SEN-2 cut do not need a
   human-output-mode result to hold: `--json` mode already establishes that this pack cannot rely on
-  either channel reaching the operator in a configuration it must support.
+  either channel reaching the operator in a configuration it must support. The accepted 2026-07-29
+  decision supersedes SEN-2's absence by using model-facing RESOLVE and host-correlated mutation evidence,
+  not either operator channel.
 - Whether `codex exec` **human-output** mode (as opposed to `--json`) renders `reason`/`systemMessage`
   text differently is a narrower, lower-priority `ASSUMPTION (UNVERIFIED)` that remains genuinely open:
   the installed binary's `event_processor_with_human_output.rs` renders only `hook: <EventName> <Status>`

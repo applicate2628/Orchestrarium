@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Thin wrapper around check-mcp-momentum.py.
 #
-# Hook entry shape (PreToolUse on Grep|Bash -- the code-NAVIGATION tools):
+# Hook entry shape (PreToolUse on Grep|Bash|PowerShell|shell_command|exec_command):
 #   bash <this-script>
 # stdin: PreToolUse JSON envelope from Claude Code or Codex.
 # stdout: on a nudge, one line of JSON -- {"hookSpecificOutput":{"hookEventName":

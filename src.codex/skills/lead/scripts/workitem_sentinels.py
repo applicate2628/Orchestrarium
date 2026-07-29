@@ -55,10 +55,8 @@ data field (today only `"Stop"` is populated; `"SessionStart"` is the declared
 landing point for the future `check-scratch-valuables` migration -- see
 `work-items/decisions/2026-07-25-*` and the follow-up filed in this item's
 design §14). Adding invariant #3 means appending one more dict to `REGISTRY`
-and writing its `evaluate(ctx)` function -- nothing else in this file, and
-NOTHING outside it, needs to change. (r8: SEN-2, the previous invariant #3,
-was CUT -- see the SEN-2 section comment below and design.md §0.9. The
-registry currently holds SEN-0 and SEN-1.)
+and writing its `evaluate(ctx)` function. The registry now holds SEN-0,
+SEN-1, and the stateless RESOLVE-tier SEN-2 delivery-drought governor.
 
 WHAT THIS MODULE DOES NOT OWN. The severity -> payload mapping (which JSON
 shape a RESOLVE/NOTICE finding becomes, the `stop_hook_active` RESOLVE
@@ -132,6 +130,24 @@ class Finding:
 
 # How far up from the session cwd to search for a work-items/active directory.
 MAX_PARENTS = 40
+
+DELIVERY_ACTION_HEADING = "## delivery action"
+DELIVERY_ACTION_FIELD_RE = re.compile(
+    r"^-\s+\*\*(Primary|Fingerprint|Class|Target|Oracle)\*\*:\s*(.*?)\s*$",
+    re.IGNORECASE,
+)
+PRIMARY_TASK_STATUS_RE = re.compile(
+    r"^\s*-?\s*\*{0,2}Primary task status\*{0,2}\s*:\s*([^\r\n]+)$",
+    re.IGNORECASE | re.MULTILINE,
+)
+DELIVERY_FINGERPRINT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+DELIVERY_CLASSES = {"mutation"}
+DELIVERY_ORACLE = "correlated-success"
+DELIVERY_INPUT_NOTICE = "SEN-2-INPUT: delivery-action input is invalid; governor allowed this Stop."
+DELIVERY_DROUGHT_REASON = (
+    "SEN-2-DROUGHT: the admitted delivery action is still due. Continue with that action now "
+    "or surface one concrete external blocker."
+)
 
 
 def _find_active_dir(start: Path) -> Path | None:
@@ -251,11 +267,9 @@ def _git_is_repo(root: Path | None) -> bool:
 def _git_head_dirnames(root: Path, tree_path: str) -> list[str]:
     """Immediate directory names under `tree_path` in HEAD's tree, or [] when
     the path does not exist in HEAD, there is no HEAD (no commits yet), or git
-    is unavailable. This is the deliberate fail-open shape: on the pack's own
-    default posture (`/work-items/` gitignored on every project install --
-    design.md §2.4), this ALWAYS returns [] and every invariant below
-    collapses to its disk-only leg, which is the documented default, not an
-    error."""
+    is unavailable. This is the deliberate fail-open shape: when `work-items/`
+    has no tree in HEAD, this returns [] and every invariant below collapses to
+    its disk-only leg, which is expected rather than an error."""
     code, out = _run_git(root, ["ls-tree", "-d", "--name-only", f"HEAD:{tree_path}"])
     if code != 0:
         return []
@@ -287,10 +301,9 @@ def _git_archive_slug_pairs(root: Path) -> list[tuple[str, str]]:
 
 def resolve_slug_locations(ctx: dict, slug: str) -> dict:
     """Returns {"active": bool, "archive": [relative-path-string, ...]}, the
-    UNION of the disk leg and the HEAD leg for both active/ and archive/. On
-    the pack's default posture (`work-items/` gitignored) the HEAD leg is
-    empty by construction and this collapses to a disk-only answer -- the
-    documented default, not a degradation (design.md §2.4)."""
+    UNION of the disk leg and the HEAD leg for both active/ and archive/. When
+    `work-items/` has no tree in HEAD, this collapses to a disk-only answer,
+    which is expected rather than a degradation."""
     return {
         "active": slug in (ctx.get("active_slugs") or set()),
         "archive": list((ctx.get("archive_slug_paths") or {}).get(slug, [])),
@@ -302,11 +315,118 @@ def resolve_slug_locations(ctx: dict, slug: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _parse_delivery_action(item: Path) -> tuple[dict | None, str]:
+    status_path = item / "status.md"
+    if not status_path.is_file():
+        return None, "ABSENT"
+    try:
+        text = status_path.read_text(encoding="utf-8", errors="strict")
+    except (OSError, UnicodeError):
+        return None, "INVALID"
+    if len(text) > 128 * 1024:
+        return None, "INVALID"
+    task_status_match = PRIMARY_TASK_STATUS_RE.search(text)
+    if task_status_match is not None:
+        task_status = task_status_match.group(1).strip().lower()
+        if task_status in {"parked", "closed", "cancelled", "canceled", "blocked", "archived"}:
+            return None, "INACTIVE"
+    fields: dict[str, str] = {}
+    in_section = False
+    found_section = False
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not in_section:
+            if line.lower().rstrip(": ") == DELIVERY_ACTION_HEADING:
+                in_section = True
+                found_section = True
+            continue
+        if line.startswith("## "):
+            break
+        if not line:
+            continue
+        match = DELIVERY_ACTION_FIELD_RE.fullmatch(line)
+        if match is None:
+            return None, "INVALID"
+        key = match.group(1).lower()
+        if key in fields:
+            return None, "INVALID"
+        fields[key] = match.group(2).strip()
+    if not found_section:
+        return None, "ABSENT"
+    if set(fields) != {"primary", "fingerprint", "class", "target", "oracle"}:
+        return None, "INVALID"
+    if fields["primary"].lower() != "true":
+        return None, "INVALID"
+    fingerprint = fields["fingerprint"].lower()
+    action_class = fields["class"].lower()
+    target = fields["target"].replace("\\", "/")
+    oracle = fields["oracle"].lower()
+    if not DELIVERY_FINGERPRINT_RE.fullmatch(fingerprint):
+        return None, "INVALID"
+    if action_class not in DELIVERY_CLASSES or oracle != DELIVERY_ORACLE:
+        return None, "INVALID"
+    if not target or len(target) > 240 or target.startswith("/") or re.match(r"^[A-Za-z]:/", target):
+        return None, "INVALID"
+    if ".." in target.split("/"):
+        return None, "INVALID"
+    return {
+        "fingerprint": fingerprint,
+        "action_class": action_class,
+        "target_id": target,
+        "oracle": oracle,
+    }, "VALID"
+
+
+def _find_delivery_action(active_dir: Path) -> tuple[dict | None, str]:
+    actions: list[dict] = []
+    for item in sorted(path for path in active_dir.iterdir() if path.is_dir()):
+        action, status = _parse_delivery_action(item)
+        if status == "INVALID":
+            return None, "INVALID"
+        if action is not None:
+            actions.append(action)
+    if len(actions) > 1:
+        return None, "INVALID"
+    if not actions:
+        return None, "ABSENT"
+    return actions[0], "VALID"
+
+
+def delivery_action_validation_errors(active_dir: Path) -> dict[str, list[str]]:
+    """Validate the canonical opted-in section owned by this module.
+
+    Exact shape: `## Delivery action` followed by Primary=true, Fingerprint,
+    Class, Target, and Oracle bullet fields. Absence and parked items are
+    compatible; a present active contract is exact and globally unique.
+    """
+    errors: dict[str, list[str]] = {}
+    valid_names: list[str] = []
+    if not active_dir.is_dir():
+        return errors
+    for item in sorted(path for path in active_dir.iterdir() if path.is_dir()):
+        action, status = _parse_delivery_action(item)
+        if status == "INVALID":
+            errors.setdefault(item.name, []).append(
+                "invalid ## Delivery action contract (require exact Primary, Fingerprint, Class, Target, Oracle fields)"
+            )
+        elif action is not None:
+            valid_names.append(item.name)
+    if len(valid_names) > 1:
+        for name in valid_names:
+            errors.setdefault(name, []).append(
+                "multiple primary ## Delivery action contracts; exactly one active item may opt in"
+            )
+    return errors
+
+
 def build_context(
     cwd: str,
     *,
     last_assistant_message: str = "",
     user_message_text: str = "",
+    delivery_activity: list[dict] | None = None,
+    delivery_activity_status: str = "ABSENT",
+    runtime_stop: bool = False,
 ) -> dict:
     """Build the sentinel evaluation context once per Stop event. Every
     registry entry reads from this ctx rather than re-walking work-items/ or
@@ -315,10 +435,8 @@ def build_context(
     `user_message_text` is SEN-0's T1 operator-channel widening (F3): the
     operator's own last genuine typed message, read via
     `hook_common.last_genuine_user_text`'s bounded reverse scan (design.md
-    §0.9.4). r8 removed the `user_message_status` companion field -- it
-    existed only to feed SEN-2's `override-channel` discriminator, and SEN-2
-    is cut; nothing else in this module reads a read-status, only the text
-    itself, matched against a marker regardless of how it was obtained."""
+    §0.9.4). SEN-2 receives its bounded, content-free activity status and
+    correlated activity records separately from the adapter."""
     ctx: dict = {
         "cwd": cwd,
         "last_assistant_message": last_assistant_message or "",
@@ -330,6 +448,11 @@ def build_context(
         "active_slugs": set(),
         "archive_slug_paths": {},
         "legs": "disk",
+        "delivery_action": None,
+        "delivery_action_status": "ABSENT",
+        "delivery_activity": list(delivery_activity or []),
+        "delivery_activity_status": delivery_activity_status,
+        "runtime_stop": runtime_stop,
     }
     active_dir = _find_active_dir(Path(cwd))
     if active_dir is None:
@@ -365,6 +488,9 @@ def build_context(
             archive_slug_paths.setdefault(slug, []).append(rel)
     ctx["archive_slug_paths"] = archive_slug_paths
     ctx["legs"] = "both" if head_contributed else "disk"
+    action, action_status = _find_delivery_action(active_dir)
+    ctx["delivery_action"] = action
+    ctx["delivery_action_status"] = action_status
     return ctx
 
 
@@ -457,6 +583,55 @@ def _parse_epic_children(text: str) -> list[str]:
     return children
 
 
+def resolve_epic_locations(epics_dir: Path, slug: str) -> dict:
+    """Resolve one epic slug without selecting an ambiguous copy.
+
+    Active epics are direct ``work-items/epics/<slug>.md`` files. Closed
+    epics are one level below ``work-items/epics/archive/<YYYY-MM>/``. The
+    returned ``state`` is one of ``missing``, ``active``, ``archived``, or
+    ``duplicate``; callers must treat ``duplicate`` as invalid rather than
+    choosing a path by traversal order.
+    """
+    active_path = epics_dir / f"{slug}.md"
+    active = (active_path,) if active_path.is_file() else ()
+    archive_dir = epics_dir / "archive"
+    try:
+        archived = tuple(sorted(
+            path
+            for path in archive_dir.glob(f"*/{slug}.md")
+            if path.is_file()
+        ))
+    except OSError:
+        archived = ()
+    locations = active + archived
+    if not locations:
+        state = "missing"
+    elif len(locations) > 1:
+        state = "duplicate"
+    elif active:
+        state = "active"
+    else:
+        state = "archived"
+    return {
+        "state": state,
+        "active": active,
+        "archive": archived,
+        "locations": locations,
+    }
+
+
+def _epic_slugs(epics_dir: Path) -> list[str]:
+    """Return every slug visible in the active root or monthly archive."""
+    slugs: set[str] = set()
+    try:
+        slugs.update(path.stem for path in epics_dir.glob("*.md") if path.is_file())
+        archive_dir = epics_dir / "archive"
+        slugs.update(path.stem for path in archive_dir.glob("*/*.md") if path.is_file())
+    except OSError:
+        return []
+    return sorted(slugs)
+
+
 def _detect_orphans(active_dir: Path) -> list[tuple[str, str]]:
     orphans: list[tuple[str, str]] = []
     try:
@@ -483,13 +658,20 @@ def _detect_epic_orphans(ctx: dict) -> list[tuple[str, str]]:
     epics_dir = ctx.get("epics_dir")
     if active_dir is None or epics_dir is None:
         return []
-    try:
-        if not epics_dir.is_dir():
-            return []
-        files = sorted(p for p in epics_dir.iterdir() if p.is_file() and p.suffix == ".md")
-    except Exception:
+    if not epics_dir.is_dir():
         return []
-    for epic in files:
+    for slug in _epic_slugs(epics_dir):
+        resolution = resolve_epic_locations(epics_dir, slug)
+        if resolution["state"] == "duplicate":
+            rendered = ", ".join(
+                path.relative_to(epics_dir).as_posix()
+                for path in resolution["locations"]
+            )
+            orphans.append((slug, f"epic slug resolves to multiple locations ({rendered}); reconcile to one location"))
+            continue
+        if resolution["state"] == "missing":
+            continue
+        epic = resolution["locations"][0]
         try:
             text = epic.read_text(encoding="utf-8", errors="replace")
         except Exception:
@@ -497,14 +679,21 @@ def _detect_epic_orphans(ctx: dict) -> list[tuple[str, str]]:
         status = _epic_status(text)
         if status not in ("active", "closed"):
             continue
+        location_state = resolution["state"]
+        if location_state == "active" and status == "closed":
+            orphans.append((slug, "epic is status: closed but remains in the active root (archive it)"))
+            continue
+        if location_state == "archived" and status == "active":
+            orphans.append((slug, "epic is archived but status: active (restore it to the active root)"))
+            continue
         children = _parse_epic_children(text)
         if not children:
             continue  # a 0-child epic never flags
         all_done = all(_slug_is_done(ctx, c) for c in children)
-        if status == "active" and all_done:
+        if location_state == "active" and status == "active" and all_done:
             orphans.append((epic.stem, "all child work-items are closed but the epic is still status: active (close it)"))
-        elif status == "closed" and not all_done:
-            orphans.append((epic.stem, "epic is status: closed but a child work-item is not closed (reopen the epic)"))
+        elif location_state == "archived" and status == "closed" and not all_done:
+            orphans.append((epic.stem, "archived epic has a child work-item that is not closed (restore and reopen the epic)"))
     return orphans
 
 
@@ -525,12 +714,13 @@ def _sen0_block_reason(item_orphans: list[tuple[str, str]], epic_orphans: list[t
     if epic_orphans:
         lines = "\n".join(f"  - {name}: {why}" for name, why in epic_orphans)
         parts.append(
-            "One or more epics in work-items/epics/ are out of sync with their "
-            "children:\n\n"
+            "One or more epics violate the active/archive lifecycle contract:\n\n"
             f"{lines}\n\n"
-            "Update the epic file's status line: close a ready-to-close epic "
-            "(status: closed + ## Closure) or reopen an epic whose child reopened "
-            "(status: active)."
+            "For closure, write status: closed + ## Closure, then move the file "
+            "to work-items/epics/archive/<YYYY-MM>/<slug>.md. For reopening, "
+            "move it back to work-items/epics/<slug>.md and set status: active "
+            "in the same lifecycle operation. Reconcile duplicate slugs before "
+            "selecting either copy."
         )
     parts.append(
         "If leaving this as-is is intentional this turn, include "
@@ -644,31 +834,57 @@ def _sen1_evaluate(ctx: dict) -> Finding | None:
 
 
 # ---------------------------------------------------------------------------
-# SEN-2 -- delivery drought. CUT at r8 (design.md §0.9): a bare `systemMessage`
-# NOTICE from a Stop hook does not reach the operator on the Codex line
-# either (T-20), the same line the admitted incident happened on, so the
-# tier produced nothing observable there in any posture or band. Combined
-# with the substrate defect F1 already found (git cannot attribute delivery
-# to an item in the pack's own default posture) and the coverage gap R-6/R-19
-# already named (file count cannot see in-place revision -- this work-item's
-# own shape), the invariant carried more open design debt (seven residuals:
-# R-3b, R-4, R-5, R-6, R-14, R-19, R-21) than the rest of the design
-# combined. Withdrawn, not narrowed again, and re-proposed on a different
-# substrate: decision `2026-07-26-delivery-drought-needs-a-substrate-not-a-
-# threshold` (R-9's T0 turn/spend counter). Removed with it: the four
-# threshold flags, the `override-channel` field, and every git
-# delivery-attribution helper reachable only from this invariant (the
-# per-commit file-diff walk, the process-path classifier, the item-attributed
-# commit finder). `_git_is_repo` / `_git_head_dirnames` / `_git_archive_slug_pairs`
-# are NOT part of that removal -- they are SEN-1's own HEAD-leg substrate,
-# reached directly from `build_context`, and stay.
+# SEN-2 -- delivery drought. The threshold/NOTICE-only design was cut at r8
+# after T-20 proved that operator-directed NOTICE is not delivered on Codex.
+# The accepted 2026-07-29 host-correlated-action-evidence decision supersedes
+# that absence with a different, stateless RESOLVE-tier V1: one exact active
+# `## Delivery action` contract opts in (`Primary: true`, `Class: mutation`,
+# `Oracle: correlated-success`), and only a direct recognized mutation whose
+# semantic target exactly matches plus a same-id explicit-success result earns
+# delivery credit. Failed, ambiguous, missing, and in-flight results remain
+# due; canonical blocked status makes the action inapplicable rather than
+# manufacturing a blocker from tool output. The adapter owns the `agent_id`
+# child skip and `stop_hook_active` same-turn re-entry suppression, so an
+# unsatisfied action blocks at most once per root user turn. Invalid action or
+# transcript inputs fail open with a static NOTICE. HALT remains absent and
+# the measured operator-NOTICE limitations are unchanged.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
-# The registry -- extension seam S1. Adding invariant #3 means appending one
-# more record here and writing its evaluate(ctx) function; nothing else in
-# this file, and nothing outside it, needs to change.
+# The registry -- extension seam S1. A future invariant #4 is appended here
+# with its evaluate(ctx) function; the adapter and installer identity remain
+# unchanged.
 # ---------------------------------------------------------------------------
+
+def _sen2_evaluate(ctx: dict) -> Finding | None:
+    if ctx.get("runtime_stop") is not True:
+        return None
+    action_status = ctx.get("delivery_action_status")
+    if action_status == "INVALID":
+        return Finding("SEN-2", NOTICE, DELIVERY_INPUT_NOTICE)
+    action = ctx.get("delivery_action")
+    if not isinstance(action, dict):
+        return None
+    if ctx.get("delivery_activity_status") != "FOUND":
+        return Finding("SEN-2", NOTICE, DELIVERY_INPUT_NOTICE)
+    activities = ctx.get("delivery_activity")
+    if not isinstance(activities, list) or not activities:
+        return None
+    expected_class = action.get("action_class")
+    expected_target = action.get("target_id")
+    for activity in activities:
+        if not isinstance(activity, dict):
+            continue
+        targets = activity.get("target_ids")
+        if (
+            activity.get("action_class") == expected_class
+            and isinstance(targets, (list, tuple))
+            and expected_target in targets
+            and activity.get("succeeded") is True
+        ):
+            return None
+    return Finding("SEN-2", RESOLVE, DELIVERY_DROUGHT_REASON)
+
 
 REGISTRY: tuple[dict, ...] = (
     {
@@ -684,6 +900,13 @@ REGISTRY: tuple[dict, ...] = (
         "scope": "work-items/active/ union work-items/archive/** (disk + HEAD)",
         "evaluate": _sen1_evaluate,
         "exemptions": "none beyond the adapter's (agent_id, ORCHESTRARIUM_DISPATCHED_REVIEW)",
+    },
+    {
+        "id": "SEN-2",
+        "event": "Stop",
+        "scope": "one explicitly opted-in active delivery action",
+        "evaluate": _sen2_evaluate,
+        "exemptions": "host agent_id skip and stop_hook_active suppression in the adapter only",
     },
 )
 

@@ -361,9 +361,12 @@ WHAT THIS STILL DOES NOT COVER (disclosed, not silently assumed away):
     not currently capture or compare in EITHER mode. Treat this exactly as
     the multi-commit gap below: real, not hypothetical, explicitly not
     closed by this change.
-  - Multi-commit pushes, force pushes, rebases, amends, and mirror/tag pushes
-    all fall to the operator marker exactly as before — nothing here binds the
-    scanned content to a specific commit object or destination ref.
+  - `range` mode deliberately does NOT implement the cut exact-spelling push
+    grammar: force flags, extra positional refspecs, empty-source deletion
+    forms, config/tag expansion, repository redirects, and same-call git-state
+    mutation CAN still be credited when the first extracted remote/destination
+    pair matches. It binds no refspec source, tip, repository/worktree identity,
+    refspec cardinality, scanner authenticity, or remote freshness.
   - A model can still forge the evidence: DELIBERATELY type a literal fake
     clean-result line into a real command (`echo "publication-safety: clean
     (tracked, examined 999 files)"`), keyed to a real call id. This remains
@@ -413,6 +416,7 @@ import shlex
 import sys
 
 from hook_common import (
+    NO_OBSERVED_FAILURE,
     extract_model_shell_commands_with_ids,
     extract_model_tool_calls_with_ids,
     extract_tool_outputs_with_ids,
@@ -660,11 +664,13 @@ def _extract_push_remote_and_dst(push_args: list[str]) -> tuple[str, str] | None
 
     Splits a `<src>:<dst>` refspec on its FIRST `:` to recover the
     destination (a git ref name cannot itself contain `:`); a bare token with
-    no colon (`git push origin claude`) is used as-is. Returns None when
-    fewer than two positional tokens are present (a bare `git push` or
-    `git push origin` alone) or when the extracted destination is empty (a
-    delete refspec, `:dst`, or `+:dst`) -- either way, range credit is simply
-    not attempted, and the marker/deny fallback is unaffected."""
+    no colon (`git push origin claude`) is used as-is. Empty-source deletion
+    forms such as `:dst` and `+:dst` therefore still extract `dst` and can
+    receive this narrow remote/destination credit. Returns None when fewer
+    than two positional tokens are present (a bare `git push` or `git push
+    origin` alone) or when the text after the colon is actually empty (for
+    example, `src:`) -- either way, range credit is simply not attempted, and
+    the marker/deny fallback is unaffected."""
     positionals = [tok for tok in push_args if not tok.startswith("-")]
     if len(positionals) < 2:
         return None
@@ -1186,8 +1192,12 @@ def evaluate_push(envelope: dict) -> bool:
             # `tracked` mode has never needed (it names no destination).
             clean_range_bindings: dict[str, tuple[str, str]] = {}
             for idx, entry in enumerate(after_user_entries):
-                for result_id, result_text in extract_tool_outputs_with_ids(entry):
+                for result in extract_tool_outputs_with_ids(entry):
+                    result_id = result.call_id
                     result_positions.setdefault(result_id, []).append(idx)
+                    if result.execution_status != NO_OBSERVED_FAILURE:
+                        continue
+                    result_text = result.output_text
                     # WHOLE-LINE match AND no co-occurring scanner FAILURE
                     # line (2026-07-26 critical hardening — see
                     # SCAN_CLEAN_TRACKED_REGEX's and SCAN_FAILURE_MARKER_
@@ -1271,13 +1281,15 @@ def main() -> int:
         "irreversible publication), but this turn shows neither the per-turn "
         "user approval marker nor a publication-safety scan that reported a "
         "clean result.\n\n"
-        "Publication requires human review PLUS a leak-check of staged changes "
-        "(Publication safety governance). Pick one before retrying:\n\n"
-        "  (a) If the user has NOT explicitly approved this push: STOP, report "
-        "readiness to push, and ask the user to approve. The user approves by "
-        "including `[approve-publication]` in their next message; then retry. "
-        "The marker is honored only from the user's own message and only for "
-        "that turn.\n\n"
+        "Publication requires human review PLUS a leak-check of the content "
+        "being published (Publication safety governance). Pick one before "
+        "retrying:\n\n"
+        "  (a) Human exception: if the user has NOT explicitly approved this "
+        "push, STOP, report readiness to push, and ask the user to approve. "
+        "The user approves by including `[approve-publication]` in their next "
+        "message; then retry. The marker is honored only from the user's own "
+        "message and only for that turn. It is an exception, not the ordinary "
+        "recovery route for an already-committed change.\n\n"
         "  (b) If the user already instructed you to push in their last "
         "message: run a publication-safety scan (check-publication-safety.sh, "
         "its .ps1 twin, check-publication-gate.sh/.ps1, or /agents-check-safety "
@@ -1289,17 +1301,17 @@ def main() -> int:
         "same call (`bash check-publication-safety.sh` — not `... ; grep ...` "
         "or `... | tail ...`) — this gate can no longer credit a scan that "
         "shares its call with any other command, because their output "
-        "cannot be told apart afterward. The scan must also have something "
-        "to examine: a scan that reports zero staged files does NOT satisfy "
-        "this gate, even though it exits clean — that is what happens after "
-        "you have already committed (the staged index then equals HEAD), "
-        "and it means nothing was actually scanned. Stage the change first "
-        "(or use marker (a) instead), then retry once the scan's own output "
-        "reports a clean result over a NON-EMPTY set. If you already ran the "
-        "scan correctly and this still denies, the scan-and-result pair may "
-        "simply be too far back in this turn for the gate to see (only the "
-        "most recent transcript entries are read) — re-run the scan closer "
-        "to the push, or use marker (a).\n\n"
+        "cannot be told apart afterward. The scan must also report a clean "
+        "result over a NON-EMPTY set. For staged work, use the ordinary "
+        "standalone scan so its `tracked` receipt examines the staged files. "
+        "For work that is already committed, use a standalone scan with "
+        "`--range <remote> <dst>` so its clean, non-empty `range` receipt names "
+        "the same remote and destination as every detected push. A zero-file "
+        "receipt satisfies neither route, and neither receipt proves that a "
+        "push is safe. If you already ran the correct scan and this still "
+        "denies, the scan-and-result pair may simply be too far back in this "
+        "turn for the gate to see (only the most recent transcript entries "
+        "are read) — re-run the scan closer to the push, or use marker (a).\n\n"
         "  (c) To test what would be sent without publishing, use "
         "`git push --dry-run` — it is always allowed.\n\n"
         "This hook is a BACKSTOP for the human-review-before-push rule, not a "

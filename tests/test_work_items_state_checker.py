@@ -9,11 +9,31 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "scripts" / "check-work-items-state.py"
+VALIDATOR = ROOT / "scripts" / "validate-work-item-state.py"
 
 
 def run_checker(root: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(CHECKER), "--root", str(root), *args],
+        text=True,
+        capture_output=True,
+    )
+
+
+def write_checker_bundle(bundle_dir: Path, sentinel_source: str | None = None) -> Path:
+    """Copy the checker into an isolated installed-layout fixture."""
+    bundle_dir.mkdir(parents=True)
+    checker = bundle_dir / CHECKER.name
+    shutil.copy2(CHECKER, checker)
+    shutil.copy2(VALIDATOR, bundle_dir / VALIDATOR.name)
+    if sentinel_source is not None:
+        (bundle_dir / "workitem_sentinels.py").write_text(sentinel_source, encoding="utf-8")
+    return checker
+
+
+def run_bundled_checker(checker: Path, root: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(checker), "--root", str(root)],
         text=True,
         capture_output=True,
     )
@@ -73,6 +93,201 @@ def write_valid_item(root: Path, name: str = "active-item", event: dict | None =
     (item / "reviews" / "qa.md").write_text("PASS\n", encoding="utf-8")
     (item / "agent-runs.jsonl").write_text(json.dumps(event or ledger_event(workItem=name)) + "\n", encoding="utf-8")
     return item
+
+
+REQUIRED_SENTINEL_STUB = """\
+def resolve_epic_locations(epics_dir, slug):
+    return {"state": "missing", "locations": []}
+
+def delivery_action_validation_errors(active_dir):
+    return {}
+"""
+
+
+def test_checker_fails_when_required_sentinel_candidates_are_missing_without_epic_link(
+    tmp_path: Path,
+):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(tmp_path / "bundle")
+    write_valid_item(repo)
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.count("required-sentinel-dependency-unavailable") == 1
+    assert "installed-sibling" in result.stdout
+    assert "source-universal-hooks" in result.stdout
+    assert "RESULT: FAIL" in result.stdout
+
+
+def test_checker_preserves_required_sentinel_import_failure_cause(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(tmp_path / "bundle", "def broken(:\n")
+    write_valid_item(repo)
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.count("required-sentinel-dependency-unavailable") == 1
+    assert "installed-sibling: SyntaxError:" in result.stdout
+    assert "invalid syntax" in result.stdout
+
+
+def test_checker_rejects_incomplete_required_sentinel_contract(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(
+        tmp_path / "bundle",
+        "def resolve_epic_locations(epics_dir, slug):\n    return {'state': 'missing', 'locations': []}\n",
+    )
+    write_valid_item(repo)
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.count("required-sentinel-contract-mismatch") == 1
+    assert "missing callable(s): delivery_action_validation_errors" in result.stdout
+
+
+def test_checker_keeps_absent_optional_sentinel_reporting_verdict_neutral(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(tmp_path / "bundle", REQUIRED_SENTINEL_STUB)
+    write_valid_item(repo)
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RESULT: PASS" in result.stdout
+    assert "required-sentinel-" not in result.stdout
+    assert "sentinel optional reporting unavailable: missing callable(s):" in result.stdout
+    assert "build_context" in result.stdout
+    assert "evaluate_all" in result.stdout
+
+
+def test_checker_keeps_failing_optional_sentinel_reporting_verdict_neutral(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(
+        tmp_path / "bundle",
+        REQUIRED_SENTINEL_STUB
+        + """
+def build_context(root):
+    return {"root": root}
+
+def evaluate_all(context):
+    raise RuntimeError("optional reporting failed")
+""",
+    )
+    write_valid_item(repo)
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RESULT: PASS" in result.stdout
+    assert "required-sentinel-" not in result.stdout
+    assert (
+        "sentinel optional reporting failed: RuntimeError: optional reporting failed"
+        in result.stdout
+    )
+
+
+def test_checker_fails_causally_when_required_delivery_validation_raises(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(
+        tmp_path / "bundle",
+        REQUIRED_SENTINEL_STUB.replace(
+            "return {}", 'raise RuntimeError("delivery validation failed")'
+        ),
+    )
+    write_valid_item(repo)
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout.count("required-sentinel-call-failed") == 1
+    assert "RuntimeError: delivery validation failed" in result.stdout
+
+
+def test_checker_preserves_required_epic_resolver_call_failure_cause(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(
+        tmp_path / "bundle",
+        REQUIRED_SENTINEL_STUB.replace(
+            'return {"state": "missing", "locations": []}',
+            'raise RuntimeError("epic resolution failed")',
+        ),
+    )
+    item = write_valid_item(repo)
+    (item / "status.md").write_text(
+        valid_status().replace(
+            "**Primary task status**: open",
+            "**Primary task status**: open\n**Epic**: demo-epic",
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "epic location resolver failed: RuntimeError: epic resolution failed" in result.stdout
+
+
+def delivery_action_contract(*, include_oracle: bool = True, action_class: str = "mutation") -> str:
+    lines = [
+        "## Delivery action",
+        "",
+        "- **Primary**: true",
+        "- **Fingerprint**: delivery-core-v1",
+        f"- **Class**: {action_class}",
+        "- **Target**: scripts/universal-hooks/scripts/workitem_sentinels.py",
+    ]
+    if include_oracle:
+        lines.append("- **Oracle**: correlated-success")
+    return "\n".join(lines) + "\n"
+
+
+def test_checker_accepts_one_explicit_primary_delivery_action(tmp_path: Path):
+    item = write_valid_item(tmp_path)
+    with (item / "status.md").open("a", encoding="utf-8") as handle:
+        handle.write("\n" + delivery_action_contract())
+    result = run_checker(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_checker_rejects_incomplete_delivery_action(tmp_path: Path):
+    item = write_valid_item(tmp_path)
+    with (item / "status.md").open("a", encoding="utf-8") as handle:
+        handle.write("\n" + delivery_action_contract(include_oracle=False))
+    result = run_checker(tmp_path)
+    assert result.returncode == 1
+    assert "invalid ## Delivery action contract" in result.stdout
+
+
+def test_checker_rejects_unsupported_verification_delivery_action(tmp_path: Path):
+    item = write_valid_item(tmp_path)
+    with (item / "status.md").open("a", encoding="utf-8") as handle:
+        handle.write("\n" + delivery_action_contract(action_class="verification"))
+
+    result = run_checker(tmp_path)
+
+    assert result.returncode == 1
+    assert "invalid ## Delivery action contract" in result.stdout
+
+
+def test_checker_rejects_multiple_primary_delivery_actions(tmp_path: Path):
+    for name in ("first-item", "second-item"):
+        item = write_valid_item(tmp_path, name)
+        with (item / "status.md").open("a", encoding="utf-8") as handle:
+            handle.write("\n" + delivery_action_contract())
+    result = run_checker(tmp_path)
+    assert result.returncode == 1
+    assert result.stdout.count("multiple primary ## Delivery action contracts") == 2
+
+
+def test_checker_keeps_parked_item_compatible(tmp_path: Path):
+    item = write_valid_item(tmp_path)
+    status = valid_status().replace("**Primary task status**: open", "**Primary task status**: parked")
+    (item / "status.md").write_text(status + "\n" + delivery_action_contract(), encoding="utf-8")
+    result = run_checker(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_checker_passes_when_no_active_directory_exists(tmp_path: Path):
@@ -239,12 +454,12 @@ def test_depends_on_none_no_note(tmp_path: Path):
     assert "dangling" not in result.stdout
 
 
-# --- epic visibility: informational, never a failure ------------------------
+# --- epic links: unique active/archive target required -----------------------
 
 def test_dangling_epic_reported(tmp_path: Path):
     write_item_with_status(tmp_path, "item-epic", status_with_epic("2026-06-18-missing-epic"))
     result = run_checker(tmp_path)
-    assert result.returncode == 0, result.stdout
+    assert result.returncode == 1, result.stdout
     assert "dangling Epic: 2026-06-18-missing-epic" in result.stdout
 
 
@@ -256,6 +471,43 @@ def test_existing_epic_not_reported(tmp_path: Path):
     result = run_checker(tmp_path)
     assert result.returncode == 0, result.stdout
     assert "dangling Epic" not in result.stdout
+
+
+def test_archived_epic_is_a_valid_link_target(tmp_path: Path):
+    archived = tmp_path / "work-items" / "epics" / "archive" / "2026-06"
+    archived.mkdir(parents=True)
+    (archived / "2026-06-18-demo.md").write_text("---\nstatus: closed\n---\n", encoding="utf-8")
+    write_item_with_status(tmp_path, "item-epic", status_with_epic("2026-06-18-demo"))
+    result = run_checker(tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert "dangling Epic" not in result.stdout
+    assert "duplicate Epic" not in result.stdout
+
+
+def test_duplicate_active_and_archived_epic_is_rejected(tmp_path: Path):
+    epics = tmp_path / "work-items" / "epics"
+    archived = epics / "archive" / "2026-06"
+    archived.mkdir(parents=True)
+    (epics / "2026-06-18-demo.md").write_text("---\nstatus: active\n---\n", encoding="utf-8")
+    (archived / "2026-06-18-demo.md").write_text("---\nstatus: closed\n---\n", encoding="utf-8")
+    write_item_with_status(tmp_path, "item-epic", status_with_epic("2026-06-18-demo"))
+    result = run_checker(tmp_path)
+    assert result.returncode == 1, result.stdout
+    assert "duplicate Epic: 2026-06-18-demo" in result.stdout
+    assert "epics/2026-06-18-demo.md" in result.stdout
+    assert "epics/archive/2026-06/2026-06-18-demo.md" in result.stdout
+
+
+def test_duplicate_epic_across_archive_months_is_rejected(tmp_path: Path):
+    epics = tmp_path / "work-items" / "epics" / "archive"
+    for month in ("2026-05", "2026-06"):
+        archived = epics / month
+        archived.mkdir(parents=True)
+        (archived / "2026-06-18-demo.md").write_text("---\nstatus: closed\n---\n", encoding="utf-8")
+    write_item_with_status(tmp_path, "item-epic", status_with_epic("2026-06-18-demo"))
+    result = run_checker(tmp_path)
+    assert result.returncode == 1, result.stdout
+    assert "duplicate Epic: 2026-06-18-demo" in result.stdout
 
 
 def test_multiple_active_items_without_epics_surface_adoption_prompt(tmp_path: Path):

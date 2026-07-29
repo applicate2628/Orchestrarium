@@ -10,8 +10,15 @@ are committed.
 
 ## Where an epic lives
 
-A flat single file `work-items/epics/<date>-<slug>.md` — the same flat shape as
-the existing `work-items/bugs/` registry (not a folder-per-item):
+Location is part of the lifecycle state:
+
+- active: `work-items/epics/<date>-<slug>.md`;
+- closed: `work-items/epics/archive/<YYYY-MM>/<date>-<slug>.md`, where the
+  archive month comes from the `Closed: <YYYY-MM-DD>` line.
+
+Each epic remains one flat file (not a folder-per-item). A slug must resolve to
+exactly one location; a copy in both locations or in two archive months is an
+invalid duplicate, never a reason to select the newest file.
 
 ```
 ---
@@ -71,26 +78,31 @@ all done -> `ready-to-close (n/n)`; some -> `in-progress (k/n)`; none -> `open`.
   `work-items/index.md` `## Epics` row current, and **closes** the epic
   (`status: closed` + `## Closure`) ONLY when ALL children are closed AND the
   epic goal is met.
-- `$knowledge-archivist` handles epic archive moves / local index sync (its
-  non-semantic hygiene lane).
+- `$knowledge-archivist` then moves that same file to
+  `work-items/epics/archive/<YYYY-MM>/<slug>.md`, synchronizes the local index,
+  and verifies that the slug has exactly one location.
 
 ### Edge cases
 - A 0-child epic rolls up as `open/empty`, never `ready-to-close`.
 - Work-items without an epic are valid — they simply omit the `Epic:` line.
-- Reopening a child of a closed epic MUST reopen the epic (`status: active`).
-- An `Epic:` value with no matching epic file is a dangling link — flag and fix.
+- Reopening a child of a closed epic MUST move the epic back to
+  `work-items/epics/<slug>.md` and set `status: active` in the same lifecycle
+  operation. An archived active epic is invalid transitional residue.
+- An `Epic:` value with no unique active or archived epic file is invalid:
+  report missing and duplicate targets distinctly.
 
 ## Known limitation
 
-The work-items-archival Stop hook now ALSO scans `work-items/epics/` (Batch B):
-at turn end it flags a ready-to-close epic (every child done but the epic still
-`status: active`) and a stale-closed epic (`status: closed` but a child is not
-done), the same way it flags an unarchived work-item — subagent-safe (skips on
-`agent_id`) and failing open when `work-items/epics/` is absent. Still
-governance-only: nothing verifies the epic's `## Goal` is actually met (only that
-the children are closed), and a child line written without the documented
-`(active|closed)` marker is ignored by the scan. Full role rules: `skills/lead/SKILL.md` (Claude; `agents/lead.md` is a fail-closed stub) / the
-lead skill (Codex) `## Epics`.
+The work-items-archival Stop hook scans the active root and monthly archive. At
+turn end it flags a ready-to-close active epic, a closed epic left in the active
+root, an archived epic whose child reopened, an archived epic still marked
+active, and a duplicate slug. It is subagent-safe (skips on `agent_id`) and
+fails open when `work-items/epics/` is absent. Still governance-only: nothing
+verifies the epic's `## Goal` is actually met (only that the children are
+closed), and a child line written outside the documented exact
+`- <slug> (active|closed)` shape is ignored rather than guessed. Full role
+rules: `skills/lead/SKILL.md` (Claude; `agents/lead.md` is a fail-closed stub) /
+the lead skill (Codex) `## Epics`.
 
 ## Terms and Abbreviations
 
@@ -100,3 +112,5 @@ lead skill (Codex) `## Epics`.
 - **Roll-up**: an epic's derived progress (k of n children done) over its members.
 - **Coherence gate**: the `$product-manager` admission test that a set of work is
   one coherent unit (defined in `product-manager.md`).
+- **Resolver**: the single lookup owner that distinguishes a unique active epic,
+  a unique archived epic, a missing epic, and a duplicate slug.

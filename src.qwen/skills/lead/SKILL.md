@@ -70,7 +70,7 @@ Read these adjacent files when the task needs more than a trivial route decision
 
 ## Epics
 
-An epic groups multiple work-items under one goal or milestone. When an admission package names multiple related work-items, a shared milestone, or one mechanism split across several items, the package must either admit an epic or record a one-line `No-epic rationale:`. Lead materializes admitted epics under `work-items/epics/<date>-<slug>.md` and links child work-items with a single `Epic: <slug>` line in each child `status.md`.
+An epic groups multiple work-items under one goal or milestone. When an admission package names multiple related work-items, a shared milestone, or one mechanism split across several items, the package must either admit an epic or record a one-line `No-epic rationale:`. Lead materializes an admitted active epic under `work-items/epics/<date>-<slug>.md` and links child work-items with a single `Epic: <slug>` line in each child `status.md`. After all children close and the goal is met, Lead writes `status: closed`, `## Closure`, and `Closed: <YYYY-MM-DD>`; the knowledge archivist moves the same file to `work-items/epics/archive/<YYYY-MM>/<slug>.md`. Reopening moves it back and sets `status: active` in the same operation. Missing or duplicate active/archive resolution is invalid; never select a copy by recency.
 
 ## Status board
 
@@ -78,7 +78,7 @@ An epic groups multiple work-items under one goal or milestone. When an admissio
 
 ## Orchestrator upgrades
 
-`work-items/orchestrator-upgrades.md` is a thin precedent -> orchestrator-change -> status PROMOTION LEDGER (NOT a second status board): it tracks which lessons/decisions earned a concrete control-plane change. `$lead` decides which precedent earns a change; `$knowledge-archivist` reconciles rows against source-lesson status in the same Board-refresh pass. Non-shipped rows point at the owning board milestone or work-item instead of restating status; a `✅ shipped` row requires the source lesson `applied` in the same change AND an independent gate — no self-certification.
+`work-items/roadmaps/orchestrator-upgrades.md` is a thin precedent -> orchestrator-change -> status PROMOTION LEDGER (NOT a second status board): it tracks which lessons/decisions earned a concrete control-plane change. `$lead` decides which precedent earns a change; `$knowledge-archivist` reconciles rows against source-lesson status in the same Board-refresh pass. Non-shipped rows point at the owning board milestone or work-item instead of restating status; a `✅ shipped` row requires the source lesson `applied` in the same change AND an independent gate — no self-certification.
 
 ## Output
 

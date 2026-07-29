@@ -5,16 +5,9 @@ provider CLI: G-1b, G-4, G-5, G-6 (incl. T-13's degraded-posture primary),
 G-7, G-8/T-2, G-11, G-12, G-13/T-10, G-14/T-16 (SEN-0-scoped post-r8), plus
 SEN-1 behavior, T-3 (subagent skip), and T-4 (determinism).
 
-r8 (design.md §0.9): SEN-2 (delivery drought) was CUT from this release --
-T-20 measured that a bare `systemMessage` NOTICE does not reach the operator
-on the Codex line either, the same line the admitted incident happened on.
-Every SEN-2-only test class and fixture (TestSEN2Drought,
-TestG17T15DegradedMagnitudeSoundness, TestG15T17OverrideChannelUnavailability,
-TestT19DegradedTierCalibrationRegression) is REMOVED here, not skipped, along
-with the SEN-2-only entries in TestDI4's evaluation-path function list. Only
-the bounded reverse scan itself (G-14/T-16, `hook_common.last_genuine_user_text`)
-survives the cut, re-justified for SEN-0's F3 T1 widening rather than its
-original SEN-2-clearing purpose (design.md §0.9.4).
+SEN-2 now uses the cross-line RESOLVE channel: a due opted-in delivery action
+gets one model-visible continuation, while raw `stop_hook_active` suppresses
+same-turn re-entry. The older file-count/NOTICE design remains withdrawn.
 
 G-1 (SEN-0 verdict-equivalence) and G-2 (byte-identity of the wrapper AND the
 registry module across canon + 2 pack trees) are NOT duplicated here:
@@ -107,6 +100,387 @@ def run_adapter(script: Path, envelope: dict, extra_env: dict | None = None) -> 
         encoding="utf-8",
         env=env,
     )
+
+
+class TestSEN2DeliveryDrought(unittest.TestCase):
+    """A due opted-in delivery action gets one root continuation only."""
+
+    def _fixture(self) -> tuple[Path, Path]:
+        root = Path(tempfile.mkdtemp(prefix="wi-sen2-red-"))
+        (root / ".git").mkdir()
+        item = root / "work-items" / "active" / "delivery-item"
+        item.mkdir(parents=True)
+        (item / "status.md").write_text(
+            """## Current state
+
+- **Primary task status**: active
+
+## Delivery action
+
+- **Primary**: true
+- **Fingerprint**: delivery-core-v1
+- **Class**: mutation
+- **Target**: scripts/universal-hooks/scripts/workitem_sentinels.py
+- **Oracle**: correlated-success
+
+## Next action
+
+Implement the admitted universal sentinel owner.
+""",
+            encoding="utf-8",
+        )
+        transcript = root / "transcript.jsonl"
+        records = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "continue"}],
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call",
+                    "call_id": "process-1",
+                    "name": "shell_command",
+                    "arguments": '{"command":"review status.md"}',
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "process-1",
+                    "output": "Exit code: 0\nreview complete",
+                },
+            },
+        ]
+        transcript.write_text(
+            "\n".join(json.dumps(record) for record in records) + "\n",
+            encoding="utf-8",
+        )
+        return root, transcript
+
+    def test_due_root_stop_blocks_once_and_reentry_allows(self) -> None:
+        root, transcript = self._fixture()
+        files_before = sorted(path.relative_to(root) for path in root.rglob("*") if path.is_file())
+        first = run_adapter(
+            CANON_ADAPTER,
+            {"cwd": str(root), "transcript_path": str(transcript), "stop_hook_active": False},
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertIn('"decision": "block"', first.stdout)
+        self.assertIn("SEN-2-DROUGHT", first.stdout)
+
+        for _ in range(2):
+            repeat = run_adapter(
+                CANON_ADAPTER,
+                {"cwd": str(root), "transcript_path": str(transcript), "stop_hook_active": True},
+            )
+            self.assertEqual(repeat.returncode, 0, repeat.stderr)
+            self.assertNotIn('"decision": "block"', repeat.stdout)
+        files_after = sorted(path.relative_to(root) for path in root.rglob("*") if path.is_file())
+        self.assertEqual(files_after, files_before)
+
+    @staticmethod
+    def _write_records(transcript: Path, records: list[dict]) -> None:
+        transcript.write_text(
+            "\n".join(json.dumps(record) for record in records) + "\n",
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def _codex_records(*, name: str, arguments: object, output: str, assistant_prose: str = "") -> list[dict]:
+        records: list[dict] = [
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "continue"}],
+                },
+            }
+        ]
+        if assistant_prose:
+            records.append({
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "assistant",
+                    "content": [{"type": "output_text", "text": assistant_prose}],
+                },
+            })
+        records.extend([
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "custom_tool_call",
+                    "call_id": "delivery-1",
+                    "name": name,
+                    "input": arguments,
+                },
+            },
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "custom_tool_call_output",
+                    "call_id": "delivery-1",
+                    "output": output,
+                },
+            },
+        ])
+        return records
+
+    def test_satisfied_matching_mutation_allows(self) -> None:
+        root, transcript = self._fixture()
+        self._write_records(transcript, self._codex_records(
+            name="apply_patch",
+            arguments="*** Update File: scripts/universal-hooks/scripts/workitem_sentinels.py",
+            output="Exit code: 0",
+        ))
+        result = run_adapter(CANON_ADAPTER, {"cwd": str(root), "transcript_path": str(transcript)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('"decision": "block"', result.stdout)
+        self.assertNotIn("SEN-2-DROUGHT", result.stdout)
+
+    def test_patch_body_target_mention_does_not_satisfy_different_patch_header(self) -> None:
+        root, transcript = self._fixture()
+        self._write_records(transcript, self._codex_records(
+            name="apply_patch",
+            arguments=(
+                "*** Update File: work-items/active/delivery-item/status.md\n"
+                "@@\n"
+                "+- **Target**: scripts/universal-hooks/scripts/workitem_sentinels.py"
+            ),
+            output="Exit code: 0",
+        ))
+        result = run_adapter(CANON_ADAPTER, {"cwd": str(root), "transcript_path": str(transcript)})
+        self.assertIn('"decision": "block"', result.stdout)
+        self.assertIn("SEN-2-DROUGHT", result.stdout)
+
+    def test_matching_failure_does_not_manufacture_progress(self) -> None:
+        root, transcript = self._fixture()
+        self._write_records(transcript, self._codex_records(
+            name="apply_patch",
+            arguments="*** Update File: scripts/universal-hooks/scripts/workitem_sentinels.py",
+            output="Exit code: 1",
+        ))
+        result = run_adapter(CANON_ADAPTER, {"cwd": str(root), "transcript_path": str(transcript)})
+        self.assertIn('"decision": "block"', result.stdout)
+        self.assertIn("SEN-2-DROUGHT", result.stdout)
+
+    def test_ambiguous_result_does_not_manufacture_progress(self) -> None:
+        root, transcript = self._fixture()
+        self._write_records(transcript, self._codex_records(
+            name="apply_patch",
+            arguments="*** Update File: scripts/universal-hooks/scripts/workitem_sentinels.py",
+            output="untyped result body",
+        ))
+        result = run_adapter(CANON_ADAPTER, {"cwd": str(root), "transcript_path": str(transcript)})
+        self.assertIn('"decision": "block"', result.stdout)
+        self.assertIn("SEN-2-DROUGHT", result.stdout)
+
+    def test_corrupt_transcript_fails_open_with_static_notice(self) -> None:
+        root, transcript = self._fixture()
+        transcript.write_text("not-json{\n", encoding="utf-8")
+        result = run_adapter(CANON_ADAPTER, {"cwd": str(root), "transcript_path": str(transcript)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('"decision": "block"', result.stdout)
+        self.assertIn("SEN-2-INPUT", result.stdout)
+        self.assertNotIn(str(root), result.stdout)
+
+    def test_assistant_prose_cannot_claim_matching_delivery(self) -> None:
+        root, transcript = self._fixture()
+        self._write_records(transcript, self._codex_records(
+            name="shell_command",
+            arguments='{"command":"review status.md"}',
+            output="Exit code: 0",
+            assistant_prose=(
+                "apply_patch succeeded for "
+                "scripts/universal-hooks/scripts/workitem_sentinels.py"
+            ),
+        ))
+        result = run_adapter(CANON_ADAPTER, {"cwd": str(root), "transcript_path": str(transcript)})
+        self.assertIn('"decision": "block"', result.stdout)
+        self.assertIn("SEN-2-DROUGHT", result.stdout)
+
+    def test_child_stop_never_blocks_due_parent_action(self) -> None:
+        root, transcript = self._fixture()
+        result = run_adapter(
+            CANON_ADAPTER,
+            {"cwd": str(root), "transcript_path": str(transcript), "agent_id": "child-1"},
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_verification_contract_is_input_invalid_and_shell_echo_gets_no_credit(self) -> None:
+        root, transcript = self._fixture()
+        status_path = root / "work-items" / "active" / "delivery-item" / "status.md"
+        status_path.write_text(
+            status_path.read_text(encoding="utf-8").replace(
+                "- **Class**: mutation",
+                "- **Class**: verification",
+            ),
+            encoding="utf-8",
+        )
+        self._write_records(transcript, self._codex_records(
+            name="shell_command",
+            arguments={
+                "command": (
+                    "Write-Output "
+                    "scripts/universal-hooks/scripts/workitem_sentinels.py"
+                )
+            },
+            output="Exit code: 0",
+        ))
+
+        result = run_adapter(CANON_ADAPTER, {"cwd": str(root), "transcript_path": str(transcript)})
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('"decision": "block"', result.stdout)
+        self.assertIn("SEN-2-INPUT", result.stdout)
+
+    def test_only_direct_semantic_mutation_target_gets_credit(self) -> None:
+        target = "scripts/universal-hooks/scripts/workitem_sentinels.py"
+        false_credit_calls = (
+            ("shell_command", {"command": f"Write-Output {target}"}),
+            ("PowerShell", {"command": f"Write-Output {target}"}),
+            ("exec_command", {"cmd": f"printf {target}"}),
+            ("functions.exec", {"source": f'tools.apply_patch("*** Update File: {target}")'}),
+            ("mcp__untrusted__write", {"file_path": target}),
+            ("Write", {"file_path": "docs/other.md", "description": target}),
+            ("Write", {"file_path": "docs/other.md", "metadata": {"target": target}}),
+        )
+        for tool_name, tool_input in false_credit_calls:
+            with self.subTest(tool=tool_name, input=tool_input):
+                root, transcript = self._fixture()
+                self._write_records(transcript, self._codex_records(
+                    name=tool_name,
+                    arguments=tool_input,
+                    output="Exit code: 0",
+                ))
+                result = run_adapter(
+                    CANON_ADAPTER,
+                    {"cwd": str(root), "transcript_path": str(transcript)},
+                )
+                self.assertIn('"decision": "block"', result.stdout)
+                self.assertIn("SEN-2-DROUGHT", result.stdout)
+
+        for tool_name, tool_input in (
+            ("Write", {"file_path": target, "content": "replacement"}),
+            (
+                "mcp__serena__replace_symbol_body",
+                {"relative_path": target, "name_path": "_sen2_evaluate", "body": "replacement"},
+            ),
+        ):
+            with self.subTest(tool=tool_name, semantic_target=tool_input):
+                root, transcript = self._fixture()
+                self._write_records(transcript, self._codex_records(
+                    name=tool_name,
+                    arguments=tool_input,
+                    output="Exit code: 0",
+                ))
+                result = run_adapter(
+                    CANON_ADAPTER,
+                    {"cwd": str(root), "transcript_path": str(transcript)},
+                )
+                self.assertNotIn('"decision": "block"', result.stdout)
+                self.assertNotIn("SEN-2-DROUGHT", result.stdout)
+
+    def test_direct_mutation_without_result_remains_due(self) -> None:
+        root, transcript = self._fixture()
+        target = "scripts/universal-hooks/scripts/workitem_sentinels.py"
+        records = self._codex_records(
+            name="Write",
+            arguments={"file_path": target, "content": "replacement"},
+            output="Exit code: 0",
+        )
+        self._write_records(transcript, records[:-1])
+
+        result = run_adapter(CANON_ADAPTER, {"cwd": str(root), "transcript_path": str(transcript)})
+
+        self.assertIn('"decision": "block"', result.stdout)
+        self.assertIn("SEN-2-DROUGHT", result.stdout)
+
+    def test_claude_direct_mutation_requires_explicit_success(self) -> None:
+        target = "scripts/universal-hooks/scripts/workitem_sentinels.py"
+        for is_error, should_satisfy in ((False, True), (None, False)):
+            with self.subTest(is_error=is_error):
+                root, transcript = self._fixture()
+                result_block = {
+                    "type": "tool_result",
+                    "tool_use_id": "claude-write-1",
+                    "content": "done",
+                }
+                if is_error is not None:
+                    result_block["is_error"] = is_error
+                records = [
+                    {
+                        "type": "user",
+                        "message": {"role": "user", "content": "continue"},
+                    },
+                    {
+                        "type": "assistant",
+                        "message": {
+                            "role": "assistant",
+                            "content": [{
+                                "type": "tool_use",
+                                "id": "claude-write-1",
+                                "name": "Write",
+                                "input": {"file_path": target, "content": "replacement"},
+                            }],
+                        },
+                    },
+                    {
+                        "type": "user",
+                        "message": {"role": "user", "content": [result_block]},
+                    },
+                ]
+                self._write_records(transcript, records)
+
+                result = run_adapter(
+                    CANON_ADAPTER,
+                    {"cwd": str(root), "transcript_path": str(transcript)},
+                )
+
+                self.assertEqual('"decision": "block"' not in result.stdout, should_satisfy)
+
+    def test_canonical_blocked_status_is_inapplicable(self) -> None:
+        root, transcript = self._fixture()
+        status_path = root / "work-items" / "active" / "delivery-item" / "status.md"
+        status_path.write_text(
+            status_path.read_text(encoding="utf-8").replace(
+                "- **Primary task status**: active",
+                "- **Primary task status**: blocked",
+            ),
+            encoding="utf-8",
+        )
+
+        result = run_adapter(CANON_ADAPTER, {"cwd": str(root), "transcript_path": str(transcript)})
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_direct_outside_repo_transcript_capability_still_drives_due_verdict(self) -> None:
+        root, fixture_transcript = self._fixture()
+        outside_transcript = Path(tempfile.mktemp(prefix="sen2-host-capability-", suffix=".jsonl"))
+        try:
+            outside_transcript.write_text(
+                fixture_transcript.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            result = run_adapter(
+                CANON_ADAPTER,
+                {"cwd": str(root), "transcript_path": str(outside_transcript)},
+            )
+        finally:
+            outside_transcript.unlink(missing_ok=True)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('"decision": "block"', result.stdout)
+        self.assertIn("SEN-2-DROUGHT", result.stdout)
 
 
 class TestSEN0MarkerScoping(unittest.TestCase):
@@ -359,6 +733,99 @@ class TestSEN1DualState(unittest.TestCase):
         self.assertFalse(any(f.id == "SEN-1" for f in findings))
 
 
+class TestEpicArchiveLifecycle(unittest.TestCase):
+    def _root(self) -> Path:
+        root = make_git_repo()
+        (root / "work-items" / "active").mkdir(parents=True)
+        (root / "work-items" / "epics").mkdir(parents=True)
+        return root
+
+    @staticmethod
+    def _write_epic(path: Path, status: str, children: tuple[str, ...] = ()) -> None:
+        child_lines = "".join(f"- {slug} (active)\n" for slug in children)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            f"---\nstatus: {status}\n---\n# Epic\n\n## Children\n{child_lines}",
+            encoding="utf-8",
+        )
+
+    def test_resolver_distinguishes_missing_active_archived_and_duplicate(self) -> None:
+        root = self._root()
+        epics = root / "work-items" / "epics"
+        self.assertEqual(sentinels.resolve_epic_locations(epics, "e1")["state"], "missing")
+
+        active = epics / "e1.md"
+        self._write_epic(active, "active")
+        self.assertEqual(sentinels.resolve_epic_locations(epics, "e1")["state"], "active")
+
+        archived = epics / "archive" / "2026-07" / "e1.md"
+        archived.parent.mkdir(parents=True)
+        active.replace(archived)
+        self.assertEqual(sentinels.resolve_epic_locations(epics, "e1")["state"], "archived")
+
+        self._write_epic(active, "active")
+        resolution = sentinels.resolve_epic_locations(epics, "e1")
+        self.assertEqual(resolution["state"], "duplicate")
+        self.assertEqual(len(resolution["locations"]), 2)
+
+    def test_resolver_fails_closed_on_duplicate_archive_months(self) -> None:
+        root = self._root()
+        epics = root / "work-items" / "epics"
+        for month in ("2026-06", "2026-07"):
+            self._write_epic(epics / "archive" / month / "e1.md", "closed")
+        resolution = sentinels.resolve_epic_locations(epics, "e1")
+        self.assertEqual(resolution["state"], "duplicate")
+        self.assertEqual(len(resolution["archive"]), 2)
+
+    def test_closed_epic_in_active_root_flags_even_without_children(self) -> None:
+        root = self._root()
+        self._write_epic(root / "work-items" / "epics" / "e1.md", "closed")
+        findings = sentinels.evaluate_all(sentinels.build_context(str(root)))
+        sen0 = [finding for finding in findings if finding.id == "SEN-0"]
+        self.assertEqual(len(sen0), 1)
+        self.assertIn("remains in the active root", sen0[0].message)
+
+    def test_archived_closed_epic_with_reopened_child_flags(self) -> None:
+        root = self._root()
+        child = root / "work-items" / "active" / "kid"
+        child.mkdir()
+        (child / "status.md").write_text("State: active\n", encoding="utf-8")
+        self._write_epic(
+            root / "work-items" / "epics" / "archive" / "2026-07" / "e1.md",
+            "closed",
+            ("kid",),
+        )
+        findings = sentinels.evaluate_all(sentinels.build_context(str(root)))
+        sen0 = [finding for finding in findings if finding.id == "SEN-0"]
+        self.assertEqual(len(sen0), 1)
+        self.assertIn("archived epic has a child work-item that is not closed", sen0[0].message)
+
+    def test_archived_active_epic_requires_same_operation_restore(self) -> None:
+        root = self._root()
+        archived = root / "work-items" / "epics" / "archive" / "2026-07" / "e1.md"
+        self._write_epic(archived, "active")
+        findings = sentinels.evaluate_all(sentinels.build_context(str(root)))
+        sen0 = [finding for finding in findings if finding.id == "SEN-0"]
+        self.assertEqual(len(sen0), 1)
+        self.assertIn("restore it to the active root", sen0[0].message)
+
+        active = root / "work-items" / "epics" / "e1.md"
+        archived.replace(active)
+        findings = sentinels.evaluate_all(sentinels.build_context(str(root)))
+        self.assertFalse(any(finding.id == "SEN-0" for finding in findings))
+
+    def test_duplicate_epic_locations_flag_without_selecting_a_copy(self) -> None:
+        root = self._root()
+        epics = root / "work-items" / "epics"
+        self._write_epic(epics / "e1.md", "active")
+        self._write_epic(epics / "archive" / "2026-07" / "e1.md", "closed")
+        findings = sentinels.evaluate_all(sentinels.build_context(str(root)))
+        sen0 = [finding for finding in findings if finding.id == "SEN-0"]
+        self.assertEqual(len(sen0), 1)
+        self.assertIn("resolves to multiple locations", sen0[0].message)
+        self.assertIn("archive/2026-07/e1.md", sen0[0].message)
+
+
 class TestF4NonMonthArchiveLayout(unittest.TestCase):
     """Regression for the archive-layout regression (design.md review-
     grounding F4): a non-month category directory one level under
@@ -381,8 +848,9 @@ class TestF4NonMonthArchiveLayout(unittest.TestCase):
         # archive/, not active/, since it is (correctly) fully archived.
         (root / "work-items" / "active").mkdir(parents=True)
         epics = root / "work-items" / "epics"
-        epics.mkdir(parents=True)
-        (epics / "e1.md").write_text(
+        epic_path = epics / "e1.md" if epic_status == "active" else epics / "archive" / "2026-07" / "e1.md"
+        epic_path.parent.mkdir(parents=True)
+        epic_path.write_text(
             f"---\nstatus: {epic_status}\n---\n# Epic: demo\n\n## Children\n- kid (active)\n",
             encoding="utf-8",
         )

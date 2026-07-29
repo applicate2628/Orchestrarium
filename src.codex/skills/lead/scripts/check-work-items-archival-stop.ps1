@@ -3,13 +3,13 @@
     Thin wrapper around check-work-items-archival-stop.py for PowerShell hosts.
 .DESCRIPTION
     This filename is a Codex trust-pinned wire identifier and stays unchanged
-    even though the .py helper now hosts TWO invariants from the
+    even though the .py helper now hosts THREE invariants from the
     workitem_sentinels.py registry, not one: SEN-0 (archival orphan -- this
     hook's original sole behaviour) and SEN-1 (dual-state item: a slug present
-    in BOTH work-items/active/ and work-items/archive/). A third invariant
-    (SEN-2, delivery drought) and a third response tier (HALT) were designed
-    and then withdrawn before release -- see check-work-items-archival-stop.py's
-    own docstring and references-codex/stop-hook-halting-primitives.md for why.
+    in BOTH work-items/active/ and work-items/archive/), plus SEN-2 (a
+    stateless RESOLVE-tier delivery-drought governor for one exact opted-in
+    Primary mutation action). HALT remains absent; the measured Codex NOTICE
+    delivery limits are unchanged.
 
     Hook entry shape (Stop):
       powershell -NoProfile -ExecutionPolicy Bypass -File <this-script>

@@ -399,6 +399,18 @@ if [ "$DRY_RUN" -eq 1 ]; then
 fi
 echo
 
+resolve_python_command() {
+  if command -v python >/dev/null 2>&1; then
+    printf '%s' "python"
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    printf '%s' "python3"
+    return 0
+  fi
+  return 1
+}
+
 # Verify source
 if [[ ! -d "$SOURCE/agents" ]]; then
   echo "FAIL: Source directory $SOURCE/agents not found."
@@ -408,6 +420,27 @@ fi
 if [[ ! -f "$DEFAULT_AGENTS_MODE_SOURCE" ]]; then
   echo "FAIL: missing default agents-mode template at $DEFAULT_AGENTS_MODE_SOURCE" >&2
   exit 1
+fi
+
+if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ -z "${ORCHESTRARIUM_NO_HYPOTHESIS_HOOK:-}" ]; then
+  hook_installer="$REPO_DIR/scripts/install-hypothesis-hook.py"
+  if [ -f "$hook_installer" ]; then
+    python_cmd="$(resolve_python_command || true)"
+    if [ -z "$python_cmd" ]; then
+      echo "FAIL: python or python3 is required to preflight structural-hook installation" >&2
+      exit 1
+    fi
+    settings_target="$TARGET/settings.json"
+    run_test_hook_transaction_preflight() {
+      "$python_cmd" "$hook_installer" \
+        --target "$settings_target" \
+        --platform claude \
+        --repo-root "$REPO_DIR" \
+        --test-install-scope "$MODE" \
+        --test-transaction-preflight
+    }
+    run_test_hook_transaction_preflight
+  fi
 fi
 
 if [[ ! -d "$TARGET" ]]; then
@@ -450,371 +483,6 @@ install_item() {
   fi
 }
 
-ensure_local_only_gitignore_entries() {
-  local project_root="$1"
-  local gitignore="$project_root/.gitignore"
-  local entries=("/.reports/" "/.plans/" "/work-items/" "/.scratch/")
-  local missing=()
-  local declined_negation=()
-  local declined_sentinel=()
-  local declined_unverifiable=()
-  local normalized=""
-
-  if [[ -f "$gitignore" ]]; then
-    normalized="$(sed -e '1s/^\xef\xbb\xbf//' -e 's/\r$//' -e 's/[[:space:]]*$//' "$gitignore")"
-  fi
-
-  local unresolved=()
-  for entry in "${entries[@]}"; do
-    local alternate="${entry#/}"
-    local decline_marker="# orchestrarium:local-only-tier-declined:${entry}"
-    if grep -Fxq "$entry" <<<"$normalized" || grep -Fxq "$alternate" <<<"$normalized"; then
-      continue
-    fi
-    if grep -Fxq "$decline_marker" <<<"$normalized"; then
-      declined_sentinel+=("$entry")
-      continue
-    fi
-    unresolved+=("$entry")
-  done
-
-  if [[ ${#unresolved[@]} -gt 0 ]]; then
-    # THE INVARIANT THIS BLOCK ENFORCES: the probe consults nothing outside
-    # the throwaway repository and the file under test. Every mechanism
-    # below -- clearing environment variables AND setting config values
-    # explicitly -- exists only to make that invariant hold; when adding a
-    # new git call here, check it against the invariant directly rather than
-    # against the list of vectors found so far, because the list is
-    # provably incomplete (three rounds have each found a member neither of
-    # the prior rounds had named, and the git-documented environment-variable
-    # list itself was consulted via empirical enumeration on this machine,
-    # not a rendered man page -- treat it as thorough, not complete).
-    #
-    # Two DISTINCT classes of leak, needing two DIFFERENT mechanisms:
-    #   1. Environment variables that redirect the probe onto a DIFFERENT
-    #      repository or inject config directly (GIT_DIR, GIT_WORK_TREE,
-    #      GIT_COMMON_DIR, ... GIT_CONFIG_COUNT below) -- closed by CLEARING
-    #      them, since an absent variable cannot redirect anything.
-    #   2. A resolution FALLBACK that fires precisely when a setting is
-    #      UNSET -- core.excludesFile has no default VALUE, but git falls
-    #      back to a default PATH ($XDG_CONFIG_HOME/git/ignore, else
-    #      $HOME/.config/git/ignore) whenever core.excludesFile itself is
-    #      unset. Pointing GIT_CONFIG_GLOBAL at a nonexistent file leaves
-    #      core.excludesFile unset, which is exactly the condition that
-    #      triggers this fallback -- so clearing GIT_CONFIG_GLOBAL/
-    #      GIT_CONFIG_NOSYSTEM does NOT close it (confirmed this session on
-    #      bash, pwsh 7, and Windows PowerShell 5.1: an ambient HOME or
-    #      XDG_CONFIG_HOME pointing at a personal global-gitignore covering
-    #      the tier still leaked in, SILENTLY, under the round-6 fix). This
-    #      is plausibly the MOST LIKELY trigger of any vector found so far:
-    #      `~/.config/git/ignore` is the standard personal global-gitignore
-    #      location, and an operator who uses this pack across several
-    #      repos and adds a tier to their own global ignore -- a natural
-    #      thing to do -- would get silence on every project, forever, with
-    #      no message. Closed by SETTING core.excludesFile EXPLICITLY on the
-    #      throwaway repo (below, right after `git init`) rather than
-    #      relying on it staying unset: an explicit value, even a
-    #      nonexistent path, means the "unset" condition the fallback keys
-    #      on never occurs, so no future default-path fallback can reopen
-    #      this by a different name.
-    #
-    # GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR (individually or paired) can
-    # redirect a `-C <dir>`-targeted call onto a COMPLETELY DIFFERENT
-    # repository -- but NOT identically: measured this session with
-    # `git rev-parse --show-toplevel --git-dir` as well as `check-ignore`,
-    # GIT_WORK_TREE alone redirects BOTH the working tree AND git-dir
-    # discovery (so a WORKING-TREE-relative ignore source, e.g. a plain
-    # `.gitignore`, leaks); GIT_DIR alone redirects ONLY git-dir discovery,
-    # leaving the working tree in place (so a GIT-DIR-relative ignore
-    # source, e.g. `$GIT_DIR/info/exclude`, leaks, while a `.gitignore` does
-    # not) -- both are real leaks, just through different ignore-source
-    # channels, and clearing both closes both regardless of which channel a
-    # given operator's ambient state happens to use. GIT_ICASE_PATHSPECS /
-    # GIT_LITERAL_PATHSPECS / GIT_NOGLOB_PATHSPECS / GIT_GLOB_PATHSPECS make
-    # `check-ignore` itself fail outright ("pathspec magic not supported by
-    # this command", exit 128, confirmed this session) -- not a silent
-    # leak, since the writer's own exit-code handling below degrades that to
-    # "could not be checked" rather than misreading it as ignored or not,
-    # but it still leaves the tier unwritten with no way to recover except
-    # by clearing the variable, so it is cleared alongside the rest.
-    # GIT_CONFIG_COUNT (paired with GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n)
-    # injects arbitrary config -- including core.excludesFile -- directly
-    # from the environment, bypassing GIT_CONFIG_NOSYSTEM/GIT_CONFIG_GLOBAL
-    # entirely (confirmed this session; found by reading git's own
-    # documented environment-variable list rather than extending piecemeal
-    # from previously-named vectors, not named by anyone before that read).
-    # A realistic trigger for any of the redirect/injection vars: the
-    # installer running from inside a git hook, mid-rebase, or from a CI/IDE
-    # wrapper that exports them. Cleared for the ENTIRE unresolved-tier
-    # block (not just calls targeting the throwaway repo): the SAME vars
-    # would equally corrupt the project_root-targeted
-    # `config --local core.ignorecase` read below. None of these have a
-    # legitimate reason to survive here -- this probe only ever needs a
-    # fresh, self-contained repository at a path this function chose itself.
-    local giprobe_repo_location_vars=(
-      GIT_DIR GIT_WORK_TREE GIT_COMMON_DIR GIT_NAMESPACE
-      GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM
-      GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
-      GIT_CONFIG_SYSTEM GIT_CONFIG_COUNT
-      GIT_ICASE_PATHSPECS GIT_LITERAL_PATHSPECS GIT_NOGLOB_PATHSPECS GIT_GLOB_PATHSPECS
-    )
-    local giprobe_saved_env=()
-    local giprobe_env_var
-    for giprobe_env_var in "${giprobe_repo_location_vars[@]}"; do
-      if [[ -v "$giprobe_env_var" ]]; then
-        giprobe_saved_env+=("${giprobe_env_var}=${!giprobe_env_var}")
-        unset "$giprobe_env_var"
-      else
-        giprobe_saved_env+=("$giprobe_env_var")
-      fi
-    done
-    local giprobe_saved_config_nosystem="${GIT_CONFIG_NOSYSTEM-}"
-    local giprobe_had_config_nosystem=0
-    [[ -v GIT_CONFIG_NOSYSTEM ]] && giprobe_had_config_nosystem=1
-    local giprobe_saved_config_global="${GIT_CONFIG_GLOBAL-}"
-    local giprobe_had_config_global=0
-    [[ -v GIT_CONFIG_GLOBAL ]] && giprobe_had_config_global=1
-
-    local giprobe_root=""
-    local giprobe_trap_installed=0
-    local giprobe_prior_trap_line=""
-    if command -v git >/dev/null 2>&1; then
-      giprobe_root="$(mktemp -d 2>/dev/null || true)"
-      if [[ -n "$giprobe_root" ]]; then
-        # Chain onto whatever EXIT trap this script already has registered
-        # (e.g. install-codex.sh's own temp-file cleanup, set BEFORE this
-        # function runs) instead of silently replacing it, and cover an
-        # interrupt/abort/hung git mid-probe, not just the normal-return
-        # path -- confirmed this session (a real SIGTERM sent mid-probe
-        # still removed the throwaway repo AND ran the pre-existing sibling
-        # cleanup) that a plain `trap ... EXIT` here would otherwise both
-        # leak this directory on interrupt AND drop that sibling cleanup.
-        # `trap -p` prints a properly re-quoted single argument; only bash's
-        # OWN quote removal (via `set --`) safely recovers the exact
-        # original text -- manual sed-stripping of the outer quote
-        # characters is NOT sufficient, since the embedded `'\''` escaping
-        # only means what it means together with the outer quote pair.
-        giprobe_prior_trap_line="$(trap -p EXIT)"
-        if [[ -n "$giprobe_prior_trap_line" ]]; then
-          eval "set -- ${giprobe_prior_trap_line#trap -- }"
-          eval "_giprobe_prior_exit_fn() { $1
-          }"
-        else
-          _giprobe_prior_exit_fn() { :; }
-        fi
-        trap "rm -rf '$giprobe_root' 2>/dev/null || true; _giprobe_prior_exit_fn" EXIT
-        giprobe_trap_installed=1
-        export GIT_CONFIG_NOSYSTEM=1
-        export GIT_CONFIG_GLOBAL="${giprobe_root}.noconfig"
-        # Neutralize the OPERATOR's ambient git environment for this
-        # throwaway repo: GIT_CONFIG_NOSYSTEM plus a nonexistent
-        # GIT_CONFIG_GLOBAL stop a global `core.excludesFile` from leaking
-        # into the probe's verdict, and `--template=<nonexistent>` stops a
-        # global `init.templateDir` from seeding `info/exclude` -- confirmed
-        # this session that without this, an operator's own global
-        # core.excludesFile covering the tier made the writer silently
-        # decide "already ignored" for a PROJECT whose own .gitignore said
-        # nothing about it, so a teammate cloning without that global config
-        # would track the tier -- the exact publication-safety failure this
-        # tier system exists to prevent. A nonexistent path is sufficient
-        # for both (git treats it as "no such config"/"no such template",
-        # not an error).
-        if ! git init -q --template="${giprobe_root}.notemplate" "$giprobe_root" >/dev/null 2>&1; then
-          rm -rf "$giprobe_root" 2>/dev/null || true
-          giprobe_root=""
-        fi
-        if [[ -n "$giprobe_root" ]]; then
-          # core.excludesFile has no default VALUE, but git falls back to a
-          # default PATH ($XDG_CONFIG_HOME/git/ignore, else
-          # $HOME/.config/git/ignore) whenever it is UNSET -- which is
-          # exactly the state GIT_CONFIG_GLOBAL=<nonexistent> leaves it in.
-          # Setting it EXPLICITLY here (a nonexistent path is enough) ends
-          # the fallback permanently, rather than relying on it staying
-          # unset -- confirmed this session that an ambient HOME or
-          # XDG_CONFIG_HOME pointing at a real `~/.config/git/ignore`
-          # covering the tier otherwise leaked in SILENTLY even with
-          # GIT_CONFIG_NOSYSTEM/GIT_CONFIG_GLOBAL already neutralized.
-          # This write's own failure must fail the probe CLOSED, the same
-          # way the `git init` check right above already does: a probe that
-          # cannot CONFIRM core.excludesFile is neutralized is not merely
-          # unhardened, it is UNVERIFIABLE, and an unverifiable probe must
-          # never be trusted to decide "already ignored" for real -- an
-          # external review forced this failure and confirmed the ambient
-          # leak survives silently without this check.
-          if ! git -C "$giprobe_root" config core.excludesFile "${giprobe_root}.noexcludes" >/dev/null 2>&1; then
-            rm -rf "$giprobe_root" 2>/dev/null || true
-            giprobe_root=""
-          fi
-        fi
-        if [[ -n "$giprobe_root" ]]; then
-          # Mirror project_root's own EXPLICIT LOCAL core.ignorecase, when
-          # set, onto the (now-neutralized) throwaway repo -- --local (never
-          # plain `config`, which falls through to global/system config even
-          # from inside a repo with no local override -- confirmed this
-          # session) keeps this scoped to project_root's own repo only, and
-          # never crashes when project_root is not yet a repo at all (exit
-          # 128, swallowed by `|| true`, same as an unset override).
-          local project_ignorecase
-          project_ignorecase="$(git -C "$project_root" config --local --type=bool core.ignorecase 2>/dev/null || true)"
-          if [[ "$project_ignorecase" == "true" || "$project_ignorecase" == "false" ]]; then
-            git -C "$giprobe_root" config core.ignorecase "$project_ignorecase" >/dev/null 2>&1 || true
-          fi
-        fi
-      fi
-    fi
-
-    # Every "!"-prefixed line's OWN stripped pattern, collected once (not
-    # per tier) -- see the isolation-testing rationale in the comment above
-    # this block.
-    local giprobe_negation_patterns=()
-    if [[ -n "$giprobe_root" ]]; then
-      while IFS= read -r giprobe_line; do
-        if [[ "$giprobe_line" == "!"* ]]; then
-          giprobe_negation_patterns+=("${giprobe_line#!}")
-        fi
-      done <<<"$normalized"
-    fi
-
-    for entry in "${unresolved[@]}"; do
-      local alt_noslash="${entry#/}"
-      alt_noslash="${alt_noslash%/}"
-      local probe="${alt_noslash}/.orchestrarium-probe"
-      if [[ -z "$giprobe_root" ]]; then
-        declined_unverifiable+=("$entry")
-        continue
-      fi
-      local negation_matched=0
-      for pattern in "${giprobe_negation_patterns[@]}"; do
-        printf '%s\n' "$pattern" > "$giprobe_root/.gitignore"
-        if git -C "$giprobe_root" check-ignore -q "$probe" 2>/dev/null; then
-          negation_matched=1
-          break
-        fi
-      done
-      if [[ "$negation_matched" -eq 1 ]]; then
-        declined_negation+=("$entry")
-        continue
-      fi
-      printf '%s\n' "$normalized" > "$giprobe_root/.gitignore"
-      local whole_file_rc=1
-      if git -C "$giprobe_root" check-ignore -q "$probe" 2>/dev/null; then
-        whole_file_rc=0
-      else
-        whole_file_rc=$?
-      fi
-      if [[ "$whole_file_rc" -eq 0 ]]; then
-        continue
-      elif [[ "$whole_file_rc" -eq 1 ]]; then
-        missing+=("$entry")
-      else
-        declined_unverifiable+=("$entry")
-      fi
-    done
-
-    if [[ -n "$giprobe_root" ]]; then
-      rm -rf "$giprobe_root" 2>/dev/null || true
-    fi
-    if [[ "$giprobe_trap_installed" -eq 1 ]]; then
-      if [[ -n "$giprobe_prior_trap_line" ]]; then
-        eval "$giprobe_prior_trap_line"
-      else
-        trap - EXIT
-      fi
-    fi
-    if [[ "$giprobe_had_config_nosystem" -eq 1 ]]; then
-      export GIT_CONFIG_NOSYSTEM="$giprobe_saved_config_nosystem"
-    else
-      unset GIT_CONFIG_NOSYSTEM 2>/dev/null || true
-    fi
-    if [[ "$giprobe_had_config_global" -eq 1 ]]; then
-      export GIT_CONFIG_GLOBAL="$giprobe_saved_config_global"
-    else
-      unset GIT_CONFIG_GLOBAL 2>/dev/null || true
-    fi
-    local giprobe_restore_entry
-    for giprobe_restore_entry in "${giprobe_saved_env[@]}"; do
-      if [[ "$giprobe_restore_entry" == *"="* ]]; then
-        export "$giprobe_restore_entry"
-      fi
-    done
-  fi
-
-  for entry in "${declined_negation[@]}"; do
-    echo "  .gitignore: '$entry' has a '!' negation on file -- leaving as-is (not re-appending; a later broader ignore pattern could still re-ignore this tree, which this writer does not check)"
-  done
-  for entry in "${declined_sentinel[@]}"; do
-    echo "  .gitignore: '$entry' declined by operator (sentinel present) -- leaving as-is"
-  done
-  for entry in "${declined_unverifiable[@]}"; do
-    echo "  .gitignore: '$entry' could not be checked against git (git unavailable or the check itself failed) -- leaving as-is rather than risk overriding an undetected '!' negation"
-  done
-
-  if [[ ${#missing[@]} -eq 0 ]]; then
-    if [[ ${#declined_negation[@]} -eq 0 && ${#declined_sentinel[@]} -eq 0 && ${#declined_unverifiable[@]} -eq 0 ]]; then
-      echo "  .gitignore: local-only entries already present"
-    fi
-    return
-  fi
-
-  echo "  Ensuring .gitignore ignores local-only task-memory paths..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    for entry in "${missing[@]}"; do
-      if [[ -f "$gitignore" ]]; then
-        echo "    [dry-run] would append '$entry' to $gitignore"
-      else
-        echo "    [dry-run] would create $gitignore with '$entry'"
-      fi
-    done
-    return
-  fi
-
-  if [[ ! -f "$gitignore" ]]; then
-    printf '%s\n' "${missing[@]}" > "$gitignore"
-    for entry in "${missing[@]}"; do
-      echo "    added '$entry' to $gitignore"
-    done
-    return
-  fi
-
-  for entry in "${missing[@]}"; do
-    printf '\n%s\n' "$entry" >> "$gitignore"
-    echo "    added '$entry' to $gitignore"
-  done
-}
-
-ensure_credential_gitignore_entry() {
-  # The pack's own credential file (.claude/SECRET.md — the invoke-claude-api
-  # wrapper's repo-local lookup candidate) must never be trackable in a project
-  # install. Kept separate from the local-only tier array above: that array is
-  # the cross-installer tier set owned by shared/local-only-tiers.txt, while
-  # this is a Claude-pack-specific credential path.
-  local project_root="$1"
-  local gitignore="$project_root/.gitignore"
-  local secret_entry="/.claude/SECRET.md"
-  local alternate="${secret_entry#/}"
-
-  if [[ -f "$gitignore" ]] && { grep -Fxq "$secret_entry" "$gitignore" || grep -Fxq "$alternate" "$gitignore"; }; then
-    echo "  .gitignore: credential entry already present"
-    return
-  fi
-
-  echo "  Ensuring .gitignore ignores the pack credential file $secret_entry..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    if [[ -f "$gitignore" ]]; then
-      echo "    [dry-run] would append '$secret_entry' to $gitignore"
-    else
-      echo "    [dry-run] would create $gitignore with '$secret_entry'"
-    fi
-    return
-  fi
-
-  if [[ ! -f "$gitignore" ]]; then
-    printf '%s\n' "$secret_entry" > "$gitignore"
-  else
-    printf '\n%s\n' "$secret_entry" >> "$gitignore"
-  fi
-}
-
 remove_dangling_symlink() {
   local path="$1"
   local label="$2"
@@ -827,18 +495,6 @@ remove_dangling_symlink() {
       rm -f "$path"
     fi
   fi
-}
-
-resolve_python_command() {
-  if command -v python >/dev/null 2>&1; then
-    printf '%s' "python"
-    return 0
-  fi
-  if command -v python3 >/dev/null 2>&1; then
-    printf '%s' "python3"
-    return 0
-  fi
-  return 1
 }
 
 sync_agents_mode_file() {
@@ -1163,10 +819,6 @@ if [[ -f "$src_agents" ]]; then
   fi
 fi
 
-if [ "$MODE" != "global" ]; then
-  ensure_local_only_gitignore_entries "$PROJECT_ROOT"
-  ensure_credential_gitignore_entry "$PROJECT_ROOT"
-fi
 
 migrate_legacy_agents_mode_file "$LEGACY_AGENTS_MODE_TARGET" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
 sync_agents_mode_file "$DEFAULT_AGENTS_MODE_SOURCE" "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
@@ -1329,7 +981,7 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ "$DRY_RUN" -ne 1 ] && [ -z "${ORCHESTRAR
       --platform claude \
       --host-os "$hook_host_os" \
       --script-marker check-mcp-momentum \
-      --tool-matcher "Grep|Bash" \
+      --tool-matcher "Grep|Bash|PowerShell|shell_command|exec_command" \
       --script-path "$mcp_momentum_script_target"
     echo "  Installing typed-routing PreToolUse hook [AUDIT] (host-os=$hook_host_os)..."
     run_hook_installer \

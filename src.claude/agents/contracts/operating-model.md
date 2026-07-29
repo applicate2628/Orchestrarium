@@ -136,7 +136,7 @@ Periodic controls complement stage gates. Stage gates answer "may this item adva
 | Refactor debt scan | `$architecture-reviewer` | Milestone close | Admit bounded refactor item |
 | Closure and archive hygiene | `$knowledge-archivist` | Monthly / milestone close | Archive and update index |
 | Board refresh | `$knowledge-archivist` | Every delivery wave (post-wave sync pass) | Refresh `work-items/README.md` against git and the tree |
-| Orchestrator-upgrades reconcile | `$knowledge-archivist` | Same post-wave pass as Board refresh | Reconcile `work-items/orchestrator-upgrades.md` rows against source lesson status |
+| Orchestrator-upgrades reconcile | `$knowledge-archivist` | Same post-wave pass as Board refresh | Reconcile `work-items/roadmaps/orchestrator-upgrades.md` rows against source lesson status |
 | Governance alignment | `$knowledge-archivist` | Governance change | Propagate to all governance files in same commit |
 | Documentation sync | `$knowledge-archivist` | Skill, role, or template added/removed/renamed | Update README, INSTALL, install scripts per root CLAUDE.md checklists |
 | Batch-close consultant-check | `$lead` | Only when explicitly requested by lead or repo-local lane policy and `consultantMode` is enabled | Satisfy the requested consultant sweep or keep the batch open and escalate honestly |
@@ -268,11 +268,13 @@ Every completed chain that produces an accepted artifact MUST persist it before 
 | Advisory memo | `work-items/active/<slug>/advisory.md` | Session log entry summarizing advisory |
 | Bug finding | `work-items/bugs/<date>-<slug>.md` | — |
 | Performance issue | `work-items/performance/<date>-<slug>.md` | — |
-| Epic (groups work-items) | `work-items/epics/<date>-<slug>.md` | — |
+| Epic (groups work-items) | active: `work-items/epics/<date>-<slug>.md`; closed: `work-items/epics/archive/<YYYY-MM>/<date>-<slug>.md` | — |
 | Decision (cross-item ADR) | `work-items/decisions/<date>-<slug>.md` | — |
 | Lesson (delivery retrospective) | `work-items/lessons/<date>-<slug>.md` | — |
 
 Session logs are summaries pointing to canonical artifacts, not copies. See `AGENTS.md` § "Session logging rule" for the mandatory logging contract.
+
+Epic location is part of lifecycle state. Lead owns closure/reopening decisions and content; the knowledge archivist moves the same file and reconciles the local index. A slug must resolve to exactly one active or archived file; missing and duplicate targets are invalid and callers never select one copy by traversal order or recency.
 
 **Standalone chains** (no active work-item): create a work-item folder if the result is worth preserving, or save to `.reports/` / `.plans/` only as a session log.
 

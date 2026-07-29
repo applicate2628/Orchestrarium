@@ -10,6 +10,30 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-07-29
+
+### Fixed
+
+- **The Codex pack validator now honors the exact maintainer-only status of `shared/references/cross-pack-reconciliation.md` instead of demanding a Russian mirror that standalone provider branches deliberately exclude.** The Russian-localization loop reports that one canonical manifest as an explicit pass and continues to fail closed for every ordinary top-level localizable reference missing its `ru/` counterpart. **Why it matters:** maintainers can run the documented full Codex pack validation after reconciling provider contracts without creating an artifact that the extraction policy does not ship. **Preserved:** the exception is exact-path-only; the top-level localization boundary, provider compatibility checks, and required mirrors for all other localizable documents are unchanged.
+
+- **Closed epics now have a real archive lifecycle instead of remaining indefinitely beside active epics.** Active epic files stay directly under `work-items/epics/`; after Lead records a valid closure, the knowledge archivist moves the same file to `work-items/epics/archive/<YYYY-MM>/`, and reopening restores it to the active root in the same state change. One resolver now distinguishes a unique active epic, a unique archived epic, a missing target, and duplicate locations; the Stop sentinel flags closed-in-root residue, stale or active archived epics, and duplicate slugs, while the periodic checker accepts unique archived links and rejects missing or ambiguous ones. **Why it matters:** location and status can no longer contradict each other silently, so routine documentation hygiene is enforced by the same source rules and checks agents follow. **Preserved:** epic admission, goal evaluation, child roll-up, and closure decisions remain with Product Manager and Lead; only location mechanics and duplicate-safe lookup changed, and existing epic data migration remains an explicit repository-local stewardship step.
+
+- **Delivery-drought enforcement now advances the admitted technical action instead of rewarding process churn.** The existing work-item Stop hook now includes stateless SEN-2: one exact opted-in Primary mutation that remains due after unrelated activity receives one model-facing continuation per root user turn. Delivery credit requires a direct structured exact-target mutation and its same-id explicit-success result; shell text, body mentions, failed, ambiguous, missing, or in-flight results do not count. Invalid input fails open, child and same-turn re-entry contexts are skipped, `HALT` remains absent, and Codex operator-NOTICE limitations are unchanged. Codex and Claude keep the same hook registration identity, so source updates require no new hook trust; SEN-2 has no prose bypass.
+
+### Changed
+
+- **Project installers leave the target repository's `.gitignore` entirely under operator control.** Codex, Claude Code, Gemini, and Qwen installers no longer create or modify that file.
+
+## 2026-07-28
+
+### Fixed
+
+- **Correction: Model Context Protocol (MCP) momentum evidence exemptions are repository-rooted, not segment-rooted.** The shared policy now validates the raw hook-envelope `cwd`, finds the nearest plain `.git` directory or file, and applies lexical component-bounded containment only to the four exact root subtrees; a path such as `scripts/work-items` no longer suppresses a code-navigation advisory merely because one segment has an exempt name. Missing, malformed, outside, mixed, or directory-change-ambiguous coordinates grant no exemption, while exact rooted evidence paths remain silent and target paths are never executed, resolved, or required to exist. **Preserved:** the hook remains warn-only, fail-open, exit-0, root/agent-identical, and server-name-only; matcher, registration, dependencies, installer/trust behavior, and the separately authorized installed-dogfood gate are unchanged.
+
+- **Model Context Protocol (MCP) continuity now uses one shared policy across session start, every-turn anchoring, and pre-tool code-navigation warnings on both provider lines.** The existing momentum hook is registered for `Grep|Bash|PowerShell|shell_command|exec_command`, recognizes default-recursive `rg`/`ag`/`ack` and explicit-recursive `grep`, keeps only all-scope `work-items/`, `.reports/`, `.plans/`, and `.scratch/` searches exempt, and applies the same warn-only, fail-open result to root and dispatched-agent envelopes. Advisory output exposes at most three safe matching server names plus a count, never configuration values. **Preserved:** no new hook event, dependency, server, configuration key, or blocking path is introduced; the reminder cannot prove model obedience, and installed dogfood remains a separate post-install gate.
+
+- **Failed or malformed recognized publication-scan executions can no longer mint automatic `tracked` or `range` push credit merely because their body contains a clean receipt.** The single Orchestrarium result-normalization owner now carries provider execution status into the existing correlation pipeline before either receipt classifier. Claude's optional Boolean `tool_result.is_error` is official provider behavior; the leading `Exit code: N` adapter is only observed installed/runtime behavior for Codex 0.145.0 and is not claimed as an official stable Codex application programming interface. An absent or false Claude status and a zero or absent Codex header retain the existing compatibility path, but mean only “no observed failure,” not proven success. **Preserved:** call identity, collision rejection, ordering, scanner failure-marker exclusion, range remote/destination binding, the human approval marker, and the disclosed narrow range residuals remain unchanged.
+
 ## 2026-07-27
 
 ### Fixed

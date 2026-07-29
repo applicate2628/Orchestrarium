@@ -18,6 +18,7 @@ re-litigate the existing ones.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -31,6 +32,11 @@ MCP_PY_SCRIPTS = (
     ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp-usage-reminder.py",
     ROOT / "src.codex" / "skills" / "lead" / "scripts" / "mcp-usage-reminder.py",
     ROOT / "src.claude" / "agents" / "scripts" / "mcp-usage-reminder.py",
+)
+MCP_POLICY_SCRIPTS = (
+    ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp_continuity_policy.py",
+    ROOT / "src.codex" / "skills" / "lead" / "scripts" / "mcp_continuity_policy.py",
+    ROOT / "src.claude" / "agents" / "scripts" / "mcp_continuity_policy.py",
 )
 
 # (script, config subdir under cwd, expected-context-dict-key)
@@ -102,6 +108,24 @@ def _decode_context(stdout: str) -> str:
 
 
 class McpUsageReminderPythonHookTest(unittest.TestCase):
+    def test_all_three_adapters_emit_their_policy_owned_exact_context(self) -> None:
+        for index, (script, policy_path) in enumerate(
+            zip(MCP_PY_SCRIPTS, MCP_POLICY_SCRIPTS, strict=True)
+        ):
+            with self.subTest(script=str(script.relative_to(ROOT))):
+                self.assertTrue(policy_path.is_file(), f"missing {policy_path}")
+                spec = importlib.util.spec_from_file_location(
+                    f"mcp_continuity_policy_test_{index}", policy_path
+                )
+                assert spec is not None and spec.loader is not None
+                policy = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(policy)
+                result = _run(script, stdin="")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    _decode_context(result.stdout), policy.SESSION_START_CONTEXT
+                )
+
     def test_all_three_copies_emit_exact_context_with_no_stdin(self) -> None:
         for script in MCP_PY_SCRIPTS:
             with self.subTest(script=str(script.relative_to(ROOT))):

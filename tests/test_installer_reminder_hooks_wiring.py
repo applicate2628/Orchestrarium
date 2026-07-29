@@ -16,8 +16,8 @@ lagging.
 boundary, not the tool choice) -> UserPromptSubmit.
 `check-mcp-momentum` fires at the TOOL CHOICE (its failure moment is mid-turn
 momentum overriding a rule sitting in context) -> PreToolUse, matched on
-Grep|Bash (the only tool_name shapes its own code-navigation detector
-recognizes).
+  Grep|Bash|PowerShell|shell_command|exec_command (the current host tool-name
+  shapes owned by the shared MCP continuity policy).
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ class InstallerReminderHooksWiringTest(unittest.TestCase):
             lines = _logical_lines(installer.read_text(encoding="utf-8"))
             wired = any(
                 "--script-marker check-mcp-momentum" in ln
-                and '--tool-matcher "Grep|Bash"' in ln
+                and '--tool-matcher "Grep|Bash|PowerShell|shell_command|exec_command"' in ln
                 # PreToolUse is the install-hypothesis-hook default hook-event
                 # (no --hook-event flag needed), unlike the Stop/SessionStart/
                 # UserPromptSubmit entries which must name their event explicitly.
@@ -77,7 +77,7 @@ class InstallerReminderHooksWiringTest(unittest.TestCase):
             self.assertTrue(
                 wired,
                 f"{installer.name} does not wire check-mcp-momentum on PreToolUse "
-                f"with tool-matcher Grep|Bash",
+                f"with the exact current-host MCP matcher",
             )
 
 

@@ -45,6 +45,10 @@ The main Qwen session activates the parallel specialist role skills. Orchestrati
 - A full-impact review or verification pass remains open until a review artifact is produced; side clarification may refine the review, but does not close or replace it.
 - Do not begin install validation, commit, push, publication, or equivalent closeout work while a primary review or verification pass is still open unless the user explicitly parks, cancels, or reprioritizes that task.
 
+## Epic task-memory lifecycle
+
+An active epic lives at `work-items/epics/<date>-<slug>.md`; after Lead records `status: closed`, `## Closure`, and `Closed: <YYYY-MM-DD>`, the knowledge archivist moves the same file to `work-items/epics/archive/<YYYY-MM>/<slug>.md` and reconciles the local index. Reopening moves it back and changes it to `status: active` in the same operation. A slug must resolve to exactly one active or archived file; missing and duplicate state are invalid and no caller selects by recency.
+
 ## External adapters
 
 Qwen-line external adapters use `.qwen/.agents-mode.yaml`.

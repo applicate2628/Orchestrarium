@@ -952,7 +952,9 @@ if [[ $DEV_REPO -eq 1 ]]; then
 
   # ru/ localization policy (INTENTIONAL SCOPE — not glob folklore): every
   # TOP-LEVEL standalone methodology reference under each ref dir must have a
-  # Russian mirror in ru/. The 'find -maxdepth 1' below is a deliberate policy
+  # Russian mirror in ru/, except the exact maintainer-only cross-pack manifest
+  # documented in shared/references/README.md and excluded by the provider-branch
+  # extractor. The 'find -maxdepth 1' below is a deliberate policy
   # boundary: typed subdirectories such as shared/references/spine/ hold
   # English-only extracts (verbatim slices of the always-loaded AGENTS.md spine,
   # which was itself English-only before the Task-6 cut) and are EXEMPT from the
@@ -960,6 +962,20 @@ if [[ $DEV_REPO -eq 1 ]]; then
   # explicit decision to localize the spine extracts.
   # A standalone codex branch only carries shared/references and references-codex;
   # the sibling references-{claude,gemini,qwen}/ dirs exist only in the monorepo.
+  # This array is the self-contained Bash boundary copy; the canonical set lives
+  # in scripts/extract-provider-branch.py::MAINTAINER_ONLY_FILES and exact parity
+  # is enforced by tests/test_codex_ru_mirror_validator.py.
+  MAINTAINER_ONLY_SHARED_REFERENCE_NAMES=(
+    "cross-pack-reconciliation.md"
+  )
+  is_maintainer_only_shared_reference_name() {
+    local candidate_name="$1"
+    local maintainer_only_name
+    for maintainer_only_name in "${MAINTAINER_ONLY_SHARED_REFERENCE_NAMES[@]}"; do
+      [[ "$candidate_name" == "$maintainer_only_name" ]] && return 0
+    done
+    return 1
+  }
   ru_mirror_ref_dirs=("$SHARED_REF_DIR" "$CODEX_REF_DIR")
   if [[ $STANDALONE -eq 0 ]]; then
     ru_mirror_ref_dirs+=("$CLAUDE_REF_DIR" "$GEMINI_REF_DIR" "$QWEN_REF_DIR")
@@ -968,6 +984,10 @@ if [[ $DEV_REPO -eq 1 ]]; then
     while IFS= read -r source_file; do
       name="$(basename "$source_file")"
       [[ "$name" == "README.md" ]] && continue
+      if [[ "$ref_dir" == "$SHARED_REF_DIR" ]] && is_maintainer_only_shared_reference_name "$name"; then
+        pass "$source_file is maintainer-only; Russian mirror not required"
+        continue
+      fi
       if [[ -f "$ref_dir/ru/$name" ]]; then
         pass "$ref_dir/ru/$name mirrors $name"
       else

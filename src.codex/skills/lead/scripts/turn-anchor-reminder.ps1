@@ -30,6 +30,7 @@ $anchor = @'
 [turn anchor - re-shown every turn because a once-per-session reminder is overwritten by whatever you did last]
 Continue until blocked: a passed slice is not completion. Record it, take the next unchecked action, keep going. A final-style summary while a known next action remains IS the defect -- the pull toward a tidy closing artifact is exactly what this anchor exists to counter. If you genuinely need the operator, name the blocker or the decision as the reason for stopping.
 Delegate: at the first decision point of non-trivial work hold $lead here, classify, route to the matching specialist role/skill via your host's delegation surface; take external-launch flags from the external-dispatch contract, never from memory.
+MCP checkpoint: for repository navigation or understanding, discover and use the relevant configured MCP before an ad-hoc shell search; if shell is genuinely the right instrument, state why.
 '@
 
 try {

@@ -53,7 +53,7 @@ import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path, PureWindowsPath
-from typing import Any, Mapping
+from typing import Any, ClassVar, Mapping
 
 DEFAULT_SCRIPT_MARKER = "check-bugfix-discipline"
 
@@ -66,20 +66,10 @@ TOOL_MATCHER_REGEX = "Edit|Write|NotebookEdit|apply_patch"
 
 WINDOWS_UNQUOTED_PATH_RE = re.compile(r"^[A-Za-z0-9_:\\./-]+$")
 WRAPPER_EXECUTABLES = frozenset({"bash", "powershell", "powershell.exe", "pwsh", "pwsh.exe"})
-TEST_TRANSACTION_ABORT_ENV = "ORCHESTRARIUM_TEST_ABORT_HOOK_TRANSACTION_AFTER"
-TEST_TRANSACTION_STAGES = ("sync", "register", "verify", "reclaim")
-TEST_TRANSACTION_ABORT_EXIT = 86
 
 
 class TestTransactionAbort(RuntimeError):
     """Intentional, scratch-contained installer interruption for regression tests."""
-
-
-@dataclass(frozen=True)
-class AbortRequest:
-    """Validated process-boundary request for one test-only transaction abort."""
-
-    stage: str
 
 
 class InstallScope(str, Enum):
@@ -88,6 +78,88 @@ class InstallScope(str, Enum):
     REPO = "repo"
     TARGET = "target"
     GLOBAL = "global"
+
+
+@dataclass(frozen=True)
+class TestAbortPolicy:
+    """Single owner for the test-only installer interruption contract."""
+
+    ABORT_ENV: ClassVar[str] = "ORCHESTRARIUM_TEST_ABORT_HOOK_TRANSACTION_AFTER"
+    PROVENANCE_ENV: ClassVar[str] = "PYTEST_CURRENT_TEST"
+    STAGES: ClassVar[tuple[str, ...]] = ("sync", "register", "verify", "reclaim")
+    MARKER: ClassVar[str] = "TEST-ABORT:"
+    EXIT_CODE: ClassVar[int] = 86
+
+    requested_stage: str | None
+    target_path: Path | None
+
+    @classmethod
+    def resolve_and_preflight(
+        cls,
+        environ: Mapping[str, str] | None,
+        install_scope: InstallScope,
+        target_path: Path,
+        repo_root: Path,
+    ) -> "TestAbortPolicy":
+        """Resolve once and reject unsafe requests before installer mutation."""
+        source = os.environ if environ is None else environ
+        requested = source.get(cls.ABORT_ENV)
+        if not requested:
+            return cls(requested_stage=None, target_path=None)
+        if not isinstance(install_scope, InstallScope):
+            raise ValueError("test transaction abort install scope is invalid")
+        if install_scope is InstallScope.GLOBAL:
+            raise ValueError("test transaction abort is forbidden for global install scope")
+        if install_scope not in (InstallScope.REPO, InstallScope.TARGET):
+            raise ValueError(
+                f"test transaction abort install scope is unsupported: {install_scope.value}"
+            )
+        if not source.get(cls.PROVENANCE_ENV):
+            raise ValueError(
+                f"{cls.ABORT_ENV} is test-only and requires pytest provenance"
+            )
+        if requested not in cls.STAGES:
+            raise ValueError(
+                f"{cls.ABORT_ENV} must name one of: "
+                + ", ".join(sorted(cls.STAGES))
+            )
+
+        resolved_repo = repo_root.expanduser().resolve()
+        scratch_root = (resolved_repo / ".scratch").resolve()
+        resolved_target = target_path.expanduser().resolve(strict=False)
+        try:
+            relative = resolved_target.relative_to(scratch_root)
+        except ValueError as exc:
+            raise ValueError(
+                "test transaction abort target must remain under repository .scratch: "
+                f"{resolved_target}"
+            ) from exc
+        if not relative.parts:
+            raise ValueError("test transaction abort target must be below repository .scratch")
+        return cls(requested_stage=requested, target_path=resolved_target)
+
+    def checkpoint(self, stage: str) -> None:
+        """Raise only at the armed stage; an absent request is an exact no-op."""
+        if self.requested_stage is None:
+            return
+        if stage not in self.STAGES:
+            raise ValueError(
+                "test transaction checkpoint stage must name one of: "
+                + ", ".join(self.STAGES)
+            )
+        if self.requested_stage != stage:
+            return
+        if self.target_path is None:
+            raise ValueError("armed test transaction abort has no validated target")
+        raise TestTransactionAbort(
+            f"intentional test interruption after {stage.upper()} at {self.target_path}"
+        )
+
+
+# Compatibility names remain read-only projections of the single policy owner.
+TEST_TRANSACTION_ABORT_ENV = TestAbortPolicy.ABORT_ENV
+TEST_TRANSACTION_STAGES = TestAbortPolicy.STAGES
+TEST_TRANSACTION_ABORT_EXIT = TestAbortPolicy.EXIT_CODE
 
 
 @dataclass(frozen=True)
@@ -440,77 +512,6 @@ def reclaimable_hook_wrappers(
     return tuple(candidates)
 
 
-def resolve_test_abort_request(
-    environ: Mapping[str, str] | None = None,
-) -> AbortRequest | None:
-    """Read and validate the test-only abort request exactly once per process."""
-    source = os.environ if environ is None else environ
-    requested = source.get(TEST_TRANSACTION_ABORT_ENV)
-    if not requested:
-        return None
-    if requested not in TEST_TRANSACTION_STAGES:
-        raise ValueError(
-            f"{TEST_TRANSACTION_ABORT_ENV} must name one of: "
-            + ", ".join(sorted(TEST_TRANSACTION_STAGES))
-        )
-    if not source.get("PYTEST_CURRENT_TEST"):
-        raise ValueError(
-            f"{TEST_TRANSACTION_ABORT_ENV} is test-only and requires pytest provenance"
-        )
-    return AbortRequest(stage=requested)
-
-
-def test_transaction_checkpoint(
-    stage: str,
-    target_path: Path,
-    repo_root: Path,
-    abort_request: AbortRequest | None,
-    install_scope: InstallScope,
-) -> None:
-    """Abort only an explicit pytest transaction under repository scratch.
-
-    This is the single owner for the production-installer interruption seam.
-    Installers invoke every stage unconditionally. The process boundary passes
-    the immutable request resolved once by ``resolve_test_abort_request``;
-    absence is the normal no-op. This function owns target containment and
-    stage-match policy, and refuses to act outside the repository's resolved
-    .scratch tree.
-    """
-    if abort_request is None:
-        return
-    if stage not in TEST_TRANSACTION_STAGES:
-        raise ValueError(
-            "test transaction checkpoint stage must name one of: "
-            + ", ".join(TEST_TRANSACTION_STAGES)
-        )
-    if abort_request.stage != stage:
-        return
-    if not isinstance(install_scope, InstallScope):
-        raise ValueError("test transaction checkpoint install scope is invalid")
-    if install_scope is InstallScope.GLOBAL:
-        raise ValueError("test transaction abort is forbidden for global install scope")
-    if install_scope not in (InstallScope.REPO, InstallScope.TARGET):
-        raise ValueError(
-            f"test transaction abort install scope is unsupported: {install_scope.value}"
-        )
-
-    resolved_repo = repo_root.expanduser().resolve()
-    scratch_root = (resolved_repo / ".scratch").resolve()
-    resolved_target = target_path.expanduser().resolve(strict=False)
-    try:
-        relative = resolved_target.relative_to(scratch_root)
-    except ValueError as exc:
-        raise ValueError(
-            "test transaction abort target must remain under repository .scratch: "
-            f"{resolved_target}"
-        ) from exc
-    if not relative.parts:
-        raise ValueError("test transaction abort target must be below repository .scratch")
-    raise TestTransactionAbort(
-        f"intentional test interruption after {stage.upper()} at {resolved_target}"
-    )
-
-
 def _target_uses_wrapper(target: HookTarget) -> bool:
     executable_name = Path(target.executable).name.lower()
     if executable_name in WRAPPER_EXECUTABLES:
@@ -588,8 +589,10 @@ def reclaim_stale_hook_wrappers(
     platform: str,
     registration_data: dict[str, Any],
     dry_run: bool,
-    install_scope: InstallScope,
-    abort_request: AbortRequest | None = None,
+    abort_policy: TestAbortPolicy = TestAbortPolicy(
+        requested_stage=None,
+        target_path=None,
+    ),
 ) -> tuple[Path, ...]:
     """Reclaim last, only after direct registrations are present and verified."""
     candidates = reclaimable_hook_wrappers(repo_root, installed_root, platform)
@@ -598,16 +601,10 @@ def reclaim_stale_hook_wrappers(
         return ()
     if _registration_wrapper_state(registration_data, expected_stems):
         return ()
+    abort_policy.checkpoint("reclaim")
     for candidate in candidates:
         if not dry_run:
             candidate.unlink()
-            test_transaction_checkpoint(
-                "reclaim",
-                installed_root,
-                repo_root,
-                abort_request,
-                install_scope,
-            )
     return candidates
 
 
@@ -810,6 +807,11 @@ def main() -> int:
         help="Print what would change without modifying any file",
     )
     parser.add_argument(
+        "--test-transaction-preflight",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         "--test-transaction-checkpoint",
         choices=TEST_TRANSACTION_STAGES[:-1],
         help=argparse.SUPPRESS,
@@ -833,23 +835,23 @@ def main() -> int:
     target = Path(args.target).expanduser()
 
     try:
-        if args.test_transaction_checkpoint:
+        if args.test_transaction_preflight or args.test_transaction_checkpoint:
             if not args.repo_root:
                 raise ValueError(
-                    "--repo-root is required with --test-transaction-checkpoint"
+                    "--repo-root is required with a test transaction action"
                 )
             if not args.test_install_scope:
                 raise ValueError(
-                    "--test-install-scope is required with "
-                    "--test-transaction-checkpoint"
+                    "--test-install-scope is required with a test transaction action"
                 )
-            test_transaction_checkpoint(
-                args.test_transaction_checkpoint,
+            abort_policy = TestAbortPolicy.resolve_and_preflight(
+                None,
+                InstallScope(args.test_install_scope),
                 target,
                 Path(args.repo_root),
-                resolve_test_abort_request(),
-                InstallScope(args.test_install_scope),
             )
+            if args.test_transaction_checkpoint:
+                abort_policy.checkpoint(args.test_transaction_checkpoint)
             return 0
 
         if args.print_verification_exclusions:
@@ -873,7 +875,12 @@ def main() -> int:
             repo_root = Path(args.repo_root).expanduser().resolve()
             installed_root = Path(args.reclaim_root).expanduser()
             install_scope = InstallScope(args.test_install_scope)
-            abort_request = resolve_test_abort_request()
+            abort_policy = TestAbortPolicy.resolve_and_preflight(
+                None,
+                install_scope,
+                installed_root,
+                repo_root,
+            )
             candidates = reclaimable_hook_wrappers(
                 repo_root,
                 installed_root,
@@ -902,8 +909,7 @@ def main() -> int:
                 platform=args.platform,
                 registration_data=registration_data,
                 dry_run=args.dry_run,
-                install_scope=install_scope,
-                abort_request=abort_request,
+                abort_policy=abort_policy,
             )
             if not removed:
                 sys.stdout.write("  hook wrapper reclaim disabled or already complete\n")
@@ -953,8 +959,8 @@ def main() -> int:
             changed = install(data, entry, args.hook_event, args.script_marker)
             action = "installed/updated"
     except TestTransactionAbort as exc:
-        sys.stderr.write(f"TEST-ABORT: {exc}\n")
-        return TEST_TRANSACTION_ABORT_EXIT
+        sys.stderr.write(f"{TestAbortPolicy.MARKER} {exc}\n")
+        return TestAbortPolicy.EXIT_CODE
     except (OSError, ValueError) as exc:
         sys.stderr.write(f"FAIL: {exc}\n")
         return 1

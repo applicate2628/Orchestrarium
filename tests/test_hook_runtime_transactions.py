@@ -177,8 +177,12 @@ def _command(case: InstallerCase, target: Path, runtime: str) -> list[str]:
     script_arg = str(case.script)
     target_arg = str(target)
     if os.name == "nt":
-        cygpath = Path(bash).with_name("cygpath.exe")
-        if not cygpath.is_file():
+        cygpath_candidates = (
+            Path(bash).with_name("cygpath.exe"),
+            Path(bash).parent.parent / "usr" / "bin" / "cygpath.exe",
+        )
+        cygpath = next((path for path in cygpath_candidates if path.is_file()), None)
+        if cygpath is None:
             pytest.skip("Git Bash cygpath.exe is unavailable")
 
         def as_posix(path: str) -> str:
@@ -425,12 +429,11 @@ def test_real_install_is_safe_when_interrupted(case: InstallerCase) -> None:
                 assert len(wrappers_after) == case.wrapper_count
             else:
                 _assert_registration_shape(case, config, "python")
-                expected_wrapper_count = (
-                    case.wrapper_count - 1
-                    if stage == "reclaim"
-                    else case.wrapper_count
-                )
-                assert len(wrappers_after) == expected_wrapper_count
+                # Every completed-stage abort happens before the next
+                # mutation.  In particular, RECLAIM now checkpoints before
+                # the first unlink, so the complete wrapper inventory must
+                # remain on rejection.
+                assert len(wrappers_after) == case.wrapper_count
             assert all(path.is_file() for path in wrappers_after)
             assert all((installed_root / path).is_file() for path in case.protected)
 
@@ -591,18 +594,66 @@ class InstallerCheckpointContract:
         )
         return target.id if isinstance(target, ast.Name) else None
 
-    @staticmethod
-    def _literal_stage_sequence(node: ast.AST | None) -> tuple[str, ...] | None:
-        if not isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+    @classmethod
+    def _safe_constant(
+        cls,
+        node: ast.AST | None,
+        names: dict[str, object] | None = None,
+    ) -> object | None:
+        """Fold only the closed constant grammar admitted by the R2 design.
+
+        Mutated helper source is parsed, never imported or executed.  The
+        grammar deliberately excludes attribute access, comprehensions, and
+        arbitrary calls.
+        """
+        names = {} if names is None else names
+        if isinstance(node, ast.Constant) and isinstance(node.value, (str, int)):
+            return node.value
+        if isinstance(node, ast.Name):
+            return names.get(node.id)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+            left = cls._safe_constant(node.left, names)
+            right = cls._safe_constant(node.right, names)
+            if isinstance(left, str) and isinstance(right, str):
+                return left + right
             return None
-        values: list[str] = []
-        for element in node.elts:
-            if not isinstance(element, ast.Constant) or not isinstance(
-                element.value, str
-            ):
+        if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+            values = [cls._safe_constant(element, names) for element in node.elts]
+            if any(value is None for value in values):
                 return None
-            values.append(element.value)
-        return tuple(values)
+            return tuple(values)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in {"tuple", "list", "set", "frozenset"}
+            and len(node.args) == 1
+            and not node.keywords
+        ):
+            value = cls._safe_constant(node.args[0], names)
+            return tuple(value) if isinstance(value, tuple) else None
+        return None
+
+    @classmethod
+    def _constant_bindings(cls, tree: ast.AST) -> dict[str, object]:
+        bindings: dict[str, object] = {}
+        assignments = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            and cls._assigned_name(node) is not None
+        ]
+        for _ in range(len(assignments) + 1):
+            changed = False
+            for assignment in assignments:
+                name = cls._assigned_name(assignment)
+                assert name is not None
+                value = cls._safe_constant(assignment.value, bindings)
+                if value is not None and bindings.get(name) != value:
+                    bindings[name] = value
+                    changed = True
+            if not changed:
+                break
+        return bindings
 
     @staticmethod
     def _enclosing_function(
@@ -614,6 +665,40 @@ class InstallerCheckpointContract:
             ):
                 return node
         return None
+
+    @staticmethod
+    def _owner_path(tree: ast.AST, target: ast.AST) -> tuple[str, ...]:
+        parents: dict[ast.AST, ast.AST] = {}
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+        owners: list[str] = []
+        current = target
+        while current in parents:
+            current = parents[current]
+            if isinstance(current, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                owners.append(current.name)
+        return tuple(reversed(owners))
+
+    @staticmethod
+    def _policy_class(tree: ast.Module) -> ast.ClassDef:
+        matches = [
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "TestAbortPolicy"
+        ]
+        assert len(matches) == 1, "expected one TestAbortPolicy owner"
+        return matches[0]
+
+    @staticmethod
+    def _method(owner: ast.ClassDef, name: str) -> ast.FunctionDef:
+        matches = [
+            node
+            for node in owner.body
+            if isinstance(node, ast.FunctionDef) and node.name == name
+        ]
+        assert len(matches) == 1, f"expected one TestAbortPolicy.{name} method"
+        return matches[0]
 
     @staticmethod
     def _extract_braced_function(
@@ -639,121 +724,169 @@ class InstallerCheckpointContract:
 
     def validate_helper(self) -> None:
         tree = ast.parse(self.helper_text)
-        stage_assignments: list[tuple[str | None, tuple[str, ...]]] = []
-        for node in tree.body:
-            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
-                continue
-            value = node.value
-            sequence = self._literal_stage_sequence(value)
-            if sequence is not None and set(sequence) == set(ABORT_STAGES):
-                stage_assignments.append((self._assigned_name(node), sequence))
-        assert stage_assignments == [
-            ("TEST_TRANSACTION_STAGES", ("sync", "register", "verify", "reclaim"))
-        ]
-
-        resolver = self._function(tree, "resolve_test_abort_request")
-        checkpoint = self._function(tree, "test_transaction_checkpoint")
+        policy = self._policy_class(tree)
+        resolver = self._method(policy, "resolve_and_preflight")
+        checkpoint = self._method(policy, "checkpoint")
         reclaim = self._function(tree, "reclaim_stale_hook_wrappers")
 
-        resolver_environment_reads = [
-            node
-            for node in ast.walk(resolver)
-            if isinstance(node, ast.Attribute)
-            and isinstance(node.value, ast.Name)
-            and node.value.id == "os"
-            and node.attr == "environ"
+        dataclass_decorators = [
+            decorator
+            for decorator in policy.decorator_list
+            if isinstance(decorator, ast.Call)
+            and isinstance(decorator.func, ast.Name)
+            and decorator.func.id == "dataclass"
         ]
-        assert len(resolver_environment_reads) == 1
-        assert not any(
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and isinstance(node.func.value, ast.Name)
-            and node.func.value.id == "os"
-            and node.func.attr == "getenv"
-            for node in ast.walk(resolver)
+        assert len(dataclass_decorators) == 1, "TestAbortPolicy must be a dataclass"
+        frozen = [
+            keyword
+            for keyword in dataclass_decorators[0].keywords
+            if keyword.arg == "frozen"
+        ]
+        assert len(frozen) == 1
+        assert isinstance(frozen[0].value, ast.Constant) and frozen[0].value.value is True
+
+        bindings = self._constant_bindings(tree)
+        policy_fact_violations: list[str] = []
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign, ast.Return)):
+                continue
+            value = self._safe_constant(node.value, bindings)
+            is_stage_set = (
+                isinstance(value, tuple)
+                and len(value) == len(ABORT_STAGES)
+                and set(value) == set(ABORT_STAGES)
+            )
+            if value not in {
+                ABORT_ENV,
+                "PYTEST_CURRENT_TEST",
+                "TEST-ABORT:",
+                ABORT_EXIT,
+            } and not is_stage_set:
+                continue
+            owner = self._owner_path(tree, node)
+            if not owner or owner[0] != "TestAbortPolicy":
+                name = (
+                    self._assigned_name(node)
+                    if isinstance(node, (ast.Assign, ast.AnnAssign))
+                    else None
+                )
+                policy_fact_violations.append(
+                    f"{name or '<expression>'}@{node.lineno}"
+                )
+
+        parents: dict[ast.AST, ast.AST] = {}
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+        environment_read_violations: list[str] = []
+        for node in ast.walk(tree):
+            direct_environ = (
+                isinstance(node, ast.Attribute)
+                and isinstance(node.value, ast.Name)
+                and node.value.id == "os"
+                and node.attr == "environ"
+            )
+            direct_getenv = (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "os"
+                and node.func.attr == "getenv"
+            )
+            if not (direct_environ or direct_getenv):
+                continue
+            owner = self._owner_path(tree, node)
+            if not owner or owner[0] != "TestAbortPolicy":
+                parent = parents.get(node)
+                call = parents.get(parent) if isinstance(parent, ast.Attribute) else None
+                allowed_opt_out_read = (
+                    direct_environ
+                    and isinstance(parent, ast.Attribute)
+                    and parent.attr == "get"
+                    and isinstance(call, ast.Call)
+                    and call.func is parent
+                    and len(call.args) >= 1
+                    and isinstance(call.args[0], ast.Constant)
+                    and call.args[0].value == "ORCHESTRARIUM_NO_HYPOTHESIS_HOOK"
+                )
+                if allowed_opt_out_read:
+                    continue
+                environment_read_violations.append(
+                    f"{'.'.join(owner) or '<module>'}@{node.lineno}"
+                )
+
+        assert not policy_fact_violations, (
+            "test-abort policy facts must be owned by TestAbortPolicy: "
+            + ", ".join(policy_fact_violations)
+        )
+        assert not environment_read_violations, (
+            "test-abort environment reads must be owned by TestAbortPolicy: "
+            + ", ".join(environment_read_violations)
         )
 
-        policy_token_loads = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Name)
-            and isinstance(node.ctx, ast.Load)
-            and node.id == "TEST_TRANSACTION_ABORT_ENV"
-        ]
-        assert policy_token_loads
-        assert {
-            self._enclosing_function(tree, node).name
-            for node in policy_token_loads
-            if self._enclosing_function(tree, node) is not None
-        } == {"resolve_test_abort_request"}
-
-        assert [arg.arg for arg in checkpoint.args.args] == [
-            "stage",
+        assert [arg.arg for arg in resolver.args.args] == [
+            "cls",
+            "environ",
+            "install_scope",
             "target_path",
             "repo_root",
-            "abort_request",
-            "install_scope",
         ]
+        assert [arg.arg for arg in checkpoint.args.args] == ["self", "stage"]
         assert [arg.arg for arg in reclaim.args.kwonlyargs] == [
             "repo_root",
             "installed_root",
             "platform",
             "registration_data",
             "dry_run",
-            "install_scope",
-            "abort_request",
+            "abort_policy",
         ]
-        for owner in (checkpoint, reclaim):
-            assert not any(
-                isinstance(node, ast.Attribute)
-                and isinstance(node.value, ast.Name)
-                and node.value.id == "os"
-                and node.attr in {"environ", "getenv"}
-                for node in ast.walk(owner)
-            )
-            assert not any(
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Attribute)
-                and node.func.attr in {"get", "getenv"}
-                for node in ast.walk(owner)
-            )
-            assert not any(
-                isinstance(node, ast.Subscript)
-                and isinstance(node.value, ast.Name)
-                and "env" in node.value.id.lower()
-                for node in ast.walk(owner)
-            )
 
-        assert self.helper_text.count(
-            'TEST_TRANSACTION_ABORT_ENV = "'
-        ) == 1
-        assert self.helper_text.count('"PYTEST_CURRENT_TEST"') == 1
-        assert self.helper_text.count('"TEST-ABORT:') == 1
-        exit_loads = [
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.Name)
-            and isinstance(node.ctx, ast.Load)
-            and node.id == "TEST_TRANSACTION_ABORT_EXIT"
+        global_scope_lines = [
+            node.lineno
+            for node in ast.walk(resolver)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "InstallScope"
+            and node.attr == "GLOBAL"
         ]
-        assert len(exit_loads) == 1
+        stage_policy_lines = [
+            node.lineno
+            for node in ast.walk(resolver)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id in {"cls", "TestAbortPolicy"}
+            and node.attr == "STAGES"
+        ]
+        assert global_scope_lines and stage_policy_lines
+        assert min(global_scope_lines) < min(stage_policy_lines), (
+            "global scope rejection must dominate stage mismatch validation"
+        )
 
         checkpoint_calls = [
             node
             for node in ast.walk(reclaim)
             if isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "test_transaction_checkpoint"
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "abort_policy"
+            and node.func.attr == "checkpoint"
         ]
         assert len(checkpoint_calls) == 1
         reclaim_call = checkpoint_calls[0]
-        assert len(reclaim_call.args) == 5
+        assert len(reclaim_call.args) == 1
         assert isinstance(reclaim_call.args[0], ast.Constant)
         assert reclaim_call.args[0].value == "reclaim"
-        assert isinstance(reclaim_call.args[3], ast.Name)
-        assert reclaim_call.args[3].id == "abort_request"
-        assert isinstance(reclaim_call.args[4], ast.Name)
-        assert reclaim_call.args[4].id == "install_scope"
+        unlink_calls = [
+            node
+            for node in ast.walk(reclaim)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "unlink"
+        ]
+        assert unlink_calls
+        assert all(reclaim_call.lineno < unlink.lineno for unlink in unlink_calls), (
+            "RECLAIM checkpoint must dominate every unlink"
+        )
 
     def validate_installers(self) -> None:
         expected = {
@@ -761,27 +894,44 @@ class InstallerCheckpointContract:
                 "bash",
                 "settings_target",
                 "claude",
+                'if [[ ! -d "$TARGET" ]]; then',
             ),
             ROOT / "scripts" / "install-codex.sh": (
                 "bash",
                 "hooks_target",
                 "codex",
+                '# Create target parent directories as needed',
             ),
             ROOT / "scripts" / "install-claude.ps1": (
                 "powershell",
                 "SettingsTarget",
                 "claude",
+                'if (-not $DryRun -and -not (Test-Path -LiteralPath $TargetRoot)) {',
             ),
             ROOT / "scripts" / "install-codex.ps1": (
                 "powershell",
                 "HooksTarget",
                 "codex",
+                '# Create parent directories as needed',
             ),
         }
         assert set(self.installer_texts) == set(expected)
-        for path, (shell, target, platform) in expected.items():
+        for path, (shell, target, platform, first_mutation_anchor) in expected.items():
             text = self.installer_texts[path]
             if shell == "bash":
+                preflight = self._extract_braced_function(
+                    text, "run_test_hook_transaction_preflight() {"
+                )
+                assert preflight == (
+                    "run_test_hook_transaction_preflight() {",
+                    '"$python_cmd" "$hook_installer" \\',
+                    f'--target "${target}" \\',
+                    f"--platform {platform} \\",
+                    '--repo-root "$REPO_DIR" \\',
+                    '--test-install-scope "$MODE" \\',
+                    "--test-transaction-preflight",
+                    "}",
+                )
                 actual = self._extract_braced_function(
                     text, "run_test_hook_transaction_checkpoint() {"
                 )
@@ -801,7 +951,33 @@ class InstallerCheckpointContract:
                     text,
                     flags=re.MULTILINE,
                 )
+                preflight_calls = re.findall(
+                    r'^\s*run_test_hook_transaction_preflight\s*$',
+                    text,
+                    flags=re.MULTILINE,
+                )
+                preflight_call = re.search(
+                    r'^\s*run_test_hook_transaction_preflight\s*$',
+                    text,
+                    flags=re.MULTILINE,
+                )
             else:
+                preflight = self._extract_braced_function(
+                    text,
+                    "function Invoke-TestHookTransactionPreflight {",
+                )
+                assert preflight == (
+                    "function Invoke-TestHookTransactionPreflight {",
+                    f"& $PythonCmd $HookInstaller --target ${target} "
+                    f"--platform {platform} --repo-root $RepoDir "
+                    "--test-install-scope $Mode --test-transaction-preflight",
+                    "if ($LASTEXITCODE -ne 0) {",
+                    '[Console]::Error.WriteLine("hook transaction test preflight '
+                    'exited with code $LASTEXITCODE")',
+                    "exit $LASTEXITCODE",
+                    "}",
+                    "}",
+                )
                 actual = self._extract_braced_function(
                     text,
                     "function Invoke-TestHookTransactionCheckpoint([string]$Stage) {",
@@ -824,7 +1000,24 @@ class InstallerCheckpointContract:
                     text,
                     flags=re.MULTILINE,
                 )
+                preflight_calls = re.findall(
+                    r'^\s*Invoke-TestHookTransactionPreflight\s*$',
+                    text,
+                    flags=re.MULTILINE,
+                )
+                preflight_call = re.search(
+                    r'^\s*Invoke-TestHookTransactionPreflight\s*$',
+                    text,
+                    flags=re.MULTILINE,
+                )
             assert tuple(calls) == ("sync", "register", "verify")
+            assert len(preflight_calls) == 1
+            assert preflight_call is not None
+            mutation_position = text.index(first_mutation_anchor)
+            assert preflight_call.start() < mutation_position, (
+                f"{path.name} must preflight before its first mutable SYNC operation"
+            )
+            assert text.count("--test-transaction-preflight") == 1
 
     def validate(self) -> None:
         self.validate_helper()
@@ -855,6 +1048,61 @@ def _checkpoint_contract(
 
 def test_transaction_abort_policy_has_one_structural_owner() -> None:
     _checkpoint_contract().validate()
+
+
+@pytest.mark.parametrize(
+    ("name", "injected"),
+    (
+        (
+            "split-abort-key",
+            "\ndef shadow_split_key_parser():\n"
+            '    key = "ORCHESTRARIUM_" + "TEST_ABORT_HOOK_TRANSACTION_AFTER"\n'
+            "    return os.environ.get(key)\n",
+        ),
+        (
+            "environment-alias-get",
+            "\ndef shadow_environment_alias():\n"
+            "    ambient = os.environ\n"
+            "    return ambient.get(TestAbortPolicy.ABORT_ENV)\n",
+        ),
+        (
+            "constructor-built-stages",
+            "\ndef shadow_stage_collection():\n"
+            '    return tuple(["sync", "register", "verify", "reclaim"])\n',
+        ),
+        (
+            "arbitrarily-named-second-parser",
+            "\ndef collect_optional_transaction_mode():\n"
+            "    return os.getenv(TestAbortPolicy.ABORT_ENV)\n",
+        ),
+        (
+            "moved-marker-and-exit-facts",
+            '\nSHADOW_ABORT_MARKER = "TEST-" + "ABORT:"\n'
+            "SHADOW_ABORT_EXIT = 86\n",
+        ),
+    ),
+    ids=(
+        "split-abort-key",
+        "environment-alias-get",
+        "constructor-built-stages",
+        "arbitrarily-named-second-parser",
+        "moved-marker-and-exit-facts",
+    ),
+)
+def test_transaction_abort_semantic_oracle_rejects_constructed_policy_owners(
+    name: str,
+    injected: str,
+) -> None:
+    # First pin the real helper to the intended owner.  On the pre-fix source
+    # this is the intentional RED for every semantic row; after the owner lands,
+    # each appended mutant must fail with the same ownership diagnostic.
+    _checkpoint_contract().validate_helper()
+    mutation = HELPER_PATH.read_text(encoding="utf-8") + injected
+    with pytest.raises(
+        AssertionError,
+        match=r"(policy facts|environment reads).*TestAbortPolicy",
+    ):
+        _checkpoint_contract(helper_text=mutation).validate_helper()
 
 
 @pytest.mark.parametrize(
@@ -902,11 +1150,12 @@ def test_transaction_abort_policy_owner_guard_rejects_installer_environment_read
 
 def test_transaction_abort_policy_owner_guard_rejects_second_stage_enumeration() -> None:
     mutation = HELPER_PATH.read_text(encoding="utf-8").replace(
-        'TEST_TRANSACTION_STAGES = ("sync", "register", "verify", "reclaim")',
-        'TEST_TRANSACTION_STAGES = ("sync", "register", "verify", "reclaim")\n'
+        "TEST_TRANSACTION_STAGES = TestAbortPolicy.STAGES",
+        "TEST_TRANSACTION_STAGES = TestAbortPolicy.STAGES\n"
         'SECOND_STAGE_OWNER = ("sync", "register", "verify", "reclaim")',
         1,
     )
+    assert mutation != HELPER_PATH.read_text(encoding="utf-8")
     with pytest.raises(AssertionError):
         _checkpoint_contract(helper_text=mutation).validate()
 
@@ -1142,11 +1391,17 @@ def test_transaction_abort_surface_is_hidden_from_operator_and_publication_paths
 def _global_command(
     case: InstallerCase,
     fake_home: Path,
+    *,
+    hook_runtime: str,
+    requested_stage: str | None,
 ) -> tuple[list[str], dict[str, str]]:
     env = os.environ.copy()
     env.pop("ORCHESTRARIUM_NO_HYPOTHESIS_HOOK", None)
-    env[ABORT_ENV] = "sync"
-    env["PYTEST_CURRENT_TEST"] = "controlled-global-rejection-fixture"
+    env.pop(ABORT_ENV, None)
+    env.pop("PYTEST_CURRENT_TEST", None)
+    if requested_stage is not None:
+        env[ABORT_ENV] = requested_stage
+        env["PYTEST_CURRENT_TEST"] = "controlled-global-rejection-fixture"
     env["USERPROFILE"] = str(fake_home)
     env["HOME"] = str(fake_home)
     if case.shell == "powershell":
@@ -1168,7 +1423,7 @@ def _global_command(
                 str(case.script),
                 "-Global",
                 "-HookRuntime",
-                "python",
+                hook_runtime,
                 "-Force",
             ],
             env,
@@ -1179,8 +1434,16 @@ def _global_command(
         pytest.skip("bash is unavailable")
     script_arg = str(case.script)
     if os.name == "nt":
-        cygpath = Path(bash).with_name("cygpath.exe")
-        if not cygpath.is_file():
+        bash_path = Path(bash)
+        cygpath_candidates = (
+            bash_path.with_name("cygpath.exe"),
+            bash_path.parent.parent / "usr" / "bin" / "cygpath.exe",
+        )
+        cygpath = next(
+            (candidate for candidate in cygpath_candidates if candidate.is_file()),
+            None,
+        )
+        if cygpath is None:
             pytest.skip("Git Bash cygpath.exe is unavailable")
 
         def as_posix(path: Path) -> str:
@@ -1199,16 +1462,43 @@ def _global_command(
             script_arg,
             "--global",
             "--hook-runtime",
-            "python",
+            hook_runtime,
             "--force",
         ],
         env,
     )
 
 
+def _tree_snapshot(
+    root: Path,
+    *,
+    excluded: frozenset[str] = frozenset(),
+) -> tuple[tuple[str, str, str], ...]:
+    entries: list[tuple[str, str, str]] = []
+    for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+        relative = path.relative_to(root).as_posix()
+        if relative in excluded:
+            continue
+        if path.is_symlink():
+            entries.append((relative, "symlink", os.readlink(path)))
+        elif path.is_file():
+            entries.append(
+                (
+                    relative,
+                    "file",
+                    hashlib.sha256(path.read_bytes()).hexdigest(),
+                )
+            )
+        elif path.is_dir():
+            entries.append((relative, "dir", ""))
+    return tuple(entries)
+
+
 @pytest.mark.parametrize("case", CASES, ids=lambda case: case.name)
-def test_real_global_installer_rejects_abort_request_in_isolated_fake_home(
+@pytest.mark.parametrize("requested_stage", ABORT_STAGES)
+def test_real_global_installer_rejects_abort_request_at_every_stage_before_mutation(
     case: InstallerCase,
+    requested_stage: str,
 ) -> None:
     SCRATCH.mkdir(exist_ok=True)
     live_before = _live_config_metadata()
@@ -1216,17 +1506,67 @@ def test_real_global_installer_rejects_abort_request_in_isolated_fake_home(
         prefix=f"global-abort-reject-{case.name}-", dir=SCRATCH
     ) as temp_dir:
         fake_home = Path(temp_dir).resolve()
+        runtime_noise = frozenset(
+            {"AppData/Local/Microsoft/PowerShell/StartupProfileData-NonInteractive"}
+            if case.shell == "powershell"
+            else ()
+        )
         config = fake_home / case.config_file
         config.parent.mkdir(parents=True)
         config.write_text(
             '{"sentinel":"global-scope-must-not-register"}\n',
             encoding="utf-8",
         )
-        before = (
-            config.is_file(),
-            hashlib.sha256(config.read_bytes()).hexdigest(),
+        baseline_command, baseline_env = _global_command(
+            case,
+            fake_home,
+            hook_runtime="wrapper",
+            requested_stage=None,
         )
-        command, env = _global_command(case, fake_home)
+        baseline = subprocess.run(
+            baseline_command,
+            cwd=ROOT,
+            env=baseline_env,
+            capture_output=True,
+            text=True,
+            timeout=240,
+        )
+        assert baseline.returncode == 0, baseline.stdout + baseline.stderr
+
+        installed_root = fake_home / (
+            ".claude/agents"
+            if case.platform == "claude"
+            else ".codex/skills/lead"
+        )
+        scope_sentinel = fake_home / "scope-preflight-sentinel.txt"
+        target_sentinel = installed_root / "target-preflight-sentinel.txt"
+        scope_sentinel.write_text("scope sentinel\n", encoding="utf-8")
+        target_sentinel.write_text("target sentinel\n", encoding="utf-8")
+        wrappers_before = tuple(
+            path.relative_to(installed_root).as_posix()
+            for path in HELPER.reclaimable_hook_wrappers(
+                ROOT, installed_root, case.platform
+            )
+        )
+        assert len(wrappers_before) == case.wrapper_count
+        before_config = config.read_bytes()
+        if runtime_noise:
+            assert runtime_noise == frozenset(
+                {"AppData/Local/Microsoft/PowerShell/StartupProfileData-NonInteractive"}
+            )
+            assert (fake_home / next(iter(runtime_noise))).is_file()
+        before_tree = _tree_snapshot(fake_home, excluded=runtime_noise)
+        before_sentinels = (
+            scope_sentinel.read_bytes(),
+            target_sentinel.read_bytes(),
+        )
+
+        command, env = _global_command(
+            case,
+            fake_home,
+            hook_runtime="python",
+            requested_stage=requested_stage,
+        )
         completed = subprocess.run(
             command,
             cwd=ROOT,
@@ -1236,18 +1576,104 @@ def test_real_global_installer_rejects_abort_request_in_isolated_fake_home(
             timeout=240,
         )
         output = completed.stdout + completed.stderr
-        after = (
-            config.is_file(),
-            hashlib.sha256(config.read_bytes()).hexdigest(),
+        wrappers_after = tuple(
+            path.relative_to(installed_root).as_posix()
+            for path in HELPER.reclaimable_hook_wrappers(
+                ROOT, installed_root, case.platform
+            )
+        )
+        after_sentinels = (
+            scope_sentinel.read_bytes() if scope_sentinel.is_file() else None,
+            target_sentinel.read_bytes() if target_sentinel.is_file() else None,
         )
 
         assert completed.returncode not in (0, ABORT_EXIT), output
         assert "forbidden for global install scope" in output
         assert "TEST-ABORT:" not in output
-        assert before == after
+        assert config.is_file()
+        assert config.read_bytes() == before_config
+        if runtime_noise:
+            assert (fake_home / next(iter(runtime_noise))).is_file()
+        assert _tree_snapshot(fake_home, excluded=runtime_noise) == before_tree
+        assert wrappers_after == wrappers_before
+        assert after_sentinels == before_sentinels
         assert config.resolve().is_relative_to(fake_home)
         normalized_output = output.replace("\\", "/").lower()
         for live_config in _live_config_metadata():
             assert Path(live_config).resolve().as_posix().lower() not in normalized_output
 
     assert _live_config_metadata() == live_before
+
+
+def test_reclaim_checkpoint_dominates_every_unlink() -> None:
+    case = next(case for case in CASES if case.name == "codex-bash")
+    SCRATCH.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="reclaim-checkpoint-dominance-", dir=SCRATCH
+    ) as temp_dir:
+        project = Path(temp_dir)
+        installed_root = project / case.installed_root
+        config = project / case.config_file
+
+        wrapper_install, _ = _run_install(case, project, "wrapper")
+        assert wrapper_install.returncode == 0, (
+            wrapper_install.stdout + wrapper_install.stderr
+        )
+        interrupted, _ = _run_install(
+            case,
+            project,
+            "python",
+            abort_after="verify",
+        )
+        assert interrupted.returncode == ABORT_EXIT, (
+            interrupted.stdout + interrupted.stderr
+        )
+        wrappers_before = tuple(
+            path.relative_to(installed_root).as_posix()
+            for path in HELPER.reclaimable_hook_wrappers(
+                ROOT, installed_root, case.platform
+            )
+        )
+        assert len(wrappers_before) == case.wrapper_count
+
+        env = os.environ.copy()
+        env[ABORT_ENV] = "reclaim"
+        env["PYTEST_CURRENT_TEST"] = "controlled-direct-reclaim-fixture"
+        rejected = subprocess.run(
+            [
+                sys.executable,
+                str(HELPER_PATH),
+                "--target",
+                str(config),
+                "--platform",
+                case.platform,
+                "--host-os",
+                "windows" if os.name == "nt" else "posix",
+                "--repo-root",
+                str(ROOT),
+                "--reclaim-root",
+                str(installed_root),
+                "--test-install-scope",
+                "global",
+            ],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        output = rejected.stdout + rejected.stderr
+        wrappers_after = tuple(
+            path.relative_to(installed_root).as_posix()
+            for path in HELPER.reclaimable_hook_wrappers(
+                ROOT, installed_root, case.platform
+            )
+        )
+        assert rejected.returncode not in (0, ABORT_EXIT), output
+        assert "forbidden for global install scope" in output
+        assert "TEST-ABORT:" not in output
+        assert wrappers_after == wrappers_before, (
+            "RECLAIM rejected after unlink; complete wrapper inventory was not preserved"
+        )
+
+    _checkpoint_contract().validate_helper()

@@ -8,7 +8,7 @@ contents (`design.md` §4.3, reproduced 2/2 against the live installed
 entries). Renaming this file, or changing the hooks.json command string that
 invokes it, would de-trust the entry and go silently dark on the Codex line.
 The filename therefore stays `check-work-items-archival-stop` even though it
-now hosts TWO invariants, not one -- see `## What this hosts, and why the
+now hosts THREE invariants, not one -- see `## What this hosts, and why the
 name is pinned` below.
 
 WHAT THIS FILE IS: a thin per-event ADAPTER (extension seam S2/S3). It reads
@@ -37,29 +37,14 @@ WHAT THIS HOSTS, AND WHY THE NAME IS PINNED (F-B3/DI-1 migration note):
            tests/test_work_items_archival_hook.py must pass unchanged. Its
            marker exemption also reads the operator's own genuine typed
            message (T1, F3), not only the model's last reply.
-  SEN-1 -- dual-state item     (RESOLVE) -- new: a work-item slug present in
+  SEN-1 -- dual-state item     (RESOLVE) -- a work-item slug present in
            BOTH work-items/active/ and work-items/archive/**. Detects the
            incident's temporal origin, on both provider lines.
-Both logic bodies live in `workitem_sentinels.py`, imported (never separately
-registered) so that adding a third invariant, or a fourth, never touches this
-file, the installer, or hooks.json -- and therefore never re-trusts anything
-on the Codex line (`design.md` §4.3 consequence 3).
-
-r8 (design.md §0.9): a THIRD invariant, SEN-2 (delivery drought), was CUT
-from this release after T-20 measured that a bare `systemMessage` NOTICE does
-not reach the operator on the Codex line either -- the same line the
-admitted incident happened on -- so the invariant produced nothing
-observable there in any posture or band. Combined with the substrate defect
-already found (git cannot attribute delivery to an item in the pack's own
-default posture) and the coverage gap already named (file count cannot see
-in-place revision), it carried more open design debt than the rest of the
-design combined. Withdrawn, not narrowed again; re-proposed on a different
-substrate (decision `2026-07-26-delivery-drought-needs-a-substrate-not-a-
-threshold`, R-9's T0 turn/spend counter). **Only cross-line channel this
-adapter emits is now RESOLVE, which addresses the model; every
-operator-directed output (the §4.4a escalation, the FM-1 unavailability
-notice) is Claude-line only; there is no run-terminating tier on either
-line.**
+  SEN-2 -- delivery drought    (RESOLVE) -- one opted-in primary action stays
+           due after unrelated correlated process activity. Raw `agent_id`
+           and `stop_hook_active` remain the root/child and re-entry owners.
+All three logic bodies live in `workitem_sentinels.py`, imported rather than
+separately registered, so SEN-2 adds no hook identity or installer entry.
 
 stdin: Stop JSON envelope from Claude Code or Codex.
 stdout: a RESOLVE or NOTICE payload (see above) if any invariant fires;
@@ -91,7 +76,14 @@ import json
 import os
 import sys
 
-from hook_common import last_genuine_user_text, parse_envelope, read_stdin_utf8
+from hook_common import (
+    STATUS_FOUND,
+    correlated_delivery_activity,
+    extract_user_typed_text,
+    parse_envelope,
+    read_stdin_utf8,
+    scan_current_turn_boundary,
+)
 
 # design.md §4.5 (F2): the operator-override channel is read via a bounded
 # REVERSE scan anchored on the turn boundary, not a fixed-line-count tail --
@@ -125,8 +117,8 @@ def _cap_payload_text(text: str, cap: int = MAX_PAYLOAD_CHARS) -> str:
     INFORMATIVELY -- stating how many characters were dropped -- never
     silently. Cuts on the last whole-line boundary inside the budget (never
     mid-word/mid-marker), so a truncated payload can never accidentally
-    split, and thereby hide or fabricate, a real override marker such as
-    [acknowledge-open-work-items] or [approve-review-continuation]."""
+    split, and thereby hide or fabricate the real SEN-0 override marker
+    [acknowledge-open-work-items]."""
     if len(text) <= cap:
         return text
     notice_template = (
@@ -252,19 +244,29 @@ def main() -> int:
         # here (empty text -> no marker match -> no exemption) exactly like
         # the pack's other transcript-reading hooks (check-bugfix-
         # discipline.py, check-git-push-gate.py, check-repository-
-        # orientation.py) fail open on the same condition. The read-status
-        # half of this helper's return value has no live consumer after
-        # SEN-2's cut (it existed only to feed SEN-2's override-channel
-        # discriminator) and is intentionally discarded.
-        user_message_text, _user_message_status = last_genuine_user_text(
+        # orientation.py) fail open on the same condition. The read status is
+        # now live twice: it gates typed-user extraction and supplies SEN-2's
+        # fail-open delivery-activity status below.
+        boundary_entry, current_entries, current_status = scan_current_turn_boundary(
             transcript_path, byte_cap=TRANSCRIPT_OVERRIDE_BYTE_CAP
         )
+        user_message_text = (
+            extract_user_typed_text(boundary_entry)
+            if current_status == STATUS_FOUND and boundary_entry is not None
+            else ""
+        )
+        delivery_activity = [
+            activity._asdict() for activity in correlated_delivery_activity(current_entries)
+        ]
 
         start_raw = envelope.get("cwd") or os.getcwd()
         ctx = sentinels.build_context(
             str(start_raw),
             last_assistant_message=last_assistant_message,
             user_message_text=user_message_text,
+            delivery_activity=delivery_activity,
+            delivery_activity_status="FOUND" if current_status == STATUS_FOUND else "INVALID",
+            runtime_stop=True,
         )
 
         findings = sentinels.evaluate_all(ctx, event="Stop")

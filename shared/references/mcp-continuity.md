@@ -1,0 +1,45 @@
+# MCP Continuity
+
+Model Context Protocol (MCP) continuity means keeping relevant connected tools visible at three points where tool choice can drift: session start or compaction, the start of each user turn, and a code-navigation shell search.
+
+## Shared semantic core
+
+One dependency-free policy module, `scripts/universal-hooks/scripts/mcp_continuity_policy.py`, owns the shared semantics for all three event adapters:
+
+| Event | Adapter | Shared behavior |
+| --- | --- | --- |
+| `SessionStart` | `mcp-usage-reminder.py` | Reintroduces the full MCP discovery and use guidance after a new session or compaction. |
+| `UserPromptSubmit` | `turn-anchor-reminder.py` | Adds a short checkpoint requiring relevant configured MCP discovery before ad hoc repository search. |
+| `PreToolUse` | `check-mcp-momentum.py` | Warns when a qualifying code-navigation search is about to bypass configured code-intelligence MCP tooling. |
+
+The policy admits exactly `Grep`, `Bash`, `PowerShell`, `shell_command`, and `exec_command`. Shell-shaped inputs read `tool_input.command`; `exec_command` reads `tool_input.cmd` and accepts `command` as a compatibility shape. Shell text is untrusted data: the policy tokenizes it and never executes it.
+
+## Navigation classification
+
+The momentum warning recognizes source-navigation patterns rather than every text search:
+
+- `rg`, `ag`, and `ack` are recursive by default; `grep` qualifies only with a recursive option.
+- Source scopes, source-oriented selectors, symbol or definition patterns, and `rg --files` over a source scope qualify.
+- A known-file read does not qualify merely because it uses a search command.
+- The adapter forwards the raw hook-envelope `cwd`; the policy alone validates that it is absolute and finds the nearest ancestor containing a `.git` directory or file.
+- An explicit scope is exempt only when lexical normalization from that validated `cwd` makes it equal to, or a component-bounded descendant of, `<repo>/work-items`, `<repo>/.reports`, `<repo>/.plans`, or `<repo>/.scratch`. A matching path segment at any other depth is not exempt.
+- Exemption keeps an invocation silent only when it has at least one explicit scope and every explicit scope is rooted-exempt. A mixed, outside, malformed, or unresolvable scope prevents exemption; missing or malformed `cwd` or a missing repository marker grants no exemption and has no process-working-directory fallback.
+- Scope normalization is lexical and does not require the target to exist, expand shell syntax, or follow symlinks or junctions. A directory-changing command makes a later relative scope unresolvable; a later absolute scope remains classifiable.
+
+The exact task-memory exemption is intentionally narrow. It does not create a general documentation or repository-path exemption.
+
+## Delivery and privacy boundary
+
+The momentum hook is warn-only and fail-open. A hit and a miss both exit 0; no MCP path exits 2 or mutates state. Root and dispatched-agent envelopes are evaluated the same way so subagents retain the same continuity guard.
+
+Configuration discovery reads only server names from the supported Claude JSON and Codex TOML MCP tables. Advisory output contains at most three matching safe names plus an omitted-count suffix. It never serializes server commands, environment values, tokens, or other configuration fields.
+
+These hooks influence the next model action; they cannot prove obedience. Registration, firing, and model-visible delivery therefore do not prove that the model used MCP. Installed-source identity and long-turn behavior require separate post-install verification.
+
+Provider-specific event envelopes, matcher registration, and installed paths live in the [Codex addendum](../../references-codex/mcp-continuity.md) and [Claude Code addendum](../../references-claude/mcp-continuity.md).
+
+## Terms and Abbreviations
+
+- `MCP`: Model Context Protocol, the interface through which connected tools and resources are exposed.
+- `TOML`: Tom's Obvious Minimal Language, the configuration format used by Codex.
+- `JSON`: JavaScript Object Notation, the configuration format used by Claude Code.

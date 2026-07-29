@@ -4,6 +4,7 @@ import importlib.util
 import json
 import re
 import sys
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -19,37 +20,95 @@ def load_validator():
     return module
 
 
-def load_sentinels():
-    """One-way import (seam S4): this validator MAY report the invariant
-    registry's own findings informationally. The registry itself MUST NEVER
-    import this validator (design.md §3.2 -- Sentinel != Validator; §5.2)
-    and this function's failure must never affect this validator's own
-    PASS/FAIL verdict -- reporting is best-effort, not the gated path.
+REQUIRED_SENTINEL_DEPENDENCY_ID = "required-sentinel-dependency-unavailable"
+REQUIRED_SENTINEL_CONTRACT_ID = "required-sentinel-contract-mismatch"
+REQUIRED_SENTINEL_CALL_ID = "required-sentinel-call-failed"
 
-    Two candidate locations because this file's relative position to
-    `workitem_sentinels.py` differs between the source repo and an installed
-    target: in the SOURCE repo this file lives at `scripts/` while the
-    registry lives at `scripts/universal-hooks/scripts/`; once INSTALLED,
-    both land side by side in the same `agents/scripts/` (Claude) or
-    `skills/lead/scripts/` (Codex) directory (both installers copy their
-    containing directories wholesale -- design.md §5.2/F-B10)."""
+
+@dataclass(frozen=True)
+class RequiredSentinelDependency:
+    """One composition-root result for every verdict-bearing sentinel use."""
+
+    module: Any | None
+    resolve_epic_locations: Any | None
+    delivery_action_validation_errors: Any | None
+    failure_id: str | None
+    candidate_labels: tuple[str, ...]
+    candidate_failures: tuple[str, ...]
+
+    @property
+    def available(self) -> bool:
+        return self.failure_id is None
+
+    def diagnostic(self) -> str:
+        tried = ", ".join(self.candidate_labels)
+        details = "; ".join(self.candidate_failures)
+        return f"{self.failure_id}: tried {tried}; {details}"
+
+
+def load_required_sentinels() -> RequiredSentinelDependency:
+    """Load the sentinel owner once for required validation and optional reporting.
+
+    The two logical candidates preserve the source and installed layouts. Import
+    and contract failures remain data until ``command_check`` decides the process
+    verdict; no candidate cause is swallowed on total failure.
+    """
     candidates = (
-        Path(__file__).with_name("workitem_sentinels.py"),  # installed layout: same dir as this file
-        Path(__file__).parent / "universal-hooks" / "scripts" / "workitem_sentinels.py",  # source-repo layout
+        ("installed-sibling", Path(__file__).with_name("workitem_sentinels.py")),
+        (
+            "source-universal-hooks",
+            Path(__file__).parent / "universal-hooks" / "scripts" / "workitem_sentinels.py",
+        ),
     )
-    for candidate in candidates:
+    failures: list[str] = []
+    saw_contract_mismatch = False
+    for label, candidate in candidates:
         if not candidate.is_file():
+            failures.append(f"{label}: missing")
             continue
         try:
             spec = importlib.util.spec_from_file_location("workitem_sentinels", candidate)
             if spec is None or spec.loader is None:
-                continue
+                raise ImportError("unable to create import specification")
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
-            return module
-        except Exception:
+        except Exception as exc:
+            failures.append(f"{label}: {type(exc).__name__}: {exc}")
             continue
-    return None
+
+        required = {
+            "resolve_epic_locations": getattr(module, "resolve_epic_locations", None),
+            "delivery_action_validation_errors": getattr(
+                module, "delivery_action_validation_errors", None
+            ),
+        }
+        missing = sorted(name for name, capability in required.items() if not callable(capability))
+        if missing:
+            saw_contract_mismatch = True
+            failures.append(f"{label}: missing callable(s): {', '.join(missing)}")
+            continue
+        return RequiredSentinelDependency(
+            module=module,
+            resolve_epic_locations=required["resolve_epic_locations"],
+            delivery_action_validation_errors=required["delivery_action_validation_errors"],
+            failure_id=None,
+            candidate_labels=tuple(label for label, _path in candidates),
+            candidate_failures=(),
+        )
+
+    failure_id = (
+        REQUIRED_SENTINEL_CONTRACT_ID
+        if saw_contract_mismatch
+        else REQUIRED_SENTINEL_DEPENDENCY_ID
+    )
+    return RequiredSentinelDependency(
+        module=None,
+        resolve_epic_locations=None,
+        delivery_action_validation_errors=None,
+        failure_id=failure_id,
+        candidate_labels=tuple(label for label, _path in candidates),
+        candidate_failures=tuple(failures),
+    )
 
 
 def parse_time(value: str) -> datetime:
@@ -204,12 +263,12 @@ def _read_status_text(item: Path) -> str:
         return ""
 
 
-def epic_link_notes(item: Path, active_dir: Path) -> list[str]:
-    """Informational: surface a child work-item that claims a missing epic.
+def epic_link_notes(item: Path, active_dir: Path, resolve_epic_locations: Any) -> list[str]:
+    """Validate a child's Epic link through the sentinel-owned resolver.
 
-    Missing epics are adoption/routing signals, not validity failures. The
-    production hook only catches lifecycle drift for already-created epics, so
-    this checker provides the status-surface prompt for bad or dangling links.
+    The resolver distinguishes a missing epic from a duplicate location and
+    never selects one ambiguous copy. These diagnostics are document validity
+    failures in ``command_check`` rather than adoption-only hints.
     """
     text = _read_status_text(item)
     match = EPIC_RE.search(text)
@@ -220,9 +279,25 @@ def epic_link_notes(item: Path, active_dir: Path) -> list[str]:
         return []
     if not SLUG_RE.match(slug):
         return [f"invalid Epic: {slug}"]
-    epic_path = active_dir.parent / "epics" / f"{slug}.md"
-    if not epic_path.is_file():
-        return [f"dangling Epic: {slug} (no matching work-items/epics/{slug}.md)"]
+    epics_dir = active_dir.parent / "epics"
+    try:
+        resolution = resolve_epic_locations(epics_dir, slug)
+    except Exception as exc:
+        return [
+            f"unresolved Epic: {slug} (epic location resolver failed: "
+            f"{type(exc).__name__}: {exc})"
+        ]
+    if resolution["state"] == "missing":
+        return [
+            f"dangling Epic: {slug} (no matching work-items/epics/{slug}.md "
+            f"or work-items/epics/archive/<YYYY-MM>/{slug}.md)"
+        ]
+    if resolution["state"] == "duplicate":
+        rendered = ", ".join(
+            path.relative_to(active_dir.parent).as_posix()
+            for path in resolution["locations"]
+        )
+        return [f"duplicate Epic: {slug} resolves to multiple locations ({rendered})"]
     return []
 
 
@@ -300,6 +375,24 @@ def command_check(args: argparse.Namespace) -> int:
     archive_dir = active_dir.parent / "archive"
     failed = 0
     global_notes = epic_adoption_notes(items, active_dir)
+    sentinel_dependency = load_required_sentinels()
+    delivery_errors: dict[str, list[str]] = {}
+    if not sentinel_dependency.available:
+        failed += 1
+        print("FAIL checker dependency:")
+        print(f"  - {sentinel_dependency.diagnostic()}")
+    else:
+        delivery_validator = sentinel_dependency.delivery_action_validation_errors
+        assert callable(delivery_validator)
+        try:
+            delivery_errors = delivery_validator(active_dir)
+        except Exception as exc:
+            failed += 1
+            print("FAIL checker dependency:")
+            print(
+                f"  - {REQUIRED_SENTINEL_CALL_ID}: "
+                f"delivery_action_validation_errors failed: {type(exc).__name__}: {exc}"
+            )
 
     telemetry: dict[str, int] = {}
     for item in items:
@@ -309,12 +402,15 @@ def command_check(args: argparse.Namespace) -> int:
             telemetry=telemetry,
         )
         errors.extend(stale_running_errors(item, now, stale_after))
+        errors.extend(delivery_errors.get(item.name, []))
+        resolver = sentinel_dependency.resolve_epic_locations
+        if callable(resolver):
+            errors.extend(epic_link_notes(item, active_dir, resolver))
         # Informational notes (aging, blocked-by) are NOT failures: a blocked or
         # aging active item is expected state, not a defect, so they never flip
         # the exit code or the RESULT line.
         notes = item_aging_notes(item, today, args.max_age_days)
         notes.extend(blocked_by_notes(item, active_dir, archive_dir))
-        notes.extend(epic_link_notes(item, active_dir))
         label = item.name
         if errors:
             failed += 1
@@ -336,19 +432,36 @@ def command_check(args: argparse.Namespace) -> int:
     # purely as an extra signal for a human running this checker by hand (a
     # third tier, HALT, was designed and then withdrawn before release --
     # design.md §0.9/§1.0 -- so it is never a value `finding.severity` takes).
-    sentinels = load_sentinels()
+    sentinels = sentinel_dependency.module
     if sentinels is not None:
-        try:
-            # build_context() dropped its own `now` parameter (r8): nothing in
-            # SEN-0/SEN-1's evaluate paths reads a timestamp now that SEN-2's
-            # date arithmetic is cut, so this validator's own `now` (used above
-            # for stale-running checks) is not threaded through here.
-            sentinel_ctx = sentinels.build_context(str(root))
-            for finding in sentinels.evaluate_all(sentinel_ctx):
-                first_line = finding.message.splitlines()[0] if finding.message else ""
-                print(f"info: sentinel {finding.id} ({finding.severity}): {first_line}")
-        except Exception:
-            pass  # reporting-only; a sentinel-side failure must not affect this validator's verdict
+        build_context = getattr(sentinels, "build_context", None)
+        evaluate_all = getattr(sentinels, "evaluate_all", None)
+        missing_optional = sorted(
+            name
+            for name, capability in (
+                ("build_context", build_context),
+                ("evaluate_all", evaluate_all),
+            )
+            if not callable(capability)
+        )
+        if missing_optional:
+            print(
+                "info: sentinel optional reporting unavailable: missing callable(s): "
+                + ", ".join(missing_optional)
+            )
+        else:
+            try:
+                # Runtime evaluation is informational here; document validity was
+                # handled above through the registry-owned delivery parser.
+                sentinel_ctx = build_context(str(root))
+                for finding in evaluate_all(sentinel_ctx):
+                    first_line = finding.message.splitlines()[0] if finding.message else ""
+                    print(f"info: sentinel {finding.id} ({finding.severity}): {first_line}")
+            except Exception as exc:
+                print(
+                    "info: sentinel optional reporting failed: "
+                    f"{type(exc).__name__}: {exc}"
+                )
 
     # Archival must not launder open obligations (decision item 3; fable impl gate
     # REVISE-1): an archived item's ledger is still scanned for open v2 REVISEs.

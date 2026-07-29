@@ -27,6 +27,10 @@ Provider-specific reference trees such as `references-codex/` and `references-cl
 
 Shared-core documents may still keep provider-local addenda when the shared blueprint needs runtime-specific concretization. `subagent-operating-model` now follows that pattern: the canonical shared core lives here, while each provider-local tree keeps only its runtime and repository-specific addendum.
 
+`cross-pack-reconciliation.md` is the intentional maintainer-only exception to the pack-specific-path rule above: it maps matching shared semantic blocks across provider contracts. It stays in this canonical reference directory but is excluded from standalone provider branches and packages.
+
+`mcp-continuity.md` defines the shared three-event Model Context Protocol continuity policy. Its Codex and Claude Code addenda own only provider event-envelope, matcher, delivery, and installed-path details.
+
 Russian translations live under `shared/references/ru/` for shared documents that are mirrored for Russian-language operators.
 
 Two design-only trunks own independence techniques at different stages: `review-loop-methodology.md` (independence at verification — multiple angles converge on one already-written artifact) and `design-panel-methodology.md` (independence at generation — N independently-framed candidate designs on one pinned problem, converged through one mandatory synthesis, before a single design exists). Installed operative bindings currently exist for the Claude and Codex PRODUCTION packs; `design-panel-methodology.md`'s Gemini/Qwen demo-pack mirror is an explicit, tracked DEFERRED follow-on, not yet shipped (see `work-items/bugs/2026-07-10-review-loop-pack-integration-gaps.md` for the related pre-existing review-loop demo-pack gap). Neither trunk carries exact provider paths or CLI syntax; those live in the corresponding pack binding.

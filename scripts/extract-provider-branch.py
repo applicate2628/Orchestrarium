@@ -19,8 +19,9 @@ The transform (verified empirically against the published branches, 2026-06-13):
       no longer carried but REGENERATED from the monorepo copy (see _regenerate_docs_readme)
       so its index and links reflect what the branch actually ships instead of going stale.
   - EXCLUDE everything else (other providers, the merged root AGENTS.md / CLAUDE.md,
-      cross-pack-reconciliation.md, install.ps1/sh, RELEASE_NOTES.md, tests/,
-      .gitattributes, docs/routing/, docs/superpowers/, and any non-allowlisted main doc).
+      the maintainer-only shared/references/cross-pack-reconciliation.md manifest,
+      install.ps1/sh, RELEASE_NOTES.md, tests/, .gitattributes, docs/routing/,
+      docs/superpowers/, and any non-allowlisted main doc).
 
 Usage:
   python scripts/extract-provider-branch.py --provider claude --out <dir>
@@ -42,6 +43,9 @@ PROVIDERS = ("claude", "codex", "gemini", "qwen")
 
 SHARED_PREFIXES = ("shared/", "scripts/")
 SHARED_FILES = ("LICENSE", ".gitignore")
+MAINTAINER_ONLY_FILES = frozenset({
+    "shared/references/cross-pack-reconciliation.md",
+})
 
 # Self-contained pack docs pulled FRESH from the monorepo (no links to excluded paths).
 # Everything else under docs/ is either carried from the branch (link-consistent standalone
@@ -178,6 +182,8 @@ def show(ref: str, path: str) -> bytes:
 
 
 def include_from_main(path: str, provider: str) -> bool:
+    if path in MAINTAINER_ONLY_FILES:
+        return False
     if path.startswith((f"src.{provider}/", f"references-{provider}/", *SHARED_PREFIXES)):
         return True
     if path in SHARED_FILES:

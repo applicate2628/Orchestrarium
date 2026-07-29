@@ -185,7 +185,7 @@ def test_reclaim_is_exact_and_idempotent(
         platform=platform,
         registration_data=direct,
         dry_run=False,
-        install_scope=HELPER.InstallScope.TARGET,
+        abort_policy=HELPER.TestAbortPolicy(None, None),
     )
     assert len(removed) == expected_count
     assert not any(path.exists() for path in removed)
@@ -196,7 +196,7 @@ def test_reclaim_is_exact_and_idempotent(
             platform=platform,
             registration_data=direct,
             dry_run=False,
-            install_scope=HELPER.InstallScope.TARGET,
+            abort_policy=HELPER.TestAbortPolicy(None, None),
         )
         == ()
     )
@@ -214,7 +214,7 @@ def test_wrapper_profile_does_not_reclaim(tmp_path: Path, platform: str) -> None
             platform=platform,
             registration_data=wrappers,
             dry_run=False,
-            install_scope=HELPER.InstallScope.TARGET,
+            abort_policy=HELPER.TestAbortPolicy(None, None),
         )
         == ()
     )
@@ -233,7 +233,7 @@ def test_reclaim_preserves_non_hook_wrappers(tmp_path: Path, platform: str) -> N
             candidates, platform=platform, wrapper=False
         ),
         dry_run=False,
-        install_scope=HELPER.InstallScope.TARGET,
+        abort_policy=HELPER.TestAbortPolicy(None, None),
     )
     assert all((installed / "scripts" / name).read_text(encoding="utf-8") == "protected\n" for name in PROTECTED)
 
@@ -250,7 +250,7 @@ def test_dry_run_reports_exact_set_without_mutation(tmp_path: Path, platform: st
             candidates, platform=platform, wrapper=False
         ),
         dry_run=True,
-        install_scope=HELPER.InstallScope.TARGET,
+        abort_policy=HELPER.TestAbortPolicy(None, None),
     )
     assert removed == candidates
     assert all(path.is_file() for path in candidates)

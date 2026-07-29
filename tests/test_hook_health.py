@@ -88,6 +88,93 @@ def test_registered_command_executes_every_owned_hook(
     assert all(message.startswith(f"PASS {platform} ") for message in messages)
 
 
+def _mcp_only_config() -> dict:
+    return {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": sys.executable,
+                            "args": [
+                                str(
+                                    ROOT
+                                    / "scripts"
+                                    / "universal-hooks"
+                                    / "hooks"
+                                    / "check-mcp-momentum.py"
+                                )
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+
+def test_hook_health_uses_synthetic_mcp_server_and_requires_positive_advisory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "mcp-health.json"
+    target.write_text(json.dumps(_mcp_only_config()), encoding="utf-8")
+    monkeypatch.setattr(
+        CHECKER, "_manifest_stems", lambda _root, _platform: {"check-mcp-momentum"}
+    )
+    real_run = subprocess.run
+    observed: dict[str, object] = {}
+
+    def capturing_run(*args, **kwargs):
+        env = kwargs.get("env")
+        observed["env"] = env
+        if isinstance(env, dict):
+            synthetic_home = Path(env["HOME"])
+            observed["config"] = json.loads(
+                (synthetic_home / ".claude.json").read_text(encoding="utf-8")
+            )
+        completed = real_run(*args, **kwargs)
+        observed["stdout"] = completed.stdout
+        return completed
+
+    monkeypatch.setattr(CHECKER.subprocess, "run", capturing_run)
+    messages = CHECKER.verify_config(
+        target=target,
+        platform="claude",
+        host_os="posix",
+        repo_root=ROOT,
+        verify_fires=True,
+    )
+    assert messages == ["PASS claude PreToolUse check-mcp-momentum"]
+    assert "mcp-momentum" in str(observed.get("stdout", ""))
+    assert observed.get("config") == {
+        "mcpServers": {"synthetic-codegraph-health": {}}
+    }
+
+
+def test_hook_health_rejects_silent_mcp_positive_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "silent-mcp-health.json"
+    target.write_text(json.dumps(_mcp_only_config()), encoding="utf-8")
+    monkeypatch.setattr(
+        CHECKER, "_manifest_stems", lambda _root, _platform: {"check-mcp-momentum"}
+    )
+    monkeypatch.setattr(
+        CHECKER.subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 0, "", ""),
+    )
+    with pytest.raises(ValueError, match="check-mcp-momentum.*advisory"):
+        CHECKER.verify_config(
+            target=target,
+            platform="claude",
+            host_os="posix",
+            repo_root=ROOT,
+            verify_fires=True,
+        )
+
+
 def test_missing_executable_and_missing_target_are_distinct(tmp_path: Path) -> None:
     executable_config = _config("claude")
     executable_config["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = str(

@@ -238,6 +238,81 @@ class TestSingleScanOwnership(unittest.TestCase):
         self.assertEqual((text, status_b), ("", "not-in-window"))
 
 
+class TestCorrelatedToolResultStatus(unittest.TestCase):
+    """The correlated result is immutable, field-addressed, and carries the
+    supported provider execution-status signal without changing its text."""
+
+    def test_provider_status_normalization_matrix(self) -> None:
+        claude_absent = {
+            "type": "user",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "claude-absent", "content": " plain body "}
+            ]},
+        }
+        claude_false = {
+            "type": "user",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "claude-false", "content": "false body", "is_error": False}
+            ]},
+        }
+        claude_true = {
+            "type": "user",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "claude-true", "content": "true body", "is_error": True}
+            ]},
+        }
+        claude_nonboolean = {
+            "type": "user",
+            "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "claude-nonboolean", "content": "ambiguous body", "is_error": "true"}
+            ]},
+        }
+
+        def nested_codex(call_id: str, output: str) -> dict:
+            return {
+                "type": "response_item",
+                "payload": {"type": "function_call_output", "call_id": call_id, "output": output},
+            }
+
+        def top_level_codex(call_id: str, output: str) -> dict:
+            return {"type": "function_call_output", "call_id": call_id, "output": output}
+
+        cases = (
+            ("claude-absent", claude_absent, "plain body", "NO_OBSERVED_FAILURE"),
+            ("claude-false", claude_false, "false body", "NO_OBSERVED_FAILURE"),
+            ("claude-true", claude_true, "true body", "EXPLICIT_FAILURE"),
+            ("claude-nonboolean", claude_nonboolean, "ambiguous body", "AMBIGUOUS_STATUS"),
+            ("codex-nested-zero", nested_codex("codex-nested-zero", "Exit code: 0\nzero body"),
+             "Exit code: 0\nzero body", "NO_OBSERVED_FAILURE"),
+            ("codex-nested-nonzero", nested_codex("codex-nested-nonzero", "Exit code: 7\nfailed body"),
+             "Exit code: 7\nfailed body", "EXPLICIT_FAILURE"),
+            ("codex-nested-malformed", nested_codex("codex-nested-malformed", "Exit code: nope\nbody"),
+             "Exit code: nope\nbody", "AMBIGUOUS_STATUS"),
+            ("codex-nested-no-header", nested_codex("codex-nested-no-header", "ordinary body"),
+             "ordinary body", "NO_OBSERVED_FAILURE"),
+            ("codex-top-zero", top_level_codex("codex-top-zero", "Exit code: 0\nzero body"),
+             "Exit code: 0\nzero body", "NO_OBSERVED_FAILURE"),
+            ("codex-top-nonzero", top_level_codex("codex-top-nonzero", "Exit code: -3\nfailed body"),
+             "Exit code: -3\nfailed body", "EXPLICIT_FAILURE"),
+            ("codex-top-malformed", top_level_codex("codex-top-malformed", "Exit code: 1.5\nbody"),
+             "Exit code: 1.5\nbody", "AMBIGUOUS_STATUS"),
+            ("codex-top-no-header", top_level_codex("codex-top-no-header", "ordinary top body"),
+             "ordinary top body", "NO_OBSERVED_FAILURE"),
+        )
+
+        for name, entry, expected_text, expected_status in cases:
+            with self.subTest(case=name):
+                results = hook_common.extract_tool_outputs_with_ids(entry)
+                self.assertEqual(len(results), 1)
+                result = results[0]
+                self.assertEqual(result.call_id, name)
+                self.assertEqual(result.output_text, expected_text)
+                self.assertEqual(result.execution_status, expected_status)
+                self.assertIsInstance(result, tuple)
+                with self.assertRaises(AttributeError):
+                    result.execution_status = "NO_OBSERVED_FAILURE"
+
+
 class TestScanCost(unittest.TestCase):
     """Measured-cost gate (bug Constraints): the refactor must preserve the
     bounded scan's cheapness against a whole-file-read control. Opt-in via

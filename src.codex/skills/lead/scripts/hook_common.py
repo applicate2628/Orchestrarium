@@ -6,6 +6,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 # Harness-injected spans that ride inside user-role transcript entries but are
 # NOT typed by the human (system reminders, async task notifications, captured
@@ -19,6 +20,63 @@ _INJECTED_SPAN_RE = re.compile(
     r"|<local-command-stdout>.*?</local-command-stdout>",
     re.DOTALL | re.IGNORECASE,
 )
+
+NO_OBSERVED_FAILURE = "NO_OBSERVED_FAILURE"
+EXPLICIT_FAILURE = "EXPLICIT_FAILURE"
+AMBIGUOUS_STATUS = "AMBIGUOUS_STATUS"
+
+
+class CorrelatedToolResult(NamedTuple):
+    """One immutable, field-addressed result correlated to a provider call.
+
+    ``execution_status`` records only whether a supported provider surface
+    exposes an execution failure. It is not the tool's semantic verdict and
+    ``NO_OBSERVED_FAILURE`` is not proof of success.
+    """
+
+    call_id: str
+    output_text: str
+    execution_status: str
+
+
+class DeliveryActivity(NamedTuple):
+    """Content-free current-turn activity correlated by the host call id."""
+
+    action_class: str
+    target_ids: tuple[str, ...]
+    succeeded: bool
+    failed: bool
+
+
+_CODEX_EXIT_STATUS_RE = re.compile(r"Exit code: ([+-]?[0-9]+)\Z")
+_PATCH_TARGET_RE = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+)$", re.MULTILINE)
+_DELIVERY_PATH_FIELDS = {
+    "edit": ("file_path", "path"),
+    "write": ("file_path", "path"),
+    "notebookedit": ("notebook_path", "path"),
+    "replace_symbol_body": ("relative_path",),
+    "insert_after_symbol": ("relative_path",),
+    "insert_before_symbol": ("relative_path",),
+    "rename_symbol": ("relative_path",),
+    "safe_delete_symbol": ("relative_path",),
+}
+
+
+def _codex_execution_status(output_text: str) -> str:
+    """Normalize the observed Codex 0.145.0 leading shell-status adapter.
+
+    This is observed installed/runtime behavior, not an official stable
+    Codex application programming interface. Only the first logical line of
+    the already stripped-and-trimmed output participates. A recognized but
+    malformed prefix is ambiguous; a later status-looking line is body text.
+    """
+    first_line = output_text.splitlines()[0] if output_text else ""
+    match = _CODEX_EXIT_STATUS_RE.fullmatch(first_line)
+    if match:
+        return NO_OBSERVED_FAILURE if int(match.group(1), 10) == 0 else EXPLICIT_FAILURE
+    if first_line.startswith("Exit code:"):
+        return AMBIGUOUS_STATUS
+    return NO_OBSERVED_FAILURE
 
 
 def read_stdin_utf8() -> str:
@@ -430,10 +488,11 @@ def extract_model_tool_calls_with_ids(entry: object) -> list[tuple[str, str]]:
     if not isinstance(entry, dict):
         return pairs
     payload = entry.get("payload")
-    if isinstance(payload, dict) and payload.get("type") == "function_call":
+    if isinstance(payload, dict) and payload.get("type") in {"function_call", "custom_tool_call"}:
         call_id = payload.get("call_id")
         if isinstance(call_id, str) and call_id:
-            text = strip_injected_spans(f"{payload.get('name', '')} {payload.get('arguments', '')}").strip()
+            arguments = payload.get("arguments", payload.get("input", ""))
+            text = strip_injected_spans(f"{payload.get('name', '')} {arguments}").strip()
             pairs.append((call_id, text))
         return pairs
     if not is_assistant_message(entry):
@@ -462,29 +521,43 @@ def extract_model_tool_calls_with_ids(entry: object) -> list[tuple[str, str]]:
     return pairs
 
 
-def extract_tool_outputs_with_ids(entry: object) -> list[tuple[str, str]]:
+def extract_tool_outputs_with_ids(entry: object) -> list[CorrelatedToolResult]:
     """The correlation-half counterpart to `extract_model_tool_calls_with_ids`:
-    returns a list of `(call_id, output_text)` pairs for this entry's tool
-    OUTPUT — Claude `tool_result` content keyed by its own `tool_use_id`,
+    returns immutable `CorrelatedToolResult` records for this entry's tool
+    OUTPUT — Claude `tool_result` content keyed by its own `tool_use_id`, or
     Codex `payload.function_call_output` (and its Codex top-level fallback
     shape) output keyed by its own `call_id`. NOT tool CALLS, NOT assistant
     prose, NOT user text. An output with no id is skipped — uncorrelatable,
-    so it can never satisfy a caller's correlated check (fail-closed)."""
-    pairs: list[tuple[str, str]] = []
+    so it can never satisfy a caller's correlated check (fail-closed).
+
+    Claude's optional Boolean `tool_result.is_error` is official provider
+    behavior: exact `True` is an explicit failure, exact `False` or absence
+    means no failure was observed, and any present non-Boolean is ambiguous.
+    For Codex, only the observed installed/runtime 0.145.0 leading
+    `Exit code: N` wrapper line is normalized; this repository does not claim
+    that prefix as an official or stable Codex contract. Output text retains
+    the existing injected-span stripping plus outer-trim semantics."""
+    results: list[CorrelatedToolResult] = []
     if not isinstance(entry, dict):
-        return pairs
+        return results
     payload = entry.get("payload")
-    if isinstance(payload, dict) and payload.get("type") == "function_call_output":
+    if isinstance(payload, dict) and payload.get("type") in {"function_call_output", "custom_tool_call_output"}:
         call_id = payload.get("call_id")
         if isinstance(call_id, str) and call_id:
-            pairs.append((call_id, strip_injected_spans(str(payload.get("output", ""))).strip()))
-        return pairs
+            output_text = strip_injected_spans(str(payload.get("output", ""))).strip()
+            results.append(CorrelatedToolResult(
+                call_id, output_text, _codex_execution_status(output_text),
+            ))
+        return results
     # Codex top-level fallback shape (mirrors extract_text's own fallback).
     if entry.get("type") == "function_call_output":
         call_id = entry.get("call_id")
         if isinstance(call_id, str) and call_id:
-            pairs.append((call_id, strip_injected_spans(str(entry.get("output", ""))).strip()))
-        return pairs
+            output_text = strip_injected_spans(str(entry.get("output", ""))).strip()
+            results.append(CorrelatedToolResult(
+                call_id, output_text, _codex_execution_status(output_text),
+            ))
+        return results
 
     content = entry.get("content")
     if content is None:
@@ -505,8 +578,192 @@ def extract_tool_outputs_with_ids(entry: object) -> list[tuple[str, str]]:
                 text = extract_text({"content": inner})
             else:
                 text = ""
-            pairs.append((call_id, strip_injected_spans(text).strip()))
-    return pairs
+            output_text = strip_injected_spans(text).strip()
+            if "is_error" not in item or item.get("is_error") is False:
+                execution_status = NO_OBSERVED_FAILURE
+            elif item.get("is_error") is True:
+                execution_status = EXPLICIT_FAILURE
+            else:
+                execution_status = AMBIGUOUS_STATUS
+            results.append(CorrelatedToolResult(call_id, output_text, execution_status))
+    return results
+
+
+def _delivery_target(value: str) -> str | None:
+    target = value.strip().strip("'\"` ,;:()[]{}").replace("\\", "/")
+    while target.startswith("./"):
+        target = target[2:]
+    if not target or len(target) > 240 or target.startswith("/"):
+        return None
+    if re.match(r"^[A-Za-z]:/", target) or ".." in target.split("/"):
+        return None
+    return target
+
+
+def _delivery_tool_identity(tool_name: object) -> str:
+    if not isinstance(tool_name, str):
+        return ""
+    identity = tool_name.strip().lower()
+    if identity.startswith("mcp__serena__"):
+        return identity.removeprefix("mcp__serena__")
+    if identity.startswith("serena."):
+        return identity.removeprefix("serena.")
+    if identity.startswith("tools."):
+        return identity.removeprefix("tools.")
+    return identity
+
+
+def _delivery_input_object(tool_input: object) -> dict | None:
+    if isinstance(tool_input, dict):
+        return tool_input
+    if not isinstance(tool_input, str):
+        return None
+    try:
+        decoded = json.loads(tool_input)
+    except (TypeError, ValueError):
+        return None
+    return decoded if isinstance(decoded, dict) else None
+
+
+def _delivery_patch_text(tool_input: object) -> str:
+    if isinstance(tool_input, dict):
+        for key in ("patch", "input"):
+            value = tool_input.get(key)
+            if isinstance(value, str):
+                return value
+        return ""
+    if not isinstance(tool_input, str):
+        return ""
+    stripped = tool_input.strip()
+    if stripped.startswith("{"):
+        decoded = _delivery_input_object(tool_input)
+        if decoded is None:
+            return ""
+        return _delivery_patch_text(decoded)
+    return tool_input
+
+
+def _classify_delivery_call(tool_name: object, tool_input: object) -> tuple[str, tuple[str, ...]]:
+    """Classify one direct host call from its typed identity and semantic input."""
+    identity = _delivery_tool_identity(tool_name)
+    candidates: list[str] = []
+    if identity == "apply_patch":
+        action_class = "mutation"
+        candidates.extend(_PATCH_TARGET_RE.findall(_delivery_patch_text(tool_input)))
+    elif identity in _DELIVERY_PATH_FIELDS:
+        action_class = "mutation"
+        input_object = _delivery_input_object(tool_input)
+        if input_object is not None:
+            for field in _DELIVERY_PATH_FIELDS[identity]:
+                candidate = input_object.get(field)
+                if isinstance(candidate, str):
+                    candidates.append(candidate)
+                    break
+    else:
+        action_class = "other"
+    targets: list[str] = []
+    for candidate in candidates:
+        normalized = _delivery_target(candidate)
+        if normalized and normalized not in targets:
+            targets.append(normalized)
+        if len(targets) >= 16:
+            break
+    return action_class, tuple(targets)
+
+
+def _extract_delivery_calls_with_ids(entry: object) -> list[tuple[str, str, tuple[str, ...]]]:
+    """Extract only direct host-recorded calls with typed delivery semantics."""
+    calls: list[tuple[str, str, tuple[str, ...]]] = []
+    if not isinstance(entry, dict):
+        return calls
+    payload = entry.get("payload")
+    if isinstance(payload, dict) and payload.get("type") in {"function_call", "custom_tool_call"}:
+        call_id = payload.get("call_id")
+        if isinstance(call_id, str) and call_id:
+            tool_input = payload.get("arguments", payload.get("input"))
+            action_class, targets = _classify_delivery_call(payload.get("name"), tool_input)
+            calls.append((call_id, action_class, targets))
+        return calls
+    if not is_assistant_message(entry):
+        return calls
+    content = entry.get("content")
+    if content is None:
+        message = entry.get("message")
+        if isinstance(message, dict):
+            content = message.get("content")
+    if not isinstance(content, list):
+        return calls
+    for item in content:
+        if not isinstance(item, dict) or item.get("type") != "tool_use":
+            continue
+        call_id = item.get("id")
+        if not isinstance(call_id, str) or not call_id:
+            continue
+        action_class, targets = _classify_delivery_call(item.get("name"), item.get("input"))
+        calls.append((call_id, action_class, targets))
+    return calls
+
+
+def _delivery_result_flags(entry: object) -> list[tuple[str, bool, bool]]:
+    """Provider-aware host result status; ambiguous output grants no credit."""
+    if not isinstance(entry, dict):
+        return []
+    payload = entry.get("payload")
+    if isinstance(payload, dict) and payload.get("type") in {"function_call_output", "custom_tool_call_output"}:
+        call_id = payload.get("call_id")
+        if not isinstance(call_id, str) or not call_id:
+            return []
+        output = strip_injected_spans(str(payload.get("output", ""))).strip()
+        first_line = output.splitlines()[0] if output else ""
+        execution_status = _codex_execution_status(output)
+        succeeded = execution_status == NO_OBSERVED_FAILURE and (
+            first_line == "Exit code: 0" or first_line.startswith("Script completed")
+        )
+        failed = execution_status == EXPLICIT_FAILURE or first_line.startswith(("Script failed", "Script error:"))
+        return [(call_id, succeeded, failed)]
+    content = entry.get("content")
+    if content is None:
+        message = entry.get("message")
+        if isinstance(message, dict):
+            content = message.get("content")
+    flags: list[tuple[str, bool, bool]] = []
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict) or item.get("type") != "tool_result":
+                continue
+            call_id = item.get("tool_use_id")
+            if not isinstance(call_id, str) or not call_id:
+                continue
+            is_error = item.get("is_error")
+            flags.append((call_id, is_error is False, is_error is True))
+    return flags
+
+
+def correlated_delivery_activity(entries: list[dict], *, event_cap: int = 64) -> list[DeliveryActivity]:
+    """Normalize correlated call/results without retaining transcript content."""
+    calls: dict[str, tuple[str, tuple[str, ...]]] = {}
+    results: dict[str, tuple[bool, bool]] = {}
+    order: list[str] = []
+    for entry in entries:
+        for call_id, action_class, target_ids in _extract_delivery_calls_with_ids(entry):
+            if call_id not in calls and len(order) < event_cap:
+                calls[call_id] = (action_class, target_ids)
+                order.append(call_id)
+        for call_id, succeeded, failed in _delivery_result_flags(entry):
+            if call_id not in results:
+                results[call_id] = (succeeded, failed)
+    activities: list[DeliveryActivity] = []
+    for call_id in order:
+        result_flags = results.get(call_id, (False, False))
+        action_class, target_ids = calls[call_id]
+        succeeded, failed = result_flags
+        activities.append(DeliveryActivity(
+            action_class,
+            target_ids,
+            succeeded,
+            failed,
+        ))
+    return activities
 
 
 def extract_model_shell_commands_with_ids(entry: object) -> list[tuple[str, str]]:

@@ -34,14 +34,14 @@ def test_claude_includes_pack_paths():
         assert inc(p), p
 
 
-def test_claude_excludes_other_providers_and_merged_root():
+def test_claude_excludes_other_providers_merged_root_and_maintainer_only_files():
     for p in (
         "src.codex/skills/lead/SKILL.md",
         "src.gemini/agents/lead.md",
         "references-codex/README.md",
         "AGENTS.md",
         "CLAUDE.md",
-        "cross-pack-reconciliation.md",
+        *sorted(mod.MAINTAINER_ONLY_FILES),
         "RELEASE_NOTES.md",
         "tests/test_x.py",
         "install.sh",

@@ -22,7 +22,7 @@ description: "Product manager: own roadmap priority and admission."
 ## Return exactly one artifact
 
 - Return one roadmap decision package containing the prioritized item or initiative, intended outcome, business or user rationale, sequencing rationale, dependency notes, target success signals, bounded scope, explicit non-goals, and the recommended admission decision for discovery or delivery.
-- An **epic** — an initiative grouping several work-items toward one goal or milestone — is admitted here like any item. When a roadmap decision package names multiple related work-items, a shared milestone, or one mechanism split across several items, either admit an epic or include `No-epic rationale: <why these remain standalone>`.
+- An **epic** — an initiative grouping several work-items toward one goal or milestone — is admitted here like any item. When a roadmap decision package names multiple related work-items, a shared milestone, or one mechanism split across several items, either admit an epic or include `No-epic rationale: <why these remain standalone>`. Admission materializes only the active file at `work-items/epics/<date>-<slug>.md`; the monthly archive is closure state, not an admission target.
 
 ## Gate
 

@@ -205,6 +205,9 @@ def _synthetic_envelope(event: str, stem: str, scratch_root: Path) -> str:
         if stem == "check-git-push-gate":
             payload["tool_name"] = "Bash"
             payload["tool_input"] = {"command": "git push"}
+        if stem == "check-mcp-momentum":
+            payload["tool_name"] = "Bash"
+            payload["tool_input"] = {"command": "rg -n 'def health_probe' src/"}
         if transcript_path is not None:
             payload["transcript_path"] = str(transcript_path)
     elif event == "Stop":
@@ -243,6 +246,19 @@ def verify_config(
                 if not target_path.is_file():
                     raise ValueError(f"registered target is missing for {stem}: {target_path}")
             if verify_fires:
+                hook_env: dict[str, str] | None = None
+                if stem == "check-mcp-momentum":
+                    synthetic_home = scratch_root / "synthetic-mcp-home"
+                    synthetic_home.mkdir(exist_ok=True)
+                    (synthetic_home / ".claude.json").write_text(
+                        json.dumps(
+                            {"mcpServers": {"synthetic-codegraph-health": {}}}
+                        ),
+                        encoding="utf-8",
+                    )
+                    hook_env = os.environ.copy()
+                    hook_env["HOME"] = str(synthetic_home)
+                    hook_env["USERPROFILE"] = str(synthetic_home)
                 completed = subprocess.run(
                     [str(executable), *argv[1:]],
                     input=_synthetic_envelope(event, stem, scratch_root),
@@ -250,6 +266,7 @@ def verify_config(
                     text=True,
                     timeout=15,
                     cwd=foreign_cwd,
+                    env=hook_env,
                 )
                 if completed.returncode != 0:
                     raise ValueError(
@@ -261,6 +278,22 @@ def verify_config(
                         raise ValueError(
                             f"{stem} fired without its expected deny payload: "
                             f"{completed.stdout.strip()}"
+                        )
+                if stem == "check-mcp-momentum":
+                    try:
+                        payload = json.loads(completed.stdout)
+                        context = payload["hookSpecificOutput"]["additionalContext"]
+                    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+                        raise ValueError(
+                            "check-mcp-momentum fired without its expected advisory"
+                        ) from exc
+                    if (
+                        payload["hookSpecificOutput"].get("hookEventName")
+                        != "PreToolUse"
+                        or "mcp-momentum" not in str(context)
+                    ):
+                        raise ValueError(
+                            "check-mcp-momentum fired without its expected advisory"
                         )
             messages.append(f"PASS {platform} {event} {stem}")
     missing = sorted(stem for stem, count in counts.items() if count == 0)

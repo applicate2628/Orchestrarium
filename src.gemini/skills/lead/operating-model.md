@@ -58,6 +58,10 @@ The main Gemini session activates the parallel specialist role skills. Orchestra
 - Escalate after 3 consecutive `REVISE` cycles on the same role and artifact.
 - Do not stop at a partial batch when admitted-scope next work is already known.
 
+## Epic task-memory lifecycle
+
+An active epic lives at `work-items/epics/<date>-<slug>.md`; after Lead records `status: closed`, `## Closure`, and `Closed: <YYYY-MM-DD>`, the knowledge archivist moves the same file to `work-items/epics/archive/<YYYY-MM>/<slug>.md` and reconciles the local index. Reopening moves it back and changes it to `status: active` in the same operation. A slug must resolve to exactly one active or archived file; missing and duplicate state are invalid and no caller selects by recency.
+
 ## External adapters
 
 Gemini-line external adapters use `.gemini/.agents-mode.yaml`.

@@ -7,14 +7,16 @@ carries the per-turn override `[approve-publication]` (user-side only — never
 honored from assistant prose, tool calls, or tool output), or (b) the current
 turn's model tool CALLS show a publication-safety scan invocation AND that
 SAME invocation's OWN tool OUTPUT this turn — correlated by call identity,
-never by mere co-occurrence in the turn — reports a clean, non-empty,
-`tracked`-mode result (2026-07-26 hardening — branch (b) now keys on a
-CORRELATED result, not merely invocation, and not an uncorrelated result
-appearing anywhere in the turn; see check-git-push-gate.py's module docstring,
-work-items/backlog/2026-07-25-push-gate-blind-to-scan-result/brief.md §11.5
+never by mere co-occurrence in the turn — reports either a clean, non-empty
+`tracked`-mode result or a clean, non-empty `range`-mode result whose declared
+remote/destination match every detected push. The 2026-07-26 hardening made
+branch (b) key on a CORRELATED result, not merely invocation and not an
+uncorrelated result appearing anywhere in the turn; see
+check-git-push-gate.py's module docstring,
+work-items/active/2026-07-25-push-gate-blind-to-scan-result/brief.md §11.5
 D1-D3/S6, and the adversarial-gate correction that found the first cut of this
-hardening joined two independent haystacks instead of correlating) AND the
-last genuine user message contains an explicit push instruction. `git push
+hardening joined two independent haystacks instead of correlating. The last
+genuine user message must also contain an explicit push instruction. `git push
 --dry-run` is always allowed; a `git push` inside a quoted string is data, not
 a command; subagent contexts (envelope `agent_id`) are allowed; everything
 fails open.
@@ -51,14 +53,18 @@ HOOKS = (
     REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-git-push-gate.py",
 )
 
+_MISSING = object()
+
 
 def user(text: str) -> dict:
     return {"type": "user", "message": {"role": "user", "content": [{"type": "text", "text": text}]}}
 
 
-def tool_result(text: str, tool_id: str = "toolu_default") -> dict:
-    return {"type": "user", "message": {"role": "user",
-            "content": [{"type": "tool_result", "tool_use_id": tool_id, "content": text}]}}
+def tool_result(text: str, tool_id: str = "toolu_default", *, is_error: object = _MISSING) -> dict:
+    item = {"type": "tool_result", "tool_use_id": tool_id, "content": text}
+    if is_error is not _MISSING:
+        item["is_error"] = is_error
+    return {"type": "user", "message": {"role": "user", "content": [item]}}
 
 
 def assistant(text: str) -> dict:
@@ -1418,6 +1424,10 @@ class TestGitPushGate(unittest.TestCase):
                 reason = payload["hookSpecificOutput"]["permissionDecisionReason"]
                 self.assertIn("[approve-publication]", reason)
                 self.assertIn("check-publication-safety", reason)
+                self.assertIn("staged", reason)
+                self.assertIn("standalone", reason)
+                self.assertIn("NON-EMPTY", reason)
+                self.assertIn("--range <remote> <dst>", reason)
                 self.assertIn("--dry-run", reason)
                 self.assertIn("BACKSTOP", reason)
 
@@ -1565,6 +1575,26 @@ class TestGitPushGateRangeMode(unittest.TestCase):
             should_deny=False,
         )
 
+    def test_narrow_scope_residual_allowances_remain_credited(self) -> None:
+        # These six shapes are disclosed CURRENT residuals of the accepted
+        # remote/destination-only contract. This test protects that narrow
+        # correction from silently claiming or implementing the cut hardening;
+        # changing any verdict requires a separately accepted design.
+        commands = (
+            "git push --force origin claude",
+            "git push origin claude refs/heads/extra",
+            "git push origin :claude",
+            "git push origin +:claude",
+            "git -C /other/repo push origin claude",
+            "git commit --allow-empty -m x && git push origin claude",
+        )
+        for command in commands:
+            self.assert_outcome(
+                [user("push the branch"), SCAN_CALL_RANGE_MODE, SCAN_RESULT_CLEAN_RANGE],
+                command,
+                should_deny=False,
+            )
+
     # --- non-uniform / unextractable push lists never range-credit ---
 
     def test_range_evidence_bare_push_does_not_bind_denies(self) -> None:
@@ -1596,6 +1626,168 @@ class TestGitPushGateRangeMode(unittest.TestCase):
             [user("push the branch"), SCAN_CALL, SCAN_RESULT_CLEAN_TRACKED],
             "git push origin main",
             should_deny=False,
+        )
+
+
+class TestGitPushGateResultStatus(unittest.TestCase):
+    """Provider execution status is part of correlated scan evidence.
+
+    A clean-looking receipt is never enough when the provider explicitly
+    reports failure or exposes a recognized but malformed status channel.
+    """
+
+    def assert_outcome(
+        self,
+        entries: list[dict],
+        command: str,
+        *,
+        should_deny: bool,
+        case: str,
+    ) -> None:
+        for script in HOOKS:
+            with self.subTest(script=script.parent.parent.name, case=case):
+                p = run_hook(script, entries, command)
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(denies(p), should_deny, f"stdout={p.stdout!r}")
+
+    def test_explicit_failure_cannot_mint_credit(self) -> None:
+        cases = (
+            (
+                "claude-tracked",
+                [user("push the branch"), SCAN_CALL,
+                 tool_result(
+                     "publication-safety: clean (tracked, examined 3 files)",
+                     tool_id="toolu_scan",
+                     is_error=True,
+                 )],
+                "git push origin main",
+            ),
+            (
+                "claude-range",
+                [user("push the branch"), SCAN_CALL_RANGE_MODE,
+                 tool_result(
+                     f"publication-safety: clean (range, examined 3 files, remote origin, "
+                     f"dst claude, tip {RANGE_TIP})",
+                     tool_id="toolu_scan_range",
+                     is_error=True,
+                 )],
+                "git push origin claude",
+            ),
+            (
+                "codex-tracked",
+                [user("push the branch"), CODEX_SCAN_CALL,
+                 codex_function_call_output(
+                     "Exit code: 1\npublication-safety: clean (tracked, examined 2 files)",
+                     call_id="call_scan",
+                 )],
+                "git push origin main",
+            ),
+            (
+                "codex-range",
+                [user("push the branch"), CODEX_SCAN_CALL_RANGE_MODE,
+                 codex_function_call_output(
+                     f"Exit code: 9\npublication-safety: clean (range, examined 2 files, "
+                     f"remote origin, dst claude, tip {RANGE_TIP})",
+                     call_id="call_scan_range",
+                 )],
+                "git push origin claude",
+            ),
+        )
+        for name, entries, command in cases:
+            self.assert_outcome(entries, command, should_deny=True, case=name)
+
+    def test_ambiguous_status_cannot_mint_credit(self) -> None:
+        cases = (
+            (
+                "claude-tracked-nonboolean",
+                [user("push the branch"), SCAN_CALL,
+                 tool_result(
+                     "publication-safety: clean (tracked, examined 3 files)",
+                     tool_id="toolu_scan",
+                     is_error="true",
+                 )],
+                "git push origin main",
+            ),
+            (
+                "claude-range-nonboolean",
+                [user("push the branch"), SCAN_CALL_RANGE_MODE,
+                 tool_result(
+                     f"publication-safety: clean (range, examined 3 files, remote origin, "
+                     f"dst claude, tip {RANGE_TIP})",
+                     tool_id="toolu_scan_range",
+                     is_error=1,
+                 )],
+                "git push origin claude",
+            ),
+            (
+                "codex-tracked-malformed",
+                [user("push the branch"), CODEX_SCAN_CALL,
+                 codex_function_call_output(
+                     "Exit code: nope\npublication-safety: clean (tracked, examined 2 files)",
+                     call_id="call_scan",
+                 )],
+                "git push origin main",
+            ),
+            (
+                "codex-range-malformed",
+                [user("push the branch"), CODEX_SCAN_CALL_RANGE_MODE,
+                 codex_function_call_output(
+                     f"Exit code: \npublication-safety: clean (range, examined 2 files, "
+                     f"remote origin, dst claude, tip {RANGE_TIP})",
+                     call_id="call_scan_range",
+                 )],
+                "git push origin claude",
+            ),
+        )
+        for name, entries, command in cases:
+            self.assert_outcome(entries, command, should_deny=True, case=name)
+
+    def test_no_observed_failure_retains_existing_credit(self) -> None:
+        cases = (
+            (
+                "claude-tracked-absent",
+                [user("push the branch"), SCAN_CALL, SCAN_RESULT_CLEAN_TRACKED],
+                "git push origin main",
+            ),
+            (
+                "claude-range-false",
+                [user("push the branch"), SCAN_CALL_RANGE_MODE,
+                 tool_result(
+                     f"publication-safety: clean (range, examined 3 files, remote origin, "
+                     f"dst claude, tip {RANGE_TIP})",
+                     tool_id="toolu_scan_range",
+                     is_error=False,
+                 )],
+                "git push origin claude",
+            ),
+            (
+                "codex-tracked-zero",
+                [user("push the branch"), CODEX_SCAN_CALL,
+                 codex_function_call_output(
+                     "Exit code: 0\npublication-safety: clean (tracked, examined 2 files)",
+                     call_id="call_scan",
+                 )],
+                "git push origin main",
+            ),
+            (
+                "codex-range-no-header",
+                [user("push the branch"), CODEX_SCAN_CALL_RANGE_MODE, CODEX_SCAN_RESULT_CLEAN_RANGE],
+                "git push origin claude",
+            ),
+        )
+        for name, entries, command in cases:
+            self.assert_outcome(entries, command, should_deny=False, case=name)
+
+    def test_later_exit_code_line_is_body_not_status(self) -> None:
+        self.assert_outcome(
+            [user("push the branch"), CODEX_SCAN_CALL,
+             codex_function_call_output(
+                 "publication-safety: clean (tracked, examined 2 files)\nExit code: 1",
+                 call_id="call_scan",
+             )],
+            "git push origin main",
+            should_deny=False,
+            case="codex-later-line",
         )
 
 

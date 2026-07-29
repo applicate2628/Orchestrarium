@@ -9,6 +9,7 @@ This tree follows the common provider-local reference layout used across the fou
 - `README.md`
 - `claude-md-structural-enforcement.md`
 - `evidence-based-answer-pipeline.md`
+- `mcp-continuity.md`
 - `operating-model-diagram.md`
 - `periodic-control-matrix.md`
 - `repository-publication-safety.md`

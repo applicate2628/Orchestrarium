@@ -56,6 +56,32 @@ PACK_ONLY_HOOKS = universal_hooks_manifest.PACK_ONLY_HOOKS
 
 
 class UniversalHookSurfaceTest(unittest.TestCase):
+    def test_mcp_policy_is_mirrored_support_and_never_a_registered_stem(self) -> None:
+        relative = Path("scripts/mcp_continuity_policy.py")
+        paths = (
+            ROOT / "scripts" / "universal-hooks" / relative,
+            ROOT / "src.claude" / "agents" / relative,
+            ROOT / "src.codex" / "skills" / "lead" / relative,
+        )
+        for path in paths:
+            self.assertTrue(path.is_file(), f"missing MCP policy support module: {path}")
+            self.assertFalse(path.with_suffix(".sh").exists())
+            self.assertFalse(path.with_suffix(".ps1").exists())
+        self.assertTrue(filecmp.cmp(paths[0], paths[1], shallow=False))
+        self.assertTrue(filecmp.cmp(paths[0], paths[2], shallow=False))
+
+        checker_path = ROOT / "scripts" / "check-hook-health.py"
+        spec = importlib.util.spec_from_file_location(
+            "check_hook_health_support_module_test", checker_path
+        )
+        assert spec is not None and spec.loader is not None
+        checker = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(checker)
+        for platform in ("claude", "codex"):
+            self.assertNotIn(
+                "mcp_continuity_policy", checker._manifest_stems(ROOT, platform)
+            )
+
     def test_pack_neutral_hook_sources_exist_and_match_production_packs(self) -> None:
         universal_scripts = ROOT / "scripts" / "universal-hooks" / "scripts"
         universal_hooks = ROOT / "scripts" / "universal-hooks" / "hooks"

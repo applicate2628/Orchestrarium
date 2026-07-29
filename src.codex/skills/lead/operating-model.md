@@ -189,7 +189,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 - If the required task-memory artifacts are missing or stale, stop and restore them before continuing delivery.
 - Use `notes.md` or `notes/` for technical notes and discoveries; keep accepted long-lived decisions in the design or ADR artifact.
 - On resume after interruption, restore only lead-owned task-memory state from persisted accepted artifacts. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
-- Epics group several work-items: persist an epic as a flat `work-items/epics/<date>-<slug>.md` (`status: active|closed`, `## Goal` / `## Children` slug list); each child work-item carries a single `Epic: <slug>` line in its `status.md`. Derive the epic roll-up live from the children (resolve each slug across `active/` + `archive/`); close the epic only when all children are closed and the goal is met. Full rules in the lead skill `## Epics`.
+- Epics group several work-items: persist an active epic as a flat `work-items/epics/<date>-<slug>.md` and a closed epic as `work-items/epics/archive/<YYYY-MM>/<date>-<slug>.md`; each child work-item carries a single `Epic: <slug>` line in its `status.md`. Derive the epic roll-up live from the children (resolve each slug across work-item `active/` + `archive/`). Lead owns closure/reopening decisions and content; the knowledge archivist owns the same-operation location move and index reconciliation. Epic lookup must distinguish unique active, unique archived, missing, and duplicate state; duplicate state fails closed. Full rules in the lead skill `## Epics`.
 - Cross-cutting decisions: durable architecture decisions persist as a flat `work-items/decisions/<date>-<slug>.md` (`status: proposed|accepted|dropped|superseded|reverted`, plus `decided-by`/`context`/`supersedes`/`superseded-by`), referenced (not duplicated) from a work-item's `design.md`. Cross-work-item dependencies persist as a `Depends-on: <slug>, <slug>` line in the dependent item's `status.md`. Full rules in the architect + lead skills.
 - Delivery lessons: a keep-worthy lesson from a delivery retrospective persists as a flat `work-items/lessons/<date>-<slug>.md` entry, the same flat shape as `work-items/decisions/`. Full rules in the lead skill `## Lessons`.
 
@@ -308,7 +308,7 @@ For critical changes, run both in sequence: Claim-Verify first (fast, catches ex
 - Keep the periodic layer lightweight: if a control is really about whether work may advance, it belongs in the stage-gate path instead.
 - Index sync (`$knowledge-archivist`): every active-item state change (create, resume, stage transition, park, close, archive) updates the recovery index in the same transition.
 - Board refresh (`$knowledge-archivist`): every delivery wave, in the same post-wave sync pass, refresh `work-items/README.md` against git and the tree.
-- Orchestrator-upgrades reconcile (`$knowledge-archivist`): same post-wave pass as Board refresh — reconcile `work-items/orchestrator-upgrades.md` rows against their source lessons' status in `work-items/lessons/`.
+- Orchestrator-upgrades reconcile (`$knowledge-archivist`): same post-wave pass as Board refresh — reconcile `work-items/roadmaps/orchestrator-upgrades.md` rows against their source lessons' status in `work-items/lessons/`.
 
 Do not let a role that defines a critical constraint act as the only approval gate for that same risk.
 

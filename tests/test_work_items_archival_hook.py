@@ -288,6 +288,15 @@ class TestWorkItemsArchivalHook(unittest.TestCase):
         self.assert_outcome({"cwd": str(subdir), "last_assistant_message": "done"}, should_block=True)
 
 
+def epic_fixture_path(base: Path, epic_name: str, *, archived: bool) -> Path:
+    """Return the canonical active or archived path for one epic fixture."""
+    epic_dir = base / "epics"
+    if archived:
+        epic_dir = epic_dir / "archive" / epic_name[:7]
+    epic_dir.mkdir(parents=True, exist_ok=True)
+    return epic_dir / f"{epic_name}.md"
+
+
 def make_epic_repo(
     epic_status: str,
     children: list[str],
@@ -295,21 +304,22 @@ def make_epic_repo(
     active: dict[str, str] | None = None,
     archived: list[str] | None = None,
     epic_name: str = "2026-06-13-demo-epic",
+    epic_archived: bool = False,
 ) -> str:
-    """Build a temp repo with work-items/epics/<epic_name>.md + child work-items.
+    """Build a temp repo with an active or canonically archived epic + children.
 
     children: child slugs listed in the epic ## Children section.
     active: {slug: status.md text} children placed under active/ (NOT done unless
             the status text says so).
     archived: slugs placed under archive/2026-06/<slug>/ (counts as done).
+    epic_archived: place the epic under epics/archive/<YYYY-MM>/ rather than the
+                   active epics root.
     """
     root = tempfile.mkdtemp(prefix="wi-epic-")
     base = Path(root) / "work-items"
     (base / "active").mkdir(parents=True, exist_ok=True)
-    epics = base / "epics"
-    epics.mkdir(parents=True, exist_ok=True)
     child_lines = "\n".join(f"- {c} (active)" for c in children) or "(none yet)"
-    (epics / f"{epic_name}.md").write_text(
+    epic_fixture_path(base, epic_name, archived=epic_archived).write_text(
         f"---\nstatus: {epic_status}\nepic-id: {epic_name}\nowner: $lead\n---\n"
         f"# Epic: demo\n\n## Goal\nship the thing\n\n## Children\n{child_lines}\n",
         encoding="utf-8",
@@ -331,13 +341,15 @@ def write_raw_epic(
     archived: list[str] | None = None,
     active: dict[str, str] | None = None,
     epic_name: str = "2026-06-13-raw-epic",
+    epic_archived: bool = False,
 ) -> str:
-    """Build a temp repo with a RAW epic file body (for parser edge-case tests)."""
+    """Build a temp repo with a RAW active or archived epic body."""
     root = tempfile.mkdtemp(prefix="wi-epic-raw-")
     base = Path(root) / "work-items"
     (base / "active").mkdir(parents=True, exist_ok=True)
-    (base / "epics").mkdir(parents=True, exist_ok=True)
-    (base / "epics" / f"{epic_name}.md").write_text(epic_text, encoding="utf-8")
+    epic_fixture_path(base, epic_name, archived=epic_archived).write_text(
+        epic_text, encoding="utf-8"
+    )
     for slug, text in (active or {}).items():
         d = base / "active" / slug
         d.mkdir(parents=True, exist_ok=True)
@@ -385,8 +397,20 @@ class TestEpicCloseHook(unittest.TestCase):
         )
 
     def test_fully_closed_epic_does_not_block(self) -> None:
-        repo = make_epic_repo("closed", ["c1", "c2"], archived=["c1", "c2"])
+        repo = make_epic_repo(
+            "closed", ["c1", "c2"], archived=["c1", "c2"], epic_archived=True
+        )
         self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
+
+    def test_closed_epic_in_active_root_blocks(self) -> None:
+        # A closed epic is valid only in epics/archive/<YYYY-MM>/, even when all
+        # of its children are already closed.
+        repo = make_epic_repo("closed", ["c1"], archived=["c1"])
+        self.assert_outcome(
+            {"cwd": repo, "last_assistant_message": "done"},
+            should_block=True,
+            expect_in="status: closed but remains in the active root",
+        )
 
     def test_zero_child_epic_does_not_block(self) -> None:
         repo = make_epic_repo("active", [])
@@ -427,7 +451,7 @@ class TestEpicCloseHook(unittest.TestCase):
             "---\nstatus: closed\n---\n# Epic: demo\n\n## Children\n"
             "- c1 (closed)\n- migration follow-up tracked separately in the bug registry\n"
         )
-        repo = write_raw_epic(epic, archived=["c1"])
+        repo = write_raw_epic(epic, archived=["c1"], epic_archived=True)
         self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
 
     def test_closed_epic_with_h3_under_children_does_not_block(self) -> None:
@@ -437,7 +461,7 @@ class TestEpicCloseHook(unittest.TestCase):
             "---\nstatus: closed\n---\n# Epic: demo\n\n## Children\n- c1 (closed)\n"
             "\n### Deferred ideas\n- some idea that is not a child work-item\n"
         )
-        repo = write_raw_epic(epic, archived=["c1"])
+        repo = write_raw_epic(epic, archived=["c1"], epic_archived=True)
         self.assert_outcome({"cwd": repo, "last_assistant_message": "done"}, should_block=False)
 
     def test_body_status_line_without_frontmatter_is_ignored(self) -> None:
