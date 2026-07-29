@@ -532,12 +532,12 @@ It should now be confirmed:
 
 ## 9. Practical routing patterns
 
-### Clearly local additive task
+### Quick-fix
 
-Use this only when the change is `additive`, stays inside one module or clearly bounded seam, introduces no new risk owner, and leaves existing contracts and shared abstractions unchanged. The lead records the fast-lane decision and inline plan in the brief or status. If the surface widens, re-classify immediately and return to the normal loop.
+Use this when the target and execution steps are fully specified, ownership and contracts are resolved, no new dependency or risk owner appears, rollback or backup is explicit, and a verification oracle is named. Record one line in the current session, allow at most one preflight, then implement and verify. If any predicate fails, re-classify before continuing.
 
 ```text
-product-manager -> lead -> implementation specialist -> qa-engineer -> lead
+lead -> implementation specialist -> qa-engineer -> lead
 ```
 
 ### Ordinary CRUD or integration task
@@ -685,8 +685,8 @@ At minimum, it is useful to keep these artifacts near the repository:
 
 - Use the configured task-memory directory when this repository uses optional tracked task memory.
 - Keep active admitted items in the configured active-item directory and use the repository-defined recovery entry point as the first recovery stop after interruption.
-- For lead-routed non-trivial work, `roadmap.md`, `brief.md`, and `status.md` are mandatory when tracked task memory is enabled.
-- `plan.md` becomes mandatory before implementation or review begins.
+- For recovery-tracked or multi-stage lead routes, `roadmap.md`, `brief.md`, and `status.md` are mandatory when tracked task memory is enabled.
+- `plan.md` becomes mandatory before implementation or review only when the selected route admits a Plan or upstream specialist stage.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
 - If the required task-memory artifacts for the configured workflow are missing or stale, stop and restore them before continuing delivery.
 - `notes.md` or `notes/` holds technical findings and discoveries; accepted long-lived decisions still belong in the design or ADR artifact.

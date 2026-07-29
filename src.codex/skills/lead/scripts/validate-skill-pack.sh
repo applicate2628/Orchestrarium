@@ -1198,7 +1198,7 @@ if [[ $DEV_REPO -eq 1 ]]; then
   check_max_lines "$CODEX_REF_DIR/subagent-operating-model.md" 120 \
     "Codex addendum stays bounded instead of regrowing into a full blueprint copy"
   check_normalized_sha256 "$SHARED_REF_DIR/subagent-operating-model.md" \
-    "e810bba3242db6ff5b620127704299ab5bd9adce992734378270466960a2b2aa" \
+    "d4e4cadc5cf8773f270299a23d2c28e6face51453a3aa35c1a854d83f5f5f190" \
     "shared subagent-operating-model matches the current canonical normalized fingerprint"
   check_normalized_sha256 "$CODEX_REF_DIR/subagent-operating-model.md" \
     "be3db2d11b1b747742ae6039b3b2626b6b5b8c942c38ce8af841eda234740cdd" \
@@ -1594,8 +1594,12 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "Codex platform rules mention the external-brigade utility skill"
   check_contains "$REPO_ROOT/src.codex/AGENTS.codex.md" "auto | codex | claude | gemini | qwen" \
     "Codex platform rules document the example-only Gemini/Qwen provider universe"
-  check_contains "$REPO_ROOT/shared/references/README.md" "current Gemini and Qwen example integrations" \
-    "shared reference index treats Gemini/Qwen as current example integrations"
+  check_contains "$REPO_ROOT/shared/references/README.md" "deprecated Gemini and Qwen full-mirror examples" \
+    "shared reference index marks Gemini/Qwen full mirrors deprecated"
+  check_contains "$REPO_ROOT/src.gemini/README.md" "**DEPRECATED:** this full-mirror Gemini pack" \
+    "Gemini pack README marks the current full-mirror form deprecated"
+  check_contains "$REPO_ROOT/src.qwen/README.md" "**DEPRECATED:** this full-mirror Qwen pack" \
+    "Qwen pack README marks the current full-mirror form deprecated"
   if [[ $STANDALONE -eq 0 ]]; then
     # Root multi-provider installer (install.sh/.ps1) and its Codex/Claude default-pair
     # documentation in README.md/INSTALL.md exist only in the monorepo. A standalone
@@ -1605,6 +1609,10 @@ if [[ $DEV_REPO -eq 1 ]]; then
       "root bash installer defaults to the Codex/Claude production pair"
     check_contains "$REPO_ROOT/install.ps1" "default production install" \
       "root PowerShell installer defaults to the Codex/Claude production pair"
+    check_contains "$REPO_ROOT/install.sh" "DEPRECATED / WEAK MODEL / NOT RECOMMENDED" \
+      "root bash installer labels Gemini/Qwen choices deprecated"
+    check_contains "$REPO_ROOT/install.ps1" "DEPRECATED / WEAK MODEL / NOT RECOMMENDED" \
+      "root PowerShell installer labels Gemini/Qwen choices deprecated"
     check_absent "$REPO_ROOT/install.sh" "All available root installs" \
       "root bash installer does not offer all-provider default installs"
     check_absent "$REPO_ROOT/install.ps1" "All available root installs" \

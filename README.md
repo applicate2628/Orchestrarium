@@ -1,13 +1,13 @@
 # Orchestrarium
 
-A cross-provider agent orchestration monorepo that keeps the production Codex and Claude Code lines aligned on one shared governance and reference core, while also carrying explicit example integrations for Gemini and Qwen:
+A cross-provider agent orchestration monorepo that keeps the production Codex and Claude Code lines aligned on one shared governance and reference core, while temporarily retaining deprecated full-mirror examples for Gemini and Qwen pending the `npm-skillpack-distribution` epic:
 
 - `src.codex/` — the production Codex provider-pack source
 - `src.claude/` — the production Claude Code provider-pack source
-- `src.gemini/` — the Gemini example-integration source tree around `GEMINI.md`; repository status: `WEAK MODEL / NOT RECOMMENDED`
-- `src.qwen/` — the Qwen native example-integration source tree around `QWEN.md`; repository status: `WEAK MODEL / NOT RECOMMENDED`
+- `src.gemini/` — deprecated Gemini full-mirror example around `GEMINI.md`; repository status: `DEPRECATED / WEAK MODEL / NOT RECOMMENDED`
+- `src.qwen/` — deprecated Qwen full-mirror example around `QWEN.md`; repository status: `DEPRECATED / WEAK MODEL / NOT RECOMMENDED`
 
-The provider lines share one governance model and role vocabulary, while each keeps the runtime structure expected by its own provider. The root router install surface is production-first: Codex plus Claude are the default shipped production install, while Gemini and Qwen are explicit example integrations. In the current checkout, matching root `scripts/install-qwen.*` entrypoints exist, so the router exposes both example slots directly without including them in the default.
+The provider lines share one governance model and role vocabulary, while each keeps the runtime structure expected by its own provider. The root router install surface is production-first: Codex plus Claude are the default shipped production install. Gemini and Qwen remain selectable only as deprecated demonstration/compatibility paths until the npm-skillpack epic decides whether to remove, archive, or generate them.
 
 Warning: Orchestrarium is optimized for maximum execution effectiveness and low orchestration drag rather than for minimum token spend. On large tasks, multi-opinion review lanes, or aggressive external fan-out, usage can rise quickly and consume a substantial token budget in a short time.
 
@@ -46,8 +46,8 @@ CLAUDE.md           Dev overlay for Claude Code pack maintenance
 | --- | --- | --- | --- | --- | --- |
 | Codex | Production | `src.codex/` | assembled installed `AGENTS.md` from `shared/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | root router installers plus `scripts/install-codex.*` | `validate-skill-pack.sh` and `validate-skill-pack.ps1` |
 | Claude Code | Production | `src.claude/` | `src.claude/CLAUDE.md` | root router installers plus `scripts/install-claude.*` | `validate-skill-pack.sh` and `validate-skill-pack.ps1` |
-| Gemini CLI | Explicit example integration (`WEAK MODEL / NOT RECOMMENDED`) | `src.gemini/` | `src.gemini/GEMINI.md` importing `shared/AGENTS.shared.md` | root router installers plus `scripts/install-gemini.*` | `validate-pack.sh` and `validate-pack.ps1` |
-| Qwen | Native explicit example integration (`WEAK MODEL / NOT RECOMMENDED`) | `src.qwen/` | `src.qwen/QWEN.md` importing `shared/AGENTS.shared.md` | root router installers plus `scripts/install-qwen.*` | `validate-pack.sh` and `validate-pack.ps1` |
+| Gemini CLI | Deprecated full-mirror example (`WEAK MODEL / NOT RECOMMENDED`) | `src.gemini/` | `src.gemini/GEMINI.md` importing `shared/AGENTS.shared.md` | retained compatibility installer pending npm-skillpack | `validate-pack.sh` and `validate-pack.ps1` |
+| Qwen | Deprecated full-mirror example (`WEAK MODEL / NOT RECOMMENDED`) | `src.qwen/` | `src.qwen/QWEN.md` importing `shared/AGENTS.shared.md` | retained compatibility installer pending npm-skillpack | `validate-pack.sh` and `validate-pack.ps1` |
 
 Shared design references now live in `shared/references/`. Provider-local `references-codex/`, `references-claude/`, `references-gemini/`, and `references-qwen/` keep provider-specific addenda plus compatibility pointers where older paths still need to resolve. The clearest example is `subagent-operating-model`: the canonical blueprint core now lives in `shared/references/subagent-operating-model.md`, while each provider-local tree keeps only its runtime and repository concretization addendum. Shared governance is maintained across provider lines; the repository-level overlays in `AGENTS.md` and `CLAUDE.md` exist only for maintaining this monorepo.
 
@@ -85,9 +85,9 @@ Production installs:
   1) Codex pack
   2) Claude Code
   3) Codex + Claude (default production install)
-Example integrations:
-  4) Gemini CLI (WEAK MODEL / NOT RECOMMENDED)
-  5) Qwen (WEAK MODEL / NOT RECOMMENDED)
+Deprecated example integrations (retained pending npm-skillpack):
+  4) Gemini CLI (DEPRECATED / WEAK MODEL / NOT RECOMMENDED)
+  5) Qwen (DEPRECATED / WEAK MODEL / NOT RECOMMENDED)
 ```
 
 Pressing Enter selects the default production install, `Codex + Claude`. The router then forwards the same arguments to the selected provider-specific installer in `scripts/`. Use `scripts/install-codex.*`, `scripts/install-claude.*`, `scripts/install-gemini.*`, or `scripts/install-qwen.*` directly when you want deterministic automation on one line. If a future checkout lacks the root `scripts/install-qwen.*` entrypoints, the router hides the dedicated Qwen slot and you should fall back to the Qwen source tree and provider-local docs directly.
@@ -105,7 +105,7 @@ Important: operator preferences live in per-provider `agents-mode` files; all pr
 - `mcpMode: auto` lets the agent decide when MCP is appropriate; `force` means the config itself is an explicit instruction to use relevant available MCP tools instead of treating MCP usage as optional.
 - `preferExternalWorker` and `preferExternalReviewer` let routing prefer `$external-worker` on `implement` and `$external-reviewer` on `review` and `QA`.
 - Production `externalProvider` routing now uses `auto | codex | claude`. `externalProvider: auto` is lane-driven, not host-pack-driven, and the shipped production profiles stay on the Codex/Claude provider pair with `reserve` allowed only as a supplemental advisory/review candidate.
-- Gemini and Qwen remain explicit example-only integrations in this repository. They are `WEAK MODEL / NOT RECOMMENDED`, do not participate in the shipped production `auto` profiles, and should be treated as manual example or compatibility paths rather than production defaults.
+- The current Gemini and Qwen full-mirror packs are `DEPRECATED / WEAK MODEL / NOT RECOMMENDED`. They remain available only for demonstration, compatibility, and inspection, do not participate in production `auto` profiles, and must not receive feature/parity work before the `npm-skillpack-distribution` epic decides their replacement or removal.
 - `externalPriorityProfile` selects the active named provider-order profile, `reserveResolver` binds the symbolic `reserve` slot to a concrete read-only resolver, `externalPriorityProfiles` stores the switchable per-lane provider orders, and `externalOpinionCounts` raises specific lanes above the default single-opinion behavior when one external opinion is not enough. Those counts are lane-local distinct-opinion requirements, not a cap on how many parallel external helper instances may run overall; `parallelMode` remains the general fan-out rule for any helper lane, while bounded same-provider external helper fan-out lives under the dedicated brigade surfaces.
 - `externalModelMode: runtime-default | pinned-top-pro` remains the shared production model policy for the Codex/Claude pair. `runtime-default` leaves the resolved provider on its runtime default model/profile; `pinned-top-pro` starts on the strongest documented provider-native model/profile and allows one named same-provider fallback on limit-style failures.
 - `externalCodexProfile: default | gpt-5.6-sol-xhigh | gpt-5.6-sol-max | gpt-5.6-terra` is the Codex-specific external profile override. The shipped value is `gpt-5.6-sol-xhigh`, symmetric to Claude's `opus-xhigh`.
@@ -119,8 +119,8 @@ Important: operator preferences live in per-provider `agents-mode` files; all pr
 - For first-time Codex project setup, run `$init-project` to write `## Project policies` in the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode.yaml`. If local Codex overlay files are missing but `~/.codex/.agents-mode.yaml` exists, ordinary reads should use that global overlay honestly until you choose to create a project-local override.
 - When the current working directory is this installer monorepo itself, a missing local `.agents/.agents-mode.yaml` should fall back to the global Codex install by default. Create a repo-local install only when you explicitly want project-local runtime state; the installer source tree and the installed runtime are different surfaces.
 - For first-time Claude Code project setup, run `/agents-init-project` to write `## Project policies` in `.claude/CLAUDE.md` and review or update the installed default `.claude/.agents-mode.yaml`. If local Claude overlay files are missing but `~/.claude/.agents-mode.yaml` exists, ordinary reads should use that global overlay honestly until you choose to create a project-local override.
-- Gemini remains an explicit example integration. Use Gemini's built-in `/init` to generate or tailor `GEMINI.md`, keep official runtime config and MCP wiring in `.gemini/settings.json` or extension manifests, and treat the Orchestrarium overlay `.gemini/.agents-mode.yaml` as example-path routing state rather than part of the shipped production `auto` contract. If local Gemini overlay files are missing but `~/.gemini/.agents-mode.yaml` exists, ordinary reads should use that global overlay honestly until you choose to create a project-local override.
-- Qwen remains a native explicit example integration. Use Qwen's built-in `/init` to generate or tailor `QWEN.md`, keep official runtime config and MCP wiring in `.qwen/settings.json` or extension manifests, and treat Qwen routing as manual example or compatibility work rather than part of the shipped production `auto` contract. The current checkout exposes Qwen through root `scripts/install-qwen.*`, while checkouts without those entrypoints should fall back to the Qwen source tree directly.
+- Deprecated Gemini compatibility use: use Gemini's built-in `/init` to generate or tailor `GEMINI.md`, keep official runtime config and MCP wiring in `.gemini/settings.json` or extension manifests, and do not extend the Orchestrarium full-mirror pack.
+- Deprecated Qwen compatibility use: use Qwen's built-in `/init` to generate or tailor `QWEN.md`, keep official runtime config and MCP wiring in `.qwen/settings.json` or extension manifests, and do not extend the Orchestrarium full-mirror pack.
 - Explicit user role requests still override the toggle state in either direction.
 - Full value-by-value operator semantics live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md), including task continuity, continue-by-default execution expectations for initialized projects, and the current init-time preset family: `default`, `absolute-balance`, `external-aggressive`, `correctness-first`, `power-mode`, and `max-speed`. Init helpers can either write the chosen preset as-is or open an optional fine-tune pass before saving `.agents-mode.yaml`.
 - Machine-readable `agents-mode` contract sources live in [`shared/agents-mode.schema.json`](shared/agents-mode.schema.json) and [`shared/agents-mode.presets.json`](shared/agents-mode.presets.json). [`scripts/validate-agents-mode-contract.py`](scripts/validate-agents-mode-contract.py) checks those sources against the shared YAML exemplar, the operator reference, and provider init surfaces.
@@ -249,14 +249,14 @@ This repository is licensed under the Mozilla Public License 2.0. See [LICENSE](
 - `externalPriorityProfile`: the active named provider-order profile used when `externalProvider: auto`.
 - `externalPriorityProfiles`: the map of named routing profiles to lane-specific provider priority lists.
 - `evidence`: concrete verification data such as a command result, artifact path, review result, log summary, or observed output supporting a gate.
-- `Gemini`: Google Gemini CLI provider line, kept here as an explicit example integration.
+- `Gemini`: deprecated Google Gemini CLI full-mirror example retained pending the npm-skillpack decision.
 - `JSON`: JavaScript Object Notation; structured data format used here for machine-readable contract files.
 - `JSONL`: JSON Lines; one JSON object per line, used here for append-only execution events.
 - `ledger`: append-only record of agent runs, gates, artifacts, and evidence for a work item.
 - `MCP`: Model Context Protocol; a protocol for exposing tools and resources to agent runtimes.
 - `power-mode`: init-time preset for hardest tasks where maximum useful result matters more than latency; starts from the `quality-first` provider-order profile.
 - `quality-first`: production provider-order profile that biases near-tie advisory, source-bound, and review lanes toward Codex while preserving Claude-first lanes where the benchmark evidence gives Claude a clearer compact or visual-worker edge.
-- `Qwen`: Qwen provider line, kept here as an explicit example integration.
+- `Qwen`: deprecated Qwen full-mirror example retained pending the npm-skillpack decision.
 - `runtime`: installed provider-facing files and directories used by an agent tool outside the source tree.
 - `schema`: structured contract describing allowed keys, values, defaults, provider sets, and routing shapes.
 - `status.md`: human-readable recovery summary for the active work item.

@@ -10,7 +10,7 @@ This subagent is the Claude-side delegate registration for the role skill `plann
 ## When to spawn this subagent vs invoke the Skill directly
 
 - Spawn this subagent (Agent tool, `subagent_type: planner`) for a non-trivial delivery plan that benefits from an isolated context.
-- Invoke the Skill tool with name `planner` to upgrade the additive fast lane's inline plan into a phased, AC-id'd delivery plan without a context switch — announce the adoption in-chat before executing and keep it scoped to that one plan upgrade (per the CLAUDE.md curated inline role-skills exception).
+- Inline `/planner` use is explicit-user-only. An admitted `quick-fix` never acquires a plan artifact; when its predicate fails and routing selects a Plan stage, dispatch this planner role for the recovery-tracked plan.
 
 ## Core stance
 

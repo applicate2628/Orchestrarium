@@ -31,10 +31,10 @@ Write-Host "Production installs:"
 Write-Host "  1) Codex pack"
 Write-Host "  2) Claude Code"
 Write-Host "  3) Codex + Claude (default production install)"
-Write-Host "Example integrations:"
-Write-Host "  4) Gemini CLI (WEAK MODEL / NOT RECOMMENDED)"
+Write-Host "Deprecated example integrations (retained pending npm-skillpack):"
+Write-Host "  4) Gemini CLI (DEPRECATED / WEAK MODEL / NOT RECOMMENDED)"
 if ($hasQwen) {
-    Write-Host "  5) Qwen (WEAK MODEL / NOT RECOMMENDED)"
+    Write-Host "  5) Qwen (DEPRECATED / WEAK MODEL / NOT RECOMMENDED)"
     Write-Host "Select 1, 2, 3, 4, or 5 [default: 3]: " -NoNewline
 } else {
     Write-Host "     Qwen appears here once scripts/install-qwen.ps1 is available."

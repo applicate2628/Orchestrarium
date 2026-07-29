@@ -110,7 +110,7 @@ A lead MUST NOT delegate work until the work-item folder contains a verified `br
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
 - `status.md` must follow the format below and be updated after every stage transition, agent launch, or interruption, including any open obligations that still block closeout.
 - If either artifact is missing, stale, or incomplete, the lead restores only the lead-owned task-memory state from persisted accepted artifacts BEFORE delegating any specialist role. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
-- The only exception is the additive fast lane where the lead records the decision in status.md instead.
+- For `quick-fix`, the one-line in-session classification is the handoff and no task-memory artifact is created.
 
 ### status.md format
 

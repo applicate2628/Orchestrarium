@@ -19,10 +19,10 @@ echo "Production installs:"
 echo "  1) Codex pack"
 echo "  2) Claude Code"
 echo "  3) Codex + Claude (default production install)"
-echo "Example integrations:"
-echo "  4) Gemini CLI (WEAK MODEL / NOT RECOMMENDED)"
+echo "Deprecated example integrations (retained pending npm-skillpack):"
+echo "  4) Gemini CLI (DEPRECATED / WEAK MODEL / NOT RECOMMENDED)"
 if [[ "$HAS_QWEN" == true ]]; then
-  echo "  5) Qwen (WEAK MODEL / NOT RECOMMENDED)"
+  echo "  5) Qwen (DEPRECATED / WEAK MODEL / NOT RECOMMENDED)"
   prompt="Select 1, 2, 3, 4, or 5 [default: 3]: "
 else
   echo "     Qwen appears here once scripts/install-qwen.sh is available."

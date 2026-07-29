@@ -1,5 +1,7 @@
 # Orchestrarium Gemini
 
+> **DEPRECATED:** this full-mirror Gemini pack is retained only for demonstration, compatibility, and inspection. Do not extend it. Its removal, archival, or replacement by a generated target is owned by the `npm-skillpack-distribution` epic.
+
 A standalone Gemini CLI example pack built around the official Gemini runtime model plus the full Orchestrarium shared role principle.
 
 This pack remains installable and inspectable, but the repository classifies Gemini as `WEAK MODEL / NOT RECOMMENDED`. Production `externalProvider: auto` routing stays on `codex | claude`; explicit Gemini routes are manual example or compatibility paths only.

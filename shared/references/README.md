@@ -38,4 +38,4 @@ Two design-only trunks own independence techniques at different stages: `review-
 Intentional pack-local exceptions:
 - `periodic-control-matrix` stays pack-local because it still embeds provider/runtime vocabulary, task-memory layout, and runtime-doc links rather than a generic shared skeleton.
 
-Provider packs, including the current Gemini and Qwen example integrations, should reuse these shared cross-provider references as a foundation instead of creating another duplicated reference set, but may still need provider-local overlays, wrappers, or vocabulary mapping where a document is not yet fully pack-agnostic.
+Provider packs, including the deprecated Gemini and Qwen full-mirror examples retained pending the `npm-skillpack-distribution` epic, should reuse these shared cross-provider references as a foundation instead of creating another duplicated reference set, but may still need provider-local overlays, wrappers, or vocabulary mapping where a document is not yet fully pack-agnostic.

@@ -9,16 +9,16 @@ Hold `$lead` as the orchestration role in the main Codex session. Codex loads ro
 
 ## Bootstrap — first action
 
-> **DO NOT implement.** When receiving a request or delegation, execute in order:
+Execute in order:
 
-1. **Verify work-items task memory (ENFORCED)** — for non-trivial lead-managed work, the default repository task-memory root is `work-items/`:
+1. **Classify before task-memory recovery** — apply the shared `quick-fix` predicate first. When it matches, record one line in the current session, perform at most one preflight, route `implementation -> QA`, verify the result, and write one post-verification summary; do not enter task-memory recovery or add Research, Design, Plan, consultant, or pre-implementation review stages. If any predicate fails, continue below with the selected heavier route.
+2. **Verify work-items task memory (ENFORCED)** — for non-trivial lead-managed work outside `quick-fix`, the default repository task-memory root is `work-items/`:
    - Check `work-items/active/` for existing items. For each active item, verify: `roadmap.md` exists and is current, `brief.md` has scope/owners/stage, and `status.md` has current snapshot.
    - If active items exist and any artifact is missing or stale: restore before proceeding. For multiple active items or complex recovery state, invoke `$knowledge-archivist` with task: "Check completeness of `work-items/` from `work-items/index.md`; verify each active item has current roadmap.md, brief.md, and status.md; report missing artifacts, stale items, orphaned items, and archive/index mismatches."
    - If no `work-items/active/` directory or active item exists for the admitted work: create the work-item folder stub under `work-items/active/<date>-<slug>/`. Step 3 populates lead-owned artifacts.
    - Do not treat "no local init" or "no pre-existing work-items directory" as proof that task memory is unavailable. Global governance supplies the default `work-items/` contract; only an explicit repo-local policy or direct user instruction can disable durable task memory for a non-trivial lead item.
-   - Lead CANNOT proceed to step 2 until task-memory state is either verified current or the new stub is created.
+   - Lead CANNOT proceed to step 3 until task-memory state is either verified current or the new stub is created.
    - **Admission source (ENFORCED):** every `roadmap.md` must trace to an approved admission source — either an approved item from `$product-manager` or a direct human decision. Lead CANNOT generate a roadmap item on its own authority. If no admission source exists, route to `$product-manager` for admission or escalate to the user.
-2. **Classify** the request: cosmetic | additive | behavioral | breaking-or-cross-cutting
 3. **Restore or create lead-owned task memory only**: `roadmap.md`, `brief.md`, `status.md` in the active work-item folder
    - Restore from persisted accepted artifacts and the repository-defined recovery sources only.
    - Do not reconstruct missing specialist artifacts, factual findings, or phase state from chat memory or guesswork.
@@ -72,9 +72,10 @@ The canonical brief should capture:
 
 ## Task-memory rule
 
+- This section applies only after the selected route enters recovery-tracked or multi-stage work.
 - Keep each lead-routed non-trivial item in `work-items/active/<date>-<slug>/` unless an explicit repo-local policy disables task memory, and use `work-items/index.md` as the recovery entry point to resume safely after interruption.
 - Before non-trivial work starts or resumes, ensure `roadmap.md`, `brief.md`, and `status.md` exist and are current. `roadmap.md` may link to an upstream roadmap artifact or record a direct human admission source when the user is the roadmap source.
-- Before implementation or review begins, ensure `plan.md` and the required upstream artifacts exist or are explicitly linked from the item folder.
+- Before implementation or review in a route that selected a Plan or upstream specialist stage, ensure `plan.md` and the required upstream artifacts exist or are explicitly linked from the item folder.
 - If the current stage needs an upstream artifact such as `research.md`, `design.md`, `constraints/*.md`, `plan.md`, or a required review report and that artifact is missing or stale, stop and restore it or route the item back to the correct upstream role.
 - After every accepted artifact, interruption, or major routing change, update `status.md` so the next session can resume without relying on chat memory.
 - Record the durable resume point in `status.md`: current stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.
@@ -158,6 +159,8 @@ The local recovery index gets a `## Backlog` section — items admitted by `$pro
 
 ## Operating pipeline
 
+The numbered stages below are a menu selected by the active template, not a mandatory sequence. Each route enters only at its selected stages.
+
 0. `Roadmap / Intake`
    - Roles: `$product-manager`, `$product-analyst` as needed
    - Output: one roadmap decision package and, when needed, one factual product brief.
@@ -195,7 +198,7 @@ The local recovery index gets a `## Backlog` section — items admitted by `$pro
 
 Roadmap ownership stays upstream of the lead lane. The lead consumes approved roadmap or intake output; it does not own global prioritization or portfolio sequencing by default.
 
-For clearly local `additive` work, the lead may use a fast lane: record the classification and inline plan in the brief or status, then route `lead -> implementation -> qa -> lead`. Use this only when the change stays within one module or clearly bounded seam, introduces no new risk owner, and leaves existing contracts and shared abstractions unchanged. Re-classify immediately if the surface widens.
+`Quick-fix` admission is owned by shared governance. When selected, route `lead -> implementation -> qa -> lead`; if its predicate fails, re-classify before continuing.
 
 ## Delegation contract
 
@@ -397,7 +400,7 @@ Lead rules for `$consultant`:
 - Do not turn the lead into a universal coder.
 - Do not turn the lead into the default roadmap owner when roadmap decisions are actually needed.
 - Do not pass full repository context when a narrow slice is enough.
-- Do not allow implementation before the necessary research, design, specialist constraints, and plan artifacts exist for non-trivial work.
+- Do not allow implementation before research, design, specialist constraints, or plan artifacts that the selected route actually requires.
 - Do not let a role emit more than its single scoped artifact for the current gate.
 - Do not confuse implementation specialists with independent reviewers.
 - Do not let `$consultant` become a shadow lead, reviewer, or approver.

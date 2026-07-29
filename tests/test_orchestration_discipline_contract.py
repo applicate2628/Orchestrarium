@@ -12,12 +12,14 @@ The spine (`shared/AGENTS.shared.md`) is merged verbatim into both installed
 
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 SPINE = "shared/AGENTS.shared.md"
+CLAUDE_QUICK_FIX_TEMPLATE = "src.claude/agents/team-templates/quick-fix.json"
 
 # --- per-gap normative substrings and the owner files that MUST contain them ---
 # (gap-id, substring, [owner files])
@@ -245,6 +247,54 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
                     substring, spine,
                     f"[{gap_id}] {substring!r} must NOT be in the spine (P7 is Lead-file-only)",
                 )
+
+    def test_quick_fix_handles_the_exact_tool_update_incident(self) -> None:
+        spine = self._read(SPINE)
+        for clause in ("target and execution steps are fully specified", "the change surface is bounded",
+                       "ownership and contracts are resolved",
+                       "no new dependency or risk owner appears", "rollback or backup is explicit",
+                       "verification oracle is named"):
+            self.assertIn(clause, spine)
+
+        claude_template = json.loads(self._read(CLAUDE_QUICK_FIX_TEMPLATE))
+        self.assertFalse(claude_template["requiresLead"])
+        self.assertEqual(claude_template["chain"], ["implement", "QA"])
+
+        for owner in ("src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"):
+            text = self._read(owner)
+            self.assertLess(text.index("**Classify before task-memory recovery**"), text.index("**Verify work-items"))
+            self.assertIn("route `implementation -> QA`", text)
+            self.assertIn("do not enter task-memory recovery", text)
+        self.assertIn("For recovery-tracked `requiresLead: false` chains with 2+ stages (`research`, `review`)",
+                      self._read("src.claude/CLAUDE.md"))
+        self.assertIn("Evaluate the shared `quick-fix` predicate before invoking a process skill",
+                      self._read("src.claude/CLAUDE.md"))
+
+    def test_quick_fix_rejects_a_contract_change(self) -> None:
+        spine = self._read(SPINE)
+        self.assertIn("ownership and contracts are resolved", spine)
+        self.assertIn("Re-classify on any failed predicate", spine)
+
+    def test_live_shared_references_do_not_restore_the_retired_fast_lane(self) -> None:
+        owners = (
+            "shared/references/workflow-strategy-comparison.md",
+            "shared/references/ru/workflow-strategy-comparison.md",
+            "shared/references/spine/delegation-principles.md",
+            "shared/references/spine/governance-glossary.md",
+            "src.codex/skills/lead/operating-model.md",
+            "src.claude/CLAUDE.md",
+            "src.claude/agents/team-templates/quick-fix.json",
+        )
+        for owner in owners:
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                self.assertNotIn("additive fast lane", text.lower())
+                self.assertNotIn("fast lane", text.lower())
+                self.assertIn("quick-fix", text.lower())
+        self.assertIn(
+            "additive impact alone does not admit `quick-fix`",
+            self._read("shared/references/workflow-strategy-comparison.md"),
+        )
 
 
 if __name__ == "__main__":

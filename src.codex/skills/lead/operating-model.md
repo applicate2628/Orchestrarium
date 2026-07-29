@@ -45,7 +45,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 
 - Classify the change before selecting routing: `cosmetic`, `additive`, `behavioral`, or `breaking-or-cross-cutting`.
 - `cosmetic` usually stays on the normal delivery loop with QA only.
-- `additive` stays on the normal delivery loop unless it introduces a new risk owner. The lead may use a fast lane only when the change stays within one module or clearly bounded seam, introduces no new risk owner, and leaves existing contracts and shared abstractions unchanged.
+- `additive` describes impact, not route admission. The lead applies the shared `quick-fix` predicate independently and re-classifies on any failed predicate.
 - `behavioral` should add factual/design scrutiny first when evidence is thin, then QA and reviewers as needed for contracts, user flow, or failure modes.
 - `breaking-or-cross-cutting` should force stronger routing: architect, planner, re-review of affected downstream artifacts, and integration ownership when multiple phases or specialists must land together.
 
@@ -89,7 +89,7 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
   `lead -> analyst -> architect -> planner -> implementation -> external-reviewer -> lead`
 - In-flight item whose admitted scope, priority, or milestone intent has drifted:
   `lead -> product-manager -> lead`
-- Clearly local additive work:
+- Quick-fix:
   `lead -> implementation -> qa-engineer -> lead`
 - Basic CRUD or integration work:
   `lead -> analyst -> architect -> planner -> implementation -> qa-engineer -> lead`
@@ -179,10 +179,11 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 
 ## Repository task memory
 
+- These requirements apply only after routing admits recovery-tracked or multi-stage work.
 - Use `work-items/index.md` as the default recovery entry point for non-trivial lead-managed work unless an explicit repo-local policy disables task memory.
 - Keep each active lead-routed non-trivial item in its own dated directory inside `work-items/active/`.
 - Require `roadmap.md`, `brief.md`, and `status.md` before non-trivial work starts or resumes.
-- Require `plan.md` before implementation or review begins.
+- Require `plan.md` before implementation or review only when the selected route admits a Plan stage.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
 - Update `status.md` after accepted artifacts, interruptions, or stage changes so work can resume without relying on chat memory.
 - Keep `status.md` explicit about the next concrete action and any open obligations that still block closeout.
@@ -393,6 +394,8 @@ The cap is 3 iterations for any single role on a single artifact.
 ## Artifact persistence protocol
 
 Every completed chain producing an accepted artifact MUST persist it before the session ends. Three storage tiers:
+
+Persistence follows completed work and never gates its first safe mutation. A `quick-fix` may use one post-verification `.reports/` summary.
 
 | Tier | Location | When to use |
 |---|---|---|

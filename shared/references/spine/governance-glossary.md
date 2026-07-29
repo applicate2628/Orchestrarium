@@ -3,7 +3,7 @@
 Terms, abbreviations, role names, status labels, and provider names used across the shared governance spine (`shared/AGENTS.shared.md` → installed `AGENTS.md`) and its references. A glossary is reference material by definition — it is read on demand, not loaded into every session — so it lives here rather than in the always-loaded spine.
 
 - `ADR`: Architecture Decision Record; a durable document recording an architecture decision and its context.
-- `additive fast lane`: a routing shortcut allowed only for additive, single-module/bounded-seam changes that add no new risk owner and leave contracts and shared abstractions unchanged.
+- `quick-fix`: the execution-first route used only when the shared admission predicate is fully satisfied; any failed predicate requires re-classification.
 - `AGENTS.md`: repository or install-level governance file read by agent runtimes that support this convention; in this repo it is the installed copy of the shared spine.
 - `API`: Application Programming Interface; an externally observable interface exposed by code or services.
 - `artifact`: a concrete output such as a brief, research memo, design, plan, patch, review, report, or closure note.

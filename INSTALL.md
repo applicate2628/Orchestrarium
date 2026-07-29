@@ -1,6 +1,6 @@
 # Installation
 
-This monorepo ships unified entry-point installers at the root (`install.sh` and `install.ps1`). They separate the production Codex/Claude path from explicit example integrations, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
+This monorepo ships unified entry-point installers at the root (`install.sh` and `install.ps1`). They separate the production Codex/Claude path from deprecated Gemini/Qwen compatibility examples retained pending the `npm-skillpack-distribution` epic, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
 ## Quick install
 
@@ -32,12 +32,12 @@ Production installs:
   1) Codex pack
   2) Claude Code
   3) Codex + Claude (default production install)
-Example integrations:
-  4) Gemini CLI (WEAK MODEL / NOT RECOMMENDED)
-  5) Qwen (WEAK MODEL / NOT RECOMMENDED)
+Deprecated example integrations (retained pending npm-skillpack):
+  4) Gemini CLI (DEPRECATED / WEAK MODEL / NOT RECOMMENDED)
+  5) Qwen (DEPRECATED / WEAK MODEL / NOT RECOMMENDED)
 ```
 
-Pressing Enter selects the default production install, `Codex + Claude`. Gemini and Qwen stay explicit example-only choices and are never included in the default root install. In the current checkout, the router exposes the Qwen example slot because matching `scripts/install-qwen.*` entrypoints are present; if a future checkout lacks them, the router hides the dedicated Qwen slot.
+Pressing Enter selects the default production install, `Codex + Claude`. Gemini and Qwen are deprecated compatibility choices, never part of the default root install, and must not receive feature/parity work before the npm-skillpack epic resolves their future.
 
 Maintainer note for this monorepo: `Orchestrarium/` is the installer/source tree, not automatically a repo-local installed Codex runtime. When you are editing this repository itself, a missing local `.agents/` tree can be perfectly valid if you are using the global install under `~/.codex/`. If you want this repository to behave as a repo-local install target, create that state intentionally through `scripts/install-codex.*` or the root router instead of hand-writing `.agents/` files.
 
@@ -94,7 +94,7 @@ Notes:
 - `externalCodexProfile` is the Codex-specific external profile override with four values: `default` inherits `externalModelMode` after provider resolution, including under `externalProvider: auto`; `gpt-5.6-sol-xhigh` (shipped as the default, symmetric to Claude's `opus-xhigh`) pins model `gpt-5.6-sol` with `model_reasoning_effort = "xhigh"` regardless of `externalModelMode`; `gpt-5.6-sol-max` requests model `gpt-5.6-sol` with `model_reasoning_effort = "max"` for higher-complexity/hard lanes (NOT `gpt-5.6-sol-ultra`, which spawns subagents and must never be shipped on a subagent lane); and `gpt-5.6-terra` selects the balanced Codex model (a distinct model, `model_reasoning_effort = "high"`, not an effort suffix) — a genuine cheaper-and-faster-than-`gpt-5.6-sol-xhigh` reasoning lane, verified against the installed runtime before use and review-gated like any external lane; it replaces the former `gpt-5.5-fast` and `gpt-5.3-codex-spark` values.
 - `reserve` is the advisory/review-only supplemental profile candidate after primary `claude`/`codex`. It is symbolic rather than a scalar provider key: `reserveResolver: claude-sonnet | claude-wrapper | wrapper:<command> | disabled` binds it to a concrete read-only resolver. Use `wrapper:<command>` for a PATH-resolved command or repo-relative wrapper path, and keep it out of implementation/editing fallback.
 - `externalClaudeProfile` is Codex-line only and selects or overrides the Claude CLI execution profile: `sonnet-high` maps to Sonnet with `--effort high`, `opus-xhigh` (the shipped default) maps to Opus with `--effort xhigh`, `opus-max` maps to Opus with `--effort max` (max-depth escalation for especially hard tasks at caller discretion), and `fable-xhigh` maps to Fable with `--effort xhigh` (the current Claude flagship-family best-effort tier; the `fable` flagship alias as of 2026-07). New Codex installs seed `opus-xhigh` by default unless a preset or explicit operator choice overrides it.
-- Gemini and Qwen remain explicit example-only integrations in this repository. They are `WEAK MODEL / NOT RECOMMENDED`, do not participate in the shipped production `auto` profiles, and should be treated as manual example or compatibility paths rather than production defaults.
+- The current Gemini and Qwen full-mirror packs are `DEPRECATED / WEAK MODEL / NOT RECOMMENDED`. They remain selectable only for demonstration, compatibility, and inspection, never participate in production `auto` profiles, and must not receive feature/parity work before the npm-skillpack epic resolves their future.
 - Full mode tables live in [`docs/agents-mode-reference.md`](docs/agents-mode-reference.md).
 - After first-time Codex project install, run `$init-project` in Codex to write `## Project policies` to the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode.yaml`.
 - If a repo-local lane policy explicitly asks for consultant input at closeout, it follows the configured `consultantMode`. `consultantMode: disabled` waives consultant closeout instead of blocking the batch, and any requested consultant sweep stays advisory-only rather than replacing review or human gates.
@@ -134,7 +134,7 @@ Notes:
 - The design-panel technique installs as `~/.claude/agents/contracts/design-panel.md` + `~/.claude/commands/agents-design-panel.md` (global) or the `<project>/.claude/` equivalents (project), source `src.claude/agents/contracts/design-panel.md` + `src.claude/commands/agents-design-panel.md`. No dedicated panel-state validator is installed; the pack validator checks only file presence and invariant markers (`DP1`-`DP8`).
 - Validation commands: `bash src.claude/agents/scripts/validate-skill-pack.sh` or `.\src.claude\agents\scripts\validate-skill-pack.ps1`.
 
-## Gemini CLI example integration
+## Deprecated Gemini CLI compatibility example
 
 Use `scripts/install-gemini.sh` or `scripts/install-gemini.ps1` when you want the Gemini pack directly.
 
@@ -160,7 +160,7 @@ Notes:
 - After first-time Gemini project install, run Gemini CLI `/init` if you want Gemini to create or refresh the user-owned portion of `GEMINI.md`, and then use the Orchestrarium Gemini `init-project` helper to review or update the installed default `.gemini/.agents-mode.yaml` when you want project-specific routing choices. Keep that overlay on the example path; it is not part of the shipped production root schema.
 - Validation commands: `bash src.gemini/scripts/validate-pack.sh` or `.\src.gemini\scripts\validate-pack.ps1`.
 
-## Qwen example integration
+## Deprecated Qwen compatibility example
 
 `src.qwen/` is the native Qwen example line in this monorepo.
 
@@ -173,7 +173,7 @@ Notes:
 
 To install any combination of packs into the same target project, either choose one explicit router option at a time or run the pack-specific installers with the same target arguments.
 
-The current root router defaults to the production Codex/Claude pair and exposes Gemini and Qwen only as explicit example integration choices. It does not provide an "all available root installs" default because `WEAK MODEL / NOT RECOMMENDED` example providers must not be installed by default. If a future checkout lacks root `scripts/install-qwen.*`, the router drops the Qwen example choice and keeps the Codex/Claude default plus Gemini as the remaining explicit example.
+The current root router defaults to the production Codex/Claude pair and exposes Gemini and Qwen only as deprecated compatibility choices. It does not provide an "all available root installs" default because deprecated providers must not be installed by default. Their future removal, archival, or generation belongs to the npm-skillpack epic.
 
 Expected default project-level result:
 

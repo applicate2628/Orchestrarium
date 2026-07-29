@@ -54,7 +54,7 @@
 | Класс изменения | Обязательный routing / gates | Пример |
 |---|---|---|
 | `cosmetic` | Обычно только QA; без extra specialist lane по умолчанию | wording, formatting, comments, local refactors без observable behavior change |
-| `additive` | Normal delivery loop; QA обязателен; specialist lane добавляется только если появляется новый risk owner. Lead может использовать fast lane только когда change остаётся в одном module или clearly bounded seam, не вводит новый risk owner и не меняет existing contracts или shared abstractions | new code или docs, которые расширяют behavior без изменения existing contracts или defaults |
+| `additive` | Route идёт через выбранный template; additive impact сам по себе не допускает `quick-fix`. QA обязателен, а specialist lane добавляется только при появлении нового risk owner | new code или docs, которые расширяют behavior без изменения existing contracts или defaults |
 | `behavioral` | Сначала factual/design owner, если evidence тонкое; QA обязателен; independent reviewer добавляется, когда важны contracts, flow или failure modes | runtime behavior, validation, error handling или user-facing flow changes |
 | `breaking-or-cross-cutting` | Architect и обычно planner; re-review affected downstream artifacts; integration owner, когда несколько phases или specialists land together; reviewer lanes as needed | contract, migration, seam, dependency direction, rollout/rollback или multi-boundary changes |
 
@@ -85,7 +85,7 @@ Embedded repository defaults показаны **bold**.
 | Мы знаем задачу, но domain risk может её завалить | `Risk-owner routing` | `Builder / blocker separation`, если риску нужна независимая approval |
 | Риск известный и bounded | `Claim-Verify` | `Adversarial` только если потеря blind spot очень дорогая |
 | Риск новый, exposed или плохо смоделирован | `Adversarial` | `Claim-Verify` сначала, если execution fidelity тоже критична |
-| Change явно локальный и additive | `Additive fast lane` | сразу re-classify в normal delivery loop, если поверхность шире ожидаемой или появляется новый risk owner |
+| Shared admission predicate выполнен полностью | `Quick-fix` | сразу re-classify, если любой predicate перестал выполняться или поверхность расширилась |
 | Сам item изменился | `Re-intake` | новый delivery loop после re-admission |
 | Работу должны вместе land'ить несколько implementation phases | `Integration ownership` | QA и reviewer gates после появления одного integrated artifact |
 | Diff стал слишком широким для local change | `Change isolation` | перекинуть на `architect`, `planner` или `architecture-reviewer` |

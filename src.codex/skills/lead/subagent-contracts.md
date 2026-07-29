@@ -86,7 +86,7 @@ A lead MUST NOT delegate work until the configured task-memory item folder, if t
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
 - `status.md` must have a current snapshot with stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.
 - If either artifact is missing, stale, or incomplete, the lead restores only the lead-owned task-memory state from persisted accepted artifacts BEFORE delegating any specialist role when task memory is configured. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
-- This gate is non-negotiable for non-trivial work when the repository uses task memory. The only exception is the additive fast lane where the lead records the decision in status.md instead.
+- This gate is non-negotiable after routing selects recovery-tracked work. For `quick-fix`, the one-line in-session classification is the handoff and no task-memory artifact is created.
 
 ### status.md format
 

@@ -245,6 +245,8 @@ Before launching work in parallel:
 
 Every completed chain that produces an accepted artifact MUST persist it before the session ends. The orchestrator (the main conversation, as Lead) owns persistence — do not invoke a separate agent for a single file write.
 
+Persistence follows completed work and never gates its first safe mutation. A `quick-fix` may use one post-verification `.reports/` summary.
+
 ### Three-tier storage
 
 | Tier | Location | Purpose | Content |

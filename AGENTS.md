@@ -57,14 +57,15 @@ This monorepo keeps `work-items/` as repo-local task memory for interruption rec
 - When information from local task memory needs to become tracked source of truth, promote the accepted result into the owning canonical surface such as `docs/`, `shared/references/`, pack references, `README.md`, `INSTALL.md`, or `RELEASE_NOTES.md` instead of committing `work-items/` directly.
 - New admitted work routed through `$lead` may still use `work-items/` locally for recovery, resume, and archive hygiene; completed, cancelled, or superseded work stays in the configured local archive location unless a human explicitly asks to publish a distilled artifact elsewhere.
 
-- For lead-routed non-trivial work, `roadmap.md`, `brief.md`, and `status.md` are mandatory when the local task-memory workflow is enabled.
-- `plan.md` becomes mandatory before implementation or review starts.
+- For routes that select recovery-tracked or multi-stage work, `roadmap.md`, `brief.md`, and `status.md` are mandatory when the local task-memory workflow is enabled.
+- `plan.md` becomes mandatory before implementation or review only when the selected route admits a Plan stage.
 - `closure.md` becomes mandatory before moving an item to the configured archive location.
 - Missing required upstream artifacts are a hard gate. If the current stage needs `roadmap`, `research`, `design`, `plan`, specialist constraints, or review artifacts and they are missing or stale, stop and restore them or route the item back to the required upstream stage before continuing delivery.
 - Ownership: `$product-manager` owns `roadmap.md` when roadmap intake is explicit; if the admission source is a direct human request, `$lead` records that source in `roadmap.md`. `$lead` owns `brief.md` and `status.md`. `$planner` owns `plan.md`. Each specialist owns the artifact for their own lane. `$knowledge-archivist` owns recovery-entry-point, template, and archive hygiene for the configured task-memory locations.
 - `notes.md` or `notes/` holds technical notes, implementation discoveries, and follow-ups. Accepted long-lived decisions belong in `design.md` or `adr.md`, not only in notes.
 - `closure.md` holds the final closeout record before archive move; `status.md` stays the live recovery log in the configured recovery location.
-- After interruption or context loss, resume from the repository-defined recovery entry point, then the item's `status.md`, then `brief.md`. If the required docs are missing or stale, stop and restore task memory before continuing delivery.
+- After interruption or context loss, resume recovery-tracked work from the repository-defined recovery entry point, then the item's `status.md`, then `brief.md`. If the required docs for that selected route are missing or stale, stop and restore task memory before continuing delivery.
+- A `quick-fix` records one post-verification summary in `.reports/`; it does not enter local task memory unless re-classified.
 - The older ignored `.plans/` directory is legacy local history only. Do not treat it as the canonical tracked source of truth for new work items.
 
 ## Repository publication safety

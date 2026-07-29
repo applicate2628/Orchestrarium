@@ -527,12 +527,12 @@ Decision-making roles должны явно разделять подтверж�
 
 ## 9. Практические routing patterns
 
-### Явно локальная additive-задача
+### Quick-fix
 
-Используйте это только когда change классифицирован как `additive`, остаётся внутри одного модуля или явно bounded seam, не создаёт нового risk owner и не меняет существующие contracts или shared abstractions. Lead фиксирует fast-lane decision и inline plan в brief или status. Если поверхность расширяется, change нужно сразу re-classify и вернуть на обычный loop.
+Используйте этот маршрут, когда target и execution steps полностью заданы, ownership и contracts разрешены, новая dependency или risk owner не появляются, rollback либо backup указаны явно и назван verification oracle. Зафиксируйте одну строку в текущей сессии, допустите не более одного preflight, затем выполните и проверьте изменение. Если любой predicate не выполнен, re-classify до продолжения.
 
 ```text
-product-manager -> lead -> implementation specialist -> qa-engineer -> lead
+lead -> implementation specialist -> qa-engineer -> lead
 ```
 
 ### Обычная CRUD или integration-задача
@@ -680,8 +680,8 @@ lead -> product-manager -> lead
 
 - Используйте конфигурируемый task-memory directory, когда этот репозиторий использует optional tracked task memory.
 - Держите активные admitted items в конфигурируемой active-item directory и начинайте восстановление после прерывания с repository-defined recovery entry point.
-- Для lead-routed non-trivial work `roadmap.md`, `brief.md` и `status.md` обязательны, когда tracked task memory включён.
-- `plan.md` становится обязательным до начала implementation или review.
+- Для recovery-tracked или multi-stage lead routes `roadmap.md`, `brief.md` и `status.md` обязательны, когда tracked task memory включён.
+- `plan.md` становится обязательным до implementation или review только когда selected route допускает Plan либо upstream specialist stage.
 - Если текущая стадия зависит от upstream artifacts, таких как research, design, specialist constraints, phase plan или required review reports, эти артефакты должны существовать и быть актуальными до продолжения работы.
 - Если обязательные task-memory artifacts для конфигурируемого workflow отсутствуют или устарели, остановитесь и восстановите их до продолжения delivery.
 - `notes.md` или `notes/` хранит technical findings и discoveries; принятые долгоживущие решения по-прежнему должны жить в design или ADR artifact.

@@ -1,7 +1,7 @@
 {
   "name": "quick-fix",
-  "description": "Fast lane for clearly local additive changes \u2014 bug fix, typo, small addition",
-  "when": "Change is additive, confined to one module/seam, no new risk owner, contracts unchanged",
+  "description": "Execution-first route for fully specified, low-risk, reversible work",
+  "when": "Shared governance quick-fix predicate is satisfied",
   "requiresLead": false,
   "chain": ["implement", "QA"],
   "roles": [
@@ -16,5 +16,5 @@
   ],
   "requiredRoles": ["qa-engineer"],
   "minRoles": 1,
-  "notes": "Main conversation picks the implementer, passes artifact to QA. Re-classify to full-delivery (pulling in the architect) when the fix needs a NEW seam, touches a shared/core module, or changes a contract — that is the decidable re-classification trigger; otherwise the fast lane stays fast."
+  "notes": "Main conversation routes implementation, then QA. Admission and re-classification are owned by shared governance."
 }
