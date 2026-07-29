@@ -163,6 +163,110 @@ Implement the admitted universal sentinel owner.
         )
         return root, transcript
 
+    def _absent_fixture(self, task_status: str = "active") -> tuple[Path, Path]:
+        root, transcript = self._fixture()
+        status = root / "work-items" / "active" / "delivery-item" / "status.md"
+        status.write_text(
+            f"""## Current state
+
+- **Primary task status**: {task_status}
+
+## Next action
+
+Continue the admitted work.
+""",
+            encoding="utf-8",
+        )
+        self._write_records(transcript, self._codex_records(
+            name="apply_patch",
+            arguments="*** Update File: README.md",
+            output="Exit code: 0",
+        ))
+        return root, transcript
+
+    def test_active_absent_blocks_once_even_with_unrelated_success(self) -> None:
+        root, transcript = self._absent_fixture()
+        ctx = sentinels.build_context(
+            str(root),
+            runtime_stop=True,
+            delivery_activity=[{
+                "action_class": "mutation",
+                "target_ids": ["README.md"],
+                "succeeded": True,
+            }],
+            delivery_activity_status="FOUND",
+        )
+        self.assertEqual(ctx["delivery_action_status"], "ABSENT")
+        self.assertIsNone(ctx["delivery_action"])
+        finding = sentinels._sen2_evaluate(ctx)
+        self.assertIsNotNone(finding)
+        self.assertEqual(finding.severity, sentinels.RESOLVE)
+
+        first = run_adapter(
+            CANON_ADAPTER,
+            {"cwd": str(root), "transcript_path": str(transcript), "stop_hook_active": False},
+        )
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertIn('"decision": "block"', first.stdout)
+        self.assertIn("SEN-2-DROUGHT", first.stdout)
+        for _ in range(2):
+            repeat = run_adapter(
+                CANON_ADAPTER,
+                {"cwd": str(root), "transcript_path": str(transcript), "stop_hook_active": True},
+            )
+            self.assertEqual(repeat.returncode, 0, repeat.stderr)
+            self.assertNotIn('"decision": "block"', repeat.stdout)
+
+    def test_status_text_cannot_suppress_absent_action(self) -> None:
+        for task_status in ("parked", "blocked", "cancelled", "canceled", "closed", "archived"):
+            with self.subTest(task_status=task_status):
+                root, transcript = self._absent_fixture(task_status)
+                ctx = sentinels.build_context(str(root), runtime_stop=True)
+                self.assertEqual(ctx["delivery_action_status"], "ABSENT")
+                result = run_adapter(
+                    CANON_ADAPTER,
+                    {"cwd": str(root), "transcript_path": str(transcript)},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('"decision": "block"', result.stdout)
+
+    def test_empty_active_directory_is_inactive(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="wi-sen2-empty-"))
+        (root / ".git").mkdir()
+        (root / "work-items" / "active").mkdir(parents=True)
+        ctx = sentinels.build_context(str(root), runtime_stop=True)
+        self.assertEqual(ctx["delivery_action_status"], "INACTIVE")
+        self.assertIsNone(sentinels._sen2_evaluate(ctx))
+
+    def test_multiple_active_directories_are_invalid(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="wi-sen2-multiple-"))
+        (root / ".git").mkdir()
+        active = root / "work-items" / "active"
+        (active / "first").mkdir(parents=True)
+        (active / "second").mkdir()
+        ctx = sentinels.build_context(str(root), runtime_stop=True)
+        self.assertEqual(ctx["delivery_action_status"], "INVALID")
+        finding = sentinels._sen2_evaluate(ctx)
+        self.assertIsNotNone(finding)
+        self.assertEqual(finding.severity, sentinels.NOTICE)
+
+    def test_one_declared_action_among_multiple_active_items_remains_valid(self) -> None:
+        root, transcript = self._fixture()
+        other = root / "work-items" / "active" / "research-item"
+        other.mkdir()
+        (other / "status.md").write_text("State: active\n", encoding="utf-8")
+        self._write_records(transcript, self._codex_records(
+            name="apply_patch",
+            arguments="*** Update File: scripts/universal-hooks/scripts/workitem_sentinels.py",
+            output="Exit code: 0",
+        ))
+
+        ctx = sentinels.build_context(str(root), runtime_stop=True)
+        self.assertEqual(ctx["delivery_action_status"], "VALID")
+        result = run_adapter(CANON_ADAPTER, {"cwd": str(root), "transcript_path": str(transcript)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn('"decision": "block"', result.stdout)
+
     def test_due_root_stop_blocks_once_and_reentry_allows(self) -> None:
         root, transcript = self._fixture()
         files_before = sorted(path.relative_to(root) for path in root.rglob("*") if path.is_file())
@@ -447,7 +551,7 @@ Implement the admitted universal sentinel owner.
 
                 self.assertEqual('"decision": "block"' not in result.stdout, should_satisfy)
 
-    def test_canonical_blocked_status_is_inapplicable(self) -> None:
+    def test_canonical_blocked_status_does_not_suppress_due_action(self) -> None:
         root, transcript = self._fixture()
         status_path = root / "work-items" / "active" / "delivery-item" / "status.md"
         status_path.write_text(
@@ -461,7 +565,8 @@ Implement the admitted universal sentinel owner.
         result = run_adapter(CANON_ADAPTER, {"cwd": str(root), "transcript_path": str(transcript)})
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "")
+        self.assertIn('"decision": "block"', result.stdout)
+        self.assertIn("SEN-2-DROUGHT", result.stdout)
 
     def test_direct_outside_repo_transcript_capability_still_drives_due_verdict(self) -> None:
         root, fixture_transcript = self._fixture()
@@ -1252,11 +1357,10 @@ class TestG14T16BoundedReverseScan(unittest.TestCase):
         # fed through the actual adapter subprocess (not build_context
         # directly) -- this is what F2 fixes, end to end.
         #
-        # r8: this test originally exercised SEN-2's own
-        # [approve-review-continuation] marker, clearing a drought fixture;
-        # SEN-2 is cut (design.md §0.9), and the transcript reader is
-        # re-justified for SEN-0's F3 T1 widening instead (§0.9.4). The
-        # marker used here is therefore SEN-0's own,
+        # r8: this test originally exercised SEN-2's old
+        # [approve-review-continuation] marker. The transcript reader is now
+        # justified by SEN-0's F3 T1 widening instead (§0.9.4). The marker
+        # used here is therefore SEN-0's own,
         # [acknowledge-open-work-items], read from the operator's channel
         # (user_message_text via last_genuine_user_text), not the model's
         # last_assistant_message -- proving the reverse scan still finds an
@@ -1266,8 +1370,40 @@ class TestG14T16BoundedReverseScan(unittest.TestCase):
         item = root / "work-items" / "active" / "orphan-e2e"
         item.mkdir(parents=True)
         (item / "closure.md").write_text("outcome: PASS", encoding="utf-8")
+        (item / "status.md").write_text(
+            """## Delivery action
+
+- **Primary**: true
+- **Fingerprint**: sen0-marker-isolation
+- **Class**: mutation
+- **Target**: closure.md
+- **Oracle**: correlated-success
+""",
+            encoding="utf-8",
+        )
         tp = self._make_transcript("ok [acknowledge-open-work-items] please continue", 300)
         try:
+            with tp.open("a", encoding="utf-8") as handle:
+                for record in (
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "custom_tool_call",
+                            "call_id": "sen0-isolation-delivery",
+                            "name": "apply_patch",
+                            "input": "*** Update File: closure.md",
+                        },
+                    },
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "custom_tool_call_output",
+                            "call_id": "sen0-isolation-delivery",
+                            "output": "Exit code: 0",
+                        },
+                    },
+                ):
+                    handle.write(json.dumps(record) + "\n")
             p = run_adapter(
                 CANON_ADAPTER,
                 {"cwd": str(root), "last_assistant_message": "done", "transcript_path": str(tp)},
@@ -1282,9 +1418,9 @@ class TestG14T16BoundedReverseScan(unittest.TestCase):
 
 
 # r8 (design.md §0.9): TestG15T17OverrideChannelUnavailability is REMOVED
-# here, not skipped. `override-channel` was SEN-2's own read-status
-# discriminator, folded into its NOTICE text; SEN-2 is cut, and the adapter
-# no longer emits an `override-channel=...` token at all (the underlying
+# here, not skipped. `override-channel` belonged to SEN-2's retired
+# read-status discriminator and was folded into that design's NOTICE text;
+# the current SEN-2 no longer emits an `override-channel=...` token (the underlying
 # hook_common.last_genuine_user_text status tuple is still returned and
 # still exercised directly -- TestG14T16BoundedReverseScan.
 # test_byte_cap_boundary_returns_not_in_window -- just no longer surfaced by

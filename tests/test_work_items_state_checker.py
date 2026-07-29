@@ -282,6 +282,17 @@ def test_checker_rejects_multiple_primary_delivery_actions(tmp_path: Path):
     assert result.stdout.count("multiple primary ## Delivery action contracts") == 2
 
 
+def test_checker_accepts_one_declared_and_one_absent_active_item(tmp_path: Path):
+    declared = write_valid_item(tmp_path, "declared-item")
+    with (declared / "status.md").open("a", encoding="utf-8") as handle:
+        handle.write("\n" + delivery_action_contract())
+    write_valid_item(tmp_path, "absent-item")
+
+    result = run_checker(tmp_path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_checker_keeps_parked_item_compatible(tmp_path: Path):
     item = write_valid_item(tmp_path)
     status = valid_status().replace("**Primary task status**: open", "**Primary task status**: parked")

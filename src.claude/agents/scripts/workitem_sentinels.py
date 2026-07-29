@@ -136,14 +136,14 @@ DELIVERY_ACTION_FIELD_RE = re.compile(
     r"^-\s+\*\*(Primary|Fingerprint|Class|Target|Oracle)\*\*:\s*(.*?)\s*$",
     re.IGNORECASE,
 )
-PRIMARY_TASK_STATUS_RE = re.compile(
-    r"^\s*-?\s*\*{0,2}Primary task status\*{0,2}\s*:\s*([^\r\n]+)$",
-    re.IGNORECASE | re.MULTILINE,
-)
 DELIVERY_FINGERPRINT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 DELIVERY_CLASSES = {"mutation"}
 DELIVERY_ORACLE = "correlated-success"
 DELIVERY_INPUT_NOTICE = "SEN-2-INPUT: delivery-action input is invalid; governor allowed this Stop."
+DELIVERY_ACTION_ABSENT_REASON = (
+    "SEN-2-DROUGHT: active work is still open without a delivery action. Continue with the next "
+    "concrete repository mutation now, or close and archive the item if its work is complete."
+)
 DELIVERY_DROUGHT_REASON = (
     "SEN-2-DROUGHT: the admitted delivery action is still due. Continue with that action now "
     "or surface one concrete external blocker."
@@ -325,11 +325,6 @@ def _parse_delivery_action(item: Path) -> tuple[dict | None, str]:
         return None, "INVALID"
     if len(text) > 128 * 1024:
         return None, "INVALID"
-    task_status_match = PRIMARY_TASK_STATUS_RE.search(text)
-    if task_status_match is not None:
-        task_status = task_status_match.group(1).strip().lower()
-        if task_status in {"parked", "closed", "cancelled", "canceled", "blocked", "archived"}:
-            return None, "INACTIVE"
     fields: dict[str, str] = {}
     in_section = False
     found_section = False
@@ -378,8 +373,11 @@ def _parse_delivery_action(item: Path) -> tuple[dict | None, str]:
 
 
 def _find_delivery_action(active_dir: Path) -> tuple[dict | None, str]:
+    items = sorted(path for path in active_dir.iterdir() if path.is_dir())
+    if not items:
+        return None, "INACTIVE"
     actions: list[dict] = []
-    for item in sorted(path for path in active_dir.iterdir() if path.is_dir()):
+    for item in items:
         action, status = _parse_delivery_action(item)
         if status == "INVALID":
             return None, "INVALID"
@@ -387,17 +385,19 @@ def _find_delivery_action(active_dir: Path) -> tuple[dict | None, str]:
             actions.append(action)
     if len(actions) > 1:
         return None, "INVALID"
-    if not actions:
+    if len(actions) == 1:
+        return actions[0], "VALID"
+    if len(items) == 1:
         return None, "ABSENT"
-    return actions[0], "VALID"
+    return None, "INVALID"
 
 
 def delivery_action_validation_errors(active_dir: Path) -> dict[str, list[str]]:
     """Validate the canonical opted-in section owned by this module.
 
     Exact shape: `## Delivery action` followed by Primary=true, Fingerprint,
-    Class, Target, and Oracle bullet fields. Absence and parked items are
-    compatible; a present active contract is exact and globally unique.
+    Class, Target, and Oracle bullet fields. Absence is accepted statically
+    while a stage is active; Stop-time SEN-2 owns unresolved omission.
     """
     errors: dict[str, list[str]] = {}
     valid_names: list[str] = []
@@ -414,7 +414,7 @@ def delivery_action_validation_errors(active_dir: Path) -> dict[str, list[str]]:
     if len(valid_names) > 1:
         for name in valid_names:
             errors.setdefault(name, []).append(
-                "multiple primary ## Delivery action contracts; exactly one active item may opt in"
+                "multiple primary ## Delivery action contracts; exactly one primary action is allowed across active items"
             )
     return errors
 
@@ -449,7 +449,7 @@ def build_context(
         "archive_slug_paths": {},
         "legs": "disk",
         "delivery_action": None,
-        "delivery_action_status": "ABSENT",
+        "delivery_action_status": "INACTIVE",
         "delivery_activity": list(delivery_activity or []),
         "delivery_activity_status": delivery_activity_status,
         "runtime_stop": runtime_stop,
@@ -836,18 +836,19 @@ def _sen1_evaluate(ctx: dict) -> Finding | None:
 # ---------------------------------------------------------------------------
 # SEN-2 -- delivery drought. The threshold/NOTICE-only design was cut at r8
 # after T-20 proved that operator-directed NOTICE is not delivered on Codex.
-# The accepted 2026-07-29 host-correlated-action-evidence decision supersedes
-# that absence with a different, stateless RESOLVE-tier V1: one exact active
-# `## Delivery action` contract opts in (`Primary: true`, `Class: mutation`,
-# `Oracle: correlated-success`), and only a direct recognized mutation whose
+# The accepted 2026-07-29 host-correlated-action-evidence decision provides a
+# stateless RESOLVE-tier V1. Physical membership under work-items/active/ owns
+# applicability: one active item without `## Delivery action` receives a
+# generic continuation block, and model-authored status prose cannot suppress
+# it. When one exact action is present (`Primary: true`, `Class: mutation`,
+# `Oracle: correlated-success`), only a direct recognized mutation whose
 # semantic target exactly matches plus a same-id explicit-success result earns
 # delivery credit. Failed, ambiguous, missing, and in-flight results remain
-# due; canonical blocked status makes the action inapplicable rather than
-# manufacturing a blocker from tool output. The adapter owns the `agent_id`
-# child skip and `stop_hook_active` same-turn re-entry suppression, so an
-# unsatisfied action blocks at most once per root user turn. Invalid action or
-# transcript inputs fail open with a static NOTICE. HALT remains absent and
-# the measured operator-NOTICE limitations are unchanged.
+# due. The adapter owns the `agent_id` child skip and `stop_hook_active`
+# same-turn re-entry suppression, so an unsatisfied action blocks at most once
+# per root user turn. Invalid action or transcript inputs fail open with a
+# static NOTICE. HALT remains absent and the measured operator-NOTICE
+# limitations are unchanged.
 # ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
@@ -862,6 +863,8 @@ def _sen2_evaluate(ctx: dict) -> Finding | None:
     action_status = ctx.get("delivery_action_status")
     if action_status == "INVALID":
         return Finding("SEN-2", NOTICE, DELIVERY_INPUT_NOTICE)
+    if action_status == "ABSENT":
+        return Finding("SEN-2", RESOLVE, DELIVERY_ACTION_ABSENT_REASON)
     action = ctx.get("delivery_action")
     if not isinstance(action, dict):
         return None
@@ -904,7 +907,7 @@ REGISTRY: tuple[dict, ...] = (
     {
         "id": "SEN-2",
         "event": "Stop",
-        "scope": "one explicitly opted-in active delivery action",
+        "scope": "physical active work plus one optional primary delivery action",
         "evaluate": _sen2_evaluate,
         "exemptions": "host agent_id skip and stop_hook_active suppression in the adapter only",
     },
