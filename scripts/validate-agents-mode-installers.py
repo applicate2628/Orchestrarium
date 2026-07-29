@@ -270,16 +270,13 @@ def seed_codex_agent_overrides(project_root: Path, root: Path) -> None:
     )
 
 
-def validate_codex_agent_overrides(project_root: Path, root: Path) -> None:
+def validate_codex_agent_override_reclaim(project_root: Path) -> None:
     agents_dir = project_root / ".codex" / "agents"
-    source_dir = root / "src.codex" / "agents"
 
     for name in ["default.toml", "explorer.toml"]:
-        expected = (source_dir / name).read_text(encoding="utf-8")
-        actual = (agents_dir / name).read_text(encoding="utf-8")
-        if actual != expected:
+        if (agents_dir / name).exists():
             raise InstallerRegressionError(
-                f"codex did not refresh stale built-in agent override {name}"
+                f"codex did not reclaim retired pack-owned agent override {name}"
             )
 
     worker = (agents_dir / "worker.toml").read_text(encoding="utf-8")
@@ -287,6 +284,19 @@ def validate_codex_agent_overrides(project_root: Path, root: Path) -> None:
         raise InstallerRegressionError(
             "codex replaced a customized built-in worker override"
         )
+
+
+def validate_no_codex_agent_overrides(project_root: Path) -> None:
+    agents_dir = project_root / ".codex" / "agents"
+    if agents_dir.exists():
+        raise InstallerRegressionError(
+            "fresh codex install created the retired .codex/agents directory"
+        )
+    for name in ["default.toml", "explorer.toml", "worker.toml"]:
+        if (agents_dir / name).exists():
+            raise InstallerRegressionError(
+                f"fresh codex install created retired built-in agent override {name}"
+            )
 
 
 def validate_overlay(
@@ -409,7 +419,20 @@ def run_regression(root: Path) -> None:
             validate_overlay(case, overlay, schema_data)
             validate_example_provider_universal_hooks(root, case, project_root)
             if case.codex_line:
-                validate_codex_agent_overrides(project_root, root)
+                validate_codex_agent_override_reclaim(project_root)
+
+        codex_fresh_project = scratch / "codex-fresh-project"
+        codex_fresh_project.mkdir(parents=True, exist_ok=True)
+        codex_case = next(case for case in INSTALLER_CASES if case.name == "codex")
+        run_installer(
+            root,
+            codex_case,
+            Path(".scratch")
+            / "agents-mode-installer-regression"
+            / scratch.name
+            / "codex-fresh-project",
+        )
+        validate_no_codex_agent_overrides(codex_fresh_project)
 
         codex_global_home = scratch / "codex-powershell-global-home"
         codex_global_home.mkdir(parents=True, exist_ok=True)
@@ -423,7 +446,12 @@ def run_regression(root: Path) -> None:
         seed_codex_agent_overrides(codex_global_home, root)
         run_powershell_codex_global_installer(root, codex_global_home)
         validate_overlay(codex_global_case, overlay, schema_data)
-        validate_codex_agent_overrides(codex_global_home, root)
+        validate_codex_agent_override_reclaim(codex_global_home)
+
+        codex_global_fresh_home = scratch / "codex-powershell-global-fresh-home"
+        codex_global_fresh_home.mkdir(parents=True, exist_ok=True)
+        run_powershell_codex_global_installer(root, codex_global_fresh_home)
+        validate_no_codex_agent_overrides(codex_global_fresh_home)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)
 

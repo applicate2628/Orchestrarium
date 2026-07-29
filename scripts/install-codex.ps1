@@ -24,6 +24,8 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoDir = Split-Path -Parent $ScriptDir
 $Source = Join-Path $RepoDir "src.codex"
+# Retired pack templates retained only as ownership fingerprints so reinstall
+# can reclaim old Orchestrarium copies without deleting user customizations.
 $AgentsSource = Join-Path $Source "agents"
 $SharedAgentsModeSource = Join-Path $RepoDir "shared\agents-mode.defaults.yaml"
 $script:CodexPackBeginMarker = "<!-- BEGIN ORCHESTRARIUM CODEX PACK -->"
@@ -404,7 +406,7 @@ function Test-PackOwnedCodexAgentOverride {
     return $false
 }
 
-function Ensure-CodexAgentOverrideFile {
+function Remove-PackOwnedCodexAgentOverrideFile {
     param(
         [string]$SourceFile,
         [string]$TargetFile,
@@ -415,27 +417,15 @@ function Ensure-CodexAgentOverrideFile {
 
     if (Test-Path -LiteralPath $TargetFile) {
         if (Test-PackOwnedCodexAgentOverride -SourceFile $SourceFile -TargetFile $TargetFile) {
-            if ((Get-FileHash -LiteralPath $SourceFile).Hash -eq (Get-FileHash -LiteralPath $TargetFile).Hash) {
-                Write-Host "  OK  $Label unchanged"
+            Write-Host "  Removing retired pack-owned $Label..."
+            if (-not $DryRun) {
+                Remove-Item -LiteralPath $TargetFile -Force
             } else {
-                Write-Host "  Refreshing stale pack-owned $Label..."
-                if (-not $DryRun) {
-                    Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
-                } else {
-                    Write-Host "    [dry-run] would replace $TargetFile"
-                }
+                Write-Host "    [dry-run] would remove $TargetFile"
             }
         } else {
             Write-Host "  Preserving existing custom $Label..."
         }
-        return
-    }
-
-    Write-Host "  Installing default $Label..."
-    if (-not $DryRun) {
-        Copy-Item -LiteralPath $SourceFile -Destination $TargetFile -Force
-    } else {
-        Write-Host "    [dry-run] would create $TargetFile"
     }
 }
 
@@ -684,7 +674,7 @@ $LegacyAgentsModeTarget = Join-Path $AgentsRoot ".agents-mode"
 Write-Host "=== Codex Installer ===" -ForegroundColor Cyan
 Write-Host "Source: $Source"
 Write-Host "Skills target: $SkillsTarget"
-Write-Host "Built-in agent overrides: $AgentOverridesTarget"
+Write-Host "Legacy agent override cleanup target: $AgentOverridesTarget"
 Write-Host "AGENTS.md target: $MdTarget"
 Write-Host "agents-mode: $AgentsModeTarget"
 Write-Host "Mode:   $Mode"
@@ -729,8 +719,9 @@ if (-not $NoHypothesisHook -and [string]::IsNullOrEmpty($env:ORCHESTRARIUM_NO_HY
     }
 }
 
-# Create parent directories as needed
-foreach ($tdir in @($SkillsTarget, $AgentOverridesTarget)) {
+# Create parent directories as needed. The retired built-in override target is
+# intentionally excluded: a fresh install must not create agents/.
+foreach ($tdir in @($SkillsTarget)) {
     $parent = Split-Path $tdir -Parent
     if (-not (Test-Path -LiteralPath $parent)) {
         if (-not $DryRun) {
@@ -827,17 +818,10 @@ foreach ($scriptName in $RuntimeLedgerScripts) {
     }
 }
 
-Write-Host "  Installing built-in agent overrides (preserving existing custom files)..."
-if (-not (Test-Path -LiteralPath $AgentOverridesTarget)) {
-    if (-not $DryRun) {
-        New-Item -ItemType Directory -Path $AgentOverridesTarget -Force | Out-Null
-    } else {
-        Write-Host "    [dry-run] would create $AgentOverridesTarget"
-    }
-}
+Write-Host "  Reclaiming retired pack-owned built-in agent overrides (preserving custom files)..."
 foreach ($agentFile in Get-ChildItem -LiteralPath $AgentsSource -File) {
     $targetFile = Join-Path $AgentOverridesTarget $agentFile.Name
-    Ensure-CodexAgentOverrideFile -SourceFile $agentFile.FullName -TargetFile $targetFile -Label ("built-in agent override {0}" -f $agentFile.Name)
+    Remove-PackOwnedCodexAgentOverrideFile -SourceFile $agentFile.FullName -TargetFile $targetFile -Label ("built-in agent override {0}" -f $agentFile.Name)
 }
 
 # AGENTS.md: assemble from shared + codex-specific, then merge or create
@@ -1166,16 +1150,6 @@ foreach ($relative in Get-SourceFiles "skills") {
     }
 }
 
-Write-Host "Verifying agents/ files..."
-foreach ($relative in Get-SourceFiles "agents") {
-    $relFile = $relative.Substring("agents\".Length)
-    if (Test-SourceFileRequiredForProfile $relative) {
-        Test-InstalledFile (Join-Path $AgentOverridesTarget $relFile) $relative
-    } else {
-        Write-Host "  OK  $relative (intentionally reclaimed for hook-runtime=$HookRuntime)" -ForegroundColor Green
-    }
-}
-
 # Explicit contract requirements
 Test-InstalledFile (Join-Path $SkillsTarget "lead/operating-model.md") "skills/lead/operating-model.md"
 Test-InstalledFile (Join-Path $SkillsTarget "lead/subagent-contracts.md") "skills/lead/subagent-contracts.md"
@@ -1186,9 +1160,19 @@ foreach ($scriptName in $RuntimeLedgerScripts) {
     Test-InstalledFile (Join-Path $LeadScriptsTarget $scriptName) "skills/lead/scripts/$scriptName"
 }
 Test-InstalledFile $AgentsModeTarget ".agents-mode.yaml"
-Test-InstalledFile (Join-Path $AgentOverridesTarget "default.toml") "agents/default.toml"
-Test-InstalledFile (Join-Path $AgentOverridesTarget "worker.toml") "agents/worker.toml"
-Test-InstalledFile (Join-Path $AgentOverridesTarget "explorer.toml") "agents/explorer.toml"
+foreach ($agentFile in Get-ChildItem -LiteralPath $AgentsSource -File) {
+    $targetFile = Join-Path $AgentOverridesTarget $agentFile.Name
+    if (Test-Path -LiteralPath $targetFile) {
+        if (Test-PackOwnedCodexAgentOverride -SourceFile $agentFile.FullName -TargetFile $targetFile) {
+            Write-Host "  FAIL agents/$($agentFile.Name) (retired pack-owned override still installed)" -ForegroundColor Red
+            $errors++
+        } else {
+            Write-Host "  OK  agents/$($agentFile.Name) (preserved custom override)" -ForegroundColor Green
+        }
+    } else {
+        Write-Host "  OK  agents/$($agentFile.Name) (not installed by default)" -ForegroundColor Green
+    }
+}
 
 if (Test-Path $dstMd) {
     $mdContent = Get-Content $dstMd -Raw
@@ -1214,7 +1198,7 @@ if ($errors -gt 0) {
 } else {
     Write-Host "RESULT: OK - Codex pack installed" -ForegroundColor Green
     Write-Host "  Skills: $SkillsTarget"
-    Write-Host "  Built-in agent overrides: $AgentOverridesTarget"
+    Write-Host "  Native agent presets: runtime/user-managed (no Orchestrarium defaults installed)"
     Write-Host "  AGENTS.md: $MdTarget"
     Write-Host "  agents-mode: $AgentsModeTarget"
     Write-Host ""

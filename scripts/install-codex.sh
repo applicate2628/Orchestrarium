@@ -9,6 +9,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SOURCE="$REPO_DIR/src.codex"
+# Retired pack templates retained only as ownership fingerprints so reinstall
+# can reclaim old Orchestrarium copies without deleting user customizations.
 AGENTS_SOURCE="$SOURCE/agents"
 SHARED_AGENTS_MODE_SOURCE="$REPO_DIR/shared/agents-mode.defaults.yaml"
 CODEX_PACK_BEGIN_MARKER='<!-- BEGIN ORCHESTRARIUM CODEX PACK -->'
@@ -418,7 +420,7 @@ LEGACY_AGENTS_MODE_TARGET="$AGENTS_ROOT/.agents-mode"
 echo "=== Codex Installer ==="
 echo "Source: $SOURCE"
 echo "Skills target: $SKILLS_TARGET"
-echo "Built-in agent overrides: $AGENT_OVERRIDES_TARGET"
+echo "Legacy agent override cleanup target: $AGENT_OVERRIDES_TARGET"
 echo "AGENTS.md target: $MD_TARGET"
 echo "agents-mode: $AGENTS_MODE_TARGET"
 echo "Mode:   $MODE"
@@ -476,8 +478,9 @@ if [ "$NO_HYPOTHESIS_HOOK" -ne 1 ] && [ -z "${ORCHESTRARIUM_NO_HYPOTHESIS_HOOK:-
   fi
 fi
 
-# Create target parent directories as needed
-for tdir in "$SKILLS_TARGET" "$AGENT_OVERRIDES_TARGET"; do
+# Create target parent directories as needed. The retired built-in override
+# target is intentionally excluded: a fresh install must not create agents/.
+for tdir in "$SKILLS_TARGET"; do
   parent="$(dirname "$tdir")"
   if [[ ! -d "$parent" ]]; then
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -598,7 +601,7 @@ is_pack_owned_codex_agent_override() {
   return 1
 }
 
-ensure_codex_agent_override_file() {
+reclaim_pack_owned_codex_agent_override_file() {
   local src="$1" dst="$2" label="$3"
   local name
   name="$(basename "$src")"
@@ -607,27 +610,15 @@ ensure_codex_agent_override_file() {
 
   if [[ -f "$dst" ]]; then
     if is_pack_owned_codex_agent_override "$src" "$dst" "$name"; then
-      if cmp -s "$src" "$dst"; then
-        echo "  OK  $label unchanged"
+      echo "  Removing retired pack-owned $label..."
+      if [ "$DRY_RUN" -eq 1 ]; then
+        echo "    [dry-run] would remove $dst"
       else
-        echo "  Refreshing stale pack-owned $label..."
-        if [ "$DRY_RUN" -eq 1 ]; then
-          echo "    [dry-run] would replace $dst"
-        else
-          cp "$src" "$dst"
-        fi
+        rm -f "$dst"
       fi
     else
       echo "  Preserving existing custom $label..."
     fi
-    return
-  fi
-
-  echo "  Installing default $label..."
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    [dry-run] would create $dst"
-  else
-    cp "$src" "$dst"
   fi
 }
 
@@ -878,17 +869,10 @@ for script_name in "${runtime_ledger_scripts[@]}"; do
   fi
 done
 
-echo "  Installing built-in agent overrides (preserving existing custom files)..."
-if [[ ! -d "$AGENT_OVERRIDES_TARGET" ]]; then
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "    [dry-run] would create $AGENT_OVERRIDES_TARGET"
-  else
-    mkdir -p "$AGENT_OVERRIDES_TARGET"
-  fi
-fi
+echo "  Reclaiming retired pack-owned built-in agent overrides (preserving custom files)..."
 for agent_file in "$AGENTS_SOURCE"/*.toml; do
   [[ -f "$agent_file" ]] || continue
-  ensure_codex_agent_override_file "$agent_file" "$AGENT_OVERRIDES_TARGET/$(basename "$agent_file")" "built-in agent override $(basename "$agent_file")"
+  reclaim_pack_owned_codex_agent_override_file "$agent_file" "$AGENT_OVERRIDES_TARGET/$(basename "$agent_file")" "built-in agent override $(basename "$agent_file")"
 done
 
 # AGENTS.md: assemble from shared + codex-specific, then merge or create
@@ -1258,7 +1242,6 @@ check_installed_manifest() {
 }
 
 check_installed_manifest "$SOURCE/skills" "$SKILLS_TARGET" "$SOURCE/skills"
-check_installed_manifest "$AGENTS_SOURCE" "$AGENT_OVERRIDES_TARGET" "$AGENTS_SOURCE"
 
 check_file "$SKILLS_TARGET/lead/operating-model.md" "skills/lead/operating-model.md"
 check_file "$SKILLS_TARGET/lead/subagent-contracts.md" "skills/lead/subagent-contracts.md"
@@ -1269,9 +1252,21 @@ for script_name in "${runtime_ledger_scripts[@]}"; do
   check_file "$SKILLS_TARGET/lead/scripts/$script_name" "skills/lead/scripts/$script_name"
 done
 check_file "$AGENTS_MODE_TARGET" ".agents-mode.yaml"
-check_file "$AGENT_OVERRIDES_TARGET/default.toml" "agents/default.toml"
-check_file "$AGENT_OVERRIDES_TARGET/worker.toml" "agents/worker.toml"
-check_file "$AGENT_OVERRIDES_TARGET/explorer.toml" "agents/explorer.toml"
+for agent_file in "$AGENTS_SOURCE"/*.toml; do
+  [[ -f "$agent_file" ]] || continue
+  agent_name="$(basename "$agent_file")"
+  installed_agent="$AGENT_OVERRIDES_TARGET/$agent_name"
+  if [[ -f "$installed_agent" ]]; then
+    if is_pack_owned_codex_agent_override "$agent_file" "$installed_agent" "$agent_name"; then
+      echo "  FAIL agents/$agent_name (retired pack-owned override still installed)"
+      errors=$((errors+1))
+    else
+      echo "  OK  agents/$agent_name (preserved custom override)"
+    fi
+  else
+    echo "  OK  agents/$agent_name (not installed by default)"
+  fi
+done
 
 if [[ -f "$dst_md" ]]; then
   line_count=$(wc -l < "$dst_md")
@@ -1296,7 +1291,7 @@ if [[ $errors -gt 0 ]]; then
 else
   echo "RESULT: OK — Codex pack installed"
   echo "  Skills: $SKILLS_TARGET"
-  echo "  Built-in agent overrides: $AGENT_OVERRIDES_TARGET"
+  echo "  Native agent presets: runtime/user-managed (no Orchestrarium defaults installed)"
   echo "  AGENTS.md: $MD_TARGET"
   echo "  agents-mode: $AGENTS_MODE_TARGET"
   echo ""

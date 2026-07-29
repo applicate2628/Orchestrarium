@@ -11,14 +11,14 @@ Use it together with:
 Source surface:
 
 - `../shared/AGENTS.shared.md` + `AGENTS.codex.md` assemble the installed Codex `AGENTS.md`
-- `agents/default.toml`, `agents/worker.toml`, and `agents/explorer.toml` seed the Codex built-in custom-agent overrides installed under `.codex/agents/`
+- `agents/default.toml`, `agents/worker.toml`, and `agents/explorer.toml` are retired-template fingerprints used only to recognize and safely reclaim older Orchestrarium-owned installs; they are not installed as defaults
 - `skills/<role>/SKILL.md` and `skills/<role>/agents/openai.yaml` define the role catalog
 - `skills/lead/` carries operating-model notes, handoff contracts, and validation/publication-safety scripts
 - `skills/consultant/` and `skills/second-opinion/` carry the advisory and explicit consultant routing surfaces
 - `skills/external-brigade/` carries the bounded parallel external-helper orchestration surface
 - `skills/design-panel/` carries the design-panel technique — independent multi-lane design generation on one pinned problem, converged through one mandatory synthesis; the generation-side analog of `skills/review-loop/`
 
-Architecture decision: the installed Codex `AGENTS.md` is intentionally the compact universal minimum, not the place for the full role catalog or long runtime manuals. Keep the universal entrypoint thin and put detailed role contracts in `skills/<role>/SKILL.md`, shared methodology in `../shared/references/`, Codex-specific addenda in `../references-codex/`, and built-in runtime override behavior in `.codex/agents/*.toml`. This mirrors the Claude-side pattern where `CLAUDE.md` stays short and `.claude/agents/*.md` carries the detailed role files.
+Architecture decision: the installed Codex `AGENTS.md` is intentionally the compact universal minimum, not the place for the full role catalog or long runtime manuals. Keep the universal entrypoint thin and put detailed role contracts in `skills/<role>/SKILL.md`, shared methodology in `../shared/references/`, and Codex-specific addenda in `../references-codex/`. Native subagent model selection remains runtime- or operator-owned; the source `agents/*.toml` files are cleanup fingerprints, not install payload. This mirrors the Claude-side pattern where `CLAUDE.md` stays short and `.claude/agents/*.md` carries the detailed role files.
 
 Keep `SKILL.md` frontmatter `description:` values compact because Codex loads them as startup metadata before any one skill body is selected. Put detailed trigger logic, scope, and gate rules in the body of the skill instead; `skills/lead/scripts/validate-skill-pack.*` enforces the Codex metadata budget.
 

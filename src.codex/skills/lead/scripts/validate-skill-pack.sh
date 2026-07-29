@@ -1723,12 +1723,12 @@ if [[ $DEV_REPO -eq 1 ]]; then
     "shared agents-mode defaults keep reserve advisory/review-only"
   check_not_exists "$REPO_ROOT/src.codex/agents-mode.defaults.yaml" \
     "src.codex/agents-mode.defaults.yaml removed from the monorepo"
-  check_contains "$REPO_ROOT/INSTALL.md" ".codex/agents/default.toml" \
-    "INSTALL.md documents Codex built-in agent override seeding"
+  check_contains "$REPO_ROOT/INSTALL.md" "Codex installs do not seed built-in subagent overrides" \
+    "INSTALL.md documents runtime-owned native subagent selection"
   check_contains "$DOCS_DIR/provider-runtime-layouts.md" "~/.codex/agents/default.toml" \
-    "provider runtime layouts document global Codex built-in agent overrides"
-  check_contains "$REPO_ROOT/src.codex/README.md" "agents/default.toml" \
-    "src.codex/README.md documents the built-in agent override payload"
+    "provider runtime layouts document optional global native overrides"
+  check_contains "$REPO_ROOT/src.codex/README.md" "retired-template fingerprints" \
+    "src.codex/README.md documents the retired override cleanup fingerprints"
   if [[ $STANDALONE -eq 0 ]]; then
     # The root README.md/INSTALL.md work-item-tracking sections and RELEASE_NOTES.md are
     # monorepo surfaces; the standalone tree carries its own curated README/INSTALL and
@@ -1814,10 +1814,14 @@ fi
 
 if [[ -n "$CODEX_RUNTIME_ROOT" ]]; then
   echo ""
-  echo "=== Codex built-in agent overrides ==="
-  check_file "$CODEX_RUNTIME_ROOT/agents/default.toml" "agents/default.toml installed"
-  check_file "$CODEX_RUNTIME_ROOT/agents/worker.toml" "agents/worker.toml installed"
-  check_file "$CODEX_RUNTIME_ROOT/agents/explorer.toml" "agents/explorer.toml installed"
+  echo "=== Codex native agent overrides ==="
+  for agent_name in default.toml worker.toml explorer.toml; do
+    if [[ -f "$CODEX_RUNTIME_ROOT/agents/$agent_name" ]]; then
+      warn "agents/$agent_name present (runtime/operator-owned; not validated as pack payload)"
+    else
+      pass "agents/$agent_name not installed by Orchestrarium"
+    fi
+  done
 fi
 
 echo ""

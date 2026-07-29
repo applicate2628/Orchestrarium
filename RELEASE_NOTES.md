@@ -10,6 +10,12 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-07-30
+
+### Changed
+
+- **Codex default installation no longer pins native `default`, `explorer`, and `worker` subagents to one model and reasoning tier.** Fresh project and global installs no longer create `.codex/agents/default.toml`, `explorer.toml`, or `worker.toml`, leaving model and effort selection to the Codex runtime or explicit operator-owned configuration. Reinstall removes only recognizable retired Orchestrarium-owned copies from older installs and preserves genuinely customized files at the same paths. **Why it matters:** independent lanes can be calibrated to their actual complexity instead of inheriting `gpt-5.6-sol` plus `xhigh` from a pack-wide preset. **Preserved:** role skills, delegation rules, external-provider profiles, hooks, Claude behavior, and user-authored native overrides are unchanged.
+
 ## 2026-07-29
 
 ### Fixed
