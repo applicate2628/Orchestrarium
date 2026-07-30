@@ -58,12 +58,17 @@ def parse_evidence_json(value: str) -> dict[str, Any]:
     return parsed
 
 
-def ensure_status_sections(item: Path, args: argparse.Namespace) -> None:
+def ensure_status_sections(item: Path, args: argparse.Namespace, validator: Any) -> list[str]:
     status_path = item / "status.md"
     if status_path.exists():
         text = status_path.read_text(encoding="utf-8")
     else:
         text = "# Status\n"
+
+    if validator.is_quick_fix_status_candidate(text):
+        errors: list[str] = []
+        validator.validate_quick_fix_status(text, errors)
+        return errors
 
     additions: list[str] = []
     for heading, body_factory in STATUS_SECTIONS.items():
@@ -76,6 +81,7 @@ def ensure_status_sections(item: Path, args: argparse.Namespace) -> None:
         if not text.endswith("\n"):
             text += "\n"
         status_path.write_text(text, encoding="utf-8")
+    return []
 
 
 # Legacy executionRole values are READ-mapped by the validator (old ledgers keep
@@ -198,7 +204,13 @@ def command_init(args: argparse.Namespace) -> int:
         return 1
     item = args.work_item.resolve()
     item.mkdir(parents=True, exist_ok=True)
-    ensure_status_sections(item, args)
+    validator = load_validator()
+    errors = ensure_status_sections(item, args, validator)
+    if errors:
+        for error in errors:
+            print(f"FAIL: {error}", file=sys.stderr)
+        print(f"RESULT: FAIL ({len(errors)} errors)", file=sys.stderr)
+        return 1
     (item / "agent-runs.jsonl").touch(exist_ok=True)
     print(f"RESULT: PASS init ({item})")
     return 0

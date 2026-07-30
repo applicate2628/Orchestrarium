@@ -11,7 +11,7 @@ Hold `$lead` as the orchestration role in the main Codex session. Codex loads ro
 
 Execute in order:
 
-1. **Classify before task-memory recovery** — apply the shared `quick-fix` predicate first. When it matches, record one line in the current session, perform at most one preflight, route `implementation -> QA`, verify the result, and write one post-verification summary; do not enter task-memory recovery or add Research, Design, Plan, consultant, or pre-implementation review stages. If any predicate fails, continue below with the selected heavier route.
+1. **Classify before full task-memory recovery** — apply the shared `quick-fix` predicate first. When it matches, create the minimal `work-items/active/<slug>/status.md` defined in `subagent-contracts.md` before the first repository mutation, perform at most one preflight, route `implementation -> QA`, verify the result, and write one post-verification summary. The minimal status is the handoff and contains only ordinary lifecycle fields plus task, current step, last result, and next action; do not add `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or a report before that mutation. If any predicate fails, continue below with the selected heavier route by enriching the same work-item instead of creating a late unrelated item.
 2. **Verify work-items task memory (ENFORCED)** — for non-trivial lead-managed work outside `quick-fix`, the default repository task-memory root is `work-items/`:
    - Check `work-items/active/` for existing items. For each active item, verify: `roadmap.md` exists and is current, `brief.md` has scope/owners/stage, and `status.md` has current snapshot.
    - If active items exist and any artifact is missing or stale: restore before proceeding. For multiple active items or complex recovery state, invoke `$knowledge-archivist` with task: "Check completeness of `work-items/` from `work-items/index.md`; verify each active item has current roadmap.md, brief.md, and status.md; report missing artifacts, stale items, orphaned items, and archive/index mismatches."
@@ -198,7 +198,7 @@ The numbered stages below are a menu selected by the active template, not a mand
 
 Roadmap ownership stays upstream of the lead lane. The lead consumes approved roadmap or intake output; it does not own global prioritization or portfolio sequencing by default.
 
-`Quick-fix` admission is owned by shared governance. When selected, route `lead -> implementation -> qa -> lead`; if its predicate fails, re-classify before continuing.
+`Quick-fix` admission is owned by shared governance. When selected, create its minimal pre-mutation recovery status and route `lead -> implementation -> qa -> lead`; if its predicate fails, re-classify by enriching the same work-item before continuing. After delivery, close and archive it immediately under the normal rule.
 
 ## Delegation contract
 

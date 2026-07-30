@@ -81,12 +81,32 @@ plain hardcoding, which is a different rule and a different fix.
 
 ## Artifact gate — no delegation without brief
 
-A lead MUST NOT delegate work until the configured task-memory item folder, if the repository uses one, contains a verified `brief.md` and `status.md`.
+A lead MUST NOT delegate recovery-tracked or multi-stage work until the configured task-memory item folder, if the repository uses one, contains a verified `brief.md` and full `status.md`.
 
 - `brief.md` must have explicit scope, out-of-scope, acceptance criteria, required roles, and critical risks with owners.
 - `status.md` must have a current snapshot with stage, last accepted artifact, next concrete action, and any open obligations that still block closeout.
 - If either artifact is missing, stale, or incomplete, the lead restores only the lead-owned task-memory state from persisted accepted artifacts BEFORE delegating any specialist role when task memory is configured. Do not reconstruct missing specialist artifacts or factual findings from chat memory.
-- This gate is non-negotiable after routing selects recovery-tracked work. For `quick-fix`, the one-line in-session classification is the handoff and no task-memory artifact is created.
+- This full-artifact gate is non-negotiable after routing selects recovery-tracked work. For `quick-fix`, the minimal status below is the handoff and must exist before implementer dispatch and the first repository mutation; no `brief.md` or other heavy prelude artifact is required.
+
+### Quick-fix minimal status.md
+
+Create `work-items/active/<slug>/status.md` with only these ordinary lifecycle fields and recovery facts:
+
+```markdown
+---
+template: quick-fix
+status: active
+started: <YYYY-MM-DD HH:MM>
+updated: <YYYY-MM-DD HH:MM>
+---
+
+- **Task**: <admitted objective>
+- **Current step**: <current execution step>
+- **Last result**: <last completed step or admission result>
+- **Next action**: <next concrete action>
+```
+
+An admitted `quick-fix` does not add `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or a report before its first mutation. If it is re-classified, keep this work-item and enrich its recovery state to the full format below instead of creating a late unrelated item. After delivery, apply the normal immediate closure/archive rule.
 
 ### status.md format
 

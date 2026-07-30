@@ -5,7 +5,6 @@
   "requiresLead": false,
   "chain": ["implement", "QA"],
   "roles": [
-    { "agentType": "analyst", "stage": "research", "whenNeeded": "scope unclear" },
     { "agentType": "backend-engineer", "stage": "implement", "whenNeeded": "backend fix" },
     { "agentType": "frontend-engineer", "stage": "implement", "whenNeeded": "frontend fix" },
     { "agentType": "qt-ui-engineer", "stage": "implement", "whenNeeded": "Qt UI fix" },
@@ -16,5 +15,5 @@
   ],
   "requiredRoles": ["qa-engineer"],
   "minRoles": 1,
-  "notes": "Main conversation routes implementation, then QA. Admission and re-classification are owned by shared governance."
+  "notes": "Main conversation creates the minimal quick-fix status.md before the first repository mutation, then routes implementation and QA without heavy prelude artifacts. Admission is owned by shared governance; unclear scope triggers re-classification, and re-classification enriches the same work-item."
 }

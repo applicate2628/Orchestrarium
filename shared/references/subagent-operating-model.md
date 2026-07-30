@@ -534,7 +534,7 @@ It should now be confirmed:
 
 ### Quick-fix
 
-Use this when the target and execution steps are fully specified, ownership and contracts are resolved, no new dependency or risk owner appears, rollback or backup is explicit, and a verification oracle is named. Record one line in the current session, allow at most one preflight, then implement and verify. If any predicate fails, re-classify before continuing.
+Use this when the target and execution steps are fully specified, ownership and contracts are resolved, no new dependency or risk owner appears, rollback or backup is explicit, and a verification oracle is named. Before the first repository mutation, create only a minimal `work-items/active/<slug>/status.md` with ordinary lifecycle fields plus task, current step, last result, and next action. Do not add `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or a report before that mutation. Allow at most one preflight, then implement and verify. If any predicate fails, re-classify by enriching the same work-item rather than creating a late unrelated item. After delivery, close and archive it immediately under the normal rule.
 
 ```text
 lead -> implementation specialist -> qa-engineer -> lead
@@ -685,7 +685,9 @@ At minimum, it is useful to keep these artifacts near the repository:
 
 - Use the configured task-memory directory when this repository uses optional tracked task memory.
 - Keep active admitted items in the configured active-item directory and use the repository-defined recovery entry point as the first recovery stop after interruption.
+- Every admitted `quick-fix` creates its minimal `work-items/active/<slug>/status.md` before the first repository mutation; its focused format is defined by the provider's `subagent-contracts.md`.
 - For recovery-tracked or multi-stage lead routes, `roadmap.md`, `brief.md`, and `status.md` are mandatory when tracked task memory is enabled.
+- Re-classifying a `quick-fix` enriches that same work-item with the newly required recovery artifacts instead of creating a separate late item.
 - `plan.md` becomes mandatory before implementation or review only when the selected route admits a Plan or upstream specialist stage.
 - If the current stage depends on upstream artifacts such as research, design, specialist constraints, phase plan, or required review reports, those artifacts must exist and be current before work continues.
 - If the required task-memory artifacts for the configured workflow are missing or stale, stop and restore them before continuing delivery.

@@ -250,10 +250,14 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
     def test_quick_fix_handles_the_exact_tool_update_incident(self) -> None:
         spine = self._read(SPINE)
-        for clause in ("target and execution steps are fully specified", "the change surface is bounded",
-                       "ownership and contracts are resolved",
-                       "no new dependency or risk owner appears", "rollback or backup is explicit",
-                       "verification oracle is named"):
+        for clause in (
+            "target+steps",
+            "bounds",
+            "ownership/contracts",
+            "no new dependency/risk owner",
+            "rollback/backup",
+            "oracle",
+        ):
             self.assertIn(clause, spine)
 
         claude_template = json.loads(self._read(CLAUDE_QUICK_FIX_TEMPLATE))
@@ -262,18 +266,110 @@ class TestOrchestrationDisciplineContract(unittest.TestCase):
 
         for owner in ("src.claude/skills/lead/SKILL.md", "src.codex/skills/lead/SKILL.md"):
             text = self._read(owner)
-            self.assertLess(text.index("**Classify before task-memory recovery**"), text.index("**Verify work-items"))
+            self.assertLess(text.index("**Classify before full task-memory recovery**"), text.index("**Verify work-items"))
             self.assertIn("route `implementation -> QA`", text)
-            self.assertIn("do not enter task-memory recovery", text)
+            self.assertIn("create the minimal `work-items/active/<slug>/status.md`", text)
         self.assertIn("For recovery-tracked `requiresLead: false` chains with 2+ stages (`research`, `review`)",
                       self._read("src.claude/CLAUDE.md"))
         self.assertIn("Evaluate the shared `quick-fix` predicate before invoking a process skill",
                       self._read("src.claude/CLAUDE.md"))
 
+    def test_quick_fix_has_minimal_pre_mutation_recovery_without_heavy_preludes(self) -> None:
+        spine = self._read(SPINE)
+        self.assertIn(
+            "Before mutation create only `work-items/active/<slug>/status.md`",
+            spine,
+        )
+        self.assertIn(
+            "no roadmap/brief/Research/Design/Plan/consultant/pre-review/report",
+            spine,
+        )
+        self.assertIn(
+            "Failed/unclear => re-classify/enrich same item",
+            spine,
+        )
+
+        installed_mirrors = (
+            "AGENTS.md",
+            "src.codex/AGENTS.codex.md",
+            "src.claude/CLAUDE.md",
+            "src.codex/skills/lead/SKILL.md",
+            "src.claude/skills/lead/SKILL.md",
+            "src.codex/skills/lead/subagent-contracts.md",
+            "src.claude/agents/contracts/subagent-contracts.md",
+        )
+        legacy_no_memory_wording = (
+            "no task-memory artifact is created",
+            "does not enter local task memory unless re-classified",
+            "do not enter task-memory recovery",
+            "record one line in the current session",
+        )
+        for owner in installed_mirrors:
+            with self.subTest(owner=owner):
+                text = self._read(owner)
+                self.assertIn("work-items/active/<slug>/status.md", text)
+                for legacy in legacy_no_memory_wording:
+                    self.assertNotIn(legacy, text)
+
+        expected_minimal_status = [
+            "---",
+            "template: quick-fix",
+            "status: active",
+            "started: <YYYY-MM-DD HH:MM>",
+            "updated: <YYYY-MM-DD HH:MM>",
+            "---",
+            "- **Task**: <admitted objective>",
+            "- **Current step**: <current execution step>",
+            "- **Last result**: <last completed step or admission result>",
+            "- **Next action**: <next concrete action>",
+        ]
+        contracts = (
+            "src.codex/skills/lead/subagent-contracts.md",
+            "src.claude/agents/contracts/subagent-contracts.md",
+        )
+        for contract in contracts:
+            with self.subTest(contract=contract):
+                text = self._read(contract)
+                section = text.split("### Quick-fix minimal status.md", 1)[1].split(
+                    "### status.md format", 1
+                )[0]
+                code = section.split("```markdown", 1)[1].split("```", 1)[0]
+                self.assertEqual(
+                    [line for line in code.splitlines() if line.strip()],
+                    expected_minimal_status,
+                )
+                self.assertIn("keep this work-item and enrich its recovery state", section)
+                self.assertIn(
+                    "does not add `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, "
+                    "pre-implementation review, or a report before its first mutation",
+                    section,
+                )
+
+        claude_template = json.loads(self._read(CLAUDE_QUICK_FIX_TEMPLATE))
+        self.assertIn("minimal quick-fix status.md before the first repository mutation", claude_template["notes"])
+        self.assertIn("re-classification enriches the same work-item", claude_template["notes"])
+        for role in claude_template["roles"]:
+            with self.subTest(role=role):
+                self.assertNotEqual(role["agentType"], "analyst")
+                self.assertNotEqual(role["agentType"], "consultant")
+                self.assertNotIn(
+                    role["stage"].lower(),
+                    {"research", "design", "plan", "pre-implementation review"},
+                )
+
+        for entrypoint in ("src.codex/AGENTS.codex.md", "src.claude/CLAUDE.md"):
+            with self.subTest(entrypoint=entrypoint):
+                text = self._read(entrypoint)
+                self.assertIn(
+                    "no recovery file is needed unless that invocation is itself admitted as `quick-fix`",
+                    text,
+                )
+                self.assertIn("this exception does not broaden recovery to trivial questions", text)
+
     def test_quick_fix_rejects_a_contract_change(self) -> None:
         spine = self._read(SPINE)
-        self.assertIn("ownership and contracts are resolved", spine)
-        self.assertIn("Re-classify on any failed predicate", spine)
+        self.assertIn("ownership/contracts", spine)
+        self.assertIn("Failed/unclear => re-classify/enrich same item", spine)
 
     def test_live_shared_references_do_not_restore_the_retired_fast_lane(self) -> None:
         owners = (

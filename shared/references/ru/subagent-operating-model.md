@@ -529,7 +529,7 @@ Decision-making roles должны явно разделять подтверж�
 
 ### Quick-fix
 
-Используйте этот маршрут, когда target и execution steps полностью заданы, ownership и contracts разрешены, новая dependency или risk owner не появляются, rollback либо backup указаны явно и назван verification oracle. Зафиксируйте одну строку в текущей сессии, допустите не более одного preflight, затем выполните и проверьте изменение. Если любой predicate не выполнен, re-classify до продолжения.
+Используйте этот маршрут, когда target и execution steps полностью заданы, ownership и contracts разрешены, новая dependency или risk owner не появляются, rollback либо backup указаны явно и назван verification oracle. До первой repository mutation создайте только минимальный `work-items/active/<slug>/status.md` с обычными lifecycle fields и полями task, current step, last result и next action. До этой mutation не добавляйте `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review или report. Допустите не более одного preflight, затем выполните и проверьте изменение. Если любой predicate не выполнен, re-classify, обогатив тот же work-item, а не создавая поздний несвязанный item. После delivery немедленно закройте и архивируйте его по обычному правилу.
 
 ```text
 lead -> implementation specialist -> qa-engineer -> lead
@@ -680,7 +680,9 @@ lead -> product-manager -> lead
 
 - Используйте конфигурируемый task-memory directory, когда этот репозиторий использует optional tracked task memory.
 - Держите активные admitted items в конфигурируемой active-item directory и начинайте восстановление после прерывания с repository-defined recovery entry point.
+- Каждый admitted `quick-fix` создаёт минимальный `work-items/active/<slug>/status.md` до первой repository mutation; его focused format определён в provider-specific `subagent-contracts.md`.
 - Для recovery-tracked или multi-stage lead routes `roadmap.md`, `brief.md` и `status.md` обязательны, когда tracked task memory включён.
+- При re-classification `quick-fix` обогащайте тот же work-item новыми обязательными recovery artifacts вместо создания отдельного позднего item.
 - `plan.md` становится обязательным до implementation или review только когда selected route допускает Plan либо upstream specialist stage.
 - Если текущая стадия зависит от upstream artifacts, таких как research, design, specialist constraints, phase plan или required review reports, эти артефакты должны существовать и быть актуальными до продолжения работы.
 - Если обязательные task-memory artifacts для конфигурируемого workflow отсутствуют или устарели, остановитесь и восстановите их до продолжения delivery.

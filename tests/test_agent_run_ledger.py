@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -45,6 +46,21 @@ def valid_status() -> str:
             "",
         ]
     )
+
+
+def minimal_quick_fix_status() -> str:
+    return """---
+template: quick-fix
+status: active
+started: 2026-07-30 10:00
+updated: 2026-07-30 10:00
+---
+
+- **Task**: Correct quick-fix recovery.
+- **Current step**: Initialize the execution ledger.
+- **Last result**: Quick-fix admitted.
+- **Next action**: Run the implementation lane.
+"""
 
 
 def prepare_valid_work_item(tmp_path: Path) -> Path:
@@ -403,3 +419,220 @@ def test_init_adds_missing_status_sections_without_clobbering_existing_text(tmp_
     ):
         assert heading in text
     assert (item / "agent-runs.jsonl").exists()
+
+
+def test_init_rejects_each_malformed_quick_fix_field_without_modifying_status(tmp_path: Path):
+    required_lines = (
+        "template: quick-fix",
+        "status: active",
+        "started: 2026-07-30 10:00",
+        "updated: 2026-07-30 10:00",
+        "- **Task**: Correct quick-fix recovery.",
+        "- **Current step**: Initialize the execution ledger.",
+        "- **Last result**: Quick-fix admitted.",
+        "- **Next action**: Run the implementation lane.",
+    )
+    for index, required_line in enumerate(required_lines):
+        item = tmp_path / "work-items" / "active" / f"malformed-quick-fix-{index}"
+        item.mkdir(parents=True)
+        status = minimal_quick_fix_status().replace(required_line + "\n", "", 1)
+        (item / "status.md").write_text(status, encoding="utf-8")
+
+        result = run_ledger(item, "init")
+
+        assert result.returncode == 1, (required_line, result.stdout, result.stderr)
+        assert "quick-fix status.md" in result.stderr
+        assert (item / "status.md").read_text(encoding="utf-8") == status
+        assert not (item / "agent-runs.jsonl").exists()
+
+
+def test_init_rejects_wrong_quick_fix_template_without_modifying_status(tmp_path: Path):
+    item = tmp_path / "work-items" / "active" / "wrong-quick-fix-template"
+    item.mkdir(parents=True)
+    status = minimal_quick_fix_status().replace(
+        "template: quick-fix",
+        "template: full-delivery",
+        1,
+    )
+    (item / "status.md").write_text(status, encoding="utf-8")
+
+    result = run_ledger(item, "init")
+
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert "lifecycle field template must be quick-fix" in result.stderr
+    assert (item / "status.md").read_text(encoding="utf-8") == status
+    assert not (item / "agent-runs.jsonl").exists()
+
+
+def test_init_rejects_quick_fix_quartet_with_full_headings_and_bad_template_atomically(
+    tmp_path: Path,
+):
+    cases = {
+        "missing-template": minimal_quick_fix_status().replace(
+            "template: quick-fix\n",
+            "",
+            1,
+        ),
+        "wrong-template": minimal_quick_fix_status().replace(
+            "template: quick-fix",
+            "template: full-delivery",
+            1,
+        ),
+    }
+    full_headings = "\n## Current state\n\n## Active agents\n\n## Completed agents\n\n## Next action\n"
+    for name, status in cases.items():
+        item = tmp_path / "work-items" / "active" / f"quick-fix-quartet-init-{name}"
+        item.mkdir(parents=True)
+        status += full_headings
+        status_path = item / "status.md"
+        status_path.write_text(status, encoding="utf-8")
+        ledger = item / "agent-runs.jsonl"
+
+        result = run_ledger(item, "init")
+
+        assert result.returncode == 1, (name, result.stdout, result.stderr)
+        assert "quick-fix status.md" in result.stderr, (name, result.stderr)
+        assert status_path.read_text(encoding="utf-8") == status, name
+        assert not ledger.exists(), name
+        assert not ledger.with_suffix(".jsonl.tmp").exists(), name
+        assert not (item / "agent-runs.jsonl.lock").exists(), name
+
+
+def test_append_rejects_malformed_quick_fix_without_modifying_ledger(tmp_path: Path):
+    item = tmp_path / "work-items" / "active" / "malformed-quick-fix-append"
+    (item / "reviews").mkdir(parents=True)
+    (item / "status.md").write_text(
+        minimal_quick_fix_status() + "## Research\nUnexpected.\n",
+        encoding="utf-8",
+    )
+    (item / "reviews" / "qa.md").write_text("PASS\n", encoding="utf-8")
+    ledger = item / "agent-runs.jsonl"
+    ledger.write_text("", encoding="utf-8")
+
+    result = append_valid(item, "malformed-quick-fix-append-001")
+
+    assert result.returncode == 1, (result.stdout, result.stderr)
+    assert "quick-fix status.md unexpected nonblank content" in result.stderr
+    assert ledger.read_text(encoding="utf-8") == ""
+    assert not ledger.with_suffix(".jsonl.tmp").exists()
+    assert not (item / "agent-runs.jsonl.lock").exists()
+
+
+def test_append_rejects_quick_fix_quartet_with_full_headings_and_bad_template_atomically(
+    tmp_path: Path,
+):
+    cases = {
+        "missing-template": minimal_quick_fix_status().replace(
+            "template: quick-fix\n",
+            "",
+            1,
+        ),
+        "wrong-template": minimal_quick_fix_status().replace(
+            "template: quick-fix",
+            "template: full-delivery",
+            1,
+        ),
+    }
+    full_headings = "\n## Current state\n\n## Active agents\n\n## Completed agents\n\n## Next action\n"
+    for name, status in cases.items():
+        item = tmp_path / "work-items" / "active" / f"quick-fix-quartet-append-{name}"
+        (item / "reviews").mkdir(parents=True)
+        status += full_headings
+        status_path = item / "status.md"
+        status_path.write_text(status, encoding="utf-8")
+        (item / "reviews" / "qa.md").write_text("PASS\n", encoding="utf-8")
+        ledger = item / "agent-runs.jsonl"
+        ledger.write_text("", encoding="utf-8")
+        original_ledger = ledger.read_bytes()
+
+        result = append_valid(item, f"quick-fix-quartet-append-{name}-001")
+
+        assert result.returncode == 1, (name, result.stdout, result.stderr)
+        assert "quick-fix status.md" in result.stderr, (name, result.stderr)
+        assert status_path.read_text(encoding="utf-8") == status, name
+        assert ledger.read_bytes() == original_ledger, name
+        assert not ledger.with_suffix(".jsonl.tmp").exists(), name
+        assert not (item / "agent-runs.jsonl.lock").exists(), name
+
+
+def test_minimal_quick_fix_status_operates_through_ledger_qa_and_archive(tmp_path: Path):
+    slug = "quick-fix-recovery"
+    item = tmp_path / "work-items" / "active" / slug
+    (item / "reviews").mkdir(parents=True)
+    status_text = minimal_quick_fix_status()
+    (item / "status.md").write_text(status_text, encoding="utf-8")
+    (item / "reviews" / "qa.md").write_text("Gate: PASS\n", encoding="utf-8")
+
+    initialized = run_ledger(item, "init")
+    assert initialized.returncode == 0, initialized.stderr
+    assert (item / "status.md").read_text(encoding="utf-8") == status_text
+
+    implemented = run_ledger(
+        item,
+        "append",
+        "--run-id",
+        "run-quick-fix-implementer-001",
+        "--role",
+        "platform-engineer",
+        "--execution-role",
+        "external-worker",
+        "--assigned-role",
+        "platform-engineer",
+        "--status",
+        "completed",
+        "--gate",
+        "none",
+        "--scope",
+        "scripts/agent-run-ledger.py",
+        "--started-at",
+        "2026-07-30T10:01:00Z",
+        "--updated-at",
+        "2026-07-30T10:05:00Z",
+    )
+    assert implemented.returncode == 0, implemented.stderr
+
+    reviewed = run_ledger(
+        item,
+        "append",
+        "--run-id",
+        "run-quick-fix-qa-001",
+        "--role",
+        "qa-engineer",
+        "--execution-role",
+        "external-reviewer",
+        "--assigned-role",
+        "qa-engineer",
+        "--status",
+        "completed",
+        "--gate",
+        "PASS",
+        "--scope",
+        "quick-fix lifecycle",
+        "--artifact",
+        "reviews/qa.md",
+        "--evidence",
+        "command:focused lifecycle tests",
+        "--started-at",
+        "2026-07-30T10:06:00Z",
+        "--updated-at",
+        "2026-07-30T10:08:00Z",
+    )
+    assert reviewed.returncode == 0, reviewed.stderr
+    assert (item / "status.md").read_text(encoding="utf-8") == status_text
+
+    active_validation = run_validator(item)
+    assert active_validation.returncode == 0, active_validation.stdout
+    assert "RESULT: PASS" in active_validation.stdout
+
+    (item / "closure.md").write_text(
+        "# Closure\n\nOutcome: delivered\n\nClosed: 2026-07-30\n",
+        encoding="utf-8",
+    )
+    archived_item = tmp_path / "work-items" / "archive" / "2026-07" / slug
+    archived_item.parent.mkdir(parents=True)
+    shutil.move(str(item), str(archived_item))
+
+    archived_validation = run_validator(archived_item)
+    assert archived_validation.returncode == 0, archived_validation.stdout
+    assert "RESULT: PASS" in archived_validation.stdout
+    assert len((archived_item / "agent-runs.jsonl").read_text(encoding="utf-8").splitlines()) == 2

@@ -742,22 +742,15 @@ class TestDI5NoValidatorImport(unittest.TestCase):
 
 
 class TestDI8LedgerUntouchedAndNotAnInput(unittest.TestCase):
-    """G-8: agent-run-ledger.py is unmodified by this change surface (`git
-    diff` on it is empty). T-2: the anti-abandonment proof -- delete the
-    ledger entirely from a fixture and assert every verdict is unchanged (the
-    sentinel never reads it at all -- confirmed precisely, function-scoped,
-    by TestDI4NoT2SignalOutsideDeclaredExemption -- so this is trivially true
-    in code, but it is the DIRECT regression test for the incident's actual
-    escape route: a gate keyed on the ledger is escapable by simply not
-    writing to it)."""
+    """G-8: the sentinel never loads the ledger helper or reads its output.
+    T-2: the anti-abandonment proof -- delete the ledger entirely from a
+    fixture and assert every verdict is unchanged (the sentinel never reads it
+    at all -- confirmed precisely, function-scoped, by
+    TestDI4NoT2SignalOutsideDeclaredExemption)."""
 
-    def test_ledger_script_git_diff_is_empty(self) -> None:
-        result = subprocess.run(
-            ["git", "-C", str(REPO_ROOT), "diff", "--stat", "--", "scripts/agent-run-ledger.py"],
-            capture_output=True, text=True,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.strip(), "", "agent-run-ledger.py must not be touched by this change surface (DI-8)")
+    def test_sentinel_does_not_load_ledger_helper(self) -> None:
+        source = CANON_MODULE.read_text(encoding="utf-8")
+        self.assertNotIn("agent-run-ledger.py", source)
 
     def test_verdict_unchanged_with_or_without_ledger_file(self) -> None:
         root = make_git_repo()

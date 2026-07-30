@@ -179,7 +179,8 @@ The roadmap loop decides what should enter discovery or delivery. The delivery l
 
 ## Repository task memory
 
-- These requirements apply only after routing admits recovery-tracked or multi-stage work.
+- Every admitted `quick-fix` first creates the minimal `work-items/active/<slug>/status.md` defined in `subagent-contracts.md` before its first repository mutation. It adds no heavy prelude artifact; re-classification enriches the same item, and delivery closes and archives it immediately under the normal rule.
+- The full requirements below apply only after routing admits recovery-tracked or multi-stage work, including a re-classified `quick-fix`.
 - Use `work-items/index.md` as the default recovery entry point for non-trivial lead-managed work unless an explicit repo-local policy disables task memory.
 - Keep each active lead-routed non-trivial item in its own dated directory inside `work-items/active/`.
 - Require `roadmap.md`, `brief.md`, and `status.md` before non-trivial work starts or resumes.
@@ -395,7 +396,7 @@ The cap is 3 iterations for any single role on a single artifact.
 
 Every completed chain producing an accepted artifact MUST persist it before the session ends. Three storage tiers:
 
-Persistence follows completed work and never gates its first safe mutation. A `quick-fix` may use one post-verification `.reports/` summary.
+Completed-artifact and session-log persistence follows completed work and never gates its first safe mutation. The minimal `quick-fix` recovery status is the explicit exception: it exists before the first repository mutation, while one post-verification `.reports/` summary may record the completed route.
 
 | Tier | Location | When to use |
 |---|---|---|

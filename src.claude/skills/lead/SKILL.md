@@ -11,7 +11,7 @@ description: "Lead: coordinate approved delivery, artifacts, and gates."
 
 Execute in order:
 
-1. **Classify before task-memory recovery** — apply the shared `quick-fix` predicate first. When it matches, record one line in the current session, perform at most one preflight, route `implementation -> QA`, verify the result, and write one post-verification summary; do not enter task-memory recovery or add Research, Design, Plan, consultant, or pre-implementation review stages. If any predicate fails, continue below with the selected heavier route.
+1. **Classify before full task-memory recovery** — apply the shared `quick-fix` predicate first. When it matches, create the minimal `work-items/active/<slug>/status.md` defined in `subagent-contracts.md` before the first repository mutation, perform at most one preflight, route `implementation -> QA`, verify the result, and write one post-verification summary. The minimal status is the handoff and contains only ordinary lifecycle fields plus task, current step, last result, and next action; do not add `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or a report before that mutation. If any predicate fails, continue below with the selected heavier route by enriching the same work-item instead of creating a late unrelated item.
 2. **Verify work-items (ENFORCED)** — for non-trivial lead-managed work outside `quick-fix`:
    - Check `work-items/active/` for existing items. For each, verify: `roadmap.md` exists, `brief.md` has scope/owners/stage, `status.md` has current snapshot.
    - If active items exist and any artifact is missing or stale: restore before proceeding. For multiple active items or complex state, invoke `$knowledge-archivist` for a completeness audit before continuing.
@@ -195,13 +195,13 @@ The numbered stages below are a menu selected by the active template, not a mand
 
 Roadmap ownership stays upstream of the lead lane. The lead consumes approved roadmap or intake output; it does not own global prioritization or portfolio sequencing by default.
 
-`Quick-fix` admission is owned by shared governance. When selected, route `lead -> implementation -> qa -> lead`; if its predicate fails, re-classify before continuing.
+`Quick-fix` admission is owned by shared governance. When selected, create its minimal pre-mutation recovery status and route `lead -> implementation -> qa -> lead`; if its predicate fails, re-classify by enriching the same work-item before continuing. After delivery, close and archive it immediately under the normal rule.
 
 ## Delegation contract
 
 Use the handoff template and response format in [subagent-contracts.md](../../agents/contracts/subagent-contracts.md). If any field is missing, tighten the task before delegating.
 
-- **Route-complete handoff**: a `quick-fix` handoff is its one-line classification; recovery-tracked or multi-stage routes require current `brief.md` and `status.md` before specialist dispatch.
+- **Route-complete handoff**: a `quick-fix` handoff is its minimal pre-mutation `status.md`; recovery-tracked or multi-stage routes require current `brief.md` and full `status.md` before specialist dispatch.
 - **Evidence discipline required**: the handoff must include the template's `Evidence discipline` field with the four accepted evidence categories, `ASSUMPTION (UNVERIFIED)` fallback, and banned correctness-drivers; a handoff without it is incomplete.
 - **Tool surface named**: `Allowed tools` must affirmatively name the repo-relevant MCP servers and skills for the lane, or state `runtime default surface`; a generic tool list that does neither is incomplete.
 

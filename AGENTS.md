@@ -55,7 +55,7 @@ This monorepo keeps `work-items/` as repo-local task memory for interruption rec
 
 - `work-items/` remains the repo-local recovery directory for admitted work and archive history on the operator machine, but it is not publication-facing tracked canon for this repository.
 - When information from local task memory needs to become tracked source of truth, promote the accepted result into the owning canonical surface such as `docs/`, `shared/references/`, pack references, `README.md`, `INSTALL.md`, or `RELEASE_NOTES.md` instead of committing `work-items/` directly.
-- New admitted work routed through `$lead` may still use `work-items/` locally for recovery, resume, and archive hygiene; completed, cancelled, or superseded work stays in the configured local archive location unless a human explicitly asks to publish a distilled artifact elsewhere.
+- New admitted work routed through `$lead` uses `work-items/` locally according to the shared recovery contract; completed, cancelled, or superseded work stays in the configured local archive location unless a human explicitly asks to publish a distilled artifact elsewhere.
 
 - For routes that select recovery-tracked or multi-stage work, `roadmap.md`, `brief.md`, and `status.md` are mandatory when the local task-memory workflow is enabled.
 - `plan.md` becomes mandatory before implementation or review only when the selected route admits a Plan stage.
@@ -65,7 +65,7 @@ This monorepo keeps `work-items/` as repo-local task memory for interruption rec
 - `notes.md` or `notes/` holds technical notes, implementation discoveries, and follow-ups. Accepted long-lived decisions belong in `design.md` or `adr.md`, not only in notes.
 - `closure.md` holds the final closeout record before archive move; `status.md` stays the live recovery log in the configured recovery location.
 - After interruption or context loss, resume recovery-tracked work from the repository-defined recovery entry point, then the item's `status.md`, then `brief.md`. If the required docs for that selected route are missing or stale, stop and restore task memory before continuing delivery.
-- A `quick-fix` records one post-verification summary in `.reports/`; it does not enter local task memory unless re-classified.
+- Per the shared `quick-fix` owner, every admitted `quick-fix` creates only a minimal `work-items/active/<slug>/status.md` before its first repository mutation. It contains ordinary lifecycle fields plus task, current step, last result, and next action; it does not require `roadmap.md`, `brief.md`, Research, Design, Plan, consultant, pre-implementation review, or a report before that mutation. Re-classification enriches the same work-item, and delivered work closes and archives immediately under the normal rule.
 - The older ignored `.plans/` directory is legacy local history only. Do not treat it as the canonical tracked source of truth for new work items.
 
 ## Repository publication safety

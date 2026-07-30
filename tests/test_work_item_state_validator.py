@@ -87,6 +87,21 @@ def canonical_status() -> str:
     return valid_status().replace("orchestrator: lead", "orchestration: full-lead")
 
 
+def minimal_quick_fix_status() -> str:
+    return """---
+template: quick-fix
+status: active
+started: 2026-07-30 10:00
+updated: 2026-07-30 10:00
+---
+
+- **Task**: Correct quick-fix recovery.
+- **Current step**: Initialize the execution ledger.
+- **Last result**: Quick-fix admitted.
+- **Next action**: Run the implementation lane.
+"""
+
+
 def ledger_event(**overrides):
     event = {
         "schemaVersion": 1,
@@ -133,6 +148,152 @@ def test_pass_ledger_with_canonical_orchestration_field(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout
     assert "RESULT: PASS" in result.stdout
+
+
+def test_quick_fix_minimal_status_fails_when_each_required_field_is_omitted(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    required_lines = (
+        "template: quick-fix",
+        "status: active",
+        "started: 2026-07-30 10:00",
+        "updated: 2026-07-30 10:00",
+        "- **Task**: Correct quick-fix recovery.",
+        "- **Current step**: Initialize the execution ledger.",
+        "- **Last result**: Quick-fix admitted.",
+        "- **Next action**: Run the implementation lane.",
+    )
+    for index, required_line in enumerate(required_lines):
+        item = tmp_path / "work-items" / "active" / f"missing-quick-fix-field-{index}"
+        status = minimal_quick_fix_status().replace(required_line + "\n", "", 1)
+        write(item / "status.md", status)
+
+        errors: list[str] = []
+        validator.validate_status(item, [], errors)
+
+        assert errors, required_line
+        assert any("quick-fix status.md" in error for error in errors), (required_line, errors)
+
+
+def test_quick_fix_minimal_status_accepts_blank_lines_but_no_other_content(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    valid_item = tmp_path / "work-items" / "active" / "valid-quick-fix"
+    valid = minimal_quick_fix_status().replace(
+        "- **Current step**",
+        "\n\n- **Current step**",
+        1,
+    )
+    write(valid_item / "status.md", valid)
+
+    valid_errors: list[str] = []
+    validator.validate_status(valid_item, [], valid_errors)
+
+    assert valid_errors == []
+
+    malformed_statuses = {
+        "extra-frontmatter": minimal_quick_fix_status().replace(
+            "updated: 2026-07-30 10:00\n",
+            "updated: 2026-07-30 10:00\nowner: lead\n",
+            1,
+        ),
+        "duplicate-lifecycle-field": minimal_quick_fix_status().replace(
+            "updated: 2026-07-30 10:00\n",
+            "updated: 2026-07-30 10:00\nupdated: 2026-07-30 10:01\n",
+            1,
+        ),
+        "wrong-template": minimal_quick_fix_status().replace(
+            "template: quick-fix",
+            "template: full-delivery",
+            1,
+        ),
+        "duplicate-recovery-fact": (
+            minimal_quick_fix_status()
+            + "- **Task**: Duplicate recovery fact.\n"
+        ),
+        "research-heading": minimal_quick_fix_status() + "## Research\nUnexpected.\n",
+        "plan-heading": minimal_quick_fix_status() + "## Plan\nUnexpected.\n",
+        "arbitrary-prelude": minimal_quick_fix_status().replace(
+            "- **Task**",
+            "Unexpected prelude.\n- **Task**",
+            1,
+        ),
+    }
+    for name, status in malformed_statuses.items():
+        item = tmp_path / "work-items" / "active" / name
+        write(item / "status.md", status)
+        errors: list[str] = []
+
+        validator.validate_status(item, [], errors)
+
+        assert errors, name
+        assert any("quick-fix status.md" in error for error in errors), (name, errors)
+
+
+def test_duplicate_template_with_full_status_headings_stays_on_quick_fix_validation(
+    tmp_path: Path,
+) -> None:
+    validator = load_validator_module()
+    item = tmp_path / "work-items" / "active" / "duplicate-template-with-full-headings"
+    status = minimal_quick_fix_status().replace(
+        "template: quick-fix\n",
+        "template: quick-fix\ntemplate: full-delivery\n",
+        1,
+    )
+    status += "\n## Current state\n\n## Active agents\n\n## Completed agents\n\n## Next action\n"
+    write(item / "status.md", status)
+
+    errors: list[str] = []
+    validator.validate_status(item, [], errors)
+
+    assert "quick-fix status.md duplicate lifecycle field: template" in errors
+
+
+def test_complete_quick_fix_quartet_with_full_headings_stays_strict_without_valid_template(
+    tmp_path: Path,
+) -> None:
+    validator = load_validator_module()
+    cases = {
+        "missing-template": (
+            minimal_quick_fix_status().replace("template: quick-fix\n", "", 1),
+            "quick-fix status.md missing lifecycle field: template",
+        ),
+        "wrong-template": (
+            minimal_quick_fix_status().replace(
+                "template: quick-fix",
+                "template: full-delivery",
+                1,
+            ),
+            "quick-fix status.md lifecycle field template must be quick-fix",
+        ),
+    }
+    full_headings = "\n## Current state\n\n## Active agents\n\n## Completed agents\n\n## Next action\n"
+    for name, (status, expected_error) in cases.items():
+        item = tmp_path / "work-items" / "active" / name
+        write(item / "status.md", status + full_headings)
+        errors: list[str] = []
+
+        validator.validate_status(item, [], errors)
+
+        assert expected_error in errors, (name, errors)
+
+
+def test_full_status_with_last_result_fact_alone_remains_full(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    for name, status in (
+        ("legacy-full", valid_status()),
+        ("canonical-full", canonical_status()),
+    ):
+        item = tmp_path / "work-items" / "active" / name
+        status = status.replace(
+            "## Next action",
+            "- **Last result**: Full-delivery checkpoint.\n\n## Next action",
+            1,
+        )
+        write(item / "status.md", status)
+        errors: list[str] = []
+
+        validator.validate_status(item, [], errors)
+
+        assert errors == [], (name, errors)
 
 
 def test_schema_contract_check_exercises_validator_negative_cases() -> None:

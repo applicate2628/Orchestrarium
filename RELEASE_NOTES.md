@@ -14,6 +14,8 @@ Do not add entries for purely local-only hygiene edits such as formatting, link 
 
 ### Changed
 
+- **Admitted `quick-fix` work now survives a process or machine crash without acquiring a heavyweight prelude.** Before the first repository mutation, the main conversation creates one minimal `work-items/active/<slug>/status.md` containing ordinary lifecycle data plus the task, current step, last result, and next action. **Why it matters:** interrupted execution can resume from durable state instead of losing the in-flight request. **Preserved:** no roadmap, brief, Research, Design, Plan, consultant, pre-implementation review, or report is required before that mutation; re-classification enriches the same item, direct single-specialist requests remain exempt unless explicitly admitted as `quick-fix`, and delivered work still closes and archives immediately.
+
 - **Codex default installation no longer pins native `default`, `explorer`, and `worker` subagents to one model and reasoning tier.** Fresh project and global installs no longer create `.codex/agents/default.toml`, `explorer.toml`, or `worker.toml`, leaving model and effort selection to the Codex runtime or explicit operator-owned configuration. Reinstall removes only recognizable retired Orchestrarium-owned copies from older installs and preserves genuinely customized files at the same paths. **Why it matters:** independent lanes can be calibrated to their actual complexity instead of inheriting `gpt-5.6-sol` plus `xhigh` from a pack-wide preset. **Preserved:** role skills, delegation rules, external-provider profiles, hooks, Claude behavior, and user-authored native overrides are unchanged.
 
 ## 2026-07-29

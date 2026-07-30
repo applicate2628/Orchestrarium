@@ -72,10 +72,117 @@ ALLOWED_FIELDS = {
     "findingClass",
 }
 EVIDENCE_ALLOWED_FIELDS = {"kind", "ref", "result"}
+QUICK_FIX_TEMPLATE = "quick-fix"
+QUICK_FIX_LIFECYCLE_FIELDS = ("template", "status", "started", "updated")
+QUICK_FIX_RECOVERY_FIELDS = ("Task", "Current step", "Last result", "Next action")
+FULL_STATUS_SECTIONS = ("## Current state", "## Active agents", "## Completed agents", "## Next action")
+QUICK_FIX_FACT_RE = re.compile(
+    r"\s*-\s*\*\*(Task|Current step|Last result|Next action)\*\*\s*:\s*(.*?)\s*",
+    re.IGNORECASE,
+)
+QUICK_FIX_RECOVERY_FIELD_BY_CASEFOLD = {
+    field.casefold(): field for field in QUICK_FIX_RECOVERY_FIELDS
+}
 
 
 def fail(errors: list[str], message: str) -> None:
     errors.append(message)
+
+
+def is_quick_fix_status(text: str) -> bool:
+    document = split_status_document(text)
+    if document is None:
+        return False
+    frontmatter_lines, _ = document
+    for line in frontmatter_lines:
+        if ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        if key.strip().lower() == "template" and value.strip() == QUICK_FIX_TEMPLATE:
+            return True
+    return False
+
+
+def is_quick_fix_status_candidate(text: str) -> bool:
+    if is_quick_fix_status(text):
+        return True
+    document = split_status_document(text)
+    if document is None:
+        return False
+    _, body_lines = document
+    recovery_fields = {
+        QUICK_FIX_RECOVERY_FIELD_BY_CASEFOLD[match.group(1).casefold()]
+        for line in body_lines
+        if (match := QUICK_FIX_FACT_RE.fullmatch(line)) is not None
+    }
+    if all(field in recovery_fields for field in QUICK_FIX_RECOVERY_FIELDS):
+        return True
+    if any(section in text for section in FULL_STATUS_SECTIONS):
+        return False
+    return bool(recovery_fields)
+
+
+def split_status_document(text: str) -> tuple[list[str], list[str]] | None:
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            return lines[1:index], lines[index + 1 :]
+    return None
+
+
+def validate_quick_fix_status(text: str, errors: list[str]) -> None:
+    document = split_status_document(text)
+    if document is None:
+        fail(errors, "quick-fix status.md must contain closed frontmatter")
+        return
+    frontmatter_lines, body_lines = document
+
+    lifecycle: dict[str, list[str]] = {}
+    for line in frontmatter_lines:
+        if not line.strip():
+            continue
+        if ":" not in line:
+            fail(errors, f"quick-fix status.md unexpected frontmatter content: {line.strip()}")
+            continue
+        key, value = line.split(":", 1)
+        lifecycle.setdefault(key.strip().lower(), []).append(value.strip())
+
+    for field in QUICK_FIX_LIFECYCLE_FIELDS:
+        values = lifecycle.get(field, [])
+        if not values or not values[0]:
+            fail(errors, f"quick-fix status.md missing lifecycle field: {field}")
+        if len(values) > 1:
+            fail(errors, f"quick-fix status.md duplicate lifecycle field: {field}")
+    for field in lifecycle:
+        if field not in QUICK_FIX_LIFECYCLE_FIELDS:
+            fail(errors, f"quick-fix status.md unexpected lifecycle field: {field}")
+
+    template_values = lifecycle.get("template", [])
+    if len(template_values) == 1 and template_values[0] != QUICK_FIX_TEMPLATE:
+        fail(errors, f"quick-fix status.md lifecycle field template must be {QUICK_FIX_TEMPLATE}")
+    status_values = lifecycle.get("status", [])
+    if len(status_values) == 1 and status_values[0] != "active":
+        fail(errors, "quick-fix status.md lifecycle field status must be active")
+
+    recovery: dict[str, list[str]] = {}
+    for line in body_lines:
+        if not line.strip():
+            continue
+        match = QUICK_FIX_FACT_RE.fullmatch(line)
+        if match is None:
+            fail(errors, f"quick-fix status.md unexpected nonblank content: {line.strip()}")
+            continue
+        field = QUICK_FIX_RECOVERY_FIELD_BY_CASEFOLD[match.group(1).casefold()]
+        recovery.setdefault(field, []).append(match.group(2).strip())
+
+    for field in QUICK_FIX_RECOVERY_FIELDS:
+        values = recovery.get(field, [])
+        if not values or not values[0]:
+            fail(errors, f"quick-fix status.md missing recovery field: {field}")
+        if len(values) > 1:
+            fail(errors, f"quick-fix status.md duplicate recovery field: {field}")
 
 
 def load_jsonl(path: Path, errors: list[str]) -> list[dict]:
@@ -744,7 +851,10 @@ def validate_status(item: Path, events: list[dict], errors: list[str]) -> None:
         fail(errors, f"missing status.md: {status_path}")
         return
     text = status_path.read_text(encoding="utf-8")
-    for section in ["## Current state", "## Active agents", "## Completed agents", "## Next action"]:
+    if is_quick_fix_status_candidate(text):
+        validate_quick_fix_status(text, errors)
+        return
+    for section in FULL_STATUS_SECTIONS:
         if section not in text:
             fail(errors, f"status.md missing section: {section}")
 
