@@ -45,7 +45,11 @@ def _manifest_stems(repo_root: Path, platform: str) -> set[str]:
                 python_target.with_suffix(".ps1").is_file()
                 or python_target.with_suffix(".sh").is_file()
             ):
-                stems.add(python_target.stem)
+                if (
+                    python_target.stem
+                    not in manifest.NON_REGISTERED_ENTRYPOINT_STEMS
+                ):
+                    stems.add(python_target.stem)
     return stems
 
 

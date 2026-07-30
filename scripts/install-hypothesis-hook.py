@@ -463,6 +463,8 @@ def owned_hook_wrapper_sources(
             for wrapper in sorted(source_dir.glob(f"*{extension}")):
                 if wrapper.name not in owned_names:
                     continue
+                if wrapper.stem in manifest.NON_REGISTERED_ENTRYPOINT_STEMS:
+                    continue
                 if not wrapper.with_suffix(".py").is_file():
                     continue
                 candidates.append(wrapper)

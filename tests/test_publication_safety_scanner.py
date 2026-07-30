@@ -1,6 +1,6 @@
 """Regression tests for the allowlist-aware publication leak-scanner.
 
-Drives the REAL scanner (`check-publication-safety.sh`, both the Claude and
+Drives the REAL scanner (`check-publication-safety.py`, both the Claude and
 Codex byte-identical-logic copies) via its production `--cached` staged-scan
 mode against a throwaway git repo, asserting EXIT CODES (the scanner contract:
 exit 1 = BLOCK a leak marker was found; exit 0 = PASS clean). Exit-code
@@ -15,9 +15,6 @@ Coverage:
   - must-PASS rows: every placeholder form, all 8 ALLOWED_USER_TOKENS,
     `%USERPROFILE%` / `%USERNAME%` / `$HOME` / `${...}`, `C:\\Windows\\...`,
     `C:\\Program Files\\...`, and generic prose.
-  - fallback (no-Python / allowlist-owner-unreachable): refined-ERE branch still
-    BLOCKs real paths + secrets and still PASSes true placeholders, emitting the
-    degraded-mode notice.
   - Wave A audit pins: Anthropic credential-material content rows (synthetic
     token, env-key assignment) BLOCK while a prose prefix mention PASSes; the
     credential FILENAME blocks in every casing; and the scanner's own source
@@ -41,7 +38,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -49,8 +45,8 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CODEX_SCANNER = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-publication-safety.sh"
-CLAUDE_SCANNER = REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-publication-safety.sh"
+CODEX_SCANNER = REPO_ROOT / "src.codex" / "skills" / "lead" / "scripts" / "check-publication-safety.py"
+CLAUDE_SCANNER = REPO_ROOT / "src.claude" / "agents" / "scripts" / "check-publication-safety.py"
 CODEX_REF = REPO_ROOT / "src.codex" / "skills" / "lead" / "hooks" / "check-machine-local-path.py"
 SCANNERS = (CODEX_SCANNER, CLAUDE_SCANNER)
 
@@ -63,40 +59,9 @@ def _join(*parts: str) -> str:
     return "".join(parts)
 
 
-def _bash() -> str | None:
-    bash = shutil.which("bash")
-    if bash and not _is_windows_wsl_bash(bash):
-        return bash
-    for candidate in _git_bash_candidates():
-        if candidate.exists():
-            return str(candidate)
-    return None if bash and _is_windows_wsl_bash(bash) else bash
-
-
-def _is_windows_wsl_bash(path: str) -> bool:
-    if os.name != "nt":
-        return False
-    parts = {part.lower() for part in Path(path).parts}
-    return Path(path).name.lower() == "bash.exe" and {"windows", "system32"}.issubset(parts)
-
-
-def _git_bash_candidates() -> list[Path]:
-    candidates: list[Path] = []
-    git = shutil.which("git")
-    if git:
-        for parent in Path(git).parents:
-            if parent.name.lower() == "git":
-                candidates.extend((parent / "bin" / "bash.exe", parent / "usr" / "bin" / "bash.exe"))
-                break
-    for env_name in ("ProgramFiles", "ProgramFiles(x86)"):
-        base = os.environ.get(env_name)
-        if base:
-            candidates.extend((Path(base) / "Git" / "bin" / "bash.exe", Path(base) / "Git" / "usr" / "bin" / "bash.exe"))
-    return candidates
-
-
 def _git() -> str | None:
-    return shutil.which("git")
+    from shutil import which
+    return which("git")
 
 
 def _load_find_machine_paths():
@@ -325,7 +290,7 @@ def pass_rows() -> dict[str, str]:
     }
 
 
-@unittest.skipIf(_bash() is None or _git() is None, "needs bash + git on PATH")
+@unittest.skipIf(_git() is None, "needs git on PATH")
 class TestPublicationSafetyScanner(unittest.TestCase):
     def _run_cached(
         self,
@@ -336,7 +301,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
     ) -> int:
         """Stage `content` as a file in a throwaway repo and run the REAL scanner
         in its production --cached tracked mode (cwd = the throwaway repo). The
-        scanner resolves its allowlist owner via its own absolute BASH_SOURCE, so
+        scanner resolves its allowlist owner via its own absolute source path, so
         it uses the real reference hook regardless of cwd. Returns the exit code."""
         return self._run_cached_full(scanner, content, env_overrides=env_overrides, filename=filename)[0]
 
@@ -352,7 +317,6 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         hardening: check-git-push-gate.py step 8 branch (b) now keys on this
         text, not just the exit code)."""
         git = _git()
-        bash = _bash()
         with tempfile.TemporaryDirectory() as td:
             subprocess.run([git, "init", "-q", td], check=True, capture_output=True)
             subprocess.run([git, "-C", td, "config", "user.email", "t@t"], check=True, capture_output=True)
@@ -365,7 +329,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
             if env_overrides:
                 env.update(env_overrides)
             proc = subprocess.run(
-                [bash, str(scanner)],
+                [sys.executable, str(scanner)],
                 cwd=td,
                 capture_output=True,
                 text=True,
@@ -380,13 +344,12 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         HEAD, so `git diff --cached` is empty and the scanner examines nothing.
         Distinct from `_run_cached`, which always stages exactly one file."""
         git = _git()
-        bash = _bash()
         with tempfile.TemporaryDirectory() as td:
             subprocess.run([git, "init", "-q", td], check=True, capture_output=True)
             subprocess.run([git, "-C", td, "config", "user.email", "t@t"], check=True, capture_output=True)
             subprocess.run([git, "-C", td, "config", "user.name", "t"], check=True, capture_output=True)
             proc = subprocess.run(
-                [bash, str(scanner)],
+                [sys.executable, str(scanner)],
                 cwd=td,
                 capture_output=True,
                 text=True,
@@ -456,7 +419,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                     fixture = Path(td) / "clean.txt"
                     fixture.write_text("nothing machine-local here\n", encoding="utf-8")
                     proc = subprocess.run(
-                        [_bash(), str(scanner), "--path", str(fixture)],
+                        [sys.executable, str(scanner), "--path", str(fixture)],
                         cwd=td,
                         capture_output=True, text=True, encoding="utf-8",
                     )
@@ -483,7 +446,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                     (fixture_dir / "a.txt").write_text("nothing machine-local here\n", encoding="utf-8")
                     (fixture_dir / "b.txt").write_text("also nothing machine-local here\n", encoding="utf-8")
                     proc = subprocess.run(
-                        [_bash(), str(scanner), "--path", str(fixture_dir)],
+                        [sys.executable, str(scanner), "--path", str(fixture_dir)],
                         cwd=td,
                         capture_output=True, text=True, encoding="utf-8",
                     )
@@ -524,7 +487,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                     self._run_cached(
                         scanner,
                         f"nonpath_patterns=(\\n  {leak!r}\\n)",
-                        filename="scripts/check-publication-safety.sh",
+                        filename="scripts/check-publication-safety.py",
                     ),
                     1,
                 )
@@ -534,13 +497,11 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         # contiguously in this tracked source, only in the staged fixture.
         catalog = "\n".join(
             [
-                "nonpath_patterns=(",
-                _join("  'BEGIN RSA PRIVATE", " KEY'"),
-                _join("  'BEGIN OPENSSH PRIVATE", " KEY'"),
-                _join("  'BEGIN PRIVATE", " KEY'"),
-                _join("  'private", "_key'"),
-                _join("  'secret", "_key'"),
-                ")",
+                _join("re.compile(r\"BEGIN RSA PRIVATE", " KEY\"),"),
+                _join("re.compile(r\"BEGIN OPENSSH PRIVATE", " KEY\"),"),
+                _join("re.compile(r\"BEGIN PRIVATE", " KEY\"),"),
+                _join("re.compile(r\"private", "_key\"),"),
+                _join("re.compile(r\"secret", "_key\"),"),
             ]
         )
         for scanner in SCANNERS:
@@ -549,7 +510,7 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                     self._run_cached(
                         scanner,
                         catalog,
-                        filename="scripts/check-publication-safety.sh",
+                        filename="scripts/check-publication-safety.py",
                     ),
                     0,
                 )
@@ -561,11 +522,34 @@ class TestPublicationSafetyScanner(unittest.TestCase):
                 self.assertEqual(
                     self._run_cached(
                         scanner,
-                        _join("  'secret", "_key' # ", leak),
-                        filename="scripts/check-publication-safety.sh",
+                        _join("re.compile(r\"secret", "_key\"), # ", leak),
+                        filename="scripts/check-publication-safety.py",
                     ),
                     1,
                 )
+
+    def test_scanner_file_blocks_secret_suffix_on_other_intentional_prefixes(self) -> None:
+        leak = "pass" + "word" + ": hunter2"
+        prefixes = (
+            '_VALUE = "safe"  # ',
+            '_DIGIT_SHAPE = "safe"  # ',
+            '_QUOTED = "safe"  # ',
+            '_BARE = "safe"  # ',
+            "_KEYWORDS = ()  # ",
+            "_VALUE_PATTERNS = ()  # ",
+            '"""scanner docs"""  # ',
+        )
+        for scanner in SCANNERS:
+            for prefix in prefixes:
+                with self.subTest(scanner=scanner.parent.parent.name, prefix=prefix):
+                    self.assertEqual(
+                        self._run_cached(
+                            scanner,
+                            prefix + leak,
+                            filename="scripts/check-publication-safety.py",
+                        ),
+                        1,
+                    )
 
     def test_scanner_own_source_passes_only_under_its_own_filename(self) -> None:
         # Gate self-block regression (Wave A audit): the REAL scanner source
@@ -578,18 +562,18 @@ class TestPublicationSafetyScanner(unittest.TestCase):
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
                 self.assertEqual(
-                    self._run_cached(scanner, content, filename="scripts/check-publication-safety.sh"),
+                    self._run_cached(scanner, content, filename="scripts/check-publication-safety.py"),
                     0,
                     "scanner source under its own name must PASS (no gate self-block)",
                 )
                 self.assertEqual(
-                    self._run_cached(scanner, content, filename="scripts/some-other-script.sh"),
+                    self._run_cached(scanner, content, filename="scripts/some-other-script.py"),
                     1,
                     "scanner source under any other name must still BLOCK",
                 )
 
 
-@unittest.skipIf(_bash() is None or _git() is None, "needs bash + git on PATH")
+@unittest.skipIf(_git() is None, "needs git on PATH")
 class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
     """Regression tests for `--range <remote> <dst>` (2026-07-27,
     work-items/active/2026-07-26-push-gate-range-receipt/): the scanner's
@@ -637,9 +621,8 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
         subprocess.run([git, "-C", str(repo), "commit", "-q", "-m", message], check=True, capture_output=True)
 
     def _run_range(self, scanner: Path, repo: Path, remote: str, dst: str) -> tuple[int, str, str]:
-        bash = _bash()
         proc = subprocess.run(
-            [bash, str(scanner), "--range", remote, dst],
+            [sys.executable, str(scanner), "--range", remote, dst],
             cwd=str(repo),
             capture_output=True, text=True, encoding="utf-8",
         )
@@ -736,7 +719,7 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
             with self.subTest(scanner=scanner.parent.parent.name):
                 with tempfile.TemporaryDirectory() as td:
                     repo = self._init_range_repo(Path(td))
-                    self._commit_file(repo, "scripts/check-publication-safety.sh", content, message="add scanner")
+                    self._commit_file(repo, "scripts/check-publication-safety.py", content, message="add scanner")
                     rc, out, err = self._run_range(scanner, repo, "origin", "claude")
                     self.assertEqual(rc, 0, err)
 
@@ -767,89 +750,16 @@ class TestPublicationSafetyScannerRangeMode(unittest.TestCase):
                     self.assertIn("not a configured remote name", err)
 
     def test_range_mode_missing_arguments_errors(self) -> None:
-        bash = _bash()
         for scanner in SCANNERS:
             with self.subTest(scanner=scanner.parent.parent.name):
                 with tempfile.TemporaryDirectory() as td:
                     repo = self._init_range_repo(Path(td))
                     proc = subprocess.run(
-                        [bash, str(scanner), "--range", "origin"],
+                        [sys.executable, str(scanner), "--range", "origin"],
                         cwd=str(repo),
                         capture_output=True, text=True, encoding="utf-8",
                     )
                     self.assertEqual(proc.returncode, 2)
-
-
-class TestPublicationSafetyScannerLauncher(unittest.TestCase):
-    def test_windows_launcher_does_not_use_wsl_bash_for_windows_paths(self) -> None:
-        if os.name != "nt":
-            self.skipTest("Windows-only launcher guard")
-        bash = _bash()
-        if bash is None:
-            self.skipTest("needs Git Bash for Windows-path scanner scripts")
-        self.assertFalse(_is_windows_wsl_bash(bash), bash)
-
-
-@unittest.skipIf(_bash() is None or _git() is None, "needs bash + git on PATH")
-class TestPublicationSafetyScannerFallback(unittest.TestCase):
-    """Exercise the no-Python / allowlist-owner-unreachable refined-ERE branch.
-
-    The branch fires when BOTH python3/python are unreachable OR the allowlist
-    owner module is missing. We trigger it deterministically by pointing PATH at
-    an empty shim dir (no python) AND keeping git reachable, which is awkward on
-    MSYS; instead we drive the SAME code branch by hiding the reference module
-    for the duration via a copied scanner whose sibling hooks dir has no owner.
-    Simpler and equivalent: set the marker env the scanner does not read, so we
-    use the documented branch trigger — an unreadable owner path — by running a
-    scanner copy from a temp dir whose ../hooks/ lacks the owner."""
-
-    def _run_fallback(self, content: str) -> tuple[int, str]:
-        git = _git()
-        bash = _bash()
-        with tempfile.TemporaryDirectory() as td:
-            tdp = Path(td)
-            # Lay out a scanner copy with an EMPTY sibling hooks dir (no owner) ->
-            # the `-f "$ref_module"` guard is false -> fallback branch runs. This
-            # is the exact same branch as "no python reachable".
-            (tdp / "scripts").mkdir()
-            (tdp / "hooks").mkdir()
-            shutil.copy2(CODEX_SCANNER, tdp / "scripts" / "check-publication-safety.sh")
-            repo = tdp / "repo"
-            repo.mkdir()
-            subprocess.run([git, "init", "-q", str(repo)], check=True, capture_output=True)
-            subprocess.run([git, "-C", str(repo), "config", "user.email", "t@t"], check=True, capture_output=True)
-            subprocess.run([git, "-C", str(repo), "config", "user.name", "t"], check=True, capture_output=True)
-            (repo / "fixture.txt").write_text(content + "\n", encoding="utf-8")
-            subprocess.run([git, "-C", str(repo), "add", "fixture.txt"], check=True, capture_output=True)
-            proc = subprocess.run(
-                [bash, str(tdp / "scripts" / "check-publication-safety.sh")],
-                cwd=str(repo),
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-            )
-            return proc.returncode, proc.stderr
-
-    def test_fallback_blocks_real_path(self) -> None:
-        rc, err = self._run_fallback(_join(WIN, BS, USERS, BS, REAL))
-        self.assertEqual(rc, 1, f"fallback must BLOCK a real path; stderr={err!r}")
-        self.assertIn("refined regex fallback", err)
-
-    def test_fallback_blocks_dev_root(self) -> None:
-        rc, err = self._run_fallback(_join(WIN_D, BS, DEV, BS, "Orchestrator", BS, "Orchestrarium"))
-        self.assertEqual(rc, 1, f"fallback must BLOCK a dev root; stderr={err!r}")
-
-    def test_fallback_blocks_secret(self) -> None:
-        rc, err = self._run_fallback("pass" + "word" + ": hunter2")
-        self.assertEqual(rc, 1, f"fallback must still BLOCK a secret (MF3); stderr={err!r}")
-
-    def test_fallback_passes_placeholder(self) -> None:
-        rc, err = self._run_fallback(_join(WIN, BS, USERS, BS, "<name>"))
-        self.assertEqual(rc, 0, f"fallback must PASS an angle-bracket placeholder; stderr={err!r}")
-
-    def test_fallback_passes_env_var(self) -> None:
-        rc, err = self._run_fallback("%USER" + "PROFILE%")
-        self.assertEqual(rc, 0, f"fallback must PASS an env-var placeholder; stderr={err!r}")
 
 
 class TestThisTestFileIsGateSafe(unittest.TestCase):

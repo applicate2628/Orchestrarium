@@ -45,6 +45,7 @@ def test_claude_excludes_other_providers_merged_root_and_maintainer_only_files()
         "RELEASE_NOTES.md",
         "tests/test_x.py",
         "install.sh",
+        "install.py",
         "install.ps1",
         ".gitattributes",
     ):

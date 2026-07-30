@@ -28,15 +28,39 @@ externalPriorityProfiles:
     worker.default-implementation: [gemini, reserve, claude]
 """
 
-LEGACY_CODEX_DEFAULT_AGENT = """\
+HISTORICAL_CODEX_DEFAULT_AGENT = """\
 name = "default"
 description = "General-purpose fallback agent."
-model = "gpt-legacy-default"
+model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 developer_instructions = \"\"\"
 General-purpose fallback agent.
 Inherit the parent session's task context and focus on the assigned subtask.
 Stay within the requested scope and return a concise, usable result.
+\"\"\"
+"""
+
+HISTORICAL_CODEX_EXPLORER_AGENT = """\
+name = "explorer"
+description = "Read-heavy codebase exploration agent."
+model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+developer_instructions = \"\"\"
+Read-only evidence-gathering overlay under the universal AGENTS rules.
+Stay in exploration mode, gather factual findings efficiently, and return clear pointers.
+Do not edit or drift into implementation unless explicitly requested.
+\"\"\"
+"""
+
+CUSTOM_CODEX_EXPLORER_AGENT = """\
+name = "explorer"
+description = "Read-heavy codebase exploration agent."
+model = "user-custom-explorer-model"
+model_reasoning_effort = "xhigh"
+developer_instructions = \"\"\"
+Read-only evidence-gathering overlay under the universal AGENTS rules.
+Stay in exploration mode, gather factual findings efficiently, and return clear pointers.
+Do not edit or drift into implementation unless explicitly requested.
 \"\"\"
 """
 
@@ -63,13 +87,13 @@ class InstallerCase:
 INSTALLER_CASES = [
     InstallerCase(
         name="codex",
-        script="scripts/install-codex.sh",
+        script="scripts/install-codex.py",
         overlay=".agents/.agents-mode.yaml",
         codex_line=True,
     ),
     InstallerCase(
         name="claude",
-        script="scripts/install-claude.sh",
+        script="scripts/install-claude.py",
         overlay=".claude/.agents-mode.yaml",
     ),
     InstallerCase(
@@ -84,7 +108,7 @@ INSTALLER_CASES = [
     ),
 ]
 
-_UNIVERSAL_HOOK_EXTS = (".py", ".sh", ".ps1")
+_UNIVERSAL_HOOK_EXTS = (".py", ".sh")
 
 
 def universal_hook_helper_paths(root: Path) -> tuple[str, ...]:
@@ -162,7 +186,7 @@ def parse_provider_list(value: str) -> list[str]:
 
 def run_installer(root: Path, case: InstallerCase, target_rel: Path) -> None:
     command = [
-        "bash",
+        sys.executable if case.name in {"codex", "claude"} else "bash",
         case.script,
         "--target",
         target_rel.as_posix(),
@@ -181,46 +205,15 @@ def run_installer(root: Path, case: InstallerCase, target_rel: Path) -> None:
         )
 
 
-def powershell_executable() -> str | None:
-    for name in ["powershell", "powershell.exe", "pwsh"]:
-        resolved = shutil.which(name)
-        if resolved:
-            return resolved
-    return None
-
-
-def run_powershell_codex_global_installer(root: Path, userprofile: Path) -> None:
-    powershell = powershell_executable()
-    if powershell is None:
-        print(
-            "SKIP: PowerShell executable not available; "
-            "Codex PowerShell global installer regression not run",
-            file=sys.stderr,
-        )
-        return
-
+def run_python_codex_global_installer(root: Path, userprofile: Path) -> None:
     env = os.environ.copy()
     env["USERPROFILE"] = str(userprofile)
     env.setdefault("HOME", str(userprofile))
-    if "PSModulePath" not in env:
-        system_root = env.get("SystemRoot", r"C:\Windows")
-        program_files = env.get("ProgramFiles", r"C:\Program Files")
-        env["PSModulePath"] = ";".join(
-            [
-                str(userprofile / "Documents" / "WindowsPowerShell" / "Modules"),
-                rf"{program_files}\WindowsPowerShell\Modules",
-                rf"{system_root}\System32\WindowsPowerShell\v1.0\Modules",
-            ]
-        )
     command = [
-        powershell,
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-File",
-        str(root / "scripts" / "install-codex.ps1"),
-        "-Global",
-        "-Force",
+        sys.executable,
+        str(root / "scripts" / "install-codex.py"),
+        "--global",
+        "--force",
     ]
     result = subprocess.run(
         command,
@@ -231,7 +224,7 @@ def run_powershell_codex_global_installer(root: Path, userprofile: Path) -> None
     )
     if result.returncode != 0:
         raise InstallerRegressionError(
-            "codex PowerShell global installer failed:\n"
+            "codex Python global installer failed:\n"
             f"{result.stdout}\n{result.stderr}"
         )
 
@@ -243,47 +236,43 @@ def seed_stale_overlay(project_root: Path, case: InstallerCase) -> Path:
     return overlay
 
 
-def seed_codex_agent_overrides(project_root: Path, root: Path) -> None:
+def seed_codex_agent_overrides(
+    project_root: Path, root: Path, *, historical_explorer: bool
+) -> None:
     agents_dir = project_root / ".codex" / "agents"
     agents_dir.mkdir(parents=True, exist_ok=True)
-    (agents_dir / "default.toml").write_text(
-        LEGACY_CODEX_DEFAULT_AGENT,
-        encoding="utf-8",
+    current_default = (root / "src.codex/agents/default.toml").read_bytes()
+    default = (
+        current_default
+        if historical_explorer
+        else HISTORICAL_CODEX_DEFAULT_AGENT.encode("utf-8")
     )
-    current_explorer = (root / "src.codex" / "agents" / "explorer.toml").read_text(
-        encoding="utf-8"
+    explorer = (
+        HISTORICAL_CODEX_EXPLORER_AGENT
+        if historical_explorer
+        else CUSTOM_CODEX_EXPLORER_AGENT
     )
-    stale_explorer = current_explorer.replace(
-        'model = "gpt-5.6-sol"', 'model = "gpt-old-default"'
-    )
-    if stale_explorer == current_explorer:
-        raise InstallerRegressionError(
-            "seed_codex_agent_overrides: the model-string marker used to stage a "
-            "stale explorer.toml was not found in src.codex/agents/explorer.toml "
-            "(a silent no-op here would mean the reinstall-refresh check tests "
-            "nothing) — update the replace() target to the current shipped model"
-        )
-    (agents_dir / "explorer.toml").write_text(stale_explorer, encoding="utf-8")
-    (agents_dir / "worker.toml").write_text(
-        CUSTOM_CODEX_WORKER_AGENT,
-        encoding="utf-8",
-    )
+    (agents_dir / "default.toml").write_bytes(default)
+    (agents_dir / "explorer.toml").write_bytes(explorer.encode("utf-8"))
+    (agents_dir / "worker.toml").write_bytes(CUSTOM_CODEX_WORKER_AGENT.encode("utf-8"))
 
 
-def validate_codex_agent_override_reclaim(project_root: Path) -> None:
+def validate_codex_agent_override_reclaim(
+    project_root: Path, expected_custom: dict[str, str]
+) -> None:
     agents_dir = project_root / ".codex" / "agents"
 
-    for name in ["default.toml", "explorer.toml"]:
-        if (agents_dir / name).exists():
+    for name in ["default.toml", "explorer.toml", "worker.toml"]:
+        path = agents_dir / name
+        expected = expected_custom.get(name)
+        if expected is None and path.exists():
             raise InstallerRegressionError(
                 f"codex did not reclaim retired pack-owned agent override {name}"
             )
-
-    worker = (agents_dir / "worker.toml").read_text(encoding="utf-8")
-    if worker != CUSTOM_CODEX_WORKER_AGENT:
-        raise InstallerRegressionError(
-            "codex replaced a customized built-in worker override"
-        )
+        if expected is not None and path.read_bytes() != expected.encode("utf-8"):
+            raise InstallerRegressionError(
+                f"codex changed customized built-in agent override {name}"
+            )
 
 
 def validate_no_codex_agent_overrides(project_root: Path) -> None:
@@ -407,7 +396,9 @@ def run_regression(root: Path) -> None:
             project_root.mkdir(parents=True, exist_ok=True)
             overlay = seed_stale_overlay(project_root, case)
             if case.codex_line:
-                seed_codex_agent_overrides(project_root, root)
+                seed_codex_agent_overrides(
+                    project_root, root, historical_explorer=False
+                )
             run_installer(
                 root,
                 case,
@@ -419,7 +410,13 @@ def run_regression(root: Path) -> None:
             validate_overlay(case, overlay, schema_data)
             validate_example_provider_universal_hooks(root, case, project_root)
             if case.codex_line:
-                validate_codex_agent_override_reclaim(project_root)
+                validate_codex_agent_override_reclaim(
+                    project_root,
+                    {
+                        "explorer.toml": CUSTOM_CODEX_EXPLORER_AGENT,
+                        "worker.toml": CUSTOM_CODEX_WORKER_AGENT,
+                    },
+                )
 
         codex_fresh_project = scratch / "codex-fresh-project"
         codex_fresh_project.mkdir(parents=True, exist_ok=True)
@@ -434,23 +431,28 @@ def run_regression(root: Path) -> None:
         )
         validate_no_codex_agent_overrides(codex_fresh_project)
 
-        codex_global_home = scratch / "codex-powershell-global-home"
+        codex_global_home = scratch / "codex-python-global-home"
         codex_global_home.mkdir(parents=True, exist_ok=True)
         codex_global_case = InstallerCase(
-            name="codex-powershell-global",
-            script="scripts/install-codex.ps1",
+            name="codex-python-global",
+            script="scripts/install-codex.py",
             overlay=".codex/.agents-mode.yaml",
             codex_line=True,
         )
         overlay = seed_stale_overlay(codex_global_home, codex_global_case)
-        seed_codex_agent_overrides(codex_global_home, root)
-        run_powershell_codex_global_installer(root, codex_global_home)
+        seed_codex_agent_overrides(
+            codex_global_home, root, historical_explorer=True
+        )
+        run_python_codex_global_installer(root, codex_global_home)
         validate_overlay(codex_global_case, overlay, schema_data)
-        validate_codex_agent_override_reclaim(codex_global_home)
+        validate_codex_agent_override_reclaim(
+            codex_global_home,
+            {"worker.toml": CUSTOM_CODEX_WORKER_AGENT},
+        )
 
-        codex_global_fresh_home = scratch / "codex-powershell-global-fresh-home"
+        codex_global_fresh_home = scratch / "codex-python-global-fresh-home"
         codex_global_fresh_home.mkdir(parents=True, exist_ok=True)
-        run_powershell_codex_global_installer(root, codex_global_fresh_home)
+        run_python_codex_global_installer(root, codex_global_fresh_home)
         validate_no_codex_agent_overrides(codex_global_fresh_home)
     finally:
         shutil.rmtree(scratch, ignore_errors=True)

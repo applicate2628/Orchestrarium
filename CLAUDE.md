@@ -18,11 +18,11 @@ When adding, renaming, or removing a skill (`src.claude/commands/agents-*.md`):
 2. Update `src.claude/commands/agents-help.md` — add to the skills table
 3. Update `README.md` and `INSTALL.md` if the change affects documented pack structure, counts, install surface, or entry points
 4. Update `RELEASE_NOTES.md` if the skill change is release-relevant under repo policy
-5. Verify `scripts/install-claude.ps1` install output totals after adding/removing a skill (installers count pack items dynamically — no hardcoded threshold to edit)
-6. Verify `scripts/install-claude.sh` install output totals after adding/removing a skill (same dynamic count)
+5. Verify `python scripts/install-claude.py` install output totals after adding/removing a skill (installers count pack items dynamically — no hardcoded threshold to edit)
+6. Verify `scripts/install-claude.sh` delegates to the same Python owner (same dynamic count)
 7. Update `src.claude/agents/scripts/validate-skill-pack.sh` — add the skill to validation only if it is not auto-discovered
 8. Run `/agents-validate` to confirm structural integrity
-9. Run `scripts/install-claude.ps1 -Global` to install and verify when install behavior or pack structure changed materially
+9. Run `python scripts/install-claude.py --global` to install and verify when install behavior or pack structure changed materially
 
 ## Role development checklist
 
@@ -63,7 +63,7 @@ When modifying `shared/AGENTS.shared.md`, `src.claude/CLAUDE.md`, `operating-mod
 - Run `/agents-validate` after changes.
 - **Full-suite gate for skill/hook commits:** any commit touching `src.*/skills/` or the hook/safety scripts (`scripts/universal-hooks/`, `src.claude/agents/scripts/` + `agents/hooks/`, `src.codex/skills/lead/scripts/` + `lead/hooks/`) must run the FULL `python -m pytest tests/` suite to completion before commit — a timed-out or partial suite run is UNVERIFIED, not clean (cross-pack parity and canon-mirror drift are only caught by the full suite).
 - **Propagation, not hand-copying, for the universal-hooks mirrors:** `scripts/universal-hooks/{scripts,hooks}/` is the stated canon for `src.claude/agents/{scripts,hooks}/` and `src.codex/skills/lead/{scripts,hooks}/` (evidence: `tests/test_universal_hook_surfaces.py:10-11`, `shared/references/repository-source-hygiene.md`). Edit ONLY the canon copy, then run `python scripts/sync-universal-hooks.py --sync` to propagate it and `--check` in your own targeted pass before reporting a result — do not hand-copy from memory and do not edit a mirror directly; the tool refuses (not guesses) when a mirror carries uncommitted local changes it cannot safely overwrite.
-- Test install: `scripts/install-claude.ps1 -Global` and verify CLAUDE.md sections.
+- Test install: `python scripts/install-claude.py --global` and verify CLAUDE.md sections.
 
 ## File layout
 
@@ -93,19 +93,19 @@ RELEASE_NOTES.md         ← canonical tracked release log for release-relevant 
 shared/references/cross-pack-reconciliation.md ← shared semantic block map between packs
 README.md                ← public docs
 INSTALL.md               ← install instructions
-install.ps1              ← unified PowerShell entry point
-install.sh               ← unified Bash entry point
+install.py               ← unified Python-owned entry point
+install.sh               ← thin POSIX launcher
 scripts/                 ← platform-specific installers
-  install-claude.ps1     ← Claude Code PowerShell installer
-  install-claude.sh      ← Claude Code Bash installer
-  install-codex.ps1      ← Codex PowerShell installer
-  install-codex.sh       ← Codex Bash installer
+  install-claude.py      ← Claude Code production installer owner
+  install-claude.sh      ← thin POSIX launcher
+  install-codex.py       ← Codex production installer owner
+  install-codex.sh       ← thin POSIX launcher
   install-gemini.ps1     ← Gemini PowerShell installer
   install-gemini.sh      ← Gemini Bash installer
   install-qwen.ps1       ← Qwen PowerShell installer
   install-qwen.sh        ← Qwen Bash installer
-  check-publication-gate.ps1 ← repo-local publication gate wrapper
-  check-publication-gate.sh  ← repo-local publication gate
+  check-publication-gate.py  ← repo-local publication gate owner
+  check-publication-gate.sh  ← thin POSIX launcher
 ```
 
 ## Key invariants

@@ -104,21 +104,20 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(data["hooks"]["PreToolUse"][0]["matcher"], "Edit|Write|NotebookEdit|apply_patch")
         self.assertNotIn("if", hook)
 
-    def test_install_claude_windows_powershell_exec_form(self) -> None:
-        ps1_path = str(PY_SCRIPT_PATH.with_suffix(".ps1"))
+    def test_install_claude_windows_python_exec_form(self) -> None:
         result = run_installer(
             self.target,
             host_os="windows",
             script_path=str(PY_SCRIPT_PATH),
+            hook_runtime="python",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         data = load_json(self.target)
         hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
-        # Windows-native PowerShell exec form
-        self.assertEqual(hook["command"], "powershell")
-        self.assertEqual(hook["args"][:4], ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File"])
-        self.assertEqual(hook["args"][4], ps1_path)
+        self.assertEqual(Path(hook["command"]), Path(sys.executable).resolve())
+        self.assertEqual(hook["args"], [str(PY_SCRIPT_PATH.resolve())])
         self.assertNotIn("bash", hook["command"])
+        self.assertNotIn("powershell", hook["command"].casefold())
         self.assertNotIn("if", hook)
 
     def test_install_with_custom_tool_matcher(self) -> None:
@@ -175,54 +174,39 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertEqual(hook["args"], [SCRIPT_PATH])
         self.assertNotIn("if", hook)
 
-    def test_codex_windows_writes_entry_with_powershell_form(self) -> None:
-        # Codex+Windows writes the hook entry in powershell.exe shell form.
-        # Explicit powershell.exe avoids the Windows PATH gotcha where `bash`
-        # may resolve to the WSL launcher (C:\Windows\System32\bash.exe)
-        # instead of Git Bash; WSL bash cannot resolve C:\Users\... paths
-        # and the entry silently failed on every Bash tool call in earlier
-        # designs. PowerShell.exe always resolves to one known system path.
-        # Trust step remains the user's manual responsibility via the
-        # codex TUI; the installer cannot trust hooks programmatically.
+    def test_codex_windows_writes_direct_python_entry(self) -> None:
         result = run_installer(
             self.target,
             platform="codex",
             host_os="windows",
             script_path=str(PY_SCRIPT_PATH),
+            hook_runtime="python",
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.target.exists(), "Codex+Windows must write hooks.json entry")
         data = load_json(self.target)
         hook = data["hooks"]["PreToolUse"][0]["hooks"][0]
-        # Codex shell form (no args, just command string)
         self.assertNotIn("args", hook)
-        # Powershell.exe form, not bash
-        self.assertIn("powershell.exe", hook["command"])
-        self.assertIn("-NoProfile", hook["command"])
-        self.assertIn("-ExecutionPolicy Bypass", hook["command"])
-        self.assertIn("-File", hook["command"])
+        self.assertIn(Path(sys.executable).name.casefold(), hook["command"].casefold())
+        self.assertIn(".py", hook["command"].casefold())
         self.assertIn("check-bugfix-discipline", hook["command"])
-        self.assertNotIn(" bash ", " " + hook["command"] + " ")
+        self.assertNotIn("powershell", hook["command"].casefold())
+        self.assertNotIn(".ps1", hook["command"].casefold())
 
-    def test_codex_windows_escapes_powershell_single_quote_in_path(self) -> None:
+    def test_codex_windows_rejects_unsupported_unquoted_python_path(self) -> None:
         quoted_dir = self.tmpdir / "O'Brien"
         quoted_dir.mkdir()
         python_path = quoted_dir / "check-bugfix-discipline.py"
-        wrapper_path = python_path.with_suffix(".ps1")
         python_path.write_text("", encoding="utf-8")
-        wrapper_path.write_text("", encoding="utf-8")
         result = run_installer(
             self.target,
             platform="codex",
             host_os="windows",
             script_path=str(python_path),
+            hook_runtime="python",
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        data = load_json(self.target)
-        command = data["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-        self.assertIn("powershell.exe", command)
-        self.assertIn("O''Brien", command)
-        self.assertNotIn("O'Brien", command)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unsupported Windows hook command token", result.stderr)
 
     def test_install_sessionstart_hook_entry_shape(self) -> None:
         result = run_installer(
@@ -545,7 +529,12 @@ class TestInstallHypothesisHook(unittest.TestCase):
         # Codex+Windows now writes the entry like POSIX. Verify the helper
         # creates any missing parent directory for the target file.
         nested = self.tmpdir / "new-subdir" / "hooks.json"
-        result = run_installer(nested, platform="codex", host_os="windows")
+        result = run_installer(
+            nested,
+            platform="codex",
+            host_os="windows",
+            hook_runtime="python",
+        )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(nested.exists(), "Codex+Windows must write the entry to target")
         self.assertTrue(nested.parent.is_dir(), "parent directory must be created")
@@ -604,18 +593,9 @@ class TestInstallHypothesisHook(unittest.TestCase):
     def test_python_profile_preflights_all_owned_hooks_before_mutation(self) -> None:
         original = b'{\n  "sentinel": true\n}\n'
         self.target.write_bytes(original)
-        installer_texts = (
-            REPO_ROOT / "scripts" / "install-claude.sh",
-            REPO_ROOT / "scripts" / "install-claude.ps1",
-            REPO_ROOT / "scripts" / "install-codex.sh",
-            REPO_ROOT / "scripts" / "install-codex.ps1",
-        )
-        for installer in installer_texts:
-            text = installer.read_text(encoding="utf-8")
-            self.assertLess(
-                text.index("--validate-only"),
-                text.index("Installing bugfix-discipline"),
-            )
+        installer = REPO_ROOT / "scripts" / "production_installer.py"
+        text = installer.read_text(encoding="utf-8")
+        self.assertLess(text.index('"--validate-only"'), text.index("for marker, script, event, matcher"))
 
         for platform in ("claude", "codex"):
             owned = sorted(
@@ -732,15 +712,16 @@ class TestInstallHypothesisHook(unittest.TestCase):
         self.assertNotIn("python", json.dumps((claude, codex)).lower())
 
     def test_migration_collapses_wrapper_entry_to_target_entry(self) -> None:
-        old_entry = HOOK_MODULE.build_codex_entry(
-            HOOK_MODULE.resolve_hook_target(
-                str(PY_SCRIPT_PATH),
-                "windows",
-                "wrapper",
-                "codex",
-            ),
-            "windows",
-        )
+        old_entry = {
+            "matcher": "Edit|Write|NotebookEdit|apply_patch",
+            "hooks": [{
+                "type": "command",
+                "command": (
+                    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File "
+                    "C:/retired/check-bugfix-discipline.ps1"
+                ),
+            }],
+        }
         self.target.write_text(
             json.dumps({"hooks": {"PreToolUse": [old_entry, old_entry]}}, indent=2),
             encoding="utf-8",
@@ -763,15 +744,16 @@ class TestInstallHypothesisHook(unittest.TestCase):
             "matcher": "Bash",
             "hooks": [{"type": "command", "command": "echo user-hook"}],
         }
-        wrapper = HOOK_MODULE.build_codex_entry(
-            HOOK_MODULE.resolve_hook_target(
-                str(PY_SCRIPT_PATH),
-                "windows",
-                "wrapper",
-                "codex",
-            ),
-            "windows",
-        )
+        wrapper = {
+            "matcher": "Edit|Write|NotebookEdit|apply_patch",
+            "hooks": [{
+                "type": "command",
+                "command": (
+                    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File "
+                    "C:/retired/check-bugfix-discipline.ps1"
+                ),
+            }],
+        }
         last = {
             "matcher": "Read",
             "hooks": [{"type": "command", "command": "echo user-last"}],

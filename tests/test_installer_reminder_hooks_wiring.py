@@ -1,85 +1,24 @@
-"""Installer wiring for `turn-anchor-reminder` (UserPromptSubmit) and
-`check-mcp-momentum` (PreToolUse, AUDIT).
-
-MAJOR (strong-model audit): both hooks ship byte-identically into the canon
-(`scripts/universal-hooks/{scripts,hooks}/`) and both production packs
-(`src.claude/agents/`, `src.codex/skills/lead/`), and both are exercised by
-`tests/test_universal_reminder_hooks.py` -- but no installer registered either
-one into `settings.json` (Claude) or `hooks.json` (Codex), so a fresh install
-never actually wired them up. This mirrors the pattern in
-`test_installer_sessionstart_hooks.py`: static wiring is enforced here because
-per-platform installer wiring has no single owner (each installer hand-writes
-its own hook-install block) and nothing else would catch a platform silently
-lagging.
-
-`turn-anchor-reminder` fires at TURN START (its failure moment is the turn
-boundary, not the tool choice) -> UserPromptSubmit.
-`check-mcp-momentum` fires at the TOOL CHOICE (its failure moment is mid-turn
-momentum overriding a rule sitting in context) -> PreToolUse, matched on
-  Grep|Bash|PowerShell|shell_command|exec_command (the current host tool-name
-  shapes owned by the shared MCP continuity policy).
-"""
-
 from __future__ import annotations
 
-import re
-import unittest
+import importlib.util
+import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
-INSTALLERS = (
-    ROOT / "scripts" / "install-claude.sh",
-    ROOT / "scripts" / "install-claude.ps1",
-    ROOT / "scripts" / "install-codex.sh",
-    ROOT / "scripts" / "install-codex.ps1",
-)
+spec = importlib.util.spec_from_file_location("production_installer_reminders", ROOT / "scripts/production_installer.py")
+assert spec and spec.loader
+installer = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = installer
+spec.loader.exec_module(installer)
 
 
-def _logical_lines(text: str) -> list[str]:
-    """Join POSIX-shell backslash line-continuations so each install invocation
-    becomes one logical line. PowerShell invocations are already single-line, so
-    this is a no-op there. Then flatten remaining whitespace per line."""
-    joined = re.sub(r"\\\s*\n\s*", " ", text)
-    return [re.sub(r"\s+", " ", ln).strip() for ln in joined.splitlines()]
-
-
-class InstallerReminderHooksWiringTest(unittest.TestCase):
-    def test_all_four_installers_wire_turn_anchor_reminder_on_userpromptsubmit(self) -> None:
-        for installer in INSTALLERS:
-            self.assertTrue(installer.is_file(), f"missing installer {installer}")
-            lines = _logical_lines(installer.read_text(encoding="utf-8"))
-            wired = any(
-                "--hook-event UserPromptSubmit" in ln
-                and "--script-marker turn-anchor-reminder" in ln
-                for ln in lines
-            )
-            self.assertTrue(
-                wired,
-                f"{installer.name} does not wire turn-anchor-reminder on "
-                f"UserPromptSubmit (needs an install-hypothesis-hook invocation "
-                f"pairing --hook-event UserPromptSubmit with "
-                f"--script-marker turn-anchor-reminder)",
-            )
-
-    def test_all_four_installers_wire_check_mcp_momentum_on_pretooluse(self) -> None:
-        for installer in INSTALLERS:
-            self.assertTrue(installer.is_file(), f"missing installer {installer}")
-            lines = _logical_lines(installer.read_text(encoding="utf-8"))
-            wired = any(
-                "--script-marker check-mcp-momentum" in ln
-                and '--tool-matcher "Grep|Bash|PowerShell|shell_command|exec_command"' in ln
-                # PreToolUse is the install-hypothesis-hook default hook-event
-                # (no --hook-event flag needed), unlike the Stop/SessionStart/
-                # UserPromptSubmit entries which must name their event explicitly.
-                and "--hook-event" not in ln
-                for ln in lines
-            )
-            self.assertTrue(
-                wired,
-                f"{installer.name} does not wire check-mcp-momentum on PreToolUse "
-                f"with the exact current-host MCP matcher",
-            )
-
-
-if __name__ == "__main__":
-    unittest.main()
+@pytest.mark.parametrize("provider", ("codex", "claude"))
+def test_reminder_hook_wiring(provider: str, tmp_path: Path) -> None:
+    specs = {marker: (path, event, matcher) for marker, path, event, matcher in installer._hook_specs(provider, tmp_path)}
+    assert specs["mcp-usage-reminder"][1] == "SessionStart"
+    assert specs["agents-mode-reminder"][1] == "SessionStart"
+    assert specs["check-scratch-valuables"][1] == "SessionStart"
+    assert specs["turn-anchor-reminder"][1] == "UserPromptSubmit"
+    assert specs["check-mcp-momentum"][2] == "Grep|Bash|PowerShell|shell_command|exec_command"

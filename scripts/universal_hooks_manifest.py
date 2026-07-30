@@ -33,7 +33,20 @@ import filecmp
 from pathlib import Path
 from typing import NamedTuple
 
-HOOK_EXTS = (".py", ".sh", ".ps1")
+HOOK_EXTS = (".py", ".sh")
+
+# Python-owned production entrypoints that intentionally retain a thin POSIX
+# launcher but are not registered runtime hooks.  Hook health and wrapper
+# reclaim must classify these identically: they remain installed files and
+# never become registration prerequisites.
+NON_REGISTERED_ENTRYPOINT_STEMS = frozenset({
+    "await-codex-dispatch",
+    "check-publication-safety",
+    "invoke-claude-api",
+    "invoke-claude-prompt",
+    "invoke-codex-prompt",
+    "validate-skill-pack",
+})
 
 # ---------------------------------------------------------------------------
 # Canon-derived name lists + declared pack-only exceptions.
@@ -45,22 +58,21 @@ PACK_ONLY_SCRIPTS = {
         # .agents-mode.yaml read-order (./.claude/, ~/.claude/) and speaks
         # Agent-tool dispatch idiom; the codex twin walks ./.agents/ + ~/.codex/
         # and speaks role/skill-activation idiom — intentionally different.
-        "agents-mode-reminder.sh", "agents-mode-reminder.ps1",
-        "agents-mode-reminder.py",
+        "agents-mode-reminder.sh", "agents-mode-reminder.py",
         # Claude-line provider transport wrappers (no codex/canon analog).
-        "invoke-claude-api.sh", "invoke-claude-api.ps1",
-        "invoke-claude-prompt.sh", "invoke-claude-prompt.ps1",
-        "invoke-codex-prompt.sh", "invoke-codex-prompt.ps1",
+        "invoke-claude-api.sh", "invoke-claude-api.py",
+        "invoke-claude-prompt.sh", "invoke-claude-prompt.py",
+        "invoke-codex-prompt.sh", "invoke-codex-prompt.py",
+        "provider_prompt.py",
         # Claude-line active watcher emitted by the Codex dispatch wrappers;
         # it is provider-specific and has no Codex/canon mirror.
-        "await-codex-dispatch.sh", "await-codex-dispatch.ps1",
+        "await-codex-dispatch.sh", "await-codex-dispatch.py",
         # Per-pack validator (content differs per pack by design).
-        "validate-skill-pack.sh", "validate-skill-pack.ps1",
+        "validate-skill-pack.sh", "validate-skill-pack.py",
     }),
     "src.codex/skills/lead/scripts": frozenset({
-        "agents-mode-reminder.sh", "agents-mode-reminder.ps1",  # see above
-        "agents-mode-reminder.py",
-        "validate-skill-pack.sh", "validate-skill-pack.ps1",
+        "agents-mode-reminder.sh", "agents-mode-reminder.py",  # see above
+        "validate-skill-pack.sh", "validate-skill-pack.py",
     }),
 }
 
@@ -69,11 +81,11 @@ PACK_ONLY_HOOKS = {
         # Claude-only typed-routing audit: keys on the subagent-dispatch tool
         # (captured tool_name "Agent"). Codex CLI exposes no analogous
         # subagent-dispatch tool, so there is no Codex/canon mirror.
-        "check-typed-routing.py", "check-typed-routing.sh", "check-typed-routing.ps1",
+        "check-typed-routing.py", "check-typed-routing.sh",
         # Dispatch-time invariant registry (round-depth observer,
         # work-items/active/2026-07-26-registry-bug-sweep/
         # design-round-cap-observer.md), imported by check-typed-routing.py
-        # above -- not a registered hook entry itself (no .sh/.ps1 wrapper),
+        # above -- not a registered hook entry itself (no shell wrapper),
         # so it carries no hooks.json/installer obligation. Single-tree for
         # the same reason as its adapter: it keys on the Agent dispatch tool,
         # which Codex CLI has no analog for.

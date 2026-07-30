@@ -20,7 +20,7 @@ The transform (verified empirically against the published branches, 2026-06-13):
       so its index and links reflect what the branch actually ships instead of going stale.
   - EXCLUDE everything else (other providers, the merged root AGENTS.md / CLAUDE.md,
       the maintainer-only shared/references/cross-pack-reconciliation.md manifest,
-      install.ps1/sh, RELEASE_NOTES.md, tests/, .gitattributes, docs/routing/,
+      root install.py/sh, RELEASE_NOTES.md, tests/, .gitattributes, docs/routing/,
       docs/superpowers/, and any non-allowlisted main doc).
 
 Usage:

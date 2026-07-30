@@ -1,19 +1,7 @@
-"""Python-twin SessionStart reminders emit the structured host context
-contract, byte-parity with their `.sh` / `.ps1` siblings.
+"""Python-owned SessionStart reminders emit the structured host context.
 
-These two hooks (mcp-usage-reminder, agents-mode-reminder) previously had NO
-`.py` at all -- pure PowerShell / bash reimplementations, so a PowerShell-free
-registration was impossible even though every OTHER SessionStart hook in this
-pack (check-scratch-valuables) already has a `.py` core with thin `.sh`/`.ps1`
-wrappers around it. This file is the Python-side counterpart to
-tests/test_sessionstart_reminder_output.py (the `.sh` contract) and
-tests/test_powershell_wrappers_smoke.py (the `.ps1` contract): same expected
-`additionalContext` text, same envelope shape, driven through
-`sys.executable` instead of `bash`/`powershell`.
-
-The `.sh` and `.ps1` siblings are UNCHANGED by this addition (see each new
-`.py` file's own header) -- this suite exists to prove the NEW file, not to
-re-litigate the existing ones.
+The retained `.sh` entrypoints are POSIX launchers; the Python files own the
+payload and fail-open behavior on every host.
 """
 
 from __future__ import annotations
@@ -137,8 +125,7 @@ class McpUsageReminderPythonHookTest(unittest.TestCase):
                 self.assertEqual(_decode_context(result.stdout), MCP_CONTEXT)
 
     def test_malformed_stdin_does_not_change_the_unconditional_reminder(self) -> None:
-        # mcp-usage-reminder never reads stdin at all (matching its .sh/.ps1
-        # siblings) -- garbage input must have zero effect on the output.
+        # mcp-usage-reminder never reads stdin; garbage input has zero effect.
         for script in MCP_PY_SCRIPTS:
             with self.subTest(script=str(script.relative_to(ROOT))):
                 result = _run(script, stdin=MALFORMED_JSON)
@@ -159,9 +146,7 @@ class McpUsageReminderPythonHookTest(unittest.TestCase):
 
 
 class AgentsModeReminderPythonHookTest(unittest.TestCase):
-    """Mirrors TestAgentsModeReminderWrapper (test_powershell_wrappers_smoke.py)
-    and the .sh-side equivalents in test_sessionstart_reminder_output.py, but
-    drives the new .py file directly via sys.executable."""
+    """Drive the Python owner directly via sys.executable."""
 
     def test_force_and_auto_emit_exact_directive_manual_and_missing_are_silent(self) -> None:
         for script, sub, pack_key in AGENTS_MODE_PY:

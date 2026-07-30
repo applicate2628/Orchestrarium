@@ -172,7 +172,7 @@ fail-open-because-the-wrapper-discards-the-exit-code.md`, found by
 `$security-reviewer` (fable)). Before this hardening, `main()`'s only
 `try/except` covered `parse_envelope` alone; every step from tool-input
 extraction through the scan-evidence correlation loop ran unguarded. Both
-wrapper scripts (`check-git-push-gate.sh`, `check-git-push-gate.ps1`)
+Python owner (`check-git-push-gate.py`) and its POSIX launcher
 unconditionally exit 0 regardless of what the python helper does internally
 — that is the deliberate fail-open contract for a hook that CANNOT decide
 (missing transcript, malformed envelope, no command). It is NOT a defensible
@@ -510,7 +510,7 @@ PUSH_INSTRUCTION_REGEX = re.compile(
 # `SCAN_INVOCATION_REGEX` here matched the scanner's NAME anywhere in a
 # call's flattened text, which is satisfied just as readily by a command
 # that merely NAMES the scanner (`grep ... check-publication-safety.sh`,
-# `Test-Path .../check-publication-safety.ps1`, `ls .../agents-check-
+# `Test-Path .../check-publication-safety.py`, `ls .../agents-check-
 # safety.md`) as by one that runs it — reproduced live against real
 # historical transcripts on this machine (a `Test-Path` existence check and
 # an `ls` of the command file both "matched" without ever running the
@@ -529,7 +529,7 @@ PUSH_INSTRUCTION_REGEX = re.compile(
 # and the module docstring's CORRELATION note), so a file or tool result
 # merely mentioning the scanner cannot satisfy it either, whether or not it
 # shares a turn with an unrelated scan invocation. This is the scanner's OWN
-# self-reported clean-pass line (check-publication-safety.sh / .ps1, all
+# self-reported clean-pass line (check-publication-safety.py, all
 # copies): "publication-safety: clean (tracked, examined N files)". THREE
 # conditions are all load-bearing and none is optional:
 #   - `tracked` only. A `--path` fixture-testing invocation reports `path` in
@@ -907,8 +907,8 @@ def find_git_push_invocations(command: str) -> list[list[str]]:
 # invocations on this machine vary case), so any installed or repo-local
 # copy at any of the pack's own script paths is recognized.
 _SCAN_SCRIPT_BASENAMES = {
-    "check-publication-safety.sh", "check-publication-safety.ps1",
-    "check-publication-gate.sh", "check-publication-gate.ps1",
+    "check-publication-safety.py", "check-publication-safety.sh",
+    "check-publication-gate.py", "check-publication-gate.sh",
 }
 
 # Interpreters that can be told to run an arbitrary script file as their
@@ -1066,7 +1066,7 @@ def evaluate_push(envelope: dict) -> bool:
     DECIDING" note for the full defect this closes). Before this split, an
     uncaught exception ANYWHERE in this logic propagated out of `main()`
     entirely: both wrapper scripts (`check-git-push-gate.sh`,
-    `check-git-push-gate.ps1`) unconditionally discard the python process's
+    retired PowerShell launcher unconditionally discarded the Python process's
     exit code and exit 0 regardless, so a crash meant nothing was ever
     printed to stdout — no deny payload, nothing — and the model-facing
     result was a SILENT ALLOW, indistinguishable from a legitimate pass.
@@ -1292,7 +1292,7 @@ def main() -> int:
         "recovery route for an already-committed change.\n\n"
         "  (b) If the user already instructed you to push in their last "
         "message: run a publication-safety scan (check-publication-safety.sh, "
-        "its .ps1 twin, check-publication-gate.sh/.ps1, or /agents-check-safety "
+        "its POSIX launcher, check-publication-gate.py/.sh, or /agents-check-safety "
         "— ANY installed or repo-local copy counts; no specific path is "
         "required) YOURSELF, as your OWN tool call, in THIS turn. A scan the "
         "OPERATOR runs in their own terminal does not count — only a scan you "

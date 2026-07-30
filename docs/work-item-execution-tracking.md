@@ -25,7 +25,7 @@ python scripts/agent-run-ledger.py --work-item work-items/active/<slug> init --p
 ```
 
 ```powershell
-.\scripts\agent-run-ledger.ps1 --work-item work-items\active\<slug> init --primary-task "Implement accepted plan" --stage "Plan"
+python .\scripts\agent-run-ledger.py --work-item work-items\active\<slug> init --primary-task "Implement accepted plan" --stage "Plan"
 ```
 
 The init command creates missing status sections and `agent-runs.jsonl` without replacing existing task-memory content.
@@ -46,7 +46,7 @@ python scripts/agent-run-ledger.py --work-item work-items/active/<slug> append \
 ```
 
 ```powershell
-.\scripts\agent-run-ledger.ps1 --work-item work-items\active\<slug> append `
+python .\scripts\agent-run-ledger.py --work-item work-items\active\<slug> append `
   --role qa-engineer `
   --execution-role internal `
   --status completed `
@@ -69,7 +69,7 @@ python scripts/validate-work-item-state.py --work-item work-items/active/<slug>
 ```
 
 ```powershell
-.\scripts\validate-work-item-state.ps1 --work-item work-items\active\<slug>
+python .\scripts\validate-work-item-state.py --work-item work-items\active\<slug>
 ```
 
 Validation fails for duplicate run IDs, running agents, missing ledger files, missing evidence for `PASS`, missing accepted artifacts, artifact paths that escape the work item, and inconsistent `BLOCKED` or `REVISE` gates.
@@ -83,7 +83,7 @@ python scripts/check-work-items-state.py --root . --stale-hours 24
 ```
 
 ```powershell
-.\scripts\check-work-items-state.ps1 --root . --stale-hours 24
+python .\scripts\check-work-items-state.py --root . --stale-hours 24
 ```
 
 `--root` points to the repository root. `--active-dir` defaults to `work-items/active`. `--stale-hours 0` disables age checks; any positive value reports running events older than that threshold. `--max-age-days <N>` reports (informational, never a FAIL) active items whose `<date>-` directory prefix is older than N days; the checker also reports any open `Depends-on` blockers and dangling dependency targets it derives from each item's `status.md`. These informational notes are printed as `info:` lines and never change the exit code — a blocked or aging active item is expected state, not a defect.

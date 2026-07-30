@@ -15,7 +15,7 @@ New maintenance sessions should start with [`docs/new-session-guide.md`](docs/ne
 
 ## WARNING: Claude external authentication
 
-The `invoke-claude-prompt.sh` and `invoke-claude-prompt.ps1` transports run automated, headless `claude -p`. Subscription sign-in (OAuth), including Claude Pro and Max, is not permitted for these orchestrated runs; use a commercial API key, `apiKeyHelper`, Amazon Bedrock, or Google Vertex AI instead. The prompt wrappers fail closed when they cannot detect one of those commercial-auth signals. For the secret-backed path, use `invoke-claude-api.sh` or `invoke-claude-api.ps1` with the credentials documented in `SECRET.md`. See [Anthropic's Claude Code legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
+The Python-owned `invoke-claude-prompt.py` transport (also exposed through the thin POSIX launcher `invoke-claude-prompt.sh`) runs automated, headless `claude -p`. Subscription sign-in (OAuth), including Claude Pro and Max, is not permitted for these orchestrated runs; use a commercial API key, `apiKeyHelper`, Amazon Bedrock, or Google Vertex AI instead. The transport fails closed when it cannot detect one of those commercial-auth signals. For the secret-backed path, use `invoke-claude-api.py` or its thin `invoke-claude-api.sh` launcher with the credentials documented in `SECRET.md`. See [Anthropic's Claude Code legal and compliance guidance](https://code.claude.com/docs/en/legal-and-compliance).
 
 ## Repository layout
 
@@ -33,8 +33,8 @@ references-claude/  Claude Code-specific addenda and compatibility pointers
 references-gemini/  Gemini-specific addenda and compatibility pointers
 references-qwen/    Qwen-specific addenda and compatibility pointers
 RELEASE_NOTES.md    Canonical tracked release log
-install.sh          Entry-point installer (asks which pack to install)
-install.ps1         Entry-point installer (asks which pack to install)
+install.py          Python-owned entry-point installer (asks which pack to install)
+install.sh          Thin POSIX launcher for `install.py`
 scripts/            Pack-specific installers plus the repo-local publication gate
 AGENTS.md           Dev overlay for Codex pack maintenance
 CLAUDE.md           Dev overlay for Claude Code pack maintenance
@@ -44,8 +44,8 @@ CLAUDE.md           Dev overlay for Claude Code pack maintenance
 
 | Pack | Status in this monorepo | Source | Runtime entrypoint in source | Packaging in this branch | Validation |
 | --- | --- | --- | --- | --- | --- |
-| Codex | Production | `src.codex/` | assembled installed `AGENTS.md` from `shared/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | root router installers plus `scripts/install-codex.*` | `validate-skill-pack.sh` and `validate-skill-pack.ps1` |
-| Claude Code | Production | `src.claude/` | `src.claude/CLAUDE.md` | root router installers plus `scripts/install-claude.*` | `validate-skill-pack.sh` and `validate-skill-pack.ps1` |
+| Codex | Production | `src.codex/` | assembled installed `AGENTS.md` from `shared/AGENTS.shared.md` + `src.codex/AGENTS.codex.md` | root Python router plus `scripts/install-codex.py` and its POSIX launcher | `validate-skill-pack.py` and its POSIX launcher |
+| Claude Code | Production | `src.claude/` | `src.claude/CLAUDE.md` | root Python router plus `scripts/install-claude.py` and its POSIX launcher | `validate-skill-pack.py` and its POSIX launcher |
 | Gemini CLI | Deprecated full-mirror example (`WEAK MODEL / NOT RECOMMENDED`) | `src.gemini/` | `src.gemini/GEMINI.md` importing `shared/AGENTS.shared.md` | retained compatibility installer pending npm-skillpack | `validate-pack.sh` and `validate-pack.ps1` |
 | Qwen | Deprecated full-mirror example (`WEAK MODEL / NOT RECOMMENDED`) | `src.qwen/` | `src.qwen/QWEN.md` importing `shared/AGENTS.shared.md` | retained compatibility installer pending npm-skillpack | `validate-pack.sh` and `validate-pack.ps1` |
 
@@ -74,7 +74,7 @@ bash install.sh --global
 ```
 
 ```powershell
-.\install.ps1 -Global
+python .\install.py --global
 ```
 
 Each router asks what to install:
@@ -203,8 +203,8 @@ python scripts/validate-agents-mode-installers.py --root .
 ```
 
 ```powershell
-.\src.codex\skills\lead\scripts\validate-skill-pack.ps1
-.\src.claude\agents\scripts\validate-skill-pack.ps1
+python .\src.codex\skills\lead\scripts\validate-skill-pack.py
+python .\src.claude\agents\scripts\validate-skill-pack.py
 .\src.gemini\scripts\validate-pack.ps1
 .\src.qwen\scripts\validate-pack.ps1
 python .\scripts\sync-agents-mode-docs.py --root . --check
@@ -213,7 +213,7 @@ python .\scripts\validate-agents-mode-installers.py --root .
 
 The docs sync command checks generated `agents-mode` tables, raised-count lists, and canonical YAML snippets against the JSON contract; use `--write` to refresh those generated blocks after intentional schema or preset edits.
 
-The installer regression command creates disposable targets under `/.scratch/`, runs the Bash installers for all four provider lines, and verifies that stale `agents-mode` overlays are normalized to the current schema-backed contract. It also verifies that Codex built-in agent override reinstall refreshes stale Orchestrarium-owned templates while preserving a customized override file.
+The installer regression command creates disposable targets under `/.scratch/`, runs the Python production installers and the retained example-provider launchers, and verifies that stale `agents-mode` overlays are normalized to the current schema-backed contract. It also verifies that fresh Codex installs create no fixed preset overrides and that upgrades preserve customized preset files.
 
 Work-item execution tracking uses `agent-runs.jsonl` beside `status.md` for machine-readable agent state. Use `scripts/agent-run-ledger.* --work-item <path> init` for one-time migration of missing status sections and ledger files, `scripts/agent-run-ledger.* --work-item <path> append ...` to append one validated event with rollback on failure, `scripts/validate-work-item-state.* --work-item <path>` before single-item closeout, and `scripts/check-work-items-state.* --root . --stale-hours 24` before broad closeout or interruption recovery. The helpers catch stale agents, duplicate run IDs, missing evidence, inconsistent gates, or accepted artifacts that were never verified. `scripts/agent-run-ledger.* rollup --root .` (or `--work-item <path>` for one item) aggregates ledger events — runs by role, execution-role, gate, and status, evidence coverage, and a malformed-line count. `scripts/check-work-items-state.* --root . --max-age-days <N>` additionally reports (informational, never a failure) active items older than N days plus any open `Depends-on` blockers or dangling dependency targets.
 
@@ -226,7 +226,7 @@ bash scripts/check-publication-gate.sh
 ```
 
 ```powershell
-.\scripts\check-publication-gate.ps1
+python .\scripts\check-publication-gate.py
 ```
 
 ## License

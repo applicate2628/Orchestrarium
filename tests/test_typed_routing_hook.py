@@ -42,7 +42,6 @@ the hook inert.)
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 import sys
 import unittest
@@ -50,7 +49,6 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 HOOK = REPO_ROOT / "src.claude" / "agents" / "hooks" / "check-typed-routing.py"
-WRAPPER = REPO_ROOT / "src.claude" / "agents" / "hooks" / "check-typed-routing.ps1"
 WARNING = "[typed-routing AUDIT]"
 
 # A complete PreToolUse envelope for an Agent dispatch: the captured tool_name
@@ -215,55 +213,17 @@ class TypedRoutingHookTests(unittest.TestCase):
                 self.assert_silent(dispatch("general-purpose", prompt="implement the fix",
                                             tool_name=name))
 
-    # (f) the Phase-0 REAL captured Agent envelope fixture -> exit 1
-    def test_real_captured_agent_fixture_warns(self) -> None:
+    # Former wrapper smoke: the direct Python owner preserves the real-hit
+    # decision and stdout advisory contract.
+    def test_python_entrypoint_exits_zero_and_warns_via_stdout_on_a_real_hit(self) -> None:
         self.assert_warns(REAL_AGENT_FIXTURE)
 
-    # fail-open on malformed input
-    def test_malformed_envelope_fails_open(self) -> None:
-        self.assert_silent(None, raw="not json {{{")
-
-    def test_empty_stdin_fails_open(self) -> None:
-        self.assert_silent(None, raw="")
-
-
-@unittest.skipIf(
-    not (shutil.which("pwsh") or shutil.which("powershell")),
-    "no PowerShell host (pwsh/powershell) on PATH",
-)
-class TypedRoutingWrapperSmokeTests(unittest.TestCase):
-    """Drive the ACTUAL .ps1 entry point under every available PowerShell host
-    (pwsh 7 + Windows PowerShell 5.1) -- a .py-only test would not catch a broken
-    stdin pipe or a wrapper hard-coding exit 0."""
-
-    def _interpreters(self) -> list[str]:
-        return [p for p in (shutil.which("pwsh"), shutil.which("powershell")) if p]
-
-    def _run_ps1(self, interp: str, stdin: str) -> subprocess.CompletedProcess:
-        return subprocess.run(
-            [interp, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(WRAPPER)],
-            input=stdin, capture_output=True, text=True, encoding="utf-8",
-        )
-
-    def test_wrapper_fails_open_on_empty_and_malformed(self) -> None:
-        for interp in self._interpreters():
-            for stdin in ("", "not json {{{"):
-                with self.subTest(interp=Path(interp).stem, stdin=stdin[:8]):
-                    p = self._run_ps1(interp, stdin)
-                    self.assertEqual(p.returncode, 0, p.stderr)
-                    self.assertEqual(p.stdout.strip(), "")
-                    self.assertEqual(p.stderr.strip(), "")
-
-    def test_wrapper_exits_zero_and_warns_via_stdout_on_a_real_hit(self) -> None:
-        payload = json.dumps(REAL_AGENT_FIXTURE, ensure_ascii=False)
-        for interp in self._interpreters():
-            with self.subTest(interp=Path(interp).stem):
-                p = self._run_ps1(interp, payload)
-                self.assertEqual(p.returncode, 0,
-                                 f"expected exit 0 on a hit; stdout={p.stdout!r} stderr={p.stderr!r}")
-                self.assertEqual(p.stderr, "")
-                _event_name, context = _decode_context(p.stdout)
-                self.assertIn(WARNING, context)
+    # Former wrapper smoke: empty and malformed input remain fail-open when the
+    # registered Python owner is executed directly.
+    def test_python_entrypoint_fails_open_on_empty_and_malformed(self) -> None:
+        for raw in ("", "not json {{{"):
+            with self.subTest(raw=raw[:8]):
+                self.assert_silent(None, raw=raw)
 
 
 if __name__ == "__main__":

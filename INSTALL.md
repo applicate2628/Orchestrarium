@@ -1,6 +1,6 @@
 # Installation
 
-This monorepo ships unified entry-point installers at the root (`install.sh` and `install.ps1`). They separate the production Codex/Claude path from deprecated Gemini/Qwen compatibility examples retained pending the `npm-skillpack-distribution` epic, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
+This monorepo ships a Python-owned root installer (`install.py`) plus the thin POSIX launcher `install.sh`. They separate the production Codex/Claude path from deprecated Gemini/Qwen compatibility examples retained pending the `npm-skillpack-distribution` epic, then forward arguments to the matching pack-specific installers in the `scripts/` directory.
 
 ## Quick install
 
@@ -11,7 +11,7 @@ bash install.sh --global
 ```
 
 ```powershell
-.\install.ps1 -Global
+python .\install.py --global
 ```
 
 Or install into a specific project:
@@ -21,7 +21,7 @@ bash install.sh --target /path/to/project
 ```
 
 ```powershell
-.\install.ps1 -Target "D:\path\to\project"
+python .\install.py --target "D:\path\to\project"
 ```
 
 The router asks which pack to install:
@@ -65,14 +65,14 @@ Project repositories that use Orchestrarium task-memory closeout should keep `ag
 
 ## Codex install details
 
-Use `scripts/install-codex.sh` or `scripts/install-codex.ps1` when you want the Codex pack directly.
+Use `python scripts/install-codex.py` or its thin POSIX launcher `scripts/install-codex.sh` when you want the Codex pack directly.
 
 | Command | Result |
 | --- | --- |
 | `bash scripts/install-codex.sh --global` | Installs into `~/.codex/` |
 | `bash scripts/install-codex.sh --target /path/to/project` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
-| `.\scripts\install-codex.ps1 -Global` | Installs into `~/.codex/` |
-| `.\scripts\install-codex.ps1 -Target "D:\path\to\project"` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
+| `python .\scripts\install-codex.py --global` | Installs into `~/.codex/` |
+| `python .\scripts\install-codex.py --target "D:\path\to\project"` | Installs into the target project's `.agents/skills/` and merges root `AGENTS.md` |
 
 Notes:
 
@@ -99,18 +99,18 @@ Notes:
 - After first-time Codex project install, run `$init-project` in Codex to write `## Project policies` to the root `AGENTS.md` and review or update the installed default `.agents/.agents-mode.yaml`.
 - If a repo-local lane policy explicitly asks for consultant input at closeout, it follows the configured `consultantMode`. `consultantMode: disabled` waives consultant closeout instead of blocking the batch, and any requested consultant sweep stays advisory-only rather than replacing review or human gates.
 - The design-panel technique installs as `~/.codex/skills/design-panel/` (global) or `<project>/.agents/skills/design-panel/` (project), source `src.codex/skills/design-panel/`. No dedicated panel-state validator is installed; the pack validator checks only file presence and invariant markers (`DP1`-`DP8`).
-- Validation commands: `bash src.codex/skills/lead/scripts/validate-skill-pack.sh` or `.\src.codex\skills\lead\scripts\validate-skill-pack.ps1`.
+- Validation commands: `python src.codex/skills/lead/scripts/validate-skill-pack.py` or its POSIX launcher `bash src.codex/skills/lead/scripts/validate-skill-pack.sh`.
 
 ## Claude Code install details
 
-Use `scripts/install-claude.sh` or `scripts/install-claude.ps1` when you want the Claude Code pack directly.
+Use `python scripts/install-claude.py` or its thin POSIX launcher `scripts/install-claude.sh` when you want the Claude Code pack directly.
 
 | Command | Result |
 | --- | --- |
 | `bash scripts/install-claude.sh --global` | Installs into `~/.claude/` |
 | `bash scripts/install-claude.sh --target /path/to/project` | Installs into the target project's `.claude/` |
-| `.\scripts\install-claude.ps1 -Global` | Installs into `~/.claude/` |
-| `.\scripts\install-claude.ps1 -Target "D:\path\to\project"` | Installs into the target project's `.claude/` |
+| `python .\scripts\install-claude.py --global` | Installs into `~/.claude/` |
+| `python .\scripts\install-claude.py --target "D:\path\to\project"` | Installs into the target project's `.claude/` |
 
 Notes:
 
@@ -122,8 +122,8 @@ Notes:
 - Decision-driving reads should resolve through the Claude read order (highest to lowest precedence, per-key): `.claude/.agents-mode.yaml`, local legacy `.claude/.agents-mode`, pack-local global `~/.claude/.agents-mode.yaml`, pack-local global legacy `~/.claude/.agents-mode`, shared cross-pack global `~/.agents-mode.yaml`, built-in defaults. Normalize whichever file supplied the effective config to the current canonical format in the same scope and never recreate any legacy file or synthesize a local override on read alone.
 - `consultantMode` still controls `$consultant`; `delegationMode: manual` keeps explicit-permission behavior, `auto` leaves ordinary delegation enabled by routing judgment, and `force` makes delegation an explicit standing instruction whenever a matching specialist and viable tool path exist; `parallelMode: manual` keeps parallel fan-out explicit-by-request, `auto` leaves safe parallelism enabled by routing judgment for any independent internal or external lanes, and `force` makes safe parallel launch a standing instruction whenever scopes are independent and the merge cost is justified; `mcpMode: auto` lets the agent decide when MCP is appropriate while `force` makes MCP usage an explicit standing instruction; the two `preferExternal*` flags let routing prefer `$external-worker` and `$external-reviewer`; production `externalProvider` uses `auto | codex | claude`; and the switchable `externalPriorityProfile` / `reserveResolver` / `externalPriorityProfiles` / `externalOpinionCounts` block keeps production auto-routing on Codex plus Claude instead of hidden host-line defaults. Shipped profiles are `balanced` and `quality-first`. Those counts stay distinct-opinion requirements for one lane, while brigade surfaces cover parallel external helper multiplicity on top of the general `parallelMode` rule.
 - Explicit self-provider selection is override-only; ordinary `auto` must not silently resolve back into the same host line.
-- `reserveResolver` controls the concrete reserve path. `claude-wrapper` may resolve to the Claude-line wrapper surface `.claude/agents/scripts/invoke-claude-api.sh` or `.ps1`, which reads repo-local `.claude/SECRET.md` first and then `~/.claude/SECRET.md`, exports the declared `ANTHROPIC_*` environment, and then runs plain `claude`; `wrapper:<command>` may point to another approved PATH-resolved or repo-relative read-only wrapper — "approved" means exactly the layer-provenance trust gate: the value is defined (or identically confirmed) at a user-global config layer (`~/.claude/.agents-mode.yaml`, its legacy sibling, or `~/.agents-mode.yaml`); a `wrapper:<command>` supplied only by a project-local `.agents-mode.yaml` (which a cloned repository can ship) resolves as `reserveResolverTrust: project-UNCONFIRMED` per `scripts/resolve-agents-mode.py` and must not be launched before explicit first-use user confirmation, recorded durably by writing the approved value into a user-global layer. `externalClaudeProfile` stays Codex-line only for primary Claude CLI runs.
-- Practical launch rules: use the PowerShell Claude wrapper from PowerShell and the bash Claude wrapper from Bash or Git Bash; the PowerShell wrapper accepts both `-PrintSecretPath` and `--print-secret-path`, requires `--%` before forwarded Claude flags, and the bash wrapper honors `CLAUDE_BIN` when the active shell PATH cannot see `claude`.
+- `reserveResolver` controls the concrete reserve path. `claude-wrapper` resolves to the Python-owned Claude-line transport `.claude/agents/scripts/invoke-claude-api.py` (also exposed through its thin POSIX launcher), which reads repo-local `.claude/SECRET.md` first and then `~/.claude/SECRET.md`, exports the declared `ANTHROPIC_*` environment, and then runs plain `claude`; `wrapper:<command>` may point to another approved PATH-resolved or repo-relative read-only wrapper — "approved" means exactly the layer-provenance trust gate: the value is defined (or identically confirmed) at a user-global config layer (`~/.claude/.agents-mode.yaml`, its legacy sibling, or `~/.agents-mode.yaml`); a `wrapper:<command>` supplied only by a project-local `.agents-mode.yaml` (which a cloned repository can ship) resolves as `reserveResolverTrust: project-UNCONFIRMED` per `scripts/resolve-agents-mode.py` and must not be launched before explicit first-use user confirmation, recorded durably by writing the approved value into a user-global layer. `externalClaudeProfile` stays Codex-line only for primary Claude CLI runs.
+- Practical launch rules: use `python .claude/agents/scripts/invoke-claude-api.py` on every host, or the Bash launcher on POSIX/Git Bash. The Python transport accepts `--print-secret-path`, forwards Claude flags unchanged, preserves the provider exit code, and honors `CLAUDE_BIN` when the active environment cannot see `claude`.
 - External provider CLI launches use file-based prompts by default: write substantive task prompts to temporary prompt files and feed them through stdin or a provider-supported file-input mechanism instead of putting the full prompt in argv.
 - If a primary Claude external run is obviously unauthenticated on the plain `claude` path, do not silently convert that run to the secret-backed wrapper. Advisory/review lanes may still reach the independent `reserve` candidate later in the profile order; mutating implementation, code-generation, file-editing, or publication work must not use the resolved `reserve` transport.
 - For Codex commit review, use `codex review --commit <sha>` without a free-form prompt; if custom review instructions are needed, prefer a narrower `codex exec` run on the admitted scope.
@@ -132,7 +132,7 @@ Notes:
 - After first-time Claude project install, run `/agents-init-project` in Claude Code to write `## Project policies` in `.claude/CLAUDE.md` and review or update the installed default `.claude/.agents-mode.yaml`.
 - If a repo-local lane policy explicitly asks for consultant input at closeout, it follows the configured `consultantMode`. `consultantMode: disabled` waives consultant closeout instead of blocking the batch, and any requested consultant sweep stays advisory-only rather than replacing review or human gates.
 - The design-panel technique installs as `~/.claude/agents/contracts/design-panel.md` + `~/.claude/commands/agents-design-panel.md` (global) or the `<project>/.claude/` equivalents (project), source `src.claude/agents/contracts/design-panel.md` + `src.claude/commands/agents-design-panel.md`. No dedicated panel-state validator is installed; the pack validator checks only file presence and invariant markers (`DP1`-`DP8`).
-- Validation commands: `bash src.claude/agents/scripts/validate-skill-pack.sh` or `.\src.claude\agents\scripts\validate-skill-pack.ps1`.
+- Validation commands: `python src.claude/agents/scripts/validate-skill-pack.py` or its POSIX launcher `bash src.claude/agents/scripts/validate-skill-pack.sh`.
 
 ## Deprecated Gemini CLI compatibility example
 
@@ -223,27 +223,27 @@ Customize each platform in the place that platform actually reads:
 
 Both Claude Code and Codex CLI expose hook surfaces. Both production packs auto-install nine shared structural hooks — four blocking backstops and five warn-only audit hooks — plus four informational reminders (three on `SessionStart`, one on `UserPromptSubmit`), so Codex CLI installs thirteen entries. The Claude Code pack additionally ships a tenth structural hook — the Claude-only `check-typed-routing` warn-only audit (Codex CLI has no analogous subagent-dispatch tool, so there is no Codex mirror) — so Claude Code installs fourteen entries:
 
-The default hook runtime is direct Python on every platform. During installation, `resolve_hook_target` obtains the absolute interpreter path from that installer process's `sys.executable`. Before any registration mutation, the Python profile checks every owned hook: the interpreter and `.py` target must be absolute regular files; on Windows the interpreter must be a non-reparse `.exe`, and on POSIX it must have execute permission. The later health gate actually launches every registered hook. A missing or invalid interpreter or target therefore fails the install loudly instead of leaving a registration that never fires. The wrapper profile remains an explicit rollback path and preflights its retained wrapper files. The reserved native profile requires a real native executable and fails before mutation because the pack does not ship native hook binaries. The serialized Claude Code entry is an executable plus argument array; the Codex Windows entry is the verified `cmd.exe`/PowerShell-compatible unquoted absolute interpreter followed by the unquoted absolute `.py` path. Windows paths containing whitespace or command metacharacters are rejected rather than registered in an unverified shape.
+The production hook runtime is direct Python on every platform. During installation, `resolve_hook_target` obtains the absolute interpreter path from that installer process's `sys.executable`. Before any registration mutation, the installer checks every owned hook: the interpreter and `.py` target must be absolute regular files; on Windows the interpreter must be a non-reparse `.exe`, and on POSIX it must have execute permission. The later health gate actually launches every registered hook. A missing or invalid interpreter or target therefore fails the install loudly instead of leaving a registration that never fires. The serialized Claude Code entry is an executable plus argument array; the Codex Windows entry is the verified `cmd.exe`/PowerShell-compatible unquoted absolute interpreter followed by the unquoted absolute `.py` path. Windows paths containing whitespace or command metacharacters are rejected rather than registered in an unverified shape.
 
-Upgrade ordering is fixed: **SYNC → REGISTER → VERIFY → RECLAIM**. Reclaim cannot run unless `scripts/check-hook-health.py` first verifies every registered executable and target. It removes an installed `.sh` or `.ps1` wrapper only when both ownership conditions hold: the exact wrapper name belongs to `scripts/universal_hooks_manifest.py`, and the pack ships an adjacent same-stem `.py` target. Reclaim is last, idempotent, dry-run-visible, and disabled for the rollback profile. Source wrappers remain in this repository; they are the rollback path, not the default runtime.
+Upgrade ordering is fixed: **SYNC → REGISTER → VERIFY → RECLAIM**. Reclaim cannot run unless `scripts/check-hook-health.py` first verifies every registered executable and target. It removes an installed hook `.sh` launcher only when both ownership conditions hold: the exact name belongs to `scripts/universal_hooks_manifest.py`, and the pack ships an adjacent same-stem `.py` target. A separate hash-gated retired-file manifest removes legacy production `.ps1` files only when their bytes still match the last pack-owned version; customized copies are preserved. Reclaim is last, idempotent, and dry-run-visible.
 
 For a later global upgrade, a lead runs Claude Code first, checks that the dry run names exactly 28 wrappers from 14 owned stems and no non-hook file, then installs and verifies:
 
-#### Claude Code PowerShell workflow
+#### Claude Code Python workflow
 
 ```powershell
-.\scripts\install-claude.ps1 -Global -DryRun
-.\scripts\install-claude.ps1 -Global
+python .\scripts\install-claude.py --global --dry-run
+python .\scripts\install-claude.py --global
 python scripts/check-hook-health.py --verify-fires
 ```
 
 Then run Codex, checking that its dry run names exactly 26 wrappers from 13 owned stems:
 
-#### Codex PowerShell workflow
+#### Codex Python workflow
 
 ```powershell
-.\scripts\install-codex.ps1 -Global -DryRun
-.\scripts\install-codex.ps1 -Global
+python .\scripts\install-codex.py --global --dry-run
+python .\scripts\install-codex.py --global
 codex
 python scripts/check-hook-health.py --verify-fires
 ```
@@ -268,7 +268,7 @@ The trust modal does not time out and the operator must review all 13 entries be
 
 #### Wrapper rollback
 
-To restore the retained wrapper registration shape, rerun the corresponding installer with `-HookRuntime wrapper` (PowerShell) or `--hook-runtime wrapper` (shell); that profile re-syncs the source wrappers, re-registers them, verifies them, and does not reclaim them.
+Production installers accept only the direct-Python hook runtime. The retained `.sh` files are manual POSIX launchers for source and installed non-hook commands; they are not a second hook-registration profile.
 
 - **PreToolUse bugfix-discipline hook** (`check-bugfix-discipline.py` plus thin `.sh`/`.ps1` wrappers): catches the model about to make a code-mutating tool call (`Edit`/`Write`/`NotebookEdit`/`apply_patch`) in response to a bug-report or change-request signal (`fix`, `change`, `broken`, `не работает`, `исправь`, `пофикси`, traceback, `Error:`), without first invoking `/agents-bugfix` or otherwise capturing diagnostic data. It reads the PreToolUse envelope's `transcript_path`, checks the current turn for discipline signals, and emits a structured deny payload when the pre-fix gate was skipped. It skips subagent contexts (envelope `agent_id` present) and exempts writes to non-code artifact paths (`.reports/`, `.scratch/`, `.plans/`, `work-items/`, `docs/`), so a report/plan/doc write under a bug-vocabulary prompt is never falsely blocked (proven on a real transcript).
 - **PreToolUse git-push publication-gate hook** (`check-git-push-gate.py` plus thin `.sh`/`.ps1` wrappers; registered on a `Bash` matcher): a **blocking** structural backstop for the publication-safety rule "human review before `git push` must include a leak-check of staged changes". It detects `git push` in command position with the same shell-aware parser technique as the stray-artifact audit (quoted-string `git push` is data; `git push --dry-run` is always allowed) and denies unless the LAST GENUINE USER MESSAGE carries the per-turn override `[approve-publication]` (honored ONLY from the user's own message — never from assistant prose, tool calls, or tool output), or the last genuine user message contains an explicit push instruction AND the current turn's model tool calls show a publication-safety scan invocation (`check-publication-safety` / `check-publication-gate` / `agents-check-safety`). It skips subagent contexts (envelope `agent_id`) and fails open on any internal error or missing transcript. It is a BACKSTOP, not a guarantee — a push hidden behind a wrapper script, `eval`, or command substitution is not modelled; the binding rule remains the governance text.

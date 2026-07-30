@@ -87,7 +87,7 @@ Run the smallest useful check first, then the affected pack checks.
 | universal-hooks canon vs. mirrors (run before reporting any change to a mirrored script/hook) | `python scripts\sync-universal-hooks.py --check` |
 | Installer behavior | `python scripts\validate-agents-mode-installers.py --root .` |
 | Diff hygiene | `git diff --check` |
-| Publication safety before push/release | `bash scripts/check-publication-gate.sh` or `.\scripts\check-publication-gate.ps1` |
+| Publication safety before push/release | `python scripts/check-publication-gate.py` or `bash scripts/check-publication-gate.sh` |
 
 ## Do Not
 

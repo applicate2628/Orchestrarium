@@ -212,7 +212,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # ImportError before `main()` is ever entered -- a nonzero exit code (Python's
 # default is 1) and a traceback on stderr -- instead of a fabricated report
 # about the wrong project. This does not weaken this hook's own "never block
-# a session" contract: `check-scratch-valuables.sh` / `.ps1` unconditionally
+# a session" contract: the retired shell launchers unconditionally
 # exit 0 regardless of the Python process's own exit code (measured; those
 # wrappers do not propagate `$?`/`$LASTEXITCODE` the way the six PreToolUse
 # audit wrappers do), so a broken install still never blocks a session -- it

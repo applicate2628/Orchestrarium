@@ -966,11 +966,11 @@ class TestGitPushGate(unittest.TestCase):
     def test_powershell_file_flag_running_the_real_scanner_allows(self) -> None:
         # The documented Windows fallback in agents-check-safety.md step
         # "Rules": `powershell -ExecutionPolicy Bypass -File
-        # .../check-publication-safety.ps1`. Must keep working.
+        # .../check-publication-safety.py`. Must keep working.
         ps_call = assistant_tool_use(
             "Bash",
             {"command": "powershell -ExecutionPolicy Bypass -File "
-                        ".claude/agents/scripts/check-publication-safety.ps1"},
+                        ".claude/agents/scripts/check-publication-safety.py"},
             tool_id="toolu_ps_file",
         )
         ps_result = tool_result(
@@ -989,7 +989,7 @@ class TestGitPushGate(unittest.TestCase):
         ps_call = assistant_tool_use(
             "Bash",
             {"command": "powershell -Command \"& '.claude/agents/scripts/"
-                        "check-publication-safety.ps1'\""},
+                        "check-publication-safety.py'\""},
             tool_id="toolu_ps_cmd",
         )
         ps_result = tool_result(
@@ -1798,7 +1798,7 @@ class TestCrashWhileDecidingFallsThroughToDeny(unittest.TestCase):
     try/except covered parse_envelope alone; an uncaught exception ANYWHERE
     in the rest of the decision code (tool-input extraction through the
     scan-evidence correlation loop) propagated out of main() entirely. Both
-    wrapper scripts (check-git-push-gate.sh, check-git-push-gate.ps1)
+    Python owner and its POSIX launcher
     unconditionally discard the python process's exit code and exit 0
     regardless of what happened internally, so a crash meant NOTHING was
     printed to stdout -- no deny payload -- and the model-facing result was

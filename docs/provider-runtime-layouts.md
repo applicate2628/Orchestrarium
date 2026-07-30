@@ -159,7 +159,7 @@ Qwen is maintained in this monorepo as a native explicit example integration cla
 
 ## Sources
 
-- Orchestrarium install and runtime contracts: `INSTALL.md`, `docs/agents-mode-reference.md`, `install.sh`, `install.ps1`, `src.codex/AGENTS.codex.md`, `src.codex/skills/consultant/SKILL.md`, `src.claude/CLAUDE.md`, `src.claude/agents/consultant.md`, `src.gemini/GEMINI.md`, `src.gemini/skills/init-project/SKILL.md`, `src.qwen/QWEN.md`, `src.qwen/README.md`, `src.qwen/skills/init-project/SKILL.md`, `scripts/install-codex.sh`, `scripts/install-codex.ps1`, `scripts/install-claude.sh`, `scripts/install-claude.ps1`, `scripts/install-gemini.sh`, `scripts/install-gemini.ps1`, `scripts/install-qwen.sh`, `scripts/install-qwen.ps1`
+- Orchestrarium install and runtime contracts: `INSTALL.md`, `docs/agents-mode-reference.md`, `install.py`, `install.sh`, `src.codex/AGENTS.codex.md`, `src.codex/skills/consultant/SKILL.md`, `src.claude/CLAUDE.md`, `src.claude/agents/consultant.md`, `src.gemini/GEMINI.md`, `src.gemini/skills/init-project/SKILL.md`, `src.qwen/QWEN.md`, `src.qwen/README.md`, `src.qwen/skills/init-project/SKILL.md`, `scripts/install-codex.py`, `scripts/install-codex.sh`, `scripts/install-claude.py`, `scripts/install-claude.sh`, `scripts/install-gemini.sh`, `scripts/install-gemini.ps1`, `scripts/install-qwen.sh`, `scripts/install-qwen.ps1`
 - Claude Code documentation:
   - Memory and `CLAUDE.md` locations: <https://code.claude.com/docs/en/memory>
   - Skills and legacy commands: <https://code.claude.com/docs/en/slash-commands>
