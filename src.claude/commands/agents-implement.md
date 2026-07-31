@@ -46,7 +46,7 @@ The user does not need to type `/agents-implement` for this flow to fire. Apply 
    - Run architecture reviewer (Agent tool, `subagent_type: architecture-reviewer`) on the full changeset
    - Present summary: phases completed, tests passed, open bugs, residual risk
    - Suggest `/agents-review` for final review before commit
-   - **Close the work-item once it is delivered (the user commits/pushes) or parked.** Do not leave a delivered item in `work-items/active/` — apply the Recovery rule's close step in `CLAUDE.md` (write `closure.md`, move the folder to `work-items/archive/<YYYY-MM>/<slug>/`, move its `work-items/index.md` row to Archived). If the session ends before the user commits, the work-items archival Stop-hook flags the still-open item on the next session. If the work-item declares an `Epic:`, also refresh the parent epic's roll-up in `work-items/epics/` and close the epic (`status: closed` + `## Closure`) when this was its last open child and the epic goal is met (see the lead skill `## Epics`).
+   - **Close the work-item once it is delivered (the user commits/pushes) or parked.** Do not leave a delivered item in `work-items/active/` — apply the Recovery rule's close step through the installed lifecycle owner (write the required closure evidence, move the folder to `work-items/archive/<YYYY-MM>/<slug>/`, and reconcile its `work-items/index.md` row to Archived). Physical archive placement, not status or closure prose, makes the item terminal. If the work-item declares an `Epic:`, refresh the parent epic's roll-up from physical child locations and archive the epic through the same lifecycle owner when this was its last open child and the epic goal is met (see the lead skill `## Epics`).
 
 ## Rules
 

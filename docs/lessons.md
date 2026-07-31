@@ -55,7 +55,7 @@ list-item frontmatter** (`- key:` bullets, NO `---` YAML fences — bugs use
 An applied/dropped/archived lesson **stays in the registry** as history; it is
 never deleted. This status enum is **independent of** the work-item / epic
 done-predicate — lessons are never "closed" by that predicate, so the
-work-items-archival hook never acts on them.
+retired archival Stop control never acts on them.
 
 ## Lifecycle + roles
 
@@ -106,7 +106,7 @@ a prose bullet on the Codex line). Full role rules: `skills/lead/SKILL.md` (Clau
 
 The lessons registry is **governance-enforced only**. No hook scans
 `work-items/lessons/`, so a stale `open` lesson that nobody applies or drops is
-not structurally caught — the work-items-archival Stop hook does not see the
+not structurally caught — no archival Stop control sees the
 registry. This is weaker than the work-item close path, which the hook
 backstops. Surfacing the open-list in `/agents-status` is the only standing
 prompt to resolve a dangling lesson — and it runs ONLY when you invoke the
@@ -115,6 +115,14 @@ the background and nothing VALIDATES the registry (no check that a captured
 lesson was ever resolved, no check that a `source:` reference exists), so a
 stale `open`, an unfiled retrospective lesson, or a wrong reference is caught
 only if and when you look.
+
+## Physical lifecycle V1
+
+A terminal lesson moves from `work-items/lessons/` only when its explicit
+terminal status, `Terminal-at` strict UTC instant, disposition, and evidence
+are present. Its immutable archive target is
+`work-items/lessons/archive/YYYY-MM/`; incomplete historical records remain
+where they are until a human supplies authoritative facts.
 
 ## Terms and Abbreviations
 

@@ -122,6 +122,14 @@ Project installs copy to the matching project-local runtime:
 
 Use the installed equivalent when the source checkout is not available in the target repository.
 
+## Physical lifecycle V1
+
+For a tracked work-item, `status.md` is active recovery state and `closure.md`
+is terminal outcome. The lifecycle owner writes or moves the physical record,
+derives the archive month from strict UTC closure evidence, and preserves the
+archived identity. `README.md` and `index.md` are generated compatibility
+views; do not use either to infer, backfill, or execute a state transition.
+
 ## Operator Rules
 
 - Do not trust a subagent report without a matching ledger event and independent verification evidence.

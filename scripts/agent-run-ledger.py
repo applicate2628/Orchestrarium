@@ -70,6 +70,11 @@ def ensure_status_sections(item: Path, args: argparse.Namespace, validator: Any)
         validator.validate_quick_fix_status(text, errors)
         return errors
 
+    if validator.is_staged_status(text):
+        errors = []
+        validator.validate_staged_status(text, errors)
+        return errors
+
     additions: list[str] = []
     for heading, body_factory in STATUS_SECTIONS.items():
         if heading not in text:

@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 
+from scripts.bash_runtime import resolve_bash
+
 
 ROOT = Path(__file__).resolve().parents[1]
-BASH = shutil.which("bash")
+BASH = resolve_bash()
 
 MCP_SCRIPTS = (
     ROOT / "scripts" / "universal-hooks" / "scripts" / "mcp-usage-reminder.sh",
@@ -57,7 +58,7 @@ def _run(script: Path, *, cwd: Path | None = None,
          input: str | None = None) -> subprocess.CompletedProcess[str]:
     assert BASH is not None
     return subprocess.run(
-        [BASH, str(script)],
+        [BASH, script.as_posix()],
         cwd=cwd,
         env=env,
         input=input,

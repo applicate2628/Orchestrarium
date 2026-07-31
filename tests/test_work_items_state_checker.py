@@ -4,12 +4,15 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CHECKER = ROOT / "scripts" / "check-work-items-state.py"
 VALIDATOR = ROOT / "scripts" / "validate-work-item-state.py"
+MUTATOR = ROOT / "scripts" / "mutate-work-item.py"
 
 
 def run_checker(root: Path, *args: str) -> subprocess.CompletedProcess:
@@ -26,6 +29,7 @@ def write_checker_bundle(bundle_dir: Path, sentinel_source: str | None = None) -
     checker = bundle_dir / CHECKER.name
     shutil.copy2(CHECKER, checker)
     shutil.copy2(VALIDATOR, bundle_dir / VALIDATOR.name)
+    shutil.copy2(MUTATOR, bundle_dir / MUTATOR.name)
     if sentinel_source is not None:
         (bundle_dir / "workitem_sentinels.py").write_text(sentinel_source, encoding="utf-8")
     return checker
@@ -67,6 +71,34 @@ def valid_status() -> str:
     )
 
 
+def minimal_staged_status(**updates: str) -> str:
+    fields = {
+        "template": "staged",
+        "status": "active",
+        "started": "2026-07-31T10:00:00Z",
+        "updated": "2026-07-31T10:05:00Z",
+        "Task": "Keep the staged checker contract aligned.",
+        "Current step": "Verify the shared status validator.",
+        "Last result": "Staged work item admitted.",
+        "Next action": "Run the staged checker gate.",
+        "Scope boundary": "Work-item lifecycle scripts and focused tests.",
+        "Owner": "toolchain-engineer",
+        "Integration owner": "lead",
+        "Evidence gate": "Focused and full lifecycle suites.",
+    }
+    fields.update(updates)
+    frontmatter = [
+        "---",
+        f"template: {fields.pop('template')}",
+        f"status: {fields.pop('status')}",
+        f"started: {fields.pop('started')}",
+        f"updated: {fields.pop('updated')}",
+        "---",
+        "",
+    ]
+    return "\n".join(frontmatter + [f"{key}: {value}" for key, value in fields.items()]) + "\n"
+
+
 def ledger_event(**updates):
     event = {
         "schemaVersion": 1,
@@ -92,6 +124,24 @@ def write_valid_item(root: Path, name: str = "active-item", event: dict | None =
     (item / "status.md").write_text(valid_status(), encoding="utf-8")
     (item / "reviews" / "qa.md").write_text("PASS\n", encoding="utf-8")
     (item / "agent-runs.jsonl").write_text(json.dumps(event or ledger_event(workItem=name)) + "\n", encoding="utf-8")
+    return item
+
+
+def write_staged_item(
+    root: Path,
+    name: str = "staged-item",
+    status: str | None = None,
+    event: dict | None = None,
+) -> Path:
+    item = root / "work-items" / "active" / name
+    (item / "reviews").mkdir(parents=True)
+    (item / "status.md").write_text(status or minimal_staged_status(), encoding="utf-8")
+    (item / "reviews" / "qa.md").write_text("PASS\n", encoding="utf-8")
+    selected_event = event or ledger_event(workItem=name)
+    (item / "agent-runs.jsonl").write_text(
+        json.dumps(selected_event) + "\n",
+        encoding="utf-8",
+    )
     return item
 
 
@@ -161,6 +211,83 @@ def test_checker_keeps_absent_optional_sentinel_reporting_verdict_neutral(tmp_pa
     assert "sentinel optional reporting unavailable: missing callable(s):" in result.stdout
     assert "build_context" in result.stdout
     assert "evaluate_all" in result.stdout
+
+
+def test_checker_accepts_minimal_staged_status_and_reports_v1_next_action(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(tmp_path / "bundle", REQUIRED_SENTINEL_STUB)
+    write_staged_item(repo)
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PASS staged-item" in result.stdout
+    assert "staged-item -- Next action: Run the staged checker gate." in result.stdout
+    assert "status.md missing section" not in result.stdout
+
+
+def test_checker_rejects_staged_status_missing_required_v1_field(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(tmp_path / "bundle", REQUIRED_SENTINEL_STUB)
+    status = minimal_staged_status()
+    status = status.replace(
+        "Evidence gate: Focused and full lifecycle suites.\n",
+        "",
+    )
+    write_staged_item(repo, status=status)
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "staged status missing fields: evidence gate" in result.stdout
+    assert "status.md missing section" not in result.stdout
+
+
+def test_checker_preserves_open_revise_failure_on_staged_status(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(tmp_path / "bundle", REQUIRED_SENTINEL_STUB)
+    revise = ledger_event(
+        schemaVersion=2,
+        runId="run-staged-revise-001",
+        workItem="staged-item",
+        status="revise",
+        gate="REVISE",
+        eventKind="standalone",
+        lane="staged-contract",
+        effort="high",
+        findingClass="correctness",
+    )
+    write_staged_item(repo, event=revise)
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "open REVISE obligation: run-staged-revise-001" in result.stdout
+    assert "status.md missing section" not in result.stdout
+
+
+def test_checker_preserves_unsettled_launch_failure_on_staged_status(tmp_path: Path):
+    repo = tmp_path / "repo"
+    checker = write_checker_bundle(tmp_path / "bundle", REQUIRED_SENTINEL_STUB)
+    launch = ledger_event(
+        schemaVersion=2,
+        runId="run-staged-launch-001",
+        workItem="staged-item",
+        status="running",
+        gate="none",
+        eventKind="launch",
+        lane="staged-contract",
+        effort="high",
+        startedAt="2026-07-31T10:00:00Z",
+        updatedAt="2026-07-31T10:05:00Z",
+    )
+    write_staged_item(repo, event=launch)
+
+    result = run_bundled_checker(checker, repo)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "unsettled launch: run-staged-launch-001" in result.stdout
+    assert "status.md missing section" not in result.stdout
 
 
 def test_checker_keeps_failing_optional_sentinel_reporting_verdict_neutral(tmp_path: Path):
@@ -697,3 +824,24 @@ def test_done_predicate_twin_not_drifted():
     checker = CHECKER.read_text(encoding="utf-8")
     assert line in sentinels, "workitem_sentinels.py DONE_STATE pattern changed — update the twin in check-work-items-state.py"
     assert line in checker, "check-work-items-state.py DONE_STATE pattern drifted from workitem_sentinels.py"
+
+
+class TestArchiveOnlyDependencyTerminality(unittest.TestCase):
+    def test_active_semantic_done_is_not_terminal_until_archive_move(self) -> None:
+        module = load_checker_module()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = root / "active"
+            archive = root / "archive"
+            item = active / "dependency"
+            item.mkdir(parents=True)
+            (item / "status.md").write_text("status: completed\n", encoding="utf-8")
+            (item / "closure.md").write_text(
+                "Closed: 2026-07-31T00:00:00Z\n",
+                encoding="utf-8",
+            )
+            self.assertFalse(module._slug_done("dependency", active, archive))
+            archived = archive / "2026-07" / "dependency"
+            archived.parent.mkdir(parents=True)
+            item.replace(archived)
+            self.assertTrue(module._slug_done("dependency", active, archive))

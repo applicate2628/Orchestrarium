@@ -172,8 +172,8 @@ def last_genuine_user_text(transcript_path: str, *, byte_cap: int) -> tuple[str,
     doubling mechanics and the status vocabulary each have exactly one
     definition instead of two that merely happened to match.
 
-    Existing callers relying on this exact signature and status vocabulary:
-    `check-work-items-archival-stop.py` and this module's own test suite."""
+    Current transcript-boundary consumers and this module's test suite rely on
+    this exact signature and status vocabulary."""
     entry, _after_entries, status = scan_current_turn_boundary(transcript_path, byte_cap=byte_cap)
     if status != STATUS_FOUND:
         return "", status

@@ -39,10 +39,10 @@ Nothing is cached; the views are computed live — on the Claude line by the
 `/agents-status` + `/agents-resume` commands, and on the Codex line by the lead
 scanning the active set (Codex has no commands):
 
-- **blocked-by** of an item = its `Depends-on` targets that are NOT done. "Done"
-  is the SAME predicate the work-items-archival hook uses (archived, OR has a
-  `closure.md`, OR its `status.md` carries a bare done-state line). An item with
-  ≥1 open target is reported as `blocked`.
+- **blocked-by** of an item = its `Depends-on` targets that are NOT archived.
+  A status line or `closure.md` does not satisfy a dependency while the target
+  remains in an active location. An item with ≥1 open target is reported as
+  `blocked`.
 - **ready-set** = active items whose every `Depends-on` target is done (or which
   have none) — the items safe to start now.
 - **dangling** = a `Depends-on` slug that resolves in none of the three
@@ -94,12 +94,20 @@ that verdict routes to the bug registry, this edge routes between work-items.
 Dependency hygiene is **governance-enforced only**. No hook enforces the
 `Depends-on` edges, so a forgotten blocker (an item started while a prerequisite
 is still open) or a dangling edge is not structurally caught — the
-work-items-archival Stop hook does not see them. `/agents-status` surfacing
+archival Stop control does not see them. `/agents-status` surfacing
 blocked / ready / dangling is the only standing prompt — and it runs ONLY when
 you invoke the command (on the Codex line, when the lead scans); nothing runs in
 the background and nothing VALIDATES the graph (no cycle check, no
 target-exists check beyond the dangling flag you have to look at), so a cycle, a
 dangling target, or a forgotten blocker is caught only if and when you look.
+
+## Physical lifecycle V1
+
+`Depends-on` resolves bare work-item slugs through the physical lifecycle
+owner: `work-items/backlog/`, `work-items/active/`, and
+`work-items/archive/YYYY-MM/`. A target is complete only when it uniquely
+resolves as an archived identity with its required terminal evidence; an index
+entry, a guessed status word, or a missing record never grants readiness.
 
 ## Terms and Abbreviations
 

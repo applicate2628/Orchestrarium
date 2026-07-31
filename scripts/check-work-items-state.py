@@ -20,6 +20,17 @@ def load_validator():
     return module
 
 
+def load_lifecycle_owner():
+    owner_path = Path(__file__).with_name("mutate-work-item.py")
+    spec = importlib.util.spec_from_file_location("mutate_work_item", owner_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load lifecycle owner from {owner_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 REQUIRED_SENTINEL_DEPENDENCY_ID = "required-sentinel-dependency-unavailable"
 REQUIRED_SENTINEL_CONTRACT_ID = "required-sentinel-contract-mismatch"
 REQUIRED_SENTINEL_CALL_ID = "required-sentinel-call-failed"
@@ -202,18 +213,7 @@ def _slug_archived(slug: str, archive_dir: Path) -> bool:
 
 
 def _slug_done(slug: str, active_dir: Path, archive_dir: Path) -> bool:
-    if _slug_archived(slug, archive_dir):
-        return True
-    item = active_dir / slug
-    try:
-        if (item / "closure.md").is_file():
-            return True
-        status = item / "status.md"
-        if status.is_file() and DONE_STATE_LINE_RE.search(status.read_text(encoding="utf-8", errors="replace")):
-            return True
-    except OSError:
-        return False
-    return False
+    return _slug_archived(slug, archive_dir)
 
 
 def _slug_exists(slug: str, active_dir: Path, archive_dir: Path) -> bool:
@@ -328,7 +328,7 @@ def iter_work_items(active_dir: Path) -> list[Path]:
     return sorted(path for path in active_dir.iterdir() if path.is_dir())
 
 
-def next_action_line(item: Path) -> str:
+def next_action_line(item: Path, validator=None) -> str:
     """First non-empty content line under the '## Next action' section of status.md,
     for the still-open enumeration. Returns a loud marker (never silence) on a missing
     file/section — open work must stay visible. The heading match is EXACT so
@@ -343,6 +343,12 @@ def next_action_line(item: Path) -> str:
         text = status.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return "(status.md unreadable)"
+    staged_fields = validator.staged_status_fields(text) if validator is not None else None
+    if staged_fields is not None:
+        content = staged_fields.get("next action", "").strip()
+        if not content:
+            return "(no Next action field content)"
+        return (content[:157] + "...") if len(content) > 160 else content
     in_section = False
     for line in text.splitlines():
         stripped = line.strip()
@@ -374,6 +380,12 @@ def command_check(args: argparse.Namespace) -> int:
     stale_after = timedelta(hours=args.stale_hours)
     archive_dir = active_dir.parent / "archive"
     failed = 0
+    lifecycle = load_lifecycle_owner()
+    try:
+        lifecycle.audit_categories(root)
+    except lifecycle.LifecycleError as exc:
+        failed += 1
+        print(f"FAIL category lifecycle: {exc.failure_id}: {exc}")
     global_notes = epic_adoption_notes(items, active_dir)
     sentinel_dependency = load_required_sentinels()
     delivery_errors: dict[str, list[str]] = {}
@@ -509,7 +521,7 @@ def command_check(args: argparse.Namespace) -> int:
         # of ANY kind is state, never completion, while these items remain open.
         print("STILL OPEN - these active work-items are NOT closed (a check result is state, not completion):")
         for item in items:
-            print(f"  - {item.name} -- Next action: {next_action_line(item)}")
+            print(f"  - {item.name} -- Next action: {next_action_line(item, validator)}")
 
     if failed:
         print(f"RESULT: FAIL ({failed} failures across active+archived work-items)")

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import importlib.util
 import json
 import re
 import sys
@@ -73,6 +74,7 @@ ALLOWED_FIELDS = {
 }
 EVIDENCE_ALLOWED_FIELDS = {"kind", "ref", "result"}
 QUICK_FIX_TEMPLATE = "quick-fix"
+STAGED_TEMPLATE = "staged"
 QUICK_FIX_LIFECYCLE_FIELDS = ("template", "status", "started", "updated")
 QUICK_FIX_RECOVERY_FIELDS = ("Task", "Current step", "Last result", "Next action")
 FULL_STATUS_SECTIONS = ("## Current state", "## Active agents", "## Completed agents", "## Next action")
@@ -83,10 +85,48 @@ QUICK_FIX_FACT_RE = re.compile(
 QUICK_FIX_RECOVERY_FIELD_BY_CASEFOLD = {
     field.casefold(): field for field in QUICK_FIX_RECOVERY_FIELDS
 }
+_LIFECYCLE_OWNER = None
 
 
 def fail(errors: list[str], message: str) -> None:
     errors.append(message)
+
+
+def load_lifecycle_owner():
+    global _LIFECYCLE_OWNER
+    if _LIFECYCLE_OWNER is not None:
+        return _LIFECYCLE_OWNER
+    owner_path = Path(__file__).with_name("mutate-work-item.py")
+    spec = importlib.util.spec_from_file_location(
+        "work_item_lifecycle_owner_for_validation",
+        owner_path,
+    )
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load lifecycle owner from {owner_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    _LIFECYCLE_OWNER = module
+    return module
+
+
+def staged_status_fields(text: str) -> dict[str, str] | None:
+    """Return lifecycle-owner parsed fields only for an explicit staged V1 status."""
+    fields = load_lifecycle_owner()._parse_fields(text)
+    return fields if fields.get("template") == STAGED_TEMPLATE else None
+
+
+def is_staged_status(text: str) -> bool:
+    return staged_status_fields(text) is not None
+
+
+def validate_staged_status(text: str, errors: list[str]) -> None:
+    """Validate staged V1 through the lifecycle owner; do not duplicate its field contract."""
+    lifecycle = load_lifecycle_owner()
+    try:
+        lifecycle._validate_active_status_bytes(text.encode("utf-8"))
+    except lifecycle.LifecycleError as exc:
+        fail(errors, str(exc))
 
 
 def is_quick_fix_status(text: str) -> bool:
@@ -854,6 +894,9 @@ def validate_status(item: Path, events: list[dict], errors: list[str]) -> None:
     if is_quick_fix_status_candidate(text):
         validate_quick_fix_status(text, errors)
         return
+    if is_staged_status(text):
+        validate_staged_status(text, errors)
+        return
     for section in FULL_STATUS_SECTIONS:
         if section not in text:
             fail(errors, f"status.md missing section: {section}")
@@ -868,6 +911,7 @@ def validate_work_item(
     ledger_path: Path | None = None,
     strict_revise: bool = True,
     telemetry: dict[str, int] | None = None,
+    validate_status_file: bool = True,
 ) -> list[str]:
     """ledger_path: candidate-validation seam — validate THIS file instead of the live
     ledger (the atomic-write flow validates its temp candidate before os.replace).
@@ -875,7 +919,17 @@ def validate_work_item(
     tool's job is failing); pass False only for triage sessions.
     """
     errors: list[str] = []
-    events = load_jsonl(ledger_path or (item / "agent-runs.jsonl"), errors)
+    selected_ledger = ledger_path or (item / "agent-runs.jsonl")
+    status_path = item / "status.md"
+    status_text = status_path.read_text(encoding="utf-8") if status_path.exists() else ""
+    # V1 keeps an undelegated quick-fix ledger-free.  A staged/full item and an
+    # explicitly supplied candidate ledger retain the exact fail-closed behavior.
+    ledger_free_quick_fix = (
+        ledger_path is None
+        and not selected_ledger.exists()
+        and is_quick_fix_status(status_text)
+    )
+    events = [] if ledger_free_quick_fix else load_jsonl(selected_ledger, errors)
     event_validity = derive_event_validity(events, item, errors)
     open_revise, open_launches = validate_closure(
         events,
@@ -897,7 +951,21 @@ def validate_work_item(
                 f"artifact={event.get('artifact')!r}) — closes only on re-verification PASS "
                 f"(closesRunIds) or a typed disposition, never on author belief or validator green",
             )
-    validate_status(item, events, errors)
+    is_monthly_archive = (
+        len(item.parts) >= 3
+        and item.parent.parent.name == "archive"
+        and re.fullmatch(r"\d{4}-\d{2}", item.parent.name) is not None
+    )
+    closure_path = item / "closure.md"
+    archived_v1_closure = False
+    if is_monthly_archive and closure_path.is_file():
+        closure_text = closure_path.read_text(encoding="utf-8", errors="replace")
+        archived_v1_closure = all(
+            re.search(rf"(?im)^\s*{re.escape(field)}\s*:\s*\S", closure_text)
+            for field in ("Closed", "Outcome", "Evidence", "Residual risk")
+        )
+    if validate_status_file and not (is_monthly_archive and archived_v1_closure):
+        validate_status(item, events, errors)
     return errors
 
 

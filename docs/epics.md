@@ -56,12 +56,11 @@ Epic: <epic-slug>
 ## Roll-up (derived, never stored)
 
 Epic progress is derived live, never kept as a maintained cache (a cache
-drifts). A child is **done** iff its `status.md` carries a bare done-state line
-(`status:`/`state:`/`stage:`/`outcome:` whose value begins
-`closed|done|complete|completed|archived` — the same predicate the
-work-items-archival hook uses), OR it lives under `work-items/archive/`, OR it
-has a `closure.md`. Each child slug is resolved across BOTH `work-items/active/`
-and `work-items/archive/` (the slug is stable across the close-move). Roll-up:
+drifts). A child is **done** only when its slug resolves uniquely under
+`work-items/archive/`; an active status line or `closure.md` records evidence
+but does not make the child terminal. Each child slug is resolved across BOTH
+`work-items/active/` and `work-items/archive/` (the slug is stable across the
+close-move). Roll-up:
 all done -> `ready-to-close (n/n)`; some -> `in-progress (k/n)`; none -> `open`.
 `/agents-status` and `/agents-resume` compute and show it.
 
@@ -93,16 +92,20 @@ all done -> `ready-to-close (n/n)`; some -> `in-progress (k/n)`; none -> `open`.
 
 ## Known limitation
 
-The work-items-archival Stop hook scans the active root and monthly archive. At
-turn end it flags a ready-to-close active epic, a closed epic left in the active
-root, an archived epic whose child reopened, an archived epic still marked
-active, and a duplicate slug. It is subagent-safe (skips on `agent_id`) and
-fails open when `work-items/epics/` is absent. Still governance-only: nothing
-verifies the epic's `## Goal` is actually met (only that the children are
-closed), and a child line written outside the documented exact
-`- <slug> (active|closed)` shape is ignored rather than guessed. Full role
-rules: `skills/lead/SKILL.md` (Claude; `agents/lead.md` is a fail-closed stub) /
-the lead skill (Codex) `## Epics`.
+No archival Stop control scans epics. The lifecycle owner and documented state
+check reject duplicate locations and missing terminal evidence; whether the
+epic `## Goal` is met remains an explicit lead decision. Full role rules:
+`skills/lead/SKILL.md` (Claude; `agents/lead.md` is a fail-closed stub) / the
+lead skill (Codex) `## Epics`.
+
+## Physical lifecycle V1
+
+An active epic is `work-items/epics/<slug>.md`; a terminal epic is only
+`work-items/epics/archive/YYYY-MM/<slug>.md`. The month comes from strict UTC
+`Closed: YYYY-MM-DDTHH:MM:SSZ` evidence. The lifecycle owner rejects duplicate
+locations and missing closure evidence; reopening creates a successor rather
+than restoring the archived identity. The archival Stop adapter is retired, so
+operators use lifecycle validation and the documented state check.
 
 ## Terms and Abbreviations
 

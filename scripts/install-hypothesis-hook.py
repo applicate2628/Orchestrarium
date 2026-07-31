@@ -210,7 +210,7 @@ def _codex_windows_command_tokens(target: HookTarget) -> HookTarget:
     absolute command token, so this is not a correctness fix -- it is a byte
     fidelity one. Codex derives each hook's trust hash from the entry content,
     so emitting exactly the spelling the operator already trusted lets a
-    reinstall reproduce the stored `trusted_hash` instead of re-keying all 13
+    reinstall reproduce the stored `trusted_hash` instead of re-keying all 12
     entries and raising a blocking review modal.
 
     Applies to the python and native profiles only. The wrapper profile must

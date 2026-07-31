@@ -63,6 +63,25 @@ updated: 2026-07-30 10:00
 """
 
 
+def minimal_staged_status() -> str:
+    return """---
+template: staged
+status: active
+started: 2026-07-31T10:00:00Z
+updated: 2026-07-31T10:05:00Z
+---
+
+Task: Keep the staged ledger contract aligned.
+Current step: Record the implementation run.
+Last result: Staged work item admitted.
+Next action: Append the implementation verdict.
+Scope boundary: Work-item lifecycle scripts and focused tests.
+Owner: toolchain-engineer
+Integration owner: lead
+Evidence gate: Focused and full lifecycle suites.
+"""
+
+
 def prepare_valid_work_item(tmp_path: Path) -> Path:
     item = tmp_path / "work-items" / "active" / "ledger-helper"
     (item / "reviews").mkdir(parents=True)
@@ -134,6 +153,49 @@ def test_append_records_event_and_validator_passes(tmp_path: Path):
     event = json.loads(lines[0])
     assert event["runId"] == "run-append-001"
     assert event["evidence"][0]["kind"] == "command"
+
+
+def test_staged_init_and_append_preserve_status_bytes(tmp_path: Path):
+    item = tmp_path / "work-items" / "active" / "staged-ledger"
+    (item / "reviews").mkdir(parents=True)
+    status_path = item / "status.md"
+    original = minimal_staged_status().encode("utf-8")
+    status_path.write_bytes(original)
+    (item / "reviews" / "qa.md").write_text("PASS\n", encoding="utf-8")
+
+    initialized = run_ledger(item, "init")
+
+    assert initialized.returncode == 0, initialized.stderr
+    assert status_path.read_bytes() == original
+    appended = run_ledger(
+        item,
+        "append",
+        "--run-id",
+        "run-staged-append-001",
+        "--role",
+        "qa-engineer",
+        "--execution-role",
+        "internal",
+        "--status",
+        "completed",
+        "--gate",
+        "PASS",
+        "--scope",
+        "scripts/agent-run-ledger.py",
+        "--artifact",
+        "reviews/qa.md",
+        "--evidence",
+        "command:pytest tests/test_agent_run_ledger.py -q",
+        "--started-at",
+        "2026-07-31T10:00:00Z",
+        "--updated-at",
+        "2026-07-31T10:05:00Z",
+    )
+
+    assert appended.returncode == 0, appended.stderr
+    assert status_path.read_bytes() == original
+    validator = run_validator(item)
+    assert validator.returncode == 0, validator.stderr
 
 
 def test_append_rolls_back_invalid_pass_without_evidence(tmp_path: Path):

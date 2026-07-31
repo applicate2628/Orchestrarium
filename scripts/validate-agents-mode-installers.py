@@ -96,36 +96,22 @@ INSTALLER_CASES = [
         script="scripts/install-claude.py",
         overlay=".claude/.agents-mode.yaml",
     ),
-    InstallerCase(
-        name="gemini",
-        script="scripts/install-gemini.sh",
-        overlay=".gemini/.agents-mode.yaml",
-    ),
-    InstallerCase(
-        name="qwen",
-        script="scripts/install-qwen.sh",
-        overlay=".qwen/.agents-mode.yaml",
-    ),
 ]
 
-_UNIVERSAL_HOOK_EXTS = (".py", ".sh")
+PRODUCTION_PROVIDER_NAMES = frozenset({"codex", "claude"})
+EXAMPLE_PROVIDER_NAMES = frozenset({"gemini", "qwen"})
 
 
-def universal_hook_helper_paths(root: Path) -> tuple[str, ...]:
-    """The `scripts/<name>` + `hooks/<name>` relative paths the packs must carry,
-    DERIVED by globbing the pack-neutral canon `scripts/universal-hooks/` — never
-    a hardcoded list (a hardcoded list hid check-stale-relation-residue from this
-    gate until 2026-07-07). Adding a hook to the canon auto-covers it here."""
-    canon = root / "scripts" / "universal-hooks"
-    paths: list[str] = []
-    for sub in ("scripts", "hooks"):
-        d = canon / sub
-        if not d.is_dir():
-            continue
-        for p in sorted(d.iterdir()):
-            if p.is_file() and p.suffix in _UNIVERSAL_HOOK_EXTS:
-                paths.append(f"{sub}/{p.name}")
-    return tuple(paths)
+def validate_production_provider_partition() -> None:
+    actual = frozenset(case.name for case in INSTALLER_CASES)
+    if actual != PRODUCTION_PROVIDER_NAMES:
+        raise InstallerRegressionError(
+            "production installer regression must cover exactly codex and claude"
+        )
+    if actual & EXAMPLE_PROVIDER_NAMES:
+        raise InstallerRegressionError(
+            "example providers must not be treated as production installer cases"
+        )
 
 
 class InstallerRegressionError(Exception):
@@ -362,31 +348,8 @@ def validate_overlay(
         )
 
 
-def validate_example_provider_universal_hooks(
-    root: Path,
-    case: InstallerCase,
-    project_root: Path,
-) -> None:
-    if case.name not in {"gemini", "qwen"}:
-        return
-
-    manifest_path = root / f"src.{case.name}" / "extension" / f"{case.name}-extension.json"
-    extension_name = load_json(manifest_path).get("name")
-    if not extension_name:
-        raise InstallerRegressionError(f"{case.name} extension manifest has no name")
-
-    extension_root = project_root / f".{case.name}" / "extensions" / extension_name
-    for rel in universal_hook_helper_paths(root):
-        if not (extension_root / rel).is_file():
-            raise InstallerRegressionError(
-                f"{case.name} installer did not install universal hook/helper {rel}"
-            )
-
-
 def run_regression(root: Path) -> None:
-    if shutil.which("bash") is None:
-        raise InstallerRegressionError("bash is required for installer regression")
-
+    validate_production_provider_partition()
     schema_data = load_json(root / "shared" / "agents-mode.schema.json")
     scratch = root / ".scratch" / "agents-mode-installer-regression" / uuid.uuid4().hex
     scratch.mkdir(parents=True, exist_ok=True)
@@ -408,7 +371,6 @@ def run_regression(root: Path) -> None:
                 / f"{case.name}-project",
             )
             validate_overlay(case, overlay, schema_data)
-            validate_example_provider_universal_hooks(root, case, project_root)
             if case.codex_line:
                 validate_codex_agent_override_reclaim(
                     project_root,

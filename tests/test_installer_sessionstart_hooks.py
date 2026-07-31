@@ -14,7 +14,7 @@ sys.modules[spec.name] = installer
 spec.loader.exec_module(installer)
 
 
-@pytest.mark.parametrize("provider,expected_count", (("codex", 13), ("claude", 14)))
+@pytest.mark.parametrize("provider,expected_count", (("codex", 12), ("claude", 13)))
 def test_complete_hook_set(provider: str, expected_count: int, tmp_path: Path) -> None:
     specs = installer._hook_specs(provider, tmp_path)
     assert len(specs) == expected_count

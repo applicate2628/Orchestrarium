@@ -91,7 +91,7 @@ EXPECTED_MANIFEST: dict[str, tuple[str, ...]] = {
         "[skip-bugfix-discipline]` bypasses the PreToolUse guard for the next turn",
         "[approve-publication]` opens the git-push gate for one turn — honored ONLY when it appears in the user's own last message",
         "[acknowledge-passive-stop]` bypasses one passive-polling Stop decision when the assistant is intentionally handing off to the user",
-        "[acknowledge-open-work-items]` bypasses one work-items-archival Stop decision when leaving a closed-marked item in `active/` is intentional this turn",
+        "Physical location owns lifecycle membership",
     ),
     "delegation and recovery teeth": (
         "/agents-init-project",
@@ -101,14 +101,14 @@ EXPECTED_MANIFEST: dict[str, tuple[str, ...]] = {
         "Every specialist invocation MUST use the Agent tool",
         "Lead is never spawned as a subagent",
         "The main conversation owns `work-items/`",
-        "the close step is as mandatory as the create step above",
+        "**Close is mandatory.**",
     ),
     "routing and role teeth": (
         "## Slash command auto-invocation",
         "**Auto-invocation contract:**",
         "**Dispatch index**",
         "## Coexistence with the superpowers plugin",
-        "invoke it via the `Skill` tool **before** picking an Orchestrator template",
+        "New feature, exploration, or unclear request → invoke `brainstorming` first, then pick a template.",
         "Already in mid-flow with admitted scope",
         "## Role definitions",
         "Pre-publication scan: run `/agents-check-safety`",
@@ -166,9 +166,9 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
     result = _run()
     assert result.returncode == 0, result.stdout + result.stderr
     for expected in (
-        "Code points: 36551",
-        "UTF-8 bytes: 36741",
-        "Binding size: 36741",
+        "Code points: 36227",
+        "UTF-8 bytes: 36407",
+        "Binding size: 36407",
         "Size cap: 36771",
         "Warning threshold: 36521",
         "Manifest: 47/47",
@@ -180,7 +180,7 @@ def test_live_claude_md_passes_at_post_extraction_cap_and_reports_exact_counts()
 def test_tiny_size_cap_fails_closed() -> None:
     result = _run("--size-cap", "1000")
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "FAIL: Claude Markdown binding size 36741 > size cap 1000" in result.stdout
+    assert "FAIL: Claude Markdown binding size 36407 > size cap 1000" in result.stdout
     assert "RESULT: FAIL" in result.stdout
 
 

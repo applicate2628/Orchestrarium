@@ -102,6 +102,7 @@ def run_adapter(script: Path, envelope: dict, extra_env: dict | None = None) -> 
     )
 
 
+@unittest.skip("retired archival Stop adapter; registry logic is covered directly")
 class TestSEN2DeliveryDrought(unittest.TestCase):
     """A due opted-in delivery action gets one root continuation only."""
 
@@ -588,32 +589,10 @@ Continue the admitted work.
         self.assertIn("SEN-2-DROUGHT", result.stdout)
 
 
-class TestSEN0MarkerScoping(unittest.TestCase):
-    """G-1b / DI-1b: [acknowledge-open-work-items] in assistant prose clears
-    SEN-0 ONLY -- it must not clear SEN-1 (dual-state), which is exactly the
-    F-B3 defect a literal (adapter-level) migration of the marker would have
-    reintroduced. (r8: SEN-2, the drought invariant this docstring originally
-    also named as a thing the marker must not clear, is cut -- design.md
-    §0.9.)"""
+class TestSEN0HasNoProseBypass(unittest.TestCase):
+    """Periodic lifecycle findings derive from repository state, not prose."""
 
-    def test_marker_clears_sen0_but_not_sen1(self) -> None:
-        root = make_git_repo()
-        active = root / "work-items" / "active" / "dup-slug"
-        active.mkdir(parents=True)
-        (active / "closure.md").write_text("outcome: PASS", encoding="utf-8")  # SEN-0 orphan
-        archive = root / "work-items" / "archive" / "2026-06" / "dup-slug"
-        archive.mkdir(parents=True)  # ALSO archived -> SEN-1 dual-state
-
-        ctx = sentinels.build_context(
-            str(root),
-            last_assistant_message="leaving it open [acknowledge-open-work-items]",
-        )
-        findings = sentinels.evaluate_all(ctx)
-        ids = {f.id: f.severity for f in findings}
-        self.assertNotIn("SEN-0", ids, "the marker must clear SEN-0")
-        self.assertIn("SEN-1", ids, "the marker must NOT clear SEN-1 (F-B3)")
-
-    def test_marker_absent_both_fire(self) -> None:
+    def test_extra_context_cannot_clear_sen0_or_sen1(self) -> None:
         root = make_git_repo()
         active = root / "work-items" / "active" / "dup-slug"
         active.mkdir(parents=True)
@@ -621,53 +600,32 @@ class TestSEN0MarkerScoping(unittest.TestCase):
         archive = root / "work-items" / "archive" / "2026-06" / "dup-slug"
         archive.mkdir(parents=True)
 
-        ctx = sentinels.build_context(str(root), last_assistant_message="done")
+        ctx = sentinels.build_context(
+            str(root),
+            arbitrary_prose="leave this open",
+        )
+        findings = sentinels.evaluate_all(ctx)
+        ids = {f.id: f.severity for f in findings}
+        self.assertIn("SEN-0", ids)
+        self.assertIn("SEN-1", ids)
+
+    def test_repository_state_alone_drives_findings(self) -> None:
+        root = make_git_repo()
+        active = root / "work-items" / "active" / "dup-slug"
+        active.mkdir(parents=True)
+        (active / "closure.md").write_text("outcome: PASS", encoding="utf-8")
+        archive = root / "work-items" / "archive" / "2026-06" / "dup-slug"
+        archive.mkdir(parents=True)
+
+        ctx = sentinels.build_context(str(root))
         findings = sentinels.evaluate_all(ctx)
         ids = {f.id for f in findings}
         self.assertIn("SEN-0", ids)
         self.assertIn("SEN-1", ids)
 
-    def test_marker_in_operators_own_message_also_clears_sen0(self) -> None:
-        """F3 regression: SEN-0's marker text must also clear via the
-        operator-only channel -- the §4.4a stop_hook_active escalation
-        (`systemMessage`), which is the only operator-directed output this
-        registry now emits (r7 removed HALT's `stopReason` entirely; r8 cut
-        SEN-2, whose [approve-review-continuation] marker was this pattern's
-        prior precedent) -- but the marker check used to read ONLY
-        last_assistant_message, the MODEL's own reply, never the operator's.
-        An operator typing the marker in their own next message must also
-        clear SEN-0."""
-        root = make_git_repo()
-        active = root / "work-items" / "active" / "orphan"
-        active.mkdir(parents=True)
-        (active / "closure.md").write_text("outcome: PASS", encoding="utf-8")
-
-        ctx = sentinels.build_context(
-            str(root),
-            last_assistant_message="done",  # no marker from the model
-            user_message_text="ok, [acknowledge-open-work-items] proceed",
-        )
-        findings = sentinels.evaluate_all(ctx)
-        self.assertFalse(
-            any(f.id == "SEN-0" for f in findings),
-            "the operator's own marker (user_message_text) must also clear SEN-0 (F3)",
-        )
-
 
 class TestDI4NoT2SignalOutsideDeclaredExemption(unittest.TestCase):
-    """G-4: no sentinel EVALUATION path reads a T2 (model-authored) signal.
-    The one declared exception (SEN-0's marker) lives inside an explicitly
-    delimited block INSIDE `_sen0_evaluate`; everywhere else in an
-    evaluate()-path function, reading the ledger, status.md-as-a-ledger-proxy,
-    or last_assistant_message would silently reintroduce the proven defect
-    (the incident's failing session called the fail-closed ledger helper 705
-    times, then simply stopped).
-
-    Scoped to actual evaluation-path function SOURCE (via `inspect.getsource`),
-    not the whole file: `build_context` legitimately carries
-    `last_assistant_message` as a CTX FIELD NAME (it has to be named
-    something), and the module docstring legitimately NAMES these signals to
-    explain why they are banned. Neither is an evaluation path."""
+    """No periodic evaluation path reads a model-authored clearing signal."""
 
     BANNED_PATTERNS = ("agent-runs", "agent_run_ledger", "status.md", "last_assistant_message")
 
@@ -676,6 +634,7 @@ class TestDI4NoT2SignalOutsideDeclaredExemption(unittest.TestCase):
     # _current_file_count, _tree_file_count) were all deleted with the
     # invariant itself (design.md §0.9) -- they no longer exist to import.
     EVALUATION_PATH_FUNCTIONS = (
+        "_sen0_evaluate",
         "_sen1_evaluate",
         "resolve_slug_locations",
     )
@@ -689,25 +648,6 @@ class TestDI4NoT2SignalOutsideDeclaredExemption(unittest.TestCase):
             for pattern in self.BANNED_PATTERNS:
                 with self.subTest(function=name, pattern=pattern):
                     self.assertNotIn(pattern, source)
-
-    def test_sen0_evaluate_confines_the_one_declared_exemption(self) -> None:
-        import inspect
-
-        source = inspect.getsource(sentinels._sen0_evaluate)
-        begin = source.index("# --- BEGIN DECLARED T2 EXEMPTION")
-        end = source.index("# --- END DECLARED T2 EXEMPTION") + len("# --- END DECLARED T2 EXEMPTION")
-        declared_block = source[begin:end]
-        outside = source[:begin] + source[end:]
-        # The declared block DOES reference the one admitted T2 signal (proves
-        # the block exists and is where the marker check actually lives).
-        self.assertIn("last_assistant_message", declared_block)
-        # Everything in _sen0_evaluate OUTSIDE that block must be clean too --
-        # the detection logic itself (item/epic orphan scan) must not read a
-        # T2 signal either; only the declared exemption may.
-        for pattern in ("agent-runs", "agent_run_ledger"):
-            with self.subTest(pattern=pattern):
-                self.assertNotIn(pattern, outside)
-
 
 class TestDI5NoValidatorImport(unittest.TestCase):
     """G-5: the sentinel surface never imports the 4079-line-on-a-real-repo
@@ -898,6 +838,32 @@ class TestEpicArchiveLifecycle(unittest.TestCase):
         self.assertEqual(len(sen0), 1)
         self.assertIn("archived epic has a child work-item that is not closed", sen0[0].message)
 
+    def test_epic_child_terminality_is_archive_only(self) -> None:
+        root = self._root()
+        child = root / "work-items" / "active" / "kid"
+        child.mkdir()
+        (child / "status.md").write_text("status: completed\n", encoding="utf-8")
+        (child / "closure.md").write_text("Closed: 2026-07-31T00:00:00Z\n", encoding="utf-8")
+        self._write_epic(
+            root / "work-items" / "epics" / "e1.md",
+            "active",
+            ("kid",),
+        )
+
+        active_ctx = sentinels.build_context(str(root))
+        self.assertFalse(sentinels._slug_is_done(active_ctx, "kid"))
+        self.assertEqual(sentinels._detect_epic_orphans(active_ctx), [])
+
+        archived = root / "work-items" / "archive" / "2026-07" / "kid"
+        archived.parent.mkdir(parents=True)
+        child.replace(archived)
+        archived_ctx = sentinels.build_context(str(root))
+        self.assertTrue(sentinels._slug_is_done(archived_ctx, "kid"))
+        self.assertEqual(
+            sentinels._detect_epic_orphans(archived_ctx),
+            [("e1", "all child work-items are closed but the epic is still status: active (close it)")],
+        )
+
     def test_archived_active_epic_requires_same_operation_restore(self) -> None:
         root = self._root()
         archived = root / "work-items" / "epics" / "archive" / "2026-07" / "e1.md"
@@ -1022,6 +988,7 @@ class TestF4NonMonthArchiveLayout(unittest.TestCase):
 # re-proposal on a different substrate.
 
 
+@unittest.skip("retired archival Stop adapter")
 class TestG11ResolveSuppressedUnderStopHookActive(unittest.TestCase):
     """Every RESOLVE-tier entry, exercised with stop_hook_active: true, must
     yield NO continuation -- no `decision` field, and the adapter must not
@@ -1051,6 +1018,7 @@ class TestG11ResolveSuppressedUnderStopHookActive(unittest.TestCase):
                 self.assertNotIn('"decision"', p.stdout)
 
 
+@unittest.skip("retired archival Stop adapter")
 class TestG13TierEscalation(unittest.TestCase):
     """G-13/T-10/DI-12: a RESOLVE-tier finding suppressed by stop_hook_active
     additionally emits a turn-free NOTICE naming the invariant, in the SAME
@@ -1085,6 +1053,7 @@ class TestG13TierEscalation(unittest.TestCase):
         self.assertIn('"block"', p.stdout)
 
 
+@unittest.skip("retired archival Stop adapter")
 class TestR7NoHaltTierExists(unittest.TestCase):
     """r7 (T-14, design.md §4.4c/§1.0): the HALT tier is REMOVED, not merely
     unused. `workitem_sentinels.HALT` must not exist as a severity constant
@@ -1135,6 +1104,7 @@ def _load_adapter_module():
         raise
 
 
+@unittest.skip("retired archival Stop adapter")
 class TestF10PayloadTruncation(unittest.TestCase):
     """F10: the runtime documents a 10,000-character cap on `systemMessage` /
     plain stdout. A finding's message grows with the number of items it
@@ -1214,17 +1184,26 @@ class TestG12CensusInventory(unittest.TestCase):
     }
 
     def test_stop_and_sessionstart_repo_state_hooks_are_registry_or_declared(self) -> None:
-        installer = (REPO_ROOT / "scripts" / "install-claude.sh").read_text(encoding="utf-8")
-        # The two matcher-less, repository-state hooks this design's own
-        # census names (design.md §2.1): the archival/sentinel Stop hook
-        # (now the registry adapter) and check-scratch-valuables.
-        self.assertIn("check-work-items-archival-stop", installer)
-        self.assertIn("check-scratch-valuables", installer)
+        path = REPO_ROOT / "scripts" / "production_installer.py"
+        spec = importlib.util.spec_from_file_location(
+            "production_installer_sentinel_census", path
+        )
+        assert spec is not None and spec.loader is not None
+        installer = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = installer
+        spec.loader.exec_module(installer)
+        markers = {
+            marker
+            for marker, *_rest in installer._hook_specs("codex", REPO_ROOT / "unused")
+        }
+        self.assertNotIn("check-work-items-archival-stop", markers)
+        self.assertIn("check-scratch-valuables", markers)
         registry_ids = {e["id"] for e in sentinels.REGISTRY}
         self.assertTrue(registry_ids, "the registry must not be empty")
         self.assertIn("check-scratch-valuables", self.DECLARED_EXCEPTIONS)
 
 
+@unittest.skip("retired archival Stop adapter")
 class TestT3SubagentSkip(unittest.TestCase):
     def test_agent_id_suppresses_sen1(self) -> None:
         root = make_git_repo()
@@ -1294,6 +1273,7 @@ class TestG6SignalBudget(unittest.TestCase):
 # exist.
 
 
+@unittest.skip("retired archival Stop adapter")
 class TestG14T16BoundedReverseScan(unittest.TestCase):
     """G-14 / T-16 (design.md §4.5, F2) -- the gate's own falsifier: an
     operator marker followed by many filler records must still be found by
@@ -1429,7 +1409,15 @@ class TestG16T18HookCommonAdditivity(unittest.TestCase):
     def test_read_transcript_tail_source_unchanged(self) -> None:
         import inspect
 
-        import hook_common
+        hook_common_path = (
+            REPO_ROOT / "scripts" / "universal-hooks" / "scripts" / "hook_common.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            "hook_common_sentinel_additivity", hook_common_path
+        )
+        assert spec is not None and spec.loader is not None
+        hook_common = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hook_common)
 
         source = inspect.getsource(hook_common.read_transcript_tail)
         self.assertIn("def read_transcript_tail(transcript_path: str, n: int = 100) -> list[dict]:", source)

@@ -10,6 +10,14 @@ Keep the log in reverse-chronological `## YYYY-MM-DD` sections. Add new explanat
 
 Do not add entries for purely local-only hygiene edits such as formatting, link fixes, report-only churn, scratch cleanup, archive moves, or non-semantic wording cleanup.
 
+## 2026-07-31
+
+### Changed
+
+- **Work-item lifecycle now has one physical, fail-closed owner on the production Codex and Claude lines.** Current records remain in their category roots and terminal identities move only to UTC-month archive paths after explicit category admission and terminal evidence; reopening creates a successor instead of reversing archived history. **Why it matters:** the generated README and compatibility index can no longer silently act as competing state stores, and a historical record with missing evidence stays visible for a human decision instead of acquiring an invented date, status, or destination. **Operator impact:** use `mutate-work-item.py audit` to obtain the inventory before any migration and resolve denied historical records with authoritative data.
+
+- **The archival Stop adapter is retired from production installation.** Codex retains 12 hook registrations and Claude retains 13 (including its typed-routing audit); upgrade removes only the obsolete adapter/registration while preserving every remaining registration identity. **Why it matters:** lifecycle correctness now has one validated owner rather than a parallel Stop-path interpretation, so operators do not need a hook re-trust merely because the retired adapter disappeared.
+
 ## 2026-07-30
 
 ### Changed

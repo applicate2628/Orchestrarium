@@ -1,0 +1,52 @@
+{
+  "supportingEpics": [
+    {
+      "slug": "delivery-epic",
+      "title": "Delivery epic",
+      "updated": "2026-07-31T00:00:00Z"
+    }
+  ],
+  "items": [
+    {
+      "kind": "active",
+      "slug": "current-focus-item",
+      "status": "active",
+      "task": "Implement the lifecycle owner",
+      "currentStep": "Verify the synchronous boundary.",
+      "nextAction": "Run focused lifecycle tests.",
+      "roadmap": "delivery-roadmap",
+      "epic": "delivery-epic",
+      "updated": "2026-07-31T01:00:00Z"
+    },
+    {
+      "kind": "backlog",
+      "slug": "next-action-item",
+      "task": "Admit the next lifecycle slice",
+      "nextAction": "Move the candidate through the lifecycle owner.",
+      "updated": "2026-07-31T02:00:00Z"
+    },
+    {
+      "kind": "blocked",
+      "slug": "blocked-item",
+      "status": "blocked",
+      "task": "Resolve the blocked lifecycle input",
+      "blocker": "Missing accepted external evidence.",
+      "updated": "2026-07-31T03:00:00Z"
+    },
+    {
+      "kind": "roadmap",
+      "slug": "delivery-roadmap",
+      "outcomes": "work-item:current-focus-item",
+      "order": "Lifecycle owner before provider migration.",
+      "milestone": "Complete deterministic Phase 1.",
+      "updated": "2026-07-31T04:00:00Z"
+    },
+    {
+      "kind": "archived",
+      "slug": "completed-item",
+      "closed": "2026-07-31T05:00:00Z",
+      "outcome": "Completed one deterministic lifecycle slice",
+      "residualRisk": "None in the trial fixture."
+    }
+  ]
+}

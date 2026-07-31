@@ -3,6 +3,8 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
+import unittest
 from pathlib import Path
 
 
@@ -226,6 +228,25 @@ def test_quick_fix_minimal_status_accepts_blank_lines_but_no_other_content(tmp_p
 
         assert errors, name
         assert any("quick-fix status.md" in error for error in errors), (name, errors)
+
+
+def test_quick_fix_status_exact_fixture(tmp_path: Path) -> None:
+    validator = load_validator_module()
+    item = tmp_path / "work-items" / "active" / "quick-fix-exact"
+    write(item / "status.md", minimal_quick_fix_status())
+
+    assert validator.validate_work_item(item) == []
+
+    write(
+        item / "status.md",
+        minimal_quick_fix_status().replace(
+            "updated: 2026-07-30 10:00\n",
+            "updated: 2026-07-30 10:00\nowner: lead\n",
+            1,
+        ),
+    )
+    errors = validator.validate_work_item(item)
+    assert "quick-fix status.md unexpected lifecycle field: owner" in errors
 
 
 def test_duplicate_template_with_full_status_headings_stays_on_quick_fix_validation(
@@ -540,6 +561,41 @@ def test_close_move_does_not_break_previously_valid_pass_gate(tmp_path: Path) ->
     assert (archived_item / "agent-runs.jsonl").read_text(encoding="utf-8") == ledger_text
 
 
+def test_ledger_closure_archive_fixture(tmp_path: Path) -> None:
+    slug = "ledger-closure-archive"
+    item = tmp_path / "work-items" / "active" / slug
+    write(item / "status.md", valid_status())
+    write(item / "design.md", "# Design\n")
+    ledger_text = json.dumps(
+        ledger_event(artifact=f"work-items/active/{slug}/design.md")
+    ) + "\n"
+    write(item / "agent-runs.jsonl", ledger_text)
+    archived = tmp_path / "work-items" / "archive" / "2026-07" / slug
+    archived.parent.mkdir(parents=True)
+    shutil.move(str(item), str(archived))
+
+    result = run_validator(archived)
+
+    assert result.returncode == 0, result.stdout
+    assert (archived / "agent-runs.jsonl").read_text(encoding="utf-8") == ledger_text
+
+    unsettled = tmp_path / "work-items" / "active" / "unsettled-revise"
+    write(unsettled / "status.md", valid_status())
+    write(unsettled / "reviews" / "qa.md", "# QA\n")
+    revise = ledger_event(
+        schemaVersion=2,
+        runId="unsettled-revise-run",
+        status="revise",
+        gate="REVISE",
+        eventKind="standalone",
+        findingClass="correctness",
+    )
+    write(unsettled / "agent-runs.jsonl", json.dumps(revise) + "\n")
+    rejected = run_validator(unsettled)
+    assert rejected.returncode == 1
+    assert "open REVISE obligation" in rejected.stdout
+
+
 def test_stale_active_path_with_no_matching_archive_still_fails(tmp_path: Path) -> None:
     """Regression guard: the archive-fallback must not swallow a genuinely missing
     artifact. If no archive/*/<slug>/ directory contains the recorded tail, the
@@ -574,3 +630,24 @@ def test_archive_fallback_does_not_match_wrong_slug(tmp_path: Path) -> None:
     )
 
     assert resolved is None or not resolved.exists()
+
+
+class _UnittestAdapter(unittest.TestCase):
+    """Run existing pytest-style functions under the plan's unittest CLI."""
+
+
+def _adapt_test(function):
+    def method(self):
+        if function.__code__.co_argcount == 0:
+            function()
+            return
+        with tempfile.TemporaryDirectory() as directory:
+            function(Path(directory))
+
+    method.__name__ = function.__name__
+    return method
+
+
+for _name, _function in tuple(globals().items()):
+    if _name.startswith("test_") and callable(_function):
+        setattr(_UnittestAdapter, _name, _adapt_test(_function))

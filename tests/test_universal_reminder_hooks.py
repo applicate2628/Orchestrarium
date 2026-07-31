@@ -35,7 +35,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-BASH = shutil.which("bash")
+from scripts.bash_runtime import resolve_bash
+
+BASH = resolve_bash()
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MCP_HOOK = REPO_ROOT / "scripts" / "universal-hooks" / "hooks" / "check-mcp-momentum.py"
@@ -681,7 +683,7 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
     @unittest.skipUnless(BASH, "no bash on PATH; the .ps1 sibling covers Windows shells")
     def test_sh_emits_wellformed_userpromptsubmit_context(self) -> None:
         result = subprocess.run(
-            [BASH, str(TURN_ANCHOR_SH)],
+            [BASH, TURN_ANCHOR_SH.as_posix()],
             input="", capture_output=True, text=True, encoding="utf-8",
         )
         self.assertEqual(result.returncode, 0, "must fail open / exit 0")
@@ -722,7 +724,7 @@ class TestTurnAnchorEmitsValidContext(unittest.TestCase):
             encoding="utf-8",
         )
         shell_result = subprocess.run(
-            [BASH, str(TURN_ANCHOR_SH)],
+            [BASH, TURN_ANCHOR_SH.as_posix()],
             input="",
             capture_output=True,
             text=True,

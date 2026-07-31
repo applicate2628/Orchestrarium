@@ -693,6 +693,13 @@ At minimum, it is useful to keep these artifacts near the repository:
 - If the required task-memory artifacts for the configured workflow are missing or stale, stop and restore them before continuing delivery.
 - `notes.md` or `notes/` holds technical findings and discoveries; accepted long-lived decisions still belong in the design or ADR artifact.
 - `closure.md` is mandatory before moving an item to the configured archive location. It holds the final closeout record: outcome, residual risk, and archive location.
+- Physical lifecycle V1 is location-owned: only the lifecycle command may move a
+  current record to `archive/YYYY-MM/`; the month comes from the record's strict
+  UTC transition instant, not a guessed timestamp. A completed archive identity
+  is immutable and reopening creates a named successor. The active `status.md`
+  and terminal `closure.md` remain the owner documents; README/index are derived
+  views. Historical records with missing terminal evidence or an unmapped link
+  stay unmoved and are escalated for a human historical-data decision.
 - `status.md` has a defined format with YAML frontmatter (template, orchestration, started, updated) and sections: Current state, Active agents, Completed agents, REVISE loop (optional), Next action. The full format is defined in `subagent-contracts.md`.
 - `agent-runs.jsonl` is the machine-readable execution ledger for the work item. It records each launched or accepted agent run, assigned role, execution path, status, gate, artifact, and evidence. The lead must use it to reconcile active, completed, blocked, and revise states before closeout. When `scripts/agent-run-ledger.*` or an installed equivalent is available, use it to initialize legacy work items and append validated events instead of hand-editing JSONL. Use `scripts/check-work-items-state.* --root <repo>` or an installed equivalent for periodic scans of all active work items before broad closeout, interruption recovery, or publication review.
 - `status.md` and `agent-runs.jsonl` must agree at stage boundaries: no closed task with running ledger entries, no accepted `PASS` without evidence, no missing artifact for a completed gate, and no dependent downstream `PASS` left untouched after a material upstream revision.

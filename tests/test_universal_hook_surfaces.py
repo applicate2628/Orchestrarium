@@ -206,6 +206,54 @@ class UniversalHookSurfaceTest(unittest.TestCase):
             f"stdout={result.stdout!r} stderr={result.stderr!r}",
         )
 
+    def test_one_sided_epic_terminal_parity(self) -> None:
+        mirror = (
+            ROOT
+            / "src.codex"
+            / "skills"
+            / "lead"
+            / "scripts"
+            / "workitem_sentinels.py"
+        )
+        original = mirror.read_bytes()
+        try:
+            mirror.write_bytes(original + b"\n# deliberate one-sided parity probe\n")
+            failed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "sync-universal-hooks.py"),
+                    "--check",
+                    "--root",
+                    str(ROOT),
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn(
+                "src.codex/skills/lead/scripts/workitem_sentinels.py",
+                failed.stdout + failed.stderr,
+            )
+        finally:
+            mirror.write_bytes(original)
+
+        clean = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts" / "sync-universal-hooks.py"),
+                "--check",
+                "--root",
+                str(ROOT),
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(
+            clean.returncode,
+            0,
+            f"stdout={clean.stdout!r} stderr={clean.stderr!r}",
+        )
+
     def test_sync_tool_cli_module_is_importable(self) -> None:
         """scripts/sync-universal-hooks.py (the CLI/mutation tool — argparse,
         subprocess, git integration — as opposed to the manifest module
@@ -239,7 +287,6 @@ class UniversalHookSurfaceTest(unittest.TestCase):
             "scripts/universal-hooks/scripts",
             "scripts/universal-hooks/hooks",
             "check-bugfix-discipline.py",
-            "check-work-items-archival-stop.py",
             "mcp-usage-reminder.sh",
             "check-machine-local-path.py",
             "check-no-trash-in-repo.py",

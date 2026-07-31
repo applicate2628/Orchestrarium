@@ -65,6 +65,18 @@ Cross-provider execution is available through two routing adapters:
 - `$external-reviewer` is the external execution adapter for eligible review and QA roles.
 - `$consultant` remains advisory-only and is not reused for implementation or review gates.
 
+## Work-item physical lifecycle
+
+The Codex and Claude production packs use one physical lifecycle owner for
+local task memory. Current work is in category roots such as
+`work-items/backlog/` and `work-items/active/`; terminal identities exist only
+under that category's `archive/YYYY-MM/` directory, selected from explicit
+strict UTC terminal evidence. `status.md` is active recovery state and
+`closure.md` is final work-item outcome. The generated `work-items/README.md`
+and compatibility `index.md` do not authorize transitions. Historical records
+without explicit terminal evidence remain unmoved for a human data decision;
+the workflow does not infer timestamps, status, or archival targets.
+
 ## Installation
 
 Use the root router installers for the common path:

@@ -64,7 +64,7 @@ other terminal from `proposed`:
 A superseded/reverted/dropped decision **stays in the registry** as history; it
 is never deleted. This status enum is **independent of** the work-item / epic
 done-predicate — decisions are never "closed" by that predicate, so the
-work-items-archival hook never acts on them.
+retired archival Stop control never acts on them.
 
 ## Lifecycle + roles
 
@@ -97,7 +97,7 @@ line, a prose bullet on the Codex line). Full role rules: `skills/lead/SKILL.md`
 The decision registry is **governance-enforced only**. No hook scans
 `work-items/decisions/`, so a stale `proposed` decision that was never accepted
 or dropped, or an `accepted` decision that should have been superseded, is not
-structurally caught — the work-items-archival Stop hook does not see the
+structurally caught — no archival Stop control sees the
 registry. This is weaker than the work-item close path, which the hook
 backstops. Surfacing the proposed-list in `/agents-status` is the only standing
 prompt to resolve a dangling proposal — and it runs ONLY when you invoke the
@@ -106,6 +106,14 @@ the background and nothing VALIDATES the registry (no check that a `superseded-b
 back-link is consistent, no check that a `supersedes:` target exists), so a stale
 `proposed`, a half-set supersede edge, or a wrong reference is caught only if and
 when you look.
+
+## Physical lifecycle V1
+
+A terminal decision may move from `work-items/decisions/` only through the
+lifecycle owner to `work-items/decisions/archive/YYYY-MM/`, after its explicit
+terminal status, `Terminal-at` strict UTC instant, rationale, and evidence are
+present. Missing historical fields are a human-data decision, not permission
+to infer timestamps or rewrite history.
 
 ## Terms and Abbreviations
 

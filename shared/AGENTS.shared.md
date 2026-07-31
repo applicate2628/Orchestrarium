@@ -11,15 +11,16 @@ Rule elaboration and the glossary live under `shared/references/` (maintainer re
 - For approved UI implementation phases, use `$frontend-engineer` for web/React UI and `$qt-ui-engineer` only for Qt desktop UI.
 
 ## Common skills
-
 Common skills: any role or the main conversation invokes on match; they are not roles and do not own delivery. knowledge-style loads context; delegate-style may spawn one-artifact subagent, also invocable inline. Set: `$windows-gui-manual-testing`, `$analyzing-video-bugs`, `$bug-hunting`, `$mathtype-book-page`, `$explain-simply`, `$vak-dissertation-review`.
 
 ## Policy boundaries
-Global layer: short, testable, cross-repo costly-mistake rules; no specialist duplication. **Keep global:** delegation/fact-first; change isolation, logic, verification, security, resource, maintainability, environment, dependency baselines. **Keep repo-local:** compatibility/deprecation; API/config/schema/migration; rollout/rollback/budgets/SLAs; toolchains/shells/build/tests, canonical paths, truth sources, portability. **Keep specialist:** threat/trust boundaries; profiling/bottlenecks; architecture tradeoffs; persisted-state/SLO/observability; domain algorithmic/numeric/UX/accessibility/security/performance heuristics. **Do not force global:** design catalogs without operational checks; academic reminders without decision tests; tool-specific rules enforced elsewhere; vague slogans (`KISS`, `YAGNI`) without falsifiable use rule.
+Keep global rules short, testable, cross-repo, and costly-mistake focused: delegation/fact-first, isolation, logic, verification, security, resources, maintainability, environment, and dependency baselines. Keep compatibility, API/config/schema/migration, rollout/rollback, toolchains, canonical paths, truth sources, and portability repo-local. Keep domain heuristics specialist-owned. Do not globalize design catalogs, unenforceable reminders, tool-enforced rules, or vague slogans.
 
 ## Artifact persistence
+Storage tiers: `work-items/` is canonical task memory; `.reports/YYYY-MM/` holds session summaries; `.plans/YYYY-MM/` holds revised plan snapshots.
 
-Three storage tiers: `work-items/` — canonical artifacts (briefs, status, research, design, plans, reviews, closures; structure defined by the lead and knowledge-archivist roles), the source of truth for tracked task memory; `.reports/YYYY-MM/` — session logs `report(<role>)-YYYY-MM-DD_HH-MM_topic.md`; `.plans/YYYY-MM/` — plan snapshots `plan(<role>)-YYYY-MM-DD_HH-MM_topic.md` saved when a plan is created or materially revised.
+### Physical lifecycle V1
+Physical location alone owns V1 lifecycle: current records stay in their category root; terminal records live only in `archive/YYYY-MM/`, with the month from recorded strict UTC `YYYY-MM-DDTHH:MM:SSZ`, never inferred. `status.md` owns active recovery, `closure.md` final outcome, and README/index are derived views. Only the lifecycle owner moves records; it fails closed on missing admission, terminal evidence, unique location, or logical-link inventory. An archive identity is immutable: reopen via an explicit successor, never reverse move. Historical records lacking authoritative terminal fields stay unmoved; never backfill or guess.
 
 ### Session logging rule (mandatory)
 - Main conversation and subagents MUST log completed results/routing decisions/reviews in `.reports/YYYY-MM/`; persistence follows completed work and never gates its first safe mutation. One summary may cover one `quick-fix`; continue if work remains.

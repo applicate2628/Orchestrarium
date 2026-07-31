@@ -56,7 +56,7 @@ STRUCTURAL_ENFORCEMENT_TEETH = (
     "[skip-bugfix-discipline]` bypasses the PreToolUse guard for the next turn",
     "[approve-publication]` opens the git-push gate for one turn — honored ONLY when it appears in the user's own last message",
     "[acknowledge-passive-stop]` bypasses one passive-polling Stop decision when the assistant is intentionally handing off to the user",
-    "[acknowledge-open-work-items]` bypasses one work-items-archival Stop decision when leaving a closed-marked item in `active/` is intentional this turn",
+    "Physical location owns lifecycle membership",
 )
 
 DELEGATION_AND_RECOVERY_TEETH = (
@@ -67,7 +67,7 @@ DELEGATION_AND_RECOVERY_TEETH = (
     "Every specialist invocation MUST use the Agent tool",
     "Lead is never spawned as a subagent",
     "The main conversation owns `work-items/`",
-    "the close step is as mandatory as the create step above",
+    "**Close is mandatory.**",
 )
 
 ROUTING_AND_ROLE_TEETH = (
@@ -75,7 +75,7 @@ ROUTING_AND_ROLE_TEETH = (
     "**Auto-invocation contract:**",
     "**Dispatch index**",
     "## Coexistence with the superpowers plugin",
-    "invoke it via the `Skill` tool **before** picking an Orchestrator template",
+    "New feature, exploration, or unclear request → invoke `brainstorming` first, then pick a template.",
     "Already in mid-flow with admitted scope",
     "## Role definitions",
     "Pre-publication scan: run `/agents-check-safety`",

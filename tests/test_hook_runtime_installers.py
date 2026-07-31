@@ -38,7 +38,6 @@ STRUCTURED_JSON_HOOK_STEMS = frozenset(
         "check-scratch-valuables",
         "check-stale-relation-residue",
         "check-typed-routing",
-        "check-work-items-archival-stop",
         "mcp-usage-reminder",
         "turn-anchor-reminder",
     }
@@ -48,10 +47,10 @@ INFORMATIONAL_REMINDER_HOOK_STEMS = frozenset(
 )
 CWD_SCANNING_HOOK_STEMS = frozenset({"check-scratch-valuables"})
 CANONICAL_TRUST_GUIDANCE = (
-    "After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for all 13 affected entries.",
+    "After reinstall, start interactive `codex` — not `codex exec` — and choose **Trust all and continue** for all 12 affected entries.",
     "Do not press Esc and do not choose **`Continue without trusting`**, because all hooks and guards remain installed but inactive.",
     "`codex exec` silently skips untrusted hook entries instead of showing the trust prompt, so interactive `codex` must run first.",
-    "The trust modal does not time out and the operator must review all 13 entries before making the explicit choice.",
+    "The trust modal does not time out and the operator must review all 12 entries before making the explicit choice.",
 )
 BYPASS_TOKENS = (
     "bypass_" + "hook_trust",

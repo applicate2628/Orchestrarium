@@ -1,80 +1,16 @@
-"""workitem_sentinels.py — the invariant registry (extension seam S1).
+"""Shared read-only work-item inspection for the periodic state checker.
 
-WHY THIS MODULE EXISTS. The pack ships exactly two always-on repository-state
-gates (`check-work-items-archival-stop` on `Stop`, `check-scratch-valuables` on
-`SessionStart`), and until this module existed each was a hard-coded,
-single-purpose detector with no way to add a third invariant except writing a
-new hook from scratch. That absence is itself the root defect this module
-fixes: a repository-state invariant now lands here as ONE REGISTRY RECORD --
-never a new hook, never a hooks.json/installer edit, and (because this module
-is IMPORTED by its adapter rather than separately REGISTERED) never a Codex
-re-trust. See `work-items/active/2026-07-25-review-round-cap-enforcement/
-design.md` for the full design; this docstring summarizes only what a future
-maintainer needs to add invariant #3.
+This module owns physical active/archive discovery, location resolution,
+delivery-action shape validation, and informational lifecycle findings used by
+``scripts/check-work-items-state.py``. It is imported support code, not a
+registered hook entry. Physical location owns lifecycle membership: status and
+closure text can identify a move still due, but never make an active record
+terminal.
 
-WHAT A SENTINEL IS, AND WHAT IT IS NOT. A sentinel asks "has the process
-failed?", not "does this document conform to its schema?" (that second
-question belongs to `check-work-items-state.py` / `validate-work-item-state.py`
--- the VALIDATOR). A sentinel's signal budget on a healthy repository is ZERO
-output; a validator's is not. **This module MUST NOT import
-`check-work-items-state.py` or `validate-work-item-state.py`** -- binding the
-always-on Stop path to a 4079-line-on-a-real-repo validator is the exact
-mistake this design exists to prevent (guarded by G-5 in
-`tests/test_workitem_sentinels.py`).
-
-THE AUTHORSHIP LATTICE (T0/T1/T2/T3) -- who may clear which tier. Every
-invariant below sorts its admissible exemptions by WHO WRITES the clearing
-signal, not by what the signal claims to be about:
-
-  T0 -- runtime-authored (envelope fields, transcript/rollout presence): the
-        strongest tier, admissible for any invariant at any severity.
-  T1 -- user-authored (the operator's own typed message): admissible for any
-        invariant at any severity.
-  T2 -- model-authored, free (assistant prose, a self-authored label, the run
-        ledger, status.md): NEVER admissible to clear a run-terminating
-        invariant. A RESOLVE-tier invariant may admit exactly one DECLARED T2
-        tier-exception (SEN-0's marker, below) -- never as an ambient reader
-        anywhere else in this module.
-  T3 -- model-controllable at a cost, with a named erasure clause (an action
-        that is itself T0-visible in the transcript's tool-call record):
-        admissible for any invariant, because the clearing action leaves its
-        own trace.
-
-DI-4's guard (G-4) greps this file for `agent-runs` / `agent_run_ledger` /
-`status.md` / `last_assistant_message` and requires NO match outside the one
-explicitly delimited "DECLARED T2 EXEMPTION" block below (SEN-0's marker).
-Anywhere else, reading one of those signals to decide a finding is exactly the
-proven defect this design fixes -- the incident's failing session called the
-fail-closed ledger helper 705 times, PASSED every time, then simply STOPPED
-calling it; a gate keyed on the ledger, or on `status.md` conforming, is
-escapable by not writing to it.
-
-THE REGISTRY RECORD SHAPE. Each entry in `REGISTRY` is a plain dict:
-`{id, event, scope, evaluate(ctx) -> Finding | None, exemptions}`. `event` is a
-data field (today only `"Stop"` is populated; `"SessionStart"` is the declared
-landing point for the future `check-scratch-valuables` migration -- see
-`work-items/decisions/2026-07-25-*` and the follow-up filed in this item's
-design §14). Adding invariant #3 means appending one more dict to `REGISTRY`
-and writing its `evaluate(ctx)` function. The registry now holds SEN-0,
-SEN-1, and the stateless RESOLVE-tier SEN-2 delivery-drought governor.
-
-WHAT THIS MODULE DOES NOT OWN. The severity -> payload mapping (which JSON
-shape a RESOLVE/NOTICE finding becomes, the `stop_hook_active` RESOLVE
-suppression + tier-escalation-to-NOTICE rule, and the RESOLVE/NOTICE
-precedence when several invariants fire at once) is owned by the ADAPTER
-(`check-work-items-archival-stop.py`), not here -- that is seam S3. This
-module is FAIL-OPEN internally per invariant (`evaluate_all` swallows any
-single entry's exception so one broken invariant cannot crash its siblings or
-the adapter), but it never touches process exit codes or hook payload shape.
-
-READ-ONLY, ALWAYS. No function in this module writes, moves, deletes, or
-renames anything under the target repository, on any platform, on any code
-path. Every `git` invocation is read-only (`rev-parse`, `ls-tree`) and uses an
-argument vector -- never `shell=True`, never string-interpolated into a shell
-command.
-
-Imports are a closed set: {argparse, json, re, subprocess, sys, datetime,
-pathlib} plus stdlib builtins -- no new runtime dependency (claim 18).
+The module does not write, move, delete, or rename repository data. Every git
+invocation is read-only and uses an argument vector. Per-finding evaluation is
+fail-open so one optional diagnostic cannot suppress its siblings or crash the
+required periodic checker.
 """
 from __future__ import annotations
 
@@ -87,20 +23,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
-# Severity vocabulary (the two response tiers; payload mapping lives at the
-# adapter -- see module docstring).
-#
-# r7: HALT is REMOVED, not merely unused. T-14 measured that on the Codex
-# line neither `stopReason` nor `systemMessage` reaches the operator inside a
-# HALT payload, and that `--json` mode emits no hook-status event at all, so
-# a run-terminating tier there is not merely unattributed, it is
-# undetectable. The three installed copies are byte-identical (G-2), so the
-# tier is all-or-nothing across both lines, and the admitted incident
-# happened on the line where it does not work. See
-# references-codex/stop-hook-halting-primitives.md and design.md §4.4c/§1.0.
-# A tier reachable by re-adding one severity constant is the half-finished
-# alternative beside live code the repo's own hygiene rules forbid -- hence
-# deletion, not a dormant flag.
+# Informational finding vocabulary retained for periodic checker output.
 # ---------------------------------------------------------------------------
 
 RESOLVE = "RESOLVE"
@@ -108,9 +31,7 @@ NOTICE = "NOTICE"
 
 
 class Finding:
-    """One invariant's verdict for this evaluation. `severity` is one of
-    RESOLVE / NOTICE; a clean invariant returns None, never a Finding with a
-    placeholder severity."""
+    """One optional periodic diagnostic; a clean check returns ``None``."""
 
     __slots__ = ("id", "severity", "message")
 
@@ -124,8 +45,7 @@ class Finding:
 
 
 # ---------------------------------------------------------------------------
-# Directory discovery -- migrated verbatim from check-work-items-archival-stop.py
-# (this is the one traversal every invariant shares; §5.1 "One traversal").
+# Directory discovery shared by every periodic diagnostic.
 # ---------------------------------------------------------------------------
 
 # How far up from the session cwd to search for a work-items/active directory.
@@ -139,17 +59,6 @@ DELIVERY_ACTION_FIELD_RE = re.compile(
 DELIVERY_FINGERPRINT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 DELIVERY_CLASSES = {"mutation"}
 DELIVERY_ORACLE = "correlated-success"
-DELIVERY_INPUT_NOTICE = "SEN-2-INPUT: delivery-action input is invalid; governor allowed this Stop."
-DELIVERY_ACTION_ABSENT_REASON = (
-    "SEN-2-DROUGHT: active work is still open without a delivery action. Continue with the next "
-    "concrete repository mutation now, or close and archive the item if its work is complete."
-)
-DELIVERY_DROUGHT_REASON = (
-    "SEN-2-DROUGHT: the admitted delivery action is still due. Continue with that action now "
-    "or surface one concrete external blocker."
-)
-
-
 def _find_active_dir(start: Path) -> Path | None:
     """Walk up from the session cwd to the nearest work-items/active directory,
     stopping at the first ancestor that is itself a repository root (contains
@@ -372,32 +281,13 @@ def _parse_delivery_action(item: Path) -> tuple[dict | None, str]:
     }, "VALID"
 
 
-def _find_delivery_action(active_dir: Path) -> tuple[dict | None, str]:
-    items = sorted(path for path in active_dir.iterdir() if path.is_dir())
-    if not items:
-        return None, "INACTIVE"
-    actions: list[dict] = []
-    for item in items:
-        action, status = _parse_delivery_action(item)
-        if status == "INVALID":
-            return None, "INVALID"
-        if action is not None:
-            actions.append(action)
-    if len(actions) > 1:
-        return None, "INVALID"
-    if len(actions) == 1:
-        return actions[0], "VALID"
-    if len(items) == 1:
-        return None, "ABSENT"
-    return None, "INVALID"
-
-
 def delivery_action_validation_errors(active_dir: Path) -> dict[str, list[str]]:
     """Validate the canonical opted-in section owned by this module.
 
     Exact shape: `## Delivery action` followed by Primary=true, Fingerprint,
-    Class, Target, and Oracle bullet fields. Absence is accepted statically
-    while a stage is active; Stop-time SEN-2 owns unresolved omission.
+    Class, Target, and Oracle bullet fields. Absence is accepted while a stage
+    is active; this validator checks declared shape and does not infer
+    lifecycle terminality.
     """
     errors: dict[str, list[str]] = {}
     valid_names: list[str] = []
@@ -421,26 +311,11 @@ def delivery_action_validation_errors(active_dir: Path) -> dict[str, list[str]]:
 
 def build_context(
     cwd: str,
-    *,
-    last_assistant_message: str = "",
-    user_message_text: str = "",
-    delivery_activity: list[dict] | None = None,
-    delivery_activity_status: str = "ABSENT",
-    runtime_stop: bool = False,
+    **_unused: object,
 ) -> dict:
-    """Build the sentinel evaluation context once per Stop event. Every
-    registry entry reads from this ctx rather than re-walking work-items/ or
-    re-invoking git itself (§5.1 "One traversal").
-
-    `user_message_text` is SEN-0's T1 operator-channel widening (F3): the
-    operator's own last genuine typed message, read via
-    `hook_common.last_genuine_user_text`'s bounded reverse scan (design.md
-    §0.9.4). SEN-2 receives its bounded, content-free activity status and
-    correlated activity records separately from the adapter."""
+    """Build one shared context for periodic checker diagnostics."""
     ctx: dict = {
         "cwd": cwd,
-        "last_assistant_message": last_assistant_message or "",
-        "user_message_text": user_message_text or "",
         "active_dir": None,
         "archive_dir": None,
         "epics_dir": None,
@@ -448,11 +323,6 @@ def build_context(
         "active_slugs": set(),
         "archive_slug_paths": {},
         "legs": "disk",
-        "delivery_action": None,
-        "delivery_action_status": "INACTIVE",
-        "delivery_activity": list(delivery_activity or []),
-        "delivery_activity_status": delivery_activity_status,
-        "runtime_stop": runtime_stop,
     }
     active_dir = _find_active_dir(Path(cwd))
     if active_dir is None:
@@ -488,9 +358,6 @@ def build_context(
             archive_slug_paths.setdefault(slug, []).append(rel)
     ctx["archive_slug_paths"] = archive_slug_paths
     ctx["legs"] = "both" if head_contributed else "disk"
-    action, action_status = _find_delivery_action(active_dir)
-    ctx["delivery_action"] = action
-    ctx["delivery_action_status"] = action_status
     return ctx
 
 
@@ -505,42 +372,24 @@ def _read_status(item: Path) -> str:
 
 
 def _slug_is_done(ctx: dict, slug: str) -> bool:
-    """A child work-item is done iff it is archived (via the shared resolver),
-    has closure.md, or its status.md carries a bare done-state line."""
-    locations = resolve_slug_locations(ctx, slug)
-    if locations["archive"]:
-        return True
-    active_dir = ctx.get("active_dir")
-    if active_dir is None:
-        return False
-    item = active_dir / slug
-    try:
-        if (item / "closure.md").is_file():
-            return True
-    except Exception:
-        pass
-    text = _read_status(item)
-    return bool(text and DONE_STATE_LINE_REGEX.search(text))
+    """A child work-item is done only after it physically enters archive/."""
+
+    return bool(resolve_slug_locations(ctx, slug)["archive"])
 
 
 # ---------------------------------------------------------------------------
-# SEN-0 -- archival orphan (migrated; verdict-equivalent, exemption narrowed
-# to this entry alone). Logic, thresholds and reason text are the same as the
-# shipped check-work-items-archival-stop.py hook (DI-1); only the slug-location
-# lookup now routes through resolve_slug_locations (F-B11 fix).
+# SEN-0 -- periodic lifecycle diagnostic for evidence that an archive move is
+# still due. It reports only; physical location remains authoritative.
 # ---------------------------------------------------------------------------
 
 # An active item counts as closed-but-not-moved when its status.md has a
 # state/status/stage/outcome LINE whose VALUE BEGINS with a done/closed word.
-# See check-work-items-archival-stop.py's original docstring for the full
-# false-positive rationale (this regex is migrated byte-for-byte).
+# The anchored value grammar avoids matching explanatory prose.
 DONE_STATE_LINE_REGEX = re.compile(
     r"(?im)^\s*>?\s*(?:[-*+]\s+)?\*{0,3}\s*(?:current\s+|primary\s+task\s+)?(?:state|status|stage|outcome)"
     r"\s*\*{0,3}\s*:\s*\*{0,3}\s*(?:closed|done|complete|completed|archived)(?![\w-])"
     r"(?![ \t]*[*_]{0,2}[ \t]*[,—-]?[ \t]*(?:when|if|means|когда|если|означает)\b)"
 )
-
-SEN0_OVERRIDE_MARKER_REGEX = re.compile(r"\[acknowledge-open-work-items\]", re.IGNORECASE)
 
 EPIC_HEADING_RE = re.compile(r"#{1,6}\s")
 EPIC_CHILDREN_HEADING_RE = re.compile(r"##\s+children\b", re.IGNORECASE)
@@ -698,7 +547,7 @@ def _detect_epic_orphans(ctx: dict) -> list[tuple[str, str]]:
 
 
 def _sen0_block_reason(item_orphans: list[tuple[str, str]], epic_orphans: list[tuple[str, str]]) -> str:
-    parts = ["work-items archival Stop guard: task-memory items need a close action before stopping."]
+    parts = ["work-items periodic lifecycle check: archive reconciliation is still due."]
     if item_orphans:
         lines = "\n".join(f"  - {name}: {why}" for name, why in item_orphans)
         parts.append(
@@ -722,56 +571,10 @@ def _sen0_block_reason(item_orphans: list[tuple[str, str]], epic_orphans: list[t
             "in the same lifecycle operation. Reconcile duplicate slugs before "
             "selecting either copy."
         )
-    parts.append(
-        "If leaving this as-is is intentional this turn, include "
-        "[acknowledge-open-work-items] in your reply. If this message reaches "
-        "the operator instead of the model (this RESOLVE was escalated to a "
-        "turn-free NOTICE because a continuation was already spent this "
-        "turn -- §4.4a), the operator may clear it the same way: by including "
-        "the same marker in their own next message."
-    )
     return "\n\n".join(parts)
 
 
 def _sen0_evaluate(ctx: dict) -> Finding | None:
-    # --- BEGIN DECLARED T2 EXEMPTION (SEN-0 only; design.md F-B3 / DI-1b) ------
-    # [acknowledge-open-work-items] in the model's own last assistant message is
-    # a documented, shipped bypass for SEN-0 ALONE (verdict-equivalent migration
-    # of the shipped hook's marker check). It must never clear SEN-1, which is
-    # exactly why this check lives inside SEN-0's own evaluate() and nowhere
-    # else in this module -- a marker check at the adapter would union across
-    # every invariant (the F-B3 defect).
-    #
-    # F3 correction (design.md review-grounding, 2026-07-25; re-justified at
-    # r8 §0.9.4 after SEN-2's cut removed the original HALT-payload
-    # justification): this RESOLVE finding's text can reach the OPERATOR
-    # instead of the model whenever it is escalated to a turn-free NOTICE
-    # under stop_hook_active (adapter's _format_escalation, §4.4a) -- an
-    # operator-only channel. A marker matched ONLY against
-    # last_assistant_message is unclearable through it: the operator's own
-    # reply is never re-checked, so the instruction above ("in your reply")
-    # would tell the operator to do something that is silently ignored. This
-    # block therefore ALSO admits a T1 exemption (the operator's own last
-    # genuine typed message) -- T1 is admissible for any invariant at any
-    # severity (design.md §3.1's tier rule), strictly stronger than the T2
-    # channel this block already grants. Its own blast radius is honestly
-    # small, and CORRECTED at r8's post-ship pass: losing it does not change
-    # how often this finding re-fires (that is §4.4a's per-turn model,
-    # independent of this marker) -- it removes only the OPERATOR's own
-    # ability to clear the finding directly. Without it, an operator who
-    # learned the marker from documentation (the in-context escalation NOTICE
-    # that would otherwise teach it is Claude-line only) cannot clear SEN-0 by
-    # typing it themselves, and the finding keeps re-firing to the model every
-    # subsequent turn until the MODEL writes the marker itself (T2, always
-    # available either way). A quality fix narrowing an operator-convenience
-    # gap, not a safety-critical one, and not a one-turn cost (§0.9.4).
-    last_assistant_message = ctx.get("last_assistant_message") or ""
-    user_message_text = ctx.get("user_message_text") or ""
-    if SEN0_OVERRIDE_MARKER_REGEX.search(last_assistant_message) or SEN0_OVERRIDE_MARKER_REGEX.search(
-        user_message_text
-    ):
-        return None
-    # --- END DECLARED T2 EXEMPTION ----------------------------------------------
     active_dir = ctx.get("active_dir")
     if active_dir is None:
         return None
@@ -833,91 +636,28 @@ def _sen1_evaluate(ctx: dict) -> Finding | None:
     return Finding("SEN-1", RESOLVE, message)
 
 
-# ---------------------------------------------------------------------------
-# SEN-2 -- delivery drought. The threshold/NOTICE-only design was cut at r8
-# after T-20 proved that operator-directed NOTICE is not delivered on Codex.
-# The accepted 2026-07-29 host-correlated-action-evidence decision provides a
-# stateless RESOLVE-tier V1. Physical membership under work-items/active/ owns
-# applicability: one active item without `## Delivery action` receives a
-# generic continuation block, and model-authored status prose cannot suppress
-# it. When one exact action is present (`Primary: true`, `Class: mutation`,
-# `Oracle: correlated-success`), only a direct recognized mutation whose
-# semantic target exactly matches plus a same-id explicit-success result earns
-# delivery credit. Failed, ambiguous, missing, and in-flight results remain
-# due. The adapter owns the `agent_id` child skip and `stop_hook_active`
-# same-turn re-entry suppression, so an unsatisfied action blocks at most once
-# per root user turn. Invalid action or transcript inputs fail open with a
-# static NOTICE. HALT remains absent and the measured operator-NOTICE
-# limitations are unchanged.
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# The registry -- extension seam S1. A future invariant #4 is appended here
-# with its evaluate(ctx) function; the adapter and installer identity remain
-# unchanged.
-# ---------------------------------------------------------------------------
-
-def _sen2_evaluate(ctx: dict) -> Finding | None:
-    if ctx.get("runtime_stop") is not True:
-        return None
-    action_status = ctx.get("delivery_action_status")
-    if action_status == "INVALID":
-        return Finding("SEN-2", NOTICE, DELIVERY_INPUT_NOTICE)
-    if action_status == "ABSENT":
-        return Finding("SEN-2", RESOLVE, DELIVERY_ACTION_ABSENT_REASON)
-    action = ctx.get("delivery_action")
-    if not isinstance(action, dict):
-        return None
-    if ctx.get("delivery_activity_status") != "FOUND":
-        return Finding("SEN-2", NOTICE, DELIVERY_INPUT_NOTICE)
-    activities = ctx.get("delivery_activity")
-    if not isinstance(activities, list) or not activities:
-        return None
-    expected_class = action.get("action_class")
-    expected_target = action.get("target_id")
-    for activity in activities:
-        if not isinstance(activity, dict):
-            continue
-        targets = activity.get("target_ids")
-        if (
-            activity.get("action_class") == expected_class
-            and isinstance(targets, (list, tuple))
-            and expected_target in targets
-            and activity.get("succeeded") is True
-        ):
-            return None
-    return Finding("SEN-2", RESOLVE, DELIVERY_DROUGHT_REASON)
-
-
 REGISTRY: tuple[dict, ...] = (
     {
         "id": "SEN-0",
-        "event": "Stop",
+        "event": "PeriodicCheck",
         "scope": "work-items/active/ + work-items/epics/ (archival orphans)",
         "evaluate": _sen0_evaluate,
-        "exemptions": "[acknowledge-open-work-items] in last_assistant_message (T2, SEN-0 only)",
+        "exemptions": "none",
     },
     {
         "id": "SEN-1",
-        "event": "Stop",
+        "event": "PeriodicCheck",
         "scope": "work-items/active/ union work-items/archive/** (disk + HEAD)",
         "evaluate": _sen1_evaluate,
-        "exemptions": "none beyond the adapter's (agent_id, ORCHESTRARIUM_DISPATCHED_REVIEW)",
-    },
-    {
-        "id": "SEN-2",
-        "event": "Stop",
-        "scope": "physical active work plus one optional primary delivery action",
-        "evaluate": _sen2_evaluate,
-        "exemptions": "host agent_id skip and stop_hook_active suppression in the adapter only",
+        "exemptions": "none",
     },
 )
 
 
-def evaluate_all(ctx: dict, event: str = "Stop") -> list[Finding]:
+def evaluate_all(ctx: dict, event: str = "PeriodicCheck") -> list[Finding]:
     """Select every registry entry for `event`, evaluate it against `ctx`, and
-    return the non-empty Findings. Per-entry fail-open: one broken invariant
-    must not crash the adapter or suppress its siblings."""
+    return the non-empty Findings. Per-entry fail-open: one broken diagnostic
+    must not crash the periodic checker or suppress its siblings."""
     findings: list[Finding] = []
     for entry in REGISTRY:
         if entry["event"] != event:
@@ -932,23 +672,16 @@ def evaluate_all(ctx: dict, event: str = "Stop") -> list[Finding]:
 
 
 # ---------------------------------------------------------------------------
-# Standalone CLI -- debug/manual invocation only. The hook adapter never
-# shells out to this; it imports the module directly.
+# Standalone CLI for debug/manual periodic evaluation.
 # ---------------------------------------------------------------------------
 
 
 def _cli(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(description="Standalone sentinel registry evaluator (debug/test entry point).")
+    parser = argparse.ArgumentParser(description="Standalone periodic work-item diagnostic evaluator.")
     parser.add_argument("--root", default=".", help="Directory to start the work-items/active/ walk from.")
-    parser.add_argument("--event", default="Stop")
-    parser.add_argument("--last-assistant-message", default="")
-    parser.add_argument("--user-message", default="")
+    parser.add_argument("--event", default="PeriodicCheck")
     args = parser.parse_args(argv)
-    ctx = build_context(
-        args.root,
-        last_assistant_message=args.last_assistant_message,
-        user_message_text=args.user_message,
-    )
+    ctx = build_context(args.root)
     findings = evaluate_all(ctx, event=args.event)
     print(json.dumps([{"id": f.id, "severity": f.severity, "message": f.message} for f in findings], indent=2))
     return 0

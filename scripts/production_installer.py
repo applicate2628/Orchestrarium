@@ -21,6 +21,7 @@ RUNTIME_HELPERS = (
     "bash_runtime.py",
     "check-work-items-state.py",
     "check-work-items-state.sh",
+    "mutate-work-item.py",
     "skill_pack_validator_runtime.py",
     "validate-work-item-state.py",
     "validate-work-item-state.sh",
@@ -62,6 +63,8 @@ _CODEX_RETIRED_PS1 = {
     "skills/lead/scripts/turn-anchor-reminder.ps1": "edf6aef1861337d3cda0dc142c64bb28ed797c48670a379c4ca0a51a0f8d58d0",
     "skills/lead/scripts/mcp-usage-reminder.ps1": "62c9990f57ee7eccadcf1504a638ff6cbe4b61548405288d70ed192254b54d3d",
     "skills/lead/scripts/check-work-items-archival-stop.ps1": "16d7cc086c34ddd8b571ad1b0e926afd74114e88d0b80a4c422c2ec2875e82ae",
+    "skills/lead/scripts/check-work-items-archival-stop.py": "6fd48cbfb64e0861a5f8ad6c2c011fa6ae9dfd8567b1636dc2cf6b1ab18e11a1",
+    "skills/lead/scripts/check-work-items-archival-stop.sh": "3c5dbc2499b6694859c71b2478e49f92b9fe45369d5287ea16463bacf6f84628",
     "skills/lead/scripts/check-scratch-valuables.ps1": "1aa910d0557bfc1abedd65d7c3e30c53bab4fc7147dbc453199ec60f37ec0b22",
     "skills/lead/scripts/check-publication-safety.ps1": "0e0b8b9a41140a58a82e59d4a21bca59b9922952872613819995c31036a3b3df",
     "skills/lead/scripts/check-passive-polling-stop.ps1": "04790e77b1c08d0d38767030531008739b9550664f69dbfa9ee80a95460beeb1",
@@ -85,6 +88,8 @@ _CLAUDE_RETIRED_PS1 = {
     "agents/scripts/invoke-claude-prompt.ps1": "e2a9d6316f5611b733745c20abea961c12bb8141949df6c3569763d5a7a9280d",
     "agents/scripts/invoke-claude-api.ps1": "7da6b460335609f023fdf4b115c960ef11d3425924d936baf721583930fc35ec",
     "agents/scripts/check-work-items-archival-stop.ps1": "16d7cc086c34ddd8b571ad1b0e926afd74114e88d0b80a4c422c2ec2875e82ae",
+    "agents/scripts/check-work-items-archival-stop.py": "6fd48cbfb64e0861a5f8ad6c2c011fa6ae9dfd8567b1636dc2cf6b1ab18e11a1",
+    "agents/scripts/check-work-items-archival-stop.sh": "3c5dbc2499b6694859c71b2478e49f92b9fe45369d5287ea16463bacf6f84628",
     "agents/scripts/check-scratch-valuables.ps1": "1aa910d0557bfc1abedd65d7c3e30c53bab4fc7147dbc453199ec60f37ec0b22",
     "agents/scripts/check-publication-safety.ps1": "0e0b8b9a41140a58a82e59d4a21bca59b9922952872613819995c31036a3b3df",
     "agents/scripts/check-passive-polling-stop.ps1": "04790e77b1c08d0d38767030531008739b9550664f69dbfa9ee80a95460beeb1",
@@ -424,6 +429,7 @@ def _installer_mutation_paths(
                     target / directory,
                 )
             )
+        paths.extend(_claude_stale_namespace_paths(source, target))
         paths.append(target / "AGENTS.md")
         helper_target = target / "agents" / "scripts"
         retired_root = target
@@ -513,6 +519,41 @@ def _reclaim_codex_presets(source: Path, target: Path, dry_run: bool) -> None:
         target.rmdir()
 
 
+def _claude_stale_namespace_paths(source: Path, target: Path) -> tuple[Path, ...]:
+    candidates: list[Path] = []
+    for directory, pattern, expected_kind in (
+        ("commands", "agents-*.md", "file"),
+        ("skills", "agents-*", "directory"),
+    ):
+        source_dir = source / directory
+        target_dir = target / directory
+        if not target_dir.is_dir():
+            continue
+        for installed in sorted(target_dir.glob(pattern)):
+            if (source_dir / installed.name).exists():
+                continue
+            if installed.is_symlink():
+                candidates.append(installed)
+            elif expected_kind == "file" and installed.is_file():
+                candidates.append(installed)
+            elif expected_kind == "directory" and installed.is_dir():
+                candidates.append(installed)
+    return tuple(candidates)
+
+
+def _reclaim_claude_namespace(source: Path, target: Path, dry_run: bool) -> None:
+    for installed in _claude_stale_namespace_paths(source, target):
+        relative = installed.relative_to(target).as_posix()
+        if dry_run:
+            print(f"    [dry-run] would reclaim stale pack namespace: {relative}")
+            continue
+        if installed.is_symlink() or installed.is_file():
+            installed.unlink()
+        else:
+            shutil.rmtree(installed)
+        print(f"  Reclaimed stale pack item: {relative}")
+
+
 def _merge_codex_agents(root: Path, source: Path, target: Path, dry_run: bool) -> None:
     pack = (
         CODEX_BEGIN
@@ -595,7 +636,6 @@ def _hook_specs(provider: str, installed_root: Path):
         ("check-bugfix-discipline", scripts / "check-bugfix-discipline.py", "PreToolUse", None),
         ("check-git-push-gate", scripts / "check-git-push-gate.py", "PreToolUse", "Bash|PowerShell"),
         ("check-passive-polling-stop", scripts / "check-passive-polling-stop.py", "Stop", None),
-        ("check-work-items-archival-stop", scripts / "check-work-items-archival-stop.py", "Stop", None),
         ("check-machine-local-path", hooks / "check-machine-local-path.py", "PreToolUse", None),
         ("check-no-trash-in-repo", hooks / "check-no-trash-in-repo.py", "PreToolUse", "Edit|Write|NotebookEdit|apply_patch|Bash|PowerShell"),
         ("check-stale-relation-residue", hooks / "check-stale-relation-residue.py", "PreToolUse", None),
@@ -612,6 +652,11 @@ def _hook_specs(provider: str, installed_root: Path):
             ("check-typed-routing", hooks / "check-typed-routing.py", "PreToolUse", "Agent"),
         )
     return specs
+
+
+RETIRED_HOOK_SPECS = (
+    ("check-work-items-archival-stop", "Stop"),
+)
 
 
 def _install_hooks(
@@ -656,6 +701,20 @@ def _install_hooks(
         if proc.returncode:
             raise RuntimeError(f"hook target preflight failed for {script}")
     _checkpoint(root, installer, registration, provider, mode, "sync")
+    for marker, event in RETIRED_HOOK_SPECS:
+        proc = _run(
+            [
+                *base,
+                "--script-marker",
+                marker,
+                "--hook-event",
+                event,
+                "--remove",
+            ],
+            root,
+        )
+        if proc.returncode:
+            raise RuntimeError(f"obsolete hook removal failed for {marker}")
     for marker, script, event, matcher in _hook_specs(provider, installed_root):
         arguments = [*base, "--script-marker", marker, "--script-path", str(script)]
         if event != "PreToolUse":
@@ -740,11 +799,11 @@ def _reclaim_retired(target_root: Path, manifest: dict[str, str], dry_run: bool)
             continue
         actual = hashlib.sha256(path.read_bytes()).hexdigest()
         if actual == expected:
-            print(f"  Reclaiming unchanged retired PowerShell file: {relative}")
+            print(f"  Reclaiming unchanged retired pack file: {relative}")
             if not dry_run:
                 path.unlink()
         else:
-            print(f"  Preserving customized retired PowerShell file: {relative}")
+            print(f"  Preserving customized retired pack file: {relative}")
 
 
 def _verify_files(
@@ -853,6 +912,7 @@ def install(provider: str, argv: list[str] | None = None) -> int:
                 )
                 _merge_codex_agents(root, source, docs_target, args.dry_run)
             else:
+                _reclaim_claude_namespace(source, target, args.dry_run)
                 _merge_claude_docs(root, source, docs_target, args.dry_run)
             _normalize_agents_mode(
                 root,
